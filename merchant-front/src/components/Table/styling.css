@@ -1,0 +1,194 @@
+.table-wrapper {
+    /* allow scrolling if the table is wider than the wrapper */
+    overflow-x: auto;
+    overflow-y: auto;
+    max-width: 100%; /* or whatever max size you need */
+    border-radius: 8px;
+    /* Smooth scrolling */
+    scroll-behavior: smooth;
+    /* Custom scrollbar styling */
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 #f1f5f9;
+}
+
+.table-wrapper::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+}
+
+.table-wrapper::-webkit-scrollbar-track {
+    background: #f1f5f9;
+    border-radius: 4px;
+}
+
+.table-wrapper::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+}
+
+.table-wrapper::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+.v-theme--dark .table-wrapper {
+    scrollbar-color: rgba(200, 200, 200, 0.3) rgba(30, 30, 30, 0.5);
+}
+
+.v-theme--dark .table-wrapper::-webkit-scrollbar-track {
+    background: rgba(30, 30, 30, 0.5);
+}
+
+.v-theme--dark .table-wrapper::-webkit-scrollbar-thumb {
+    background: rgba(200, 200, 200, 0.3);
+}
+
+.v-theme--dark .table-wrapper::-webkit-scrollbar-thumb:hover {
+    background: rgba(200, 200, 200, 0.5);
+}
+
+/* 1. keep table from auto-sizing down to the wrapper width */
+.table-wrapper table {
+    /* table will expand to fit its content */
+    width: max-content;
+
+    /* optional: switch to auto layout if you'd rather let
+     columns size to content rather than fixed widths */
+    table-layout: auto;
+
+    /* this helps keep borders/cells behaving normally */
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+/* Modern table styling */
+.modern-table {
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.table-header-row {
+    background-color: #f8fafc;
+}
+
+.table-header-cell {
+    background-color: #f8fafc !important;
+    font-weight: 600;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.v-theme--dark .table-header-row {
+    background-color: #1e1e1e22;
+}
+
+.v-theme--dark .table-header-cell {
+    /* background-color: #1e1e1e !important; */
+}
+
+.table-header-cell:first-child {
+    border-top-left-radius: 8px;
+}
+
+.table-header-cell:last-child {
+    border-top-right-radius: 8px;
+}
+
+/* Row hover effects */
+.table-data-row {
+    transition: background-color 0.2s ease, transform 0.1s ease;
+}
+
+.table-data-row:hover {
+    background-color: #f1f5f9 !important;
+    transform: scale(1.001);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.v-theme--dark .table-data-row:hover {
+    background-color: rgba(255, 255, 255, 0.05) !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+/* Cell styling */
+.table-wrapper th,
+.table-wrapper td {
+    white-space: nowrap; /* no wrapping at all */
+    word-break: normal; /* don't break words */
+    padding: 0.75em 1em;
+    vertical-align: middle;
+}
+
+.table-cell {
+    transition: background-color 0.15s ease;
+}
+
+.table-cell-clickable {
+    transition: background-color 0.15s ease;
+    cursor: pointer;
+}
+
+.table-cell-clickable:hover {
+    background-color: #e2e8f0 !important;
+}
+
+.v-theme--dark .table-cell-clickable:hover {
+    background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Ensure last row doesn't have bottom border */
+.table-data-row:last-child td {
+    border-bottom: none !important;
+}
+
+/* Pagination button hover effects */
+.pagination-button:hover:not([disabled]) {
+    background-color: #f1f5f9 !important;
+    border-color: currentColor !important;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.v-theme--dark .pagination-button:hover:not([disabled]) {
+    background-color: rgba(255, 255, 255, 0.1) !important;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.page-number-button:hover:not([disabled]) {
+    background-color: #f1f5f9 !important;
+    transform: translateY(-1px);
+}
+
+.v-theme--dark .page-number-button:hover:not([disabled]) {
+    background-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Table row action styling */
+.table-row-action-menu-trigger:hover {
+    background-color: #f1f5f9;
+    transform: scale(1.05);
+}
+
+.v-theme--dark .table-row-action-menu-trigger:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.table-row-action-item:hover:not([disabled]) {
+    background-color: rgba(0, 0, 0, 0.05) !important;
+    transform: translateX(2px);
+}
+
+.v-theme--dark .table-row-action-item:hover:not([disabled]) {
+    background-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+.table-row-action-button:hover:not([disabled]) {
+    background-color: rgba(0, 0, 0, 0.05) !important;
+    border-color: currentColor !important;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.v-theme--dark .table-row-action-button:hover:not([disabled]) {
+    background-color: rgba(255, 255, 255, 0.05) !important;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}

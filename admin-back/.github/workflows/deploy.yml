@@ -1,0 +1,67 @@
+name: Deploy
+
+on: workflow_dispatch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    # environments secrets are stored in secrets and can be embedded with $\{{ secret.username }} for example
+    # the secrets needed to access the ssh is
+    # - hostname
+    # - port
+    # - username
+    # - key
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Copy SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p ${{ secrets.PORT }} ${{secrets.HOSTNAME}} >> ~/.ssh/known_hosts
+
+      - name: Test SSH Connection
+        run: |
+          ssh -p ${{secrets.PORT}} -i ~/.ssh/id_rsa -vvv ${{secrets.USERNAME}}@${{secrets.HOSTNAME}} "echo 'SSH Access Confirmed'"
+
+      - name: Make sure deletion-form directory exists
+        run: |
+          ssh -p ${{secrets.PORT}} -i ~/.ssh/id_rsa ${{secrets.USERNAME}}@${{secrets.HOSTNAME}} "mkdir -p ~/deletion-form"
+
+      - name: RSYNC Code to server
+        run: |
+          rsync -avz \
+            --delete \
+            --info=progress2 \
+            --partial \
+            -e "ssh -i ~/.ssh/id_rsa -p ${{ secrets.PORT }} -o StrictHostKeyChecking=no" \
+            ./ \
+            ${{ secrets.USERNAME }}@${{ secrets.HOSTNAME }}:~/deletion-form/back
+      - name: install packages
+        run: |
+          ssh -p ${{secrets.PORT}} -i ~/.ssh/id_rsa ${{secrets.USERNAME}}@${{secrets.HOSTNAME}} "cd ~/deletion-form/back && ~/.bun/bin/bun i"
+
+      - name: migrate deploy
+        run: |
+          ssh -p ${{ secrets.PORT }} -i ~/.ssh/id_rsa ${{ secrets.USERNAME }}@${{ secrets.HOSTNAME }} 'export PATH="$HOME/.bun/bin:$PATH" && cd ~/deletion-form/back && bun run migrate-deploy'
+      - name: migrate generate prisma client
+        run: |
+          ssh -p ${{ secrets.PORT }} -i ~/.ssh/id_rsa ${{ secrets.USERNAME }}@${{ secrets.HOSTNAME }} 'export PATH="$HOME/.bun/bin:$PATH" && cd ~/deletion-form/back && bun run migrate-generate'
+     
+      - name: restart pm2
+        run: |
+          ssh -p ${{ secrets.PORT }} -i ~/.ssh/id_rsa ${{ secrets.USERNAME }}@${{ secrets.HOSTNAME }} \  'export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && export PATH="$HOME/.bun/bin:$PATH" && pm2 restart deletion-form || pm2 start ~/deletion-form/back/pm2-compatible-start.js --name="deletion-form" --interpreter="$HOME/.bun/bin/bun"'
+      
+      - name: pm2 save
+        run: |
+          ssh -p ${{secrets.PORT}} -i ~/.ssh/id_rsa ${{secrets.USERNAME}}@${{secrets.HOSTNAME}} 'export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh" && export PATH="$HOME/.bun/bin:$PATH" && pm2 save'
+
+      # copy/sync stuff to server
+      # run migrate deploy
+      # run migrate generate
+      # run pm2 restart or start new
+      # run pm2 save

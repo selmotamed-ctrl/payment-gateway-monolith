@@ -1,0 +1,433 @@
+.v-application {
+    font-feature-settings:
+        "kern" 1,
+        "tnum" 1;
+    letter-spacing: 0;
+}
+
+body {
+    background: rgb(var(--v-theme-background));
+}
+
+* {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(100, 116, 139, 0.35) transparent;
+}
+
+.v-theme--light {
+    --fintech-border: rgba(15, 23, 42, 0.08);
+    --fintech-border-strong: rgba(15, 23, 42, 0.12);
+    --fintech-raised: 0 18px 50px rgba(15, 23, 42, 0.08);
+    --fintech-soft: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+.v-theme--dark {
+    --fintech-border: rgba(226, 232, 240, 0.09);
+    --fintech-border-strong: rgba(226, 232, 240, 0.14);
+    --fintech-raised: 0 18px 50px rgba(0, 0, 0, 0.34);
+    --fintech-soft: 0 8px 24px rgba(0, 0, 0, 0.24);
+}
+
+.v-field {
+    border-radius: 12px !important;
+    box-shadow: inset 0 0 0 1px var(--fintech-border);
+}
+
+.v-field--variant-outlined .v-field__outline {
+    --v-field-border-opacity: 0;
+}
+
+.v-field--focused {
+    box-shadow:
+        inset 0 0 0 1px rgb(var(--v-theme-primary)),
+        0 0 0 4px rgba(var(--v-theme-primary), 0.1);
+}
+
+.v-btn {
+    min-height: 38px;
+}
+
+.v-table,
+.v-data-table {
+    border: 1px solid var(--fintech-border);
+    border-radius: 14px;
+    overflow: hidden;
+    background: rgb(var(--v-theme-surface)) !important;
+    box-shadow: var(--fintech-soft);
+}
+
+.v-table th,
+.v-data-table th {
+    background: rgb(var(--v-theme-surface-variant));
+    color: rgb(var(--v-theme-on-surface-variant)) !important;
+    font-size: 12px;
+    font-weight: 800 !important;
+    letter-spacing: 0;
+}
+
+.v-table td,
+.v-data-table td {
+    border-bottom-color: var(--fintech-border) !important;
+}
+
+.hoverable:hover {
+    background-color: rgba(15, 107, 255, 0.06);
+    transform: translateY(-1px);
+}
+
+.v-theme--dark .hoverable:hover {
+    background-color: rgba(94, 161, 255, 0.08);
+}
+
+.show-on-hover {
+    opacity: 0.1;
+    transition: all 0.3s ease-in-out;
+}
+.show-on-hover:hover {
+    opacity: 1;
+}
+
+.fields-section-card:hover {
+    box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.12),
+        0 2px 4px rgba(0, 0, 0, 0.08) !important;
+    transform: translateY(-1px);
+}
+
+.field-interactive:hover {
+    color: rgb(var(--v-theme-primary)) !important;
+    transform: translateX(2px);
+}
+
+.field-wrapper-interactive:hover .field-copy-icon {
+    opacity: 1 !important;
+    color: rgb(var(--v-theme-primary)) !important;
+}
+
+td .v-messages__message,
+.v-field__message,
+.v-field__messages,
+.v-messages__message,
+.v-messages__wrapper {
+    white-space: normal !important;
+    overflow-wrap: anywhere; /* modern */
+    word-break: break-word; /* fallback */
+}
+.drawer {
+    transition: all 0.4s;
+}
+
+.hoverable-text {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.hoverable-text:hover {
+    color: #0938b0;
+    font-weight: 700;
+}
+
+/* Modern Account Actions */
+.account-actions-trigger {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.account-actions-trigger:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--fintech-soft) !important;
+}
+
+.v-theme--dark .account-actions-trigger:hover {
+    box-shadow: var(--fintech-soft) !important;
+}
+
+.account-actions-trigger:hover .chevron-icon {
+    transform: rotate(180deg);
+}
+
+/* Menu Toggle Button */
+.menu-toggle-button:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--fintech-soft) !important;
+}
+
+.v-theme--dark .menu-toggle-button:hover {
+    box-shadow: var(--fintech-soft) !important;
+}
+
+/* Menu Items */
+.menu-item-hover:hover {
+    background: rgba(15, 107, 255, 0.07) !important;
+}
+
+.v-theme--dark .menu-item-hover:hover {
+    background: rgba(94, 161, 255, 0.1) !important;
+}
+
+/* Section Headers */
+.section-header-hover:hover {
+    background: rgba(255, 255, 255, 0.07) !important;
+}
+
+.v-theme--dark .section-header-hover:hover {
+    background: rgba(255, 255, 255, 0.04) !important;
+}
+
+/* Route Items */
+.route-item {
+    cursor: pointer;
+}
+
+.route-item:hover {
+    background: rgba(255, 255, 255, 0.08) !important;
+    transform: translateX(3px) !important;
+    border-left-color: rgba(45, 212, 191, 0.8) !important;
+}
+
+.v-theme--dark .route-item:hover {
+    background: rgba(255, 255, 255, 0.08) !important;
+    border-left-color: rgba(45, 212, 191, 0.8) !important;
+}
+
+.route-item-active {
+    cursor: default;
+}
+
+/* Modern Drawer */
+.modern-drawer {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ThemedView Animations */
+.themed-view-animated {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Smooth page transitions */
+.fade-enter-active,
+.fade-leave-active {
+    transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+    opacity: 0;
+}
+
+/* Enhanced scrollbar for drawer */
+.modern-drawer ::-webkit-scrollbar {
+    width: 8px;
+}
+
+.modern-drawer ::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.02);
+    border-radius: 4px;
+}
+
+.modern-drawer ::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+    transition: background 0.2s ease;
+}
+
+.modern-drawer ::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.3);
+}
+
+.v-theme--dark .modern-drawer ::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.v-theme--dark .modern-drawer ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.v-theme--dark .modern-drawer ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* Smooth animations for list items */
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateX(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.route-item {
+    animation: slideIn 0.3s ease-out;
+}
+
+/* Enhanced focus states */
+.route-item:focus-visible {
+    outline: 2px solid rgba(0, 0, 0, 0.1);
+    outline-offset: 2px;
+    border-radius: 14px;
+}
+
+.v-theme--dark .route-item:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Smooth gradient transitions */
+@keyframes gradientShift {
+    0%,
+    100% {
+        background-position: 0% 50%;
+    }
+    50% {
+        background-position: 100% 50%;
+    }
+}
+
+/* Improved backdrop blur support */
+@supports (backdrop-filter: blur(10px)) {
+    .modern-drawer,
+    .account-actions-trigger,
+    .menu-toggle-button {
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+    }
+}
+
+/* Loading state animations */
+@keyframes pulse {
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.6;
+    }
+}
+
+/* Responsive improvements */
+@media (max-width: 768px) {
+    .account-actions-trigger {
+        min-width: auto !important;
+        padding: 6px 12px !important;
+    }
+
+    .modern-drawer {
+        width: 280px !important;
+    }
+}
+
+html,
+body,
+#app {
+    padding: 0px;
+    margin: 0px;
+    height: 100%;
+}
+
+/* Global app scaling - Scale entire app to 0.9 */
+:root {
+    --app-scale: 0.9;
+}
+
+#app {
+    transform: scale(var(--app-scale));
+    transform-origin: top left;
+    width: calc(100% / var(--app-scale)); /* Compensate for scaling to maintain full width */
+    height: calc(100% / var(--app-scale)); /* Compensate for scaling to maintain full height */
+}
+
+// .drawer-width {
+//     transition: all 0.5s;
+// }
+::-webkit-scrollbar {
+    width: 6px; /* For vertical scrollbars */
+    height: 6px; /* For horizontal scrollbars */
+}
+
+/* Track */
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+/* Handle */
+::-webkit-scrollbar-thumb {
+    background-color: rgba(100, 100, 100, 0.4);
+    border-radius: 4px;
+}
+
+/* Handle on hover */
+::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(100, 100, 100, 0.7);
+}
+
+.v-theme--dark ::-webkit-scrollbar-thumb {
+    background-color: rgba(200, 200, 200, 0.3);
+}
+
+.v-theme--dark ::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(200, 200, 200, 0.5);
+}
+
+.required-field .v-label::after {
+    content: " *";
+    color: red;
+}
+
+* {
+    scrollbar-width: thin !important;
+    font-family: "Plus Jakarta Sans", sans-serif;
+    font-optical-sizing: auto;
+    scrollbar-color: rgba(100, 100, 100, 0.4) transparent;
+}
+
+.v-theme--dark * {
+    scrollbar-color: rgba(200, 200, 200, 0.3) transparent;
+}
+html {
+    overflow-y: auto;
+}
+
+.tiny-autocomplete {
+    font-size: 0.75rem; /* reduce font globally */
+}
+
+.tiny-autocomplete .v-field__input {
+    font-size: 0.75rem;
+    min-height: 32px; /* reduce height */
+    padding-top: 2px;
+    padding-bottom: 2px;
+}
+
+.tiny-autocomplete .v-field__label {
+    font-size: 0.7rem;
+}
+
+.show-in-print {
+    display: none;
+}
+.printable-header {
+    page-break-after: auto !important;
+    page-break-inside: avoid !important;
+    orphans: 3 !important;
+    widows: 3 !important;
+}
+
+@media print {
+    .print-hide {
+        display: none !important;
+    }
+
+    html,
+    body {
+        margin: 0 !important;
+        padding: 0 !important;
+        color: black !important;
+    }
+    .show-in-print {
+        display: inherit;
+    }
+}
+@page {
+    size: A4;
+    margin-top: 1cm !important;
+    margin-bottom: 1cm !important;
+}
