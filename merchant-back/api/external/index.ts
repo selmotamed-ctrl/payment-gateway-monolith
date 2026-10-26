@@ -4,6 +4,7 @@ import { z } from "zod";
 import { env } from "../../lib/env";
 import { ApiError } from "../../lib/error";
 import { zAmount, zCurrency, zIdentifier, zJsonObject } from "../../lib/zReady";
+import { coreLinkCreateSchema } from "../contract";
 import { coreForward } from "../forward";
 
 const router = express.Router();
@@ -66,6 +67,7 @@ router.post(
     method: "POST",
     path: () => "/internal/merchant/external/links",
     schema: linkCreateSchema,
+    coreSchema: coreLinkCreateSchema,
     status: 201,
   }),
 );

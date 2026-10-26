@@ -6,6 +6,8 @@ Public SSL checkout and inbound webhook edge API for the payment gateway platfor
 - No database access: the service owns no Prisma client, no `DATABASE_*` variable and no migration script.
 - Every business operation is forwarded over mutual TLS to `core-back` through `lib/mtlsClient/index.ts` using the client certificate identified by `CN=checkout-back`.
 - Hard zero-trust rule: no request schema accepts `amount` or `currency`; `core-back` resolves the money from `payment_links` by `linkKey`. Requests carrying monetary fields are rejected with `400 AMOUNT_NOT_ACCEPTED`.
+- Edge vocabularies are translated to the canonical `core-back` contract: client events use `completeCallback|errorCallback|widgetEvent|returnHint` (legacy `COMPLETE_CALLBACK` style aliases are translated), and inbound environments use `SANDBOX|LIVE` (`sandbox|test|uat` become `SANDBOX`, `live|production` become `LIVE`).
+- Inbound webhook headers are allowlisted: only `content-type`, `user-agent`, `content-length`, `x-signature`, `x-gateway-signature`, `x-hub-signature-256`, `x-moomalat-signature`, `x-timestamp` and `x-nonce` reach `core-back`; `authorization`, `cookie` and every other `x-` header are dropped.
 
 ## Routes
 
@@ -19,7 +21,7 @@ Public SSL checkout and inbound webhook edge API for the payment gateway platfor
 | POST | `/api/v1/pay/:linkKey/logs/:attemptId/resend` | `POST /internal/checkout/pay/:linkKey/logs/:attemptId/resend` |
 | POST | `/api/v1/pay/:linkKey/logs/:attemptId/cancel` | `POST /internal/checkout/pay/:linkKey/logs/:attemptId/cancel` |
 | POST | `/api/v1/pay/:linkKey/logs/:attemptId/client-event` | `POST /internal/checkout/pay/:linkKey/logs/:attemptId/client-event` |
-| ANY | `/api/v1/inbound/:gateway/:env/:pathToken` | `ANY /internal/checkout/inbound/:gateway/:env/:pathToken` (raw bytes) |
+| ANY | `/api/v1/inbound/:gateway/:env/:pathToken` | `ANY /internal/checkout/inbound/:gateway/:env/:pathToken` (raw bytes, `env` translated to `SANDBOX`/`LIVE`) |
 | GET, POST | `/api/v1/return/:attemptToken` | `GET, POST /internal/checkout/return/:attemptToken` |
 
 ## Environment

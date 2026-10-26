@@ -95,21 +95,31 @@ export class ExpirySweeperWorker extends BaseWorker {
 
   private async applyInquiryOutcome(attempt: PaymentAttemptRow, outcome: InquiryOutcome, now: Date): Promise<void> {
     const terminal = ["SUCCEEDED", "FAILED", "EXPIRED", "CANCELLED"].includes(outcome.status);
-    const patch: Record<string, unknown> = {
-      status: outcome.status,
-      substatus: outcome.substatus ?? attempt.substatus ?? null,
-    };
-    if (outcome.settledAmount !== undefined && outcome.settledAmount !== null) {
-      patch.settledAmount = outcome.settledAmount;
-    }
-    if (outcome.providerFee !== undefined && outcome.providerFee !== null) {
-      patch.gatewayFeeAmount = outcome.providerFee;
-    }
     if (terminal) {
-      patch.terminalAt = now;
-      patch.nextCheckAt = null;
+      const transitioned = await this.terminate(attempt.id, {
+        status: outcome.status,
+        terminal_at: now,
+        next_check_at: null,
+      });
+      if (!transitioned) {
+        return;
+      }
+      if (outcome.settledAmount !== undefined && outcome.settledAmount !== null) {
+        await this.repositories.payments.updateAttempt(this.db as Tx, attempt.id, {
+          settledAmount: outcome.settledAmount,
+        });
+      }
+      if (outcome.providerFee !== undefined && outcome.providerFee !== null) {
+        await this.repositories.payments.updateAttempt(this.db as Tx, attempt.id, {
+          gatewayFeeAmount: outcome.providerFee,
+        });
+      }
+    } else {
+      await this.repositories.payments.updateAttempt(this.db as Tx, attempt.id, {
+        status: outcome.status,
+        substatus: outcome.substatus ?? attempt.substatus ?? null,
+      });
     }
-    await this.repositories.payments.updateAttempt(this.db as Tx, attempt.id, patch);
     if (terminal && RELEASE_SLOT_STATUSES.includes(outcome.status)) {
       await this.releaseSlot(attempt);
     }
@@ -132,11 +142,16 @@ export class ExpirySweeperWorker extends BaseWorker {
   }
 
   private async expireAttempt(attempt: PaymentAttemptRow, now: Date): Promise<void> {
-    await this.repositories.payments.updateAttempt(this.db as Tx, attempt.id, {
+    // The terminal transition is conditional, so two cluster nodes can never
+    // expire the same attempt twice (and can never release its slot twice).
+    const transitioned = await this.terminate(attempt.id, {
       status: "EXPIRED",
-      terminalAt: now,
-      nextCheckAt: null,
+      terminal_at: now,
+      next_check_at: null,
     });
+    if (!transitioned) {
+      return;
+    }
     await this.releaseSlot(attempt);
     await this.repositories.governance.writeAuditLog(this.db as Tx, {
       actorId: null,
@@ -146,6 +161,24 @@ export class ExpirySweeperWorker extends BaseWorker {
       entityId: attempt.id,
       afterJson: { status: "EXPIRED", graceExpiresAt: attempt.graceExpiresAt ?? null },
     });
+  }
+
+  /**
+   * Applies a terminal transition at most once. The row is only updated when
+   * it is still non-terminal, which makes the worker safe to run on several
+   * nodes at the same time.
+   */
+  private async terminate(
+    attemptId: string,
+    columns: { status: string; terminal_at: Date; next_check_at: null },
+  ): Promise<boolean> {
+    const result = await this.db.$executeRawUnsafe(
+      "UPDATE payment_attempts SET status = $1, terminal_at = $2, next_check_at = NULL, updated_at = NOW() WHERE id = $3 AND terminal_at IS NULL",
+      columns.status,
+      columns.terminal_at,
+      attemptId,
+    );
+    return Number(result ?? 0) > 0;
   }
 
   private async releaseSlot(attempt: PaymentAttemptRow): Promise<void> {

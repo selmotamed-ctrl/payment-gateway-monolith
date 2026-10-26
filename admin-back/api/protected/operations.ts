@@ -1,13 +1,14 @@
 import express from "express";
 import { z } from "zod";
 import { zIdentifier, zJsonObject, zPaginationQuery, zReason } from "../../lib/zReady";
+import { toCoreOperatorCaseResolve } from "../contract";
 import { coreForward } from "../forward";
 
 const router = express.Router();
 
 const idParamsSchema = z.object({ id: zIdentifier });
 
-const resolveSchema = z
+export const resolveSchema = z
   .object({
     resolution: z.enum(["RETRY_INQUIRE", "MARK_SUCCEEDED", "MARK_FAILED", "ESCALATE", "RELEASE_RESERVATION"]),
     reason: zReason,
@@ -41,6 +42,7 @@ router.post(
       `/internal/admin/operator-cases/${encodeURIComponent(context.params.id ?? "")}/resolve`,
     paramsSchema: idParamsSchema,
     schema: resolveSchema,
+    bodyFrom: (_req, body) => toCoreOperatorCaseResolve(body),
   }),
 );
 

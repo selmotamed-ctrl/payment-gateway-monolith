@@ -1,16 +1,19 @@
 import express from "express";
 import { z } from "zod";
-import { zAmount, zCurrency, zIdentifier } from "../../lib/zReady";
+import { zAmount, zCurrency, zIdentifier, zJsonObject } from "../../lib/zReady";
+import { coreCashoutCreateSchema, toCoreCashoutCreate } from "../contract";
 import { coreForward } from "../forward";
 
 const router = express.Router();
 
-const cashoutCreateSchema = z
+export const cashoutCreateSchema = z
   .object({
     walletId: zIdentifier,
     amount: zAmount,
     currency: zCurrency,
     bankAccountId: zIdentifier.optional(),
+    /** Canonical core field: the settlement account details of the merchant. */
+    destinationBank: zJsonObject.optional(),
     reference: z.string().max(140).optional(),
     idempotencyKey: z.string().min(8).max(128).optional(),
   })
@@ -39,6 +42,8 @@ router.post(
     method: "POST",
     path: () => "/internal/merchant/cashouts",
     schema: cashoutCreateSchema,
+    bodyMapper: toCoreCashoutCreate,
+    coreSchema: coreCashoutCreateSchema,
     status: 201,
   }),
 );

@@ -330,6 +330,7 @@ const checks: Record<string, Check> = {
       ownershipMode: "PLATFORM_CLEARING",
       feeBearer: "PAYER_SURCHARGE",
       amount: "100.0000",
+      surchargeAmount: "3.0000",
       commissionAmount: "3.0000",
       merchantAmount: "100.0000",
       gatewayFeeAmount: "0.8000",

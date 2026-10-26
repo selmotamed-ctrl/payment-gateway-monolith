@@ -1,13 +1,14 @@
 import express from "express";
 import { z } from "zod";
 import { zAmount, zCurrency, zIdentifier, zJsonObject, zMonth } from "../../lib/zReady";
+import { coreWalletCreateSchema, toCoreWalletCreate } from "../contract";
 import { coreForward } from "../forward";
 
 const router = express.Router();
 
 const walletParamsSchema = z.object({ id: zIdentifier });
 
-const walletCreateSchema = z
+export const walletCreateSchema = z
   .object({
     applicationId: zIdentifier,
     label: z.string().min(2).max(120),
@@ -38,6 +39,8 @@ router.post(
     method: "POST",
     path: () => "/internal/merchant/wallets",
     schema: walletCreateSchema,
+    bodyMapper: toCoreWalletCreate,
+    coreSchema: coreWalletCreateSchema,
     status: 201,
   }),
 );

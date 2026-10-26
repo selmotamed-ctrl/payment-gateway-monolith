@@ -1,13 +1,14 @@
 import express from "express";
 import { z } from "zod";
 import { zIdentifier, zPaginationQuery, zReason } from "../../lib/zReady";
+import { toCoreApprovalApprove, toCoreApprovalReject } from "../contract";
 import { coreForward } from "../forward";
 
 const router = express.Router();
 
 const idParamsSchema = z.object({ id: zIdentifier });
 
-const decisionSchema = z
+export const decisionSchema = z
   .object({
     reason: zReason,
     checkerUserId: zIdentifier.optional(),
@@ -41,6 +42,7 @@ router.post(
     path: (context) => `/internal/admin/approvals/${encodeURIComponent(context.params.id ?? "")}/approve`,
     paramsSchema: idParamsSchema,
     schema: decisionSchema,
+    bodyFrom: (_req, body) => toCoreApprovalApprove(body),
   }),
 );
 
@@ -51,6 +53,7 @@ router.post(
     path: (context) => `/internal/admin/approvals/${encodeURIComponent(context.params.id ?? "")}/reject`,
     paramsSchema: idParamsSchema,
     schema: decisionSchema,
+    bodyFrom: (_req, body) => toCoreApprovalReject(body),
   }),
 );
 

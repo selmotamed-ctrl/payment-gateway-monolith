@@ -1,6 +1,22 @@
 import express from "express";
 import { z } from "zod";
 import { zBaseVersion, zConfigDocument, zGatewayCode, zIdentifier, zJsonObject } from "../../lib/zReady";
+import {
+  toCoreGatewayCreate,
+  toCoreGatewayRollback,
+  toCoreGatewayUpdate,
+  toCoreGatewayVersionAuth,
+  toCoreGatewayVersionChannels,
+  toCoreGatewayVersionCryptoProfiles,
+  toCoreGatewayVersionCreate,
+  toCoreGatewayVersionDryRun,
+  toCoreGatewayVersionEnvironments,
+  toCoreGatewayVersionErrorMaps,
+  toCoreGatewayVersionFlows,
+  toCoreGatewayVersionRunSuite,
+  toCoreGatewayVersionSettings,
+  toCoreGatewayVersionStatusRules,
+} from "../contract";
 import { coreForward } from "../forward";
 
 const router = express.Router();
@@ -8,7 +24,7 @@ const router = express.Router();
 const gatewayParamsSchema = z.object({ id: zIdentifier });
 const versionParamsSchema = z.object({ vid: zIdentifier });
 
-const gatewayCreateSchema = z
+export const gatewayCreateSchema = z
   .object({
     code: zGatewayCode,
     name: z.string().min(2).max(160),
@@ -17,10 +33,16 @@ const gatewayCreateSchema = z
     country: z.string().min(2).max(2).optional(),
     evidenceLevel: z.enum(["VERIFIED", "PARTIAL", "INTERNAL"]).optional(),
     active: z.boolean().optional(),
+    // core requires an operator and a gateway kind: they are accepted optionally so the
+    // existing frontend payloads keep working and are translated into core defaults.
+    operator: z.string().min(2).max(160).optional(),
+    kind: z.enum(["DIRECT", "AGGREGATOR", "NATIVE_ADAPTER", "INTERNAL"]).optional(),
+    aliases: z.array(z.string().min(1).max(64)).max(20).optional(),
+    riskClass: z.enum(["NORMAL", "HIGH_RISK"]).optional(),
   })
   .strict();
 
-const gatewayPatchSchema = z
+export const gatewayPatchSchema = z
   .object({
     name: z.string().min(2).max(160).optional(),
     description: z.string().max(2000).optional(),
@@ -28,19 +50,23 @@ const gatewayPatchSchema = z
     evidenceLevel: z.enum(["VERIFIED", "PARTIAL", "INTERNAL"]).optional(),
     active: z.boolean().optional(),
     baseVersion: zBaseVersion.optional(),
+    operator: z.string().min(2).max(160).optional(),
+    aliases: z.array(z.string().min(1).max(64)).max(20).optional(),
+    riskClass: z.enum(["NORMAL", "HIGH_RISK"]).optional(),
   })
   .strict();
 
-const versionCreateSchema = z
+export const versionCreateSchema = z
   .object({
     version: z.coerce.number().int().min(1).max(100000),
     basedOnVersionId: zIdentifier.optional(),
     changelog: z.string().max(2000).optional(),
     active: z.boolean().optional(),
+    snapshot: zJsonObject.optional(),
   })
   .strict();
 
-const environmentsSchema = z
+export const environmentsSchema = z
   .object({
     environments: z
       .array(
@@ -55,10 +81,11 @@ const environmentsSchema = z
       )
       .min(1)
       .max(10),
+    env: z.enum(["SANDBOX", "LIVE"]).optional(),
   })
   .catchall(z.unknown());
 
-const authSchema = z
+export const authSchema = z
   .object({
     authMethod: z.enum([
       "NONE",
@@ -74,10 +101,12 @@ const authSchema = z
     ]),
     credentialSetId: zIdentifier.optional(),
     settings: zJsonObject.optional(),
+    env: z.enum(["SANDBOX", "LIVE"]).optional(),
+    authApply: z.enum(["HEADER", "QUERY", "BODY"]).optional(),
   })
   .catchall(z.unknown());
 
-const settingsSchema = z
+export const settingsSchema = z
   .object({
     settings: zJsonObject.optional(),
     timeoutMs: z.number().int().min(100).max(120000).optional(),
@@ -85,7 +114,7 @@ const settingsSchema = z
   })
   .catchall(z.unknown());
 
-const cryptoProfilesSchema = z
+export const cryptoProfilesSchema = z
   .object({
     cryptoProfiles: z
       .array(
@@ -96,6 +125,7 @@ const cryptoProfilesSchema = z
             encoding: z.enum(["HEX_UPPER", "HEX_LOWER", "BASE64", "RAW", "SORTED_KEY_VALUE_AMP", "TIMESTAMP_DOT_RAW_BODY", "SORTED_VALUES_HASH"]),
             secretRef: z.string().max(128).optional(),
             fields: z.array(z.string().max(64)).max(50).optional(),
+            purpose: z.enum(["OUTBOUND_SIGN", "INBOUND_VERIFY"]).optional(),
           })
           .strict(),
       )
@@ -104,7 +134,7 @@ const cryptoProfilesSchema = z
   })
   .catchall(z.unknown());
 
-const flowsSchema = z
+export const flowsSchema = z
   .object({
     flows: z
       .array(
@@ -123,7 +153,7 @@ const flowsSchema = z
   })
   .catchall(z.unknown());
 
-const channelsSchema = z
+export const channelsSchema = z
   .object({
     clientActions: z.array(zJsonObject).max(20).optional(),
     confirmationChannels: z.array(zJsonObject).max(20).optional(),
@@ -131,19 +161,19 @@ const channelsSchema = z
   })
   .catchall(z.unknown());
 
-const statusRulesSchema = z
+export const statusRulesSchema = z
   .object({
     statusRules: z.array(zJsonObject).min(1).max(100),
   })
   .catchall(z.unknown());
 
-const errorMapsSchema = z
+export const errorMapsSchema = z
   .object({
     errorMaps: z.array(zJsonObject).min(1).max(100),
   })
   .catchall(z.unknown());
 
-const dryRunSchema = z
+export const dryRunSchema = z
   .object({
     scenario: z.string().min(2).max(64),
     payload: zJsonObject.optional(),
@@ -151,21 +181,21 @@ const dryRunSchema = z
   })
   .strict();
 
-const runSuiteSchema = z
+export const runSuiteSchema = z
   .object({
     suite: z.enum(["SANDBOX_15", "CONTRACT_AMOUNT", "CONTRACT_REFERENCE", "CONTRACT_SIGNATURE"]),
     environment: z.enum(["sandbox", "test", "uat", "live"]).optional(),
   })
   .strict();
 
-const submitApprovalSchema = z
+export const submitApprovalSchema = z
   .object({
     reason: z.string().min(3).max(500),
     baseVersion: zBaseVersion.optional(),
   })
   .strict();
 
-const rollbackSchema = z
+export const rollbackSchema = z
   .object({
     targetVersionId: zIdentifier,
     reason: z.string().min(3).max(500),
@@ -188,6 +218,7 @@ router.post(
     method: "POST",
     path: () => "/internal/admin/gateways",
     schema: gatewayCreateSchema,
+    bodyFrom: (_req, body) => toCoreGatewayCreate(body),
     status: 201,
   }),
 );
@@ -199,6 +230,7 @@ router.patch(
     path: (context) => `/internal/admin/gateways/${encodeURIComponent(context.params.id ?? "")}`,
     paramsSchema: gatewayParamsSchema,
     schema: gatewayPatchSchema,
+    bodyFrom: (_req, body) => toCoreGatewayUpdate(body),
   }),
 );
 
@@ -218,6 +250,7 @@ router.post(
     path: (context) => `/internal/admin/gateways/${encodeURIComponent(context.params.id ?? "")}/rollback`,
     paramsSchema: gatewayParamsSchema,
     schema: rollbackSchema,
+    bodyFrom: (_req, body) => toCoreGatewayRollback(body),
   }),
 );
 
@@ -237,6 +270,7 @@ router.post(
     path: (context) => `/internal/admin/gateways/${encodeURIComponent(context.params.id ?? "")}/versions`,
     paramsSchema: gatewayParamsSchema,
     schema: versionCreateSchema,
+    bodyFrom: (_req, body) => toCoreGatewayVersionCreate(body),
     status: 201,
   }),
 );
@@ -251,6 +285,7 @@ versionRouter.put(
       `/internal/admin/gateway-versions/${encodeURIComponent(context.params.vid ?? "")}/environments`,
     paramsSchema: versionParamsSchema,
     schema: environmentsSchema,
+    bodyFrom: (_req, body) => toCoreGatewayVersionEnvironments(body),
   }),
 );
 
@@ -261,6 +296,7 @@ versionRouter.put(
     path: (context) => `/internal/admin/gateway-versions/${encodeURIComponent(context.params.vid ?? "")}/auth`,
     paramsSchema: versionParamsSchema,
     schema: authSchema,
+    bodyFrom: (_req, body) => toCoreGatewayVersionAuth(body),
   }),
 );
 
@@ -271,6 +307,7 @@ versionRouter.put(
     path: (context) => `/internal/admin/gateway-versions/${encodeURIComponent(context.params.vid ?? "")}/settings`,
     paramsSchema: versionParamsSchema,
     schema: settingsSchema,
+    bodyFrom: (_req, body) => toCoreGatewayVersionSettings(body),
   }),
 );
 
@@ -282,6 +319,7 @@ versionRouter.put(
       `/internal/admin/gateway-versions/${encodeURIComponent(context.params.vid ?? "")}/crypto-profiles`,
     paramsSchema: versionParamsSchema,
     schema: cryptoProfilesSchema,
+    bodyFrom: (_req, body) => toCoreGatewayVersionCryptoProfiles(body),
   }),
 );
 
@@ -292,6 +330,7 @@ versionRouter.put(
     path: (context) => `/internal/admin/gateway-versions/${encodeURIComponent(context.params.vid ?? "")}/flows`,
     paramsSchema: versionParamsSchema,
     schema: flowsSchema,
+    bodyFrom: (_req, body) => toCoreGatewayVersionFlows(body),
   }),
 );
 
@@ -302,6 +341,7 @@ versionRouter.put(
     path: (context) => `/internal/admin/gateway-versions/${encodeURIComponent(context.params.vid ?? "")}/channels`,
     paramsSchema: versionParamsSchema,
     schema: channelsSchema,
+    bodyFrom: (_req, body) => toCoreGatewayVersionChannels(body),
   }),
 );
 
@@ -313,6 +353,7 @@ versionRouter.put(
       `/internal/admin/gateway-versions/${encodeURIComponent(context.params.vid ?? "")}/status-rules`,
     paramsSchema: versionParamsSchema,
     schema: statusRulesSchema,
+    bodyFrom: (_req, body) => toCoreGatewayVersionStatusRules(body),
   }),
 );
 
@@ -324,6 +365,7 @@ versionRouter.put(
       `/internal/admin/gateway-versions/${encodeURIComponent(context.params.vid ?? "")}/error-maps`,
     paramsSchema: versionParamsSchema,
     schema: errorMapsSchema,
+    bodyFrom: (_req, body) => toCoreGatewayVersionErrorMaps(body),
   }),
 );
 
@@ -335,6 +377,7 @@ versionRouter.post(
       `/internal/admin/gateway-versions/${encodeURIComponent(context.params.vid ?? "")}/dry-run`,
     paramsSchema: versionParamsSchema,
     schema: dryRunSchema,
+    bodyFrom: (_req, body) => toCoreGatewayVersionDryRun(body),
   }),
 );
 
@@ -346,6 +389,7 @@ versionRouter.post(
       `/internal/admin/gateway-versions/${encodeURIComponent(context.params.vid ?? "")}/run-suite`,
     paramsSchema: versionParamsSchema,
     schema: runSuiteSchema,
+    bodyFrom: (_req, body) => toCoreGatewayVersionRunSuite(body),
   }),
 );
 

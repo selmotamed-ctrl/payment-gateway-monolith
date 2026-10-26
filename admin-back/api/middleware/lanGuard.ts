@@ -1,20 +1,24 @@
 import type { NextFunction, Request, Response } from "express";
 import { env } from "../../lib/env";
 import { ApiError } from "../../lib/error";
-import { isInCidrList, normalizeIp, parseCidrList, remoteAddressOf } from "../../lib/net";
+import { isInCidrList, parseCidrList, resolveClientIp } from "../../lib/net";
 
 const LOOPBACK_CIDRS = ["127.0.0.1/32", "::1/128"];
 
-export const resolveLanClientIp = (req: Request): string => {
-  const remote = remoteAddressOf(req);
-  if (isInCidrList(LOOPBACK_CIDRS, remote)) {
-    const forwarded = req.headers["x-real-client-ip"];
-    if (typeof forwarded === "string" && forwarded.trim().length > 0) {
-      return normalizeIp(forwarded);
-    }
-  }
-  return remote;
-};
+/**
+ * Peers whose forwarded headers are trusted.
+ *
+ * The shipped nginx (`design/deploy/nginx-lan-admin.conf`) proxies the back office from
+ * the loopback interface and sets `X-Real-IP` (not `X-Real-Client-IP`), so both header
+ * names have to be honoured. Forwarded headers are only accepted when the immediate peer
+ * is a loopback address or an explicitly configured trusted proxy.
+ */
+const trustedProxyCidrs = (): string[] => [
+  ...new Set([...LOOPBACK_CIDRS, ...parseCidrList(env.TRUSTED_PROXY_CIDRS)]),
+];
+
+export const resolveLanClientIp = (req: Request): string =>
+  resolveClientIp(req, trustedProxyCidrs());
 
 export const enforceLanAccess = (req: Request, _res: Response, next: NextFunction) => {
   const cidrs = parseCidrList(env.ADMIN_LAN_CIDRS);

@@ -1,6 +1,7 @@
 import express from "express";
 import { z } from "zod";
 import { zCidrList, zIdentifier } from "../../lib/zReady";
+import { coreTokenCreateSchema, coreTokenIpsSchema } from "../contract";
 import { coreForward } from "../forward";
 
 const router = express.Router();
@@ -36,6 +37,7 @@ router.post(
     method: "POST",
     path: () => "/internal/merchant/tokens",
     schema: tokenCreateSchema,
+    coreSchema: coreTokenCreateSchema,
     status: 201,
   }),
 );
@@ -47,6 +49,7 @@ router.put(
     path: (context) => `/internal/merchant/tokens/${encodeURIComponent(context.params.id ?? "")}/ips`,
     paramsSchema: tokenParamsSchema,
     schema: tokenIpsSchema,
+    coreSchema: coreTokenIpsSchema,
   }),
 );
 

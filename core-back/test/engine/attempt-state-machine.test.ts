@@ -15,6 +15,8 @@ const createAttempt = (overrides: Partial<DynamicAttempt> = {}): DynamicAttempt 
   currency: "LYD",
   requestedAmount: "100",
   totalChargedAmount: "100",
+  platformCommissionAmount: "3.0000",
+  netMerchantAmount: "97.0000",
   maxOtpAttempts: 3,
   otpAttempts: 0,
   ownershipMode: "PLATFORM_CLEARING",
@@ -241,6 +243,8 @@ describe("trusted success facts", () => {
     env: "LIVE",
     currency: "LYD",
     totalChargedAmount: "100.0000",
+    platformCommissionAmount: "3.0000",
+    netMerchantAmount: "97.0000",
   });
 
   test("accepts evidence that satisfies all five facts", () => {

@@ -202,6 +202,15 @@ export const getCoreAgent = (): https.Agent => {
   return agent;
 };
 
+/**
+ * Drops the cached mTLS agent. Used by the test suites, which run several
+ * service instances with a different key material inside one process.
+ */
+export const resetCoreAgent = (): void => {
+  agent?.destroy();
+  agent = undefined;
+};
+
 export const buildCoreHeaders = (options: CoreCallOptions): Record<string, string> => {
   const headers: Record<string, string> = {
     "x-request-id": options.requestId,

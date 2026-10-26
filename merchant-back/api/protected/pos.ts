@@ -1,6 +1,7 @@
 import express from "express";
 import { z } from "zod";
 import { zIdentifier } from "../../lib/zReady";
+import { corePosTerminalCreateSchema, corePosTerminalPatchSchema, toCorePosTerminalCreate } from "../contract";
 import { coreForward, coreProxyStream } from "../forward";
 
 const router = express.Router();
@@ -8,7 +9,7 @@ const router = express.Router();
 const terminalParamsSchema = z.object({ id: zIdentifier });
 const screenParamsSchema = z.object({ screenCode: zIdentifier });
 
-const terminalCreateSchema = z
+export const terminalCreateSchema = z
   .object({
     name: z.string().min(2).max(120),
     applicationId: zIdentifier.optional(),
@@ -47,6 +48,8 @@ router.post(
     method: "POST",
     path: () => "/internal/merchant/pos/terminals",
     schema: terminalCreateSchema,
+    bodyMapper: toCorePosTerminalCreate,
+    coreSchema: corePosTerminalCreateSchema,
     status: 201,
   }),
 );
@@ -58,6 +61,7 @@ router.patch(
     path: (context) => `/internal/merchant/pos/terminals/${encodeURIComponent(context.params.id ?? "")}`,
     paramsSchema: terminalParamsSchema,
     schema: terminalPatchSchema,
+    coreSchema: corePosTerminalPatchSchema,
   }),
 );
 

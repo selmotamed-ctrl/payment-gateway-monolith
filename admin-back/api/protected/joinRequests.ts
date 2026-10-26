@@ -1,13 +1,19 @@
 import express from "express";
 import { z } from "zod";
 import { zIdentifier, zPaginationQuery, zReason } from "../../lib/zReady";
+import {
+  toCoreJoinRequestAssign,
+  toCoreJoinRequestDecide,
+  toCoreJoinRequestRequestInfo,
+  toCoreKybDocumentReview,
+} from "../contract";
 import { coreForward } from "../forward";
 
 const router = express.Router();
 
 const idParamsSchema = z.object({ id: zIdentifier });
 
-const assignSchema = z
+export const assignSchema = z
   .object({
     assigneeUserId: zIdentifier,
     dueAt: z.string().max(64).optional(),
@@ -15,7 +21,7 @@ const assignSchema = z
   })
   .strict();
 
-const requestInfoSchema = z
+export const requestInfoSchema = z
   .object({
     requestedItems: z.array(z.string().min(1).max(160)).min(1).max(50),
     message: z.string().min(3).max(2000),
@@ -23,7 +29,7 @@ const requestInfoSchema = z
   })
   .strict();
 
-const decideSchema = z
+export const decideSchema = z
   .object({
     decision: z.enum(["APPROVE", "REJECT", "REQUEST_INFO", "WITHDRAW"]),
     reason: zReason,
@@ -33,7 +39,7 @@ const decideSchema = z
   })
   .strict();
 
-const kybReviewSchema = z
+export const kybReviewSchema = z
   .object({
     decision: z.enum(["ACCEPT", "REJECT", "REQUEST_INFO"]),
     checklist: z.array(z.string().min(1).max(160)).max(50).optional(),
@@ -67,6 +73,7 @@ router.post(
     path: (context) => `/internal/admin/join-requests/${encodeURIComponent(context.params.id ?? "")}/assign`,
     paramsSchema: idParamsSchema,
     schema: assignSchema,
+    bodyFrom: (_req, body) => toCoreJoinRequestAssign(body),
   }),
 );
 
@@ -78,6 +85,7 @@ router.post(
       `/internal/admin/join-requests/${encodeURIComponent(context.params.id ?? "")}/request-info`,
     paramsSchema: idParamsSchema,
     schema: requestInfoSchema,
+    bodyFrom: (_req, body) => toCoreJoinRequestRequestInfo(body),
   }),
 );
 
@@ -88,6 +96,7 @@ router.post(
     path: (context) => `/internal/admin/join-requests/${encodeURIComponent(context.params.id ?? "")}/decide`,
     paramsSchema: idParamsSchema,
     schema: decideSchema,
+    bodyFrom: (_req, body) => toCoreJoinRequestDecide(body),
   }),
 );
 
@@ -103,5 +112,6 @@ kybRouter.post(
       `/internal/admin/kyb-documents/${encodeURIComponent(context.params.id ?? "")}/review`,
     paramsSchema: idParamsSchema,
     schema: kybReviewSchema,
+    bodyFrom: (_req, body) => toCoreKybDocumentReview(body),
   }),
 );

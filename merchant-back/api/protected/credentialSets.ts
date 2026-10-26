@@ -1,13 +1,26 @@
 import express from "express";
 import { z } from "zod";
 import { zIdentifier, zJsonObject } from "../../lib/zReady";
+import {
+  coreCredentialSetCreateSchema,
+  coreCredentialSetUpdateSchema,
+  toCoreCredentialSetCreate,
+  toCoreCredentialSetUpdate,
+} from "../contract";
 import { coreForward } from "../forward";
 
 const router = express.Router();
 
 const credentialSetParamsSchema = z.object({ id: zIdentifier });
 
-const credentialCreateSchema = z
+const credentialEntrySchema = z.object({
+  key: z.string().min(1).max(64),
+  type: z.enum(["HEADER", "QUERY", "BODY", "CERTIFICATE"]),
+  value: z.string().max(4096),
+  isSecret: z.boolean().default(true),
+});
+
+export const credentialCreateSchema = z
   .object({
     name: z.string().min(2).max(120),
     gatewayId: zIdentifier.optional(),
@@ -29,14 +42,21 @@ const credentialCreateSchema = z
       .optional(),
     secrets: zJsonObject.optional(),
     settings: zJsonObject.optional(),
+    /** Canonical core fields, accepted next to the portal vocabulary. */
+    gatewayCode: z.string().min(2).max(64).optional(),
+    env: z.enum(["SANDBOX", "LIVE"]).optional(),
+    externalMerchantId: z.string().min(2).max(120).optional(),
+    settlementTarget: z.enum(["PLATFORM_CLEARING", "MERCHANT_DIRECT", "PROVIDER_HELD"]).optional(),
+    entries: z.array(credentialEntrySchema).min(1).max(40).optional(),
   })
   .strict();
 
-const credentialUpdateSchema = z
+export const credentialUpdateSchema = z
   .object({
     name: z.string().min(2).max(120).optional(),
     secrets: zJsonObject.optional(),
     settings: zJsonObject.optional(),
+    entries: z.array(credentialEntrySchema).min(1).max(40).optional(),
   })
   .strict();
 
@@ -54,6 +74,8 @@ router.post(
     method: "POST",
     path: () => "/internal/merchant/credential-sets",
     schema: credentialCreateSchema,
+    bodyMapper: toCoreCredentialSetCreate,
+    coreSchema: coreCredentialSetCreateSchema,
     status: 201,
   }),
 );
@@ -66,6 +88,8 @@ router.put(
       `/internal/merchant/credential-sets/${encodeURIComponent(context.params.id ?? "")}`,
     paramsSchema: credentialSetParamsSchema,
     schema: credentialUpdateSchema,
+    bodyMapper: toCoreCredentialSetUpdate,
+    coreSchema: coreCredentialSetUpdateSchema,
   }),
 );
 

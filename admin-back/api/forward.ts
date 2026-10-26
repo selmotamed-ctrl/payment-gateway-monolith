@@ -19,7 +19,17 @@ export interface ForwardOptions {
   paramsSchema?: z.ZodType;
   querySchema?: z.ZodType;
   status?: number;
-  bodyFrom?: (req: Request) => unknown;
+  /**
+   * Translates the validated public body into core's canonical body.
+   * The public schema is always applied first, so the frontend contract stays untouched
+   * and only the forwarded payload changes.
+   */
+  bodyFrom?: (req: Request, body: unknown) => unknown;
+  /**
+   * Expands the validated public body into one core request per element.
+   * Used by bulk endpoints where core only accepts a single subject per request.
+   */
+  splitBodyFrom?: (req: Request, body: unknown) => unknown[];
   headers?: Record<string, string>;
 }
 
@@ -44,24 +54,34 @@ export const coreForward =
     const query = options.querySchema
       ? (parseOrThrow(options.querySchema, req.query) as Record<string, unknown>)
       : undefined;
-    let body: unknown = options.bodyFrom
-      ? options.bodyFrom(req)
-      : req.method === "GET" || req.method === "HEAD"
-        ? undefined
-        : (req.body ?? {});
-    if (options.schema && body !== undefined) {
-      body = parseOrThrow(options.schema, body);
+    const rawBody =
+      req.method === "GET" || req.method === "HEAD" ? undefined : (req.body ?? {});
+    const publicBody =
+      options.schema && rawBody !== undefined ? parseOrThrow(options.schema, rawBody) : rawBody;
+    const call = (path: string, body: unknown) =>
+      callCore({
+        method: options.method,
+        path,
+        body,
+        query: scalarQuery(query),
+        headers: options.headers,
+        requestId: resolveRequestId(req),
+        clientIp: resolveClientIp(req, parseCidrList(env.TRUSTED_PROXY_CIDRS)),
+        userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
+        authorization,
+      });
+
+    if (options.splitBodyFrom) {
+      const parts = options.splitBodyFrom(req, publicBody);
+      const results: unknown[] = [];
+      for (const part of parts) {
+        results.push(await call(options.path({ params, body: part, query: query ?? {} }), part));
+      }
+      res.status(options.status ?? 200).json(results);
+      return;
     }
-    const payload = await callCore({
-      method: options.method,
-      path: options.path({ params, body, query: query ?? {} }),
-      body,
-      query: scalarQuery(query),
-      headers: options.headers,
-      requestId: resolveRequestId(req),
-      clientIp: resolveClientIp(req, parseCidrList(env.TRUSTED_PROXY_CIDRS)),
-      userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
-      authorization,
-    });
+
+    const body = options.bodyFrom ? options.bodyFrom(req, publicBody) : publicBody;
+    const payload = await call(options.path({ params, body, query: query ?? {} }), body);
     res.status(options.status ?? 200).json(payload);
   };

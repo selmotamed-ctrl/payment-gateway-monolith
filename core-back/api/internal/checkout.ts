@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { Decimal } from "decimal.js";
 import express, { type Request, type Response } from "express";
 import { z } from "zod";
 import { Prisma } from "../../generated/prisma/client";
@@ -6,7 +7,10 @@ import { client } from "../../prisma/client";
 import { ApiError, parseOrThrow } from "../../lib/error";
 import { VisibleRailsResolver, type RailRecord, type RailRouteRecord, type CredentialSetRecord, type CommissionProfileRecord } from "../../engine/flow/VisibleRailsResolver";
 import { decimal } from "../../engine/ledger/LedgerPoster";
+import { getPlatformRuntime } from "../../engine/runtime";
+import type { DynamicAttempt } from "../../engine/flow/DynamicRailEngine";
 import { fingerprint, principalOf } from "../middleware/authDoubleCheck";
+import { json } from "./json";
 
 const PLATFORM_TTL_CEILINGS: Record<string, number> = {
   OTP_PULL: 1200,
@@ -275,15 +279,28 @@ const commissionForProfile = (
   return value;
 };
 
-const splitRatio = (value: unknown): number => {
+/**
+ * The platform share of a split fee bearer. The ratio is a DECIMAL, never a
+ * JavaScript float: it is multiplied into money.
+ */
+const splitRatio = (value: unknown): Decimal => {
+  const fallback = decimal("0.5");
   if (!value || typeof value !== "object") {
-    return 0.5;
+    return fallback;
   }
   const record = value as Record<string, unknown>;
   const raw = record.platformShare ?? record.platform_share ?? record.share;
-  const parsed = raw === undefined ? 0.5 : Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
-    return 0.5;
+  if (raw === undefined || raw === null) {
+    return fallback;
+  }
+  let parsed: Decimal;
+  try {
+    parsed = decimal(raw as never);
+  } catch {
+    return fallback;
+  }
+  if (!parsed.isFinite() || parsed.lt(0) || parsed.gt(1)) {
+    return fallback;
   }
   return parsed;
 };
@@ -435,6 +452,119 @@ const buildClientAction = (
   }
 };
 
+/**
+ * The gateway fee is derived from the pinned route cost model. It is never
+ * guessed: a route without a cost model books no gateway fee.
+ */
+const gatewayFeeForRoute = (
+  costModel: RailRouteRecord["costModel"],
+  amount: string,
+): string => {
+  const model = costModel;
+  if (!model) {
+    return "0.0000";
+  }
+  let cost = decimal(0);
+  if (model.flat !== undefined) {
+    cost = cost.plus(decimal(model.flat));
+  }
+  if (model.percent !== undefined) {
+    cost = cost.plus(decimal(amount).mul(decimal(model.percent)).div(100));
+  }
+  if (model.calc_type === "TIERED" || model.calc_type === "HYBRID") {
+    for (const tier of model.tiers ?? []) {
+      if (tier.up_to === undefined || decimal(amount).lte(decimal(tier.up_to))) {
+        if (tier.flat !== undefined) {
+          cost = cost.plus(decimal(tier.flat));
+        }
+        if (tier.percent !== undefined) {
+          cost = cost.plus(decimal(amount).mul(decimal(tier.percent)).div(100));
+        }
+        break;
+      }
+    }
+  }
+  if (model.min !== undefined) {
+    cost = decimal(decimal(model.min)).gt(cost) ? decimal(model.min) : cost;
+  }
+  if (model.max !== undefined && cost.gt(decimal(model.max))) {
+    cost = decimal(model.max);
+  }
+  return cost.toFixed(4);
+};
+
+/**
+ * Customer supplied fields are stored masked. PAN-class fields are never
+ * persisted at all - they are wiped from memory after the single outbound
+ * call that needs them.
+ */
+const SENSITIVE_FORM_FIELDS = new Set([
+  "pan",
+  "card_number",
+  "cardnumber",
+  "cvv",
+  "cvc",
+  "expiry",
+  "exp_month",
+  "exp_year",
+]);
+
+const maskedCustomerFields = (formData: Record<string, unknown>): Record<string, unknown> => {
+  const masked: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(formData)) {
+    if (SENSITIVE_FORM_FIELDS.has(key.toLowerCase())) {
+      continue;
+    }
+    masked[key] = typeof value === "string" ? maskIdentifier(value) : value;
+  }
+  return masked;
+};
+
+const maskIdentifier = (value: string): string => {
+  const trimmed = value.trim();
+  if (trimmed.length <= 4) {
+    return "*".repeat(trimmed.length);
+  }
+  return `${"*".repeat(trimmed.length - 4)}${trimmed.slice(-4)}`;
+};
+
+/**
+ * The engine produces the declarative `ClientAction` in its own envelope; the
+ * hosted checkout consumes the flat `kind` + payload contract.
+ */
+const toClientActionPayload = (action: {
+  type: string;
+  payload: Record<string, unknown>;
+}): Record<string, unknown> => {
+  const { type, payload } = action;
+  switch (type) {
+    case "HTTP_REDIRECT":
+      return { kind: "HTTP_REDIRECT", ...payload };
+    case "RENDER_EMBEDDED":
+      return { kind: "RENDER_EMBEDDED", ...payload };
+    case "SHOW_QR_OR_CODE":
+      return { kind: "SHOW_QR_OR_CODE", ...payload };
+    case "SHOW_PUSH_OR_TRANSFER":
+      return { kind: "SHOW_PUSH_OR_TRANSFER", ...payload };
+    case "SHOW_OTP_FORM":
+    default:
+      return { kind: "SHOW_OTP_FORM", ...payload };
+  }
+};
+
+const ownershipModeFor = (
+  settlementTarget: string,
+  gatewayKind: string | null | undefined,
+): "INTERNAL" | "PLATFORM_CLEARING" | "MERCHANT_DIRECT" => {
+  if (gatewayKind === "INTERNAL") {
+    return "INTERNAL";
+  }
+  if (settlementTarget === "MERCHANT_DIRECT") {
+    return "MERCHANT_DIRECT";
+  }
+  return "PLATFORM_CLEARING";
+};
+
 const ensureLinkUsable = (link: LoadedLink): void => {
   if (link.state !== "PENDING") {
     throw new ApiError(409, "PAYMENT_LINK_NOT_AVAILABLE", "The payment link is no longer available");
@@ -525,7 +655,9 @@ route.get("/pay/:linkKey", async (request: Request, response: Response) => {
     feeAmount: fee.commission,
     totalAmount: fee.totalCharged,
     merchantAmount: fee.merchantCredited,
-    splitPercent: link.feeBearer === "SPLIT" ? String(Math.round(splitRatio(link.splitRatioJson) * 100)) : null,
+    splitPercent: link.feeBearer === "SPLIT"
+      ? splitRatio(link.splitRatioJson).mul(100).toFixed(0)
+      : null,
     visibleRails: rails,
     expiresAt: link.expiresAt ? link.expiresAt.toISOString() : null,
     status: link.state,
@@ -608,16 +740,11 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
     .toUpperCase()}`;
 
   const breakdown = buildBreakdown(link, profile);
+  const gatewayFee = gatewayFeeForRoute(routeRow.costModel, breakdown.totalCharged);
+  const settlementTarget = credentialSet.settlementTarget;
+  const gatewayKind = gateway?.kind ?? null;
 
   const attempt = await client.$transaction(async (tx) => {
-    const reservation = await tx.$queryRawUnsafe<Array<{ id: string }>>(
-      "UPDATE payment_links SET active_locked_count = active_locked_count + 1, updated_at = NOW() WHERE id = $1 AND (infinite_use = true OR confirmed_count + active_locked_count < use_count) RETURNING id",
-      link.id,
-    );
-    if (!Array.isArray(reservation) || reservation.length === 0) {
-      throw new ApiError(409, "PAYMENT_LINK_SLOT_UNAVAILABLE", "The payment link has no available slot");
-    }
-
     const group = await tx.attemptGroup.upsert({
       where: { linkId_customerFingerprint: { linkId: link.id, customerFingerprint } },
       update: {},
@@ -640,15 +767,20 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
         env: credentialSet.env,
         mode,
         subMode: body.subMode ?? null,
-        status: "INITIATING",
+        status: "CREATED",
         requestedAmount: link.amount,
         surchargeAmount: new Prisma.Decimal(breakdown.payerSurcharge),
         totalChargedAmount: new Prisma.Decimal(breakdown.totalCharged),
         platformCommissionAmount: new Prisma.Decimal(breakdown.commission),
         netMerchantAmount: new Prisma.Decimal(breakdown.merchantCredited),
+        gatewayFeeAmount: new Prisma.Decimal(gatewayFee),
         feeBearer: link.feeBearer,
+        settlementTarget,
         currency: link.currency,
-        customerFieldsMasked: { fingerprint: customerFingerprint },
+        customerFieldsMasked: json({
+          fingerprint: customerFingerprint,
+          fields: maskedCustomerFields(body.formData),
+        }),
         contextCiphertext: "",
         expiresAt,
         graceExpiresAt,
@@ -662,7 +794,7 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
   const widget = await client.widgetDefinition.findUnique({ where: { routeId: routeRow.id } });
   const redirect = await client.redirectDefinition.findUnique({ where: { routeId: routeRow.id } });
 
-  const clientAction = buildClientAction(mode, {
+  const fallbackAction = buildClientAction(mode, {
     expiresAt,
     attemptReference: attempt.reference,
     maskedPhone: maskedPhone(body.formData),
@@ -691,15 +823,23 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
     fee: breakdown,
   });
 
-  await client.paymentAttempt.update({
-    where: { id: attempt.id },
-    data: { status: "AWAITING_CUSTOMER", substatus: mode },
-  });
+  // The slot reservation, the flow execution and the state transition are
+  // owned by the universal rail engine.
+  const platform = getPlatformRuntime(client as never);
+  const engineResult = await platform.engine.initiate(
+    attempt as unknown as DynamicAttempt,
+    body.formData,
+  );
+
+  const attemptRow = await client.paymentAttempt.findUnique({ where: { id: attempt.id } });
+  const clientAction = engineResult.clientAction
+    ? toClientActionPayload(engineResult.clientAction)
+    : fallbackAction;
 
   response.status(201).json({
     attemptId: attempt.id,
     reference: attempt.reference,
-    status: "AWAITING_CUSTOMER",
+    status: attemptRow?.status ?? engineResult.status,
     clientAction,
   });
 });
@@ -798,22 +938,22 @@ route.post("/pay/:linkKey/logs/:attemptId/confirm", async (request: Request, res
     throw new ApiError(409, "ATTEMPT_NOT_CONFIRMABLE", "The attempt is not in a confirmable state");
   }
 
-  const otpAttempts = body.otp ? attempt.otpAttempts + 1 : attempt.otpAttempts;
-  const updated = await client.paymentAttempt.update({
-    where: { id: attempt.id },
-    data: {
-      status: "VERIFYING",
-      substatus: "AWAITING_GATEWAY_CONFIRMATION",
-      otpAttempts,
-      nextCheckAt: new Date(Date.now() + 5000),
-    },
-  });
+  // The SUBMIT stack, the trusted success facts and the ledger posting are
+  // owned by the universal rail engine.
+  const platform = getPlatformRuntime(client as never);
+  const evidence: Record<string, unknown> = {
+    ...((body.evidence ?? {}) as Record<string, unknown>),
+    ...(body.otp ? { otp: body.otp } : {}),
+  };
+  const result = await platform.engine.confirm(attempt as unknown as DynamicAttempt, evidence);
+  const updated = await client.paymentAttempt.findUnique({ where: { id: attempt.id } });
 
   response.json({
-    attemptId: updated.id,
-    reference: updated.reference,
-    status: updated.status,
-    clientAction: null,
+    attemptId: attempt.id,
+    reference: attempt.reference,
+    status: updated?.status ?? result.status,
+    canonicalError: result.canonicalError ?? null,
+    clientAction: result.clientAction ? toClientActionPayload(result.clientAction) : null,
   });
 });
 
@@ -868,15 +1008,16 @@ route.post("/pay/:linkKey/logs/:attemptId/client-event", async (request: Request
     response.json({ attemptId: attempt.id, status: attempt.status });
     return;
   }
-  const updated = await client.paymentAttempt.update({
-    where: { id: attempt.id },
-    data: {
-      status: "VERIFYING",
-      substatus: `CLIENT_EVENT:${body.event}`,
-      nextCheckAt: new Date(Date.now() + 3000),
-    },
+  // A browser callback is only a HINT. It never decides the outcome: the
+  // engine inquires the gateway and trusts only verified facts.
+  const platform = getPlatformRuntime(client as never);
+  const result = await platform.engine.inquire(attempt as unknown as DynamicAttempt);
+  const updated = await client.paymentAttempt.findUnique({ where: { id: attempt.id } });
+  response.json({
+    attemptId: attempt.id,
+    status: updated?.status ?? result.status,
+    event: body.event,
   });
-  response.json({ attemptId: updated.id, status: updated.status });
 });
 
 route.get("/return/:attemptToken", async (request: Request, response: Response) => {
@@ -887,14 +1028,13 @@ route.get("/return/:attemptToken", async (request: Request, response: Response) 
   if (!attempt) {
     throw new ApiError(404, "PAYMENT_ATTEMPT_NOT_FOUND", "The attempt token is not recognised");
   }
-  await client.paymentAttempt.update({
-    where: { id: attempt.id },
-    data: { status: attempt.status === "SUCCEEDED" ? "SUCCEEDED" : "VERIFYING", nextCheckAt: new Date(Date.now() + 3000) },
-  });
+  const platform = getPlatformRuntime(client as never);
+  const result = await platform.engine.inquire(attempt as unknown as DynamicAttempt);
+  const updated = await client.paymentAttempt.findUnique({ where: { id: attempt.id } });
   response.json({
     attemptId: attempt.id,
     reference: attempt.reference,
-    status: attempt.status,
+    status: updated?.status ?? result.status,
     redirect: `/pay/${attempt.reference}/status`,
   });
 });
@@ -907,14 +1047,13 @@ route.post("/return/:attemptToken", async (request: Request, response: Response)
   if (!attempt) {
     throw new ApiError(404, "PAYMENT_ATTEMPT_NOT_FOUND", "The attempt token is not recognised");
   }
-  await client.paymentAttempt.update({
-    where: { id: attempt.id },
-    data: { status: attempt.status === "SUCCEEDED" ? "SUCCEEDED" : "VERIFYING", nextCheckAt: new Date(Date.now() + 3000) },
-  });
+  const platform = getPlatformRuntime(client as never);
+  const result = await platform.engine.inquire(attempt as unknown as DynamicAttempt);
+  const updated = await client.paymentAttempt.findUnique({ where: { id: attempt.id } });
   response.json({
     attemptId: attempt.id,
     reference: attempt.reference,
-    status: attempt.status,
+    status: updated?.status ?? result.status,
     redirect: `/pay/${attempt.reference}/status`,
   });
 });
@@ -938,6 +1077,12 @@ route.post("/inbound/:gateway/:env/:pathToken", async (request: Request, respons
   }
   if (environment !== "SANDBOX" && environment !== "LIVE") {
     throw new ApiError(400, "INBOUND_ENVIRONMENT_INVALID", "The inbound environment is invalid");
+  }
+  const boundEnvironment = await client.gatewayEnvironment.findFirst({
+    where: { gatewayVersionId: channel.gatewayVersionId, env: environment },
+  });
+  if (!boundEnvironment || !boundEnvironment.enabled) {
+    throw new ApiError(403, "INBOUND_ENVIRONMENT_NOT_BOUND", "The inbound channel is not bound to this environment");
   }
 
   const dedupeKey = createHash("sha256")
@@ -964,7 +1109,10 @@ route.post("/inbound/:gateway/:env/:pathToken", async (request: Request, respons
       gatewayId: channel.gatewayVersion.gatewayId,
       env: environment,
       rawBodyBytes: new Uint8Array(rawBody),
-      redactedHeadersJson: { "content-type": request.headers["content-type"] ?? null },
+      redactedHeadersJson: json({
+        "content-type": request.headers["content-type"] ?? null,
+        "content-length": rawBody.byteLength,
+      }),
       sourceIp,
       verified: false,
       verificationError: "VERIFICATION_PENDING",
@@ -993,6 +1141,40 @@ route.post("/inbound/:gateway/:env/:pathToken", async (request: Request, respons
       data: { attemptId: attempt.id },
     });
   }
+
+  // The webhook is never trusted on arrival. The engine verifies the
+  // signature (constant time, across every active secret version), enforces
+  // the IP allowlist and the replay window, and only then trusts the facts.
+  const platform = getPlatformRuntime(client as never);
+  let verified = false;
+  let verificationError: string | null = null;
+  let processingResult = "IGNORED";
+  try {
+    const result = await platform.engine.verifyCallback(pathToken, {
+      rawBody,
+      headers: Object.fromEntries(
+        Object.entries(request.headers as Record<string, string | string[] | undefined>)
+          .filter(([, value]) => typeof value === "string")
+          .map(([key, value]) => [key.toLowerCase(), value as string]),
+      ),
+      sourceIp,
+    });
+    verified = true;
+    processingResult = result.status;
+  } catch (error) {
+    verificationError = String((error as { code?: string })?.code ?? "CALLBACK_VERIFICATION_FAILED");
+    processingResult = "REJECTED";
+  }
+
+  await client.inboundEvent.update({
+    where: { id: stored.id },
+    data: {
+      verified,
+      verificationError,
+      processedAt: new Date(),
+      processingResult,
+    },
+  });
 
   response.status(channel.ackStatus).send(
     channel.ackBodyTemplate

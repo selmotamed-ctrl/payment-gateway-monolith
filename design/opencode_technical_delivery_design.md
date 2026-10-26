@@ -450,7 +450,83 @@ All phase verification gates were executed in this workspace with the following 
 | Phase 3 | `cd core-back && bun test test/phase3-dynamic-engine-and-blueprints.test.ts` | 12 tests pass (7 production blueprints, 15 deterministic mock scenarios, initiate/confirm/ledger flow, 12 go-live gates, closed transform library) |
 | Phase 4 | `cd core-back && bun test test/phase4-onboarding-aml-disputes-recon.test.ts` | 16 tests pass (duplicate detection, AML hold/case-only/critical escalation, Arabic normalisation, no tipping-off, dispute dedupe, statement parsing) |
 | Phase 8 | `cd core-back && bun test test/edge-cases/catalog-140.test.ts` | 140 catalogued edge cases with 140 executable regression checks, all pass |
-| All backends | `cd <service> && bun run typecheck && bun test` | `core-back` 473 tests, `admin-back` 98 tests, `merchant-back` 23 tests, `checkout-back` 33 tests — all pass with clean TypeScript |
+| All backends | `cd <service> && bun run typecheck && bun test` | `core-back` 543 tests, `admin-back` 397 tests, `merchant-back` 66 tests, `checkout-back` 44 tests — all pass with clean TypeScript |
 | All frontends | `cd <spa> && bun run build` | `admin-front`, `merchant-front`, `checkout-front` all build (type-check + Vite) |
+| Schema parity | `cd core-back && bunx prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script` | 64 model tables and 100 enum types, identical to the committed migration (plus the hand written `schema_versions` table and the four domain `CHECK` constraints) |
 
-**Outstanding environment dependency:** `T-1.4` remains in progress because this workspace has no reachable PostgreSQL instance (no local server and no container runtime), so `prisma migrate deploy` and `bun run db-seed` could not be executed against a live database. The migration was generated from the schema and verified to match it exactly (64 model tables + `schema_versions`, 121 identical indexes) via `prisma migrate diff --from-empty --to-schema`, and the seed script is idempotent.
+**Outstanding environment dependency:** `T-1.4` remains in progress because this workspace has no reachable PostgreSQL instance (no local server and no container runtime), so `prisma migrate deploy` and `bun run db-seed` could not be executed against a live database. The migration was generated from the schema and verified to match it exactly via `prisma migrate diff --from-empty --to-schema`, and the seed script is idempotent (verified twice against an in-memory Prisma stand-in).
+
+## 10. Hardening Pass · Audit Findings Closed (Delivery Run 2)
+
+A structured audit of the implementation against `design/payment_gateway_final_design-v5.md` produced a large
+defect list. The following are the defects that were **closed** in this pass, grouped by severity.
+
+### 10.1 The platform could not actually run (critical)
+
+| Defect | Fix |
+| :--- | :--- |
+| The universal rail engine, the ledger poster, the guard pipeline and the consumer registry existed as library code but were **never instantiated by the running service**: no payment could ever reach `SUCCEEDED`, no journal entry was ever written and no AML/velocity guard ever ran | New composition root `core-back/engine/runtime/platform.ts`; `core-back/engine/runtime/index.ts` exposes it as a singleton; `core-back/index.ts` builds it on startup |
+| `POST /pay/:linkKey/initiate` created an attempt and flipped the status by hand | The route now calls `engine.initiate()` — atomic slot reservation, flow execution, legal state transition |
+| `POST /pay/:linkKey/logs/:attemptId/confirm` only set `status = VERIFYING`; no OTP was verified, no gateway was called and no ledger entry was posted | The route now calls `engine.confirm()` — SUBMIT stack, five trusted success facts and the ledger posting in one transaction |
+| `client-event` and `return` set `VERIFYING` directly, bypassing the transition matrix | Both routes now call `engine.inquire()`; a browser callback is only a hint, never a decision |
+| `core-back` mounted `express.json()` before the binary routes, so **every inbound webhook, KYB document and statement file arrived as zero bytes** and could never be signature-verified or parsed | New `core-back/lib/rawBody/index.ts` mounts a raw collector before the JSON parser for `/internal/checkout/inbound`, `/internal/merchant/onboarding/kyb-documents` and `/internal/admin/reconciliation/upload` |
+| No `CallbackVerifier` existed, so webhooks could not be trusted; `InboundInboxWorker` had no handler and the inbox was never drained; the expiry sweeper had no inquiry port and expired attempts blind | New `core-back/engine/runtime/callbackVerifier.ts` (constant-time signature check across every active secret version, IP allowlist, timestamp replay window, dedupe and correlation); `core-back/engine/workers/productionRuntime.ts` wires the `inquiry`, `handler` and `sender` ports |
+| The slot counters were never finalised: `confirmed_count` stayed `0` and `active_locked_count` stayed `1` after a successful payment | New `core-back/engine/runtime/slotStore.ts` — atomic conditional `UPDATE` for the reservation, `confirmed_count` increment and link completion on commit |
+| The ledger booked a hard coded `1.0000` provider fee and `0.8000` gateway fee on every confirmation | The magic defaults are removed from `buildPaymentConfirmationTemplate`; the fee is resolved from the pinned route cost model and stored on the attempt |
+| The `SPLIT` fee bearer had no ledger branch and `PAYER_SURCHARGE` added the surcharge twice | New `SPLIT_SURCHARGE_CONFIRMATION` template; the confirmation now posts the **base** amount plus the surcharge, with the pinned commission and merchant amount |
+| The platform commission silently fell back to a hard coded `3 %` | The commission must come from the pinned commission profile; the posting fails loudly when it cannot be resolved |
+
+### 10.2 Security
+
+| Defect | Fix |
+| :--- | :--- |
+| IPv6 SSRF bypass: `::ffff:7f00:1`, `::ffff:a9fe:a9fe`, `::127.0.0.1`, `2002:7f00:1::` and `64:ff9b::7f00:1` were all treated as public | `isPublicIpAddress` now uses `ipaddr.js` and rejects the IPv4-mapped, IPv4-compatible, NAT64, 6to4, Teredo, ULA, link-local and multicast ranges |
+| `REQUEST_SIGNATURE` signed an **empty** body because the body was serialised after the signature was computed | The body is serialised first and the signature covers exactly the transmitted bytes |
+| The `InvalidationBus` never delivered a wildcard event, so a rotated credential never evicted the cached consumer | The bus supports trailing `*` patterns (and `psubscribe` on Redis); the merchant credential-set write paths publish `credential:<id>`, and a gateway version going live publishes `gateway:<id>` |
+| The admin LAN guard read only `x-real-client-ip` while the shipped nginx sends `X-Real-IP`, so every proxied request resolved to `127.0.0.1` and the allowlist was bypassed | The guard now uses the shared `resolveClientIp` resolver, which honours both headers and only trusts them from a loopback/trusted-proxy peer |
+| The admin authority guard read `roles`/`authorities_map`, but core issues `role`/`authorities` — every COMPLIANCE/MLRO officer was rejected with `403` on all `/aml/*` routes | The guard reads the real claims (and keeps the legacy shape), and denies confidential routes when the credential cannot be read |
+| The vault redactor matched an exact list of 15 field names, so `api_secret`, `signing_key`, `card_number` … leaked into `attempt_step_logs` | The redactor now matches by pattern and additionally redacts any Luhn-valid 12–19 digit value |
+| `checkout-back` relayed every client header of the public inbound webhook (denylist) to core | The inbound proxy now uses an allowlist and never forwards `authorization`, `cookie` or any unknown `x-` header |
+| The edge services validated a different payload vocabulary than core, so **every write request** was rejected with `400 VALIDATION_FAILED` | `admin-back`, `merchant-back` and `checkout-back` gained a contract layer (`api/contract.ts`) that translates the public payload into core's canonical payload; the public contract is unchanged |
+
+### 10.3 Correctness
+
+| Defect | Fix |
+| :--- | :--- |
+| A matched `FAILED` status rule on a `MOVES_MONEY` step was rewritten to `UNKNOWN`, so a decline never reached `FAILED` | An explicit matched rule is honoured; only an unmatched money step defaults to `UNKNOWN` |
+| `BRANCH` steps were executed and their result ignored | The engine now jumps to `thenStepId`/`elseStepId` |
+| `idempotency_config` was declared but never applied | The `HEADER` and `BODY_FIELD` modes are implemented |
+| `CRYPTO_SIGNATURE` step parameters were unimplemented and `crypto_profile_id` was missing | The signature is computed through the `CryptoEngine` with the configured canonicalisation, key and output encoding |
+| The transform library rejected `Prisma.Decimal` money values and offered `to_number` on monetary outputs | Decimal inputs are accepted and `to_number` is refused on a monetary output |
+| `SORTED_KEY_VALUE_AMP` ignored `included_fields`/`excluded_fields`; `TEMPLATE_STRING` and `JSON_CANONICAL` were unimplemented | Both are implemented and the field filters are honoured |
+| An invalid transform pipe was only rejected at live payment time | The gateway wizard save handlers validate the pipes before writing |
+| The settled amount had to match exactly, so a legitimate gateway rounding produced `UNKNOWN` | The comparison honours the pinned route's `mismatch_policy.tolerance_amount` |
+| The split ratio was parsed as a JavaScript float and multiplied into money | The ratio is a `Decimal` |
+| `gateway_versions.state` could not express `SUPERSEDED`/`ROLLED_BACK` | New `GatewayVersionState` enum; `platform_settings.scope` became `TEXT` |
+| The seeded notification templates had no `SMS` channel, so `LOGIN_MFA` and `IDENTITY_VERIFICATION` always failed to deliver | The seed now creates the SMS templates for both codes in AR and EN |
+| The blueprint seed created no flows, steps, crypto profiles, channels or rail fields, so the engine found nothing to execute | `prisma/seedBlueprints.ts` now seeds the full declarative configuration of all 7 blueprints (43 flows, 63 steps, 107 parameters, 147 outputs, 41 status rules, 28 channels, 23 rail fields, 13 routes) |
+| A maker-checker approval of a gateway version only recorded the decision | The approved change is executed: the previous version is superseded, the new one goes `LIVE` and the consumer cache is invalidated |
+| `rails.capabilities` used `partialRefund` instead of the design's `partial_refund`; T-LYNC was seeded as an aggregator | Both corrected |
+
+### 10.4 Tests added
+
+`core-back/test/runtime/production-adapters.test.ts`, `core-back/test/runtime/raw-body.test.ts`,
+`core-back/test/engine/engine-hardening.test.ts`, `core-back/test/blueprint-seed.test.ts`,
+`admin-back/test/core-contract.test.ts`, `merchant-back/test/core-contract.test.ts`,
+`merchant-back/test/core-forwarding.test.ts`, `checkout-back/test/checkout-zero-trust.test.ts` (extended).
+
+## 11. Continuation Plan · Open Items
+
+These items are **not** closed by this pass. They are ordered by operational risk.
+
+| # | Item | Severity | Notes |
+| :--- | :--- | :--- | :--- |
+| 1 | Apply the migration and the seed to a live PostgreSQL instance and re-run the phase gates against it | HIGH | Blocked only by the absence of a database in this workspace (`T-1.4`) |
+| 2 | Run an end-to-end payment against a sandbox gateway with the seeded blueprints | HIGH | The declarative flows are seeded and projected, but no real gateway credentials exist yet |
+| 3 | Replace the `console.log` notification transport with a real SMS/email provider | MEDIUM | `engine/workers/productionRuntime.ts` renders and validates the message, then logs it |
+| 4 | Execute the AML case resolution, the dispute drafting and the reconciliation parsing from the admin API | MEDIUM | The ledger templates and the parsers exist, but the admin routes still record instead of execute the state change (the same class of defect that was closed for gateway versions) |
+| 5 | Move the `FOR UPDATE SKIP LOCKED` worker selects inside an explicit transaction | MEDIUM | Two cluster nodes can currently select the same batch |
+| 6 | Add the onboarding-time (L1) and periodic (L2) screening passes | MEDIUM | `AttemptGuardPipeline` covers the hot path (L3); the onboarding and periodic layers are still stubs |
+| 7 | Enforce the §6 daily-cap formula against the processed volume of the day | MEDIUM | The resolver reads `daily_processed_amount`, which is not yet aggregated |
+| 8 | Seed the system GL accounts per currency | LOW | A non-LYD posting context has no matching account and would raise `GL_ACCOUNT_NOT_FOUND` |
+| 9 | Bind the SAML/OIDC provider configuration of the corporate identity module | LOW | The module is not part of this delivery scope |

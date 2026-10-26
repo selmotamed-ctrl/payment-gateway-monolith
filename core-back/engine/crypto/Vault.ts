@@ -28,6 +28,39 @@ const SENSITIVE_FIELD_NAMES = new Set([
   "privatekey",
 ]);
 
+/**
+ * Field names are matched by PATTERN as well as by an exact list. A gateway
+ * that names its secret `api_secret`, `signing_key` or `card_number` must not
+ * leak it into `attempt_step_logs` or any other persisted payload.
+ */
+const SENSITIVE_FIELD_PATTERN =
+  /(secret|token|password|passwd|passphrase|apikey|api_key|privatekey|private_key|signingkey|signing_key|signature|authorization|auth|credential|cookie|session|pan|card|cvv|cvc|otp|pin|iban|accountnumber|account_number)/i;
+
+/**
+ * A Luhn valid 12-19 digit number is treated as a card number even when the
+ * field name does not say so.
+ */
+const looksLikePan = (value: string): boolean => {
+  const digits = value.replace(/[\s-]/g, "");
+  if (!/^\d{12,19}$/.test(digits)) {
+    return false;
+  }
+  let sum = 0;
+  let double = false;
+  for (let index = digits.length - 1; index >= 0; index -= 1) {
+    let digit = digits.charCodeAt(index) - 48;
+    if (double) {
+      digit *= 2;
+      if (digit > 9) {
+        digit -= 9;
+      }
+    }
+    sum += digit;
+    double = !double;
+  }
+  return sum % 10 === 0;
+};
+
 export interface VaultKms {
   getKey(keyId: string): Promise<string | Buffer> | string | Buffer;
 }
@@ -208,7 +241,11 @@ function normalizeFieldName(name: string): string {
 }
 
 function isSensitiveFieldName(name: string): boolean {
-  return SENSITIVE_FIELD_NAMES.has(normalizeFieldName(name));
+  const normalized = normalizeFieldName(name);
+  if (SENSITIVE_FIELD_NAMES.has(normalized)) {
+    return true;
+  }
+  return SENSITIVE_FIELD_PATTERN.test(normalized);
 }
 
 function redactText(text: string, literalSecrets: readonly string[]): string {
@@ -282,6 +319,9 @@ export class Vault {
         return REDACTED_VALUE;
       }
       if (typeof value === "string") {
+        if (looksLikePan(value)) {
+          return REDACTED_VALUE;
+        }
         return redactText(value, literalSecrets);
       }
       if (value === null || typeof value !== "object") {

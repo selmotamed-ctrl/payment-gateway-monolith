@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { resetEnvCache } from "../lib/env";
+import { resetCoreAgent } from "../lib/mtlsClient";
 import { createTestPki, startTestCore, type TestCore, type TestPki } from "./helpers/core";
 
 const pki: TestPki = createTestPki("merchant-back");
@@ -10,6 +12,8 @@ process.env.MTLS_CLIENT_CERT_PATH = pki.clientCert;
 process.env.MTLS_CLIENT_KEY_PATH = pki.clientKey;
 process.env.MTLS_CA_CERT_PATH = pki.caCert;
 process.env.MAX_UPLOAD_BYTES = "1048576";
+resetEnvCache();
+resetCoreAgent();
 
 const { createApp } = await import("../index");
 

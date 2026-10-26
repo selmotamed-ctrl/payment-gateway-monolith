@@ -1,6 +1,7 @@
 import express from "express";
 import { z } from "zod";
 import { zAmount, zCurrency, zIdentifier, zJsonObject } from "../../lib/zReady";
+import { coreLinkCreateSchema } from "../contract";
 import { coreForward } from "../forward";
 
 const router = express.Router();
@@ -53,6 +54,7 @@ router.post(
     method: "POST",
     path: () => "/internal/merchant/links",
     schema: linkCreateSchema,
+    coreSchema: coreLinkCreateSchema,
     status: 201,
   }),
 );

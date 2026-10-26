@@ -2,15 +2,24 @@ import express from "express";
 import { z } from "zod";
 import { requireAuthorities } from "../middleware/authorityGuard";
 import { zAmount, zIdentifier, zJsonObject, zPaginationQuery, zReason } from "../../lib/zReady";
+import {
+  toCoreAmlCasePropose,
+  toCoreAmlMatchDisposition,
+  toCoreAmlReport,
+  toCoreAmlReportingRule,
+  toCoreAmlRule,
+} from "../contract";
 import { coreForward } from "../forward";
 
 const router = express.Router();
 
 const idParamsSchema = z.object({ id: zIdentifier });
 
-const amlConfidential = requireAuthorities("COMPLIANCE", "MLRO");
+// Confidential AML routes: the role names are the canonical check, the aml authority
+// strings are the equivalent claim core accepts for the same resources.
+const amlConfidential = requireAuthorities("COMPLIANCE", "MLRO", "aml:read", "aml:write");
 
-const dispositionSchema = z
+export const dispositionSchema = z
   .object({
     disposition: z.enum(["FALSE_POSITIVE", "CONFIRMED_MATCH", "PENDING", "ESCALATED"]),
     notes: z.string().min(3).max(2000),
@@ -18,7 +27,7 @@ const dispositionSchema = z
   })
   .strict();
 
-const caseProposeSchema = z
+export const caseProposeSchema = z
   .object({
     severity: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]),
     action: z.enum(["CASE_ONLY", "AML_HOLD", "BLOCK", "REPORT"]),
@@ -28,7 +37,7 @@ const caseProposeSchema = z
   })
   .strict();
 
-const ruleSchema = z
+export const ruleSchema = z
   .object({
     code: z.string().min(2).max(64),
     name: z.string().min(2).max(160),
@@ -37,10 +46,11 @@ const ruleSchema = z
     parameters: zJsonObject,
     action: z.enum(["CASE_ONLY", "AML_HOLD", "BLOCK", "REPORT"]),
     active: z.boolean().optional(),
+    severity: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).optional(),
   })
   .strict();
 
-const reportingRuleSchema = z
+export const reportingRuleSchema = z
   .object({
     code: z.string().min(2).max(64),
     name: z.string().min(2).max(160),
@@ -49,16 +59,18 @@ const reportingRuleSchema = z
     currency: z.string().regex(/^[A-Z]{3}$/),
     windowDays: z.number().int().min(1).max(365),
     active: z.boolean().optional(),
+    reportType: z.enum(["LARGE_TRANSACTION", "SUSPICIOUS_ACTIVITY", "PERIODIC_RETURN"]).optional(),
   })
   .strict();
 
-const reportSchema = z
+export const reportSchema = z
   .object({
     reportingRuleId: zIdentifier,
     caseId: zIdentifier.optional(),
     periodStart: z.string().max(64),
     periodEnd: z.string().max(64),
     notes: z.string().max(2000).optional(),
+    reportType: z.enum(["LARGE_TRANSACTION", "SUSPICIOUS_ACTIVITY", "PERIODIC_RETURN"]).optional(),
   })
   .strict();
 
@@ -81,6 +93,7 @@ router.post(
       `/internal/admin/aml/matches/${encodeURIComponent(context.params.id ?? "")}/disposition`,
     paramsSchema: idParamsSchema,
     schema: dispositionSchema,
+    bodyFrom: (_req, body) => toCoreAmlMatchDisposition(body),
   }),
 );
 
@@ -100,6 +113,7 @@ router.post(
     path: (context) => `/internal/admin/aml/cases/${encodeURIComponent(context.params.id ?? "")}/propose`,
     paramsSchema: idParamsSchema,
     schema: caseProposeSchema,
+    bodyFrom: (_req, body) => toCoreAmlCasePropose(body),
   }),
 );
 
@@ -117,6 +131,7 @@ router.post(
     method: "POST",
     path: () => "/internal/admin/aml/rules",
     schema: ruleSchema,
+    bodyFrom: (_req, body) => toCoreAmlRule(body),
     status: 201,
   }),
 );
@@ -135,6 +150,7 @@ router.post(
     method: "POST",
     path: () => "/internal/admin/aml/reporting-rules",
     schema: reportingRuleSchema,
+    bodyFrom: (_req, body) => toCoreAmlReportingRule(body),
     status: 201,
   }),
 );
@@ -154,6 +170,7 @@ router.post(
     method: "POST",
     path: () => "/internal/admin/aml/reports",
     schema: reportSchema,
+    bodyFrom: (_req, body) => toCoreAmlReport(body),
     status: 201,
   }),
 );

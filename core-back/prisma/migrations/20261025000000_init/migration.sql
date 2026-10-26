@@ -80,6 +80,9 @@ CREATE TYPE "GatewayKind" AS ENUM ('DIRECT', 'AGGREGATOR', 'NATIVE_ADAPTER', 'IN
 CREATE TYPE "GatewayStatus" AS ENUM ('DRAFT', 'SANDBOX_VERIFIED', 'PENDING_APPROVAL', 'LIVE', 'SUSPENDED', 'RETIRED');
 
 -- CreateEnum
+CREATE TYPE "GatewayVersionState" AS ENUM ('DRAFT', 'SANDBOX_VERIFIED', 'PENDING_APPROVAL', 'LIVE', 'SUPERSEDED', 'ROLLED_BACK');
+
+-- CreateEnum
 CREATE TYPE "GatewayVerificationState" AS ENUM ('VERIFIED', 'UNVERIFIED');
 
 -- CreateEnum
@@ -297,9 +300,6 @@ CREATE TYPE "ConfidentialityClass" AS ENUM ('PUBLIC', 'MERCHANT', 'INTERNAL');
 
 -- CreateEnum
 CREATE TYPE "NotificationStatus" AS ENUM ('QUEUED', 'SENT', 'DELIVERED', 'FAILED', 'SUPPRESSED');
-
--- CreateEnum
-CREATE TYPE "PlatformSettingScope" AS ENUM ('PLATFORM');
 
 -- CreateTable
 CREATE TABLE "merchants" (
@@ -659,7 +659,7 @@ CREATE TABLE "gateway_versions" (
     "version_number" INTEGER NOT NULL,
     "snapshot_ciphertext" TEXT NOT NULL,
     "content_hash" CHAR(64) NOT NULL,
-    "state" "GatewayStatus" NOT NULL DEFAULT 'DRAFT',
+    "state" "GatewayVersionState" NOT NULL DEFAULT 'DRAFT',
     "created_by" TEXT NOT NULL,
     "approval_request_id" TEXT,
     "change_note" TEXT,
@@ -1112,9 +1112,12 @@ CREATE TABLE "payment_attempts" (
     "platform_commission_amount" DECIMAL(18,4) NOT NULL DEFAULT 0,
     "net_merchant_amount" DECIMAL(18,4) NOT NULL DEFAULT 0,
     "feeBearer" "FeeBearer" NOT NULL,
+    "settlement_target" "SettlementTarget" NOT NULL DEFAULT 'PLATFORM_CLEARING',
     "currency" CHAR(3) NOT NULL,
     "customer_fields_masked" JSONB NOT NULL,
+    "public_outputs" JSONB,
     "context_ciphertext" TEXT NOT NULL,
+    "point_of_no_return" BOOLEAN NOT NULL DEFAULT false,
     "otp_attempts" INTEGER NOT NULL DEFAULT 0,
     "last_otp_sent_at" TIMESTAMP(3),
     "client_ip" TEXT,
@@ -1536,7 +1539,7 @@ CREATE TABLE "platform_settings" (
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
     "key" TEXT NOT NULL,
-    "scope" "PlatformSettingScope" NOT NULL DEFAULT 'PLATFORM',
+    "scope" TEXT NOT NULL DEFAULT 'PLATFORM',
     "value_json" JSONB NOT NULL,
     "version" INTEGER NOT NULL DEFAULT 1,
     "effective_from" TIMESTAMP(3) NOT NULL,
@@ -1796,6 +1799,9 @@ CREATE INDEX "payment_attempts_status_next_check_at_idx" ON "payment_attempts"("
 
 -- CreateIndex
 CREATE INDEX "payment_attempts_gateway_version_id_idx" ON "payment_attempts"("gateway_version_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "payment_attempts_link_id_idempotency_key_key" ON "payment_attempts"("link_id", "idempotency_key");
 
 -- CreateIndex
 CREATE INDEX "attempt_step_logs_attempt_id_idx" ON "attempt_step_logs"("attempt_id");
@@ -2259,7 +2265,6 @@ ALTER TABLE "notifications" ADD CONSTRAINT "notifications_recipient_merchant_id_
 -- AddForeignKey
 ALTER TABLE "platform_settings" ADD CONSTRAINT "platform_settings_approval_request_id_fkey" FOREIGN KEY ("approval_request_id") REFERENCES "approval_requests"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
-
 -- Schema version support (single-row table managed outside the Prisma datamodel).
 CREATE TABLE IF NOT EXISTS "schema_versions" (
     "id" INTEGER NOT NULL DEFAULT 1,
@@ -2269,7 +2274,7 @@ CREATE TABLE IF NOT EXISTS "schema_versions" (
     CONSTRAINT "schema_versions_pkey" PRIMARY KEY ("id")
 );
 
-INSERT INTO "schema_versions" ("id", "version") VALUES (1, 1)
+INSERT INTO "schema_versions" ("id", "version") VALUES (1, 2)
 ON CONFLICT ("id") DO UPDATE SET "version" = EXCLUDED."version";
 
 -- Domain invariants that the Prisma datamodel cannot express.

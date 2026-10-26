@@ -1,13 +1,21 @@
 import express from "express";
 import { z } from "zod";
 import { zAmount, zBaseVersion, zCurrency, zIdentifier, zJsonObject } from "../../lib/zReady";
+import {
+  toCoreRailCreate,
+  toCoreRailFields,
+  toCoreRailUpdate,
+  toCoreRouteCreate,
+  toCoreRouteState,
+  toCoreRouteUpdate,
+} from "../contract";
 import { coreForward } from "../forward";
 
 const router = express.Router();
 
 const idParamsSchema = z.object({ id: zIdentifier });
 
-const railCreateSchema = z
+export const railCreateSchema = z
   .object({
     code: z
       .string()
@@ -24,7 +32,7 @@ const railCreateSchema = z
   })
   .strict();
 
-const railPatchSchema = z
+export const railPatchSchema = z
   .object({
     name: z.string().min(2).max(160).optional(),
     subModes: z.array(z.string().min(1).max(64)).max(20).optional(),
@@ -35,7 +43,7 @@ const railPatchSchema = z
   })
   .strict();
 
-const railFieldsSchema = z
+export const railFieldsSchema = z
   .object({
     fields: z
       .array(
@@ -58,7 +66,7 @@ const railFieldsSchema = z
   })
   .catchall(z.unknown());
 
-const routeCreateSchema = z
+export const routeCreateSchema = z
   .object({
     railId: zIdentifier,
     gatewayId: zIdentifier.optional(),
@@ -68,10 +76,12 @@ const routeCreateSchema = z
     limitAmount: zAmount.optional(),
     limitCurrency: zCurrency.optional(),
     active: z.boolean().optional(),
+    // core requires the credential policy of a route and the public API cannot express it.
+    credentialPolicy: z.enum(["PLATFORM", "MERCHANT_REQUIRED", "MERCHANT_OR_PLATFORM"]).optional(),
   })
   .strict();
 
-const routePatchSchema = z
+export const routePatchSchema = z
   .object({
     priority: z.number().int().min(0).max(10000).optional(),
     costModel: zJsonObject.optional(),
@@ -81,7 +91,7 @@ const routePatchSchema = z
   })
   .strict();
 
-const routeStateSchema = z
+export const routeStateSchema = z
   .object({
     state: z.enum(["ACTIVE", "PAUSED", "DRAINING"]),
     reason: z.string().min(3).max(500).optional(),
@@ -102,6 +112,7 @@ router.post(
     method: "POST",
     path: () => "/internal/admin/rails",
     schema: railCreateSchema,
+    bodyFrom: (_req, body) => toCoreRailCreate(body),
     status: 201,
   }),
 );
@@ -113,6 +124,7 @@ router.patch(
     path: (context) => `/internal/admin/rails/${encodeURIComponent(context.params.id ?? "")}`,
     paramsSchema: idParamsSchema,
     schema: railPatchSchema,
+    bodyFrom: (_req, body) => toCoreRailUpdate(body),
   }),
 );
 
@@ -132,6 +144,7 @@ router.put(
     path: (context) => `/internal/admin/rails/${encodeURIComponent(context.params.id ?? "")}/fields`,
     paramsSchema: idParamsSchema,
     schema: railFieldsSchema,
+    bodyFrom: (_req, body) => toCoreRailFields(body),
   }),
 );
 
@@ -152,6 +165,7 @@ routesRouter.post(
     method: "POST",
     path: () => "/internal/admin/routes",
     schema: routeCreateSchema,
+    bodyFrom: (_req, body) => toCoreRouteCreate(body),
     status: 201,
   }),
 );
@@ -163,6 +177,7 @@ routesRouter.patch(
     path: (context) => `/internal/admin/routes/${encodeURIComponent(context.params.id ?? "")}`,
     paramsSchema: idParamsSchema,
     schema: routePatchSchema,
+    bodyFrom: (_req, body) => toCoreRouteUpdate(body),
   }),
 );
 
@@ -182,5 +197,6 @@ routesRouter.post(
     path: (context) => `/internal/admin/routes/${encodeURIComponent(context.params.id ?? "")}/state`,
     paramsSchema: idParamsSchema,
     schema: routeStateSchema,
+    bodyFrom: (_req, body) => toCoreRouteState(body),
   }),
 );

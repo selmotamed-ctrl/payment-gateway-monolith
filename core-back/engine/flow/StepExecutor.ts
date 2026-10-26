@@ -2,6 +2,14 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { ApiError } from "../../lib/error";
 import { Vault } from "../crypto/Vault";
+import {
+  CryptoEngine,
+  type CanonicalizationMode,
+  type CryptoAlgorithm,
+  type CryptoSecretResolver,
+  type HashOutputEncoding,
+  type KeyEncoding,
+} from "../crypto/CryptoEngine";
 import { compileUrl, assertNoControlCharacters, encodeForDestination, validateFinalUrl, type QueryValue } from "../apiConsumer/compileUrl";
 import { recursiveSelect } from "../apiConsumer/recursiveSelect";
 import { recursiveSet } from "../apiConsumer/recursiveSet";
@@ -35,6 +43,7 @@ export interface StepParameter {
   source: StepParameterSource;
   selector?: string;
   constant_value?: unknown;
+  crypto_profile_id?: string;
   transforms?: readonly TransformPipe[];
 }
 
@@ -44,6 +53,32 @@ export interface StepOutput {
   transforms?: readonly TransformPipe[];
   store_as: StepOutputStore;
   required?: boolean;
+}
+
+/**
+ * The declarative idempotency recipe of a step. `HEADER` injects the rendered
+ * key as a request header, `BODY_FIELD` injects it into the JSON body.
+ */
+export type StepIdempotencyMode = "NONE" | "HEADER" | "BODY_FIELD";
+
+export interface StepIdempotencyConfig {
+  mode: StepIdempotencyMode;
+  key_name?: string;
+  source_template?: string;
+}
+
+/**
+ * The declarative signing recipe of a `CRYPTO_SIGNATURE` step parameter.
+ */
+export interface CryptoProfileConfig {
+  algorithm: CryptoAlgorithm;
+  canonicalizationMode: CanonicalizationMode;
+  secretKeyRef?: string | null;
+  secretKeyEncoding?: KeyEncoding;
+  outputEncoding?: HashOutputEncoding;
+  includedFields?: readonly string[];
+  excludedFields?: readonly string[];
+  templateString?: string | null;
 }
 
 export interface StepAssertion {
@@ -99,7 +134,7 @@ export interface FlowStep {
   side_effect?: ConsumerSideEffect;
   retry_policy?: ConsumerRetryPolicy;
   point_of_no_return?: boolean;
-  idempotency_config?: Record<string, unknown>;
+  idempotency_config?: StepIdempotencyConfig;
   parameters?: readonly StepParameter[];
   outputs?: readonly StepOutput[];
   success_check?: StepAssertion[];
@@ -168,6 +203,12 @@ export interface StepExecutorLogger {
 
 export interface StepExecutorOptions {
   apiConsumer?: ApiConsumer;
+  /**
+   * Resolves the outbound consumer for the attempt being executed. When
+   * present it takes precedence over the static `apiConsumer`, which allows a
+   * single executor to serve every gateway in the catalog.
+   */
+  apiConsumerResolver?: (context: StepExecutionContext) => Promise<ApiConsumer | undefined> | ApiConsumer | undefined;
   fetch?: typeof fetch;
   transformPipeline?: TransformPipeline;
   allowedHosts?: readonly string[];
@@ -181,6 +222,15 @@ export interface StepExecutorOptions {
   maxResponseBytes?: number;
   maxJsonDepth?: number;
   panFieldNames?: readonly string[];
+  /**
+   * Resolves the crypto profile of a `CRYPTO_SIGNATURE` step parameter.
+   */
+  cryptoProfileResolver?: (id: string) => Promise<CryptoProfileConfig | null> | CryptoProfileConfig | null;
+  /**
+   * Resolves the secret material of a crypto profile. When it is absent the
+   * resolver of the transform context is used instead.
+   */
+  secretResolver?: CryptoSecretResolver;
 }
 
 export class StepAssertionError extends Error {
@@ -284,12 +334,106 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value) && !(value instanceof Date);
 }
 
+/**
+ * The context roots a `{{path.to.value}}` template can address.
+ */
+function contextTemplateRoots(context: StepExecutionContext): Record<string, unknown> {
+  return {
+    attempt: context.attempt ?? {},
+    customer: context.customerFields ?? {},
+    customerFields: context.customerFields ?? {},
+    state: context.state ?? {},
+    previousResponse: isPlainObject(context.previousResponse) ? context.previousResponse : {},
+    gatewayMeta: context.gatewayMeta ?? {},
+    routeMeta: context.routeMeta ?? {},
+    credentials: context.credentials ?? {},
+    urls: context.urls ?? {},
+    clientContext: context.clientContext ?? {},
+    constants: context.constants ?? {},
+  };
+}
+
+function readObjectPath(root: Record<string, unknown>, path: string): unknown {
+  let current: unknown = root;
+  for (const segment of path.split(".")) {
+    if (!current || typeof current !== "object") {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
+function stringifyTemplateValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+  if (typeof value === "object") {
+    const text = String(value);
+    if (text !== "[object Object]") {
+      return text;
+    }
+    return JSON.stringify(value) ?? "";
+  }
+  return String(value);
+}
+
+function resolveTemplatePath(path: string, context: StepExecutionContext): unknown {
+  const roots = contextTemplateRoots(context);
+  const composed = readObjectPath(roots, path);
+  if (composed !== undefined) {
+    return composed;
+  }
+  const directRoots: Array<Record<string, unknown> | undefined> = [
+    context.attempt,
+    context.customerFields,
+    context.state,
+    isPlainObject(context.previousResponse) ? context.previousResponse : undefined,
+    context.gatewayMeta,
+    context.routeMeta,
+    context.constants,
+  ];
+  for (const root of directRoots) {
+    if (!root) {
+      continue;
+    }
+    if (Object.hasOwn(root, path)) {
+      return root[path];
+    }
+    const nested = readObjectPath(root, path);
+    if (nested !== undefined) {
+      return nested;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Renders a `{{path.to.value}}` template against the execution context.
+ */
+function renderContextTemplate(template: string, context: StepExecutionContext): string {
+  return template.replace(
+    /\{\{([A-Za-z0-9_.-]+)\}\}|\{([A-Za-z0-9_.-]+)\}/g,
+    (_match, doubleKey: string | undefined, singleKey: string | undefined) => {
+      const path = String(doubleKey ?? singleKey ?? "");
+      return stringifyTemplateValue(resolveTemplatePath(path, context));
+    },
+  );
+}
+
 export class StepExecutor {
   private readonly options: StepExecutorOptions;
   private readonly pipeline: TransformPipeline;
   private readonly vault: Vault;
   private readonly fetchImpl: typeof fetch;
   private readonly dnsLookup: (hostname: string) => Promise<string[]>;
+  private readonly cryptoEngine: CryptoEngine;
 
   constructor(options: StepExecutorOptions = {}) {
     this.options = options;
@@ -297,6 +441,7 @@ export class StepExecutor {
     this.vault = options.vault ?? new Vault();
     this.fetchImpl = options.fetch ?? fetch;
     this.dnsLookup = options.dnsLookup ?? defaultLookup;
+    this.cryptoEngine = new CryptoEngine();
   }
 
   async execute(step: FlowStep, context: StepExecutionContext = {}): Promise<StepExecutionResult> {
@@ -363,7 +508,12 @@ export class StepExecutor {
         );
         const mapped = this.mapStatus(step, response.data, response.status);
         let status = mapped.status;
-        if (sideEffect === "MOVES_MONEY" && (mapped.status === "FAILED" || missingRequired)) {
+        // A matched status rule always wins. Only an unmatched money step
+        // falls back to UNKNOWN because the money movement is then unknown.
+        if (sideEffect === "MOVES_MONEY" && !mapped.ruleMatched && status === "FAILED") {
+          status = "UNKNOWN";
+        }
+        if (sideEffect === "MOVES_MONEY" && missingRequired) {
           status = "UNKNOWN";
         }
         const log = this.redactLog({
@@ -574,7 +724,9 @@ export class StepExecutor {
     let xml = step.xml_template ?? "";
 
     for (const parameter of step.parameters ?? []) {
-      let value = selectParameter(parameter, context);
+      let value = parameter.source === "CRYPTO_SIGNATURE" && parameter.crypto_profile_id
+        ? await this.resolveCryptoSignature(parameter, context)
+        : selectParameter(parameter, context);
       if (parameter.transforms) {
         value = await this.pipeline.apply(value, parameter.transforms, context.transformContext);
       }
@@ -597,6 +749,19 @@ export class StepExecutor {
         multipart.append(parameter.key, value instanceof Blob ? value : String(value));
       } else if (parameter.place === "XML") {
         xml = xml.replaceAll(`{{${parameter.key}}}`, encodeForDestination(value, "XML"));
+      }
+    }
+
+    const idempotency = this.resolveIdempotency(step, context);
+    if (idempotency) {
+      if (idempotency.mode === "HEADER") {
+        assertNoControlCharacters(idempotency.value, "header");
+        headers[idempotency.keyName] = idempotency.value;
+      } else if (idempotency.mode === "BODY_FIELD") {
+        body = mergeBody(body, { [idempotency.keyName]: idempotency.value });
+        if (step.content_type?.includes("x-www-form-urlencoded")) {
+          form[idempotency.keyName] = idempotency.value;
+        }
       }
     }
 
@@ -636,13 +801,107 @@ export class StepExecutor {
     };
   }
 
+  /**
+   * Renders the declarative idempotency recipe of a step. The source template
+   * is resolved against the execution context.
+   */
+  private resolveIdempotency(
+    step: FlowStep,
+    context: StepExecutionContext,
+  ): { mode: "HEADER" | "BODY_FIELD"; keyName: string; value: string } | undefined {
+    const config = step.idempotency_config;
+    if (!config || config.mode === "NONE") {
+      return undefined;
+    }
+    const keyName = config.key_name?.trim();
+    if (!keyName) {
+      throw executorError("IDEMPOTENCY_KEY_NAME_MISSING", "An idempotency configuration requires a key name");
+    }
+    const template = config.source_template;
+    if (!template) {
+      throw executorError(
+        "IDEMPOTENCY_SOURCE_TEMPLATE_MISSING",
+        "An idempotency configuration requires a source template",
+      );
+    }
+    return {
+      mode: config.mode,
+      keyName,
+      value: renderContextTemplate(template, context),
+    };
+  }
+
+  /**
+   * Signs the declarative payload of a `CRYPTO_SIGNATURE` step parameter with
+   * the recipe of its crypto profile.
+   */
+  private async resolveCryptoSignature(
+    parameter: StepParameter,
+    context: StepExecutionContext,
+  ): Promise<string> {
+    const profileId = parameter.crypto_profile_id;
+    if (!profileId) {
+      throw executorError("CRYPTO_PROFILE_REQUIRED", "A CRYPTO_SIGNATURE parameter requires a crypto profile");
+    }
+    const resolver = this.options.cryptoProfileResolver;
+    if (!resolver) {
+      throw executorError("CRYPTO_PROFILE_RESOLVER_MISSING", "No crypto profile resolver is configured");
+    }
+    const profile = await resolver(profileId);
+    if (!profile) {
+      throw executorError("CRYPTO_PROFILE_NOT_FOUND", `Crypto profile '${profileId}' does not exist`);
+    }
+    const payload = this.cryptoSigningPayload(parameter, context);
+    const canonical = CryptoEngine.canonicalize(profile.canonicalizationMode, {
+      fields: payload.fields,
+      rawBody: payload.rawBody,
+      timestamp: payload.timestamp,
+      includedFields: profile.includedFields,
+      excludedFields: profile.excludedFields,
+      templateString: profile.templateString ?? undefined,
+    });
+    const secretResolver = this.options.secretResolver ?? context.transformContext?.secretResolver;
+    const engine = secretResolver ? new CryptoEngine({ secretResolver }) : this.cryptoEngine;
+    return engine.signCanonicalPayload(profile.algorithm, canonical, {
+      keyReference: profile.secretKeyRef,
+      keyEncoding: profile.secretKeyEncoding,
+      outputEncoding: profile.outputEncoding,
+    });
+  }
+
+  /**
+   * The payload a crypto profile signs: the execution context, narrowed by the
+   * selector of the parameter.
+   */
+  private cryptoSigningPayload(
+    parameter: StepParameter,
+    context: StepExecutionContext,
+  ): { fields: Record<string, unknown>; rawBody?: string; timestamp?: string | number } {
+    const root = contextTemplateRoots(context);
+    const selected = parameter.selector ? recursiveSelect(root, parameter.selector) : root;
+    const candidateTimestamp = root.timestamp ?? context.attempt?.timestamp;
+    const timestamp = typeof candidateTimestamp === "string" || typeof candidateTimestamp === "number"
+      ? candidateTimestamp
+      : undefined;
+    if (typeof selected === "string") {
+      return { fields: {}, rawBody: selected, timestamp };
+    }
+    if (isPlainObject(selected)) {
+      return { fields: selected, timestamp };
+    }
+    return { fields: selected === undefined ? {} : { value: selected }, timestamp };
+  }
+
   private async sendHttp(
     step: FlowStep,
     request: { url: string; method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; headers: Record<string, string>; body?: FetchBody },
     context: StepExecutionContext,
   ): Promise<{ status: number; data: unknown; rawText: string }> {
-    if (this.options.apiConsumer) {
-      const response = await this.options.apiConsumer.request({
+    const consumer = this.options.apiConsumerResolver
+      ? await this.options.apiConsumerResolver(context)
+      : this.options.apiConsumer;
+    if (consumer) {
+      const response = await consumer.request({
         method: request.method,
         url: request.url,
         headers: request.headers,
@@ -703,6 +962,9 @@ export class StepExecutor {
   ): Promise<StepOutputs> {
     const output = this.emptyOutputs();
     for (const definition of step.outputs ?? []) {
+      if (definition.store_as === "SETTLED_AMOUNT" || definition.store_as === "PROVIDER_FEE") {
+        assertNoFloatMoneyTransform(definition.transforms, definition.name);
+      }
       let value = definition.selector
         ? recursiveSelect(response, definition.selector)
         : response;
@@ -733,22 +995,24 @@ export class StepExecutor {
     step: FlowStep,
     response: unknown,
     httpStatus: number,
-  ): { status: CanonicalStepStatus; substatus?: string; canonicalError?: string } {
+  ): { status: CanonicalStepStatus; substatus?: string; canonicalError?: string; ruleMatched: boolean } {
     for (const rule of step.status_rules ?? []) {
       if (evaluateAssertion(rule, response)) {
         return {
           status: rule.canonical_status,
           substatus: rule.canonical_substatus,
           canonicalError: rule.canonical_error,
+          ruleMatched: true,
         };
       }
     }
     if (httpStatus >= 200 && httpStatus < 300) {
-      return { status: "SUCCEEDED" };
+      return { status: "SUCCEEDED", ruleMatched: false };
     }
     return {
       status: step.side_effect === "MOVES_MONEY" ? "UNKNOWN" : "FAILED",
       canonicalError: `HTTP ${httpStatus}`,
+      ruleMatched: false,
     };
   }
 
@@ -891,6 +1155,26 @@ function evaluateAssertion(
 
 function moneyUncertainStep(step: FlowStep, sideEffect: ConsumerSideEffect): boolean {
   return sideEffect === "MOVES_MONEY" || step.point_of_no_return === true;
+}
+
+/**
+ * Money is never a native float. A monetary step output that runs the
+ * `to_number` transform is refused at runtime as well as at save time.
+ */
+function assertNoFloatMoneyTransform(
+  pipes: readonly TransformPipe[] | undefined,
+  name: string,
+): void {
+  if (!Array.isArray(pipes)) {
+    return;
+  }
+  const offender = pipes.find((pipe) => pipe && typeof pipe === "object" && pipe.op === "to_number");
+  if (offender) {
+    throw executorError(
+      "MONEY_OUTPUT_FLOAT_FORBIDDEN",
+      `Output '${name}' stores money and must not use the to_number transform`,
+    );
+  }
 }
 
 function isRetryableStepError(error: unknown): boolean {

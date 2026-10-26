@@ -71,11 +71,33 @@ export interface TransformValidationError {
   index: number;
   op: string;
   message: string;
+  path?: string;
 }
 
 export interface TransformValidationResult {
   valid: boolean;
   errors: TransformValidationError[];
+}
+
+/**
+ * The step outputs that carry money. They are persisted as decimals, never as
+ * native floats, so the closed library forbids `to_number` on them.
+ */
+export const MONETARY_OUTPUT_STORES = ["SETTLED_AMOUNT", "PROVIDER_FEE"] as const;
+
+export type MonetaryOutputStore = (typeof MONETARY_OUTPUT_STORES)[number];
+
+export const isMonetaryOutputStore = (storeAs: string | undefined | null): boolean =>
+  typeof storeAs === "string" && (MONETARY_OUTPUT_STORES as readonly string[]).includes(storeAs);
+
+/**
+ * A transform usage site: the pipes of a step parameter or a step output and,
+ * for outputs, the store the value ends up in.
+ */
+export interface TransformUsage {
+  path: string;
+  pipes?: readonly TransformPipe[];
+  storeAs?: string;
 }
 
 interface DecimalValue {
@@ -98,20 +120,52 @@ function decimalToPlainString(value: DecimalValue): string {
   return `${value.negative && value.coefficient !== 0n ? "-" : ""}${whole}${fraction ? `.${fraction}` : ""}`;
 }
 
-function parseDecimal(value: unknown): DecimalValue {
-  if (typeof value === "bigint") {
-    return { negative: value < 0n, coefficient: value < 0n ? -value : value, scale: 0 };
+/**
+ * Renders a value into its decimal literal form. `Prisma.Decimal` and
+ * `decimal.js` instances are objects that expose a `toString()` producing the
+ * plain decimal literal, so every money value read from the database is
+ * accepted without ever touching a native float.
+ */
+function decimalLiteral(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
   }
   if (typeof value === "number") {
     if (!Number.isFinite(value)) {
       throw new Error("Decimal value must be finite");
     }
-    value = String(value);
+    return String(value);
   }
-  if (typeof value !== "string") {
-    throw new Error("Decimal value must be a string, number, or bigint");
+  if (typeof value === "bigint") {
+    return value.toString();
   }
-  const trimmed = value.trim();
+  if (value && typeof value === "object") {
+    const candidate = value as { toString?: () => string };
+    if (typeof candidate.toString === "function") {
+      const text = candidate.toString();
+      if (typeof text === "string") {
+        return text;
+      }
+    }
+  }
+  throw new Error("Decimal value must be a string, number, bigint, or a decimal-compatible object");
+}
+
+function isDecimalCompatible(value: unknown): boolean {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "bigint") {
+    return true;
+  }
+  if (value && typeof value === "object") {
+    return typeof (value as { toString?: () => string }).toString === "function";
+  }
+  return false;
+}
+
+function parseDecimal(value: unknown): DecimalValue {
+  if (typeof value === "bigint") {
+    return { negative: value < 0n, coefficient: value < 0n ? -value : value, scale: 0 };
+  }
+  const trimmed = decimalLiteral(value).trim();
   const match = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(trimmed);
   if (!match) {
     throw new Error(`Invalid decimal value '${trimmed}'`);
@@ -349,6 +403,30 @@ function validationError(index: number, op: string, message: string): TransformV
   return { index, op, message };
 }
 
+/**
+ * `to_number` produces a native float. Money is never stored as a float, so
+ * the rule is refused on the monetary step outputs.
+ */
+function monetaryTransformErrors(
+  pipes: readonly TransformPipe[] | undefined,
+  storeAs: string | undefined,
+): TransformValidationError[] {
+  if (!isMonetaryOutputStore(storeAs) || !Array.isArray(pipes)) {
+    return [];
+  }
+  const errors: TransformValidationError[] = [];
+  pipes.forEach((pipe, index) => {
+    if (pipe && typeof pipe === "object" && pipe.op === "to_number") {
+      errors.push(validationError(
+        index,
+        "to_number",
+        "Money outputs must not use to_number; money is persisted as a decimal, never as a native float",
+      ));
+    }
+  });
+  return errors;
+}
+
 export const TRANSFORM_OPERATIONS: readonly TransformOperation[] = [
   "scale",
   "MUL_INT",
@@ -454,7 +532,7 @@ export class TransformPipeline {
           break;
         case "DIV_DECIMAL":
           requireCount(2);
-          if (typeof args[0] !== "string" && typeof args[0] !== "number" && typeof args[0] !== "bigint") {
+          if (!isDecimalCompatible(args[0])) {
             errors.push(validationError(index, op, "Divisor must be decimal-compatible"));
           }
           requireInteger(1);
@@ -583,6 +661,22 @@ export class TransformPipeline {
 
   assertValid(pipes: readonly TransformPipe[]): void {
     const result = this.validate(pipes);
+    if (!result.valid) {
+      throw new Error(result.errors.map((error) => `${error.op}: ${error.message}`).join("; "));
+    }
+  }
+
+  /**
+   * Validates the pipes of a step output against the store the value ends up
+   * in. Monetary stores forbid the float producing `to_number` operation.
+   */
+  validateForStore(pipes: readonly TransformPipe[], storeAs?: string): TransformValidationResult {
+    const errors = [...this.validate(pipes).errors, ...monetaryTransformErrors(pipes, storeAs)];
+    return { valid: errors.length === 0, errors };
+  }
+
+  assertValidForStore(pipes: readonly TransformPipe[], storeAs?: string): void {
+    const result = this.validateForStore(pipes, storeAs);
     if (!result.valid) {
       throw new Error(result.errors.map((error) => `${error.op}: ${error.message}`).join("; "));
     }
@@ -754,4 +848,33 @@ export function validateTransformPipes(pipes: readonly TransformPipe[]): Transfo
 
 export function assertValidTransformPipes(pipes: readonly TransformPipe[]): void {
   new TransformPipeline().assertValid(pipes);
+}
+
+/**
+ * Validates every transform usage of a declarative definition (the pipes of
+ * the step parameters and of the step outputs) in one pass. The save paths use
+ * it to refuse a broken pipe while the gateway version is being configured
+ * instead of when a live payment executes.
+ */
+export function validateTransformUsage(usages: readonly TransformUsage[]): TransformValidationResult {
+  const pipeline = new TransformPipeline();
+  const errors: TransformValidationError[] = [];
+  for (const usage of usages) {
+    const result = pipeline.validateForStore(usage.pipes ?? [], usage.storeAs);
+    for (const error of result.errors) {
+      errors.push({ ...error, path: usage.path });
+    }
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+export function assertValidTransformUsage(usages: readonly TransformUsage[]): void {
+  const result = validateTransformUsage(usages);
+  if (!result.valid) {
+    throw new Error(
+      result.errors
+        .map((error) => `${error.path ? `${error.path}: ` : ""}${error.op}: ${error.message}`)
+        .join("; "),
+    );
+  }
 }

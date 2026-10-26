@@ -4,6 +4,11 @@ import { z } from "zod";
 import { env } from "../../lib/env";
 import { parseOrThrow } from "../../lib/error";
 import { zIdentifier } from "../../lib/zReady";
+import {
+  coreBeneficialOwnerSchema,
+  coreJoinRequestSchema,
+  coreOnboardingSubmitSchema,
+} from "../contract";
 import { coreForward } from "../forward";
 import { forwardUpload, uploadSingle } from "../upload";
 
@@ -92,6 +97,7 @@ router.put(
     method: "PUT",
     path: () => "/internal/merchant/onboarding/join-request",
     schema: joinRequestSchema,
+    coreSchema: coreJoinRequestSchema,
   }),
 );
 
@@ -122,6 +128,7 @@ router.post(
     method: "POST",
     path: () => "/internal/merchant/onboarding/beneficial-owners",
     schema: beneficialOwnerSchema,
+    coreSchema: coreBeneficialOwnerSchema,
     status: 201,
   }),
 );
@@ -142,6 +149,7 @@ router.post(
     method: "POST",
     path: () => "/internal/merchant/onboarding/submit",
     schema: submitSchema,
+    coreSchema: coreOnboardingSubmitSchema,
   }),
 );
 

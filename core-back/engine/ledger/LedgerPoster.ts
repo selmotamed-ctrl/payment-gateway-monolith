@@ -124,6 +124,7 @@ export type LedgerScenario =
   | "SETTLEMENT_SWEEP"
   | "FEE_VARIANCE_TRUE_UP"
   | "PAYER_SURCHARGE_CONFIRMATION"
+  | "SPLIT_SURCHARGE_CONFIRMATION"
   | "MERCHANT_DIRECT_CONFIRMATION"
   | "AML_HOLD_AND_RELEASE"
   | "CASHOUT"
@@ -192,6 +193,14 @@ function requirePositive(value: DecimalInput, label: string): Decimal {
   return amount;
 }
 
+function requireNonNegative(value: DecimalInput, label: string): Decimal {
+  const amount = decimal(value);
+  if (!amount.isFinite() || amount.lt(0)) {
+    throw moneyError("INVALID_LEDGER_AMOUNT", `${label} must not be negative`);
+  }
+  return amount;
+}
+
 function account(accountType: LedgerAccountType, overrides: Partial<LedgerAccountSelector> = {}): LedgerAccountSelector {
   return { accountType, ...overrides };
 }
@@ -210,10 +219,10 @@ export function buildLedgerTemplate(
     : requirePositive(input.commissionAmount, "Commission amount");
   const providerFee = input.providerFeeAmount === undefined
     ? new Decimal("1")
-    : requirePositive(input.providerFeeAmount, "Provider fee amount");
+    : requireNonNegative(input.providerFeeAmount, "Provider fee amount");
   const gatewayFee = input.gatewayFeeAmount === undefined
     ? new Decimal("0.8")
-    : requirePositive(input.gatewayFeeAmount, "Gateway fee amount");
+    : requireNonNegative(input.gatewayFeeAmount, "Gateway fee amount");
   const merchantAmount = input.merchantAmount === undefined
     ? amount.minus(commission)
     : requirePositive(input.merchantAmount, "Merchant amount");
@@ -228,7 +237,9 @@ export function buildLedgerTemplate(
         description: "Platform-held confirmation with fee deducted at source",
         lines: [
           { direction: "DEBIT", amount: treasuryAmount, account: account("TREASURY") },
-          { direction: "DEBIT", amount: providerFee, account: account("PROVIDER_FEE_EXPENSE") },
+          ...(providerFee.isZero()
+            ? []
+            : [{ direction: "DEBIT" as const, amount: providerFee, account: account("PROVIDER_FEE_EXPENSE") }]),
           { direction: "CREDIT", amount: merchantAmount, account: account("MERCHANT_WALLET") },
           { direction: "CREDIT", amount: commission, account: account("PLATFORM_INCOME") },
         ],
@@ -241,10 +252,14 @@ export function buildLedgerTemplate(
         description: "Platform-held confirmation with gateway fee accrual",
         lines: [
           { direction: "DEBIT", amount, account: account("GATEWAY_CLEARING") },
-          { direction: "DEBIT", amount: gatewayFee, account: account("GATEWAY_FEE_EXPENSE") },
+          ...(gatewayFee.isZero()
+            ? []
+            : [{ direction: "DEBIT" as const, amount: gatewayFee, account: account("GATEWAY_FEE_EXPENSE") }]),
           { direction: "CREDIT", amount: merchantAmount, account: account("MERCHANT_WALLET") },
           { direction: "CREDIT", amount: commission, account: account("PLATFORM_INCOME") },
-          { direction: "CREDIT", amount: gatewayFee, account: account("GATEWAY_FEE_ACCRUAL") },
+          ...(gatewayFee.isZero()
+            ? []
+            : [{ direction: "CREDIT" as const, amount: gatewayFee, account: account("GATEWAY_FEE_ACCRUAL") }]),
         ],
       };
     case "SETTLEMENT_SWEEP": {
@@ -257,7 +272,9 @@ export function buildLedgerTemplate(
         description: "Gateway settlement sweep",
         lines: [
           { direction: "DEBIT", amount: settled, account: account("TREASURY") },
-          { direction: "DEBIT", amount: gatewayFee, account: account("GATEWAY_FEE_ACCRUAL") },
+          ...(gatewayFee.isZero()
+            ? []
+            : [{ direction: "DEBIT" as const, amount: gatewayFee, account: account("GATEWAY_FEE_ACCRUAL") }]),
           { direction: "CREDIT", amount, account: account("GATEWAY_CLEARING") },
         ],
       };
@@ -287,10 +304,36 @@ export function buildLedgerTemplate(
         description: "Payment confirmation with payer surcharge",
         lines: [
           { direction: "DEBIT", amount: charged, account: account("GATEWAY_CLEARING") },
-          { direction: "DEBIT", amount: gatewayFee, account: account("GATEWAY_FEE_EXPENSE") },
+          ...(gatewayFee.isZero()
+            ? []
+            : [{ direction: "DEBIT" as const, amount: gatewayFee, account: account("GATEWAY_FEE_EXPENSE") }]),
           { direction: "CREDIT", amount, account: account("MERCHANT_WALLET") },
           { direction: "CREDIT", amount: commission, account: account("PLATFORM_INCOME") },
-          { direction: "CREDIT", amount: gatewayFee, account: account("GATEWAY_FEE_ACCRUAL") },
+          ...(gatewayFee.isZero()
+            ? []
+            : [{ direction: "CREDIT" as const, amount: gatewayFee, account: account("GATEWAY_FEE_ACCRUAL") }]),
+        ],
+      };
+    }
+    case "SPLIT_SURCHARGE_CONFIRMATION": {
+      const surcharge = input.surchargeAmount === undefined
+        ? commission
+        : requirePositive(input.surchargeAmount, "Payer surcharge amount");
+      const charged = amount.plus(surcharge);
+      return {
+        refType: "PAYMENT_ATTEMPT",
+        refId: reference,
+        description: "Payment confirmation with a split fee bearer",
+        lines: [
+          { direction: "DEBIT", amount: charged, account: account("GATEWAY_CLEARING") },
+          ...(gatewayFee.isZero()
+            ? []
+            : [{ direction: "DEBIT" as const, amount: gatewayFee, account: account("GATEWAY_FEE_EXPENSE") }]),
+          { direction: "CREDIT", amount: merchantAmount, account: account("MERCHANT_WALLET") },
+          { direction: "CREDIT", amount: commission, account: account("PLATFORM_INCOME") },
+          ...(gatewayFee.isZero()
+            ? []
+            : [{ direction: "CREDIT" as const, amount: gatewayFee, account: account("GATEWAY_FEE_ACCRUAL") }]),
         ],
       };
     }
@@ -440,6 +483,14 @@ export function buildLedgerTemplate(
   }
 }
 
+/**
+ * Builds the confirmation posting for a settled attempt.
+ *
+ * Unlike the raw scenario builder this function is strict about money: every
+ * fee that the selected template books MUST be supplied by the caller. The
+ * engine resolves the real gateway fee from the pinned route cost model, so a
+ * confirmation can never be posted with an invented fee.
+ */
 export function buildPaymentConfirmationTemplate(input: PaymentConfirmationInput): JournalTemplate {
   if (input.ownershipMode === "INTERNAL") {
     return buildLedgerTemplate("INTERNAL_CONFIRMATION", input);
@@ -447,13 +498,39 @@ export function buildPaymentConfirmationTemplate(input: PaymentConfirmationInput
   if (input.ownershipMode === "MERCHANT_DIRECT") {
     return buildLedgerTemplate("MERCHANT_DIRECT_CONFIRMATION", input);
   }
+  if (input.commissionAmount === undefined) {
+    throw moneyError(
+      "MISSING_COMMISSION_AMOUNT",
+      "The platform commission must be resolved from the pinned commission profile",
+    );
+  }
   if (input.feeBearer === "PAYER_SURCHARGE") {
+    requireFee(input.gatewayFeeAmount, "Gateway fee amount");
+    requireFee(input.surchargeAmount, "Payer surcharge amount");
     return buildLedgerTemplate("PAYER_SURCHARGE_CONFIRMATION", input);
   }
-  return buildLedgerTemplate(
-    input.feeAccrual === true ? "PLATFORM_HELD_FEE_ACCRUAL" : "PLATFORM_HELD_CONFIRMATION",
-    input,
-  );
+  if (input.feeBearer === "SPLIT") {
+    requireFee(input.gatewayFeeAmount, "Gateway fee amount");
+    requireFee(input.surchargeAmount, "Payer surcharge amount");
+    return buildLedgerTemplate("SPLIT_SURCHARGE_CONFIRMATION", input);
+  }
+  if (input.feeAccrual === true) {
+    requireFee(input.gatewayFeeAmount, "Gateway fee amount");
+    return buildLedgerTemplate("PLATFORM_HELD_FEE_ACCRUAL", input);
+  }
+  requireFee(input.providerFeeAmount, "Provider fee amount");
+  return buildLedgerTemplate("PLATFORM_HELD_CONFIRMATION", input);
+}
+
+function requireFee(value: DecimalInput | undefined, label: string): Decimal {
+  if (value === undefined) {
+    throw moneyError("MISSING_FEE_AMOUNT", `${label} must be resolved before posting`);
+  }
+  const amount = decimal(value);
+  if (!amount.isFinite() || amount.lt(0)) {
+    throw moneyError("INVALID_LEDGER_AMOUNT", `${label} must not be negative`);
+  }
+  return amount;
 }
 
 export class LedgerPoster {

@@ -58,6 +58,14 @@ export const loadEnv = (): EdgeEnv => {
   return cached;
 };
 
+/**
+ * Drops the cached environment snapshot. Used by the test suites, which boot
+ * several service instances with a different configuration inside one process.
+ */
+export const resetEnvCache = (): void => {
+  cached = undefined;
+};
+
 export const env: EdgeEnv = new Proxy({} as EdgeEnv, {
   get(_target, property) {
     if (typeof property === "symbol") return undefined;

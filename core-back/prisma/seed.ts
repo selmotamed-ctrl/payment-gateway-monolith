@@ -243,6 +243,32 @@ const notificationTemplates = [
       body: "A new approval request is waiting for review.",
     },
   },
+  {
+    code: "LOGIN_MFA",
+    confidentialityClass: "INTERNAL",
+    channel: "SMS",
+    ar: {
+      subject: "رمز الدخول",
+      body: "رمز الدخول الخاص بك هو {{code}}. لا تشارك هذا الرمز مع أي شخص.",
+    },
+    en: {
+      subject: "Your sign-in code",
+      body: "Your sign-in code is {{code}}. Never share this code with anyone.",
+    },
+  },
+  {
+    code: "IDENTITY_VERIFICATION",
+    confidentialityClass: "INTERNAL",
+    channel: "SMS",
+    ar: {
+      subject: "رمز التحقق",
+      body: "رمز التحقق من هويتك هو {{code}}. لا تشارك هذا الرمز مع أي شخص.",
+    },
+    en: {
+      subject: "Your verification code",
+      body: "Your identity verification code is {{code}}. Never share this code with anyone.",
+    },
+  },
 ] as const;
 
 const seed = async () => {
@@ -308,6 +334,7 @@ const seed = async () => {
   }
 
   for (const template of notificationTemplates) {
+    const channel = "channel" in template ? template.channel : "EMAIL";
     for (const [lang, content] of [
       ["AR", template.ar],
       ["EN", template.en],
@@ -316,7 +343,7 @@ const seed = async () => {
         where: {
           code_channel_lang_version: {
             code: template.code,
-            channel: "EMAIL",
+            channel,
             lang,
             version: 1,
           },
@@ -329,7 +356,7 @@ const seed = async () => {
         },
         create: {
           code: template.code,
-          channel: "EMAIL",
+          channel,
           lang,
           subjectTemplate: content.subject,
           bodyTemplate: content.body,

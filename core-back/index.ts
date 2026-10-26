@@ -4,10 +4,11 @@ import http from "node:http";
 import tls from "node:tls";
 import { randomUUID } from "node:crypto";
 import { apiRouter, internalRouter } from "./api";
-import { createWorkerRuntime } from "./engine/workers/runtime";
+import { createProductionWorkerRuntime } from "./engine/workers/productionRuntime";
 import { env } from "./lib/env";
 import { isApiError, toErrorEnvelope } from "./lib/error";
 import { requestLoggerMiddleware } from "./lib/requestLogger";
+import { rawBodyMiddleware } from "./lib/rawBody";
 import { baseClient } from "./prisma/client";
 
 declare global {
@@ -49,6 +50,7 @@ export const createApp = () => {
   app.set("trust proxy", env.TRUST_PROXY);
   app.use(requestIdMiddleware);
   app.use(requestLoggerMiddleware);
+  app.use(rawBodyMiddleware);
   app.use(express.json({ limit: "1mb" }));
   app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
@@ -146,7 +148,7 @@ export const createHttpsServer = (): CoreHttpsServer => {
 export const start = async () => {
   const server = createHttpsServer();
   const workers = env.WORKER_ENABLED
-    ? createWorkerRuntime({
+    ? createProductionWorkerRuntime({
         db: baseClient as never,
         intervalMs: env.WORKER_POLL_INTERVAL_MS,
         batchSize: env.WORKER_BATCH_SIZE,

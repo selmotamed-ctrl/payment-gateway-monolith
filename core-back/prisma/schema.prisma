@@ -213,6 +213,15 @@ enum GatewayStatus {
   RETIRED
 }
 
+enum GatewayVersionState {
+  DRAFT
+  SANDBOX_VERIFIED
+  PENDING_APPROVAL
+  LIVE
+  SUPERSEDED
+  ROLLED_BACK
+}
+
 enum GatewayVerificationState {
   VERIFIED
   UNVERIFIED
@@ -763,10 +772,6 @@ enum NotificationStatus {
   SUPPRESSED
 }
 
-enum PlatformSettingScope {
-  PLATFORM
-}
-
 model Merchant {
   id                          String         @id @default(uuid(7))
   createdAt                   DateTime       @default(now()) @map("created_at")
@@ -1253,18 +1258,18 @@ model Gateway {
 }
 
 model GatewayVersion {
-  id                 String        @id @default(uuid(7))
-  createdAt          DateTime      @default(now()) @map("created_at")
-  updatedAt          DateTime      @updatedAt @map("updated_at")
-  gatewayId          String        @map("gateway_id")
-  versionNumber      Int           @map("version_number")
-  snapshotCiphertext String        @map("snapshot_ciphertext")
-  contentHash        String        @unique @map("content_hash") @db.Char(64)
-  state              GatewayStatus @default(DRAFT)
-  createdById        String        @map("created_by")
-  approvalRequestId  String?       @map("approval_request_id")
-  changeNote         String?       @map("change_note")
-  rollbackVersionId  String?       @map("rollback_version_id")
+  id                 String              @id @default(uuid(7))
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+  gatewayId          String              @map("gateway_id")
+  versionNumber      Int                 @map("version_number")
+  snapshotCiphertext String              @map("snapshot_ciphertext")
+  contentHash        String              @unique @map("content_hash") @db.Char(64)
+  state              GatewayVersionState @default(DRAFT)
+  createdById        String              @map("created_by")
+  approvalRequestId  String?             @map("approval_request_id")
+  changeNote         String?             @map("change_note")
+  rollbackVersionId  String?             @map("rollback_version_id")
 
   gateway              Gateway               @relation("GatewayVersions", fields: [gatewayId], references: [id], onDelete: Cascade)
   activeForGateway     Gateway?              @relation("GatewayActiveVersion")
@@ -1805,9 +1810,12 @@ model PaymentAttempt {
   platformCommissionAmount Decimal                @default(0) @map("platform_commission_amount") @db.Decimal(18, 4)
   netMerchantAmount        Decimal                @default(0) @map("net_merchant_amount") @db.Decimal(18, 4)
   feeBearer                FeeBearer
+  settlementTarget         SettlementTarget       @default(PLATFORM_CLEARING) @map("settlement_target")
   currency                 String                 @db.Char(3)
   customerFieldsMasked     Json                   @map("customer_fields_masked")
+  publicOutputs            Json?                  @map("public_outputs")
   contextCiphertext        String                 @map("context_ciphertext")
+  pointOfNoReturn          Boolean                @default(false) @map("point_of_no_return")
   otpAttempts              Int                    @default(0) @map("otp_attempts")
   lastOtpSentAt            DateTime?              @map("last_otp_sent_at")
   clientIp                 String?                @map("client_ip")
@@ -1835,6 +1843,7 @@ model PaymentAttempt {
   inboundEvents       InboundEvent[]
   reconciliationItems ReconciliationItem[]
 
+  @@unique([linkId, idempotencyKey])
   @@index([linkId])
   @@index([merchantId])
   @@index([status, nextCheckAt])
@@ -2323,15 +2332,15 @@ model Notification {
 }
 
 model PlatformSetting {
-  id                String               @id @default(uuid(7))
-  createdAt         DateTime             @default(now()) @map("created_at")
-  updatedAt         DateTime             @updatedAt @map("updated_at")
+  id                String   @id @default(uuid(7))
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
   key               String
-  scope             PlatformSettingScope @default(PLATFORM)
-  valueJson         Json                 @map("value_json")
-  version           Int                  @default(1)
-  effectiveFrom     DateTime             @map("effective_from")
-  approvalRequestId String?              @map("approval_request_id")
+  scope             String   @default("PLATFORM")
+  valueJson         Json     @map("value_json")
+  version           Int      @default(1)
+  effectiveFrom     DateTime @map("effective_from")
+  approvalRequestId String?  @map("approval_request_id")
 
   approvalRequest ApprovalRequest? @relation("PlatformSettingApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
 

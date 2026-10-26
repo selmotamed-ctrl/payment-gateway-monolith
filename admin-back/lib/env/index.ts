@@ -26,10 +26,13 @@ export const envSchema = z.object({
   ADMIN_LAN_CIDRS: z
     .string()
     .default("127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"),
+  // Accepted authority hints for the confidential admin routes. Core issues the role name
+  // (`role`) and the granted authorities (`authorities`, e.g. `aml:read`) in the session
+  // token, so both vocabularies have to be listed here.
   ADMIN_AUTHORITY_HINTS: z
     .string()
     .default(
-      "GATEWAY_ADMIN,SECURITY_ADMIN,FINANCE,OPERATOR,COMPLIANCE,MLRO,SUPPORT",
+      "GATEWAY_ADMIN,SECURITY_ADMIN,FINANCE,OPERATOR,COMPLIANCE,MLRO,SUPPORT,aml:read,aml:write",
     ),
   MAX_JSON_BODY_BYTES: z.coerce.number().int().min(1024).max(20971520).default(4194304),
   MAX_UPLOAD_BYTES: z.coerce.number().int().min(1024).max(52428800).default(20971520),

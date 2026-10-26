@@ -2,9 +2,10 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { env } from "../lib/env";
 import { ApiError, parseOrThrow } from "../lib/error";
-import { callCore, type CoreHttpMethod } from "../lib/mtlsClient";
+import { callCore, type CoreCallOptions, type CoreHttpMethod } from "../lib/mtlsClient";
 import { parseCidrList, resolveClientIp } from "../lib/net";
 import { resolveRequestId } from "../lib/requestLogger";
+import type { PublicPayload } from "./contract";
 
 export interface ForwardContext {
   params: Record<string, string>;
@@ -15,12 +16,27 @@ export interface ForwardContext {
 export interface ForwardOptions {
   method: CoreHttpMethod;
   path: (context: ForwardContext) => string;
+  /**
+   * Public (frontend) contract: validated against the incoming request body.
+   */
   schema?: z.ZodType;
+  /**
+   * Canonical core contract: validated against the payload that is forwarded
+   * to `core-back`, so a request is never sent that core would reject.
+   */
+  coreSchema?: z.ZodType;
   paramsSchema?: z.ZodType;
   querySchema?: z.ZodType;
   status?: number;
   requireAuth?: boolean;
+  /**
+   * Replaces the forwarded body entirely (raw or multipart payloads).
+   */
   bodyFrom?: (req: Request) => unknown;
+  /**
+   * Translates the validated public payload into the canonical core payload.
+   */
+  bodyMapper?: (body: PublicPayload) => unknown;
   headers?: Record<string, string>;
 }
 
@@ -35,6 +51,27 @@ const scalarQuery = (query: Record<string, unknown> | undefined) => {
   return Object.keys(result).length > 0 ? result : undefined;
 };
 
+export const requireBearer = (req: Request): string => {
+  const authorization = req.headers.authorization;
+  if (!authorization) {
+    throw new ApiError(401, "AUTH_REQUIRED", "A bearer token is required for this endpoint");
+  }
+  return authorization;
+};
+
+/**
+ * Shared call metadata (request id, client ip, user agent, credentials) used by
+ * every call towards `core-back`.
+ */
+export const coreCallContext = (
+  req: Request,
+): Omit<CoreCallOptions, "method" | "path" | "body"> => ({
+  requestId: resolveRequestId(req),
+  clientIp: resolveClientIp(req, parseCidrList(env.TRUSTED_PROXY_CIDRS)),
+  userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
+  authorization: req.headers.authorization,
+});
+
 export const coreForward =
   (options: ForwardOptions) =>
   async (req: Request, res: Response): Promise<void> => {
@@ -48,13 +85,18 @@ export const coreForward =
     const query = options.querySchema
       ? (parseOrThrow(options.querySchema, req.query) as Record<string, unknown>)
       : undefined;
-    let body: unknown = options.bodyFrom
-      ? options.bodyFrom(req)
-      : req.method === "GET" || req.method === "HEAD"
-        ? undefined
-        : (req.body ?? {});
-    if (options.schema && body !== undefined) {
-      body = parseOrThrow(options.schema, body);
+    const isRead = req.method === "GET" || req.method === "HEAD";
+    const rawBody = isRead ? undefined : (req.body ?? {});
+    const publicBody =
+      options.schema && rawBody !== undefined ? parseOrThrow(options.schema, rawBody) : rawBody;
+    let body: unknown = options.bodyMapper
+      ? options.bodyMapper((publicBody ?? {}) as PublicPayload)
+      : publicBody;
+    if (options.bodyFrom) {
+      body = options.bodyFrom(req);
+    }
+    if (options.coreSchema && body !== undefined) {
+      body = parseOrThrow(options.coreSchema, body);
     }
     const payload = await callCore({
       method: options.method,

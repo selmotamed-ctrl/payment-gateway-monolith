@@ -18,6 +18,19 @@ export const getUploader = (): multer.Multer => {
   return uploader;
 };
 
+const handleUploadError = (error: unknown, next: NextFunction): void => {
+  const code = (error as { code?: string })?.code;
+  if (code === "LIMIT_FILE_SIZE") {
+    next(new ApiError(413, "UPLOAD_TOO_LARGE", "The uploaded document exceeds the size limit"));
+    return;
+  }
+  if (code === "LIMIT_UNEXPECTED_FILE") {
+    next(new ApiError(400, "UPLOAD_UNEXPECTED_FIELD", "Unexpected file field in the multipart payload"));
+    return;
+  }
+  next(new ApiError(400, "UPLOAD_INVALID", "The multipart payload could not be parsed"));
+};
+
 export const uploadSingle = (field: string) => (req: Request, res: Response, next: NextFunction) => {
   getUploader()
     .single(field)(req, res, (error: unknown) => {
@@ -25,18 +38,28 @@ export const uploadSingle = (field: string) => (req: Request, res: Response, nex
         next();
         return;
       }
-      const code = (error as { code?: string })?.code;
-      if (code === "LIMIT_FILE_SIZE") {
-        next(new ApiError(413, "UPLOAD_TOO_LARGE", "The uploaded document exceeds the size limit"));
-        return;
-      }
-      if (code === "LIMIT_UNEXPECTED_FILE") {
-        next(new ApiError(400, "UPLOAD_UNEXPECTED_FIELD", "Unexpected file field in the multipart payload"));
-        return;
-      }
-      next(new ApiError(400, "UPLOAD_INVALID", "The multipart payload could not be parsed"));
+      handleUploadError(error, next);
     });
 };
+
+/**
+ * Accepts the uploaded document under any of the given field names and keeps
+ * the first file in `req.file`.
+ */
+export const uploadSingleAny =
+  (fields: string[]) => (req: Request, res: Response, next: NextFunction) => {
+    getUploader()
+      .fields(fields.map((name) => ({ name, maxCount: 1 })))
+      (req, res, (error: unknown) => {
+        if (!error) {
+          const uploaded = req.files as Record<string, Express.Multer.File[]> | undefined;
+          req.file = uploaded ? Object.values(uploaded).flat()[0] : undefined;
+          next();
+          return;
+        }
+        handleUploadError(error, next);
+      });
+  };
 
 export interface UploadForwardOptions {
   path: string;

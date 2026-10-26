@@ -41,7 +41,14 @@ export const uploadSingle = (field: string) => (req: Request, res: Response, nex
 export const forwardUpload = async (
   req: Request,
   res: Response,
-  options: { path: string; fileField: string; metadata: Record<string, unknown>; status?: number },
+  options: {
+    path: string;
+    fileField: string;
+    metadata: Record<string, unknown>;
+    status?: number;
+    body?: unknown;
+    headers?: Record<string, string>;
+  },
 ): Promise<void> => {
   const file = req.file as Express.Multer.File | undefined;
   if (!file) {
@@ -54,14 +61,16 @@ export const forwardUpload = async (
   const payload = await callCore({
     method: "POST",
     path: options.path,
-    rawBody: file.buffer,
-    rawContentType: "application/octet-stream",
+    rawBody: options.body === undefined ? file.buffer : undefined,
+    body: options.body,
+    rawContentType: options.body === undefined ? "application/octet-stream" : undefined,
     headers: {
       "x-upload-filename": encodeURIComponent(file.originalname.slice(0, 200)),
       "x-upload-content-type": detected,
       "x-upload-sha256": createHash("sha256").update(file.buffer).digest("hex"),
       "x-upload-size": String(file.buffer.byteLength),
       "x-upload-metadata": Buffer.from(JSON.stringify(options.metadata), "utf8").toString("base64url"),
+      ...(options.headers ?? {}),
     },
     requestId: resolveRequestId(req),
     clientIp: resolveClientIp(req, parseCidrList(env.TRUSTED_PROXY_CIDRS)),

@@ -146,24 +146,44 @@ export class PollWorker extends BaseWorker {
     }
 
     const terminal = TERMINAL_STATUSES.includes(outcome.status);
-    const patch: Record<string, unknown> = {
-      status: outcome.status,
-      substatus: outcome.substatus ?? attempt.substatus ?? null,
-    };
-    if (outcome.settledAmount !== undefined && outcome.settledAmount !== null) {
-      patch.settledAmount = outcome.settledAmount;
-    }
     if (terminal) {
-      patch.terminalAt = now;
-      patch.nextCheckAt = null;
+      // The terminal transition is conditional on the attempt still being
+      // open, so two cluster nodes can never terminate it twice.
+      const transitioned = await this.terminate(attempt.id, outcome.status, now);
+      if (!transitioned) {
+        return;
+      }
+      if (outcome.settledAmount !== undefined && outcome.settledAmount !== null) {
+        await this.repositories.payments.updateAttempt(this.db as Tx, attempt.id, {
+          settledAmount: outcome.settledAmount,
+        });
+      }
     } else {
-      patch.nextCheckAt = new Date(now.getTime() + delaySeconds * 1000);
+      await this.repositories.payments.updateAttempt(this.db as Tx, attempt.id, {
+        status: outcome.status,
+        substatus: outcome.substatus ?? attempt.substatus ?? null,
+        nextCheckAt: new Date(now.getTime() + delaySeconds * 1000),
+      });
     }
-    await this.repositories.payments.updateAttempt(this.db as Tx, attempt.id, patch);
 
     if (terminal && (outcome.status === "FAILED" || outcome.status === "CANCELLED")) {
       await this.releaseSlot(attempt);
     }
+  }
+
+  /**
+   * Applies a terminal transition at most once. The row is only updated when
+   * it is still non-terminal, which makes the worker safe to run on several
+   * nodes at the same time.
+   */
+  private async terminate(attemptId: string, status: string, now: Date): Promise<boolean> {
+    const result = await this.db.$executeRawUnsafe(
+      "UPDATE payment_attempts SET status = $1, terminal_at = $2, next_check_at = NULL, updated_at = NOW() WHERE id = $3 AND terminal_at IS NULL",
+      status,
+      now,
+      attemptId,
+    );
+    return Number(result ?? 0) > 0;
   }
 
   private async releaseSlot(attempt: PaymentAttemptRow): Promise<void> {

@@ -3,6 +3,10 @@ import express, { type Request, type Response } from "express";
 import { z } from "zod";
 import { Prisma, type ContentType } from "../../generated/prisma/client";
 import { client } from "../../prisma/client";
+import { invalidationBus } from "../../lib/invalidationBus";
+import { StatementIngestor } from "../../engine/reconciliation/StatementIngestor";
+import { getPlatformRuntime } from "../../engine/runtime";
+import { moneyToString } from "../../engine/db/money";
 import { ApiError, parseOrThrow } from "../../lib/error";
 import {
   generateMfaCode,
@@ -17,6 +21,7 @@ import type { Decimal } from "decimal.js";
 import { decimal } from "../../engine/ledger/LedgerPoster";
 import { LedgerPoster } from "../../engine/ledger/LedgerPoster";
 import { GoLiveGateValidator } from "../../engine/flow/GoLiveGateValidator";
+import { validateTransformUsage, type TransformPipe, type TransformUsage } from "../../engine/transforms/TransformPipeline";
 import { json, jsonOptional } from "./json";
 import { requireAuthentication, requireAuthorities, principalOf } from "../middleware/authDoubleCheck";
 import { actorFromRequest, assertCheckerAuthority, assertCheckerIsNotMaker } from "../middleware/makerCheckerGuard";
@@ -649,8 +654,35 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
       riskAcceptanceNote: body.riskAcceptanceNote,
     },
   });
+  // The approved change is executed, not just recorded.
+  if (approval.subjectType === "GATEWAY_VERSION") {
+    await activateGatewayVersion(approval.subjectId);
+  }
   response.json({ id: updated.id, state: updated.state, checkerUserId: updated.checkerUserId });
 });
+
+/**
+ * Promotes a gateway version to LIVE. The previous live version is
+ * superseded and the outbound consumer cache of the gateway is invalidated.
+ */
+const activateGatewayVersion = async (versionId: string): Promise<void> => {
+  const version = await client.gatewayVersion.findUnique({ where: { id: versionId } });
+  if (!version) {
+    return;
+  }
+  await client.$transaction(async (tx) => {
+    await tx.gatewayVersion.updateMany({
+      where: { gatewayId: version.gatewayId, state: "LIVE", id: { not: version.id } },
+      data: { state: "SUPERSEDED" },
+    });
+    await tx.gatewayVersion.update({ where: { id: version.id }, data: { state: "LIVE" } });
+    await tx.gateway.update({
+      where: { id: version.gatewayId },
+      data: { activeVersionId: version.id, status: "LIVE" },
+    });
+  });
+  await invalidationBus.invalidateGateway(version.gatewayId, "gateway-version-live");
+};
 
 router.post("/approvals/:id/reject", async (request: Request, response: Response) => {
   requireAuthorities(request, ["approval:check", "approval:write"]);
@@ -1083,10 +1115,22 @@ router.post("/gateways/:id/rollback", async (request: Request, response: Respons
   if (!target) {
     throw new ApiError(404, "GATEWAY_VERSION_NOT_FOUND", "The gateway version does not exist");
   }
-  const gateway = await client.gateway.update({
-    where: { id },
-    data: { activeVersionId: target.id, status: "LIVE" },
+  const gateway = await client.$transaction(async (tx) => {
+    const previous = await tx.gatewayVersion.findMany({
+      where: { gatewayId: id, state: "LIVE" },
+      select: { id: true },
+    });
+    for (const version of previous) {
+      await tx.gatewayVersion.update({ where: { id: version.id }, data: { state: "ROLLED_BACK" } });
+    }
+    await tx.gatewayVersion.update({ where: { id: target.id }, data: { state: "LIVE" } });
+    return tx.gateway.update({
+      where: { id },
+      data: { activeVersionId: target.id, status: "LIVE" },
+    });
   });
+  // The outbound consumers of the gateway are now stale.
+  await invalidationBus.invalidateGateway(id, "gateway-version-rolled-back");
   response.json({ id: gateway.id, activeVersionId: gateway.activeVersionId });
 });
 
@@ -1279,60 +1323,165 @@ router.put("/gateway-versions/:vid/crypto-profiles", async (request: Request, re
   response.json({ profiles: created.map((profile) => ({ id: profile.id, name: profile.name })) });
 });
 
-router.put("/gateway-versions/:vid/flows", async (request: Request, response: Response) => {
-  requireAuthorities(request, ["gateway:write"]);
-  const { vid } = parseOrThrow(versionParamsSchema, request.params);
-  await loadVersion(vid);
-  const body = parseOrThrow(
-    z
-      .object({
-        flows: z
-          .array(
-            z
-              .object({
-                railId: z.string().min(1).max(64).optional(),
-                subMode: z.string().max(64).optional(),
-                phase: z.enum([
-                  "CREDENTIAL_CHECK",
-                  "PRE_INITIATE",
-                  "INITIATE",
-                  "SUBMIT",
-                  "VERIFY",
-                  "CANCEL",
-                  "REFUND",
-                  "VOID",
-                  "CAPTURE",
-                  "SETTLEMENT_FETCH",
-                ]),
-                steps: z
-                  .array(
-                    z
-                      .object({
-                        type: z.enum(["HTTP", "COMPUTE", "RENDER", "WAIT", "ASSERT", "BRANCH"]),
-                        method: z.string().max(10).optional(),
-                        urlTemplate: z.string().max(1000).optional(),
-                        contentType: z.string().max(80).optional(),
-                        sideEffect: z.enum(["READ_ONLY", "SENDS_NOTIFICATION", "MOVES_MONEY"]),
-                        retryPolicy: z.enum(["SAFE", "SAFE_WITH_COOLDOWN", "NEVER"]),
-                        pointOfNoReturn: z.boolean().default(false),
-                        idempotencyConfig: z.record(z.string().max(64), z.unknown()).default({ mode: "NONE" }),
-                        timeoutMs: z.number().int().min(1000).max(120000).optional(),
-                      }),
-                  )
-                  .max(50)
-                  .default([]),
-              }),
-          )
-          .min(1)
-          .max(40),
-      })
-      .strict(),
-    request.body,
-  );
-  await client.flow.deleteMany({ where: { gatewayVersionId: vid } });
-  const flows = await Promise.all(
-    body.flows.map((flow) =>
-      client.flow.create({
+const transformPipeSchema = z
+  .object({
+    op: z.string().min(1).max(40),
+    args: z.array(z.unknown()).max(10).optional(),
+  })
+  .strict();
+
+const stepParameterSchema = z
+  .object({
+    place: z.enum(["HEADERS", "QUERY", "PATH", "BODY", "FORM", "MULTIPART", "XML"]),
+    key: z.string().min(1).max(120),
+    source: z.enum([
+      "GATEWAY_META",
+      "ROUTE_META",
+      "CREDENTIAL",
+      "ATTEMPT",
+      "CUSTOMER_FIELD",
+      "STATE",
+      "PREVIOUS_RESPONSE",
+      "URLS",
+      "CLIENT_CONTEXT",
+      "CONSTANT",
+      "NOW",
+      "RANDOM",
+      "COMPUTED",
+      "CRYPTO_SIGNATURE",
+    ]),
+    selector: z.string().max(200).optional(),
+    constantValue: z.string().max(2000).optional(),
+    cryptoProfileId: z.string().min(1).max(64).optional(),
+    transforms: z.array(transformPipeSchema).max(20).default([]),
+  })
+  .strict();
+
+const stepOutputSchema = z
+  .object({
+    name: z.string().min(1).max(64),
+    selector: z.string().max(200).optional(),
+    transforms: z.array(transformPipeSchema).max(20).default([]),
+    storeAs: z.enum(["STATE", "PUBLIC", "SETTLED_AMOUNT", "PROVIDER_FEE", "PROVIDER_REF", "NETWORK_REF"]),
+    required: z.boolean().default(false),
+  })
+  .strict();
+
+const gatewayFlowsSchema = z
+  .object({
+    flows: z
+      .array(
+        z
+          .object({
+            railId: z.string().min(1).max(64).optional(),
+            subMode: z.string().max(64).optional(),
+            phase: z.enum([
+              "CREDENTIAL_CHECK",
+              "PRE_INITIATE",
+              "INITIATE",
+              "SUBMIT",
+              "VERIFY",
+              "CANCEL",
+              "REFUND",
+              "VOID",
+              "CAPTURE",
+              "SETTLEMENT_FETCH",
+            ]),
+            steps: z
+              .array(
+                z
+                  .object({
+                    type: z.enum(["HTTP", "COMPUTE", "RENDER", "WAIT", "ASSERT", "BRANCH"]),
+                    method: z.string().max(10).optional(),
+                    urlTemplate: z.string().max(1000).optional(),
+                    contentType: z.string().max(80).optional(),
+                    sideEffect: z.enum(["READ_ONLY", "SENDS_NOTIFICATION", "MOVES_MONEY"]),
+                    retryPolicy: z.enum(["SAFE", "SAFE_WITH_COOLDOWN", "NEVER"]),
+                    pointOfNoReturn: z.boolean().default(false),
+                    idempotencyConfig: z.record(z.string().max(64), z.unknown()).default({ mode: "NONE" }),
+                    timeoutMs: z.number().int().min(1000).max(120000).optional(),
+                    parameters: z.array(stepParameterSchema).max(50).default([]),
+                    outputs: z.array(stepOutputSchema).max(50).default([]),
+                  }),
+              )
+              .max(50)
+              .default([]),
+          }),
+      )
+      .min(1)
+      .max(40),
+  })
+  .strict();
+
+export type GatewayFlowInput = z.output<typeof gatewayFlowsSchema>["flows"][number];
+
+/**
+ * The operation of a pipe is checked against the closed library by the
+ * transform validator, so the parsed payload is narrowed here.
+ */
+const asTransformPipes = (
+  pipes: readonly { op: string; args?: unknown[] }[],
+): readonly TransformPipe[] => pipes as readonly TransformPipe[];
+
+/**
+ * Every transform usage of a gateway version save: the pipes of the step
+ * parameters and of the step outputs.
+ */
+export const gatewayFlowTransformUsages = (
+  flows: readonly GatewayFlowInput[],
+): TransformUsage[] => {
+  const usages: TransformUsage[] = [];
+  flows.forEach((flow, flowIndex) => {
+    flow.steps.forEach((step, stepIndex) => {
+      step.parameters.forEach((parameter, parameterIndex) => {
+        usages.push({
+          path: `flows[${flowIndex}].steps[${stepIndex}].parameters[${parameterIndex}].transforms`,
+          pipes: asTransformPipes(parameter.transforms),
+        });
+      });
+      step.outputs.forEach((output, outputIndex) => {
+        usages.push({
+          path: `flows[${flowIndex}].steps[${stepIndex}].outputs[${outputIndex}].transforms`,
+          pipes: asTransformPipes(output.transforms),
+          storeAs: output.storeAs,
+        });
+      });
+    });
+  });
+  return usages;
+};
+
+/**
+ * The closed transform library is validated when the gateway version is
+ * saved, never when a live payment executes.
+ */
+export const assertValidGatewayFlowTransforms = (flows: readonly GatewayFlowInput[]): void => {
+  const result = validateTransformUsage(gatewayFlowTransformUsages(flows));
+  if (!result.valid) {
+    throw new ApiError(400, "INVALID_TRANSFORM_PIPE", "The transform pipeline is invalid", result.errors);
+  }
+};
+
+export interface GatewayFlowStore {
+  deleteMany(args: Prisma.FlowDeleteManyArgs): Promise<unknown>;
+  create(args: Prisma.FlowCreateArgs): Promise<{ id: string; phase: string }>;
+}
+
+/**
+ * Replaces the declarative flows of a gateway version. The transform pipes are
+ * validated before anything is written, so an invalid pipe is refused with a
+ * 400 instead of breaking a live payment.
+ */
+export const saveGatewayVersionFlows = async (
+  vid: string,
+  flows: readonly GatewayFlowInput[],
+  store: GatewayFlowStore = client.flow,
+): Promise<Array<{ id: string; phase: string }>> => {
+  assertValidGatewayFlowTransforms(flows);
+  await store.deleteMany({ where: { gatewayVersionId: vid } });
+  const created = await Promise.all(
+    flows.map((flow) =>
+      store.create({
         data: {
           gatewayVersionId: vid,
           railId: flow.railId,
@@ -1350,13 +1499,42 @@ router.put("/gateway-versions/:vid/flows", async (request: Request, response: Re
               pointOfNoReturn: step.pointOfNoReturn,
               idempotencyConfig: json(step.idempotencyConfig),
               timeoutMs: step.timeoutMs,
+              parameters: {
+                create: step.parameters.map((parameter) => ({
+                  place: parameter.place,
+                  key: parameter.key,
+                  source: parameter.source,
+                  selector: parameter.selector,
+                  constantValue: parameter.constantValue,
+                  cryptoProfileId: parameter.cryptoProfileId,
+                  transforms: json(parameter.transforms),
+                })),
+              },
+              outputs: {
+                create: step.outputs.map((output) => ({
+                  name: output.name,
+                  selector: output.selector,
+                  transforms: json(output.transforms),
+                  storeAs: output.storeAs,
+                  required: output.required,
+                })),
+              },
             })) as Prisma.FlowStepCreateWithoutFlowInput[],
           },
         },
       }),
     ),
   );
-  response.json({ flows: flows.map((flow) => ({ id: flow.id, phase: flow.phase })) });
+  return created.map((flow) => ({ id: flow.id, phase: flow.phase }));
+};
+
+router.put("/gateway-versions/:vid/flows", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["gateway:write"]);
+  const { vid } = parseOrThrow(versionParamsSchema, request.params);
+  await loadVersion(vid);
+  const body = parseOrThrow(gatewayFlowsSchema, request.body);
+  const flows = await saveGatewayVersionFlows(vid, body.flows);
+  response.json({ flows });
 });
 
 router.put("/gateway-versions/:vid/channels", async (request: Request, response: Response) => {
@@ -2032,22 +2210,69 @@ router.post("/reconciliation/upload", async (request: Request, response: Respons
   if (!sourceId) {
     throw new ApiError(400, "STATEMENT_SOURCE_REQUIRED", "The statement source identifier header is required");
   }
-  const fileHash = createHash("sha256").update(raw).digest("hex");
-  const existing = await client.reconciliationRun.findUnique({ where: { fileHash } });
-  if (existing) {
-    response.status(200).json({ runId: existing.id, fileHash, idempotent: true });
-    return;
+  const metadataHeader = request.headers["x-upload-metadata"];
+  let metadata: Record<string, unknown> = {};
+  if (typeof metadataHeader === "string" && metadataHeader.length > 0) {
+    try {
+      metadata = JSON.parse(Buffer.from(metadataHeader, "base64url").toString("utf8")) as Record<string, unknown>;
+    } catch {
+      metadata = {};
+    }
   }
-  const run = await client.reconciliationRun.create({
-    data: {
-      statementSourceId: sourceId,
-      windowStart: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000),
-      windowEnd: new Date(),
-      fileHash,
-      statsJson: { pending: true },
+  const windowStart = typeof metadata.periodStart === "string"
+    ? new Date(metadata.periodStart)
+    : new Date(Date.now() - 31 * 24 * 60 * 60 * 1000);
+  const windowEnd = typeof metadata.periodEnd === "string"
+    ? new Date(metadata.periodEnd)
+    : new Date();
+
+  // The statement is parsed and matched against the local attempts, and the
+  // fee variance is trued up through the ledger.
+  const platform = getPlatformRuntime(client as never);
+  const ingestor = new StatementIngestor({
+    db: client as never,
+    repositories: platform.repositories,
+    feeVariancePoster: {
+      postFeeVariance: async (posting) => {
+        const variance = moneyToString(posting.variance);
+        if (variance === "0.0000") {
+          return { journalEntryId: null };
+        }
+        const result = await platform.ledgerPoster.postScenario(
+          "FEE_VARIANCE_TRUE_UP",
+          posting.attemptId ?? `fee-variance:${posting.statementSourceId}`,
+          { amount: "0.0001", varianceAmount: variance },
+          {
+            gatewayId: posting.gatewayId,
+          },
+        );
+        return { journalEntryId: result.entry.id };
+      },
     },
   });
-  response.status(201).json({ runId: run.id, fileHash, idempotent: false });
+
+  const result = await ingestor.ingest({
+    statementSourceId: sourceId,
+    content: raw,
+    fileName: typeof request.headers["x-upload-filename"] === "string"
+      ? decodeURIComponent(String(request.headers["x-upload-filename"]))
+      : undefined,
+    windowStart: Number.isNaN(windowStart.getTime()) ? undefined : windowStart,
+    windowEnd: Number.isNaN(windowEnd.getTime()) ? undefined : windowEnd,
+  });
+
+  response.status(result.idempotent ? 200 : 201).json({
+    runId: result.runId,
+    fileHash: result.fileHash,
+    idempotent: result.idempotent,
+    totalRows: result.totalRows,
+    matched: result.matched,
+    amountMismatch: result.amountMismatch,
+    missingAtGateway: result.missingAtGateway,
+    missingLocally: result.missingLocally,
+    duplicates: result.duplicates,
+    feeVariances: result.feeVariances,
+  });
 });
 
 router.get("/disputes", async (request: Request, response: Response) => {

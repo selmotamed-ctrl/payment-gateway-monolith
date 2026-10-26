@@ -3,6 +3,7 @@ import express, { type Request, type Response } from "express";
 import { z } from "zod";
 import { Prisma } from "../../generated/prisma/client";
 import { client } from "../../prisma/client";
+import { invalidationBus } from "../../lib/invalidationBus";
 import { ApiError, parseOrThrow } from "../../lib/error";
 import {
   generateAccessToken,
@@ -1150,6 +1151,7 @@ router.post("/credential-sets", async (request: Request, response: Response) => 
       status: "UNTESTED",
     },
   });
+  await invalidationBus.invalidateCredential(credentialSet.id, "credential-set-created");
   response.status(201).json({ id: credentialSet.id, status: credentialSet.status });
 });
 
@@ -1190,6 +1192,9 @@ router.put("/credential-sets/:id", async (request: Request, response: Response) 
     where: { id: credentialSet.id },
     data: { entriesCiphertext: encryptedEntries, status: "UNTESTED" },
   });
+  // Any cached outbound consumer for this credential set must be evicted so
+  // that the rotated secret is used from now on.
+  await invalidationBus.invalidateCredential(updated.id, "credential-set-rotated");
   response.json({ id: updated.id, status: updated.status });
 });
 

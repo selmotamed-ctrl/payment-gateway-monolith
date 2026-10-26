@@ -1,13 +1,14 @@
 import express from "express";
 import { z } from "zod";
 import { zIdentifier } from "../../lib/zReady";
+import { toCoreAssetCreate } from "../contract";
 import { coreForward } from "../forward";
 
 const router = express.Router();
 
 const idParamsSchema = z.object({ id: zIdentifier });
 
-const assetCreateSchema = z
+export const assetCreateSchema = z
   .object({
     kind: z.enum(["LOGO", "ICON", "DOCUMENT", "QR_TEMPLATE", "STATIC_FILE"]),
     name: z.string().min(1).max(160),
@@ -33,6 +34,7 @@ router.post(
     method: "POST",
     path: () => "/internal/admin/assets",
     schema: assetCreateSchema,
+    bodyFrom: (_req, body) => toCoreAssetCreate(body),
     status: 201,
   }),
 );

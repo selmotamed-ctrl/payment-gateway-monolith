@@ -60,13 +60,35 @@ export const zFormData = z.record(
 
 export const zEvidence = z.record(z.string().max(64), z.unknown());
 
-export const zClientEvent = z.enum([
-  "COMPLETE_CALLBACK",
-  "ERROR_CALLBACK",
-  "CANCEL_CALLBACK",
-  "WIDGET_READY",
-  "WIDGET_CLOSED",
-]);
+export const CLIENT_EVENTS = [
+  "completeCallback",
+  "errorCallback",
+  "widgetEvent",
+  "returnHint",
+] as const;
+
+export type ClientEvent = (typeof CLIENT_EVENTS)[number];
+
+const CLIENT_EVENT_BY_NORMALIZED_KEY: Record<string, ClientEvent> = {
+  completecallback: "completeCallback",
+  errorcallback: "errorCallback",
+  cancelcallback: "errorCallback",
+  widgetready: "widgetEvent",
+  widgetclosed: "widgetEvent",
+  widgetevent: "widgetEvent",
+  returnhint: "returnHint",
+};
+
+const normalizeClientEventKey = (value: string): string =>
+  value.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+
+export const translateClientEvent = (value: string): ClientEvent | undefined =>
+  CLIENT_EVENT_BY_NORMALIZED_KEY[normalizeClientEventKey(value)];
+
+export const zClientEvent = z.preprocess(
+  (value) => (typeof value === "string" ? (translateClientEvent(value) ?? value) : value),
+  z.enum(CLIENT_EVENTS),
+);
 
 const FORBIDDEN_MONETARY_NAMES = new Set([
   "amount",

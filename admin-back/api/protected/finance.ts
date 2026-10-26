@@ -1,13 +1,20 @@
 import express from "express";
 import { z } from "zod";
 import { zAmount, zCurrency, zDateRangeQuery, zIdentifier, zPaginationQuery, zReason } from "../../lib/zReady";
+import {
+  toCoreAdjustmentCreate,
+  toCoreCashoutProcess,
+  toCoreCommissionProfileCreate,
+  toCoreDisputeCreate,
+  toCoreVelocityRuleCreate,
+} from "../contract";
 import { coreForward } from "../forward";
 
 const router = express.Router();
 
 const idParamsSchema = z.object({ id: zIdentifier });
 
-const disputeCreateSchema = z
+export const disputeCreateSchema = z
   .object({
     merchantId: zIdentifier,
     gatewayId: zIdentifier.optional(),
@@ -18,10 +25,14 @@ const disputeCreateSchema = z
     currency: zCurrency,
     reason: z.string().min(3).max(500),
     dueAt: z.string().max(64).optional(),
+    // core requires the rail, the gateway and the ingestion source of a dispute and the
+    // public API cannot always express them.
+    railId: zIdentifier.optional(),
+    source: z.enum(["WEBHOOK", "STATEMENT", "MANUAL"]).optional(),
   })
   .strict();
 
-const adjustmentCreateSchema = z
+export const adjustmentCreateSchema = z
   .object({
     disputeId: zIdentifier.optional(),
     merchantId: zIdentifier,
@@ -31,10 +42,12 @@ const adjustmentCreateSchema = z
     currency: zCurrency,
     reason: zReason,
     draft: z.boolean().optional(),
+    // core posts the adjustment against a ledger account that the public API does not carry.
+    targetGlAccountId: zIdentifier.optional(),
   })
   .strict();
 
-const cashoutProcessSchema = z
+export const cashoutProcessSchema = z
   .object({
     decision: z.enum(["APPROVE", "REJECT", "HOLD"]),
     reason: zReason.optional(),
@@ -44,7 +57,7 @@ const cashoutProcessSchema = z
   })
   .strict();
 
-const commissionProfileSchema = z
+export const commissionProfileSchema = z
   .object({
     code: z
       .string()
@@ -58,10 +71,12 @@ const commissionProfileSchema = z
     tiers: z.array(z.record(z.string().max(64), z.unknown())).max(20).optional(),
     currency: zCurrency.optional(),
     active: z.boolean().optional(),
+    // core binds every commission profile to a rail code that the public API does not carry.
+    railCode: z.string().min(1).max(64).optional(),
   })
   .strict();
 
-const velocityRuleSchema = z
+export const velocityRuleSchema = z
   .object({
     code: z
       .string()
@@ -76,6 +91,19 @@ const velocityRuleSchema = z
     currency: zCurrency.optional(),
     action: z.enum(["BLOCK", "REVIEW", "THROTTLE", "CHALLENGE"]),
     active: z.boolean().optional(),
+    // core scopes a rule to an end client dimension that the public scope vocabulary cannot
+    // always express (a device scope has no canonical counterpart).
+    scopeType: z
+      .enum([
+        "END_CLIENT_IP",
+        "END_CLIENT_PHONE",
+        "END_CLIENT_CARD",
+        "MERCHANT",
+        "APPLICATION",
+        "RAIL",
+        "LINK",
+      ])
+      .optional(),
   })
   .strict();
 
@@ -94,6 +122,7 @@ router.post(
     method: "POST",
     path: () => "/internal/admin/disputes",
     schema: disputeCreateSchema,
+    bodyFrom: (_req, body) => toCoreDisputeCreate(body),
     status: 201,
   }),
 );
@@ -122,6 +151,7 @@ router.post(
     method: "POST",
     path: () => "/internal/admin/adjustments",
     schema: adjustmentCreateSchema,
+    bodyFrom: (_req, body) => toCoreAdjustmentCreate(body),
     status: 201,
   }),
 );
@@ -135,15 +165,6 @@ router.get(
   }),
 );
 
-router.get(
-  "/cashouts/:id/process",
-  coreForward({
-    method: "GET",
-    path: (context) => `/internal/admin/cashouts/${encodeURIComponent(context.params.id ?? "")}/process`,
-    paramsSchema: idParamsSchema,
-  }),
-);
-
 router.post(
   "/cashouts/:id/process",
   coreForward({
@@ -151,6 +172,7 @@ router.post(
     path: (context) => `/internal/admin/cashouts/${encodeURIComponent(context.params.id ?? "")}/process`,
     paramsSchema: idParamsSchema,
     schema: cashoutProcessSchema,
+    bodyFrom: (_req, body) => toCoreCashoutProcess(body),
   }),
 );
 
@@ -168,6 +190,7 @@ router.post(
     method: "POST",
     path: () => "/internal/admin/commission-profiles",
     schema: commissionProfileSchema,
+    bodyFrom: (_req, body) => toCoreCommissionProfileCreate(body),
     status: 201,
   }),
 );
@@ -186,6 +209,7 @@ router.post(
     method: "POST",
     path: () => "/internal/admin/velocity-rules",
     schema: velocityRuleSchema,
+    bodyFrom: (_req, body) => toCoreVelocityRuleCreate(body),
     status: 201,
   }),
 );

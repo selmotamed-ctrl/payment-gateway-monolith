@@ -2,12 +2,13 @@ import express, { type Request, type Response } from "express";
 import { z } from "zod";
 import { parseOrThrow } from "../../lib/error";
 import { zIdentifier, zPaginationQuery } from "../../lib/zReady";
+import { toCoreReconciliationSourceCreate, toCoreReconciliationUpload } from "../contract";
 import { coreForward } from "../forward";
 import { forwardUpload, uploadSingle } from "../upload";
 
 const router = express.Router();
 
-const sourceCreateSchema = z
+export const sourceCreateSchema = z
   .object({
     code: z
       .string()
@@ -22,10 +23,12 @@ const sourceCreateSchema = z
     columnMapping: z.record(z.string().max(64), z.string().max(64)).optional(),
     dateFormat: z.string().max(64).optional(),
     active: z.boolean().optional(),
+    // core requires the transport of a statement source and the public API cannot express it.
+    type: z.enum(["API", "SFTP", "UPLOAD"]).optional(),
   })
   .strict();
 
-const uploadSchema = z
+export const uploadSchema = z
   .object({
     sourceId: zIdentifier,
     periodStart: z.string().max(64),
@@ -49,6 +52,7 @@ router.post(
     method: "POST",
     path: () => "/internal/admin/reconciliation/sources",
     schema: sourceCreateSchema,
+    bodyFrom: (_req, body) => toCoreReconciliationSourceCreate(body),
     status: 201,
   }),
 );
@@ -58,10 +62,15 @@ router.post(
   uploadSingle("statement"),
   async (req: Request, res: Response) => {
     const metadata = parseOrThrow(uploadSchema, req.body ?? {});
+    const body = toCoreReconciliationUpload(metadata);
+    // The statement file itself is forwarded as raw bytes so that `core-back`
+    // can hash and parse the exact uploaded payload. The metadata travels in
+    // the `x-upload-metadata` header.
     await forwardUpload(req, res, {
       path: "/internal/admin/reconciliation/upload",
       fileField: "statement",
       metadata,
+      headers: { "x-statement-source-id": String(body.sourceId) },
     });
   },
 );

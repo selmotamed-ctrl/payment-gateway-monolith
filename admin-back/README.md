@@ -25,7 +25,7 @@ Mounted under `/api/v1/admin`:
 | Assets | `GET, POST /assets` |
 | Operations | `GET /operator-cases`, `POST /operator-cases/:id/resolve`, `POST /attempts/:id/inquire` |
 | Reconciliation | `GET, POST /reconciliation/sources`, `POST /reconciliation/upload`, `GET /reconciliation/runs` |
-| Finance | `GET, POST /disputes`, `GET, POST /adjustments`, `GET /cashouts`, `GET, POST /cashouts/:id/process`, `GET, POST /commission-profiles`, `GET, POST /velocity-rules`, `GET /finance/profitability`, `GET /finance/liquidity`, `GET /finance/invariant-check` |
+| Finance | `GET, POST /disputes`, `GET, POST /adjustments`, `GET /cashouts`, `POST /cashouts/:id/process`, `GET, POST /commission-profiles`, `GET, POST /velocity-rules`, `GET /finance/profitability`, `GET /finance/liquidity`, `GET /finance/invariant-check` |
 | Settings | `GET, PUT /settings` |
 
 ## Environment

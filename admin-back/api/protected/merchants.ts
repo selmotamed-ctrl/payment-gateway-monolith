@@ -1,13 +1,18 @@
 import express from "express";
 import { z } from "zod";
 import { zBaseVersion, zIdentifier, zJsonPatch, zPaginationQuery, zReason } from "../../lib/zReady";
+import {
+  toCoreMerchantProposeEdit,
+  toCoreMerchantReinstate,
+  toCoreMerchantSuspend,
+} from "../contract";
 import { coreForward } from "../forward";
 
 const router = express.Router();
 
 const idParamsSchema = z.object({ id: zIdentifier });
 
-const suspendSchema = z
+export const suspendSchema = z
   .object({
     reason: zReason,
     emergency: z.boolean().optional(),
@@ -15,14 +20,14 @@ const suspendSchema = z
   })
   .strict();
 
-const reinstateSchema = z
+export const reinstateSchema = z
   .object({
     reason: zReason,
     baseVersion: zBaseVersion.optional(),
   })
   .strict();
 
-const proposeEditSchema = z
+export const proposeEditSchema = z
   .object({
     reason: zReason,
     patch: zJsonPatch.min(1).max(200),
@@ -55,6 +60,7 @@ router.post(
     path: (context) => `/internal/admin/merchants/${encodeURIComponent(context.params.id ?? "")}/suspend`,
     paramsSchema: idParamsSchema,
     schema: suspendSchema,
+    bodyFrom: (_req, body) => toCoreMerchantSuspend(body),
   }),
 );
 
@@ -65,6 +71,7 @@ router.post(
     path: (context) => `/internal/admin/merchants/${encodeURIComponent(context.params.id ?? "")}/reinstate`,
     paramsSchema: idParamsSchema,
     schema: reinstateSchema,
+    bodyFrom: (_req, body) => toCoreMerchantReinstate(body),
   }),
 );
 
@@ -72,9 +79,11 @@ router.post(
   "/:id/propose-edit",
   coreForward({
     method: "POST",
-    path: (context) => `/internal/admin/merchants/${encodeURIComponent(context.params.id ?? "")}/propose-edit`,
+    path: (context) =>
+      `/internal/admin/merchants/${encodeURIComponent(context.params.id ?? "")}/propose-edit`,
     paramsSchema: idParamsSchema,
     schema: proposeEditSchema,
+    bodyFrom: (_req, body) => toCoreMerchantProposeEdit(body),
   }),
 );
 

@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import { lookup } from "node:dns/promises";
+import ipaddr from "ipaddr.js";
 import { isIP } from "node:net";
 import { ApiError } from "../../lib/error";
 import { compileUrl, assertNoControlCharacters, validateFinalUrl, type QueryValue } from "./compileUrl";
@@ -190,51 +191,116 @@ function inIpv4Range(address: string, cidr: string): boolean {
   return ((addressValue & mask) >>> 0) === ((networkValue & mask) >>> 0);
 }
 
+/**
+ * IPv6 ranges that are never a legitimate gateway destination. They all wrap,
+ * embed or translate an IPv4 address and are therefore classic SSRF bypasses.
+ */
+const BLOCKED_IPV6_RANGES = [
+  "::/128",          // unspecified
+  "::1/128",         // loopback
+  "::ffff:0:0/96",   // IPv4 mapped
+  "64:ff9b::/96",    // NAT64
+  "100::/64",        // discard only
+  "2001::/32",       // Teredo
+  "2002::/16",       // 6to4
+  "fc00::/7",        // unique local
+  "fe80::/10",       // link local
+  "ff00::/8",        // multicast
+  "2001:db8::/32",   // documentation
+];
+
+const BLOCKED_IPV4_RANGES = [
+  "0.0.0.0/8",
+  "10.0.0.0/8",
+  "100.64.0.0/10",
+  "127.0.0.0/8",
+  "169.254.0.0/16",
+  "172.16.0.0/12",
+  "192.0.0.0/24",
+  "192.0.2.0/24",
+  "192.168.0.0/16",
+  "198.18.0.0/15",
+  "198.51.100.0/24",
+  "203.0.113.0/24",
+  "224.0.0.0/4",
+  "240.0.0.0/4",
+];
+
+/**
+ * Decides whether an address may be used as an outbound gateway target.
+ *
+ * The check is intentionally conservative: an address that cannot be parsed,
+ * or that is embedded inside one of the IPv4-in-IPv6 translation ranges, is
+ * treated as NOT public.
+ */
 export function isPublicIpAddress(address: string): boolean {
   const normalized = address.trim().toLowerCase().replace(/^\[|\]$/g, "");
+  if (!normalized) {
+    return false;
+  }
+
   const ipv4 = ipv4Number(normalized);
   if (ipv4 !== undefined) {
-    const blocked = [
-      "0.0.0.0/8",
-      "10.0.0.0/8",
-      "100.64.0.0/10",
-      "127.0.0.0/8",
-      "169.254.0.0/16",
-      "172.16.0.0/12",
-      "192.0.0.0/24",
-      "192.0.2.0/24",
-      "192.168.0.0/16",
-      "198.18.0.0/15",
-      "198.51.100.0/24",
-      "203.0.113.0/24",
-      "224.0.0.0/4",
-      "240.0.0.0/4",
-    ];
-    return !blocked.some((cidr) => inIpv4Range(normalized, cidr));
+    return !BLOCKED_IPV4_RANGES.some((cidr) => inIpv4Range(normalized, cidr));
   }
+
   if (isIP(normalized) !== 6) {
     return false;
   }
-  if (normalized === "::" || normalized === "::1") {
+
+  let parsed: ipaddr.IPv6;
+  try {
+    parsed = ipaddr.parse(normalized) as ipaddr.IPv6;
+  } catch {
     return false;
   }
-  if (normalized.startsWith("fc") || normalized.startsWith("fd")) {
-    return false;
+
+  // IPv4 mapped / IPv4 compatible addresses are unwrapped first so that the
+  // IPv4 rules apply to the embedded address.
+  if (parsed.isIPv4MappedAddress()) {
+    const embedded = parsed.toIPv4Address().toString();
+    return isPublicIpAddress(embedded);
   }
-  if (/^fe[89ab]/.test(normalized)) {
-    return false;
+  // `::a.b.c.d` (IPv4 compatible) embeds an IPv4 address in the low 32 bits.
+  const bytes = parsed.toByteArray();
+  const compatiblePrefix = bytes.slice(0, 12).every((byte) => byte === 0);
+  if (compatiblePrefix) {
+    const embedded = `${bytes[12]}.${bytes[13]}.${bytes[14]}.${bytes[15]}`;
+    return isPublicIpAddress(embedded);
   }
-  if (normalized.startsWith("ff")) {
-    return false;
+
+  return !BLOCKED_IPV6_RANGES.some((cidr) => {
+    try {
+      const range = ipaddr.parseCIDR(cidr);
+      const [network, bits] = range;
+      return network.kind() === "ipv6" && parsed.match(network, bits);
+    } catch {
+      return false;
+    }
+  });
+}
+
+/**
+ * Converts the exact transmitted payload into the string that a request
+ * signature is computed over.
+ */
+function payloadToString(body: unknown): string {
+  if (body === undefined || body === null) {
+    return "";
   }
-  if (normalized.startsWith("2001:db8")) {
-    return false;
+  if (typeof body === "string") {
+    return body;
   }
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(normalized);
-  if (mapped?.[1]) {
-    return isPublicIpAddress(mapped[1]);
+  if (body instanceof URLSearchParams) {
+    return body.toString();
   }
-  return true;
+  if (body instanceof ArrayBuffer) {
+    return Buffer.from(body).toString("utf8");
+  }
+  if (ArrayBuffer.isView(body)) {
+    return Buffer.from(body.buffer, body.byteOffset, body.byteLength).toString("utf8");
+  }
+  return JSON.stringify(body);
 }
 
 function defaultDnsLookup(hostname: string): Promise<string[]> {
@@ -443,8 +509,10 @@ export class ApiConsumer {
       && !ArrayBuffer.isView(rawBody)) {
       rawBody = { ...(rawBody as Record<string, unknown>) };
     }
-    this.applyAuthentication(auth, headers, query, rawBody);
+    // The body is serialized BEFORE the authentication is applied so that a
+    // request signature covers exactly the bytes that are transmitted.
     const body = this.serializeBody(rawBody, headers);
+    this.applyAuthentication(auth, headers, query, body);
     const finalUrl = query.toString();
     validateFinalUrl(finalUrl, { allowedHosts: this.config.allowedHosts, requireHttps: true });
 
@@ -592,9 +660,10 @@ export class ApiConsumer {
         throw new Error("Request signature secret is missing");
       }
       const timestamp = String(Math.floor(Date.now() / 1000));
-      const rawBody = typeof body === "string" ? body : "";      const algorithm = this.config.auth.signature_algorithm ?? "HMAC_SHA256";
+      const signedPayload = payloadToString(body);
+      const algorithm = this.config.auth.signature_algorithm ?? "HMAC_SHA256";
       const digest = createHmac(algorithm === "HMAC_SHA512" ? "sha512" : "sha256", secret)
-        .update(`${timestamp}.${rawBody}`)
+        .update(`${timestamp}.${signedPayload}`)
         .digest("hex");
       headers.set(this.config.auth.timestamp_header ?? "X-Timestamp", timestamp);
       headers.set(this.config.auth.signature_header ?? "X-Signature", digest);

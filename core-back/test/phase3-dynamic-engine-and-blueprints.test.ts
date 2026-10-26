@@ -16,6 +16,8 @@ const createAttempt = (overrides: Partial<DynamicAttempt> = {}): DynamicAttempt 
   currency: "LYD",
   requestedAmount: "100.0000",
   totalChargedAmount: "100.0000",
+  platformCommissionAmount: "3.0000",
+  netMerchantAmount: "97.0000",
   maxOtpAttempts: 3,
   otpAttempts: 0,
   ownershipMode: "PLATFORM_CLEARING",
@@ -127,6 +129,8 @@ describe("phase 3 mock gateway scenario suite", () => {
       currency: "LYD",
       requestedAmount: "100.0000",
       totalChargedAmount: "100.0000",
+      platformCommissionAmount: "3.0000",
+      netMerchantAmount: "97.0000",
       context: {},
     };
     for (const scenario of MOCK_SCENARIOS) {

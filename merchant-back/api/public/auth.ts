@@ -4,6 +4,13 @@ import { z } from "zod";
 import { env } from "../../lib/env";
 import { ApiError } from "../../lib/error";
 import { zEmail, zMfaCode, zPassword, zPhone } from "../../lib/zReady";
+import {
+  coreGoogleSchema,
+  coreLoginSchema,
+  coreMfaSchema,
+  coreRegisterSchema,
+  coreVerifyIdentitySchema,
+} from "../contract";
 import { coreForward } from "../forward";
 
 const router = express.Router();
@@ -74,6 +81,7 @@ router.post(
     method: "POST",
     path: () => "/internal/merchant/auth/register",
     schema: registerSchema,
+    coreSchema: coreRegisterSchema,
     requireAuth: false,
     status: 201,
   }),
@@ -85,6 +93,7 @@ router.post(
     method: "POST",
     path: () => "/internal/merchant/auth/verify-identity",
     schema: verifyIdentitySchema,
+    coreSchema: coreVerifyIdentitySchema,
     requireAuth: false,
   }),
 );
@@ -95,6 +104,7 @@ router.post(
     method: "POST",
     path: () => "/internal/merchant/auth/login",
     schema: loginSchema,
+    coreSchema: coreLoginSchema,
     requireAuth: false,
   }),
 );
@@ -105,6 +115,7 @@ router.post(
     method: "POST",
     path: () => "/internal/merchant/auth/google",
     schema: googleSchema,
+    coreSchema: coreGoogleSchema,
     requireAuth: false,
   }),
 );
@@ -115,6 +126,7 @@ router.post(
     method: "POST",
     path: () => "/internal/merchant/auth/mfa/verify",
     schema: mfaSchema,
+    coreSchema: coreMfaSchema,
     requireAuth: false,
   }),
 );

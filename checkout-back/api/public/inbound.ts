@@ -2,35 +2,23 @@ import express, { type Request, type Response } from "express";
 import rateLimiter from "express-rate-limit";
 import { z } from "zod";
 import { env } from "../../lib/env";
-import { parseOrThrow } from "../../lib/error";
+import { ApiError, parseOrThrow } from "../../lib/error";
 import { callCoreRaw, type CoreHttpMethod } from "../../lib/mtlsClient";
 import { parseCidrList, resolveClientIp } from "../../lib/net";
 import { resolveRequestId } from "../../lib/requestLogger";
 
 const router = express.Router();
 
-const HOP_BY_HOP_HEADERS = new Set([
-  "connection",
-  "keep-alive",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "te",
-  "trailer",
-  "transfer-encoding",
-  "upgrade",
-  "host",
+const FORWARDABLE_HEADER_ALLOWLIST = new Set([
+  "content-type",
+  "user-agent",
   "content-length",
-  "expect",
-]);
-
-const EDGE_OWNED_HEADERS = new Set([
-  "x-request-id",
-  "x-real-client-ip",
-  "x-client-user-agent",
-  "x-edge-service",
-  "x-forwarded-for",
-  "x-forwarded-proto",
-  "x-forwarded-host",
+  "x-signature",
+  "x-gateway-signature",
+  "x-hub-signature-256",
+  "x-moomalat-signature",
+  "x-timestamp",
+  "x-nonce",
 ]);
 
 export const pickForwardableHeaders = (
@@ -39,12 +27,33 @@ export const pickForwardableHeaders = (
   const forwarded: Record<string, string> = {};
   for (const [key, value] of Object.entries(headers)) {
     const name = key.toLowerCase();
-    if (HOP_BY_HOP_HEADERS.has(name)) continue;
-    if (EDGE_OWNED_HEADERS.has(name)) continue;
+    if (!FORWARDABLE_HEADER_ALLOWLIST.has(name)) continue;
     if (value === undefined) continue;
     forwarded[name] = Array.isArray(value) ? value.join(", ") : value;
   }
   return forwarded;
+};
+
+export const INBOUND_ENVIRONMENTS = ["sandbox", "test", "uat", "live", "production"] as const;
+
+export type InboundEnvironment = (typeof INBOUND_ENVIRONMENTS)[number];
+export type CoreInboundEnvironment = "SANDBOX" | "LIVE";
+
+const CORE_ENV_BY_INBOUND_ENV: Record<InboundEnvironment, CoreInboundEnvironment> = {
+  sandbox: "SANDBOX",
+  test: "SANDBOX",
+  uat: "SANDBOX",
+  live: "LIVE",
+  production: "LIVE",
+};
+
+export const translateInboundEnvironment = (value: string): CoreInboundEnvironment => {
+  const key = value.trim().toLowerCase() as InboundEnvironment;
+  const canonical = CORE_ENV_BY_INBOUND_ENV[key];
+  if (!canonical) {
+    throw new ApiError(400, "INBOUND_ENVIRONMENT_INVALID", "The inbound environment is invalid");
+  }
+  return canonical;
 };
 
 const paramsSchema = z.object({
@@ -53,7 +62,7 @@ const paramsSchema = z.object({
     .min(1)
     .max(64)
     .regex(/^[A-Za-z0-9_-]+$/, "invalid gateway identifier"),
-  env: z.enum(["sandbox", "test", "uat", "live", "production"]),
+  env: z.enum(INBOUND_ENVIRONMENTS),
   pathToken: z
     .string()
     .min(4)
@@ -93,9 +102,10 @@ router.all("/:gateway/:env/:pathToken", async (req: Request, res: Response) => {
   const params = parseOrThrow(paramsSchema, req.params);
   const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
   const contentType = req.headers["content-type"];
+  const coreEnvironment = translateInboundEnvironment(params.env);
   const response = await callCoreRaw({
     method: req.method as CoreHttpMethod,
-    path: `/internal/checkout/inbound/${encodeURIComponent(params.gateway)}/${encodeURIComponent(params.env)}/${encodeURIComponent(params.pathToken)}`,
+    path: `/internal/checkout/inbound/${encodeURIComponent(params.gateway)}/${coreEnvironment}/${encodeURIComponent(params.pathToken)}`,
     rawBody: raw,
     rawContentType: typeof contentType === "string" ? contentType : undefined,
     headers: pickForwardableHeaders(req.headers),

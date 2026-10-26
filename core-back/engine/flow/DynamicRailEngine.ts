@@ -15,14 +15,22 @@ export type DynamicAttempt = AdapterAttempt & {
   gatewayId?: string;
   gatewayVersionId?: string;
   routeId?: string;
+  railId?: string;
+  linkId?: string;
   credentialSetId?: string;
   commissionProfileId?: string;
   ownershipMode?: "INTERNAL" | "PLATFORM_CLEARING" | "MERCHANT_DIRECT";
   feeBearer?: "MERCHANT_ABSORBS" | "PAYER_SURCHARGE" | "SPLIT";
+  platformCommissionAmount?: DecimalInput;
+  netMerchantAmount?: DecimalInput;
+  feeAccrual?: boolean;
+  /** The amount tolerance of the pinned route (`mismatch_policy.tolerance_amount`). */
+  mismatchTolerance?: DecimalInput;
   ledgerEntryId?: string;
   contextCiphertext?: string;
   publicOutputs?: Record<string, unknown>;
   adjustmentState?: string;
+  substatus?: string;
 };
 
 export interface DynamicAttemptPatch {
@@ -128,6 +136,12 @@ export interface DynamicRailEngineOptions {
   ledgerPoster?: PaymentLedgerPoster;
   transactionRunner?: DynamicRailTransactionRunner;
   reconciliationScheduler?: ReconciliationScheduler;
+  /**
+   * Resolves the credential entries of the attempt (the merchant identifiers
+   * and the signing keys) so that a declarative step can address them with the
+   * `CREDENTIAL` parameter source.
+   */
+  credentialResolver?: (attempt: DynamicAttempt) => Promise<Record<string, unknown>>;
   now?: () => Date;
   panFieldNames?: readonly string[];
 }
@@ -365,7 +379,11 @@ export class DynamicRailEngine {
         outputs: { state: {}, public: current.publicOutputs ?? {} },
       });
     }
-    if (current.status !== "UNKNOWN" && current.status !== "VERIFYING") {
+    // A late success may arrive after the attempt was already FAILED or
+    // EXPIRED. Those states may still transition to SUCCEEDED, so the inquiry
+    // runs without first forcing the attempt back into VERIFYING.
+    const lateSuccessCandidate = current.status === "FAILED" || current.status === "EXPIRED";
+    if (!lateSuccessCandidate && current.status !== "UNKNOWN" && current.status !== "VERIFYING") {
       await this.transition(current, "VERIFYING");
     }
     const execution = await this.executePhase("VERIFY", current, {});
@@ -474,7 +492,7 @@ export class DynamicRailEngine {
       && (expectedReference === undefined || String(evidenceReference) === String(expectedReference));
     const evidenceAmount = values.amount ?? values.settled_amount ?? values.total_charged_amount;
     const amount = evidenceAmount !== undefined
-      && decimal(evidenceAmount as DecimalInput).eq(decimal(attempt.totalChargedAmount));
+      && this.amountWithinTolerance(evidenceAmount as DecimalInput, attempt);
     const currency = Boolean(values.currency)
       && String(values.currency).toUpperCase() === String(attempt.currency).toUpperCase();
     const environment = Boolean(values.environment ?? values.env)
@@ -484,6 +502,29 @@ export class DynamicRailEngine {
       trusted: Object.values(facts).every(Boolean),
       facts,
     };
+  }
+
+  /**
+   * The settled amount must match the charged amount within the tolerance of
+   * the pinned route. A gateway that rounds by a fraction of a minor unit is
+   * not a reason to declare the outcome unknown.
+   */
+  private amountWithinTolerance(value: DecimalInput, attempt: DynamicAttempt): boolean {
+    const charged = decimal(attempt.totalChargedAmount);
+    const settled = decimal(value);
+    if (!settled.isFinite()) {
+      return false;
+    }
+    if (settled.eq(charged)) {
+      return true;
+    }
+    const tolerance = attempt.mismatchTolerance === undefined
+      ? new Decimal(0)
+      : decimal(attempt.mismatchTolerance);
+    if (!tolerance.isFinite() || tolerance.lte(0)) {
+      return false;
+    }
+    return settled.minus(charged).abs().lte(tolerance);
   }
 
   async transition(
@@ -547,15 +588,25 @@ export class DynamicRailEngine {
     let response: unknown;
     let rawText: string | undefined;
     let clientAction: AdapterClientAction | undefined;
-    for (const step of steps) {
+    const storedFields = (attempt.context as { fields?: Record<string, unknown> } | undefined)?.fields;
+    const customerFields = { ...(storedFields ?? {}), ...input };
+    const credentials = this.options.credentialResolver
+      ? await this.options.credentialResolver(attempt)
+      : undefined;
+    for (let index = 0; index < steps.length; index += 1) {
+      const step = steps[index];
+      if (!step) {
+        continue;
+      }
       const context: StepExecutionContext = {
         attempt: attempt as unknown as Record<string, unknown>,
-        customerFields: input,
+        customerFields,
+        credentials,
         state,
         previousResponse: response,
         urls: attempt.context?.urls as Record<string, unknown> | undefined,
         transformContext: {
-          templateValues: input,
+          templateValues: customerFields,
         },
         panFieldNames: this.options.panFieldNames,
       };
@@ -597,6 +648,21 @@ export class DynamicRailEngine {
           outputs: { state, public: publicOutputs },
           clientAction,
         };
+      }
+      if (result.branch) {
+        // A branch decides where the phase continues: the referenced step is
+        // the next one and the rest of the current stack is skipped.
+        const target = result.branch === "then" ? step.branch?.thenStepId : step.branch?.elseStepId;
+        if (!target) {
+          break;
+        }
+        const targetIndex = steps.findIndex(
+          (candidate, candidateIndex) => candidateIndex > index && candidate.id === target,
+        );
+        if (targetIndex === -1) {
+          break;
+        }
+        index = targetIndex - 1;
       }
     }
     const status = this.phaseStatus(phase, steps.length > 0);
@@ -674,16 +740,28 @@ export class DynamicRailEngine {
       if (!this.options.ledgerPoster) {
         return `unposted:${attempt.id}`;
       }
-      const amount = decimal(attempt.totalChargedAmount);
-      const commission = this.commissionForAttempt(attempt, amount);
+      // The base amount is the requested amount; the surcharge is added on
+      // top of it by the payer-surcharge templates.
+      const amount = decimal(attempt.requestedAmount);
+      const commission = this.commissionForAttempt(attempt);
+      const surcharge = decimal(attempt.surchargeAmount ?? 0);
+      const merchantAmount = attempt.netMerchantAmount === undefined
+        ? amount.minus(commission)
+        : decimal(attempt.netMerchantAmount);
+      const gatewayFee = attempt.gatewayFeeAmount === undefined
+        ? undefined
+        : decimal(attempt.gatewayFeeAmount);
       const result = await this.options.ledgerPoster.postPaymentConfirmation(
         attempt.id,
         {
           ownershipMode: attempt.ownershipMode ?? "PLATFORM_CLEARING",
           feeBearer: attempt.feeBearer ?? "MERCHANT_ABSORBS",
+          feeAccrual: attempt.feeAccrual,
           amount,
+          surchargeAmount: surcharge,
           commissionAmount: commission,
-          merchantAmount: amount.minus(commission),
+          merchantAmount,
+          ...(gatewayFee === undefined ? {} : { gatewayFeeAmount: gatewayFee }),
         },
         this.ledgerContext(attempt),
         transaction,
@@ -717,18 +795,31 @@ export class DynamicRailEngine {
     }
   }
 
-  private commissionForAttempt(attempt: DynamicAttempt, amount: Decimal): Decimal {
-    const context = attempt.context ?? {};
-    const commission = context.platformCommissionAmount;
-    if (commission !== undefined) {
-      return decimal(commission as DecimalInput);
+  /**
+   * The platform commission is always taken from the pinned commission profile
+   * that was snapshotted onto the attempt. There is deliberately no default
+   * rate: a booking without a resolved commission must never silently use a
+   * hard coded percentage.
+   */
+  private commissionForAttempt(attempt: DynamicAttempt): Decimal {
+    const pinned = attempt.platformCommissionAmount;
+    if (pinned !== undefined) {
+      return decimal(pinned);
     }
-    return amount.mul("0.03");
+    const context = attempt.context ?? {};
+    const contextual = context.platformCommissionAmount;
+    if (contextual !== undefined) {
+      return decimal(contextual as DecimalInput);
+    }
+    throw engineError(
+      "COMMISSION_NOT_RESOLVED",
+      "The platform commission must be resolved from the pinned commission profile",
+    );
   }
 
   private refundSplit(attempt: DynamicAttempt, amount: Decimal): { commission: Decimal; merchant: Decimal } {
     const total = decimal(attempt.totalChargedAmount);
-    const commission = total.isZero() ? new Decimal(0) : this.commissionForAttempt(attempt, total).mul(amount).div(total);
+    const commission = total.isZero() ? new Decimal(0) : this.commissionForAttempt(attempt).mul(amount).div(total);
     return { commission, merchant: amount.minus(commission) };
   }
 

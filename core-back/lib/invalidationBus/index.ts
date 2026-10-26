@@ -8,12 +8,17 @@ export interface RedisCompatiblePublisher {
 export interface RedisCompatibleSubscriber {
   subscribe(channel: string, listener: (message: string) => void | Promise<void>): Promise<void> | void;
   unsubscribe(channel: string): Promise<void> | void;
+  /** Optional pattern subscription used for wildcard topics such as `credential:*`. */
+  psubscribe?(pattern: string, listener: (message: string) => void | Promise<void>): Promise<void> | void;
+  punsubscribe?(pattern: string): Promise<void> | void;
 }
 
 export interface InvalidationBusOptions {
   namespace?: string;
   publisher?: RedisCompatiblePublisher;
   subscriber?: RedisCompatibleSubscriber;
+  /** Maximum number of remembered event ids used for cross-node de-duplication. */
+  seenLimit?: number;
 }
 
 export interface InvalidationEvent<T = unknown> {
@@ -26,17 +31,35 @@ export interface InvalidationEvent<T = unknown> {
 
 export type InvalidationListener<T = unknown> = (event: InvalidationEvent<T>) => void | Promise<void>;
 
+/**
+ * Matches a concrete topic against a subscription pattern. Only a trailing
+ * `*` wildcard is supported, e.g. `credential:*`.
+ */
+export const topicMatchesPattern = (topic: string, pattern: string): boolean => {
+  if (pattern === topic) {
+    return true;
+  }
+  if (!pattern.endsWith("*")) {
+    return false;
+  }
+  const prefix = pattern.slice(0, -1);
+  return topic.startsWith(prefix);
+};
+
 export class InvalidationBus {
   private readonly emitter = new EventEmitter();
   private readonly namespace: string;
   private readonly publisher?: RedisCompatiblePublisher;
   private readonly subscriber?: RedisCompatibleSubscriber;
+  private readonly seenLimit: number;
   private readonly seen = new Set<string>();
+  private readonly subscriptions = new Map<string, Set<InvalidationListener<never>>>();
 
   constructor(options: InvalidationBusOptions = {}) {
     this.namespace = options.namespace ?? "payment-gateway";
     this.publisher = options.publisher;
     this.subscriber = options.subscriber;
+    this.seenLimit = options.seenLimit ?? 2048;
     this.emitter.setMaxListeners(0);
   }
 
@@ -55,7 +78,7 @@ export class InvalidationBus {
       payload,
       publishedAt: new Date().toISOString(),
     };
-    this.seen.add(event.id);
+    this.remember(event.id);
     await this.emitLocal(event);
     if (this.publisher) {
       await this.publisher.publish(this.channel(topic), JSON.stringify(event));
@@ -64,20 +87,36 @@ export class InvalidationBus {
   }
 
   subscribe<T>(topic: string, listener: InvalidationListener<T>): () => void {
-    const channel = this.channel(topic);
-    const wrapped = (event: InvalidationEvent<T>): void | Promise<void> => listener(event);
-    this.emitter.on(channel, wrapped);
+    const listeners = this.subscriptions.get(topic) ?? new Set<InvalidationListener<never>>();
+    listeners.add(listener as InvalidationListener<never>);
+    this.subscriptions.set(topic, listeners);
+
     let redisListener: ((message: string) => void | Promise<void>) | undefined;
     if (this.subscriber) {
       redisListener = (message: string): void => {
         void this.receiveRedisMessage(message);
       };
-      void this.subscriber.subscribe(channel, redisListener);
+      const isWildcard = topic.endsWith("*");
+      if (isWildcard && this.subscriber.psubscribe) {
+        void this.subscriber.psubscribe(this.channel(topic), redisListener);
+      } else {
+        void this.subscriber.subscribe(this.channel(topic), redisListener);
+      }
     }
+
     return () => {
-      this.emitter.off(channel, wrapped);
+      const current = this.subscriptions.get(topic);
+      current?.delete(listener as InvalidationListener<never>);
+      if (current && current.size === 0) {
+        this.subscriptions.delete(topic);
+      }
       if (this.subscriber && redisListener) {
-        void this.subscriber.unsubscribe(channel);
+        const isWildcard = topic.endsWith("*");
+        if (isWildcard && this.subscriber.punsubscribe) {
+          void this.subscriber.punsubscribe(this.channel(topic));
+        } else {
+          void this.subscriber.unsubscribe(this.channel(topic));
+        }
       }
     };
   }
@@ -96,14 +135,18 @@ export class InvalidationBus {
 
   async close(): Promise<void> {
     this.emitter.removeAllListeners();
+    this.subscriptions.clear();
     this.seen.clear();
   }
 
   private async emitLocal<T>(event: InvalidationEvent<T>): Promise<void> {
-    const channel = this.channel(event.topic);
-    const listeners = this.emitter.listeners(channel) as InvalidationListener<T>[];
-    for (const listener of listeners) {
-      await listener(event);
+    for (const [pattern, listeners] of this.subscriptions) {
+      if (!topicMatchesPattern(event.topic, pattern)) {
+        continue;
+      }
+      for (const listener of [...listeners]) {
+        await (listener as InvalidationListener<T>)(event);
+      }
     }
     const generic = this.emitter.listeners("invalidation") as InvalidationListener<T>[];
     for (const listener of generic) {
@@ -121,8 +164,19 @@ export class InvalidationBus {
     if (!event.id || event.namespace !== this.namespace || this.seen.has(event.id)) {
       return;
     }
-    this.seen.add(event.id);
+    this.remember(event.id);
     await this.emitLocal(event);
+  }
+
+  private remember(id: string): void {
+    this.seen.add(id);
+    while (this.seen.size > this.seenLimit) {
+      const oldest = this.seen.values().next();
+      if (oldest.done) {
+        break;
+      }
+      this.seen.delete(oldest.value);
+    }
   }
 }
 

@@ -123,13 +123,24 @@ export const parseIpList = (value: string | undefined | null): string[] => {
 
 export const remoteAddressOf = (req: Request): string => normalizeIp(req.socket?.remoteAddress ?? "");
 
+/**
+ * Resolves the client ip of a proxied request.
+ *
+ * Forwarded headers are only honoured when the immediate peer is a trusted proxy
+ * (loopback by default), never for an arbitrary client.
+ *
+ * `x-real-ip` is the header the shipped reverse proxies overwrite with the real peer
+ * address (`proxy_set_header X-Real-IP $remote_addr`), so it is authoritative.
+ * `x-real-client-ip` is not overwritten by those proxies and therefore stays under the
+ * control of the caller: it is only used as a fallback.
+ */
 export const resolveClientIp = (req: Request, trustedProxyCidrs: string[]): string => {
   const remote = remoteAddressOf(req);
-  const forwarded = req.headers["x-real-client-ip"];
-  const forwardedIp = typeof forwarded === "string" ? normalizeIp(forwarded) : "";
-  if (forwardedIp && isInCidrList(trustedProxyCidrs, remote)) return forwardedIp;
   const realIp = req.headers["x-real-ip"];
   const realIpValue = typeof realIp === "string" ? normalizeIp(realIp) : "";
   if (realIpValue && isInCidrList(trustedProxyCidrs, remote)) return realIpValue;
+  const forwarded = req.headers["x-real-client-ip"];
+  const forwardedIp = typeof forwarded === "string" ? normalizeIp(forwarded) : "";
+  if (forwardedIp && isInCidrList(trustedProxyCidrs, remote)) return forwardedIp;
   return remote;
 };
