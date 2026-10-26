@@ -1,23 +1,18 @@
-
 import vuetify from "@/plugins/vuetify";
 import { adaptedLocale } from "@/plugins/localization";
 
-
-
-export const drawer = ref(!vuetify.display.mobile.value);
+export const drawer = ref(false);
 
 export const toggleDrawer = () => {
     drawer.value = !drawer.value;
 };
 
-// Theme management
 export const getTheme = (): "light" | "dark" => {
     if (typeof window !== "undefined") {
         const saved = localStorage.getItem("theme");
         if (saved === "light" || saved === "dark") {
             return saved;
         }
-        // Check system preference
         if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
             return "dark";
         }
@@ -33,8 +28,7 @@ export const doArabic = (arabic: null | undefined | string, fallback: string) =>
 };
 
 export const isArabic = () => {
-    const currentLanguage = adaptedLocale.current.value;
-    return currentLanguage == "ar";
+    return adaptedLocale.current.value == "ar";
 };
 
 export const setTheme = (theme: "light" | "dark") => {

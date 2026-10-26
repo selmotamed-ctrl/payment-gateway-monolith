@@ -1,66 +1,49 @@
-import type { UserAuthoritiesMapType } from "@/pages/user/core/users/roles/authorities";
+import type { UserAuthorityType, UserAuthoritiesMapType } from "@/utils/authorities";
 import router from "@/router";
 import { nextTick, ref } from "vue";
+import { mapHasAllAuthorities, mapHasAuthority, type MerchantRole } from "@/utils/authorities";
 
-enum UserType {
-    admin = "admin",
-    manager = "manager",
-    staff = "staff",
-}
-
-export type User = {
-    id: number;
+export type MerchantUserInfo = {
+    id: string;
     name: string;
-    userType: UserType;
-    phone: string | null;
     username: string;
-    createdAt: Date;
-    updatedAt: Date;
-    active: boolean;
-    roleToUserRelations: ({
-        role: {
-            authorities: {
-                id: number;
-                authorityName: string;
-                userRoleId: number | null;
-            }[];
-        } & {
-            name: string;
-            id: number;
-        };
-    } & {
-        relationId: number;
-        userId: number;
-        roleId: number;
-    })[];
-};
-
-type UserState = {
-    userInfo: User;
-    token: string;
+    role: MerchantRole | string;
+    email: string | null;
+    phone: string | null;
+    merchantId: string;
+    merchantTradeName: string;
     authoritiesMap: UserAuthoritiesMapType;
+    appScopeIds: string[];
+    isMaker: boolean;
+    isChecker: boolean;
 };
 
-export const userStorageKey = `MTMS:USER`;
+export type UserState = {
+    token: string;
+    refreshToken: string | null;
+    userInfo: MerchantUserInfo;
+};
+
+export const userStorageKey = "PAYMENT_GATEWAY:MERCHANT:USER";
 
 export const setUserState = (userData: UserState | null) => {
     user.value = userData;
 
     if (userData) {
-        localStorage.setItem(userStorageKey, JSON.stringify(userData, null, 4));
+        localStorage.setItem(userStorageKey, JSON.stringify(userData));
     } else {
         localStorage.removeItem(userStorageKey);
     }
-    console.log("setting user data", userData);
 };
 
 export const loggingOut = ref(false);
+
 export const logout = async () => {
+    loggingOut.value = true;
     setUserState(null);
     await nextTick();
-    router.push({
-        name: "Login",
-    });
+    await router.push({ name: "Login" }).catch(() => undefined);
+    loggingOut.value = false;
 };
 
 export const getUserStateFromLocalStorage = (): UserState | null => {
@@ -69,15 +52,26 @@ export const getUserStateFromLocalStorage = (): UserState | null => {
         if (!storedData) {
             return null;
         }
-        return JSON.parse(storedData);
+        const parsed = JSON.parse(storedData) as UserState;
+        if (!parsed?.token || !parsed?.userInfo) {
+            return null;
+        }
+        return parsed;
     } catch (error) {
         console.error("Error retrieving user info from storage", error);
-        localStorage.clear();
-        logout();
+        localStorage.removeItem(userStorageKey);
         return null;
     }
 };
 
-const initialUserState = getUserStateFromLocalStorage();
-console.log(initialUserState);
-export const user = ref<null | UserState>(initialUserState);
+export const user = ref<null | UserState>(getUserStateFromLocalStorage());
+
+export const hasOneOfAuthorities = (required?: UserAuthorityType[] | null): boolean =>
+    mapHasAuthority(user.value?.userInfo?.authoritiesMap, required);
+
+export const hasAllAuthorities = (required?: UserAuthorityType[] | null): boolean =>
+    mapHasAllAuthorities(user.value?.userInfo?.authoritiesMap, required);
+
+export const isAuthenticated = () => !!user.value?.token && !!user.value?.userInfo;
+
+export const merchantRole = () => String(user.value?.userInfo?.role ?? "");

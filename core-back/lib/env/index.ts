@@ -1,21 +1,154 @@
-import z from "zod"; 
+import { z } from "zod";
 
+const booleanFromEnvironment = z.preprocess((value) => {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value !== "string") {
+    return value;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "true" || normalized === "1" || normalized === "yes") {
+    return true;
+  }
+  if (normalized === "false" || normalized === "0" || normalized === "no") {
+    return false;
+  }
+  return value;
+}, z.boolean());
 
-const envSchema = z.object({
-    DATABASE_HOST: z.string().default("localhost"),
-    DATABASE_URL: z.string().default("mysql://admin:admin@localhost:3306/deletion-requests"), 
-    DATABASE_USER: z.string().default("admin"), 
-    DATABASE_PASSWORD: z.string().default("admin"), 
-    DATABASE_NAME: z.string().default("deletion-requests"), 
+const postgresUrl = z
+  .string()
+  .min(1, "DATABASE_URL is required")
+  .refine((value) => /^postgres(?:ql)?:\/\//i.test(value), "DATABASE_URL must be a PostgreSQL URL");
 
+const filePath = (label: string) =>
+  z
+    .string()
+    .min(1, `${label} is required`)
+    .refine((value) => value.trim().length > 0, `${label} must not be blank`);
 
-    PORT: z.coerce.number().default(3003),
-})
+export const envSchema = z.strictObject({
+  PORT: z.coerce.number().int().min(1).max(65535).default(4000),
+  HOST: z.string().min(1).default("127.0.0.1"),
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  DATABASE_URL: postgresUrl,
+  MTLS_CA_CERT_PATH: filePath("MTLS_CA_CERT_PATH"),
+  MTLS_SERVER_CERT_PATH: filePath("MTLS_SERVER_CERT_PATH"),
+  MTLS_SERVER_KEY_PATH: filePath("MTLS_SERVER_KEY_PATH"),
+  KMS_MASTER_KEY: z
+    .string()
+    .min(16, "KMS_MASTER_KEY must be at least 16 characters long"),
+  TRUST_PROXY: booleanFromEnvironment.default(false),
+  LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+  WORKER_ENABLED: booleanFromEnvironment.default(false),
+  WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
+  WORKER_BATCH_SIZE: z.coerce.number().int().positive().max(1000).default(50),
+  WORKER_CONCURRENCY: z.coerce.number().int().positive().max(100).default(4),
+  WORKER_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
+  WORKER_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
+});
 
-const result = await z.safeParseAsync(envSchema, process.env)
-if(!result.success){
-    console.error("invalid environement", result.error)
-    process.exit(1)
-}
+export type CoreEnv = z.infer<typeof envSchema>;
 
-export const env = result.data; 
+const environmentKeys = new Set(Object.keys(envSchema.shape));
+
+const readEnvironment = (): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([key, value]) => environmentKeys.has(key) && value !== undefined,
+    ),
+  );
+
+const isTestEnvironment = (): boolean => process.env.NODE_ENV === "test";
+
+let cached: CoreEnv | undefined;
+let warnedAboutTestEnvironment = false;
+
+const parseEnvironment = (): { ok: true; data: CoreEnv } | { ok: false; issues: string[] } => {
+  const result = envSchema.safeParse(readEnvironment());
+  if (result.success) {
+    return { ok: true, data: result.data };
+  }
+  return {
+    ok: false,
+    issues: [...new Set(result.error.issues.map((issue) => issue.path.join(".") || "environment"))],
+  };
+};
+
+const resolveEnvironment = (): CoreEnv => {
+  if (!isTestEnvironment() && cached) {
+    return cached;
+  }
+  const parsed = parseEnvironment();
+  if (parsed.ok) {
+    cached = parsed.data;
+    return parsed.data;
+  }
+  if (!isTestEnvironment()) {
+    process.stderr.write(`Invalid environment configuration: ${parsed.issues.join(", ")}\n`);
+    process.exit(1);
+  }
+  if (!warnedAboutTestEnvironment) {
+    warnedAboutTestEnvironment = true;
+    process.stderr.write(`Test environment is missing configuration: ${parsed.issues.join(", ")}\n`);
+  }
+  return {
+    PORT: 4000,
+    HOST: "127.0.0.1",
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/payment_gateway",
+    MTLS_CA_CERT_PATH: "./certs/internal-ca.crt",
+    MTLS_SERVER_CERT_PATH: "./certs/core-back.crt",
+    MTLS_SERVER_KEY_PATH: "./certs/core-back.key",
+    KMS_MASTER_KEY: "test-only-master-key-value",
+    TRUST_PROXY: false,
+    LOG_LEVEL: "error",
+    WORKER_ENABLED: false,
+    WORKER_POLL_INTERVAL_MS: 5000,
+    WORKER_BATCH_SIZE: 50,
+    WORKER_CONCURRENCY: 4,
+    WORKER_MAX_ATTEMPTS: 3,
+    WORKER_REQUEST_TIMEOUT_MS: 15000,
+  };
+};
+
+export const env: CoreEnv = new Proxy({} as CoreEnv, {
+  get(_target, property) {
+    if (typeof property === "symbol") {
+      return undefined;
+    }
+    return resolveEnvironment()[property as keyof CoreEnv];
+  },
+  has(_target, property) {
+    if (typeof property === "symbol") {
+      return false;
+    }
+    return property in resolveEnvironment();
+  },
+  ownKeys() {
+    return Reflect.ownKeys(resolveEnvironment());
+  },
+  getOwnPropertyDescriptor(_target, property) {
+    return Reflect.getOwnPropertyDescriptor(resolveEnvironment(), property);
+  },
+});
+
+export const reloadEnv = (): CoreEnv => {
+  cached = undefined;
+  return resolveEnvironment();
+};
+
+const redactedKeys = new Set([
+  "DATABASE_URL",
+  "KMS_MASTER_KEY",
+  "MTLS_SERVER_KEY_PATH",
+]);
+
+export const envSummary = (): Record<string, string | number | boolean> =>
+  Object.fromEntries(
+    Object.entries(resolveEnvironment()).map(([key, value]) => [
+      key,
+      redactedKeys.has(key) ? "[redacted]" : value,
+    ]),
+  );

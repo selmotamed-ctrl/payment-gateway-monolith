@@ -43,7 +43,9 @@
         "vue-i18n": "^11.1.12",
         "vue-router": "^4.6.3",
         "vuetify": "^3.10.7",
-        "xlsx": "^0.18.5"
+        "xlsx": "^0.18.5",
+        "qrcode": "^1.5.4",
+        "zod": "^4.5.4"
     },
     "devDependencies": {
         "@prettier/plugin-oxc": "^0.0.4",
@@ -73,6 +75,7 @@
         "vite-plugin-vue-devtools": "^8.0.3",
         "vite-plugin-vue-layouts-next": "^1.1.1",
         "vite-plugin-vuetify": "^2.1.2",
-        "vue-tsc": "^3.1.1"
+        "vue-tsc": "^3.1.1",
+        "@types/qrcode": "^1.5.5"
     }
 }

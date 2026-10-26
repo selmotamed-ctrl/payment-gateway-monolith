@@ -2,14 +2,18 @@ import { isDev } from "@/constants/env";
 import { trimSlashes } from "kt-common";
 
 export const getBaseUrl = (): string => {
-    const baseUrl = location.origin + "/api/app";
-    console.log("Base url", { baseUrl });
-    return baseUrl;
+    if (isDev()) {
+        const configured = (import.meta.env.VITE_API_URL as string | undefined) || "";
+        if (configured) {
+            return `${trimSlashes(configured)}/api`.replace(/\/+$/, "");
+        }
+    }
+    return "/api";
 };
 
 export const getRealBaseUrl = () => {
     if (isDev()) {
-        return import.meta.env.VITE_API_URL + "api/app";
+        return `${trimSlashes((import.meta.env.VITE_API_URL as string | undefined) || "")}/api`;
     }
     return getBaseUrl();
 };

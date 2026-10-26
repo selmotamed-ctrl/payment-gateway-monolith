@@ -35,4 +35,11 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Finder (MacOS) folder config
 .DS_Store
 
-/generated/prisma
+# generated prisma client
+/generated
+
+# local mTLS PKI (private keys must never be committed)
+/certs
+
+# prisma local artefacts
+/prisma/.tmp

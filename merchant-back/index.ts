@@ -1,50 +1,34 @@
-import cors from "cors"; 
-import express, { type NextFunction, type Request, type Response } from "express"; 
+import cors from "cors";
+import express from "express";
 import { apiRouter } from "./api";
 import { env } from "./lib/env";
-import { ApiError, apiErrorSymbol, isApiError } from "./lib/error";
+import { apiErrorHandler, notFoundHandler } from "./lib/error";
 import { requestLoggerMiddleware } from "./lib/requestLogger";
 
-const run = async ()=>{
-    const app = express(); 
-    app.use(express.json())
-    app.use(express.urlencoded({
-        extended: true,
-    }))
-    app.use(cors())
-    
-    app.use(requestLoggerMiddleware)
+export const createApp = () => {
+  const app = express();
+  app.disable("x-powered-by");
+  app.set("trust proxy", false);
+  app.use(cors({ origin: true, credentials: false }));
+  app.use(requestLoggerMiddleware);
+  app.get("/health", (_req, res) => {
+    res.json({ status: "ok", service: "merchant-back", uptime: process.uptime() });
+  });
+  app.use(express.json({ limit: env.MAX_JSON_BODY_BYTES }));
+  app.use(express.urlencoded({ extended: false, limit: env.MAX_JSON_BODY_BYTES }));
+  app.use("/api/v1", apiRouter);
+  app.use(notFoundHandler);
+  app.use(apiErrorHandler);
+  return app;
+};
 
+export const start = () => {
+  const app = createApp();
+  return app.listen(env.PORT, () => {
+    console.log(`merchant-back listening on port ${env.PORT}`);
+  });
+};
 
-    app.get("/health", (_, response)=>{
-        return response.json({
-            msg: "OK"
-        })
-    })
-
-    app.use("/api", apiRouter)
-    app.use((error: any, request: Request, response: Response, next: NextFunction)=>{
-        console.error(error); 
-        if(response.headersSent){
-            return
-        }
-        let apiError: ApiError
-        if(!isApiError(error)){
-            apiError = new ApiError({
-                code: 'SERVER_ERROR', 
-                statusCode: 500, 
-                data: error, 
-                error: "unknown error",
-            })
-        }else{
-            apiError = error; 
-        }
-
-        response.status(apiError.statusCode).json(apiError)
-    })
-    console.log("Server will run on port", env.PORT)
-    app.listen(env.PORT)
+if (import.meta.main) {
+  start();
 }
-
-
-await run()

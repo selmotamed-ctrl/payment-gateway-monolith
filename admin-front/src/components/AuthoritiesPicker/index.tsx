@@ -27,7 +27,13 @@ import { useTheme } from "vuetify";
 import Checkbox from "@/components/Checkbox";
 import { ThemedText } from "@/components/ThemedText";
 import { clip } from "@/utils/common";
-import { UserAuthorityDetail, UserAuthorityDetails, type UserAuthoritiesMapType, type UserAuthorityType } from "@/pages/user/core/users/roles/authorities";
+import {
+    ADMIN_AUTHORITY_GROUPS,
+    UserAuthorityDetails,
+    type UserAuthoritiesMapType,
+    type UserAuthorityDetail,
+    type UserAuthorityType,
+} from "@/utils/authorities";
 
 // Add custom CSS styles for the authorities picker
 const customStyles = `
@@ -64,8 +70,17 @@ const authorityGroups:{
     icon: string;
     color: string;
     authorities: UserAuthorityDetail[];
-}[] = [
-];
+}[] = ADMIN_AUTHORITY_GROUPS.map((group) => ({
+    name: group.group,
+    icon: group.icon,
+    color: "primary",
+    authorities: group.authorities.map((authority) => ({
+        authorityKey: authority.authorityKey,
+        title: authority.title,
+        description: authority.description,
+        group: group.group,
+    })),
+}));
 
 type AuthoritiesPickerProps = {
     selectedAuthorities?: UserAuthoritiesMapType;

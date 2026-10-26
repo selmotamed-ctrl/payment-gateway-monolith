@@ -1,56 +1,101 @@
+import { z } from "zod";
+
 export const apiErrorSymbol = Symbol("api-error");
-import z from "zod"
-import type { $ZodType, $ZodTypeInternals } from "zod/v4/core";
-export const isApiError = (error: any): error is ApiError =>{
-    return error?.__symbol === apiErrorSymbol; 
+
+export interface ErrorEnvelope {
+  code: string;
+  message: string;
+  reference?: string;
+  details?: unknown;
 }
 
-
 export class ApiError extends Error {
-  __symbol = apiErrorSymbol;
+  readonly __symbol = apiErrorSymbol;
+  readonly [apiErrorSymbol] = true;
+  readonly statusCode: number;
+  readonly code: string;
+  readonly details?: unknown;
+  reference?: string;
 
-  error: string;
-  errors: undefined | string[];
-  code: string;
-  statusCode: number;
-  data?: any;
-  constructor(props: {
-    error: string;
-    data?: any;
-    statusCode: number;
-    errors?: string[];
-    code: string;
-  }) {
-    super();
-    this.error = props.error;
-    this.data = props.data;
-    this.code = props.code;
-    this.statusCode = props.statusCode;
-    this.errors = props.errors;
+  constructor(statusCode: number, code: string, message: string, details?: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.statusCode = statusCode;
+    this.code = code;
+    this.details = details;
+  }
+
+  get error(): string {
+    return this.message;
+  }
+
+  get data(): unknown {
+    return this.details;
+  }
+
+  toJSON(): ErrorEnvelope {
+    return toErrorEnvelope(this, this.reference);
   }
 }
 
+export const isApiError = (error: unknown): error is ApiError => {
+  if (error instanceof ApiError) {
+    return true;
+  }
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "__symbol" in error &&
+    (error as { __symbol?: unknown }).__symbol === apiErrorSymbol
+  );
+};
+
 export const errorCodePrefixer = (prefix: string) => {
-  prefix = prefix.toUpperCase().replaceAll(" ", "_");
+  const normalizedPrefix = prefix.toUpperCase().replaceAll(" ", "_");
 
   return (code: string) => {
-    code = code.toUpperCase().replaceAll(" ", "_");
-    return `${prefix}${code}`;
+    const normalizedCode = code.toUpperCase().replaceAll(" ", "_");
+    return `${normalizedPrefix}${normalizedCode}`;
   };
 };
 
-
-
-export const parseOrThrow = async <T extends Readonly<{ [k: string]: $ZodType<unknown, unknown, $ZodTypeInternals<unknown, unknown>>; }>>(body: any, schema: z.ZodObject<T>)=>{
-  const result = await z.safeParseAsync(schema, body)
-  if(result.success){
-    return result.data; 
+export const toErrorEnvelope = (error: unknown, reference?: string): ErrorEnvelope => {
+  if (isApiError(error)) {
+    const envelope: ErrorEnvelope = {
+      code: error.code,
+      message: error.message,
+    };
+    const errorReference = error.reference ?? reference;
+    if (errorReference) {
+      envelope.reference = errorReference;
+    }
+    if (error.details !== undefined) {
+      envelope.details = error.details;
+    }
+    return envelope;
   }
 
-  throw new ApiError({
-    statusCode: 400, 
-    code: "INVALID_BODY",
-    error: "invalid request data", 
-    data: result.error,      
-  })
-}
+  return {
+    code: "SERVER_ERROR",
+    message: "Internal server error",
+    ...(reference ? { reference } : {}),
+  };
+};
+
+export const parseOrThrow = <T extends z.ZodType>(
+  schema: T,
+  data: unknown,
+): z.output<T> => {
+  const result = schema.safeParse(data);
+  if (result.success) {
+    return result.data;
+  }
+
+  const details = result.error.issues.map((issue) => ({
+    path: issue.path,
+    code: issue.code,
+    message: issue.message,
+  }));
+
+  throw new ApiError(400, "INVALID_BODY", "Invalid request data", details);
+};

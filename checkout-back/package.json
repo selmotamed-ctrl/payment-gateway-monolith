@@ -1,29 +1,26 @@
 {
-  "name": "back",
+  "name": "checkout-back",
   "module": "index.ts",
   "type": "module",
   "private": true,
-  "devDependencies": {
-    "@types/bun": "latest",
-    "@types/node": "^26.4.1",
-    "prisma": "7.10.0"
-  },
   "scripts": {
-    "migrate-dev": "bun ./prisma/migrateDev/index.ts && bunx --bun prisma generate",
-    "migrate-generate": "IGNORE_ENV=1 bunx --bun prisma generate",
-    "migrate-deploy": "IGNORE_ENV=1 bunx --bun prisma migrate deploy"
+    "start": "bun run index.ts",
+    "dev": "bun --watch index.ts",
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit"
   },
   "peerDependencies": {
     "typescript": "^7"
   },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^26.4.1",
+    "typescript": "^7.0.2"
+  },
   "dependencies": {
-    "@prisma/adapter-mariadb": "^7.10.0",
-    "@prisma/client": "7.10.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "cors": "^2.8.6",
-    "dotenv": "^17.4.2",
-    "expres": "^0.0.5",
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.0",
     "zod": "^4.5.4"

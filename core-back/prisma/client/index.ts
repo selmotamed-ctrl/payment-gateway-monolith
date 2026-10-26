@@ -1,21 +1,45 @@
+import type { PrismaClient } from "../../generated/prisma/client";
 import { REQUIRED_SCHEMA_VERSION } from "../schemaVersion";
-import { baseClient } from "./base";
+import { getBaseClient } from "./base";
 
-const client = baseClient; 
-await client.$connect()
+const clientProxy = new Proxy({} as PrismaClient, {
+  get: (_target, property) => {
+    const instance = getBaseClient();
+    const value = Reflect.get(instance, property);
+    return typeof value === "function" ? value.bind(instance) : value;
+  },
+});
 
-const schemaVersion = await client.schemaVersion.findFirstOrThrow({
-    where: {
-        id: 1, 
-    }
-})
+export const client = clientProxy;
 
-if(schemaVersion.version != REQUIRED_SCHEMA_VERSION){
-    console.error("Binary Schema Version does not match database schema version")
-    process.exit(1); 
-}
+let schemaVersionCheck: Promise<void> | undefined;
 
-type TransactionCallback = Parameters<typeof client.$transaction>[0];
+export const ensureSchemaVersion = async (): Promise<void> => {
+  if (!schemaVersionCheck) {
+    schemaVersionCheck = (async () => {
+      const instance = getBaseClient();
+      await instance.$connect();
+      const rows = await instance.$queryRaw<Array<{ version: number }>>`
+        SELECT "version"
+        FROM "schema_versions"
+        WHERE "id" = 1
+      `;
+      const version = rows[0]?.version;
+      if (version !== REQUIRED_SCHEMA_VERSION) {
+        throw new Error(
+          `Database schema version ${version ?? "missing"} does not match required version ${REQUIRED_SCHEMA_VERSION}`,
+        );
+      }
+    })().catch((error: unknown) => {
+      schemaVersionCheck = undefined;
+      throw error;
+    });
+  }
+
+  return schemaVersionCheck;
+};
+
+type TransactionCallback = Parameters<PrismaClient["$transaction"]>[0];
 export type CtxClient = TransactionCallback extends (tx: infer T, ...args: any[]) => any ? T : never;
 
-export {client}
+export { getBaseClient as baseClient };

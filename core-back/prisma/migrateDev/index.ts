@@ -1,123 +1,107 @@
-import type { tryCast } from "typescript/unstable/ast";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { env } from "../../lib/env";
-import path from "path";
-import fs from "fs";
-import { execSync } from "child_process";
 import { REQUIRED_SCHEMA_VERSION } from "../schemaVersion";
 
-const databaseUrl = env.DATABASE_URL;
-const prismaRoot = path.join(import.meta.dirname, "../");
+const prismaRoot = path.join(import.meta.dirname, "..");
 const migrationsDirectory = path.join(prismaRoot, "migrations");
 const schemaPath = path.join(prismaRoot, "schema.prisma");
-const createMigration = async () => {
-  const oldMigrationsContent = fs.readdirSync(migrationsDirectory);
-  execSync(
-    `DATABASE_URL="${databaseUrl}" bunx --bun prisma migrate dev --create-only --name init --schema="${schemaPath}"`,
-    {
-      stdio: "inherit",
-    },
-  );
-  const afterMigrationContent = fs.readdirSync(migrationsDirectory);
-  for (const item of afterMigrationContent) {
-    const itemFullPath = path.join(migrationsDirectory, item);
-    const itemStats = fs.statSync(itemFullPath);
-    if (!itemStats.isDirectory()) {
-      continue;
-    }
-    const migrationFilePath = path.join(itemFullPath, "migration.sql");
-    if (!fs.existsSync(migrationFilePath)) {
-      continue;
-    }
-    const migrationFileContent = fs.readFileSync(migrationFilePath, "utf-8");
-    if (migrationFileContent.startsWith("-- This is an empty migration.")) {
-      fs.rmSync(itemFullPath, {
-        recursive: true,
-        force: true,
-      });
-    }
-  }
 
-  const afterCleanContent = fs.readdirSync(migrationsDirectory);
-  if (afterCleanContent.length == oldMigrationsContent.length) {
-    let sameContent = true;
-    for (const item of oldMigrationsContent) {
-      if (
-        !afterCleanContent.find((newItem) => {
-          return item == newItem;
-        })
-      ) {
-        sameContent = false;
-        break;
-      }
-    }
-    if (sameContent) {
-      return null;
-    }
-  }
+const schemaVersionsTable = "schema_versions";
 
-  const lastMigrationDirectory = afterCleanContent
-    .map((item) => {
-      const itemFullPath = path.join(migrationsDirectory, item);
-      const itemStats = fs.statSync(itemFullPath);
-      return {
-        item,
-        itemFullPath,
-        itemStats,
-      };
-    })
-    .filter((item) => {
-      return item.itemStats.isDirectory();
-    })
-    .sort((itemA, itemB) => {
-      return itemB.itemStats.mtimeMs - itemA.itemStats.mtimeMs;
-    })
-    .at(0);
-  if (!lastMigrationDirectory) {
-    throw new Error("no migration found");
-  }
-  return lastMigrationDirectory.itemFullPath;
-};
+const runPrisma = (argumentsList: string[]) =>
+  execFileSync("bunx", ["--bun", "prisma", ...argumentsList], {
+    stdio: "inherit",
+    env: { ...process.env, DATABASE_URL: env.DATABASE_URL },
+  });
 
-const appendSchemaVersionToMigration = (migrationDirFullPath: string) => {
-  const migraitonFileFullPath = path.join(
-    migrationDirFullPath,
-    "migration.sql",
-  );
-  const upsertSql = `
-INSERT INTO SchemaVersion (id, version)
-VALUES (1, ${REQUIRED_SCHEMA_VERSION})
-ON DUPLICATE KEY UPDATE version = VALUES(version);
+const listMigrationDirectories = () =>
+  fs
+    .readdirSync(migrationsDirectory, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+
+const schemaVersionSql = `-- Schema version support (single-row table managed outside the Prisma datamodel).
+CREATE TABLE IF NOT EXISTS "${schemaVersionsTable}" (
+    "id" INTEGER NOT NULL DEFAULT 1,
+    "version" INTEGER NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "${schemaVersionsTable}_pkey" PRIMARY KEY ("id")
+);
+
+INSERT INTO "${schemaVersionsTable}" ("id", "version") VALUES (1, ${REQUIRED_SCHEMA_VERSION})
+ON CONFLICT ("id") DO UPDATE SET "version" = EXCLUDED."version";
 `;
-  fs.appendFileSync(migraitonFileFullPath, `\n${upsertSql}`);
-};
 
-const runMigrateDev = async () => {
-  const newMigration = await createMigration();
-  if (!newMigration) {
-    console.log("No changes");
-    process.exit(0);
+export const patchMigrationSql = (migrationSql: string): string => {
+  const lines = migrationSql.split("\n");
+  const withoutSchemaVersionDrop: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === `DROP TABLE "${schemaVersionsTable}";`) {
+      while (
+        withoutSchemaVersionDrop.length > 0 &&
+        /^--\s*Drop/i.test(
+          withoutSchemaVersionDrop[withoutSchemaVersionDrop.length - 1] as string,
+        )
+      ) {
+        withoutSchemaVersionDrop.pop();
+      }
+      continue;
+    }
+    withoutSchemaVersionDrop.push(line);
   }
-  appendSchemaVersionToMigration(newMigration);
-  execSync(
-    `DATABASE_URL=${env.DATABASE_URL} bunx prisma migrate deploy --schema="${schemaPath}"`,
-    {
-      stdio: "inherit",
-    },
-  );
 
-  console.log(
-    "Migration created, SQL patched with version upsert. \ndeployed for database:",
-    env.DATABASE_NAME,
-    "\nnew migration at:",
-    newMigration,
-  );
+  return `${withoutSchemaVersionDrop.join("\n").trimEnd()}\n\n${schemaVersionSql}`;
 };
 
-if (require.main === module) {
+const patchMigration = (migrationDirectory: string) => {
+  const migrationFilePath = path.join(migrationDirectory, "migration.sql");
+  const migrationSql = fs.readFileSync(migrationFilePath, "utf8");
+  fs.writeFileSync(migrationFilePath, patchMigrationSql(migrationSql));
+};
+
+const createMigration = () => {
+  const before = listMigrationDirectories();
+  runPrisma([
+    "migrate",
+    "dev",
+    "--create-only",
+    "--name",
+    "init",
+    `--schema=${schemaPath}`,
+  ]);
+  const after = listMigrationDirectories();
+  const created = after.filter((directory) => !before.includes(directory));
+  if (created.length === 0) {
+    return null;
+  }
+  return path.join(migrationsDirectory, created.sort().at(-1) as string);
+};
+
+const runMigrateDev = () => {
+  const migrationDirectory = createMigration();
+  if (!migrationDirectory) {
+    process.stdout.write("No schema changes detected.\n");
+    return;
+  }
+
+  patchMigration(migrationDirectory);
+  runPrisma(["migrate", "deploy", `--schema=${schemaPath}`]);
+  process.stdout.write(`Migration applied from ${migrationDirectory}\n`);
+};
+
+if (import.meta.main) {
   try {
-    await runMigrateDev();
+    runMigrateDev();
   } catch (error) {
-    console.error(error);
+    process.stderr.write(
+      `${error instanceof Error ? error.message : String(error)}\n`,
+    );
     process.exit(1);
   }
 }

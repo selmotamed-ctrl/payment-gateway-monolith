@@ -1,9 +1,10 @@
-import express from "express"; 
-import { publicRouter } from "./public";
+import express from "express";
+import { protectedRouter } from "./protected";
+import { adminAuthRouter } from "./public";
 
-const router = express.Router(); 
+const router = express.Router();
 
+router.use("/auth", adminAuthRouter);
+router.use("/", protectedRouter);
 
-router.use("/public", publicRouter)
-
-export const apiRouter = router; 
+export const apiRouter = router;

@@ -1,37 +1,49 @@
-import { getBaseUrl, resolveUploadPath } from "@/constants/baseUrl";
+import { getBaseUrl } from "@/constants/baseUrl";
 import axios from "axios";
-import { logout, user } from "../user";
-import { extractApiError, isAppSuspendedError } from "@/utils/errors/extractor";
-import { loadAppStatus } from "../app";
+import { extractApiError } from "@/utils/errors/extractor";
+
+const tokenStorageKey = "PAYMENT_GATEWAY:CHECKOUT:TOKEN";
+
+export const getAuthToken = (): string | null => {
+    try {
+        return localStorage.getItem(tokenStorageKey);
+    } catch {
+        return null;
+    }
+};
+
+export const setAuthToken = (token: string | null) => {
+    try {
+        if (token) {
+            localStorage.setItem(tokenStorageKey, token);
+        } else {
+            localStorage.removeItem(tokenStorageKey);
+        }
+    } catch {
+        return;
+    }
+};
 
 export const api = axios.create({
     baseURL: getBaseUrl(),
-    timeout: 120e3,
+    timeout: 60e3,
     adapter: "fetch",
 });
-api.interceptors.request.use((config) => {
-    if (user.value?.token) {
-        config.headers["Authorization"] = `Bearer ${user.value.token}`;
-    }
 
+api.interceptors.request.use((config) => {
+    const token = getAuthToken();
+    if (token) {
+        config.headers["Authorization"] = `Bearer ${token}`;
+    }
+    config.headers["X-Client-Channel"] = "checkout";
     return config;
 });
 
 api.interceptors.response.use(undefined, (error) => {
     const extractedError = extractApiError(error);
-    if (!!extractedError) {
-        if (isAppSuspendedError(extractedError)) {
-            loadAppStatus();
-        } else if (extractedError.status == 401) {
-            logout();
-        }
+    if (extractedError && extractedError.status === 401) {
+        setAuthToken(null);
+        window.dispatchEvent(new CustomEvent("checkout:unauthorized"));
     }
-
     throw error;
 });
-
-export const resolveUploadPathWithMat = (path: string) => {
-    const url = `${resolveUploadPath(path)}?mat=${encodeURIComponent(user.value?.token || "")}`;
-    console.log("Mat url", url);
-    return url;
-};

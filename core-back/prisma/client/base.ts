@@ -1,25 +1,18 @@
-import { PrismaMariaDb } from "@prisma/adapter-mariadb";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../../generated/prisma/client";
 import { env } from "../../lib/env";
 
-console.log("Database config: ", {
-    host: env.DATABASE_HOST,
-    user: env.DATABASE_USER,
-    password: env.DATABASE_PASSWORD,
-    database: env.DATABASE_NAME,
-});
-const adapter = new PrismaMariaDb({
-    host: env.DATABASE_HOST,
-    user: env.DATABASE_USER,
-    password: env.DATABASE_PASSWORD,
-    database: env.DATABASE_NAME,
-    connectionLimit: 10,
-    allowPublicKeyRetrieval: true,     
-    ssl: false, // Set to true if you are using SSL certificates in prod
-});
+let baseClientInstance: PrismaClient | undefined;
 
-const client = new PrismaClient({
-    adapter: adapter,
-});
+export const createBaseClient = (): PrismaClient =>
+  new PrismaClient({
+    adapter: new PrismaPg(env.DATABASE_URL),
+    log: [],
+  });
 
-export const baseClient = client;
+export const getBaseClient = (): PrismaClient => {
+  if (!baseClientInstance) {
+    baseClientInstance = createBaseClient();
+  }
+  return baseClientInstance;
+};

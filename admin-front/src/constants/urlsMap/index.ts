@@ -1,5 +1,86 @@
-export enum urlsMap {
-    // Auth
-    // authLogin = "core/login", // example
-    
-}
+export const urlsMap = {
+    authLogin: "v1/admin/auth/login",
+    authMfa: "v1/admin/auth/mfa",
+    profileMe: "v1/admin/auth/me",
+    usersList: "v1/admin/users",
+    userDetail: (id: string) => `v1/admin/users/${id}`,
+    dashboardOverview: "v1/admin/stats/overview",
+    statsMetric: "v1/admin/stats/metrics/:mk",
+
+    joinRequestsList: "v1/admin/join-requests",
+    joinRequestDetail: (id: string) => `v1/admin/join-requests/${id}`,
+    joinRequestAssign: (id: string) => `v1/admin/join-requests/${id}/assign`,
+    joinRequestRequestInfo: (id: string) => `v1/admin/join-requests/${id}/request-info`,
+    joinRequestDecide: (id: string) => `v1/admin/join-requests/${id}/decide`,
+    kybDocumentReview: (id: string) => `v1/admin/kyb-documents/${id}/review`,
+
+    merchantsList: "v1/admin/merchants",
+    merchantDetail: (id: string) => `v1/admin/merchants/${id}`,
+    merchantSuspend: (id: string) => `v1/admin/merchants/${id}/suspend`,
+    merchantReinstate: (id: string) => `v1/admin/merchants/${id}/reinstate`,
+    merchantProposeEdit: (id: string) => `v1/admin/merchants/${id}/propose-edit`,
+    merchantDetailChanges: (id: string) => `v1/admin/merchants/${id}/detail-changes`,
+
+    approvalsList: "v1/admin/approvals",
+    approvalDetail: (id: string) => `v1/admin/approvals/${id}`,
+    approvalApprove: (id: string) => `v1/admin/approvals/${id}/approve`,
+    approvalReject: (id: string) => `v1/admin/approvals/${id}/reject`,
+
+    amlScreenings: "v1/admin/aml/screenings",
+    amlMatchDisposition: (id: string) => `v1/admin/aml/matches/${id}/disposition`,
+    amlCases: "v1/admin/aml/cases",
+    amlCasePropose: (id: string) => `v1/admin/aml/cases/${id}/propose`,
+    amlRules: "v1/admin/aml/rules",
+    amlReportingRules: "v1/admin/aml/reporting-rules",
+    amlReports: "v1/admin/aml/reports",
+
+    operatorCases: "v1/admin/operator-cases",
+    operatorCaseResolve: (id: string) => `v1/admin/operator-cases/${id}/resolve`,
+    attemptInquire: (id: string) => `v1/admin/attempts/${id}/inquire`,
+
+    reconciliationSources: "v1/admin/reconciliation/sources",
+    reconciliationUpload: "v1/admin/reconciliation/upload",
+    reconciliationRuns: "v1/admin/reconciliation/runs",
+
+    disputesList: "v1/admin/disputes",
+    adjustmentsList: "v1/admin/adjustments",
+    cashoutsList: "v1/admin/cashouts",
+    cashoutProcess: (id: string) => `v1/admin/cashouts/${id}/process`,
+
+    commissionProfiles: "v1/admin/commission-profiles",
+    velocityRules: "v1/admin/velocity-rules",
+
+    financeProfitability: "v1/admin/finance/profitability",
+    financeLiquidity: "v1/admin/finance/liquidity",
+    financeInvariantCheck: "v1/admin/finance/invariant-check",
+
+    settings: "v1/admin/settings",
+
+    gatewaysList: "v1/admin/gateways",
+    gatewayDetail: (id: string) => `v1/admin/gateways/${id}`,
+    gatewayVersions: (id: string) => `v1/admin/gateways/${id}/versions`,
+    gatewayVersionDetail: (versionId: string) => `v1/admin/gateway-versions/${versionId}`,
+    gatewayVersionEnvironments: (versionId: string) => `v1/admin/gateway-versions/${versionId}/environments`,
+    gatewayVersionAuth: (versionId: string) => `v1/admin/gateway-versions/${versionId}/auth`,
+    gatewayVersionSettings: (versionId: string) => `v1/admin/gateway-versions/${versionId}/settings`,
+    gatewayVersionCryptoProfiles: (versionId: string) => `v1/admin/gateway-versions/${versionId}/crypto-profiles`,
+    gatewayVersionFlows: (versionId: string) => `v1/admin/gateway-versions/${versionId}/flows`,
+    gatewayVersionChannels: (versionId: string) => `v1/admin/gateway-versions/${versionId}/channels`,
+    gatewayVersionStatusRules: (versionId: string) => `v1/admin/gateway-versions/${versionId}/status-rules`,
+    gatewayVersionErrorMaps: (versionId: string) => `v1/admin/gateway-versions/${versionId}/error-maps`,
+    gatewayVersionDryRun: (versionId: string) => `v1/admin/gateway-versions/${versionId}/dry-run`,
+    gatewayVersionRunSuite: (versionId: string) => `v1/admin/gateway-versions/${versionId}/run-suite`,
+    gatewayVersionSubmitApproval: (versionId: string) => `v1/admin/gateway-versions/${versionId}/submit-approval`,
+    gatewayRollback: (id: string) => `v1/admin/gateways/${id}/rollback`,
+
+    railsList: "v1/admin/rails",
+    railFields: (id: string) => `v1/admin/rails/${id}/fields`,
+    routesList: "v1/admin/routes",
+    routeState: (id: string) => `v1/admin/routes/${id}/state`,
+    assetsList: "v1/admin/assets",
+
+    branchListAll: "v1/admin/reference/branches",
+    currenciesList: "v1/admin/reference/currencies",
+} as const;
+
+export type UrlsMap = typeof urlsMap;

@@ -111,7 +111,7 @@ const createRequestLogger = (request: Request, response: Response): RequestLogge
 
     const end = () => {
         const durationMs = Number(process.hrtime.bigint() - startNs) / 1_000_000;
-        const { method, originalUrl, ip } = request;
+        const { method, path: requestPath, ip } = request;
         const { statusCode } = response;
         const contentLength = response.getHeader("content-length");
 
@@ -122,7 +122,7 @@ const createRequestLogger = (request: Request, response: Response): RequestLogge
         const header =
             `${c.dim}${startedAt.toISOString()} #${id}${c.reset} ` +
             `${methodColor(method)}${c.bold}${method.padEnd(6)}${c.reset}` +
-            `${c.white}${originalUrl}${c.reset} ` +
+            `${c.white}${requestPath}${c.reset} ` +
             `${statusColor(statusCode)}${c.bold}${statusCode}${c.reset} ` +
             `${c.dim}${formatDuration(durationMs)}${c.reset}` +
             (contentLength ? `${c.dim} ${contentLength}b${c.reset}` : "") +

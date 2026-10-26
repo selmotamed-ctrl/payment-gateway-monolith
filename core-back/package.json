@@ -1,31 +1,48 @@
 {
-  "name": "back",
+  "name": "core-back",
   "module": "index.ts",
   "type": "module",
   "private": true,
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^26.4.1",
-    "prisma": "7.10.0"
+    "oxlint": "^1.89.0",
+    "prisma": "7.10.0",
+    "typescript": "^7.0.2"
   },
   "scripts": {
-    "migrate-dev": "bun ./prisma/migrateDev/index.ts && bunx --bun prisma generate",
-    "migrate-generate": "IGNORE_ENV=1 bunx --bun prisma generate",
-    "migrate-deploy": "IGNORE_ENV=1 bunx --bun prisma migrate deploy"
+    "start": "bun run index.ts",
+    "dev": "bun --watch index.ts",
+    "test": "bun test",
+    "typecheck": "bunx --bun tsc --noEmit",
+    "lint": "oxlint .",
+    "migrate": "bunx --bun prisma migrate deploy",
+    "migrate-dev": "bun ./prisma/migrateDev/index.ts",
+    "migrate-generate": "bunx --bun prisma generate",
+    "migrate-deploy": "bunx --bun prisma migrate deploy",
+    "migrate-reset": "bunx --bun prisma migrate reset --force",
+    "db-seed": "bun ./prisma/seed.ts",
+    "prisma:format": "bunx --bun prisma format",
+    "prisma:validate": "bunx --bun prisma validate",
+    "generate-mtls-certs": "bun ./scripts/generate-mtls-certs.ts"
   },
   "peerDependencies": {
     "typescript": "^7"
   },
   "dependencies": {
-    "@prisma/adapter-mariadb": "^7.10.0",
+    "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "7.10.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
+    "bcryptjs": "^3.0.2",
     "cors": "^2.8.6",
+    "decimal.js": "^10.6.0",
     "dotenv": "^17.4.2",
-    "expres": "^0.0.5",
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.0",
+    "ipaddr.js": "^2.2.0",
+    "jsonwebtoken": "^9.0.2",
     "zod": "^4.5.4"
   }
 }

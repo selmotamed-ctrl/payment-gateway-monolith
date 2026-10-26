@@ -88,12 +88,11 @@ export default ({ mode }: any) => {
         server: {
             proxy: {
                 "/api": {
-                    target: process.env.VITE_API_URL,
+                    target: process.env.VITE_API_URL || "http://localhost:4102",
                     changeOrigin: true,
-                    autoRewrite: true,
                 },
             },
-            port: 3003,
+            port: 5102,
             allowedHosts: [String(process.env.VITE_MY_TAILSCALE)],
         },
 

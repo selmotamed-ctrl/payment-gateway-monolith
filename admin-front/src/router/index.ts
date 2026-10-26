@@ -1,36 +1,124 @@
-import { routesAuthorities } from "@/layouts/sections";
-import { hasOneOfAuthorities } from "@/pages/user/core/users/roles/authorities";
-import { operations } from "@/pages/user/ubs/operations";
-import { allowedToAccessCore } from "@/state/app";
-import { user } from "@/state/user";
+import { routesAuthorities, routesRoles } from "@/layouts/sections";
+import { hasOneOfAuthorities, isAuthenticated, user } from "@/state/user";
 import { showSnackBar } from "@/utils/snackBar";
-import { createRouter, createWebHashHistory, createWebHistory } from "vue-router";
-import { components } from "vuetify/dist/vuetify.js";
+import { createRouter, createWebHistory } from "vue-router";
 
 const router = createRouter({
     history: createWebHistory(import.meta.env.BASE_URL),
     routes: [
         {
             path: "/",
-            name: "",
-            component: () => {
-                return import("@/layouts/default");
-            },
+            component: () => import("@/layouts/default"),
             children: [
-                // example
-                // {
-                //     path: "",
-                //     redirect: {
-                //         name: "Dashboard",
-                //     },
-                // },
-                // {
-                //     path: "/dashboard",
-                //     name: "Dashboard",
-                //     component: () => {
-                //         return import("@/pages/user/dashboard");
-                //     },
-                // },
+                {
+                    path: "",
+                    redirect: { name: "Dashboard" },
+                },
+                {
+                    path: "dashboard",
+                    name: "Dashboard",
+                    component: () => import("@/pages/dashboard/index"),
+                },
+                {
+                    path: "join-requests",
+                    name: "JoinRequests",
+                    component: () => import("@/pages/join-requests/index"),
+                },
+                {
+                    path: "kyb",
+                    name: "KybReview",
+                    component: () => import("@/pages/kyb/index"),
+                },
+                {
+                    path: "merchants",
+                    name: "Merchants",
+                    component: () => import("@/pages/merchants/index"),
+                },
+                {
+                    path: "approvals",
+                    name: "Approvals",
+                    component: () => import("@/pages/approvals/index"),
+                },
+                {
+                    path: "aml/cases",
+                    name: "AmlCases",
+                    component: () => import("@/pages/aml/cases/index"),
+                },
+                {
+                    path: "aml/screenings",
+                    name: "AmlScreenings",
+                    component: () => import("@/pages/aml/screenings/index"),
+                },
+                {
+                    path: "aml/rules",
+                    name: "AmlRules",
+                    component: () => import("@/pages/aml/rules/index"),
+                },
+                {
+                    path: "aml/reports",
+                    name: "AmlReports",
+                    component: () => import("@/pages/aml/reports/index"),
+                },
+                {
+                    path: "operator-cases",
+                    name: "OperatorCases",
+                    component: () => import("@/pages/operator-cases/index"),
+                },
+                {
+                    path: "disputes",
+                    name: "Disputes",
+                    component: () => import("@/pages/disputes/index"),
+                },
+                {
+                    path: "adjustments",
+                    name: "Adjustments",
+                    component: () => import("@/pages/adjustments/index"),
+                },
+                {
+                    path: "cashouts",
+                    name: "CashOuts",
+                    component: () => import("@/pages/cashouts/index"),
+                },
+                {
+                    path: "reconciliation",
+                    name: "Reconciliation",
+                    component: () => import("@/pages/reconciliation/index"),
+                },
+                {
+                    path: "finance/profitability",
+                    name: "Profitability",
+                    component: () => import("@/pages/finance/profitability/index"),
+                },
+                {
+                    path: "finance/liquidity",
+                    name: "Liquidity",
+                    component: () => import("@/pages/finance/liquidity/index"),
+                },
+                {
+                    path: "finance/invariant",
+                    name: "Invariant",
+                    component: () => import("@/pages/finance/invariant/index"),
+                },
+                {
+                    path: "gateways",
+                    name: "Gateways",
+                    component: () => import("@/pages/gateways/index"),
+                },
+                {
+                    path: "gateways/wizard/:id",
+                    name: "GatewayWizard",
+                    component: () => import("@/pages/gateways/wizard/[id]"),
+                },
+                {
+                    path: "rails",
+                    name: "Rails",
+                    component: () => import("@/pages/rails/index"),
+                },
+                {
+                    path: "routes",
+                    name: "GatewayRoutes",
+                    component: () => import("@/pages/routes/index"),
+                },
             ],
             meta: {
                 requiresAuth: true,
@@ -44,6 +132,11 @@ const router = createRouter({
                 requiresVisitor: true,
             },
         },
+        {
+            path: "/:pathMatch(.*)*",
+            name: "NotFound",
+            component: () => import("@/pages/public/not-found/index"),
+        },
     ],
 });
 
@@ -52,72 +145,40 @@ export const defaultRoute = {
 };
 
 router.beforeEach((to, from) => {
-    const isAuthenticated = !!user.value?.token && !!user.value?.userInfo;
+    const authenticated = isAuthenticated();
+
     const forceRedirect = (props: { path?: string; name: string }) => {
         if (from.name == props.name) {
             return false;
         }
         if (props.path) {
-            return {
-                path: props.path,
-            };
+            return { path: props.path };
         }
-        return {
-            name: props.name,
-        };
+        return { name: props.name };
     };
 
-    console.log("routing...", {
-        isAuthenticated,
-        from: {
-            path: from.path,
-            name: from.name,
-        },
-        to: {
-            path: to.path,
-            name: to.name,
-        },
-    });
-
-    if (
-        !isAuthenticated &&
-        to.matched.some((r) => {
-            return r.meta?.requiresAuth;
-        })
-    ) {
-        console.log("[RA:unauthorized] Routing away from target", to.name, "because it requires authentication and the user is not", user.value);
-        return forceRedirect({
-            name: "Login",
-        });
+    if (!authenticated && to.matched.some((r) => r.meta?.requiresAuth)) {
+        return forceRedirect({ name: "Login" });
     }
 
-    if (
-        to.matched.some((r) => {
-            return r.meta?.requiresVisitor;
-        }) &&
-        isAuthenticated
-    ) {
-        console.log("[RA:requires-visitor] Routing away from target", to.name, "because it requires visitor and the user is logged in", user.value);
+    if (to.matched.some((r) => r.meta?.requiresVisitor) && authenticated) {
         return forceRedirect(defaultRoute);
     }
 
-    if (
-        to.matched.some((r) => {
-            return r.meta?.requiresCore;
-        }) &&
-        !allowedToAccessCore.value
-    ) {
-        console.log("[RA:requires-core-access] Routing away from target", to.name, "because it requires core access", allowedToAccessCore.value);
+    const routeName = String(to.name ?? "");
+    const requiredAuthorities = routesAuthorities[routeName];
+    if (requiredAuthorities?.length && !hasOneOfAuthorities(requiredAuthorities)) {
         showSnackBar({
+            message: "you are not allowed to access this resource",
             type: "error",
-            message: "Not Allowed To Access Core",
         });
         return forceRedirect(defaultRoute);
     }
 
-    const routeAuthorities = routesAuthorities[String(to.name)];
-    if (routeAuthorities?.length) {
-        if (!hasOneOfAuthorities(routeAuthorities)) {
+    const allowedRoles = routesRoles[routeName];
+    if (allowedRoles?.length) {
+        const role = String(user.value?.userInfo?.role ?? "");
+        if (!allowedRoles.includes(role)) {
             showSnackBar({
                 message: "you are not allowed to access this resource",
                 type: "error",
@@ -129,11 +190,9 @@ router.beforeEach((to, from) => {
     return true;
 });
 
-// Workaround for https://github.com/vitejs/vite/issues/11804
 router.onError((err, to) => {
     if (err?.message?.includes?.("Failed to fetch dynamically imported module")) {
         if (!localStorage.getItem("vuetify:dynamic-reload")) {
-            console.log("Reloading page to fix dynamic import error");
             localStorage.setItem("vuetify:dynamic-reload", "true");
             location.assign(to.fullPath);
         } else {

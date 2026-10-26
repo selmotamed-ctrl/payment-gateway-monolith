@@ -10,7 +10,8 @@ import "vuetify/styles";
 
 import colors from "vuetify/util/colors";
 export { colors };
-import { adaptedLocale, getLocaleName } from "./localization";
+import { adaptedLocale } from "@/plugins/localization";
+import { getLocaleName } from "@/plugins/i18n";
 
 // Composables
 import { createVuetify } from "vuetify";
@@ -76,6 +77,28 @@ export default createVuetify({
         VList: {
             density: "comfortable",
         },
+        VTextField: {
+            variant: "outlined",
+            density: "comfortable",
+        },
+        VTextarea: {
+            variant: "outlined",
+        },
+        VSelect: {
+            variant: "outlined",
+            density: "comfortable",
+        },
+        VAutocomplete: {
+            variant: "outlined",
+            density: "comfortable",
+        },
+        VCombobox: {
+            variant: "outlined",
+            density: "comfortable",
+        },
+        VTable: {
+            density: "comfortable",
+        },
         global: {
             ripple: false,
         },
@@ -86,20 +109,12 @@ export default createVuetify({
             en: false,
         },
         locale: getLocaleName(),
+        fallback: "en",
         adapter: adaptedLocale,
     },
     blueprint: {
         defaults: {
-            VTextField: {
-                variant: "outlined",
-            },
-            VAutocomplete: {
-                variant: "outlined",
-            },
             VDateInput: {
-                variant: "outlined",
-            },
-            VCombobox: {
                 variant: "outlined",
             },
         },

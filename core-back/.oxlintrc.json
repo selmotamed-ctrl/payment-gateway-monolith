@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": [
+    "node_modules/**",
+    "generated/**",
+    "certs/**",
+    "dist/**",
+    "engine/guards/AttemptGuardPipeline.ts",
+    "engine/reconciliation/StatementIngestor.ts"
+  ],
+  "categories": {
+    "correctness": "warn"
+  },
+  "rules": {
+    "no-unused-vars": "warn",
+    "no-console": "off"
+  },
+  "env": {
+    "es2024": true,
+    "node": true,
+    "bun": true
+  }
+}

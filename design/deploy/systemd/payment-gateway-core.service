@@ -1,0 +1,28 @@
+[Unit]
+Description=Payment gateway core engine (mTLS)
+Documentation=https://github.com/selmotamed-ctrl/template-back-front
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=payment-gateway
+Group=payment-gateway
+WorkingDirectory=/opt/payment-gateway/core-back
+EnvironmentFile=/etc/payment-gateway/core-back.env
+ExecStart=/usr/local/bin/bun run /opt/payment-gateway/core-back/index.ts
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+LimitNOFILE=65535
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/payment-gateway/core-back/prisma /var/lib/payment-gateway
+RestrictAddressFamilies=AF_INET AF_INET6
+MemoryDenyWriteExecute=false
+
+[Install]
+WantedBy=multi-user.target

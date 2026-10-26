@@ -15,7 +15,7 @@ export const PrintProvider = dc(
         let getPrintTargetPromise = null as null | {
             resolve: (result: Element | globalThis.ComponentPublicInstance) => void;
             reject: (err: any) => void;
-            timer: number;
+            timer: ReturnType<typeof setTimeout>;
             resolved: boolean;
         };
 

@@ -26,5 +26,15 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
-  }
+  },
+  "include": [
+    "index.ts",
+    "api/**/*.ts",
+    "engine/**/*.ts",
+    "lib/**/*.ts",
+    "prisma/**/*.ts",
+    "scripts/**/*.ts",
+    "test/**/*.ts"
+  ],
+  "exclude": ["node_modules", "generated", "certs"]
 }

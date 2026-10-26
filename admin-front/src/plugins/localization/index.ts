@@ -1,142 +1,55 @@
-import { createI18n } from "vue-i18n";
+import { computed, ref, shallowRef } from "vue";
+import { en as vuetifyEn, ar as vuetifyAr } from "vuetify/locale";
 import type { LocaleInstance } from "vuetify";
-import { en, ar } from "vuetify/locale";
-import { createVueI18nAdapter } from "vuetify/locale/adapters/vue-i18n";
-import { useI18n } from "vue-i18n";
-import { isDev, isSendNotFoundTranslations } from "@/constants/env";
-import axios from "axios";
-import { createAsyncBatcher } from "async-batcher-js";
+import { getLocaleName, i18n, setI18nLocale } from "@/plugins/i18n";
 
-export const messages = {
-    en: {
-        $vuetify: {
-            ...en,
-        },
-    },
-    ar: {
-        $vuetify: {
-            ...ar,
-        },
-        ...Object.fromEntries(Object.entries({}).map(([key, translation]) => {
-            return [key.toLowerCase(), translation];
-        })),
-    },
+const vuetifyMessages: Record<string, Record<string, string>> = {
+    en: vuetifyEn as unknown as Record<string, string>,
+    ar: vuetifyAr as unknown as Record<string, string>,
 };
 
-export const getLocaleName = () => {
-    const locale = localStorage.getItem("locale-name");
-    return locale || "ar";
+const replaceParams = (str: string, params: unknown[]): string => {
+    return str.replace(/\{(\w+)\}/g, (match, key: string) => {
+        const numeric = Number(key);
+        if (!Number.isNaN(numeric)) {
+            return String(params[numeric] ?? "");
+        }
+        const object = params[0] as Record<string, unknown> | undefined;
+        const value = object?.[key];
+        return value === undefined || value === null ? match : String(value);
+    });
 };
 
-export const setLocale = (l: string) => {
-    localStorage.setItem("locale-name", l);
-    setTimeout(() => {
-        location.reload();
-    }, 0.5e3);
-};
-
-export const i18n = createI18n({
-    legacy: false,
-    locale: getLocaleName(),
-    fallbackLocale: "en",
-    fallbackWarn: false,
-    missingWarn: false,
-    messages,
-});
-
-const adaptedLocale: LocaleInstance & {
-    originalT: (key: string, ...params: unknown[]) => string;
-} = createVueI18nAdapter({ i18n, useI18n }) as any;
-
-adaptedLocale.originalT = adaptedLocale.t;
-
-const sendBatcher = createAsyncBatcher<
-    {
-        lang: string;
-        message: string;
+export const adaptedLocale: LocaleInstance = {
+    name: "payment-gateway-i18n",
+    decimalSeparator: shallowRef("."),
+    messages: ref(vuetifyMessages) as unknown as LocaleInstance["messages"],
+    current: computed(() => i18n.global.locale.value) as unknown as LocaleInstance["current"],
+    fallback: shallowRef("en"),
+    t: (key: string, ...params: unknown[]) => {
+        if (typeof key != "string") {
+            return String(key ?? "");
+        }
+        if (key.startsWith("$vuetify.")) {
+            const shortKey = key.slice("$vuetify.".length);
+            const current = vuetifyMessages[i18n.global.locale.value] ?? vuetifyMessages.en;
+            const fallback = vuetifyMessages.en;
+            const found = current?.[shortKey] ?? fallback?.[shortKey] ?? key;
+            return replaceParams(String(found), params);
+        }
+        const translate = i18n.global.t as unknown as (...args: unknown[]) => string;
+        return String(translate(key, ...params));
     },
-    void
->({
-    async batcherCallback(promises, timeoutAbortSignal) {
-        const phrases: {
-            [lang: string]: string[];
-        } = {};
-        for (const promise of promises) {
-            promise.resolve();
-
-            if (!phrases[promise.content.lang]) {
-                phrases[promise.content.lang] = [];
-            }
-            phrases[promise.content.lang]?.push(promise.content.message);
-        }
-        if (Object.keys(phrases).length)
-            try {
-                console.log("sending translations", phrases);
-                await axios.post(
-                    "http://localhost:3456/api/add-translations",
-                    {
-                        phrases,
-                    },
-                    {
-                        signal: timeoutAbortSignal,
-                    },
-                );
-            } catch (error) {
-                console.error(error);
-            }
-    },
-    batchPeriodInMs: 1e3,
-    name: "translation-batcher",
-    timeoutPeriod: 60e3,
-});
-if (isDev()) {
-    sendBatcher.start();
-}
-adaptedLocale.t = (key: string, ...args: any[]) => {
-    if (typeof key != "string") {
-        return key;
-    }
-    if (key.match(/\{\{.*?\}\}/)) {
-        const translations = [] as string[];
-        const match = key.matchAll(/\{\{(.*?)\}\}|(.+?)(?=$|\{\{)/gi);
-        for (const [_, constant, translatable] of match) {
-            if (constant) {
-                translations.push(constant);
-            } else if (translatable) {
-                const match = translatable.match(/^(\s+)?(.+?)(\s+)?$/);
-                if (match) {
-                    if (match[1]) {
-                        translations.push(match[1]);
-                    }
-                    if (match[2]) {
-                        translations.push(adaptedLocale.t(match[2]));
-                    }
-                    if (match[3]) {
-                        translations.push(match[3]);
-                    }
-                } else {
-                    translations.push(translatable);
-                }
-            }
-        }
-        return translations.join("");
-    }
-
-    if (key.startsWith("$v")) {
-        return adaptedLocale.originalT(key, ...args);
-    }
-    const translation = adaptedLocale.originalT(key.toLowerCase(), ...args);
-    if (translation == key.toLowerCase()) {
-        if (key.toLowerCase() && isDev() && isSendNotFoundTranslations()) {
-            sendBatcher.run({
-                message: key.toLowerCase(),
-                lang: adaptedLocale.current.value,
-            });
-        }
-        return key;
-    }
-    return translation;
+    n: (value: number) => (i18n.global.n as unknown as (v: number) => string)(value),
+    provide: () => adaptedLocale,
 };
 
 export const t = adaptedLocale.t;
-export { adaptedLocale };
+
+export const setLocale = (locale: string) => {
+    setI18nLocale(locale === "en" ? "en" : "ar");
+};
+
+export const currentLocale = () => getLocaleName();
+
+export { i18n };

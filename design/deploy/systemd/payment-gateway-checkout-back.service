@@ -1,0 +1,24 @@
+[Unit]
+Description=Payment gateway checkout edge API (public SSL tier)
+After=network-online.target payment-gateway-core.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=payment-gateway
+Group=payment-gateway
+WorkingDirectory=/opt/payment-gateway/checkout-back
+EnvironmentFile=/etc/payment-gateway/checkout-back.env
+ExecStart=/usr/local/bin/bun run /opt/payment-gateway/checkout-back/index.ts
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

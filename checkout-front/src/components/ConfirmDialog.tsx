@@ -82,7 +82,7 @@ export const AwaitedConfirmationDialog = dc<{}, { show(opts: ConfirmOptions): Pr
                 zIndex: 100,
             }}
             modelValue={visible.value}
-            onUpdate:modelValue={(v: boolean) => (visible.value = v)}
+            onUpdate:modelValue={(v: boolean | null) => (visible.value = !!v)}
             persistent
             max-width="650"
         >
