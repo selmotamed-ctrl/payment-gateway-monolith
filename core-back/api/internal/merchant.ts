@@ -44,6 +44,72 @@ const normalizePhone = (value: string): string => value.replace(/[\s\-().]/g, ""
 const normalizeEmail = (value: string): string => value.trim().toLowerCase();
 
 /**
+ * The upload types accepted for KYB documents (Safeguard 15).
+ *
+ * The edge validates the file before it forwards it, but core never trusts a
+ * header alone: the bytes are sniffed here again.
+ */
+export const ALLOWED_KYB_UPLOAD_MIMES = ["image/png", "image/jpeg", "application/pdf"] as const;
+
+const UPLOAD_MAGIC_BYTES: ReadonlyArray<{ mime: string; signature: readonly number[] }> = [
+  { mime: "image/png", signature: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] },
+  { mime: "image/jpeg", signature: [0xff, 0xd8, 0xff] },
+  { mime: "application/pdf", signature: [0x25, 0x50, 0x44, 0x46, 0x2d] },
+];
+
+/**
+ * Detects the type of an uploaded document from its magic bytes. An
+ * unrecognised payload returns null, whatever its declared type is.
+ */
+export const detectUploadMime = (buffer: Buffer): string | null => {
+  for (const candidate of UPLOAD_MAGIC_BYTES) {
+    if (buffer.byteLength < candidate.signature.length) {
+      continue;
+    }
+    if (candidate.signature.every((byte, index) => buffer[index] === byte)) {
+      return candidate.mime;
+    }
+  }
+  return null;
+};
+
+/**
+ * Double-checks the declared type of an uploaded document against its bytes
+ * (defence in depth, Safeguard 15). The returned type is the detected one,
+ * which is what gets stored.
+ */
+export const assertUploadSignature = (
+  buffer: Buffer,
+  declaredMime: string | undefined,
+  allowedMimes: readonly string[] = ALLOWED_KYB_UPLOAD_MIMES,
+): string => {
+  const normalized = (declaredMime ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
+  if (!allowedMimes.includes(normalized)) {
+    throw new ApiError(415, "UNSUPPORTED_UPLOAD_TYPE", "The uploaded document type is not accepted", {
+      allowed: [...allowedMimes],
+      received: normalized,
+    });
+  }
+  const detected = detectUploadMime(buffer);
+  if (!detected) {
+    throw new ApiError(
+      415,
+      "UPLOAD_SIGNATURE_MISMATCH",
+      "The uploaded document is not a valid PNG, JPEG or PDF file",
+    );
+  }
+  if (detected !== normalized) {
+    throw new ApiError(
+      415,
+      "UPLOAD_SIGNATURE_MISMATCH",
+      "The uploaded document content does not match its declared type",
+      { declared: normalized, detected },
+    );
+  }
+  return detected;
+};
+
+/**
  * The national identifier of a beneficial owner is stored encrypted. It is
  * decrypted for the screening only; a payload that cannot be decrypted is
  * screened without an identifier instead of failing the whole onboarding.
@@ -754,6 +820,12 @@ router.post("/onboarding/kyb-documents", async (request: Request, response: Resp
   if (raw.byteLength === 0) {
     throw new ApiError(400, "UPLOAD_REQUIRED", "A KYB document payload is required");
   }
+  const declaredMime = typeof request.headers["x-upload-content-type"] === "string"
+    ? (request.headers["x-upload-content-type"] as string)
+    : undefined;
+  // The declared MIME is never trusted on its own: the magic bytes decide the
+  // stored type, and a mismatch is rejected (Safeguard 15).
+  const mime = assertUploadSignature(raw, declaredMime);
   const sha256 = createHash("sha256").update(raw).digest("hex");
   const duplicates = await client.kybDocument.findMany({ where: { sha256 } });
   if (duplicates.length > 0) {
@@ -765,9 +837,6 @@ router.post("/onboarding/kyb-documents", async (request: Request, response: Resp
   const metadata = typeof metadataHeader === "string"
     ? (JSON.parse(Buffer.from(metadataHeader, "base64url").toString("utf8")) as Record<string, unknown>)
     : {};
-  const mime = typeof request.headers["x-upload-content-type"] === "string"
-    ? (request.headers["x-upload-content-type"] as string)
-    : "application/octet-stream";
   const sizeBytes = Number(request.headers["x-upload-size"] ?? raw.byteLength);
   const storageKey = `kyb/${merchantId}/${sha256}`;
   const joinRequest = await client.joinRequest.findFirst({
@@ -865,6 +934,19 @@ router.post("/onboarding/submit", async (request: Request, response: Response) =
   // The onboarding screening (L1) screens the merchant and its beneficial
   // owners. A confirmed match raises an AML case and blocks the activation.
   const screening = await runOnboardingScreening(merchantId, joinRequest.id);
+  // An unavailable screening is never a clean result: the submission is
+  // refused and the join request stays in review (design §20, edge case 124).
+  if (screening.result === "ERROR") {
+    throw new ApiError(
+      503,
+      "SCREENING_UNAVAILABLE",
+      "The AML screening provider is unavailable; the onboarding request cannot be submitted",
+      {
+        screeningId: screening.screeningId,
+        joinRequestStatus: screening.joinRequestStatus,
+      },
+    );
+  }
   if (screening.blocked) {
     throw new ApiError(
       403,

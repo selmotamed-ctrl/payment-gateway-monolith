@@ -9,6 +9,7 @@ import { PollWorker } from "./PollWorker";
 import { InboundInboxWorker } from "./InboundInboxWorker";
 import { OutboxNotificationWorker } from "./OutboxNotificationWorker";
 import { LedgerInvariantWorker } from "./LedgerInvariantWorker";
+import { JoinRequestExpiryWorker } from "./JoinRequestExpiryWorker";
 import { PeriodicScreeningWorker } from "./PeriodicScreeningWorker";
 import { RetentionWorker } from "./RetentionWorker";
 import { BackgroundJobWorker } from "./BackgroundJobWorker";
@@ -87,6 +88,93 @@ export interface ProductionWorkerRuntime {
   start: () => void;
   stop: () => void;
 }
+
+/**
+ * The gating of the durable queue.
+ *
+ * The statement upload and the dispute intake answer `202 Accepted` and only
+ * enqueue a job, so the API must never boot without a worker that drains it.
+ */
+export interface BackgroundJobGating {
+  workerEnabled: boolean;
+  backgroundJobsEnabled: boolean;
+}
+
+export const assertBackgroundJobQueueDrainable = (gating: BackgroundJobGating): void => {
+  if (!gating.workerEnabled) {
+    throw new Error(
+      "Refusing to start core-back: WORKER_ENABLED is disabled while the statement " +
+        "upload and the dispute intake are queue-only routes (202 Accepted). " +
+        "Enable WORKER_ENABLED or jobs will be accepted and never executed.",
+    );
+  }
+  if (!gating.backgroundJobsEnabled) {
+    throw new Error(
+      "Refusing to start core-back: WORKER_BACKGROUND_JOBS_ENABLED is disabled while " +
+        "the statement upload and the dispute intake are queue-only routes (202 Accepted). " +
+        "Every queued job would be stranded without a drain.",
+    );
+  }
+};
+
+/** The default age of the oldest queued job that the health probe tolerates. */
+export const DEFAULT_QUEUE_AGE_THRESHOLD_MS = 300_000;
+
+export interface BackgroundJobQueueHealth {
+  queued: number;
+  oldestQueuedAgeMs: number | null;
+  thresholdMs: number;
+  degraded: boolean;
+}
+
+export interface QueueHealthDatabase {
+  backgroundJob: {
+    count: (args: { where: { state: string } }) => Promise<number>;
+    findFirst: (args: {
+      where: { state: string };
+      orderBy: { createdAt: "asc" };
+      select: { createdAt: true };
+    }) => Promise<{ createdAt: Date | string | null } | null>;
+  };
+}
+
+const ageOf = (createdAt: Date | string | null, now: Date): number | null => {
+  if (createdAt === null) {
+    return null;
+  }
+  const created = createdAt instanceof Date ? createdAt : new Date(createdAt);
+  if (Number.isNaN(created.getTime())) {
+    return null;
+  }
+  return Math.max(0, now.getTime() - created.getTime());
+};
+
+/**
+ * Reads the queue health without leaking tenant data: the count and the age
+ * of the oldest `QUEUED` job are enough to tell that the drain is stuck.
+ */
+export const readBackgroundJobQueueHealth = async (
+  db: QueueHealthDatabase,
+  options: { now?: Date; thresholdMs?: number } = {},
+): Promise<BackgroundJobQueueHealth> => {
+  const now = options.now ?? new Date();
+  const thresholdMs = options.thresholdMs ?? DEFAULT_QUEUE_AGE_THRESHOLD_MS;
+  const [queued, oldest] = await Promise.all([
+    db.backgroundJob.count({ where: { state: "QUEUED" } }),
+    db.backgroundJob.findFirst({
+      where: { state: "QUEUED" },
+      orderBy: { createdAt: "asc" },
+      select: { createdAt: true },
+    }),
+  ]);
+  const oldestQueuedAgeMs = ageOf(oldest?.createdAt ?? null, now);
+  return {
+    queued,
+    oldestQueuedAgeMs,
+    thresholdMs,
+    degraded: oldestQueuedAgeMs !== null && oldestQueuedAgeMs > thresholdMs,
+  };
+};
 
 /**
  * Builds the durable workers of `core-back` with every port connected to a
@@ -168,6 +256,9 @@ export const createProductionWorkerRuntime = (
     new InboundInboxWorker({ ...workerOptions, handler, maxAttempts: options.maxAttempts }),
     new OutboxNotificationWorker({ ...workerOptions, sender }),
     new LedgerInvariantWorker(workerOptions),
+    // The onboarding drafts that are abandoned, and the review requests whose
+    // SLA elapsed, are expired instead of sitting open forever (design §18).
+    new JoinRequestExpiryWorker(workerOptions),
     // The ongoing screening layer (L2) re-screens the active merchants
     // against the watch list and raises a case for a merchant that became a
     // confirmed match after its onboarding.

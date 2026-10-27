@@ -16,6 +16,7 @@ import type {
   Tx,
   VelocityRuleRow,
 } from "../db/ports";
+import { evaluateCommissionReceivableCeiling } from "../governance/GovernanceExecution";
 import { buildLedgerTemplate, LedgerPoster } from "../ledger/LedgerPoster";
 import { AmlRuleEngine, slaHoursForSeverity, type AmlRuleHit } from "./AmlRuleEngine";
 import {
@@ -23,6 +24,7 @@ import {
   normalizeIdentifier,
   publishWatchlist,
   type ScreeningProvider,
+  type ScreeningResult,
   type ScreeningResultCode,
 } from "./ScreeningProvider";
 
@@ -152,6 +154,79 @@ interface ResolvedAmounts {
  * The platform setting that publishes the internal watch list.
  */
 export const WATCHLIST_SETTING_KEY = "screening.watchlist";
+
+/**
+ * The fail-closed switch of the hot-path screening.
+ *
+ * The design requires the transaction screen to be enforced (design §20), so
+ * an ERROR / timeout / unavailable provider must not be treated as clean. A
+ * deployment may explicitly opt into the degraded mode with a platform
+ * setting, but the default is always fail-closed.
+ */
+export const SCREENING_FAIL_CLOSED_SETTING_KEY = "screening.fail_closed";
+export const DEFAULT_SCREENING_FAIL_CLOSED = true;
+
+export const screeningFailClosedFromSetting = (value: unknown): boolean => {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    const field = record.failClosed ?? record.fail_closed;
+    if (typeof field === "boolean") {
+      return field;
+    }
+  }
+  return DEFAULT_SCREENING_FAIL_CLOSED;
+};
+
+/**
+ * The anti-self-dealing policy of the design (§10):
+ * `SELF_PAYMENT_POLICY = BLOCK`. A deployment may only loosen it explicitly.
+ */
+export const SELF_PAYMENT_POLICY_SETTING_KEY = "SELF_PAYMENT_POLICY";
+export const DEFAULT_SELF_PAYMENT_POLICY = "BLOCK";
+
+export type SelfPaymentPolicy = "BLOCK" | "ALLOW";
+
+export const selfPaymentPolicyFromSetting = (value: unknown): SelfPaymentPolicy => {
+  const raw = typeof value === "string"
+    ? value
+    : value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>).policy
+      : null;
+  const normalized = typeof raw === "string" ? raw.trim().toUpperCase() : "";
+  return normalized === "ALLOW" || normalized === "PERMIT" || normalized === "OFF"
+    ? "ALLOW"
+    : "BLOCK";
+};
+
+/**
+ * OD-10, the decision register setting that allows a `PENDING` merchant to
+ * use the sandbox before the onboarding is approved.
+ *
+ * The seed stores the register keys (`OD-10`) with a JSON object, so the
+ * value is read from the field inside it and the documented default (`true`)
+ * applies when the setting is absent.
+ */
+export const OD10_SANDBOX_BEFORE_APPROVAL_KEY = "OD-10";
+export const OD10_SANDBOX_BEFORE_APPROVAL_FIELD = "sandboxBeforeApproval";
+export const DEFAULT_SANDBOX_BEFORE_APPROVAL = true;
+
+export const sandboxBeforeApprovalFromSetting = (value: unknown): boolean => {
+  if (typeof value === "boolean") {
+    // Tolerate a deployment that still stores the raw flag instead of the
+    // OD-10 register object.
+    return value;
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const field = (value as Record<string, unknown>)[OD10_SANDBOX_BEFORE_APPROVAL_FIELD];
+    if (typeof field === "boolean") {
+      return field;
+    }
+  }
+  return DEFAULT_SANDBOX_BEFORE_APPROVAL;
+};
 
 const ACTIVE_ATTEMPT_STATUSES = [
   "CREATED",
@@ -321,7 +396,7 @@ export class AttemptGuardPipeline {
           env: request.env,
         });
 
-      const posture = await this.merchantPosture(tx, merchant, request.env, now);
+      const posture = await this.merchantPosture(tx, merchant, request.env, now, settlementTarget);
       if (!posture.allowed) {
         // A merchant that may not pay is blocked the same way a rejected
         // velocity rule is blocked: a terminal attempt keeps the refusal
@@ -381,12 +456,46 @@ export class AttemptGuardPipeline {
         );
       }
 
+      // A payer wallet that belongs to the merchant is an anti-self-dealing
+      // violation: a merchant may not pay itself to manufacture volume
+      // (design §10 and §20, edge case 134).
+      if (await this.isSelfPayment(tx, merchant, link, customer.walletId ?? null)) {
+        const policy = await this.selfPaymentPolicy(tx);
+        if (policy === "BLOCK") {
+          const blocked = await this.createBlockedAttempt(tx, {
+            link,
+            merchant,
+            request,
+            route,
+            amounts,
+            currency,
+            reason: "SELF_PAYMENT_NOT_ALLOWED",
+            velocityRuleIds: [],
+            clientIp,
+            clientPhone,
+            now,
+          });
+          return blockDecision(
+            "SELF_PAYMENT_NOT_ALLOWED",
+            "PAYMENT_CANNOT_BE_PROCESSED",
+            [],
+            blocked.id,
+            blocked.reference,
+            amounts.totalCharged,
+            currency,
+            null,
+            null,
+            settlementTarget,
+          );
+        }
+      }
+
       // The watch list of the platform is published before the hot path
       // screening, so the screening is run against the list that is
       // published and not against the list the process started with.
       await this.publishWatchlist(tx);
 
-      const screening = this.screenHotPath({
+      let screening = this.screenHotPath({
         merchant,
         customer,
         clientIp,
@@ -394,9 +503,43 @@ export class AttemptGuardPipeline {
         cardAlias,
         now,
       });
-      const confirmedSanctions = screening?.result === "CONFIRMED_MATCH"
+      // An unavailable provider is never a clean result. The attempt is
+      // parked as a terminal BLOCK unless the deployment explicitly opted
+      // into the degraded mode (design §20, edge case 124).
+      if (!screening || screening.result === "ERROR") {
+        if (await this.screeningFailClosed(tx)) {
+          const blocked = await this.createBlockedAttempt(tx, {
+            link,
+            merchant,
+            request,
+            route,
+            amounts,
+            currency,
+            reason: "SCREENING_UNAVAILABLE",
+            velocityRuleIds: [],
+            clientIp,
+            clientPhone,
+            now,
+          });
+          return blockDecision(
+            "SCREENING_UNAVAILABLE",
+            "PAYMENT_CANNOT_BE_PROCESSED",
+            [],
+            blocked.id,
+            blocked.reference,
+            amounts.totalCharged,
+            currency,
+            null,
+            null,
+            settlementTarget,
+          );
+        }
+        screening = null;
+      }
+      const confirmedSanctions = screening !== null
+        && screening.result === "CONFIRMED_MATCH"
         && screening.matches.some((match) => match.listType === "SANCTIONS");
-      if (confirmedSanctions) {
+      if (confirmedSanctions && screening !== null) {
         const listType = screening.matches.find((match) => match.listType === "SANCTIONS")?.listType ?? "SANCTIONS";
         const blocked = await this.createBlockedAttempt(tx, {
           link,
@@ -796,8 +939,34 @@ export class AttemptGuardPipeline {
     merchant: MerchantRow,
     env: Environment,
     now: Date,
+    settlementTarget?: SettlementTarget | null,
   ): Promise<{ allowed: boolean; reason: string }> {
     void now;
+    const statusPosture = await this.merchantStatusPosture(tx, merchant, env);
+    if (!statusPosture.allowed) {
+      return statusPosture;
+    }
+    // Design §7.1: the merchant carries a commission receivable ceiling. Once
+    // the outstanding receivable passes it, the settlement-dependent traffic is
+    // paused (or switched to netting for a merchant-owned settlement target)
+    // instead of being silently allowed to grow.
+    const receivable = await evaluateCommissionReceivableCeiling(
+      { repositories: this.repositories },
+      tx,
+      merchant.id,
+      settlementTarget ?? null,
+    );
+    if (receivable.decision === "PAUSE") {
+      return { allowed: false, reason: receivable.reason };
+    }
+    return statusPosture;
+  }
+
+  private async merchantStatusPosture(
+    tx: Tx,
+    merchant: MerchantRow,
+    env: Environment,
+  ): Promise<{ allowed: boolean; reason: string }> {
     switch (merchant.status) {
       case "ACTIVE":
         return { allowed: true, reason: "ACTIVE" };
@@ -805,8 +974,11 @@ export class AttemptGuardPipeline {
         if (env !== "SANDBOX") {
           return { allowed: false, reason: "MERCHANT_NOT_ACTIVE" };
         }
-        const setting = await this.repositories.governance.getPlatformSetting(tx, "onboarding.sandbox_before_approval");
-        if (setting === false) {
+        const setting = await this.repositories.governance.getPlatformSetting(
+          tx,
+          OD10_SANDBOX_BEFORE_APPROVAL_KEY,
+        );
+        if (!sandboxBeforeApprovalFromSetting(setting)) {
           return { allowed: false, reason: "MERCHANT_NOT_ACTIVE" };
         }
         return { allowed: true, reason: "SANDBOX_ALLOWED" };
@@ -841,22 +1013,116 @@ export class AttemptGuardPipeline {
     clientPhone: string | null;
     cardAlias: string | null;
     now: Date;
-  }) {
-    if (!this.screening.screenLocal) {
-      return null;
-    }
+  }): ScreeningResult | null {
     const identifiers = [input.merchant.registrationNo, input.merchant.taxId, input.clientPhone, input.cardAlias].filter(
       (value): value is string => typeof value === "string" && value.length > 0,
     );
-    return this.screening.screenLocal(
-      buildScreeningSubject({
-        subjectType: "MERCHANT",
-        subjectId: input.merchant.id,
-        names: [input.merchant.legalName, input.merchant.tradeName, input.customer.name],
-        identifier: identifiers[0] ?? null,
-        aliases: identifiers.slice(1),
-      }),
+    const subject = buildScreeningSubject({
+      subjectType: "MERCHANT",
+      subjectId: input.merchant.id,
+      names: [input.merchant.legalName, input.merchant.tradeName, input.customer.name],
+      identifier: identifiers[0] ?? null,
+      aliases: identifiers.slice(1),
+    });
+    if (!this.screening.screenLocal) {
+      // A provider without a local list cannot screen the hot path. That is
+      // an unavailable screening, not a clean one.
+      return {
+        result: "ERROR",
+        matches: [],
+        highestScore: null,
+        providerCode: this.screening.code,
+        providerRequestRef: null,
+        listVersions: {},
+        inputHash: "",
+        error: "SCREENING_PROVIDER_LOCAL_UNAVAILABLE",
+      };
+    }
+    try {
+      return this.screening.screenLocal(subject);
+    } catch (error) {
+      return {
+        result: "ERROR",
+        matches: [],
+        highestScore: null,
+        providerCode: this.screening.code,
+        providerRequestRef: null,
+        listVersions: {},
+        inputHash: "",
+        error: error instanceof Error ? error.message : "SCREENING_PROVIDER_ERROR",
+      };
+    }
+  }
+
+  private async screeningFailClosed(tx: Tx): Promise<boolean> {
+    const setting = await this.repositories.governance.getPlatformSetting(
+      tx,
+      SCREENING_FAIL_CLOSED_SETTING_KEY,
     );
+    return screeningFailClosedFromSetting(setting);
+  }
+
+  private async selfPaymentPolicy(tx: Tx): Promise<SelfPaymentPolicy> {
+    const setting = await this.repositories.governance.getPlatformSetting(
+      tx,
+      SELF_PAYMENT_POLICY_SETTING_KEY,
+    );
+    return selfPaymentPolicyFromSetting(setting);
+  }
+
+  /**
+   * True when the submitted payer wallet/account identifier is owned by the
+   * merchant that owns the link.
+   *
+   * The settlement wallet of the link is always compared. When the caller's
+   * transaction can list the merchant wallets, their ids and GL account ids
+   * are compared as well, so an internal wallet/account reference is caught
+   * too. The comparison is normalized, so formatting never evades it.
+   */
+  private async isSelfPayment(
+    tx: Tx,
+    merchant: MerchantRow,
+    link: { walletId?: string | null },
+    walletId: string | null,
+  ): Promise<boolean> {
+    if (!walletId || walletId.trim().length === 0) {
+      return false;
+    }
+    const identifiers = new Set<string>();
+    if (link.walletId) {
+      identifiers.add(link.walletId);
+    }
+    identifiers.add(merchant.id);
+    const walletTable = (tx as Record<string, any>).wallet;
+    if (walletTable?.findMany) {
+      try {
+        const wallets = await walletTable.findMany({
+          where: { merchantId: merchant.id },
+          select: { id: true, glAccountId: true },
+        });
+        for (const wallet of (Array.isArray(wallets) ? wallets : []) as Array<Record<string, unknown>>) {
+          if (typeof wallet.id === "string") {
+            identifiers.add(wallet.id);
+          }
+          if (typeof wallet.glAccountId === "string") {
+            identifiers.add(wallet.glAccountId);
+          }
+        }
+      } catch {
+        // The link wallet is still enough to detect the self-payment of the
+        // settlement wallet itself.
+      }
+    }
+    const target = normalizeIdentifier(walletId);
+    if (target.length === 0) {
+      return false;
+    }
+    for (const identifier of identifiers) {
+      if (normalizeIdentifier(identifier) === target) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private async evaluateVelocity(

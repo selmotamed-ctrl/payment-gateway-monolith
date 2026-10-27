@@ -236,6 +236,87 @@ describe("admin asynchronous routes", () => {
     });
     expect(response.status).toBe(202);
   });
+
+  test("an approval forwards the dispute outcome and the risk acceptance to core", async () => {
+    const response = await call("POST", "/api/v1/admin/approvals/apr_1/approve", {
+      token: operator,
+      body: {
+        reason: "chargeback evidence reviewed",
+        outcome: "WON",
+        riskAcceptanceNote: "the evidence is conclusive",
+      },
+    });
+    expect(response.status).toBe(202);
+    expect(forwardedBody()).toMatchObject({
+      notes: "chargeback evidence reviewed",
+      outcome: "WON",
+      riskAcceptanceNote: "the evidence is conclusive",
+    });
+  });
+
+  test("a bulk user role change relays the accepted status of core", async () => {
+    const response = await call("PATCH", "/api/v1/admin/users", {
+      token: operator,
+      body: { userIds: ["usr_1", "usr_2"], role: "SUPPORT" },
+    });
+    expect(response.status).toBe(202);
+    const recent = core.requests.slice(-2);
+    expect(recent.map((request) => request.url)).toEqual([
+      "/internal/admin/users",
+      "/internal/admin/users",
+    ]);
+  });
+
+  test("a single user role change relays the accepted status of core", async () => {
+    const response = await call("PATCH", "/api/v1/admin/users/usr_1", {
+      token: operator,
+      body: { role: "SUPPORT" },
+    });
+    expect(response.status).toBe(202);
+    expect(forwardedBody()).toEqual({ role: "SUPPORT" });
+  });
+
+  test("a join request approval relays the accepted status of core", async () => {
+    const response = await call("POST", "/api/v1/admin/join-requests/jr_1/decide", {
+      token: compliance,
+      body: { decision: "APPROVE", reason: "kyb complete" },
+    });
+    expect(response.status).toBe(202);
+    expect(forwardedBody()).toMatchObject({ decision: "APPROVED" });
+  });
+
+  test("a merchant edit proposal relays the accepted status of core", async () => {
+    const response = await call("POST", "/api/v1/admin/merchants/mch_1/propose-edit", {
+      token: operator,
+      body: {
+        reason: "typo",
+        patch: [{ op: "replace", path: "/name", value: "Acme Ltd" }],
+        baseVersion: 1,
+      },
+    });
+    expect(response.status).toBe(202);
+    expect(core.requests.at(-1)?.url).toBe("/internal/admin/merchants/mch_1/propose-edit");
+  });
+
+  test("an aml case proposal relays the accepted status of core", async () => {
+    const response = await call("POST", "/api/v1/admin/aml/cases/c_1/propose", {
+      token: compliance,
+      body: { severity: "HIGH", action: "AML_HOLD", reason: "structuring" },
+    });
+    expect(response.status).toBe(202);
+    expect(core.requests.at(-1)?.url).toBe("/internal/admin/aml/cases/c_1/propose");
+  });
+
+  test("a gateway version approval relays the accepted status of core", async () => {
+    const response = await call("POST", "/api/v1/admin/gateway-versions/gv_1/submit-approval", {
+      token: operator,
+      body: { reason: "ready for approval" },
+    });
+    expect(response.status).toBe(202);
+    expect(core.requests.at(-1)?.url).toBe(
+      "/internal/admin/gateway-versions/gv_1/submit-approval",
+    );
+  });
 });
 
 describe("admin statement upload", () => {
@@ -347,7 +428,7 @@ describe("admin core contract forwarding", () => {
       token: compliance,
       body: { decision: "APPROVE", reason: "kyb complete" },
     });
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(core.requests.at(-1)?.url).toBe("/internal/admin/join-requests/jr_1/decide");
     expect(forwardedBody()).toEqual({
       decision: "APPROVED",

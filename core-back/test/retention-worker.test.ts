@@ -6,6 +6,7 @@ import {
   retentionDaysFromSetting,
 } from "../engine/workers/RetentionWorker";
 import { PrismaRepositories } from "../engine/db/repositories";
+import { InvariantVerifier } from "../engine/ledger/InvariantVerifier";
 import { createProductionWorkerRuntime } from "../engine/workers/productionRuntime";
 import type { WorkerLogger } from "../engine/workers/workerRuntime";
 import { createRetentionFake, type FakeRow } from "./helpers/retentionFake";
@@ -90,7 +91,7 @@ describe("RetentionWorker", () => {
     expect(ids(fake.rows("notifications"))).toEqual(["edge"]);
   });
 
-  test("purges a terminal attempt together with its journal entry and its lines", async () => {
+  test("purges a terminal attempt but keeps its journal entry and lines", async () => {
     const fake = createRetentionFake();
     fake.seed("payment_attempts", [
       {
@@ -122,11 +123,85 @@ describe("RetentionWorker", () => {
     const { worker } = buildWorker(fake);
     await worker.runOnce();
 
+    // The attempt and its non-ledger evidence go, but the immutable ledger
+    // stays: deleting it would silently change the GL balances.
     expect(ids(fake.rows("payment_attempts"))).toEqual([]);
-    expect(ids(fake.rows("journal_entries"))).toEqual([]);
-    expect(ids(fake.rows("journal_lines"))).toEqual([]);
+    expect(ids(fake.rows("journal_entries"))).toEqual(["entry-old"]);
+    expect(ids(fake.rows("journal_lines"))).toEqual(["line-old"]);
     expect(ids(fake.rows("attempt_step_logs"))).toEqual([]);
     expect(ids(fake.rows("attempt_groups"))).toEqual([]);
+  });
+
+  test("a purge preserves every GL balance and the system-wide invariant", async () => {
+    const fake = createRetentionFake();
+    fake.seed("gl_accounts", [
+      {
+        id: "gl-clearing",
+        accountType: "GATEWAY_CLEARING",
+        currency: "LYD",
+        checkpoint_balance: "0.0000",
+        checkpoint_at: null,
+      },
+      {
+        id: "gl-wallet",
+        accountType: "MERCHANT_WALLET",
+        currency: "LYD",
+        checkpoint_balance: "0.0000",
+        checkpoint_at: null,
+      },
+    ]);
+    fake.seed("payment_attempts", [
+      {
+        id: "attempt-old",
+        created_at: daysAgo(DEFAULT_RETENTION_DAYS + 10),
+        terminal_at: daysAgo(DEFAULT_RETENTION_DAYS + 9),
+        status: "SUCCEEDED",
+        ledger_entry_id: "entry-old",
+        attempt_group_id: "group-old",
+      },
+    ]);
+    fake.seed("journal_entries", [
+      { id: "entry-old", created_at: daysAgo(DEFAULT_RETENTION_DAYS + 10) },
+    ]);
+    fake.seed("journal_lines", [
+      {
+        id: "line-debit",
+        created_at: daysAgo(DEFAULT_RETENTION_DAYS + 10),
+        entry_id: "entry-old",
+        gl_account_id: "gl-clearing",
+        direction: "DEBIT",
+        amount: "100.0000",
+      },
+      {
+        id: "line-credit",
+        created_at: daysAgo(DEFAULT_RETENTION_DAYS + 10),
+        entry_id: "entry-old",
+        gl_account_id: "gl-wallet",
+        direction: "CREDIT",
+        amount: "100.0000",
+      },
+    ]);
+
+    const verifier = new InvariantVerifier(fake.db as never);
+    const before = await verifier.verify();
+    const balanceOf = (result: typeof before, accountId: string): string =>
+      result.accountBalances.find((account) => account.accountId === accountId)?.liveBalance.toFixed(4) ?? "";
+    expect(before.drift.toFixed(4)).toBe("0.0000");
+    const walletBefore = balanceOf(before, "gl-wallet");
+    const clearingBefore = balanceOf(before, "gl-clearing");
+
+    const { worker } = buildWorker(fake);
+    await worker.runOnce();
+
+    // The attempt went, the ledger did not.
+    expect(ids(fake.rows("payment_attempts"))).toEqual([]);
+    expect(ids(fake.rows("journal_lines"))).toEqual(["line-debit", "line-credit"]);
+
+    const after = await verifier.verify();
+    expect(after.drift.toFixed(4)).toBe("0.0000");
+    expect(balanceOf(after, "gl-wallet")).toBe(walletBefore);
+    expect(balanceOf(after, "gl-clearing")).toBe(clearingBefore);
+    expect(walletBefore).toBe("-100.0000");
   });
 
   test("keeps a non-terminal attempt and its journal entry", async () => {
@@ -184,7 +259,7 @@ describe("RetentionWorker", () => {
     expect(ids(fake.rows("attempt_step_logs"))).toEqual(["step-old"]);
   });
 
-  test("keeps a journal entry that an attempt outside the batch references", async () => {
+  test("keeps a journal entry and purges only the attempt that is past retention", async () => {
     const fake = createRetentionFake();
     fake.seed("payment_attempts", [
       {
@@ -211,9 +286,10 @@ describe("RetentionWorker", () => {
     const { worker } = buildWorker(fake);
     await worker.runOnce();
 
-    // The entry survives, so the attempt that points at it survives too.
+    // The ledger entry survives, but the expired attempt no longer has to:
+    // deleting an attempt never touches the entry it references.
     expect(ids(fake.rows("journal_entries"))).toEqual(["entry-shared"]);
-    expect(ids(fake.rows("payment_attempts"))).toEqual(["attempt-old", "attempt-live"]);
+    expect(ids(fake.rows("payment_attempts"))).toEqual(["attempt-live"]);
   });
 
   test("purges the expired step logs of an expired attempt and keeps the others", async () => {
@@ -265,7 +341,7 @@ describe("RetentionWorker", () => {
     expect(ids(fake.rows("detail_change_logs"))).toEqual(["change-fresh"]);
   });
 
-  test("purges a journal entry that no attempt references any more", async () => {
+  test("keeps a journal entry that no attempt references any more", async () => {
     const fake = createRetentionFake();
     fake.seed("journal_entries", [
       { id: "entry-orphan", created_at: daysAgo(DEFAULT_RETENTION_DAYS + 10) },
@@ -282,8 +358,10 @@ describe("RetentionWorker", () => {
     const { worker } = buildWorker(fake);
     await worker.runOnce();
 
-    expect(ids(fake.rows("journal_entries"))).toEqual(["entry-fresh"]);
-    expect(ids(fake.rows("journal_lines"))).toEqual([]);
+    // The ledger is out of the retention scope even when no attempt points at
+    // the entry: it carries the balance of an adjustment or a sweep.
+    expect(ids(fake.rows("journal_entries"))).toEqual(["entry-orphan", "entry-fresh"]);
+    expect(ids(fake.rows("journal_lines"))).toEqual(["line-orphan"]);
   });
 
   test("keeps a journal entry that an AML case holds", async () => {
@@ -341,7 +419,8 @@ describe("RetentionWorker", () => {
     expect(report).toContain('"dryRun":true');
     expect(report).toContain('"notifications":1');
     expect(report).toContain('"paymentAttempts":1');
-    expect(report).toContain('"journalEntries":1');
+    // The dry run never schedules a ledger deletion any more.
+    expect(report).toContain('"journalEntries":0');
   });
 
   test("the platform setting overrides the default retention period", async () => {

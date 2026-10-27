@@ -401,6 +401,8 @@ versionRouter.post(
       `/internal/admin/gateway-versions/${encodeURIComponent(context.params.vid ?? "")}/submit-approval`,
     paramsSchema: versionParamsSchema,
     schema: submitApprovalSchema,
+    // The version is queued for approval: core answers `202 Accepted`.
+    relayStatus: true,
   }),
 );
 

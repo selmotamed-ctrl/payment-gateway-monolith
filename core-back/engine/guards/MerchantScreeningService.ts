@@ -83,6 +83,12 @@ export interface OnboardingScreeningOutcome {
   result: ScreeningResultCode;
   /** A confirmed match blocks the activation of the merchant. */
   blocked: boolean;
+  /**
+   * The screening provider was unavailable for at least one subject. The
+   * onboarding is parked in review until a clean screening is obtained; it is
+   * never treated as a clean result (design §20, edge case 124).
+   */
+  screeningUnavailable: boolean;
   amlCaseId: string | null;
   /** The status the join request ended up in. */
   joinRequestStatus: string;
@@ -104,12 +110,6 @@ export const CONFIRMED_MATCH_SEVERITY: Record<ScreeningListType, Severity> = {
 export const severitySlaHours = (severity: Severity): number =>
   severity === "CRITICAL" ? 4 : severity === "HIGH" ? 24 : severity === "MEDIUM" ? 72 : 120;
 
-const RESULT_RANK: Record<ScreeningResultCode, number> = {
-  ERROR: 0,
-  CLEAR: 1,
-  POTENTIAL_MATCH: 2,
-  CONFIRMED_MATCH: 3,
-};
 
 const jsonSafe = (value: unknown): unknown => {
   if (value === null || value === undefined) {
@@ -276,6 +276,45 @@ export class MerchantScreeningService {
     );
     const screeningId = merchantScreening?.screeningId ?? null;
 
+    // A provider error is not a clean result. The request is parked in review
+    // and the caller refuses the submission, so an unavailable screening can
+    // never let an applicant through (design §20, edge case 124).
+    if (report.result === "ERROR") {
+      await this.repositories.onboarding.updateJoinRequest(tx, input.joinRequestId, {
+        screeningId,
+        status: "IN_REVIEW",
+      });
+      await this.repositories.governance.writeAuditLog(tx, {
+        actorId: null,
+        role: "SYSTEM",
+        action: "MERCHANT_ONBOARDING_SCREENING_UNAVAILABLE",
+        entityType: "MERCHANT",
+        entityId: input.merchant.id,
+        afterJson: {
+          screening_id: screeningId,
+          trigger: "ONBOARDING",
+          failed_subjects: report.outcomes
+            .filter((outcome) => outcome.result === "ERROR")
+            .map((outcome) => ({
+              subject_type: outcome.subjectType,
+              subject_id: outcome.subjectId,
+              provider_code: outcome.providerCode,
+            })),
+          source: "ONBOARDING_SCREENING",
+        },
+      });
+      return {
+        merchantId: input.merchant.id,
+        screeningId,
+        result: report.result,
+        blocked: true,
+        screeningUnavailable: true,
+        amlCaseId: null,
+        joinRequestStatus: "IN_REVIEW",
+        report,
+      };
+    }
+
     if (report.result !== "CONFIRMED_MATCH") {
       await this.repositories.onboarding.updateJoinRequest(tx, input.joinRequestId, {
         screeningId,
@@ -287,6 +326,7 @@ export class MerchantScreeningService {
         screeningId,
         result: report.result,
         blocked: false,
+        screeningUnavailable: false,
         amlCaseId: null,
         joinRequestStatus: "SUBMITTED",
         report,
@@ -324,6 +364,7 @@ export class MerchantScreeningService {
       screeningId,
       result: report.result,
       blocked: true,
+      screeningUnavailable: false,
       amlCaseId: amlCase?.id ?? null,
       joinRequestStatus: "REJECTED",
       report,
@@ -470,12 +511,22 @@ export class MerchantScreeningService {
 const severityRank = (severity: Severity): number =>
   severity === "CRITICAL" ? 3 : severity === "HIGH" ? 2 : severity === "MEDIUM" ? 1 : 0;
 
+/**
+ * The strongest result of a multi-subject screening.
+ *
+ * A confirmed match is the most severe outcome and always wins. Otherwise an
+ * ERROR dominates every non-confirmed result: an unavailable provider must
+ * never be masked by a CLEAR result of another subject (fail closed).
+ */
 const strongestResult = (results: readonly ScreeningResultCode[]): ScreeningResultCode => {
-  let strongest: ScreeningResultCode = "CLEAR";
-  for (const result of results) {
-    if (RESULT_RANK[result] > RESULT_RANK[strongest]) {
-      strongest = result;
-    }
+  if (results.includes("CONFIRMED_MATCH")) {
+    return "CONFIRMED_MATCH";
   }
-  return strongest;
+  if (results.includes("ERROR")) {
+    return "ERROR";
+  }
+  if (results.includes("POTENTIAL_MATCH")) {
+    return "POTENTIAL_MATCH";
+  }
+  return "CLEAR";
 };

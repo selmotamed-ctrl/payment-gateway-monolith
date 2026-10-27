@@ -6,7 +6,10 @@ import {
   openDisputeWithDraftedAdjustment,
   SYSTEM_AUTOMATION_USER_ID,
   type GovernanceExecutionContext,
+  type ReconciliationSchedulerLike,
+  type RefundExecutionEngine,
 } from "../governance/GovernanceExecution";
+import { getPlatformRuntime } from "../runtime";
 import { decimal, LedgerPoster } from "../ledger/LedgerPoster";
 import {
   StatementIngestor,
@@ -79,10 +82,95 @@ export const createFeeVariancePoster = (ledgerPoster: LedgerPoster): FeeVariance
   },
 });
 
+const parserConfigOf = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
+/**
+ * A statement source that settles in a T+N batch.
+ *
+ * The parser configuration is the declarative flag (`supports_batch_net`);
+ * the settlement lag is accepted too, because a source with a positive lag
+ * is by definition settled after the payment day.
+ */
+const isBatchSettlementSource = (
+  source: { parserConfig: unknown; settlementLagDays: number },
+): boolean => {
+  const config = parserConfigOf(source.parserConfig);
+  const flag = config.supportsBatchNet ?? config.supports_batch_net;
+  return Boolean(flag) || Number(source.settlementLagDays ?? 0) > 0;
+};
+
+/**
+ * Posts the T+N bank statement settlement sweep of a reconciliation run.
+ *
+ * The statement amount is the gross amount the gateway cleared and the
+ * statement fee is the accrued gateway fee, so the sweep is
+ * `Dr TREASURY <settled> / Dr GATEWAY_FEE_ACCRUAL <fee> /
+ *  Cr GATEWAY_CLEARING <gross>` (design §11.3 entry 3). The ledger dedupes on
+ * `(refType, refId)`, so a retried job never books a sweep twice.
+ */
+const postSettlementSweeps = async (
+  deps: ReconciliationJobHandlerDeps,
+  run: { id: string; statementSourceId: string },
+): Promise<number> => {
+  const source = await deps.repositories.reconciliation.findStatementSourceById(
+    deps.db as Tx,
+    run.statementSourceId,
+  );
+  if (!source) {
+    return 0;
+  }
+  const batchSource = isBatchSettlementSource(source);
+  const items = await deps.repositories.reconciliation.listItemsByRun(deps.db as Tx, run.id);
+  const candidates = batchSource ? items : items.filter((item) => Boolean(item.batchReference));
+  if (candidates.length === 0) {
+    return 0;
+  }
+  const poster = deps.ledgerPoster ?? new LedgerPoster(deps.db as never);
+  const seen = new Set<string>();
+  let posted = 0;
+  for (const item of candidates) {
+    if (item.result === "DUPLICATE") {
+      continue;
+    }
+    const gross = decimal(item.statementAmount as never);
+    const fee = decimal(item.statementFee as never);
+    if (!gross.gt(0)) {
+      continue;
+    }
+    const settled = gross.minus(fee);
+    if (!settled.gt(0)) {
+      continue;
+    }
+    const refId = item.batchReference
+      ? `settlement:${item.batchReference}`
+      : `settlement:${item.id}`;
+    if (seen.has(refId)) {
+      continue;
+    }
+    seen.add(refId);
+    await poster.postScenario(
+      "SETTLEMENT_SWEEP",
+      refId,
+      {
+        amount: gross.toFixed(4),
+        gatewayFeeAmount: fee.toFixed(4),
+        settledAmount: settled.toFixed(4),
+      },
+      { gatewayId: String(source.gatewayId) },
+    );
+    posted += 1;
+  }
+  return posted;
+};
+
 export interface ReconciliationJobHandlerDeps {
   db: PrismaLike;
   repositories: Repositories;
   feeVariancePoster?: FeeVariancePoster;
+  ledgerPoster?: LedgerPoster;
   clock?: () => Date;
   logger?: { info: (message: string, meta?: Record<string, unknown>) => void };
 }
@@ -91,6 +179,8 @@ export interface AdjustmentJobHandlerDeps {
   db: PrismaLike;
   ledgerPoster: LedgerPoster;
   repositories: Repositories;
+  engine?: RefundExecutionEngine;
+  reconciliationScheduler?: ReconciliationSchedulerLike;
   clock?: () => Date;
   logger?: { info: (message: string, meta?: Record<string, unknown>) => void };
 }
@@ -131,6 +221,10 @@ export const createReconciliationJobHandler = (
       throw new ApiError(404, "RECONCILIATION_RUN_NOT_FOUND", "The reconciliation run does not exist");
     }
     if (run.ingestedAt) {
+      // The run is committed; a retried job still re-attempts the settlement
+      // sweep, which the ledger dedupes, so a failure after ingestion is not
+      // lost.
+      await postSettlementSweeps(deps, run);
       deps.logger?.info("BackgroundJobWorker: reconciliation run was already ingested", {
         runId: run.id,
       });
@@ -153,6 +247,7 @@ export const createReconciliationJobHandler = (
       windowEnd: run.windowEnd,
       runId: run.id,
     });
+    const settlementSweeps = await postSettlementSweeps(deps, run);
     deps.logger?.info("BackgroundJobWorker: reconciliation run finished", {
       runId: result.runId,
       totalRows: result.totalRows,
@@ -161,6 +256,7 @@ export const createReconciliationJobHandler = (
       missingAtGateway: result.missingAtGateway,
       missingLocally: result.missingLocally,
       feeVariances: result.feeVariances,
+      settlementSweeps,
       idempotent: result.idempotent,
     });
   },
@@ -184,9 +280,18 @@ export const createAdjustmentJobHandler = (
 ): BackgroundJobHandler => ({
   async handle(job: BackgroundJobRow): Promise<void> {
     const payload = parseAdjustmentPayload(job);
+    const engine: RefundExecutionEngine = deps.engine ?? {
+      // Resolved lazily so a dispute intake or a chargeback never builds the
+      // rail engine; an approved refund shares the platform engine and calls
+      // the very gateway stack the payment used.
+      refund: async (attempt, amount, adjustmentId) =>
+        getPlatformRuntime(deps.db as never).engine.refund(attempt as never, amount, adjustmentId),
+    };
     const context: GovernanceExecutionContext = {
       ledgerPoster: deps.ledgerPoster,
       repositories: deps.repositories,
+      engine,
+      reconciliationScheduler: deps.reconciliationScheduler,
     };
     if (payload.kind === "DISPUTE_INTAKE") {
       await executeDisputeIntake(deps, context, payload);
@@ -322,11 +427,7 @@ const executeApprovedAdjustment = async (
       notes: payload.notes ?? null,
       outcome: payload.outcome ?? null,
     });
-    const state = result.status === "HELD"
-      ? "PENDING_REVIEW"
-      : result.reason === "NO_EXECUTABLE_SUBJECT"
-        ? "APPROVED"
-        : "EXECUTED";
+    const state = result.status === "HELD" ? "PENDING_REVIEW" : "EXECUTED";
     await deps.repositories.governance.updateApprovalRequest(tx, approval.id, { state });
     deps.logger?.info("BackgroundJobWorker: adjustment execution finished", {
       approvalRequestId: approval.id,

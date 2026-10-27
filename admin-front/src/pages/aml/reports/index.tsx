@@ -38,6 +38,7 @@ const AmlReportsPage = dc(() => {
 
     const dialogOpen = ref(false);
     const form = ref({
+        reportingRuleId: "",
         reportType: "LARGE_TRANSACTION",
         authority: "",
         subjectName: "",
@@ -70,13 +71,13 @@ const AmlReportsPage = dc(() => {
     const submit = async () => {
         actionLoading.value = true;
         try {
+            const today = new Date();
+            const periodStart = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
             await api.post(urlsMap.amlReports, {
+                reportingRuleId: form.value.reportingRuleId,
                 reportType: form.value.reportType,
-                authority: form.value.authority,
-                subjectName: form.value.subjectName,
-                amount: form.value.amount,
-                currency: form.value.currency,
-                sourceRuleCode: form.value.sourceRuleCode,
+                periodStart: periodStart.toISOString().slice(0, 10),
+                periodEnd: today.toISOString().slice(0, 10),
                 notes: form.value.notes,
             });
             dialogOpen.value = false;
@@ -129,6 +130,7 @@ const AmlReportsPage = dc(() => {
                             variant="tonal"
                             onClick={() => {
                                 form.value = {
+                                    reportingRuleId: "",
                                     reportType: "LARGE_TRANSACTION",
                                     authority: "",
                                     subjectName: "",

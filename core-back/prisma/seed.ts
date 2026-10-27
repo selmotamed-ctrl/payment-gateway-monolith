@@ -394,6 +394,49 @@ const seed = async () => {
   // set, so no rail is ever visible and no payment can start.
   const seededCredentialSets = await seedPlatformCredentialSets(client);
   process.stdout.write(`Seeded ${seededCredentialSets} platform credential sets.\n`);
+
+  // The regulatory reporting rules (design §20, OD-1). A CONFIRMED rule
+  // generates a live filing; a PROVISIONAL rule only drafts an internal one.
+  const reportingRuleSeeds = [
+    {
+      reportType: "LARGE_TRANSACTION" as const,
+      thresholdAmount: "50000.0000",
+      windowSeconds: null as number | null,
+      sourceReference: "CBL-LARGE-TRANSACTION-CONFIRMED-001",
+      status: "CONFIRMED" as const,
+    },
+    {
+      reportType: "SUSPICIOUS_ACTIVITY" as const,
+      thresholdAmount: "50000.0000",
+      windowSeconds: 86400,
+      sourceReference: "CBL-SUSPICIOUS-ACTIVITY-PROVISIONAL-001",
+      status: "PROVISIONAL" as const,
+    },
+  ];
+  let seededReportingRules = 0;
+  for (const rule of reportingRuleSeeds) {
+    const existing = await client.reportingRule.findFirst({
+      where: { sourceReference: rule.sourceReference },
+    });
+    if (existing) {
+      continue;
+    }
+    await client.reportingRule.create({
+      data: {
+        authority: "CBL",
+        reportType: rule.reportType,
+        thresholdAmount: new Prisma.Decimal(rule.thresholdAmount),
+        windowSeconds: rule.windowSeconds,
+        currency: "LYD",
+        conditions: {},
+        sourceReference: rule.sourceReference,
+        status: rule.status,
+        effectiveFrom: new Date("2026-01-01T00:00:00.000Z"),
+      },
+    });
+    seededReportingRules += 1;
+  }
+  process.stdout.write(`Seeded ${seededReportingRules} reporting rules.\n`);
 };
 
 try {

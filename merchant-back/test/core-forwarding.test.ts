@@ -140,7 +140,7 @@ describe("merchant write routes are translated into the canonical core payload",
     expect(forwardedBody()).toEqual({ name: "Storefront", businessUseDescription: "Online sales channel" });
   });
 
-  test("PATCH /applications/:id flattens the sensitive portal payload", async () => {
+  test("PATCH /applications/:id flattens the sensitive portal payload and relays 202", async () => {
     const response = await patchJson("/api/v1/merchant/applications/app_1", {
       sensitive: {
         assignedWalletId: "wal_1",
@@ -149,7 +149,7 @@ describe("merchant write routes are translated into the canonical core payload",
       },
       reason: "settlement change",
     });
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(forwarded()?.url).toBe("/internal/merchant/applications/app_1");
     expect(forwardedBody()).toEqual({
       assignedWalletId: "wal_1",

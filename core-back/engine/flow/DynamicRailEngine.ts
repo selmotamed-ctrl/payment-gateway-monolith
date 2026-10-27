@@ -1,4 +1,5 @@
 import { Decimal } from "decimal.js";
+import { invalidationBus, type InvalidationBus } from "../../lib/invalidationBus";
 import { decimal, type DecimalInput, type LedgerPostContext, type LedgerScenario, type LedgerScenarioInput, type PaymentConfirmationInput } from "../ledger/LedgerPoster";
 import { StepExecutor, type FlowStep, type StepExecutionContext, type StepExecutionResult } from "./StepExecutor";
 import type {
@@ -59,10 +60,27 @@ export interface SlotReservation {
   linkId?: string;
 }
 
+/**
+ * The outcome of committing a reserved slot.
+ *
+ * `COMMITTED` is the normal settlement. `SUSPENSE` means the link had no slot
+ * left for this settlement (a duplicate/over settlement); the money has been
+ * booked to SUSPENSE, an automatic refund adjustment was drafted and a P1
+ * operator case was opened, but the merchant was NOT credited and the slot
+ * counters were NOT advanced.
+ */
+export interface SlotCommitResult {
+  outcome: "COMMITTED" | "SUSPENSE";
+  journalEntryId?: string;
+  adjustmentId?: string;
+  operatorCaseId?: string;
+  reason?: string;
+}
+
 export interface SlotReservationStore {
   reserveSlot(attempt: DynamicAttempt, transaction?: unknown): Promise<SlotReservation>;
   releaseSlot(attempt: DynamicAttempt, reason: string, transaction?: unknown): Promise<void>;
-  commitSlot(attempt: DynamicAttempt, transaction?: unknown): Promise<void>;
+  commitSlot(attempt: DynamicAttempt, transaction?: unknown): Promise<SlotCommitResult | void>;
 }
 
 export interface FlowProvider {
@@ -123,6 +141,32 @@ export interface DynamicRailTransactionRunner {
   <R>(callback: (transaction: unknown) => Promise<R>): Promise<R>;
 }
 
+export interface OperatorCaseOpenInput {
+  kind: string;
+  priority: "P1" | "P2" | "P3";
+  attemptId: string;
+  title: string;
+  detail: string;
+  slaDueAt: Date;
+}
+
+export interface OperatorCaseSink {
+  open(input: OperatorCaseOpenInput): Promise<{ id: string; created?: boolean }>;
+}
+
+export interface ReportingEvaluationInput {
+  id: string;
+  merchantId?: string;
+  amount: DecimalInput;
+  currency: string;
+  status?: AdapterAttemptStatus;
+  settledAt?: Date;
+}
+
+export interface ReportingEvaluator {
+  evaluate(attempt: ReportingEvaluationInput): Promise<unknown>;
+}
+
 export interface DynamicRailEngineOptions {
   attempts: AttemptRepository;
   slots: SlotReservationStore;
@@ -142,8 +186,20 @@ export interface DynamicRailEngineOptions {
    * `CREDENTIAL` parameter source.
    */
   credentialResolver?: (attempt: DynamicAttempt) => Promise<Record<string, unknown>>;
+  operatorCaseSink?: OperatorCaseSink;
+  reportingEvaluator?: ReportingEvaluator;
+  invalidationBus?: Pick<InvalidationBus, "publish">;
   now?: () => Date;
   panFieldNames?: readonly string[];
+}
+
+export interface ConfirmOptions {
+  /**
+   * Performs the durable, atomic AUTHORIZING claim of the attempt before the
+   * SUBMIT phase. Returns `true` only for the single caller that changed the
+   * row; every other caller must not submit.
+   */
+  claim?: (attemptId: string) => Promise<boolean>;
 }
 
 export type FlowPhase = "PRE_INITIATE" | "INITIATE" | "SUBMIT" | "VERIFY" | "CANCEL" | "REFUND" | "VOID";
@@ -154,7 +210,21 @@ export interface DynamicRailResult {
   substatus?: string;
   canonicalError?: string;
   clientAction?: AdapterClientAction;
+  /**
+   * How the money of a successful settlement was routed. A `SUSPENSE`
+   * settlement is still a captured payment, but it is not a normal merchant
+   * credit: the caller must not treat it as a clean success.
+   */
+  settlement?: "NORMAL" | "SUSPENSE";
   outputs: Record<string, unknown>;
+}
+
+export const ATTEMPT_TRANSITION_TOPIC = "attempt:transition";
+
+export interface AttemptTransitionEvent {
+  attemptId: string;
+  status: AdapterAttemptStatus;
+  substatus?: string;
 }
 
 export interface TrustedSuccessFacts {
@@ -178,9 +248,13 @@ const TERMINAL_RELEASING_STATES = new Set<AdapterAttemptStatus>([
 ]);
 
 const ALLOWED_TRANSITIONS: Record<AdapterAttemptStatus, readonly AdapterAttemptStatus[]> = {
-  CREATED: ["INITIATING", "AWAITING_CUSTOMER", "BLOCKED", "CANCELLED", "EXPIRED", "FAILED"],
+  CREATED: ["INITIATING", "AWAITING_CUSTOMER", "VERIFYING", "BLOCKED", "CANCELLED", "EXPIRED", "FAILED"],
   INITIATING: ["AWAITING_CUSTOMER", "VERIFYING", "FAILED", "BLOCKED", "CANCELLED", "EXPIRED", "UNKNOWN"],
-  AWAITING_CUSTOMER: ["AUTHORIZING", "AWAITING_CUSTOMER", "FAILED", "CANCELLED", "EXPIRED", "BLOCKED", "UNKNOWN"],
+  // A browser callback or a return hint on a pending attempt starts an
+  // inquiry: the attempt is VERIFYING while the gateway is asked (design
+  // §9.1 rule 9). Without this edge the return-url flow threw
+  // INVALID_ATTEMPT_TRANSITION.
+  AWAITING_CUSTOMER: ["AUTHORIZING", "AWAITING_CUSTOMER", "VERIFYING", "FAILED", "CANCELLED", "EXPIRED", "BLOCKED", "UNKNOWN"],
   AUTHORIZING: ["VERIFYING", "SUCCEEDED", "FAILED", "UNKNOWN", "AWAITING_CUSTOMER"],
   VERIFYING: ["VERIFYING", "SUCCEEDED", "FAILED", "UNKNOWN", "AWAITING_CUSTOMER"],
   UNKNOWN: ["VERIFYING", "SUCCEEDED", "FAILED", "UNKNOWN"],
@@ -218,13 +292,32 @@ function nestedEvidence(evidence: AdapterEvidence): Record<string, unknown> {
     : evidence;
 }
 
+interface PhaseExecution {
+  status: AdapterAttemptStatus;
+  substatus?: string;
+  canonicalError?: string;
+  response?: unknown;
+  rawText?: string;
+  outputs: {
+    state: Record<string, unknown>;
+    public: Record<string, unknown>;
+    settledAmount?: DecimalInput;
+    providerFee?: DecimalInput;
+    providerReference?: string;
+    networkReference?: string;
+  };
+  clientAction?: AdapterClientAction;
+}
+
 export class DynamicRailEngine {
   private readonly options: DynamicRailEngineOptions;
   private readonly now: () => Date;
+  private readonly transitionBus: Pick<InvalidationBus, "publish">;
 
   constructor(options: DynamicRailEngineOptions) {
     this.options = options;
     this.now = options.now ?? (() => new Date());
+    this.transitionBus = options.invalidationBus ?? invalidationBus;
   }
 
   async preInitiate(attempt: DynamicAttempt, formData: AdapterFormData): Promise<DynamicRailResult> {
@@ -235,15 +328,37 @@ export class DynamicRailEngine {
     return this.toResult(current, execution);
   }
 
-  async initiate(attempt: DynamicAttempt, formData: AdapterFormData): Promise<DynamicRailResult> {
+  async initiate(
+    attempt: DynamicAttempt,
+    formData: AdapterFormData,
+    options: { slotReserved?: boolean } = {},
+  ): Promise<DynamicRailResult> {
     const current = await this.getAttempt(attempt.id);
     const normalized = await this.normalizeAndValidate(formData, true);
-    let reserved = false;
-    try {
-      await this.options.slots.reserveSlot(current);
-      reserved = true;
-    } catch (error) {
-      throw engineError("SLOT_RESERVATION_FAILED", error instanceof Error ? error.message : "Payment slot is unavailable", 409);
+    const preInitiateSteps = await this.options.flowProvider.getSteps("PRE_INITIATE", current);
+    if (preInitiateSteps.length > 0) {
+      const preExecution = await this.executeSteps("PRE_INITIATE", current, normalized, preInitiateSteps);
+      await this.persistOutputs(current, preExecution);
+      if (preExecution.status === "FAILED" || preExecution.status === "BLOCKED") {
+        await this.transition(current, preExecution.status);
+        if (options.slotReserved === true) {
+          await this.releaseSlot(current, preExecution.status);
+        }
+        return this.toResult(current, preExecution);
+      }
+    }
+    // The attempt-creation guard may already own the reservation (design §9.1
+    // rule 2). The reservation must have exactly one owner, otherwise a
+    // single-use link would be reserved twice and the second reservation would
+    // always find no free slot.
+    let reserved = options.slotReserved === true;
+    if (!reserved) {
+      try {
+        await this.options.slots.reserveSlot(current);
+        reserved = true;
+      } catch (error) {
+        throw engineError("SLOT_RESERVATION_FAILED", error instanceof Error ? error.message : "Payment slot is unavailable", 409);
+      }
     }
     try {
       await this.transition(current, "INITIATING");
@@ -270,7 +385,11 @@ export class DynamicRailEngine {
     }
   }
 
-  async confirm(attempt: DynamicAttempt, evidence: AdapterEvidence): Promise<DynamicRailResult> {
+  async confirm(
+    attempt: DynamicAttempt,
+    evidence: AdapterEvidence,
+    options: ConfirmOptions = {},
+  ): Promise<DynamicRailResult> {
     const current = await this.getAttempt(attempt.id);
     if (current.status === "SUCCEEDED") {
       return this.toResult(current, {
@@ -278,10 +397,31 @@ export class DynamicRailEngine {
         outputs: { state: {}, public: current.publicOutputs ?? {} },
       });
     }
-    if (current.status === "UNKNOWN" && current.pointOfNoReturn) {
-      throw engineError("POINT_OF_NO_RETURN", "A money-moving attempt in UNKNOWN cannot be resubmitted", 409);
+    if (options.claim) {
+      // The caller owns the atomic attempt-state claim. Only the winner runs
+      // the SUBMIT stack; a loser (including a duplicate key or an UNKNOWN
+      // attempt past the point of no return) returns the persisted state and
+      // never contacts the gateway again.
+      const claimed = await options.claim(current.id);
+      if (!claimed) {
+        const latest = await this.getAttempt(current.id);
+        return this.toResult(latest, {
+          status: latest.status,
+          outputs: { state: {}, public: latest.publicOutputs ?? {} },
+        });
+      }
+      current.status = "AUTHORIZING";
+      current.pointOfNoReturn = true;
+      await this.transitionBus.publish(ATTEMPT_TRANSITION_TOPIC, {
+        attemptId: current.id,
+        status: "AUTHORIZING",
+      } satisfies AttemptTransitionEvent);
+    } else {
+      if (current.status === "UNKNOWN" && current.pointOfNoReturn) {
+        throw engineError("POINT_OF_NO_RETURN", "A money-moving attempt in UNKNOWN cannot be resubmitted", 409);
+      }
+      await this.transition(current, "AUTHORIZING", { pointOfNoReturn: true });
     }
-    await this.transition(current, "AUTHORIZING", { pointOfNoReturn: true });
     const execution = await this.executePhase("SUBMIT", current, evidence);
     await this.persistOutputs(current, execution);
     if (execution.status === "UNKNOWN") {
@@ -314,12 +454,8 @@ export class DynamicRailEngine {
         outputs: execution.outputs.public,
       };
     }
-    await this.finalizeSuccess(current, combinedEvidence);
-    return {
-      attempt: current,
-      status: "SUCCEEDED",
-      outputs: execution.outputs.public,
-    };
+    const finalized = await this.finalizeSuccess(current, combinedEvidence);
+    return this.successResult(current, execution.outputs.public, finalized);
   }
 
   async verifyCallback(channel: string, rawRequest: unknown): Promise<DynamicRailResult> {
@@ -363,12 +499,8 @@ export class DynamicRailEngine {
         outputs: current.publicOutputs ?? {},
       };
     }
-    await this.finalizeSuccess(current, evidence);
-    return {
-      attempt: current,
-      status: "SUCCEEDED",
-      outputs: current.publicOutputs ?? {},
-    };
+    const finalized = await this.finalizeSuccess(current, evidence);
+    return this.successResult(current, current.publicOutputs ?? {}, finalized);
   }
 
   async inquire(attempt: DynamicAttempt): Promise<DynamicRailResult> {
@@ -396,6 +528,16 @@ export class DynamicRailEngine {
       const context = await this.readContext(current);
       if (context.trustedSuccessObserved === true) {
         await this.transition(current, "UNKNOWN", { canonicalError: "CONFLICTING_TRUSTED_SIGNALS" });
+        await this.openOperatorCase({
+          kind: "CONFLICT",
+          priority: "P1",
+          attemptId: current.id,
+          title: "Conflicting trusted signals",
+          detail:
+            `Attempt ${current.id} received a failure signal from the gateway while a trusted success `
+            + "had already been observed. The attempt is frozen in UNKNOWN for operator review.",
+          slaDueAt: this.slaDueAt(4),
+        });
         return this.toResult(current, {
           status: "UNKNOWN",
           canonicalError: "CONFLICTING_TRUSTED_SIGNALS",
@@ -422,12 +564,8 @@ export class DynamicRailEngine {
         outputs: execution.outputs.public,
       });
     }
-    await this.finalizeSuccess(current, response);
-    return {
-      attempt: current,
-      status: "SUCCEEDED",
-      outputs: execution.outputs.public,
-    };
+    const finalized = await this.finalizeSuccess(current, response);
+    return this.successResult(current, execution.outputs.public, finalized);
   }
 
   async refund(attempt: DynamicAttempt, amount: DecimalInput, adjustmentId: string): Promise<DynamicRailResult> {
@@ -540,7 +678,13 @@ export class DynamicRailEngine {
       );
     }
     attempt.status = nextStatus;
-    return this.options.attempts.updateAttempt(attempt.id, { status: nextStatus, ...patch });
+    const updated = await this.options.attempts.updateAttempt(attempt.id, { status: nextStatus, ...patch });
+    await this.transitionBus.publish(ATTEMPT_TRANSITION_TOPIC, {
+      attemptId: attempt.id,
+      status: nextStatus,
+      substatus: patch.substatus,
+    } satisfies AttemptTransitionEvent);
+    return updated;
   }
 
   private async getAttempt(attemptId: string): Promise<DynamicAttempt> {
@@ -566,23 +710,17 @@ export class DynamicRailEngine {
     phase: FlowPhase,
     attempt: DynamicAttempt,
     input: AdapterFormData,
-  ): Promise<{
-    status: AdapterAttemptStatus;
-    substatus?: string;
-    canonicalError?: string;
-    response?: unknown;
-    rawText?: string;
-    outputs: {
-      state: Record<string, unknown>;
-      public: Record<string, unknown>;
-      settledAmount?: DecimalInput;
-      providerFee?: DecimalInput;
-      providerReference?: string;
-      networkReference?: string;
-    };
-    clientAction?: AdapterClientAction;
-  }> {
+  ): Promise<PhaseExecution> {
     const steps = await this.options.flowProvider.getSteps(phase, attempt);
+    return this.executeSteps(phase, attempt, input, steps);
+  }
+
+  private async executeSteps(
+    phase: FlowPhase,
+    attempt: DynamicAttempt,
+    input: AdapterFormData,
+    steps: readonly FlowStep[],
+  ): Promise<PhaseExecution> {
     const state = await this.readContext(attempt);
     const publicOutputs = { ...attempt.publicOutputs };
     let response: unknown;
@@ -636,7 +774,26 @@ export class DynamicRailEngine {
       response = result.response;
       rawText = result.rawText ?? rawText;
       clientAction = this.clientActionFrom(result) ?? clientAction;
-      if (result.status === "UNKNOWN") {
+      if (String(result.status) === "BLOCKED") {
+        return {
+          status: "BLOCKED",
+          substatus: result.substatus,
+          canonicalError: result.canonicalError,
+          response,
+          rawText,
+          outputs: {
+            state,
+            public: publicOutputs,
+            settledAmount,
+            providerFee,
+            providerReference,
+            networkReference,
+          },
+          clientAction,
+        };
+      }
+      const resultStatus = result.status;
+      if (resultStatus === "UNKNOWN") {
         return {
           status: "UNKNOWN",
           substatus: result.substatus,
@@ -654,7 +811,7 @@ export class DynamicRailEngine {
           clientAction,
         };
       }
-      if (result.status === "FAILED") {
+      if (resultStatus === "FAILED") {
         return {
           status: "FAILED",
           substatus: result.substatus,
@@ -672,9 +829,9 @@ export class DynamicRailEngine {
           clientAction,
         };
       }
-      if (result.status === "AWAITING_CUSTOMER" || result.status === "VERIFYING") {
+      if (resultStatus === "AWAITING_CUSTOMER" || resultStatus === "VERIFYING") {
         return {
-          status: result.status,
+          status: resultStatus,
           substatus: result.substatus,
           canonicalError: result.canonicalError,
           response,
@@ -747,25 +904,39 @@ export class DynamicRailEngine {
 
   private async persistOutputs(
     attempt: DynamicAttempt,
-    execution: Awaited<ReturnType<DynamicRailEngine["executePhase"]>>,
+    execution: PhaseExecution,
   ): Promise<void> {
     const contextCiphertext = this.options.contextCipher
       ? await this.options.contextCipher.encrypt(execution.outputs.state)
       : attempt.contextCiphertext;
+    const settledAmount = execution.outputs.settledAmount === undefined
+      ? undefined
+      : decimal(execution.outputs.settledAmount).toFixed(4);
     await this.options.attempts.updateAttempt(attempt.id, {
       contextCiphertext,
       publicOutputs: execution.outputs.public,
       providerReference: execution.outputs.providerReference,
       networkReference: execution.outputs.networkReference,
-      settledAmount: execution.outputs.settledAmount === undefined
-        ? undefined
-        : decimal(execution.outputs.settledAmount).toFixed(4),
+      settledAmount,
     });
+    if (contextCiphertext !== undefined) {
+      attempt.contextCiphertext = contextCiphertext;
+    }
+    attempt.publicOutputs = execution.outputs.public;
+    if (execution.outputs.providerReference !== undefined) {
+      attempt.providerReference = execution.outputs.providerReference;
+    }
+    if (execution.outputs.networkReference !== undefined) {
+      attempt.networkReference = execution.outputs.networkReference;
+    }
+    if (settledAmount !== undefined) {
+      attempt.settledAmount = settledAmount;
+    }
   }
 
   private async handleRetryableOtp(
     attempt: DynamicAttempt,
-    execution: Awaited<ReturnType<DynamicRailEngine["executePhase"]>>,
+    execution: PhaseExecution,
   ): Promise<DynamicRailResult> {
     const nextAttempts = (attempt.otpAttempts ?? 0) + 1;
     const maximum = attempt.maxOtpAttempts ?? 3;
@@ -789,7 +960,11 @@ export class DynamicRailEngine {
     });
   }
 
-  private async finalizeSuccess(attempt: DynamicAttempt, _evidence: AdapterEvidence): Promise<void> {
+  private async finalizeSuccess(
+    attempt: DynamicAttempt,
+    _evidence: AdapterEvidence,
+  ): Promise<SlotCommitResult> {
+    const previousStatus = attempt.status;
     const post = async (transaction?: unknown): Promise<string> => {
       if (!this.options.ledgerPoster) {
         return `unposted:${attempt.id}`;
@@ -829,24 +1004,41 @@ export class DynamicRailEngine {
       );
       return result.entry.id;
     };
-    const runner = this.options.transactionRunner;
-    if (runner) {
-      await runner(async (transaction) => {
-        const ledgerEntryId = await post(transaction);
+
+    const finalize = async (transaction?: unknown): Promise<SlotCommitResult> => {
+      // The slot decision comes first: it either advances the counters (the
+      // normal path) or books the money to SUSPENSE and drafts the refund. All
+      // three effects - the slot decision, the journal posting and the
+      // SUCCEEDED status - use this same transaction, so they commit or roll
+      // back together (design §9.1 rules 6 and 7).
+      const commit = await this.options.slots.commitSlot(attempt, transaction);
+      if (commit?.outcome === "SUSPENSE") {
         await this.options.attempts.updateAttempt(attempt.id, {
           status: "SUCCEEDED",
-          ledgerEntryId,
+          substatus: "SUSPENSE_SETTLEMENT",
+          ...(commit.journalEntryId ? { ledgerEntryId: commit.journalEntryId } : {}),
         }, transaction);
-      });
-    } else {
-      const ledgerEntryId = await post();
+        return commit;
+      }
+      const ledgerEntryId = await post(transaction);
       await this.options.attempts.updateAttempt(attempt.id, {
         status: "SUCCEEDED",
         ledgerEntryId,
-      });
-    }
+      }, transaction);
+      return { outcome: "COMMITTED", journalEntryId: ledgerEntryId };
+    };
+
+    const runner = this.options.transactionRunner;
+    const result = runner ? await runner(finalize) : await finalize();
     attempt.status = "SUCCEEDED";
-    await this.options.slots.commitSlot(attempt);
+    if (result.outcome === "SUSPENSE") {
+      attempt.substatus = "SUSPENSE_SETTLEMENT";
+    }
+    await this.transitionBus.publish(ATTEMPT_TRANSITION_TOPIC, {
+      attemptId: attempt.id,
+      status: "SUCCEEDED",
+      substatus: attempt.substatus,
+    } satisfies AttemptTransitionEvent);
     const context = await this.readContext(attempt);
     context.trustedSuccessObserved = true;
     if (this.options.contextCipher) {
@@ -854,6 +1046,79 @@ export class DynamicRailEngine {
         contextCiphertext: await this.options.contextCipher.encrypt(context),
       });
     }
+    if (previousStatus === "FAILED" || previousStatus === "EXPIRED") {
+      await this.openOperatorCase({
+        kind: "LATE_SUCCESS",
+        priority: "P2",
+        attemptId: attempt.id,
+        title: "Late success recovered",
+        detail:
+          `Attempt ${attempt.id} succeeded after it had reached ${previousStatus}`
+          + (result.outcome === "SUSPENSE" ? " and was routed to SUSPENSE" : "")
+          + ". Verify the customer notification and the merchant credit.",
+        slaDueAt: this.slaDueAt(24),
+      });
+    }
+    await this.evaluateReporting(attempt);
+    return result;
+  }
+
+  private async evaluateReporting(attempt: DynamicAttempt): Promise<void> {
+    if (!this.options.reportingEvaluator) {
+      return;
+    }
+    try {
+      await this.options.reportingEvaluator.evaluate({
+        id: attempt.id,
+        merchantId: attempt.merchantId,
+        amount: attempt.settledAmount ?? attempt.totalChargedAmount ?? attempt.requestedAmount,
+        currency: attempt.currency,
+        status: "SUCCEEDED",
+        settledAt: this.now(),
+      });
+    } catch {
+      return;
+    }
+  }
+
+  private async openOperatorCase(input: OperatorCaseOpenInput): Promise<void> {
+    if (!this.options.operatorCaseSink) {
+      return;
+    }
+    await this.options.operatorCaseSink.open(input);
+  }
+
+  private slaDueAt(hours: number): Date {
+    return new Date(this.now().getTime() + hours * 60 * 60 * 1000);
+  }
+
+  /**
+   * The result of a successful settlement. A settlement that was routed to
+   * SUSPENSE is not reported as a clean success: it carries the distinct
+   * settlement marker and the substatus, so the caller cannot mistake it for a
+   * normal merchant credit.
+   */
+  private successResult(
+    attempt: DynamicAttempt,
+    outputs: Record<string, unknown>,
+    finalized: SlotCommitResult,
+  ): DynamicRailResult {
+    if (finalized.outcome === "SUSPENSE") {
+      return {
+        attempt,
+        status: "SUCCEEDED",
+        substatus: "SUSPENSE_SETTLEMENT",
+        canonicalError: "SLOT_ALREADY_SETTLED_SUSPENSE",
+        settlement: "SUSPENSE",
+        outputs,
+      };
+    }
+    return {
+      attempt,
+      status: "SUCCEEDED",
+      settlement: "NORMAL",
+      outputs,
+    };
   }
 
   /**

@@ -2300,7 +2300,7 @@ model ReportingRule {
   id                String              @id @default(uuid(7))
   createdAt         DateTime            @default(now()) @map("created_at")
   updatedAt         DateTime            @updatedAt @map("updated_at")
-  authority         String              @default("CBL") @db.Text
+  authority         String              @default("CBL") @db.VarChar(64)
   reportType        ReportingType       @map("report_type")
   thresholdAmount   Decimal?            @map("threshold_amount") @db.Decimal(18, 4)
   windowSeconds     Int?                @map("window_seconds")

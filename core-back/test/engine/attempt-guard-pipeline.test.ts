@@ -229,6 +229,51 @@ describe("the attempt-creation guard (design §9.1 rule 2)", () => {
   });
 });
 
+describe("OD-10 sandbox access for a pending merchant", () => {
+  test("allows the sandbox when OD-10 is absent (documented default true)", async () => {
+    const fixture = createGuardFixture({
+      merchant: merchantRow({ status: "PENDING" }),
+    });
+    const pipeline = buildPipeline(fixture);
+
+    const decision = await pipeline.guard(guardRequest());
+
+    expect(decision.outcome).toBe("ALLOW");
+    expect(fixture.state.createdAttempts[0]?.status).toBe("CREATED");
+  });
+
+  test("reads sandboxBeforeApproval=false from the OD-10 register object", async () => {
+    const fixture = createGuardFixture({
+      merchant: merchantRow({ status: "PENDING" }),
+      platformSettings: {
+        "OD-10": { sandboxBeforeApproval: false },
+      },
+    });
+    const pipeline = buildPipeline(fixture);
+
+    const decision = await pipeline.guard(guardRequest());
+
+    expect(decision.outcome).toBe("BLOCK");
+    expect(decision.reasons[0]).toBe("MERCHANT_NOT_ACTIVE");
+    expect(fixture.state.slotDeltas).toEqual([]);
+  });
+
+  test("reads sandboxBeforeApproval=true from the OD-10 register object", async () => {
+    const fixture = createGuardFixture({
+      merchant: merchantRow({ status: "PENDING" }),
+      platformSettings: {
+        "OD-10": { sandboxBeforeApproval: true },
+      },
+    });
+    const pipeline = buildPipeline(fixture);
+
+    const decision = await pipeline.guard(guardRequest());
+
+    expect(decision.outcome).toBe("ALLOW");
+    expect(fixture.state.createdAttempts[0]?.status).toBe("CREATED");
+  });
+});
+
 describe("the guard against the production repositories", () => {
   test("the velocity rules are read from the database through the repositories", async () => {
     const fixture = createPrismaGuardFixture({

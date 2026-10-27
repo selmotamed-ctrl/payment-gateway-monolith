@@ -97,6 +97,8 @@ router.post(
     paramsSchema: idParamsSchema,
     schema: decideSchema,
     bodyFrom: (_req, body) => toCoreJoinRequestDecide(body),
+    // An approval that needs four eyes is queued: core answers `202 Accepted`.
+    relayStatus: true,
   }),
 );
 

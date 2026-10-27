@@ -2,7 +2,7 @@ import "dotenv/config";
 import { defineConfig } from "prisma/config";
 
 const databaseUrl =
-  process.env.DATABASE_URL ?? "mysql://gateway:gateway_pw@127.0.0.1:3307/payment_gateway";
+  process.env.DATABASE_URL ?? "mysql://admin:admin@127.0.0.1:3306/payment_gateway_monolith";
 
 const shadowDatabaseUrl = process.env.SHADOW_DATABASE_URL;
 

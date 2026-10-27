@@ -34,9 +34,9 @@ type AmlCase = {
 
 const RESOLUTIONS = [
     { title: "Release", value: "RELEASE" },
-    { title: "Void And Return", value: "VOID_AND_RETURN" },
-    { title: "Freeze", value: "FREEZE" },
-    { title: "Escalate STR", value: "ESCALATE_STR" },
+    { title: "Void And Return", value: "REJECT" },
+    { title: "Freeze", value: "AML_HOLD" },
+    { title: "Escalate STR", value: "REPORT" },
 ];
 
 const AmlCasesPage = dc(() => {
@@ -78,8 +78,9 @@ const AmlCasesPage = dc(() => {
         actionLoading.value = true;
         try {
             await api.post(urlsMap.amlCasePropose(selected.value.id), {
-                resolution: resolution.value,
-                rationale: rationale.value,
+                severity: selected.value.severity,
+                action: resolution.value,
+                reason: rationale.value,
             });
             dialogOpen.value = false;
             showSnackBar({ type: "success", message: t("Propose") });

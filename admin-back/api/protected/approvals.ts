@@ -14,6 +14,9 @@ export const decisionSchema = z
     checkerUserId: zIdentifier.optional(),
     baseVersion: z.number().int().min(1).optional(),
     comment: z.string().max(2000).optional(),
+    /** The checker's decision on a chargeback: core executes the adjustment with it. */
+    outcome: z.enum(["WON", "LOST"]).optional(),
+    riskAcceptanceNote: z.string().max(2000).optional(),
   })
   .strict();
 

@@ -416,6 +416,19 @@ CREATE TABLE `gateway_versions` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
+CREATE TABLE `gateway_version_evidence` (
+    `id` VARCHAR(191) NOT NULL,
+    `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updated_at` DATETIME(3) NOT NULL,
+    `gateway_version_id` VARCHAR(191) NOT NULL,
+    `evidence_json` JSON NOT NULL,
+    `ran_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    UNIQUE INDEX `gateway_version_evidence_gateway_version_id_key`(`gateway_version_id`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
 CREATE TABLE `gateway_environments` (
     `id` VARCHAR(191) NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -909,6 +922,7 @@ CREATE TABLE `payment_attempts` (
     INDEX `payment_attempts_merchant_id_idx`(`merchant_id`),
     INDEX `payment_attempts_status_next_check_at_idx`(`status`, `next_check_at`),
     INDEX `payment_attempts_gateway_version_id_idx`(`gateway_version_id`),
+    INDEX `payment_attempts_route_id_status_idx`(`route_id`, `status`),
     UNIQUE INDEX `payment_attempts_link_id_idempotency_key_key`(`link_id`, `idempotency_key`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -987,9 +1001,36 @@ CREATE TABLE `reconciliation_runs` (
     `window_end` DATETIME(3) NOT NULL,
     `file_hash` CHAR(64) NOT NULL,
     `stats_json` JSON NOT NULL,
+    `file_name` TEXT NULL,
+    `file_content` LONGBLOB NULL,
+    `ingested_at` DATETIME(3) NULL,
 
     UNIQUE INDEX `reconciliation_runs_file_hash_key`(`file_hash`),
     INDEX `reconciliation_runs_statement_source_id_idx`(`statement_source_id`),
+    INDEX `reconciliation_runs_ingested_at_idx`(`ingested_at`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `background_jobs` (
+    `id` VARCHAR(191) NOT NULL,
+    `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updated_at` DATETIME(3) NOT NULL,
+    `job_type` ENUM('RECONCILIATION_RUN', 'ADJUSTMENT_EXECUTION') NOT NULL,
+    `reference_type` VARCHAR(191) NOT NULL,
+    `reference_id` VARCHAR(191) NOT NULL,
+    `payload_json` JSON NOT NULL,
+    `state` ENUM('QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED') NOT NULL DEFAULT 'QUEUED',
+    `attempts` INTEGER NOT NULL DEFAULT 0,
+    `max_attempts` INTEGER NOT NULL DEFAULT 5,
+    `available_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `locked_at` DATETIME(3) NULL,
+    `last_error` TEXT NULL,
+    `completed_at` DATETIME(3) NULL,
+
+    INDEX `background_jobs_state_available_at_idx`(`state`, `available_at`),
+    INDEX `background_jobs_state_locked_at_idx`(`state`, `locked_at`),
+    INDEX `background_jobs_reference_type_reference_id_idx`(`reference_type`, `reference_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -1241,7 +1282,7 @@ CREATE TABLE `reporting_rules` (
     `id` VARCHAR(191) NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `authority` TEXT NOT NULL DEFAULT 'CBL',
+    `authority` VARCHAR(64) NOT NULL DEFAULT 'CBL',
     `report_type` ENUM('LARGE_TRANSACTION', 'SUSPICIOUS_ACTIVITY', 'PERIODIC_RETURN') NOT NULL,
     `threshold_amount` DECIMAL(18, 4) NULL,
     `window_seconds` INTEGER NULL,
@@ -1480,6 +1521,9 @@ ALTER TABLE `gateway_versions` ADD CONSTRAINT `gateway_versions_approval_request
 
 -- AddForeignKey
 ALTER TABLE `gateway_versions` ADD CONSTRAINT `gateway_versions_rollback_version_id_fkey` FOREIGN KEY (`rollback_version_id`) REFERENCES `gateway_versions`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `gateway_version_evidence` ADD CONSTRAINT `gateway_version_evidence_gateway_version_id_fkey` FOREIGN KEY (`gateway_version_id`) REFERENCES `gateway_versions`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `gateway_environments` ADD CONSTRAINT `gateway_environments_gateway_version_id_fkey` FOREIGN KEY (`gateway_version_id`) REFERENCES `gateway_versions`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1726,7 +1770,7 @@ CREATE TABLE IF NOT EXISTS `schema_versions` (
     CONSTRAINT `schema_versions_pkey` PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO `schema_versions` (`id`, `version`) VALUES (1, 2)
+INSERT INTO `schema_versions` (`id`, `version`) VALUES (1, 5)
 ON DUPLICATE KEY UPDATE `version` = VALUES(`version`);
 
 -- Domain invariants that the Prisma datamodel cannot express.

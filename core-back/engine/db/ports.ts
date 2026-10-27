@@ -64,6 +64,7 @@ export interface MerchantRow {
   activatedAt: Date | null;
   suspendedAt: Date | null;
   suspensionReasonCode: string | null;
+  commissionReceivableCeiling?: unknown;
   negativeBalanceCeiling: unknown;
   payoutBankDetailsJson: unknown;
   expectedMonthlyVolume?: unknown;
@@ -567,6 +568,15 @@ export interface MerchantRepository {
   }): Promise<MerchantRow[]>;
   getWalletBalance(tx: Tx, merchantId: string): Promise<Money>;
   getNegativeBalanceCeiling(tx: Tx, merchantId: string): Promise<Money>;
+  /**
+   * The merchant's outstanding COMMISSION_RECEIVABLE balance (design §7.1).
+   *
+   * The ledger account itself is global, so the balance is attributed to the
+   * merchant through the attempt that each receivable posting references.
+   * The method is optional only so older in-memory repository fakes keep
+   * compiling; every production repository implements it.
+   */
+  getCommissionReceivableBalance?(tx: Tx, merchantId: string): Promise<Money>;
 }
 
 export interface OnboardingRepository {
@@ -652,6 +662,12 @@ export interface PaymentRepository {
   resolveSettlementTarget(tx: Tx, input: { railCode: string | null; merchantId: string | null; env: Environment }): Promise<SettlementTarget>;
   createAttempt(tx: Tx, data: Partial<PaymentAttemptRow> & { linkId: string; merchantId: string; applicationId: string }): Promise<PaymentAttemptRow>;
   findAttemptById(tx: Tx, id: string): Promise<PaymentAttemptRow | null>;
+  /**
+   * Takes a `SELECT ... FOR UPDATE` row lock on the attempt. Refund and
+   * chargeback amount checks use it so two concurrent approvals serialise
+   * instead of both reading the same pre-refund total.
+   */
+  lockAttemptById?(tx: Tx, id: string): Promise<PaymentAttemptRow | null>;
   findAttemptByReference(tx: Tx, reference: string): Promise<PaymentAttemptRow | null>;
   findAttemptByIdempotencyKey(tx: Tx, idempotencyKey: string): Promise<PaymentAttemptRow | null>;
   findAttemptByProviderReference(tx: Tx, providerReference: string): Promise<PaymentAttemptRow | null>;
@@ -688,6 +704,12 @@ export interface DisputeRepository {
   listAdjustments(tx: Tx, filter: { state?: string; limit: number; offset: number }): Promise<AdjustmentRow[]>;
   updateAdjustment(tx: Tx, id: string, patch: Partial<AdjustmentRow>): Promise<AdjustmentRow>;
   sumExecutedRefundsForAttempt(tx: Tx, attemptId: string): Promise<Money>;
+  /**
+   * Sums the refunds of an attempt in the supplied states. The governance
+   * path asks for EXECUTED and EXECUTING together so an in-flight gateway
+   * refund is reserved against the settled amount as well.
+   */
+  sumRefundsForAttempt?(tx: Tx, attemptId: string, states?: string[]): Promise<Money>;
 }
 
 export interface GovernanceRepository {

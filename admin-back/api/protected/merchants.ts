@@ -84,6 +84,8 @@ router.post(
     paramsSchema: idParamsSchema,
     schema: proposeEditSchema,
     bodyFrom: (_req, body) => toCoreMerchantProposeEdit(body),
+    // The edit is an approval request: core answers `202 Accepted`.
+    relayStatus: true,
   }),
 );
 

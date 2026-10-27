@@ -24,9 +24,9 @@ import { LedgerPoster } from "../../engine/ledger/LedgerPoster";
 import {
   GoLiveGateValidator,
   type ChannelVerificationEvidence,
-  type GoLiveValidationResult,
 } from "../../engine/flow/GoLiveGateValidator";
 import { Vault } from "../../engine/crypto/Vault";
+import { VaultContextCipher } from "../../engine/runtime/contextCipher";
 import { ApiConsumerError } from "../../engine/apiConsumer/ApiConsumer";
 import type { AdapterAttempt } from "../../engine/flow/NativeAdapterRegistry";
 import {
@@ -35,6 +35,9 @@ import {
   type MockScenario,
 } from "../../engine/mockGateway/MockGatewayServer";
 import {
+  activateApprovedJoinRequest,
+  activateGatewayVersionInTransaction,
+  assertGatewayVersionGoLive,
   executeApprovalSubject,
   executeCashout,
   type GovernanceExecutionContext,
@@ -42,6 +45,7 @@ import {
 import { evaluateRouteDailyCap } from "../../engine/flow/VisibleRailsResolver";
 import { dayWindowInTimeZone, resolveGatewayTimezone } from "../../engine/flow/DailyRouteVolume";
 import { PrismaRepositories } from "../../engine/db/repositories";
+import type { Tx } from "../../engine/db/ports";
 import { validateTransformUsage, type TransformPipe, type TransformUsage } from "../../engine/transforms/TransformPipeline";
 import { json, jsonOptional } from "./json";
 import { requireAuthentication, requireAuthorities, principalOf } from "../middleware/authDoubleCheck";
@@ -65,6 +69,8 @@ const vault = new Vault();
 const governanceContext = (platform: ReturnType<typeof getPlatformRuntime>): GovernanceExecutionContext => ({
   ledgerPoster: platform.ledgerPoster,
   repositories: platform.repositories,
+  engine: platform.engine,
+  transitionBus: invalidationBus,
 });
 
 /**
@@ -119,6 +125,347 @@ const assertConfidential = (request: Request): void => {
   if (!roleHasConfidentialAccess(request)) {
     throw new ApiError(403, "AML_CONFIDENTIAL_ROLE_REQUIRED", "This resource is restricted to compliance roles");
   }
+};
+
+const reportingPayloadCipher = new VaultContextCipher(vault, "reporting-payload");
+
+const REPORTING_ROLES = ["MLRO", "COMPLIANCE"];
+const REPORTING_AUTHORITIES = [
+  "report:approve",
+  "report:review",
+  "aml:write",
+  "compliance:write",
+  "approval:check",
+  "approval:write",
+];
+
+const assertReportingAuthority = (request: Request): void => {
+  assertConfidential(request);
+  const principal = principalOf(request);
+  if (REPORTING_ROLES.includes(principal.role ?? "")) {
+    return;
+  }
+  if (principal.authorities.some((authority) => authority === "*" || REPORTING_AUTHORITIES.includes(authority))) {
+    return;
+  }
+  throw new ApiError(
+    403,
+    "REPORTING_AUTHORITY_REQUIRED",
+    "A reporting action requires an MLRO / compliance authority",
+  );
+};
+
+const readRegulatoryReportPayload = async (ciphertext: string | null | undefined): Promise<Record<string, unknown>> => {
+  if (!ciphertext) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(ciphertext) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    // The evaluator stores the reporting payload encrypted. The admin route
+    // stores the draft payload as JSON, so both shapes are understood.
+  }
+  try {
+    const decoded = await reportingPayloadCipher.decrypt(ciphertext);
+    return decoded && typeof decoded === "object" && !Array.isArray(decoded)
+      ? decoded as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+};
+
+const assertReportSubmitter = async (
+  db: typeof client,
+  report: { approvalRequestId: string | null },
+  actorUserId: string,
+): Promise<void> => {
+  if (!report.approvalRequestId) {
+    return;
+  }
+  const approval = await db.approvalRequest.findUnique({ where: { id: report.approvalRequestId } });
+  if (approval) {
+    assertCheckerIsNotMaker(approval.makerUserId, actorUserId);
+  }
+};
+
+export const createRegulatoryReportViaApproval = async (
+  db: typeof client,
+  input: {
+    reportType: "LARGE_TRANSACTION" | "SUSPICIOUS_ACTIVITY" | "PERIODIC_RETURN";
+    authority: string;
+    subjectType: string;
+    subjectId: string;
+    amlCaseId?: string | null;
+    payload: Record<string, unknown>;
+  },
+  actor: { userId: string; role: string | null },
+): Promise<{ reportId: string; approvalRequestId: string; status: string }> => {
+  const payloadJson = JSON.stringify(input.payload);
+  const payloadSha256 = createHash("sha256").update(payloadJson).digest("hex");
+  return db.$transaction(async (tx) => {
+    const report = await tx.regulatoryReport.create({
+      data: {
+        reportType: input.reportType,
+        authority: input.authority,
+        subjectType: input.subjectType,
+        subjectId: input.subjectId,
+        amlCaseId: input.amlCaseId ?? null,
+        payloadCiphertext: payloadJson,
+        payloadSha256,
+        status: "PENDING_CHECKER",
+        confidential: true,
+      },
+    });
+    const approval = await tx.approvalRequest.create({
+      data: {
+        subjectType: "REGULATORY_REPORT",
+        subjectId: report.id,
+        payloadDiffJson: {
+          reportType: input.reportType,
+          authority: input.authority,
+          subjectType: input.subjectType,
+          subjectId: input.subjectId,
+          ruleId: input.payload.ruleId ?? null,
+        },
+        mode: "STANDARD",
+        makerUserId: actor.userId,
+        state: "PENDING_REVIEW",
+        expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+      },
+    });
+    await tx.regulatoryReport.update({
+      where: { id: report.id },
+      data: { approvalRequestId: approval.id },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "SYSTEM",
+        action: "REGULATORY_REPORT_DRAFTED",
+        entityType: "REGULATORY_REPORT",
+        entityId: report.id,
+        beforeJson: {},
+        afterJson: {
+          reportType: report.reportType,
+          authority: report.authority,
+          approvalRequestId: approval.id,
+        },
+        approvalRequestId: approval.id,
+      },
+    });
+    return { reportId: report.id, approvalRequestId: approval.id, status: report.status };
+  });
+};
+
+export const submitRegulatoryReport = async (
+  db: typeof client,
+  input: {
+    reportId: string;
+    submissionRef: string;
+    submittedAt?: Date | null;
+    actorUserId: string;
+    actorRole: string | null;
+  },
+): Promise<{ id: string; status: string; submissionRef: string | null; submittedAt: Date | null }> => {
+  const report = await db.regulatoryReport.findUnique({ where: { id: input.reportId } });
+  if (!report) {
+    throw new ApiError(404, "REGULATORY_REPORT_NOT_FOUND", "The regulatory report does not exist");
+  }
+  if (report.status !== "APPROVED") {
+    throw new ApiError(
+      409,
+      "REGULATORY_REPORT_NOT_APPROVED",
+      `The regulatory report is '${report.status}' and cannot be submitted`,
+      { reportId: report.id, status: report.status },
+    );
+  }
+  await assertReportSubmitter(db, report, input.actorUserId);
+
+  // OD-1: a PROVISIONAL rule is internal only. The evaluator links the report
+  // to its triggering rule through the persisted payload's `ruleId`.
+  const payload = await readRegulatoryReportPayload(report.payloadCiphertext);
+  const ruleId = typeof payload.ruleId === "string" && payload.ruleId.length > 0 ? payload.ruleId : null;
+  if (ruleId) {
+    const rule = await db.reportingRule.findUnique({ where: { id: ruleId } });
+    if (rule && rule.status !== "CONFIRMED") {
+      throw new ApiError(
+        409,
+        "REPORTING_RULE_PROVISIONAL",
+        "A PROVISIONAL reporting rule can never produce a live regulatory filing",
+        { reportId: report.id, ruleId, ruleStatus: rule.status },
+      );
+    }
+  }
+
+  const submittedAt = input.submittedAt ?? new Date();
+  return db.$transaction(async (tx) => {
+    const current = await tx.regulatoryReport.findUnique({ where: { id: report.id } });
+    if (!current) {
+      throw new ApiError(404, "REGULATORY_REPORT_NOT_FOUND", "The regulatory report does not exist");
+    }
+    if (current.status !== "APPROVED") {
+      throw new ApiError(
+        409,
+        "REGULATORY_REPORT_NOT_APPROVED",
+        `The regulatory report is '${current.status}' and cannot be submitted`,
+        { reportId: current.id, status: current.status },
+      );
+    }
+    const updated = await tx.regulatoryReport.update({
+      where: { id: current.id },
+      data: { status: "SUBMITTED", submissionRef: input.submissionRef, submittedAt },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: input.actorUserId,
+        role: input.actorRole ?? "SYSTEM",
+        action: "REGULATORY_REPORT_SUBMITTED",
+        entityType: "REGULATORY_REPORT",
+        entityId: updated.id,
+        beforeJson: { status: "APPROVED" },
+        afterJson: {
+          status: "SUBMITTED",
+          submissionRef: input.submissionRef,
+          submittedAt: submittedAt.toISOString(),
+          ruleId,
+        },
+        approvalRequestId: updated.approvalRequestId,
+      },
+    });
+    return {
+      id: updated.id,
+      status: updated.status,
+      submissionRef: updated.submissionRef,
+      submittedAt: updated.submittedAt,
+    };
+  });
+};
+
+export const acknowledgeRegulatoryReport = async (
+  db: typeof client,
+  input: {
+    reportId: string;
+    status: "ACKNOWLEDGED" | "REJECTED_BY_AUTHORITY";
+    reason?: string | null;
+    actorUserId: string;
+    actorRole: string | null;
+  },
+): Promise<{ id: string; status: string; reason: string | null }> => {
+  const report = await db.regulatoryReport.findUnique({ where: { id: input.reportId } });
+  if (!report) {
+    throw new ApiError(404, "REGULATORY_REPORT_NOT_FOUND", "The regulatory report does not exist");
+  }
+  if (report.status !== "SUBMITTED") {
+    throw new ApiError(
+      409,
+      "REGULATORY_REPORT_NOT_SUBMITTED",
+      `The regulatory report is '${report.status}' and cannot be acknowledged`,
+      { reportId: report.id, status: report.status },
+    );
+  }
+  const reason = input.reason?.trim() || null;
+  if (input.status === "REJECTED_BY_AUTHORITY" && !reason) {
+    throw new ApiError(
+      400,
+      "REJECTION_REASON_REQUIRED",
+      "A rejection by the authority must carry a reason",
+    );
+  }
+  return db.$transaction(async (tx) => {
+    const current = await tx.regulatoryReport.findUnique({ where: { id: report.id } });
+    if (!current) {
+      throw new ApiError(404, "REGULATORY_REPORT_NOT_FOUND", "The regulatory report does not exist");
+    }
+    if (current.status !== "SUBMITTED") {
+      throw new ApiError(
+        409,
+        "REGULATORY_REPORT_NOT_SUBMITTED",
+        `The regulatory report is '${current.status}' and cannot be acknowledged`,
+        { reportId: current.id, status: current.status },
+      );
+    }
+    const updated = await tx.regulatoryReport.update({
+      where: { id: current.id },
+      data: { status: input.status },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: input.actorUserId,
+        role: input.actorRole ?? "SYSTEM",
+        action: input.status === "ACKNOWLEDGED"
+          ? "REGULATORY_REPORT_ACKNOWLEDGED"
+          : "REGULATORY_REPORT_REJECTED_BY_AUTHORITY",
+        entityType: "REGULATORY_REPORT",
+        entityId: updated.id,
+        beforeJson: { status: "SUBMITTED" },
+        afterJson: { status: updated.status, reason },
+        approvalRequestId: updated.approvalRequestId,
+      },
+    });
+    return { id: updated.id, status: updated.status, reason };
+  });
+};
+
+export const proposeReportingRulePromotion = async (
+  db: typeof client,
+  input: { ruleId: string; actorUserId: string; actorRole: string | null },
+): Promise<{ approvalRequestId: string; status: string }> => {
+  const rule = await db.reportingRule.findUnique({ where: { id: input.ruleId } });
+  if (!rule) {
+    throw new ApiError(404, "REPORTING_RULE_NOT_FOUND", "The reporting rule does not exist");
+  }
+  if (rule.status === "CONFIRMED") {
+    throw new ApiError(409, "REPORTING_RULE_ALREADY_CONFIRMED", "The reporting rule is already CONFIRMED");
+  }
+  const pending = await db.approvalRequest.findFirst({
+    where: {
+      subjectType: "REPORTING_RULE",
+      subjectId: rule.id,
+      state: { in: ["DRAFT", "PENDING_REVIEW"] },
+    },
+  });
+  if (pending) {
+    throw new ApiError(
+      409,
+      "REPORTING_RULE_PROMOTION_PENDING",
+      "A promotion of this reporting rule is already pending",
+      { approvalRequestId: pending.id },
+    );
+  }
+  return db.$transaction(async (tx) => {
+    const approval = await tx.approvalRequest.create({
+      data: {
+        subjectType: "REPORTING_RULE",
+        subjectId: rule.id,
+        payloadDiffJson: { from: rule.status, to: "CONFIRMED" },
+        mode: "STANDARD",
+        makerUserId: input.actorUserId,
+        state: "PENDING_REVIEW",
+        expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+      },
+    });
+    await tx.reportingRule.update({
+      where: { id: rule.id },
+      data: { approvalRequestId: approval.id },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: input.actorUserId,
+        role: input.actorRole ?? "SYSTEM",
+        action: "REPORTING_RULE_PROMOTION_PROPOSED",
+        entityType: "REPORTING_RULE",
+        entityId: rule.id,
+        beforeJson: { status: rule.status },
+        afterJson: { status: rule.status, requestedStatus: "CONFIRMED" },
+        approvalRequestId: approval.id,
+      },
+    });
+    return { approvalRequestId: approval.id, status: "PENDING_REVIEW" };
+  });
 };
 
 router.post("/auth/login", async (request: Request, response: Response) => {
@@ -495,29 +842,16 @@ router.post("/join-requests/:id/decide", async (request: Request, response: Resp
     return;
   }
   if (body.decision === "APPROVED") {
+    const platform = getPlatformRuntime(client as never);
     await client.$transaction(async (tx) => {
-      await tx.joinRequest.update({
-        where: { id },
-        data: {
-          status: "APPROVED",
-          decision: "APPROVED",
-          decisionReasonCode: body.reasonCode,
-          decisionNotes: body.notes,
-          proposedRiskTier: body.proposedRiskTier,
-        },
-      });
-      await tx.merchant.update({
-        where: { id: joinRequest.merchantId },
-        data: {
-          status: "ACTIVE",
-          kybStatus: "VERIFIED",
-          riskTier: body.proposedRiskTier ?? joinRequest.proposedRiskTier,
-          activatedAt: new Date(),
-        },
-      });
-      await tx.wallet.updateMany({
-        where: { merchantId: joinRequest.merchantId },
-        data: { status: "ACTIVE" },
+      await activateApprovedJoinRequest(governanceContext(platform), tx as never, {
+        joinRequestId: joinRequest.id,
+        checkerUserId: actor.userId,
+        checkerRole: actor.role,
+        approvalRequestId: joinRequest.approvalRequestId ?? null,
+        decisionReasonCode: body.reasonCode ?? null,
+        decisionNotes: body.notes ?? null,
+        proposedRiskTier: body.proposedRiskTier ?? joinRequest.proposedRiskTier ?? null,
       });
     });
     response.json({ id: joinRequest.id, status: "APPROVED" });
@@ -727,12 +1061,6 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
     throw new ApiError(409, "APPROVAL_NOT_PENDING", "The approval request is not pending review");
   }
   const platform = getPlatformRuntime(client as never);
-  if (approval.subjectType === "GATEWAY_VERSION") {
-    // The go-live gates are evaluated before the approval is consumed, so a
-    // version that fails them keeps its pending approval and the operator
-    // sees the failed gates.
-    await assertGoLiveGates(approval.subjectId, actor.userId);
-  }
   if (approval.subjectType === "ADJUSTMENT") {
     // The execution of an adjustment moves the money, so it is a background
     // job: the request records the checker and queues the execution. The job
@@ -786,11 +1114,7 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
       notes: body.notes ?? null,
       outcome: body.outcome ?? null,
     });
-    const state = result.status === "HELD"
-      ? "PENDING_REVIEW"
-      : result.reason === "NO_EXECUTABLE_SUBJECT"
-        ? "APPROVED"
-        : "EXECUTED";
+    const state = result.status === "HELD" ? "PENDING_REVIEW" : "EXECUTED";
     const updatedApproval = await tx.approvalRequest.update({
       where: { id },
       data: {
@@ -802,7 +1126,12 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
     return { updated: updatedApproval, execution: result };
   });
   if (approval.subjectType === "GATEWAY_VERSION") {
-    await activateGatewayVersion(approval.subjectId, actor.userId);
+    // The state change committed with the go-live gate decision; only the
+    // outbound cache is invalidated after the commit.
+    const version = await client.gatewayVersion.findUnique({ where: { id: approval.subjectId } });
+    if (version) {
+      await invalidationBus.invalidateGateway(version.gatewayId, "gateway-version-live");
+    }
   }
   response.json({
     id: updated.id,
@@ -831,25 +1160,13 @@ export const activateGatewayVersion = async (
   versionId: string,
   checkerUserId: string | null = null,
 ): Promise<void> => {
-  const version = await client.gatewayVersion.findUnique({ where: { id: versionId } });
-  if (!version) {
-    throw new ApiError(404, "GATEWAY_VERSION_NOT_FOUND", "The gateway version does not exist");
-  }
-  // The gates are evaluated before anything is written, so a version that
-  // fails them never becomes the live configuration of the gateway.
-  await assertGoLiveGates(versionId, checkerUserId);
-  await client.$transaction(async (tx) => {
-    await tx.gatewayVersion.updateMany({
-      where: { gatewayId: version.gatewayId, state: "LIVE", id: { not: version.id } },
-      data: { state: "SUPERSEDED" },
-    });
-    await tx.gatewayVersion.update({ where: { id: version.id }, data: { state: "LIVE" } });
-    await tx.gateway.update({
-      where: { id: version.gatewayId },
-      data: { activeVersionId: version.id, status: "LIVE" },
-    });
-  });
-  await invalidationBus.invalidateGateway(version.gatewayId, "gateway-version-live");
+  // The gates and the state change share the transaction of the activation,
+  // so a version can never become live unless every gate passed in the same
+  // commit (design §14).
+  const activated = await client.$transaction(async (tx) =>
+    activateGatewayVersionInTransaction(tx as never, versionId, checkerUserId),
+  );
+  await invalidationBus.invalidateGateway(activated.gatewayId, "gateway-version-live");
 };
 
 router.post("/approvals/:id/reject", async (request: Request, response: Response) => {
@@ -1031,6 +1348,18 @@ router.post("/aml/reporting-rules", async (request: Request, response: Response)
   response.status(201).json({ id: rule.id, status: rule.status });
 });
 
+router.post("/aml/reporting-rules/:id/promote", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const actor = actorFromRequest(request);
+  const result = await proposeReportingRulePromotion(client, {
+    ruleId: id,
+    actorUserId: actor.userId,
+    actorRole: actor.role,
+  });
+  response.status(202).json(result);
+});
+
 router.get("/aml/reports", async (request: Request, response: Response) => {
   assertConfidential(request);
   const reports = await client.regulatoryReport.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
@@ -1041,7 +1370,9 @@ router.get("/aml/reports", async (request: Request, response: Response) => {
       authority: report.authority,
       status: report.status,
       confidential: report.confidential,
+      submissionRef: report.submissionRef,
       submittedAt: report.submittedAt,
+      approvalRequestId: report.approvalRequestId,
     })),
   });
 });
@@ -1062,32 +1393,81 @@ router.post("/aml/reports", async (request: Request, response: Response) => {
     request.body,
   );
   const actor = actorFromRequest(request);
-  const payloadJson = JSON.stringify(body.payload);
-  const report = await client.regulatoryReport.create({
-    data: {
+  const created = await createRegulatoryReportViaApproval(
+    client,
+    {
       reportType: body.reportType,
       authority: body.authority,
       subjectType: body.subjectType,
       subjectId: body.subjectId,
       amlCaseId: body.amlCaseId ?? null,
-      payloadCiphertext: payloadJson,
-      payloadSha256: createHash("sha256").update(payloadJson).digest("hex"),
-      status: "PENDING_CHECKER",
-      confidential: true,
+      payload: body.payload,
     },
+    { userId: actor.userId, role: actor.role },
+  );
+  response.status(201).json(created);
+});
+
+router.post("/aml/reports/:id/submit", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z
+      .object({
+        submissionRef: z.string().min(1).max(200),
+        submittedAt: z.string().max(64).optional(),
+      })
+      .strict(),
+    request.body,
+  );
+  const actor = actorFromRequest(request);
+  const submittedAt = body.submittedAt ? new Date(body.submittedAt) : null;
+  if (submittedAt && Number.isNaN(submittedAt.getTime())) {
+    throw new ApiError(400, "INVALID_SUBMITTED_AT", "The submission time is not a valid date");
+  }
+  const report = await submitRegulatoryReport(client, {
+    reportId: id,
+    submissionRef: body.submissionRef,
+    submittedAt,
+    actorUserId: actor.userId,
+    actorRole: actor.role,
   });
-  await client.auditLog.create({
-    data: {
-      actorId: actor.userId,
-      role: actor.role,
-      action: "REGULATORY_REPORT_DRAFTED",
-      entityType: "REGULATORY_REPORT",
-      entityId: report.id,
-      beforeJson: {},
-      afterJson: { reportType: report.reportType, authority: report.authority },
-    },
+  response.json(report);
+});
+
+router.post("/aml/reports/:id/acknowledge", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z
+      .object({
+        status: z.enum(["ACKNOWLEDGED", "REJECTED_BY_AUTHORITY"]).optional(),
+        outcome: z.enum(["ACKNOWLEDGED", "REJECTED_BY_AUTHORITY"]).optional(),
+        decision: z.enum(["ACKNOWLEDGED", "REJECTED_BY_AUTHORITY"]).optional(),
+        accepted: z.boolean().optional(),
+        acknowledged: z.boolean().optional(),
+        rejected: z.boolean().optional(),
+        reason: z.string().max(2000).optional(),
+        rejectionReason: z.string().max(2000).optional(),
+      })
+      .strict(),
+    request.body ?? {},
+  );
+  const actor = actorFromRequest(request);
+  const explicit = body.status ?? body.outcome ?? body.decision;
+  const reason = body.reason ?? body.rejectionReason ?? null;
+  const implicitRejection = body.accepted === false
+    || body.rejected === true
+    || (body.acknowledged !== true && body.accepted !== true && reason !== null);
+  const status = explicit ?? (implicitRejection ? "REJECTED_BY_AUTHORITY" : "ACKNOWLEDGED");
+  const report = await acknowledgeRegulatoryReport(client, {
+    reportId: id,
+    status,
+    reason,
+    actorUserId: actor.userId,
+    actorRole: actor.role,
   });
-  response.status(201).json({ id: report.id, status: report.status });
+  response.json(report);
 });
 
 router.get("/operator-cases", async (request: Request, response: Response) => {
@@ -1275,28 +1655,65 @@ router.post("/gateways/:id/versions", async (request: Request, response: Respons
   response.status(201).json({ id: version.id, versionNumber: version.versionNumber, state: version.state });
 });
 
+/**
+ * States a rollback target may have had before. Only a version that was
+ * already promoted through the go-live gates can be rolled back to.
+ */
+const ROLLBACK_ELIGIBLE_STATES = new Set(["LIVE", "SUPERSEDED", "ROLLED_BACK"]);
+
+/**
+ * Rolls a gateway back to a previously live version.
+ *
+ * Design v5 §14 admits no exception: even a rollback target must still pass
+ * all twelve go-live gates against its persisted evidence. The state check
+ * rejects a version that was never live, and the gate assertion - the very
+ * same one the approval path uses - runs inside the rollback transaction, so
+ * a partially validated version can never become LIVE.
+ */
+export const rollbackGatewayVersionInTransaction = async (
+  tx: Tx,
+  gatewayId: string,
+  targetVersionId: string,
+  checkerUserId: string | null,
+) => {
+  const target = await tx.gatewayVersion.findFirst({
+    where: { id: targetVersionId, gatewayId },
+  });
+  if (!target) {
+    throw new ApiError(404, "GATEWAY_VERSION_NOT_FOUND", "The gateway version does not exist");
+  }
+  const state = String(target.state);
+  if (!ROLLBACK_ELIGIBLE_STATES.has(state)) {
+    throw new ApiError(
+      409,
+      "GATEWAY_VERSION_NOT_ROLLBACKABLE",
+      `The gateway version cannot be rolled back to because it has never been live (state '${state}')`,
+      { versionId: String(target.id), state },
+    );
+  }
+  await assertGatewayVersionGoLive(tx, String(target.id), checkerUserId);
+  const previous = await tx.gatewayVersion.findMany({
+    where: { gatewayId, state: "LIVE" },
+    select: { id: true },
+  });
+  for (const version of previous) {
+    await tx.gatewayVersion.update({ where: { id: version.id }, data: { state: "ROLLED_BACK" } });
+  }
+  await tx.gatewayVersion.update({ where: { id: String(target.id) }, data: { state: "LIVE" } });
+  return tx.gateway.update({
+    where: { id: gatewayId },
+    data: { activeVersionId: String(target.id), status: "LIVE" },
+  });
+};
+
 router.post("/gateways/:id/rollback", async (request: Request, response: Response) => {
   requireAuthorities(request, ["gateway:write"]);
   const { id } = parseOrThrow(idSchema, request.params);
   const body = parseOrThrow(z.object({ versionId: z.string().min(1).max(64) }).strict(), request.body);
-  const target = await client.gatewayVersion.findFirst({ where: { id: body.versionId, gatewayId: id } });
-  if (!target) {
-    throw new ApiError(404, "GATEWAY_VERSION_NOT_FOUND", "The gateway version does not exist");
-  }
-  const gateway = await client.$transaction(async (tx) => {
-    const previous = await tx.gatewayVersion.findMany({
-      where: { gatewayId: id, state: "LIVE" },
-      select: { id: true },
-    });
-    for (const version of previous) {
-      await tx.gatewayVersion.update({ where: { id: version.id }, data: { state: "ROLLED_BACK" } });
-    }
-    await tx.gatewayVersion.update({ where: { id: target.id }, data: { state: "LIVE" } });
-    return tx.gateway.update({
-      where: { id },
-      data: { activeVersionId: target.id, status: "LIVE" },
-    });
-  });
+  const actor = actorFromRequest(request);
+  const gateway = await client.$transaction(async (tx) =>
+    rollbackGatewayVersionInTransaction(tx as never, id, body.versionId, actor.userId)
+  );
   // The outbound consumers of the gateway are now stale.
   await invalidationBus.invalidateGateway(id, "gateway-version-rolled-back");
   response.json({ id: gateway.id, activeVersionId: gateway.activeVersionId });
@@ -2875,84 +3292,6 @@ const persistGoLiveEvidence = async (
     create: { gatewayVersionId: versionId, evidenceJson: json(evidence), ranAt: new Date() },
   });
 };
-
-/**
- * The evidence of a version, as the gates consume it.
- */
-const goLiveEvidenceOf = (
-  version: { id: string; createdById: string; rollbackVersionId: string | null },
-  record: GoLiveEvidenceRecord,
-  checkerUserId: string | null,
-) => ({
-  makerUserId: version.createdById,
-  checkerUserId: checkerUserId ?? "",
-  scenarioResults: record.scenarioResults,
-  amountPipelineContractPassed: record.amountPipelineContractPassed,
-  referenceFormatContractPassed: record.referenceFormatContractPassed,
-  cryptographicSignatureContractPassed: record.cryptographicSignatureContractPassed,
-  channels: record.channels,
-  rollbackVersionId: record.rollbackVersionId ?? version.rollbackVersionId,
-  routeLimitsPreviewed: record.routeLimitsPreviewed,
-  commissionProfilePreviewed: record.commissionProfilePreviewed,
-  statementParserPreviewed: record.statementParserPreviewed,
-  evidenceLevel: record.evidenceLevel,
-  internalContractSuitePassed: record.internalContractSuitePassed,
-  highRiskExecutiveAcceptanceSigned: record.highRiskExecutiveAcceptanceSigned,
-  panFieldCount: record.panFieldCount,
-  pciScopeReviewPassed: record.pciScopeReviewPassed,
-  canaryTrafficPlanConfigured: record.canaryTrafficPlanConfigured,
-  routeAlertsConfigured: record.routeAlertsConfigured,
-  runbooksConfigured: record.runbooksConfigured,
-});
-
-/**
- * The twelve go-live gates of a gateway version.
- *
- * The gates are evaluated against the persisted evidence, so a version that
- * was never tested can never become live.
- */
-const assertGoLiveGates = async (
-  versionId: string,
-  checkerUserId: string | null,
-): Promise<GoLiveValidationResult> => {
-  const version = await client.gatewayVersion.findUnique({
-    where: { id: versionId },
-    include: { approvalRequest: true },
-  });
-  if (!version) {
-    throw new ApiError(404, "GATEWAY_VERSION_NOT_FOUND", "The gateway version does not exist");
-  }
-  const record = await client.gatewayVersionEvidence.findUnique({
-    where: { gatewayVersionId: versionId },
-  });
-  if (!record) {
-    throw new ApiError(
-      409,
-      "GO_LIVE_EVIDENCE_MISSING",
-      "The go-live evidence of the gateway version was never collected",
-      { failedGateIds: ["SANDBOX_SCENARIO_SUITE"] },
-    );
-  }
-  const evidence = record.evidenceJson as unknown as GoLiveEvidenceRecord;
-  const gates = new GoLiveGateValidator();
-  const result = await gates.validate(
-    goLiveEvidenceOf(
-      version,
-      evidence,
-      checkerUserId ?? version.approvalRequest?.checkerUserId ?? null,
-    ),
-  );
-  if (!result.passed) {
-    throw new ApiError(
-      409,
-      "GO_LIVE_GATES_FAILED",
-      `The gateway version does not pass the go-live gates: ${result.failedGateIds.join(", ")}`,
-      { failedGateIds: result.failedGateIds, gates: result.gates },
-    );
-  }
-  return result;
-};
-
 
 /**
  * The named rollback version of a gateway version.

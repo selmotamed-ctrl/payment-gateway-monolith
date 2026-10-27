@@ -123,9 +123,10 @@ const SCENARIOS: readonly LedgerScenario[] = [
   "INTERNAL_CONFIRMATION",
   "INTERNAL_REFUND",
   "CHARGEBACK_INSUFFICIENT",
+  "SUSPENSE_SETTLEMENT",
 ];
 
-describe("all 15 journal entry templates", () => {
+describe("all 16 journal entry templates", () => {
   test("every scenario builds a balanced entry with strictly positive lines", () => {
     for (const scenario of SCENARIOS) {
       const template = buildLedgerTemplate(scenario, { amount: "100" });

@@ -410,6 +410,33 @@ export interface RetentionFake {
   reset(): void;
 }
 
+const toGlAccount = (row: FakeRow | undefined): Record<string, unknown> | null => {
+  if (!row) {
+    return null;
+  }
+  return {
+    id: String(row.id),
+    accountType: String(row.accountType ?? row.account_type ?? ""),
+    ownerId: row.ownerId ?? row.owner_id ?? null,
+    gatewayId: row.gatewayId ?? row.gateway_id ?? null,
+    credentialSetId: row.credentialSetId ?? row.credential_set_id ?? null,
+    env: row.env ?? null,
+    currency: row.currency ?? null,
+    checkpointBalance: row.checkpointBalance ?? row.checkpoint_balance ?? 0,
+    checkpointAt: row.checkpointAt ?? row.checkpoint_at ?? null,
+    lastCheckpointId: row.lastCheckpointId ?? row.last_checkpoint_id ?? null,
+  };
+};
+
+const toJournalLine = (row: FakeRow): Record<string, unknown> => ({
+  id: String(row.id),
+  entryId: String(row.entryId ?? row.entry_id ?? ""),
+  glAccountId: String(row.glAccountId ?? row.gl_account_id ?? ""),
+  direction: String(row.direction ?? "DEBIT"),
+  amount: row.amount ?? 0,
+  createdAt: row.createdAt ?? row.created_at,
+});
+
 /**
  * Builds the in-memory client of the retention tests.
  */
@@ -443,8 +470,49 @@ export const createRetentionFake = (): RetentionFake => {
     },
   };
 
+  const glAccount = {
+    async findUnique(args: { where: { id: string } }) {
+      return toGlAccount(table("gl_accounts").find((row) => row.id === args.where.id));
+    },
+    async findMany() {
+      return table("gl_accounts").map(toGlAccount).filter((row) => row !== null);
+    },
+    async update(args: { where: { id: string }; data: Record<string, unknown> }) {
+      const row = table("gl_accounts").find((candidate) => candidate.id === args.where.id);
+      if (!row) {
+        throw new Error(`Fake gl_account '${args.where.id}' not found`);
+      }
+      if (args.data.checkpointBalance !== undefined) row.checkpoint_balance = args.data.checkpointBalance;
+      if (args.data.checkpointAt !== undefined) row.checkpoint_at = args.data.checkpointAt;
+      if (args.data.lastCheckpointId !== undefined) row.last_checkpoint_id = args.data.lastCheckpointId;
+      return toGlAccount(row);
+    },
+  };
+
+  const journalLine = {
+    async findMany(args: { where?: Record<string, unknown> } = {}) {
+      const where = args.where ?? {};
+      return table("journal_lines")
+        .filter((row) => {
+          const accountId = String(row.gl_account_id ?? row.glAccountId ?? "");
+          if (where.glAccountId !== undefined && accountId !== where.glAccountId) {
+            return false;
+          }
+          const createdAt = (row.created_at ?? row.createdAt) as Date | undefined;
+          const condition = where.createdAt as { gt?: Date } | undefined;
+          if (condition?.gt && createdAt && createdAt.getTime() <= condition.gt.getTime()) {
+            return false;
+          }
+          return true;
+        })
+        .map(toJournalLine);
+    },
+  };
+
   const db = {
     platformSetting,
+    glAccount,
+    journalLine,
     $queryRawUnsafe: async (sql: string, ...params: unknown[]) => {
       const statement = new StatementParser(tokenize(sql)).parse();
       if (statement.kind !== "select") {

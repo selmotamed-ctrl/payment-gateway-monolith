@@ -44,7 +44,13 @@ export const envSchema = z.strictObject({
     .min(16, "KMS_MASTER_KEY must be at least 16 characters long"),
   TRUST_PROXY: booleanFromEnvironment.default(false),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
-  WORKER_ENABLED: booleanFromEnvironment.default(false),
+  /**
+   * The master switch of the durable workers. It defaults to `true` because
+   * the statement upload and the dispute intake are queue-only routes: an
+   * API that answers `202 Accepted` without a queue drain loses the work.
+   * The startup guard refuses to boot when this is explicitly disabled.
+   */
+  WORKER_ENABLED: booleanFromEnvironment.default(true),
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
   WORKER_BATCH_SIZE: z.coerce.number().int().positive().max(1000).default(50),
   WORKER_CONCURRENCY: z.coerce.number().int().positive().max(100).default(4),
@@ -92,6 +98,11 @@ export const envSchema = z.strictObject({
    * when its lease expired belonged to a crashed node and is re-queued.
    */
   WORKER_BACKGROUND_JOBS_LEASE_SECONDS: z.coerce.number().int().positive().default(300),
+  /**
+   * The age of the oldest queued job above which the health probe reports a
+   * degraded queue. The default is five minutes.
+   */
+  WORKER_BACKGROUND_JOBS_MAX_QUEUE_AGE_MS: z.coerce.number().int().positive().default(300_000),
   /**
    * The endpoint of the SMS / email aggregator of the deployment.
    *
@@ -154,14 +165,14 @@ const resolveEnvironment = (): CoreEnv => {
     PORT: 4000,
     HOST: "127.0.0.1",
     NODE_ENV: "test",
-    DATABASE_URL: "mysql://gateway:gateway_pw@127.0.0.1:3307/payment_gateway",
+    DATABASE_URL: "mysql://admin:admin@127.0.0.1:3306/payment_gateway_monolith",
     MTLS_CA_CERT_PATH: "./certs/internal-ca.crt",
     MTLS_SERVER_CERT_PATH: "./certs/core-back.crt",
     MTLS_SERVER_KEY_PATH: "./certs/core-back.key",
     KMS_MASTER_KEY: "test-only-master-key-value",
     TRUST_PROXY: false,
     LOG_LEVEL: "error",
-    WORKER_ENABLED: false,
+    WORKER_ENABLED: true,
     WORKER_POLL_INTERVAL_MS: 5000,
     WORKER_BATCH_SIZE: 50,
     WORKER_CONCURRENCY: 4,
@@ -176,6 +187,7 @@ const resolveEnvironment = (): CoreEnv => {
     WORKER_BACKGROUND_JOBS_INTERVAL_MS: 2000,
     WORKER_BACKGROUND_JOBS_BATCH_SIZE: 10,
     WORKER_BACKGROUND_JOBS_LEASE_SECONDS: 300,
+    WORKER_BACKGROUND_JOBS_MAX_QUEUE_AGE_MS: 300_000,
     NOTIFICATION_WEBHOOK_URL: undefined,
     NOTIFICATION_WEBHOOK_TIMEOUT_MS: 5000,
   };

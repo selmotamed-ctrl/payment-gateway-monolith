@@ -42,7 +42,7 @@ import type { DynamicAttempt } from "../../engine/flow/DynamicRailEngine";
  */
 const DATABASE_URL =
   process.env.MARIADB_TEST_DATABASE_URL
-  ?? "mysql://gateway:gateway_pw@127.0.0.1:3307/payment_gateway_test";
+  ?? "mysql://admin:admin@127.0.0.1:3306/payment_gateway_monolith_test";
 process.env.DATABASE_URL = DATABASE_URL;
 
 /** Every run uses its own ids so the suite can be repeated on the same server. */

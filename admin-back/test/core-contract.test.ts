@@ -411,7 +411,7 @@ const cases: ContractCase[] = [
     mapper: toCoreApprovalApprove,
     publicSchema: approvalDecisionSchema,
     legacyPayload: { reason: "checked", checkerUserId: "usr_9", baseVersion: 2, comment: "ok" },
-    allowedKeys: ["notes", "riskAcceptanceNote"],
+    allowedKeys: ["notes", "riskAcceptanceNote", "outcome"],
     requiredKeys: [],
   },
   {
@@ -1106,6 +1106,24 @@ describe("core contract field mapping", () => {
   test("approval approve maps the reason onto the core notes", () => {
     expect(toCoreApprovalApprove({ reason: "checked" })).toEqual({ notes: "checked" });
     expect(toCoreApprovalReject({ reason: "not checked" })).toEqual({ reason: "not checked" });
+  });
+
+  test("approval approve forwards the chargeback outcome and the risk acceptance", () => {
+    expect(
+      toCoreApprovalApprove({
+        reason: "chargeback reviewed",
+        outcome: "WON",
+        riskAcceptanceNote: "the evidence is conclusive",
+      }),
+    ).toEqual({
+      notes: "chargeback reviewed",
+      outcome: "WON",
+      riskAcceptanceNote: "the evidence is conclusive",
+    });
+    expect(toCoreApprovalApprove({ reason: "checked", outcome: "lost" })).toEqual({
+      notes: "checked",
+      outcome: "LOST",
+    });
   });
 
   test("aml disposition maps the confirmed match onto the core vocabulary", () => {

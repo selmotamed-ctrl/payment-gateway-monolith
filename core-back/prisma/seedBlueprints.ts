@@ -3320,6 +3320,61 @@ const blueprint7: BlueprintCatalogEntry = {
 };
 
 /**
+ * The reversal flows of a gateway.
+ *
+ * A refund reverses the capture at the gateway; a void cancels a payment
+ * before it settles. Both stacks move money, so they must never be retried
+ * and they are points of no return (design §8.2, §11.3 entries 9 and 14).
+ */
+const reversalFlowsFor = (gateway: BlueprintGateway): BlueprintFlow[] => {
+  const definitions: Array<{ phase: "REFUND" | "VOID"; path: string; name: string; description: string }> = [
+    {
+      phase: "REFUND",
+      path: "refund",
+      name: "refund-at-gateway",
+      description: "Reverse the captured payment at the gateway",
+    },
+    {
+      phase: "VOID",
+      path: "void",
+      name: "void-at-gateway",
+      description: "Void the payment before settlement",
+    },
+  ];
+  return definitions
+    .filter((definition) => !gateway.flows.some((flow) => flow.phase === definition.phase))
+    .map((definition) => ({
+      phase: definition.phase,
+      steps: [
+        step({
+          name: definition.name,
+          type: "HTTP",
+          method: "POST",
+          urlTemplate: `{api}/${definition.path}`,
+          contentType: "application/json",
+          sideEffect: "MOVES_MONEY",
+          retryPolicy: "NEVER",
+          pointOfNoReturn: true,
+          idempotencyConfig: idempotencyHeader("Idempotency-Key"),
+          parameters: [
+            param("BODY", "reference", "ATTEMPT", { selector: "reference" }),
+            param("BODY", "provider_reference", "ATTEMPT", { selector: "providerReference" }),
+            param("BODY", "amount", "ATTEMPT", {
+              selector: "totalChargedAmount",
+              transforms: [{ op: "format_decimal", args: [2] }],
+            }),
+            param("BODY", "adjustment_id", "STATE", { selector: "adjustmentId" }),
+          ],
+          outputs: [
+            output("status", "status", "STATE", true),
+            output("refund_reference", "refund_reference", "PROVIDER_REF"),
+          ],
+        }),
+      ],
+    }));
+};
+
+/**
  * A channel that carries no signature must always be confirmed by an inquiry.
  * The rule is enforced once so that the seeded rows and the catalogue never
  * disagree.
@@ -3328,6 +3383,7 @@ const normalizeChannels = (blueprint: BlueprintCatalogEntry): BlueprintCatalogEn
   ...blueprint,
   gateways: blueprint.gateways.map((gateway) => ({
     ...gateway,
+    flows: [...gateway.flows, ...reversalFlowsFor(gateway)],
     channels: gateway.channels.map((channel) => ({
       ...channel,
       mustInquire: channel.mustInquire || channel.verifyMethod === "NONE_PLUS_INQUIRY",

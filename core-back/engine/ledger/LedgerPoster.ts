@@ -134,7 +134,8 @@ export type LedgerScenario =
   | "CHARGEBACK_WON"
   | "INTERNAL_CONFIRMATION"
   | "INTERNAL_REFUND"
-  | "CHARGEBACK_INSUFFICIENT";
+  | "CHARGEBACK_INSUFFICIENT"
+  | "SUSPENSE_SETTLEMENT";
 
 export type LedgerScenarioStage =
   | "HOLD"
@@ -154,6 +155,13 @@ export interface LedgerScenarioInput {
   surchargeAmount?: DecimalInput;
   merchantAmount?: DecimalInput;
   stage?: LedgerScenarioStage;
+  /**
+   * The ownership mode of the attempt that is being settled. It decides
+   * whether the money that could not be applied to a slot already sits in the
+   * platform clearing account or in treasury (the internal rails clear through
+   * treasury).
+   */
+  ownershipMode?: LedgerOwnershipMode;
 }
 
 export type LedgerOwnershipMode = "INTERNAL" | "PLATFORM_CLEARING" | "MERCHANT_DIRECT";
@@ -216,6 +224,23 @@ function optionalLine(
 ): LedgerLineTemplate[] {
   return amount.isZero() ? [] : [{ direction, amount, account }];
 }
+
+/**
+ * How each account of the chart of accounts is scoped (design §7.1).
+ */
+const ACCOUNT_SCOPING: Record<LedgerAccountType, "GLOBAL" | "MERCHANT" | "GATEWAY"> = {
+  TREASURY: "GLOBAL",
+  GATEWAY_CLEARING: "GATEWAY",
+  MERCHANT_WALLET: "MERCHANT",
+  PLATFORM_INCOME: "GLOBAL",
+  PROVIDER_FEE_EXPENSE: "GLOBAL",
+  GATEWAY_FEE_EXPENSE: "GLOBAL",
+  GATEWAY_FEE_ACCRUAL: "GLOBAL",
+  COMMISSION_RECEIVABLE: "GLOBAL",
+  AML_HOLD: "GLOBAL",
+  CHARGEBACK_RESERVE: "GLOBAL",
+  SUSPENSE: "GLOBAL",
+};
 
 function account(accountType: LedgerAccountType, overrides: Partial<LedgerAccountSelector> = {}): LedgerAccountSelector {
   return { accountType, ...overrides };
@@ -496,6 +521,25 @@ export function buildLedgerTemplate(
           { direction: "CREDIT", amount, account: account("CHARGEBACK_RESERVE") },
         ],
       };
+    case "SUSPENSE_SETTLEMENT":
+      // The settlement could not be applied to a payment link slot (a second
+      // settlement on a single-use link, an overpayment, or a duplicate
+      // settlement). The money is real, so it must not disappear from the
+      // books: it is parked in SUSPENSE until the automatic refund adjustment
+      // is reviewed and executed (design §9.1 rule 6, edge cases 13/38/41).
+      return {
+        refType: "PAYMENT_ATTEMPT",
+        refId: reference,
+        description: "Settlement routed to SUSPENSE because the link slot was already used",
+        lines: [
+          {
+            direction: "DEBIT",
+            amount,
+            account: account(input.ownershipMode === "INTERNAL" ? "TREASURY" : "GATEWAY_CLEARING"),
+          },
+          { direction: "CREDIT", amount, account: account("SUSPENSE") },
+        ],
+      };
   }
 }
 
@@ -678,26 +722,54 @@ export class LedgerPoster {
     if (mapped) {
       return mapped;
     }
-    const ownerId = selector.ownerId ?? context.merchantId;
-    const gatewayId = selector.gatewayId ?? context.gatewayId;
-    const credentialSetId = selector.credentialSetId ?? context.credentialSetId;
-    const env = selector.env ?? context.env;
     const currency = selector.currency ?? context.currency;
+    // The chart of accounts has three kinds of account (design §7.1):
+    //   - a merchant wallet belongs to ONE merchant,
+    //   - a gateway clearing account belongs to ONE (gateway, env, credential set),
+    //   - every other account (treasury, income, the two fee accounts, the fee
+    //     accrual, the commission receivable, the AML hold, the chargeback
+    //     reserve and suspense) is platform wide.
+    // The resolver therefore only narrows a lookup by the dimensions the
+    // account type actually carries, and it falls back to the platform wide
+    // account when no dedicated one has been configured.
+    const scoping = ACCOUNT_SCOPING[selector.accountType] ?? "GLOBAL";
+    const ownerId = selector.ownerId ?? (scoping === "MERCHANT" ? context.merchantId : undefined);
+    const gatewayId = selector.gatewayId ?? (scoping === "GATEWAY" ? context.gatewayId : undefined);
+    const credentialSetId = selector.credentialSetId
+      ?? (scoping === "GATEWAY" ? context.credentialSetId : undefined);
+    const env = selector.env ?? (scoping === "GATEWAY" ? context.env : undefined);
+
+    const scopedWhere = {
+      accountType: selector.accountType,
+      ...(ownerId ? { ownerId } : {}),
+      ...(gatewayId ? { gatewayId } : {}),
+      ...(credentialSetId ? { credentialSetId } : {}),
+      ...(env ? { env } : {}),
+      ...(currency ? { currency } : {}),
+    };
     const record = await transaction.glAccount.findFirst({
+      where: scopedWhere,
+      select: { id: true },
+    });
+    if (record) {
+      return record.id;
+    }
+    // Fall back to the platform wide account of the same type and currency.
+    const fallback = await transaction.glAccount.findFirst({
       where: {
         accountType: selector.accountType,
-        ...(ownerId ? { ownerId: ownerId } : {}),
-        ...(gatewayId ? { gatewayId: gatewayId } : {}),
-        ...(credentialSetId ? { credentialSetId: credentialSetId } : {}),
-        ...(env ? { env } : {}),
+        ownerId: null,
+        gatewayId: null,
+        credentialSetId: null,
+        env: null,
         ...(currency ? { currency } : {}),
       },
       select: { id: true },
     });
-    if (!record) {
+    if (!fallback) {
       throw moneyError("GL_ACCOUNT_NOT_FOUND", `No ${selector.accountType} account matched the posting context`);
     }
-    return record.id;
+    return fallback.id;
   }
 }
 

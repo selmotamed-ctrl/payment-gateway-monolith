@@ -455,7 +455,7 @@ All phase verification gates were executed in this workspace with the following 
 | Phase 3 | `cd core-back && bun test test/phase3-dynamic-engine-and-blueprints.test.ts` | 12 tests pass (7 production blueprints, 15 deterministic mock scenarios, initiate/confirm/ledger flow, 12 go-live gates, closed transform library) |
 | Phase 4 | `cd core-back && bun test test/phase4-onboarding-aml-disputes-recon.test.ts` | 16 tests pass (duplicate detection, AML hold/case-only/critical escalation, Arabic normalisation, no tipping-off, dispute dedupe, statement parsing) |
 | Phase 8 | `cd core-back && bun test test/edge-cases/catalog-140.test.ts` | 140 catalogued edge cases with 140 executable regression checks, all pass |
-| All backends | `cd <service> && bun run typecheck && bun test` | `core-back` 605 tests, `admin-back` 398 tests, `merchant-back` 67 tests, `checkout-back` 45 tests — all pass with clean TypeScript |
+| All backends | `cd <service> && bun run typecheck && bun test` | `core-back` 759 tests, `admin-back` 408 tests, `merchant-back` 67 tests, `checkout-back` 45 tests — all pass with clean TypeScript |
 | All frontends | `cd <spa> && bun run build` | `admin-front`, `merchant-front`, `checkout-front` all build (type-check + Vite) |
 | Schema parity | `cd core-back && bunx prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script` | 64 model tables and 100 enum types, identical to the committed migration (plus the hand written `schema_versions` table, the three domain `CHECK` constraints and the `approval_requests_checker_not_maker` `BEFORE INSERT` trigger) |
 
@@ -578,12 +578,126 @@ These items are **not** closed by this pass. They are ordered by operational ris
 
 | # | Item | Severity | Notes |
 | :--- | :--- | :--- | :--- |
-| 1 | ~~Apply the migration and the seed to a live database~~ | — | **CLOSED**: the migration and the seed were applied to a live MariaDB 13.0.2 instance and the phase gates were re-run against it |
+| 1 | ~~Apply the migration and the seed to a live database~~ | — | **CLOSED**: the migration and the seed were applied to a live MySQL 8.4 instance (and earlier to MariaDB 13.0.2) and the phase gates were re-run against it |
 | 2 | ~~Run an end-to-end payment through the engine~~ | — | **CLOSED**: `test/e2e/mariadb-payment.test.ts` drives a complete payment against the live database (initiate → confirm → balanced journal entry → slot commit → `0.0000` invariant). What is still missing is a **real** partner gateway: the suite uses a local HTTP stand-in |
 | 2b | Run the same end-to-end path against a real sandbox gateway of one of the seven blueprints (Edfali/Sadad OTP, Moamalat, CBL LYPay, MyPay, MPGS, NeomPay) | HIGH | The declarative flows, the crypto profiles and the confirmation channels are seeded; only the partner credentials and a reachable sandbox endpoint are missing |
 | 3 | Bind the real SMS/email aggregator credentials to the notification webhook transport | MEDIUM | The transport is implemented and signed; it only needs the provider endpoint and its secret |
-| 4 | Execute the regulatory report submission (`PROVISIONAL` → `CONFIRMED`) | MEDIUM | `POST /aml/reports` records the report in `PENDING_CHECKER`; the submission to the authority is still a manual step |
-| 5 | Add the retention job for the 5 year record-keeping obligation (OD-4) | MEDIUM | `audit_log` writes are in place, the purge is not |
-| 6 | Add an index on `payment_attempts (route_id, status)` for the daily-volume aggregate | LOW | The aggregate runs on every rail resolution |
-| 7 | Move the reconciliation and dispute executions onto a durable queue instead of the request path | LOW | They are already atomic, they are just synchronous |
+| 4 | ~~Execute the regulatory report submission~~ | — | **CLOSED** (delivery run 6): the report is created through an approval, and `POST /aml/reports/:id/submit` → `/acknowledge` moves `APPROVED → SUBMITTED → ACKNOWLEDGED` (or `REJECTED_BY_AUTHORITY`) with a submission reference; a `PROVISIONAL` rule is refused (OD-1), and `POST /aml/reporting-rules/:id/promote` promotes a rule `PROVISIONAL → CONFIRMED` through maker/checker. What remains is only the real authority endpoint/credentials |
+| 5 | ~~Add the retention job for the 5 year record-keeping obligation (OD-4)~~ | — | **CLOSED** (delivery run 4): `RetentionWorker`, with the ledger excluded so a purge never moves a balance |
+| 6 | ~~Add an index on `payment_attempts (route_id, status)`~~ | — | **CLOSED**: `payment_attempts_route_id_status_idx` |
+| 7 | ~~Move the reconciliation and dispute executions onto a durable queue~~ | — | **CLOSED**: `background_jobs` + `BackgroundJobWorker` (claim, backoff, lease recovery), drained by default |
 | 8 | Bind the SAML/OIDC provider configuration of the corporate identity module | LOW | The module is not part of this delivery scope |
+
+## 12. Fourth Hardening Pass · Conformance Audit Findings Closed
+
+A final conformance audit turned every requirement-bearing design section into an explicit checklist and verified each item against the code. It found 18 defects that the previous three passes had missed, plus 12 more surfaced by rewriting the 140-case catalogue against the real units. All of them are closed.
+
+### 12.1 Blocking defects (the platform could not take a payment)
+
+| Defect | Fix |
+| :--- | :--- |
+| **No credential set could ever reach `VERIFIED`** and no PLATFORM credential set could be created, so every route was excluded with `NO_VERIFIED_CREDENTIAL_SET` and no payment could start | Admin credential-set API (create/list/update/verify/revoke, PLATFORM and MERCHANT), a `CREDENTIAL_CHECK` service that probes the gateway and sets `VERIFIED`/`FAILING`, and the seed now creates a `VERIFIED` PLATFORM credential set per gateway/environment (26 seeded) |
+| **The attempt-guard pipeline was dead code**: no velocity rule, no AML hot-path screen, no merchant-posture check ever ran, so a SUSPENDED merchant could still pay | `AttemptGuardPipeline` is now invoked from the checkout initiation inside the slot-reservation transaction; a `BLOCK` creates a terminal `BLOCKED` attempt, an AML `HOLD` posts the `AML_HOLD` escrow |
+| **A Maker-Checker refund booked the ledger but never called the gateway** — the merchant was debited and the customer never refunded | `executeAdjustment` now calls the engine's `refund()` first, keeps the adjustment `EXECUTING` while the gateway is in flight or `UNKNOWN`, and posts `FULL_REFUND`/`INTERNAL_REFUND` only after confirmation; the blueprints now seed `REFUND` and `VOID` flows |
+| **The Maker-Checker engine executed only two subject types**, so with four-eyes mandatory no self-service merchant could ever be activated | `executeApprovalSubject` now executes `JOIN_REQUEST` (shared activation with the single-reviewer path), `MERCHANT` (JSON-Patch + detail change log), `USER` (authorities/role) and `GATEWAY_VERSION`; an unknown subject is an explicit error, never a silent `APPROVED` |
+| **The `ApiConsumer` was unreachable** (the attempt carried no `gatewayId`), so the 10 authentication methods, the single-flight refresh, the rotating-token persistence and the host pinning never ran | The gateway id is derived from the pinned `gatewayVersion`, the consumer is built from the PINNED version (not the latest LIVE one), and the credential entries come from the attempt's pinned credential set |
+| **The 12 go-live gates were advisory**: a version went `LIVE` without being validated | `activateGatewayVersion` now evaluates the gates against persisted evidence (`gateway_version_evidence`) and refuses the promotion with the failed gate ids |
+
+### 12.2 Money-integrity defects
+
+| Defect | Fix |
+| :--- | :--- |
+| The retention worker deleted ledger history without a checkpoint, so an old payment silently vanished from a merchant balance | The ledger (`journal_entries`/`journal_lines`) is **excluded from retention**; attempts are purged only when their ledger entry is retained, so no balance can move. Proven by a test that the balance and the `0.0000` invariant are identical before and after a purge |
+| `SUSPENSE` was never used and the slot commit ran outside the ledger transaction, so a duplicate settlement charged the customer, credited the merchant, then 500'd on the CHECK constraint | New `SUSPENSE_SETTLEMENT` template; a commit that would exceed `use_count` routes the funds to `SUSPENSE`, drafts a refund adjustment and opens a `P1` case; `commitSlot`, the journal posting and the `SUCCEEDED` status now commit in one transaction |
+| Sequential partial refunds could exceed the settled amount | The attempt is locked `FOR UPDATE` and the `EXECUTED` + `EXECUTING` refunds are summed; an over-refund is refused with `REFUND_EXCEEDS_SETTLED_AMOUNT` |
+| A chargeback was drafted for the full amount even after a refund | The chargeback is capped to the unrefunded amount; a fully refunded attempt records the dispute with `NO_CHARGEBACK_DRAFTED` and drafts nothing |
+| A refund ignored the rail's `capabilities.refund` / `partial_refund` and the refund window | The rail is read and the capability and window are enforced (`REFUND_NOT_SUPPORTED`, `PARTIAL_REFUND_NOT_SUPPORTED`, `REFUND_WINDOW_EXPIRED`) |
+| `SETTLEMENT_SWEEP` and `CHARGEBACK_INSUFFICIENT` had no caller | The reconciliation job posts the settlement sweep for a T+N batch source; a chargeback inside the negative-balance ceiling posts `CHARGEBACK_INSUFFICIENT` |
+
+### 12.3 Compliance and input-validation defects
+
+| Defect | Fix |
+| :--- | :--- |
+| Screening failed **open**: an `ERROR` result let the onboarding and the payment through | Screening now fails **closed**: onboarding returns `503 SCREENING_UNAVAILABLE` and parks the request `IN_REVIEW`; the guard opens a terminal `BLOCKED` attempt |
+| No self-payment policy | A payer wallet/account owned by the merchant is blocked with `SELF_PAYMENT_NOT_ALLOWED` (policy configurable, default block) |
+| The NeomPay `wallet_id` regex, LUHN check and wallet-type allow-list were metadata only | Checkout validates every submitted field against `rail_fields` (required, regex, length, optional LUHN, optional wallet-type allow-list) before any money moves |
+| The KYB upload trusted the declared MIME | Core sniffs the magic bytes (PNG/JPEG/PDF) and rejects a mismatch with `415 UPLOAD_SIGNATURE_MISMATCH` |
+| `merchants.commission_receivable_ceiling` was never enforced | A repository query computes the merchant's outstanding receivable; the guard pauses settlement-dependent traffic above the ceiling (`CEILING_EXCEEDED_PAUSE`) |
+| A browser callback / return hint on a pending attempt threw `INVALID_ATTEMPT_TRANSITION` | `AWAITING_CUSTOMER → VERIFYING` (and `CREATED → VERIFYING`) are legal, so the return-url inquiry works |
+| A checkpoint could race a settlement sweep | `CheckpointService.captureCheckpoint` locks the GL account row (`SELECT … FOR UPDATE`) before reading the balance |
+
+### 12.4 Operational defects
+
+| Defect | Fix |
+| :--- | :--- |
+| The durable job queue was off by default, so a dispute (accepted `202`) was never executed | `WORKER_ENABLED` defaults to `true`, the background-job worker is drained by default, startup fails fast when a queue-only API has no drain, and `/health` reports the queue depth and the oldest queued job |
+| OD-10 was seeded under a key the code never read and compared the wrong shape | The guard reads the `OD-10` register key, reads the `sandboxBeforeApproval` field, defaults to `true` |
+| OD-2 (`RISK_BASED` four-eyes) was not implemented — every applicant needed four eyes | The four-eyes decision is computed from the risk tier, the screening result and the beneficial-ownership profile |
+| Six edge routes answered `200` where core answers `202` | All of them relay the core status; the admin edge also forwards the dispute `outcome` so a chargeback can be decided |
+| Abandoned join-request drafts never expired | New `JoinRequestExpiryWorker` expires the abandoned drafts and the overdue reviews |
+| The 140-case catalogue was 102/140 tautological | All 140 checks now drive the real production unit; a regression in the behaviour fails the check. Zero `todo` remain |
+| The design documents still described PostgreSQL | All five documents now describe MySQL 8.0+ / MariaDB 10.6+, including the `VARCHAR(191)` string rule, the `LongBlob` webhook body, the trigger-based maker/checker invariant (MariaDB forbids a CHECK on a foreign-key column) and the raw-SQL dialect |
+
+### 12.5 Verification
+
+| Gate | Result |
+| :--- | :--- |
+| `core-back`: typecheck + test | 745 pass, 0 fail (was 605) |
+| `admin-back` | 408 pass, 0 fail |
+| `merchant-back` | 67 pass, 0 fail |
+| `checkout-back` | 45 pass, 0 fail |
+| Live MySQL 8.4 end-to-end payment | 8 pass: initiate → confirm → balanced journal entry → slot commit → `0.0000` invariant, plus the duplicate-settlement, self-approval and slot-exhaustion refusals |
+| Schema | 68 tables (66 models + `schema_versions` + `_prisma_migrations`), `schema_versions = 5`, migration applies cleanly to a fresh MySQL 8.4 database |
+| Frontends | `admin-front`, `merchant-front`, `checkout-front` all build |
+
+## 13. Fifth Hardening Pass · Independent Re-Audit Findings Closed
+
+A fresh independent conformance audit re-verified the F1–F18 fixes against the code and the live database, and found **six further defects** that the previous passes had missed — including one that broke the composed checkout path the unit suites never exercised. All six are closed.
+
+| Defect | Severity | Fix |
+| :--- | :--- | :--- |
+| **The guard and the engine both reserved the link slot.** The guard creates the attempt and increments `active_locked_count` in its transaction; `engine.initiate` then reserved the same slot again, so every default single-use link (`use_count = 1`) failed with `SLOT_RESERVATION_FAILED`. The e2e suite called `engine.initiate` directly, so it never saw it. | CRITICAL | `engine.initiate(attempt, formData, { slotReserved })`; the checkout passes the guard's reservation so exactly one owner reserves. New `checkout-slot-composition.test.ts` exercises the real guard + engine composition |
+| The AML hold **release/void never finalized the attempt or the link slot**: the merchant was credited while the attempt stayed `CREATED`, and the slot stayed reserved (or leaked) | HIGH | `executeAmlCaseResolution` now transitions the attempt (`SUCCEEDED` on release, `FAILED` on void), sets `terminalAt`, commits/releases the slot exactly once (conditional update) and broadcasts the transition |
+| `POST /gateways/:id/rollback` promoted **any** version to `LIVE`, bypassing all 12 go-live gates | HIGH | Rollback is restricted to a previously `LIVE`/`SUPERSEDED`/`ROLLED_BACK` version and runs the same go-live gate assertion inside the transaction |
+| **Cancel was not idempotent**, ignored `point_of_no_return`, and could free a slot held by a different attempt (a repeated cancel, a cancel after expiry, or a cancel of a never-reserved `BLOCKED` attempt all decremented the counter) | HIGH | A single conditional transition (`terminal_at IS NULL AND point_of_no_return = 0 AND status ...`) releases the slot only when it affected a row; repeats are idempotent |
+| An **infinite-use link was marked `COMPLETED` after its first payment**, so it could never be used again | HIGH | Only a finite link completes when its last slot is consumed; the SUSPENSE path uses the same rule |
+| **Rotating refresh-token persistence was never wired** in production (only in a test), so a gateway that rotates its refresh token would replay the old token after a restart | HIGH | `loadConsumerConfig` now supplies `rotatingRefreshTokenPersistence`: the new token is Vault-encrypted, written to the pinned credential set with an incremented `secretVersion`, and the consumer cache is invalidated |
+| The seeded reporting rules (F16) were missing, so the evaluator had nothing to evaluate | LOW | `prisma/seed.ts` seeds one `CONFIRMED` `LARGE_TRANSACTION` rule and one `PROVISIONAL` `SUSPICIOUS_ACTIVITY` rule (idempotent) |
+
+### 13.1 Verification
+
+| Gate | Result |
+| :--- | :--- |
+| `core-back`: typecheck + test | **759 pass, 0 fail** (was 712) |
+| `admin-back` / `merchant-back` / `checkout-back` | 408 / 67 / 45 pass, 0 fail |
+| Live MySQL 8.4 end-to-end payment | 8 pass |
+| Composed checkout slot reservation | 3 new tests (single-use reserved once, engine self-reserves when not pre-reserved, infinite-use link stays usable) |
+| AML release/void finalization | 4 new tests |
+| Rollback gate enforcement | 4 new tests |
+| Cancel safety | 5 new tests |
+| Rotating refresh-token persistence | 2 new tests (ciphertext never contains the plaintext token) |
+| Seed idempotency | reporting rules seeded once, `0` on re-run |
+
+## 14. Sixth Hardening Pass · Composed-Path Audit Findings Closed
+
+A final audit of the **composed** production paths (rather than the units) found four more defects, all closed.
+
+| Defect | Severity | Fix |
+| :--- | :--- | :--- |
+| **A concurrent duplicate `confirm` double-submitted**: both requests read `AWAITING_CUSTOMER`, both called the gateway, both posted the ledger and both committed a slot (two slots for one payment on a multi-use link; a spurious SUSPENSE settlement on a single-use link) | HIGH | `confirm` now performs one atomic conditional claim (`UPDATE … SET status='AUTHORIZING', point_of_no_return=1 … WHERE terminal_at IS NULL AND status IN (…) AND NOT (status='UNKNOWN' AND point_of_no_return=1) AND substatus <> 'AML_HOLD' AND <confirm-key hash differs>`); only the winner runs SUBMIT, the loser returns the persisted state. The confirm `idempotencyKey` is hashed into `customer_fields_masked` (no schema change) |
+| **The refund path deadlocked against its own row lock**: `SELECT … FOR UPDATE` on the attempt in the approval transaction, then `engine.refund` updated the same row through a different connection → the refund blocked until timeout, and the gateway refund could complete outside the rolled-back transaction | CRITICAL | The refund is now three short phases: claim (lock, verify limits/capability/window, set `EXECUTING`, commit) → gateway call with **no** transaction open → finalize (post the refund entry, set `EXECUTED`, audit) in one transaction. `UNKNOWN` stays `EXECUTING` and is scheduled for reconciliation |
+| **An AML-held attempt could be cancelled or expired while its case was open**, and a later release still credited the merchant | HIGH | AML-held attempts (`substatus = 'AML_HOLD'`) are excluded from the customer cancel and from the expiry sweeper; the AML case resolution is the only writer |
+| **Four frontend↔edge contract mismatches** made UI actions fail with `400`: the checkout widget sent `{ event, data }` and `"ready"`; the AML case page sent `{ resolution, rationale }`; the AML reports page sent free-form `subjectName/amount`; the approvals page never sent the chargeback `outcome` | MEDIUM | The checkout widget sends `{ event, payload }` with the canonical event names; the AML case page sends `{ severity, action, reason }` (the edge enum now also accepts `RELEASE`/`REJECT`); the reports page sends `{ reportingRuleId, reportType, periodStart, periodEnd }`; the approvals page has an outcome selector and sends `outcome` |
+
+### 14.1 Verification
+
+| Gate | Result |
+| :--- | :--- |
+| `core-back`: typecheck + test | **759 pass, 0 fail** |
+| `admin-back` / `merchant-back` / `checkout-back` | 408 / 67 / 45 pass, 0 fail |
+| Live MySQL 8.4 end-to-end payment | 8 pass |
+| Concurrent confirm | 4 new tests (one submit, one journal, one slot) |
+| Refund three-phase | 1 new test with separate transaction/base connections (no deadlock, one posting) |
+| AML hold protection | 4 new tests (cancel and expiry both refuse a held attempt) |
+| Regulatory report lifecycle | 6 new tests (approval, PROVISIONAL refusal, submit, acknowledge, reject, rule promotion) |
+| Frontends | all three build |

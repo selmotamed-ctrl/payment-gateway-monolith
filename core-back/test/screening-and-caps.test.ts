@@ -14,6 +14,7 @@ import {
 import {
   CachedScreeningProvider,
   InternalWatchlistProvider,
+  MockScreeningProvider,
   buildScreeningSubject,
   type ScreeningOptions,
   type ScreeningProvider,
@@ -187,6 +188,41 @@ describe("L1 - the onboarding screening", () => {
     expect(state.joinRequests[0]?.screeningId).toBe(outcome.screeningId);
     expect(state.joinRequests[0]?.status).toBe("SUBMITTED");
     expect(merchant.status).toBe("PENDING");
+  });
+
+  test("an unavailable screening provider fails closed and parks the request in review", async () => {
+    const state = createScreeningState();
+    const merchant = merchantRow({ legalName: "مؤسسة النور للتجارة" });
+    state.merchants.push(merchant);
+    state.joinRequests.push(joinRequestRow());
+    state.owners.push(ownerRow());
+    const repositories = createScreeningRepositories(state, NOW);
+    const service = new MerchantScreeningService({
+      repositories,
+      screening: new MockScreeningProvider({
+        result: "ERROR",
+        errorMessage: "provider unavailable",
+      }),
+      clock: () => NOW,
+    });
+
+    const outcome = await service.submitOnboarding(TX, {
+      merchant,
+      joinRequestId: "join-1",
+      owners: state.owners,
+    });
+
+    // An ERROR is never a clean result: the request is parked in review and
+    // never becomes SUBMITTED, so approval is impossible.
+    expect(outcome.result).toBe("ERROR");
+    expect(outcome.blocked).toBe(true);
+    expect(outcome.screeningUnavailable).toBe(true);
+    expect(outcome.joinRequestStatus).toBe("IN_REVIEW");
+    expect(state.joinRequests[0]?.status).toBe("IN_REVIEW");
+    expect(state.joinRequests[0]?.submittedAt).toBeNull();
+    expect(state.cases).toHaveLength(0);
+    expect(state.screenings.length).toBeGreaterThan(0);
+    expect(state.auditLogs.some((entry) => entry.action === "MERCHANT_ONBOARDING_SCREENING_UNAVAILABLE")).toBe(true);
   });
 
   test("a confirmed match on a beneficial owner blocks the submission as well", async () => {

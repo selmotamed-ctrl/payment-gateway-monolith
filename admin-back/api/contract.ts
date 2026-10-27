@@ -736,10 +736,20 @@ export const toCoreMerchantProposeEdit = (body: unknown): JsonRecord => {
 
 /* ------------------------------------------------------------------------ approvals */
 
+const DISPUTE_OUTCOMES = ["WON", "LOST"] as const;
+
 export const toCoreApprovalApprove = (body: unknown): JsonRecord => {
   const source = asRecord(body);
+  const result: JsonRecord = {};
   const notes = asString(source.comment) ?? asString(source.reason);
-  return notes ? { notes: clamp(notes, 2000) } : {};
+  if (notes) result.notes = clamp(notes, 2000);
+  // The outcome of a chargeback is what the adjustment execution consumes:
+  // without it core holds the money forever.
+  const outcome = pickEnum(source.outcome, DISPUTE_OUTCOMES);
+  if (outcome) result.outcome = outcome;
+  const riskAcceptanceNote = asString(source.riskAcceptanceNote);
+  if (riskAcceptanceNote) result.riskAcceptanceNote = clamp(riskAcceptanceNote, 2000);
+  return result;
 };
 
 export const toCoreApprovalReject = (body: unknown): JsonRecord => {

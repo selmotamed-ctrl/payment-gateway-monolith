@@ -81,7 +81,7 @@ const createFakeClient = (options: FakeOptions = {}) => {
     if (sql.includes("confirmed_count = confirmed_count + 1")) {
       link.confirmedCount = Number(link.confirmedCount ?? 0) + 1;
       link.activeLockedCount = Math.max(0, Number(link.activeLockedCount ?? 0) - 1);
-      if (Number(link.confirmedCount) >= Number(link.useCount ?? 1)) {
+      if (!link.infiniteUse && Number(link.confirmedCount) >= Number(link.useCount ?? 1)) {
         link.state = "COMPLETED";
       }
       return 1;

@@ -21,6 +21,8 @@ export interface CheckpointPrismaClient {
   journalEntry?: {
     findFirst(args: { where: Record<string, unknown>; orderBy?: Record<string, unknown> }): Promise<{ id: string } | null>;
   };
+  /** Present on the Prisma client; absent on a narrow test double. */
+  $queryRawUnsafe?: (sql: string, ...params: unknown[]) => Promise<unknown>;
 }
 
 export interface AccountBalance {
@@ -40,7 +42,10 @@ export class CheckpointService {
   }
 
   async captureCheckpoint(accountId: string, asOf = new Date(), checkpointId?: string): Promise<CheckpointRecord> {
-    const account = await this.client.glAccount.findUnique({ where: { id: accountId } });
+    // The checkpoint must serialise against a concurrent settlement sweep that
+    // is writing lines to the same account, otherwise the balance captured is
+    // a torn read. The row is locked for the duration of the snapshot.
+    const account = await this.lockAccount(accountId);
     if (!account) {
       throw new Error(`GL account '${accountId}' does not exist`);
     }
@@ -66,6 +71,24 @@ export class CheckpointService {
       },
     });
     return { id, glAccountId: accountId, asOf, balance };
+  }
+
+  /**
+   * Reads the account under a row lock when the client supports it, so a
+   * checkpoint cannot interleave with a posting that targets the same account.
+   */
+  private async lockAccount(accountId: string): Promise<LedgerAccountRecord | null> {
+    if (this.client.$queryRawUnsafe) {
+      const rows = (await this.client.$queryRawUnsafe(
+        "SELECT * FROM `gl_accounts` WHERE `id` = ? FOR UPDATE",
+        accountId,
+      )) as Array<Record<string, unknown>> | null;
+      const locked = Array.isArray(rows) ? rows[0] : undefined;
+      if (locked) {
+        return locked as unknown as LedgerAccountRecord;
+      }
+    }
+    return this.client.glAccount.findUnique({ where: { id: accountId } });
   }
 
   async getLiveBalance(accountId: string): Promise<AccountBalance> {

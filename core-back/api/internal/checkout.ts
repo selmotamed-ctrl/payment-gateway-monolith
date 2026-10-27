@@ -353,6 +353,172 @@ const customerNameOf = (formData: Record<string, unknown>): string | null =>
 const customerWalletOf = (formData: Record<string, unknown>): string | null =>
   formValue(formData, ["wallet_id", "walletId"]);
 
+/**
+ * The fields of a rail, as declared in `rail_fields`.
+ *
+ * The checkout validates the submitted form against exactly this descriptor,
+ * so every rail gets the same server-side validation as the one the customer
+ * form advertised. The client is never trusted to have enforced it.
+ */
+export interface RailFieldRule {
+  key: string;
+  type: string;
+  checksum?: string | null;
+  regex?: string | null;
+  minLength?: number | null;
+  maxLength?: number | null;
+  optionsJson?: unknown;
+  required?: boolean | null;
+}
+
+const railFieldError = (
+  field: string,
+  reason: string,
+  message: string,
+): ApiError => new ApiError(400, "RAIL_FIELD_INVALID", message, { field, reason });
+
+const asOptionsRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
+/**
+ * The Luhn (mod 10) check digit. Non-digit separators are ignored, so a PAN
+ * or a wallet id may be formatted with spaces or hyphens.
+ */
+export const isValidLuhn = (value: string): boolean => {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length < 2) {
+    return false;
+  }
+  let sum = 0;
+  let double = false;
+  for (let index = digits.length - 1; index >= 0; index -= 1) {
+    let digit = digits.charCodeAt(index) - 48;
+    if (digit < 0 || digit > 9) {
+      return false;
+    }
+    if (double) {
+      digit *= 2;
+      if (digit > 9) {
+        digit -= 9;
+      }
+    }
+    sum += digit;
+    double = !double;
+  }
+  return sum % 10 === 0;
+};
+
+const walletTypeCodes = (options: Record<string, unknown>): string[] | null => {
+  const raw = options.wallet_types ?? options.walletTypes;
+  if (!Array.isArray(raw)) {
+    return null;
+  }
+  const codes = raw
+    .filter((entry) => typeof entry === "string" || typeof entry === "number")
+    .map((entry) => String(entry));
+  return codes.length > 0 ? codes : null;
+};
+
+/**
+ * Validates the customer form data against the `rail_fields` descriptors.
+ *
+ * The rules are driven by the catalog: required, regex, length, the optional
+ * Luhn checksum and the optional wallet-type allow-list in `options_json`.
+ * The first violation is reported as a field-level 400 before any money
+ * moves and before the gateway is contacted.
+ */
+export const validateRailFields = (
+  fields: readonly RailFieldRule[],
+  formData: Record<string, unknown>,
+): void => {
+  for (const field of fields) {
+    const raw = formData[field.key];
+    const absent =
+      raw === undefined
+      || raw === null
+      || (typeof raw === "string" && raw.trim().length === 0);
+    if (absent) {
+      if (field.required === true) {
+        throw railFieldError(
+          field.key,
+          "REQUIRED",
+          `The field '${field.key}' is required`,
+        );
+      }
+      continue;
+    }
+    if (typeof raw !== "string" && typeof raw !== "number") {
+      throw railFieldError(
+        field.key,
+        "INVALID_TYPE",
+        `The field '${field.key}' must be a text value`,
+      );
+    }
+    const value = typeof raw === "string" ? raw : String(raw);
+    if (typeof field.minLength === "number" && value.length < field.minLength) {
+      throw railFieldError(
+        field.key,
+        "MIN_LENGTH",
+        `The field '${field.key}' must be at least ${field.minLength} characters long`,
+      );
+    }
+    if (typeof field.maxLength === "number" && value.length > field.maxLength) {
+      throw railFieldError(
+        field.key,
+        "MAX_LENGTH",
+        `The field '${field.key}' must be at most ${field.maxLength} characters long`,
+      );
+    }
+    if (typeof field.regex === "string" && field.regex.length > 0) {
+      let pattern: RegExp;
+      try {
+        pattern = new RegExp(field.regex);
+      } catch {
+        throw new ApiError(
+          500,
+          "RAIL_FIELD_CONFIGURATION_INVALID",
+          `The validation rule of the field '${field.key}' is invalid`,
+        );
+      }
+      if (!pattern.test(value)) {
+        throw railFieldError(
+          field.key,
+          "REGEX",
+          `The field '${field.key}' does not match the required format`,
+        );
+      }
+    }
+    if (String(field.checksum ?? "NONE").toUpperCase() === "LUHN" && !isValidLuhn(value)) {
+      throw railFieldError(
+        field.key,
+        "CHECKSUM",
+        `The field '${field.key}' fails the check digit validation`,
+      );
+    }
+    const options = asOptionsRecord(field.optionsJson);
+    const allowedTypes = walletTypeCodes(options);
+    if (allowedTypes) {
+      const offset = typeof options.wallet_type_offset === "number"
+        ? Math.max(0, Math.trunc(options.wallet_type_offset))
+        : 0;
+      const length = typeof options.wallet_type_length === "number"
+        ? Math.max(1, Math.trunc(options.wallet_type_length))
+        : 2;
+      const digits = value.replace(/\D/g, "");
+      const typeCode = digits.slice(offset, offset + length);
+      if (!allowedTypes.includes(typeCode)) {
+        throw railFieldError(
+          field.key,
+          "WALLET_TYPE_NOT_ALLOWED",
+          `The wallet type of the field '${field.key}' is not allowed`,
+        );
+      }
+    }
+  }
+};
+
 const buildClientAction = (
   mode: string,
   payload: {
@@ -531,6 +697,149 @@ const ensureLinkUsable = (link: LoadedLink): void => {
   }
 };
 
+const NON_CANCELLABLE_STATUSES = [
+  "SUCCEEDED",
+  "AUTHORIZING",
+  "REFUNDED",
+  "PARTIALLY_REFUNDED",
+  "FAILED",
+  "EXPIRED",
+  "CANCELLED",
+  "BLOCKED",
+] as const;
+
+/**
+ * The AML guard marks a held attempt with this substatus. The AML case owns the
+ * lifecycle of a held payment (release/void) until it is resolved, so the
+ * customer cancel and the generic expiry sweeper must not touch it.
+ */
+export const AML_HOLD_SUBSTATUS = "AML_HOLD";
+
+/**
+ * The attempt states from which a confirm may claim the SUBMIT phase. The claim
+ * is a single conditional UPDATE, so exactly one concurrent caller wins.
+ */
+export const CONFIRM_CLAIMABLE_STATUSES = [
+  "CREATED",
+  "INITIATING",
+  "AWAITING_CUSTOMER",
+  "VERIFYING",
+  "UNKNOWN",
+] as const;
+
+const CONFIRM_IDEMPOTENCY_FIELD = "confirm_idempotency_key_hash";
+
+/**
+ * The confirm idempotency key is stored as a hash in the attempt's existing
+ * `customer_fields_masked` JSON document. No schema column is added, and the
+ * marker survives every engine update (canonical errors only overwrite
+ * `substatus`).
+ */
+export const confirmIdempotencyHash = (idempotencyKey: string): string =>
+  createHash("sha256").update(idempotencyKey).digest("hex");
+
+export interface ConfirmClaimResult {
+  claimed: boolean;
+  attemptId: string;
+}
+
+/**
+ * Atomically claims an attempt for the SUBMIT phase (design §9.1 rules 2/3/5).
+ *
+ * The conditional UPDATE is the single-writer guard: only one concurrent
+ * confirm can move a claimable attempt to AUTHORIZING. A repeated confirm with
+ * the same idempotency key is refused by the marker comparison before the
+ * gateway is contacted, and an UNKNOWN attempt past the point of no return can
+ * never be claimed again.
+ */
+export const claimAttemptForConfirm = async (
+  db: typeof client,
+  attemptId: string,
+  idempotencyKeyHash: string,
+): Promise<ConfirmClaimResult> => {
+  const statusPlaceholders = CONFIRM_CLAIMABLE_STATUSES.map(() => "?").join(", ");
+  const affected = Number(
+    await db.$executeRawUnsafe(
+      `UPDATE payment_attempts
+          SET status = 'AUTHORIZING',
+              point_of_no_return = 1,
+              customer_fields_masked = JSON_SET(
+                customer_fields_masked,
+                '$.${CONFIRM_IDEMPOTENCY_FIELD}',
+                ?
+              ),
+              updated_at = NOW()
+        WHERE id = ?
+          AND terminal_at IS NULL
+          AND status IN (${statusPlaceholders})
+          AND NOT (status = 'UNKNOWN' AND point_of_no_return = 1)
+          AND (substatus IS NULL OR substatus <> '${AML_HOLD_SUBSTATUS}')
+          AND (
+            JSON_UNQUOTE(JSON_EXTRACT(customer_fields_masked, '$.${CONFIRM_IDEMPOTENCY_FIELD}')) IS NULL
+            OR JSON_UNQUOTE(JSON_EXTRACT(customer_fields_masked, '$.${CONFIRM_IDEMPOTENCY_FIELD}')) <> ?
+          )`,
+      idempotencyKeyHash,
+      attemptId,
+      ...CONFIRM_CLAIMABLE_STATUSES,
+      idempotencyKeyHash,
+    ) ?? 0,
+  );
+  return { claimed: affected === 1, attemptId };
+};
+
+export interface CancelAttemptResult {
+  attemptId: string;
+  status: string;
+  released: boolean;
+}
+
+/**
+ * Cancels an attempt with one conditional transition (design §16.1).
+ *
+ * The update only succeeds while the attempt is non-terminal, before the point
+ * of no return, and not AML-held. The link reservation is released only when
+ * that exact transition changed a row, so a repeated cancel (or a cancel of a
+ * BLOCKED / EXPIRED attempt that never held a slot) can never free another
+ * attempt's slot. A held attempt is owned by its AML case: cancelling it here
+ * would release the slot and let a later release credit a cancelled attempt.
+ * The current status is always returned, which makes repeats idempotent.
+ */
+export const cancelAttemptAtomically = async (
+  db: typeof client,
+  attempt: { id: string; linkId: string },
+): Promise<CancelAttemptResult> =>
+  db.$transaction(async (tx) => {
+    const affected = Number(
+      await tx.$executeRawUnsafe(
+        `UPDATE payment_attempts
+            SET status = 'CANCELLED', terminal_at = ?, next_check_at = NULL, updated_at = NOW()
+          WHERE id = ?
+            AND terminal_at IS NULL
+            AND point_of_no_return = 0
+            AND (substatus IS NULL OR substatus <> '${AML_HOLD_SUBSTATUS}')
+            AND status NOT IN (${NON_CANCELLABLE_STATUSES.map(() => "?").join(", ")})`,
+        new Date(),
+        attempt.id,
+        ...NON_CANCELLABLE_STATUSES,
+      ) ?? 0,
+    );
+    if (affected > 0) {
+      await tx.$executeRawUnsafe(
+        "UPDATE payment_links SET active_locked_count = GREATEST(0, active_locked_count - 1), updated_at = NOW() WHERE id = ?",
+        attempt.linkId,
+      );
+    }
+    const current = await tx.paymentAttempt.findUnique({
+      where: { id: attempt.id },
+      select: { status: true },
+    });
+    return {
+      attemptId: attempt.id,
+      status: current?.status ?? "UNKNOWN",
+      released: affected > 0,
+    };
+  });
+
 route.get("/pay/:linkKey", async (request: Request, response: Response) => {
   const { linkKey } = parseOrThrow(linkParamsSchema, request.params);
   const link = await loadLink(linkKey);
@@ -689,6 +998,15 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
     throw new ApiError(409, "RAIL_CONFIGURATION_INCOMPLETE", "The rail configuration is incomplete");
   }
 
+  // The customer form is validated against the rail's own field descriptors
+  // before the guard runs or the gateway is contacted (design §7.3 and §10;
+  // edge cases 131 and 138).
+  const railFields = await client.railField.findMany({
+    where: { railId: rail.id },
+    orderBy: { orderIndex: "asc" },
+  });
+  validateRailFields(railFields, body.formData);
+
   const mode = rail.collectionMode;
   const platformCeiling = PLATFORM_TTL_CEILINGS[mode] ?? 1200;
   const gatewayTtl = gatewaySetting?.sessionTtlSeconds ?? platformCeiling;
@@ -837,10 +1155,13 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
   });
 
   // The slot reservation, the flow execution and the state transition are
-  // owned by the universal rail engine.
+  // owned by the universal rail engine. The guard already reserved the slot
+  // in the transaction that created the attempt, so the engine must not take
+  // a second reservation (design §9.1 rule 2).
   const engineResult = await platform.engine.initiate(
     attempt as unknown as DynamicAttempt,
     body.formData,
+    { slotReserved: decision.slotReserved === true },
   );
 
   const attemptRow = await client.paymentAttempt.findUnique({ where: { id: attempt.id } });
@@ -946,7 +1267,10 @@ route.post("/pay/:linkKey/logs/:attemptId/confirm", async (request: Request, res
     response.json({ attemptId: attempt.id, status: attempt.status });
     return;
   }
-  if (!["CREATED", "INITIATING", "AWAITING_CUSTOMER", "VERIFYING", "UNKNOWN"].includes(attempt.status)) {
+  // AUTHORIZING is included so a duplicate confirm that arrives after the
+  // winner has claimed the attempt returns the current state instead of a 409.
+  // The atomic claim still guarantees that only one caller runs SUBMIT.
+  if (!["CREATED", "INITIATING", "AWAITING_CUSTOMER", "VERIFYING", "UNKNOWN", "AUTHORIZING"].includes(attempt.status)) {
     throw new ApiError(409, "ATTEMPT_NOT_CONFIRMABLE", "The attempt is not in a confirmable state");
   }
 
@@ -957,7 +1281,11 @@ route.post("/pay/:linkKey/logs/:attemptId/confirm", async (request: Request, res
     ...((body.evidence ?? {}) as Record<string, unknown>),
     ...(body.otp ? { otp: body.otp } : {}),
   };
-  const result = await platform.engine.confirm(attempt as unknown as DynamicAttempt, evidence);
+  const idempotencyKeyHash = confirmIdempotencyHash(body.idempotencyKey);
+  const result = await platform.engine.confirm(attempt as unknown as DynamicAttempt, evidence, {
+    claim: async (targetAttemptId) =>
+      (await claimAttemptForConfirm(client, targetAttemptId, idempotencyKeyHash)).claimed,
+  });
   const updated = await client.paymentAttempt.findUnique({ where: { id: attempt.id } });
 
   response.json({
@@ -996,20 +1324,11 @@ route.post("/pay/:linkKey/logs/:attemptId/cancel", async (request: Request, resp
   const { linkKey, attemptId } = parseOrThrow(attemptParamsSchema, request.params);
   parseOrThrow(cancelSchema, request.body ?? {});
   const { attempt } = await loadAttempt(linkKey, attemptId);
-  if (["SUCCEEDED", "AUTHORIZING", "REFUNDED", "PARTIALLY_REFUNDED"].includes(attempt.status)) {
+  const cancelled = await cancelAttemptAtomically(client, attempt);
+  if (!cancelled.released && cancelled.status !== "CANCELLED") {
     throw new ApiError(409, "ATTEMPT_NOT_CANCELLABLE", "The attempt can no longer be cancelled");
   }
-  const updated = await client.$transaction(async (tx) => {
-    await tx.$queryRawUnsafe(
-      "UPDATE payment_links SET active_locked_count = GREATEST(0, active_locked_count - 1), updated_at = NOW() WHERE id = ?",
-      attempt.linkId,
-    );
-    return tx.paymentAttempt.update({
-      where: { id: attempt.id },
-      data: { status: "CANCELLED", terminalAt: new Date(), nextCheckAt: null },
-    });
-  });
-  response.json({ attemptId: updated.id, status: updated.status });
+  response.json({ attemptId: cancelled.attemptId, status: cancelled.status });
 });
 
 route.post("/pay/:linkKey/logs/:attemptId/client-event", async (request: Request, response: Response) => {
@@ -1230,5 +1549,10 @@ export const checkoutInternals = {
   visibleRailsFor,
   loadCatalog,
   loadLink,
+  isValidLuhn,
+  validateRailFields,
+  cancelAttemptAtomically,
+  claimAttemptForConfirm,
+  confirmIdempotencyHash,
 };
 export { principalOf };

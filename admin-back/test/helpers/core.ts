@@ -124,6 +124,61 @@ const readBody = (request: IncomingMessage): Promise<Buffer> =>
     request.on("error", reject);
   });
 
+const parseJsonBody = (body: Buffer): Record<string, unknown> => {
+  const raw = body.toString("utf8");
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+};
+
+const isAcceptedAdminResponse = (
+  method: string,
+  rawPath: string,
+  body: Record<string, unknown>,
+): boolean => {
+  const path = rawPath.split("?")[0] ?? rawPath;
+  if (path === "/internal/admin/disputes") return true;
+  if (path === "/internal/admin/reconciliation/upload") return true;
+  if (path.endsWith("/approve")) return true;
+  if (
+    method === "PATCH" &&
+    (path === "/internal/admin/users" || /^\/internal\/admin\/users\/[^/]+$/.test(path))
+  ) {
+    return typeof body.role === "string" || Array.isArray(body.authoritiesMap);
+  }
+  if (
+    method === "POST" &&
+    /^\/internal\/admin\/join-requests\/[^/]+\/decide$/.test(path)
+  ) {
+    return body.decision === "APPROVED";
+  }
+  if (
+    method === "POST" &&
+    /^\/internal\/admin\/merchants\/[^/]+\/propose-edit$/.test(path)
+  ) {
+    return true;
+  }
+  if (
+    method === "POST" &&
+    /^\/internal\/admin\/aml\/cases\/[^/]+\/propose$/.test(path)
+  ) {
+    return true;
+  }
+  if (
+    method === "POST" &&
+    /^\/internal\/admin\/gateway-versions\/[^/]+\/submit-approval$/.test(path)
+  ) {
+    return true;
+  }
+  return false;
+};
+
 export const startTestCore = async (pki: TestPki): Promise<TestCore> => {
   const requests: CoreRequestRecord[] = [];
   const server = https.createServer(
@@ -144,9 +199,11 @@ export const startTestCore = async (pki: TestPki): Promise<TestCore> => {
         body,
       });
       // A route whose outcome became asynchronous answers `202 Accepted`.
-      const path = request.url ?? "/";
-      const accepted = path === "/internal/admin/disputes"
-        || path.endsWith("/approve");
+      const accepted = isAcceptedAdminResponse(
+        request.method ?? "GET",
+        request.url ?? "/",
+        parseJsonBody(body),
+      );
       response.writeHead(accepted ? 202 : 200, { "content-type": "application/json" });
       response.end(
         JSON.stringify({

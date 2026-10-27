@@ -1,5 +1,6 @@
 import { Decimal } from "decimal.js";
 import { ApiError } from "../../lib/error";
+import { moneyToString, type Money } from "../db/money";
 import {
   buildLedgerTemplate,
   decimal,
@@ -8,6 +9,14 @@ import {
   type LedgerPostContext,
 } from "../ledger/LedgerPoster";
 import type { Repositories, Tx } from "../db/ports";
+import { applyJsonPatch, validateJsonPatch, type JsonPatchOperation } from "./ApprovalService";
+import {
+  GoLiveGateValidator,
+  type ChannelVerificationEvidence,
+  type GoLiveValidationResult,
+} from "../flow/GoLiveGateValidator";
+import { ATTEMPT_TRANSITION_TOPIC } from "../flow/DynamicRailEngine";
+import type { InvalidationBus } from "../../lib/invalidationBus";
 
 /**
  * Executable governance.
@@ -49,9 +58,36 @@ export interface GovernanceExecutionResult {
   idempotent?: boolean;
 }
 
+export interface RefundExecutionEngine {
+  refund(
+    attempt: unknown,
+    amount: Decimal,
+    adjustmentId: string,
+  ): Promise<{ status: string; attempt?: { ownershipMode?: string | null } | null }>;
+}
+
+export interface ReconciliationSchedulerLike {
+  schedule(attemptId: string, adjustmentId?: string): Promise<void> | void;
+}
+
 export interface GovernanceExecutionContext {
   ledgerPoster: LedgerPoster;
   repositories: Repositories;
+  /**
+   * The universal rail engine. A refund is executed by the gateway first and
+   * only booked when the gateway confirms it (design §8.2).
+   */
+  engine?: RefundExecutionEngine;
+  /**
+   * Schedules an attempt whose refund answer is UNKNOWN for reconciliation.
+   */
+  reconciliationScheduler?: ReconciliationSchedulerLike;
+  /**
+   * Optional outbound bus. When present, a governance driven attempt
+   * transition (an AML release or void) is broadcast exactly like a normal
+   * engine transition.
+   */
+  transitionBus?: Pick<InvalidationBus, "publish">;
 }
 
 export interface ApprovalSubjectLike {
@@ -93,6 +129,134 @@ const asRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+
+const moneyToDecimal = (value: Money): Decimal => new Decimal(moneyToString(value));
+
+const lockAttemptForGovernance = async (
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  attemptId: string,
+): Promise<any> => {
+  const lock = ctx.repositories.payments.lockAttemptById;
+  if (lock) {
+    return lock(tx, attemptId);
+  }
+  return modelOf(tx, "paymentAttempt").findUnique({ where: { id: attemptId } });
+};
+
+const sumGovernanceRefunds = async (
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  attemptId: string,
+  states: string[],
+): Promise<Decimal> => {
+  const sum = ctx.repositories.disputes.sumRefundsForAttempt;
+  if (sum) {
+    return moneyToDecimal(await sum(tx, attemptId, states));
+  }
+  const adjustments = await modelOf(tx, "adjustment").findMany({
+    where: { sourceAttemptId: attemptId, type: "REFUND", state: { in: states } },
+  });
+  let total = new Decimal(0);
+  for (const row of adjustments as any[]) {
+    total = total.plus(toDecimal(row.amount));
+  }
+  return total;
+};
+
+const capabilitiesOf = (value: unknown): Record<string, unknown> => {
+  if (typeof value === "string") {
+    try {
+      return asRecord(JSON.parse(value));
+    } catch {
+      return {};
+    }
+  }
+  return asRecord(value);
+};
+
+const refundWindowDaysOf = async (
+  tx: Tx,
+  attempt: any,
+  rail: any,
+): Promise<number | null> => {
+  const fromRail = rail?.refundWindowDays;
+  if (fromRail !== null && fromRail !== undefined) {
+    const days = Number(fromRail);
+    if (Number.isFinite(days) && days >= 0) {
+      return days;
+    }
+  }
+  if (attempt?.routeId) {
+    const route = await modelOf(tx, "railRoute").findUnique({
+      where: { id: String(attempt.routeId) },
+    });
+    const scope = asRecord(route?.scope);
+    const fromScope = scope.refund_window_days ?? scope.refundWindowDays;
+    if (fromScope !== null && fromScope !== undefined) {
+      const days = Number(fromScope);
+      if (Number.isFinite(days) && days >= 0) {
+        return days;
+      }
+    }
+  }
+  return null;
+};
+
+const assertRefundAllowedByRail = async (
+  tx: Tx,
+  attempt: any,
+  amount: Decimal,
+  refundableAmount: Decimal,
+): Promise<void> => {
+  if (!attempt?.railId) {
+    return;
+  }
+  const rail = await modelOf(tx, "rail").findUnique({ where: { id: String(attempt.railId) } });
+  if (!rail) {
+    return;
+  }
+  const capabilities = capabilitiesOf(rail.capabilities);
+  if (amount.lt(refundableAmount)) {
+    if (capabilities.partial_refund !== true) {
+      throw new ApiError(
+        409,
+        "PARTIAL_REFUND_NOT_SUPPORTED",
+        "The pinned rail does not support partial refunds",
+        { railId: String(attempt.railId) },
+      );
+    }
+  } else if (capabilities.refund !== true) {
+    throw new ApiError(
+      409,
+      "REFUND_NOT_SUPPORTED",
+      "The pinned rail does not support refunds",
+      { railId: String(attempt.railId) },
+    );
+  }
+
+  const windowDays = await refundWindowDaysOf(tx, attempt, rail);
+  if (windowDays === null) {
+    return;
+  }
+  const base = attempt.terminalAt ?? attempt.createdAt;
+  if (!base) {
+    return;
+  }
+  const baseTime = new Date(base).getTime();
+  if (!Number.isFinite(baseTime)) {
+    return;
+  }
+  const deadline = baseTime + windowDays * 24 * 60 * 60 * 1000;
+  if (Date.now() > deadline) {
+    throw new ApiError(
+      409,
+      "REFUND_WINDOW_EXPIRED",
+      `The ${windowDays}-day refund window of the pinned rail has expired`,
+      { railId: String(attempt.railId), windowDays, deadline: new Date(deadline).toISOString() },
+    );
+  }
+};
 
 const slaHoursForSeverity = (severity: string): number => {
   switch (severity) {
@@ -258,6 +422,70 @@ const resolveNegativeBalanceCeiling = async (tx: Tx, merchantId: string): Promis
   return toDecimal(merchant?.negativeBalanceCeiling);
 };
 
+export type CommissionReceivableDecision = "ALLOW" | "PAUSE" | "NETTING";
+
+export interface CommissionReceivableCeilingEvaluation {
+  merchantId: string;
+  receivable: Decimal;
+  ceiling: Decimal | null;
+  exceeded: boolean;
+  decision: CommissionReceivableDecision;
+  reason:
+    | "NO_CEILING"
+    | "WITHIN_CEILING"
+    | "CEILING_EXCEEDED_PAUSE"
+    | "CEILING_EXCEEDED_NETTING";
+}
+
+export const decideCommissionReceivableCeiling = (input: {
+  merchantId: string;
+  receivable: Decimal;
+  ceiling: Decimal | null;
+  settlementTarget?: string | null;
+}): CommissionReceivableCeilingEvaluation => {
+  const exceeded = input.ceiling !== null && input.receivable.gt(input.ceiling);
+  if (!exceeded) {
+    return {
+      merchantId: input.merchantId,
+      receivable: input.receivable,
+      ceiling: input.ceiling,
+      exceeded: false,
+      decision: "ALLOW",
+      reason: input.ceiling === null ? "NO_CEILING" : "WITHIN_CEILING",
+    };
+  }
+  const netting = input.settlementTarget === "MERCHANT_DIRECT";
+  return {
+    merchantId: input.merchantId,
+    receivable: input.receivable,
+    ceiling: input.ceiling,
+    exceeded: true,
+    decision: netting ? "NETTING" : "PAUSE",
+    reason: netting ? "CEILING_EXCEEDED_NETTING" : "CEILING_EXCEEDED_PAUSE",
+  };
+};
+
+export const evaluateCommissionReceivableCeiling = async (
+  ctx: Pick<GovernanceExecutionContext, "repositories">,
+  tx: Tx,
+  merchantId: string,
+  settlementTarget?: string | null,
+): Promise<CommissionReceivableCeilingEvaluation> => {
+  const merchant = await ctx.repositories.merchants.findMerchantById(tx, merchantId);
+  const rawCeiling = merchant?.commissionReceivableCeiling;
+  const ceiling = rawCeiling === null || rawCeiling === undefined ? null : toDecimal(rawCeiling);
+  const receivableQuery = ctx.repositories.merchants.getCommissionReceivableBalance;
+  const receivable = receivableQuery
+    ? moneyToDecimal(await receivableQuery(tx, merchantId))
+    : new Decimal(0);
+  return decideCommissionReceivableCeiling({
+    merchantId,
+    receivable,
+    ceiling,
+    settlementTarget: settlementTarget ?? null,
+  });
+};
+
 /**
  * The merchant wallet balance, computed from the posted journal lines.
  */
@@ -300,6 +528,442 @@ const resolveAdjustmentMerchantId = async (tx: Tx, adjustment: any): Promise<str
   }
   return "";
 };
+
+export interface JoinRequestActivationInput {
+  joinRequestId: string;
+  checkerUserId: string;
+  checkerRole: string;
+  approvalRequestId?: string | null;
+  decisionReasonCode?: string | null;
+  decisionNotes?: string | null;
+  proposedRiskTier?: string | null;
+}
+
+/**
+ * Activates a merchant whose join request was approved.
+ *
+ * The four-eyes path (design §18) and the ordinary single-reviewer path both
+ * call THIS function, so a merchant can never be activated by one path in a
+ * way the other does not reproduce.
+ */
+export async function activateApprovedJoinRequest(
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  input: JoinRequestActivationInput,
+): Promise<{ joinRequestId: string; merchantId: string; status: "APPROVED" }> {
+  const joinRequests = modelOf(tx, "joinRequest");
+  const joinRequest = await joinRequests.findUnique({ where: { id: input.joinRequestId } });
+  if (!joinRequest) {
+    throw new ApiError(404, "JOIN_REQUEST_NOT_FOUND", "The join request does not exist");
+  }
+  const merchantId = String(joinRequest.merchantId);
+  const merchants = modelOf(tx, "merchant");
+  const merchant = await merchants.findUnique({ where: { id: merchantId } });
+  if (!merchant) {
+    throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
+  }
+  if (joinRequest.status === "APPROVED" && merchant.status === "ACTIVE") {
+    return { joinRequestId: String(joinRequest.id), merchantId, status: "APPROVED" };
+  }
+
+  const riskTier = input.proposedRiskTier ?? joinRequest.proposedRiskTier ?? merchant.riskTier;
+  const activatedAt = new Date();
+  await joinRequests.update({
+    where: { id: String(joinRequest.id) },
+    data: {
+      status: "APPROVED",
+      decision: "APPROVED",
+      decisionReasonCode: input.decisionReasonCode ?? null,
+      decisionNotes: input.decisionNotes ?? null,
+      proposedRiskTier: riskTier,
+    },
+  });
+  await merchants.update({
+    where: { id: merchantId },
+    data: {
+      status: "ACTIVE",
+      kybStatus: "VERIFIED",
+      riskTier,
+      activatedAt,
+    },
+  });
+
+  // A self-service registration already created the wallet, but an approved
+  // merchant must never be left without one: the wallet is created and
+  // activated here when it is missing.
+  const wallets = modelOf(tx, "wallet");
+  const merchantWallets = await wallets.findMany({ where: { merchantId } });
+  if (merchantWallets.length === 0) {
+    const glAccounts = modelOf(tx, "glAccount");
+    const glAccount = await glAccounts.create({
+      data: {
+        accountType: "MERCHANT_WALLET",
+        ownerId: merchantId,
+        currency: "LYD",
+        checkpointBalance: 0,
+      },
+    });
+    await wallets.create({
+      data: {
+        merchantId,
+        glAccountId: String(glAccount.id),
+        currency: "LYD",
+        status: "PENDING",
+      },
+    });
+  }
+  await wallets.updateMany({ where: { merchantId }, data: { status: "ACTIVE" } });
+
+  await writeAudit(ctx, tx, {
+    actorId: input.checkerUserId,
+    role: input.checkerRole,
+    action: "JOIN_REQUEST_APPROVED",
+    entityType: "JOIN_REQUEST",
+    entityId: String(joinRequest.id),
+    beforeJson: { status: String(joinRequest.status), merchantStatus: String(merchant.status) },
+    afterJson: {
+      status: "APPROVED",
+      merchantId,
+      merchantStatus: "ACTIVE",
+      kybStatus: "VERIFIED",
+      riskTier,
+      activatedAt: activatedAt.toISOString(),
+    },
+    approvalRequestId: input.approvalRequestId ?? null,
+  });
+
+  return { joinRequestId: String(joinRequest.id), merchantId, status: "APPROVED" };
+}
+
+const decodePointerSegment = (segment: string): string =>
+  segment.replaceAll("~1", "/").replaceAll("~0", "~");
+
+const topLevelFieldOfPointer = (path: string): string => {
+  if (!path.startsWith("/")) {
+    return "";
+  }
+  const segment = path.slice(1).split("/")[0] ?? "";
+  return decodePointerSegment(segment);
+};
+
+const readPointerValue = (root: unknown, path: string): unknown => {
+  if (path === "") {
+    return root;
+  }
+  let current: unknown = root;
+  for (const raw of path.slice(1).split("/")) {
+    const segment = decodePointerSegment(raw);
+    if (Array.isArray(current)) {
+      const index = Number(segment);
+      if (!Number.isInteger(index)) {
+        return undefined;
+      }
+      current = current[index];
+      continue;
+    }
+    if (!current || typeof current !== "object") {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+};
+
+const stringifyChangeValue = (value: unknown): string | null => {
+  if (value === undefined) {
+    return null;
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+};
+
+const MERCHANT_DECIMAL_FIELDS = new Set([
+  "negativeBalanceCeiling",
+  "commissionReceivableCeiling",
+]);
+const MERCHANT_DATE_FIELDS = new Set(["activatedAt", "suspendedAt", "closedAt"]);
+
+/**
+ * Applies an approved merchant JSON-Patch.
+ *
+ * The patch is applied to the merchant row, every changed field is recorded
+ * in `detail_change_logs` and the whole change is audited. The patch and the
+ * audit share the approval transaction.
+ */
+export async function executeMerchantPatch(
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  input: {
+    approvalId: string;
+    merchantId: string;
+    patch: unknown;
+    checkerUserId: string;
+    checkerRole: string;
+  },
+): Promise<GovernanceExecutionResult> {
+  const operations = validateJsonPatch(input.patch);
+  const merchants = modelOf(tx, "merchant");
+  const merchant = await merchants.findUnique({ where: { id: input.merchantId } });
+  if (!merchant) {
+    throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
+  }
+
+  // A Prisma Decimal is not structured-cloneable, so the patch document is
+  // built from clone-safe values. Decimal fields touched by the patch are
+  // converted back to an exact Decimal before the update.
+  const before: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(merchant as Record<string, unknown>)) {
+    before[key] = value instanceof Decimal ? value.toString() : value;
+  }
+  const after = applyJsonPatch(before, operations as JsonPatchOperation[]);
+  const touched = new Set(
+    operations
+      .map((operation) => topLevelFieldOfPointer(operation.path))
+      .filter((field) => field.length > 0),
+  );
+  const data: Record<string, unknown> = {};
+  for (const field of touched) {
+    if (field === "id" || field === "createdAt" || field === "updatedAt") {
+      continue;
+    }
+    const value = (after as Record<string, unknown>)[field];
+    if (MERCHANT_DECIMAL_FIELDS.has(field)) {
+      data[field] = value === null || value === undefined ? null : decimal(value as never);
+    } else if (MERCHANT_DATE_FIELDS.has(field)) {
+      data[field] = value === null || value === undefined ? null : new Date(String(value));
+    } else {
+      data[field] = value;
+    }
+  }
+  if (Object.keys(data).length === 0) {
+    return {
+      status: "SKIPPED",
+      reason: "MERCHANT_PATCH_EMPTY",
+      entityId: input.merchantId,
+      idempotent: true,
+    };
+  }
+  const updated = await merchants.update({ where: { id: input.merchantId }, data });
+
+  const detailLogs = modelOf(tx, "detailChangeLog");
+  for (const operation of operations) {
+    await detailLogs.create({
+      data: {
+        actorId: input.checkerUserId,
+        merchantId: input.merchantId,
+        entityType: "MERCHANT",
+        entityId: input.merchantId,
+        fieldName: operation.path,
+        oldValue: stringifyChangeValue(readPointerValue(before, operation.path)),
+        newValue: stringifyChangeValue(readPointerValue(after, operation.path)),
+        approvalRequestId: input.approvalId,
+        source: "ADMIN",
+        requestId: input.approvalId,
+      },
+    });
+  }
+
+  await writeAudit(ctx, tx, {
+    actorId: input.checkerUserId,
+    role: input.checkerRole,
+    action: "MERCHANT_EDIT_APPLIED",
+    entityType: "MERCHANT",
+    entityId: input.merchantId,
+    beforeJson: before,
+    afterJson: updated,
+    approvalRequestId: input.approvalId,
+  });
+
+  return {
+    status: "EXECUTED",
+    entityId: input.merchantId,
+    idempotent: false,
+  };
+}
+
+/**
+ * Applies a pending authority/role change of a user (design §7.1).
+ */
+export async function executeUserAuthorityChange(
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  input: {
+    approvalId: string;
+    userId: string;
+    payload: unknown;
+    checkerUserId: string;
+    checkerRole: string;
+  },
+): Promise<GovernanceExecutionResult> {
+  const users = modelOf(tx, "user");
+  const user = await users.findUnique({ where: { id: input.userId } });
+  if (!user) {
+    throw new ApiError(404, "USER_NOT_FOUND", "The user does not exist");
+  }
+  const payload = asRecord(input.payload);
+  const authorities = payload.authoritiesMap ?? payload.authorities_map;
+  const role = payload.role;
+  const data: Record<string, unknown> = {};
+  if (authorities !== undefined) {
+    data.authoritiesMap = authorities;
+  }
+  if (role !== undefined) {
+    data.role = role;
+  }
+  if (Object.keys(data).length === 0) {
+    throw new ApiError(
+      409,
+      "USER_APPROVAL_NO_FIELDS",
+      "The approval carries neither an authorities map nor a role change",
+    );
+  }
+  const updated = await users.update({ where: { id: input.userId }, data });
+  await writeAudit(ctx, tx, {
+    actorId: input.checkerUserId,
+    role: input.checkerRole,
+    action: "USER_AUTHORITY_UPDATED",
+    entityType: "USER",
+    entityId: input.userId,
+    beforeJson: { role: String(user.role), authoritiesMap: user.authoritiesMap },
+    afterJson: { role: String(updated.role), authoritiesMap: updated.authoritiesMap },
+    approvalRequestId: input.approvalId,
+  });
+  return {
+    status: "EXECUTED",
+    entityId: input.userId,
+    idempotent: false,
+  };
+}
+
+interface GatewayGoLiveEvidenceRecord {
+  scenarioResults: { scenario: string; passed: boolean; details?: string }[];
+  amountPipelineContractPassed: boolean;
+  referenceFormatContractPassed: boolean;
+  cryptographicSignatureContractPassed: boolean;
+  channels: ChannelVerificationEvidence[];
+  rollbackVersionId: string | null;
+  routeLimitsPreviewed: boolean;
+  commissionProfilePreviewed: boolean;
+  statementParserPreviewed: boolean;
+  evidenceLevel: "VERIFIED" | "INTERNAL" | "UNVERIFIED" | "PARTIAL" | "HIGH_RISK";
+  internalContractSuitePassed: boolean;
+  highRiskExecutiveAcceptanceSigned: boolean;
+  panFieldCount: number;
+  pciScopeReviewPassed: boolean;
+  canaryTrafficPlanConfigured: boolean;
+  routeAlertsConfigured: boolean;
+  runbooksConfigured: boolean;
+  contractDetails: Record<string, string[]>;
+}
+
+const gatewayGoLiveEvidenceOf = (
+  version: { id: string; createdById: string; rollbackVersionId: string | null },
+  record: GatewayGoLiveEvidenceRecord,
+  checkerUserId: string | null,
+) => ({
+  makerUserId: version.createdById,
+  checkerUserId: checkerUserId ?? "",
+  scenarioResults: record.scenarioResults,
+  amountPipelineContractPassed: record.amountPipelineContractPassed,
+  referenceFormatContractPassed: record.referenceFormatContractPassed,
+  cryptographicSignatureContractPassed: record.cryptographicSignatureContractPassed,
+  channels: record.channels,
+  rollbackVersionId: record.rollbackVersionId ?? version.rollbackVersionId,
+  routeLimitsPreviewed: record.routeLimitsPreviewed,
+  commissionProfilePreviewed: record.commissionProfilePreviewed,
+  statementParserPreviewed: record.statementParserPreviewed,
+  evidenceLevel: record.evidenceLevel,
+  internalContractSuitePassed: record.internalContractSuitePassed,
+  highRiskExecutiveAcceptanceSigned: record.highRiskExecutiveAcceptanceSigned,
+  panFieldCount: record.panFieldCount,
+  pciScopeReviewPassed: record.pciScopeReviewPassed,
+  canaryTrafficPlanConfigured: record.canaryTrafficPlanConfigured,
+  routeAlertsConfigured: record.routeAlertsConfigured,
+  runbooksConfigured: record.runbooksConfigured,
+});
+
+/**
+ * The twelve go-live gates of a gateway version, evaluated inside the
+ * caller's transaction so the gate decision and the go-live state change
+ * commit together (design §14).
+ */
+export async function assertGatewayVersionGoLive(
+  tx: Tx,
+  versionId: string,
+  checkerUserId: string | null,
+): Promise<GoLiveValidationResult> {
+  const version = await modelOf(tx, "gatewayVersion").findUnique({ where: { id: versionId } });
+  if (!version) {
+    throw new ApiError(404, "GATEWAY_VERSION_NOT_FOUND", "The gateway version does not exist");
+  }
+  const approval = version.approvalRequestId
+    ? await modelOf(tx, "approvalRequest").findUnique({ where: { id: String(version.approvalRequestId) } })
+    : null;
+  const record = await modelOf(tx, "gatewayVersionEvidence").findUnique({
+    where: { gatewayVersionId: versionId },
+  });
+  if (!record) {
+    throw new ApiError(
+      409,
+      "GO_LIVE_EVIDENCE_MISSING",
+      "The go-live evidence of the gateway version was never collected",
+      { failedGateIds: ["SANDBOX_SCENARIO_SUITE"] },
+    );
+  }
+  const evidence = record.evidenceJson as unknown as GatewayGoLiveEvidenceRecord;
+  const gates = new GoLiveGateValidator();
+  const result = await gates.validate(
+    gatewayGoLiveEvidenceOf(
+      version as { id: string; createdById: string; rollbackVersionId: string | null },
+      evidence,
+      checkerUserId ?? approval?.checkerUserId ?? null,
+    ),
+  );
+  if (!result.passed) {
+    throw new ApiError(
+      409,
+      "GO_LIVE_GATES_FAILED",
+      `The gateway version does not pass the go-live gates: ${result.failedGateIds.join(", ")}`,
+      { failedGateIds: result.failedGateIds, gates: result.gates },
+    );
+  }
+  return result;
+}
+
+/**
+ * Promotes a gateway version to LIVE after the gates pass, using the caller's
+ * transaction. The previous live version is superseded in the same write.
+ */
+export async function activateGatewayVersionInTransaction(
+  tx: Tx,
+  versionId: string,
+  checkerUserId: string | null,
+): Promise<{ versionId: string; gatewayId: string }> {
+  const version = await modelOf(tx, "gatewayVersion").findUnique({ where: { id: versionId } });
+  if (!version) {
+    throw new ApiError(404, "GATEWAY_VERSION_NOT_FOUND", "The gateway version does not exist");
+  }
+  await assertGatewayVersionGoLive(tx, versionId, checkerUserId);
+  await modelOf(tx, "gatewayVersion").updateMany({
+    where: { gatewayId: String(version.gatewayId), state: "LIVE", id: { not: String(version.id) } },
+    data: { state: "SUPERSEDED" },
+  });
+  await modelOf(tx, "gatewayVersion").update({
+    where: { id: String(version.id) },
+    data: { state: "LIVE" },
+  });
+  await modelOf(tx, "gateway").update({
+    where: { id: String(version.gatewayId) },
+    data: { activeVersionId: String(version.id), status: "LIVE" },
+  });
+  return { versionId: String(version.id), gatewayId: String(version.gatewayId) };
+}
 
 /**
  * Reads the proposed resolution out of an AML approval payload.
@@ -386,6 +1050,137 @@ const resolveAmlHoldAmounts = async (
     throw new ApiError(409, "AML_HOLD_AMOUNT_INCONSISTENT", "The platform commission exceeds the held amount");
   }
   return { amount, commission, merchantAmount };
+};
+
+const linkCountOf = (row: any, camel: string, snake: string, fallback = 0): number => {
+  const value = row?.[camel] ?? row?.[snake];
+  const parsed = Number(value ?? fallback);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+/**
+ * Commits the link slot of a released AML hold.
+ *
+ * The attempt transition that guards this call is conditional on
+ * `terminal_at IS NULL`, so the slot is consumed exactly once even when a
+ * re-run or a concurrent sweeper resolves the same case. An infinite-use
+ * link never becomes `COMPLETED`; only a finite link whose last slot is
+ * consumed does.
+ */
+const commitAmlLinkSlot = async (tx: Tx, linkId: string): Promise<void> => {
+  const client = tx as Record<string, any>;
+  if (typeof client.$executeRawUnsafe === "function") {
+    await client.$executeRawUnsafe(
+      `UPDATE payment_links
+          SET state = CASE
+                WHEN infinite_use = 0 AND confirmed_count + 1 >= use_count THEN 'COMPLETED'
+                ELSE state
+              END,
+              confirmed_count = confirmed_count + 1,
+              active_locked_count = GREATEST(0, active_locked_count - 1),
+              updated_at = NOW()
+        WHERE id = ?`,
+      linkId,
+    );
+    return;
+  }
+  const links = modelOf(tx, "paymentLink");
+  const link = await links.findUnique({ where: { id: linkId } });
+  if (!link) {
+    return;
+  }
+  const infinite = Boolean(link.infiniteUse ?? link.infinite_use);
+  const confirmed = linkCountOf(link, "confirmedCount", "confirmed_count");
+  const active = linkCountOf(link, "activeLockedCount", "active_locked_count");
+  const useCount = linkCountOf(link, "useCount", "use_count", 1);
+  const complete = !infinite && confirmed + 1 >= useCount;
+  await links.update({
+    where: { id: linkId },
+    data: {
+      confirmedCount: confirmed + 1,
+      activeLockedCount: Math.max(0, active - 1),
+      ...(complete ? { state: "COMPLETED" } : {}),
+    },
+  });
+};
+
+/**
+ * Releases the link slot of a voided AML hold. The confirmed count is never
+ * advanced, so a void does not consume capacity.
+ */
+const releaseAmlLinkSlot = async (tx: Tx, linkId: string): Promise<void> => {
+  const client = tx as Record<string, any>;
+  if (typeof client.$executeRawUnsafe === "function") {
+    await client.$executeRawUnsafe(
+      `UPDATE payment_links
+          SET active_locked_count = GREATEST(0, active_locked_count - 1),
+              updated_at = NOW()
+        WHERE id = ?`,
+      linkId,
+    );
+    return;
+  }
+  const links = modelOf(tx, "paymentLink");
+  const link = await links.findUnique({ where: { id: linkId } });
+  if (!link) {
+    return;
+  }
+  const active = linkCountOf(link, "activeLockedCount", "active_locked_count");
+  await links.update({
+    where: { id: linkId },
+    data: { activeLockedCount: Math.max(0, active - 1) },
+  });
+};
+
+/**
+ * Finalises the payment attempt of an AML case.
+ *
+ * The conditional `terminal_at IS NULL` update is the single-writer guard:
+ * only the caller that changes a non-terminal attempt goes on to move the
+ * link slot, so neither a re-run nor a concurrent sweeper can double count.
+ */
+const finalizeAmlAttempt = async (
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  attempt: any,
+  input: {
+    status: "SUCCEEDED" | "FAILED";
+    ledgerEntryId: string | null;
+    action: AmlCaseAction;
+  },
+): Promise<boolean> => {
+  if (!attempt) {
+    return false;
+  }
+  const updated = await modelOf(tx, "paymentAttempt").updateMany({
+    where: { id: String(attempt.id), terminalAt: null },
+    data: {
+      status: input.status,
+      terminalAt: new Date(),
+      nextCheckAt: null,
+      ...(input.ledgerEntryId ? { ledgerEntryId: input.ledgerEntryId } : {}),
+    },
+  });
+  const affected = Number(updated?.count ?? 0);
+  if (affected === 0) {
+    return false;
+  }
+  const linkId = attempt.linkId ? String(attempt.linkId) : null;
+  if (linkId) {
+    if (input.status === "SUCCEEDED") {
+      await commitAmlLinkSlot(tx, linkId);
+    } else {
+      await releaseAmlLinkSlot(tx, linkId);
+    }
+  }
+  if (ctx.transitionBus) {
+    await ctx.transitionBus.publish(ATTEMPT_TRANSITION_TOPIC, {
+      attemptId: String(attempt.id),
+      status: input.status,
+      substatus: input.action === "RELEASE" ? "AML_RELEASED" : "AML_VOID",
+    });
+  }
+  return true;
 };
 
 /**
@@ -492,6 +1287,17 @@ export async function executeAmlCaseResolution(
     },
   });
 
+  // The case resolution owns the attempt: a release settles it and commits
+  // the reserved link slot, a rejection voids it and gives the slot back.
+  // Both transitions run in this same transaction as the posting.
+  const attemptFinalized = attempt && (action === "RELEASE" || action === "REJECT")
+    ? await finalizeAmlAttempt(ctx, tx, attempt, {
+      status: action === "RELEASE" ? "SUCCEEDED" : "FAILED",
+      ledgerEntryId: action === "RELEASE" ? journalEntryId : null,
+      action,
+    })
+    : false;
+
   let operatorCaseId: string | null = null;
   if (action === "ESCALATE") {
     operatorCaseId = await openOperatorCase(ctx, tx, {
@@ -528,6 +1334,7 @@ export async function executeAmlCaseResolution(
       settlementTarget,
       postingReason: postingReason ?? null,
       operatorCaseId,
+      attemptFinalized,
     },
     approvalRequestId: input.approvalRequestId ?? null,
   });
@@ -557,10 +1364,12 @@ export interface DisputeIntakeInput {
 
 export interface DisputeIntakeResult {
   disputeId: string;
-  adjustmentId: string;
-  approvalRequestId: string;
+  adjustmentId: string | null;
+  approvalRequestId: string | null;
   escrowed: boolean;
   journalEntryId: string | null;
+  status?: "DRAFTED" | "NO_CHARGEBACK_DRAFTED";
+  reason?: string;
 }
 
 /**
@@ -594,6 +1403,13 @@ export async function openDisputeWithDraftedAdjustment(
   const merchantId = attempt.merchantId ? String(attempt.merchantId) : "";
   const currency = input.currency.toUpperCase();
 
+  const lockedAttempt = (await lockAttemptForGovernance(ctx, tx, input.attemptId)) ?? attempt;
+  const chargedAmount = toDecimal(lockedAttempt.totalChargedAmount);
+  const alreadyRefunded = await sumGovernanceRefunds(ctx, tx, input.attemptId, ["EXECUTED", "EXECUTING"]);
+  const unrefundedAmount = Decimal.max(chargedAmount.minus(alreadyRefunded), new Decimal(0));
+  const requestedAmount = toDecimal(input.amount);
+  const chargebackAmount = Decimal.min(requestedAmount, unrefundedAmount);
+
   const dispute = await disputes.create({
     data: {
       attemptId: input.attemptId,
@@ -609,6 +1425,38 @@ export async function openDisputeWithDraftedAdjustment(
     },
   });
 
+  if (!chargebackAmount.gt(0)) {
+    const reason = unrefundedAmount.lte(0) ? "ATTEMPT_FULLY_REFUNDED" : "NO_CHARGEBACK_AMOUNT";
+    await writeAudit(ctx, tx, {
+      actorId: input.actorUserId,
+      role: input.actorRole,
+      action: "DISPUTE_OPENED",
+      entityType: "DISPUTE",
+      entityId: String(dispute.id),
+      afterJson: {
+        amount: input.amount.toFixed(4),
+        chargedAmount: chargedAmount.toFixed(4),
+        alreadyRefunded: alreadyRefunded.toFixed(4),
+        unrefundedAmount: unrefundedAmount.toFixed(4),
+        currency,
+        externalDisputeRef: input.externalDisputeRef,
+        escrowed: false,
+        journalEntryId: null,
+        chargebackDrafted: false,
+        reason,
+      },
+    });
+    return {
+      disputeId: String(dispute.id),
+      adjustmentId: null,
+      approvalRequestId: null,
+      escrowed: false,
+      journalEntryId: null,
+      status: "NO_CHARGEBACK_DRAFTED",
+      reason,
+    };
+  }
+
   const targetGlAccountId = await resolveMerchantWalletGlAccountId(tx, merchantId, input.attemptId);
   const adjustment = await modelOf(tx, "adjustment").create({
     data: {
@@ -617,7 +1465,7 @@ export async function openDisputeWithDraftedAdjustment(
       sourceAttemptId: input.attemptId,
       disputeId: String(dispute.id),
       draftedBySystem: true,
-      amount: input.amount,
+      amount: chargebackAmount,
       reverseCommission: true,
       reason: `Chargeback drafted for dispute ${input.externalDisputeRef}`,
       externalDisputeRef: input.externalDisputeRef,
@@ -640,15 +1488,15 @@ export async function openDisputeWithDraftedAdjustment(
 
   let journalEntryId: string | null = null;
   let escrowed = false;
-  const settlementTarget = String(attempt.settlementTarget ?? "PLATFORM_CLEARING");
+  const settlementTarget = String(lockedAttempt.settlementTarget ?? "PLATFORM_CLEARING");
   if (settlementTarget !== "MERCHANT_DIRECT") {
-    const commission = toDecimal(attempt.platformCommissionAmount);
-    const merchantAmount = input.amount.minus(commission);
+    const commission = Decimal.min(toDecimal(lockedAttempt.platformCommissionAmount), chargebackAmount);
+    const merchantAmount = chargebackAmount.minus(commission);
     if (merchantAmount.lt(0)) {
       throw new ApiError(409, "CHARGEBACK_AMOUNT_INCONSISTENT", "The platform commission exceeds the disputed amount");
     }
     const journal = buildLedgerTemplate("CHARGEBACK_RESERVE_AND_LOST", {
-      amount: input.amount,
+      amount: chargebackAmount,
       commissionAmount: commission,
       merchantAmount,
       stage: "RESERVE",
@@ -674,7 +1522,11 @@ export async function openDisputeWithDraftedAdjustment(
     entityType: "DISPUTE",
     entityId: String(dispute.id),
     afterJson: {
-      amount: input.amount.toFixed(4),
+      amount: chargebackAmount.toFixed(4),
+      requestedAmount: requestedAmount.toFixed(4),
+      chargedAmount: chargedAmount.toFixed(4),
+      alreadyRefunded: alreadyRefunded.toFixed(4),
+      unrefundedAmount: unrefundedAmount.toFixed(4),
       currency,
       externalDisputeRef: input.externalDisputeRef,
       escrowed,
@@ -692,6 +1544,7 @@ export async function openDisputeWithDraftedAdjustment(
       state: "PENDING_REVIEW",
       disputeId: String(dispute.id),
       externalDisputeRef: input.externalDisputeRef,
+      amount: chargebackAmount.toFixed(4),
     },
     approvalRequestId: String(approval.id),
   });
@@ -702,8 +1555,340 @@ export async function openDisputeWithDraftedAdjustment(
     approvalRequestId: String(approval.id),
     escrowed,
     journalEntryId,
+    status: "DRAFTED",
   };
 }
+
+/**
+ * A refund runs in three short transactions.
+ *
+ * The gateway is an external call: holding the attempt row lock while it is
+ * in flight makes the gateway's own attempt update (on a different database
+ * connection) block until the approval transaction times out. Phase 1 claims
+ * the adjustment and releases every lock, phase 2 talks to the gateway with
+ * no transaction open, and phase 3 books the confirmed refund.
+ */
+interface TransactionCapableRepositories {
+  transaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T>;
+}
+
+const runIsolatedTransaction = async <T>(
+  ctx: GovernanceExecutionContext,
+  fallbackTx: Tx,
+  fn: (tx: Tx) => Promise<T>,
+): Promise<T> => {
+  const repositories = ctx.repositories as unknown as Partial<TransactionCapableRepositories>;
+  if (typeof repositories.transaction === "function") {
+    return repositories.transaction(fn);
+  }
+  const candidate = fallbackTx as unknown as { $transaction?: (callback: (tx: Tx) => Promise<T>) => Promise<T> };
+  if (typeof candidate.$transaction === "function") {
+    return candidate.$transaction(fn);
+  }
+  return fn(fallbackTx);
+};
+
+const refundSkippedResult = (adjustment: any, reason: string): GovernanceExecutionResult => ({
+  status: "SKIPPED",
+  reason,
+  entityId: String(adjustment.id),
+  journalEntryId: adjustment.journalEntryId ?? null,
+  idempotent: true,
+});
+
+const refundInFlightResult = (adjustment: any): GovernanceExecutionResult => ({
+  status: "HELD",
+  reason: "REFUND_IN_FLIGHT",
+  entityId: String(adjustment.id),
+  idempotent: true,
+});
+
+/**
+ * Phase 1 of an approved refund: verify every guard, lock the attempt and
+ * move the adjustment to `EXECUTING`, then COMMIT. No lock survives this
+ * function, so the gateway call in phase 2 never contends with it.
+ */
+const claimRefundAdjustment = async (
+  ctx: GovernanceExecutionContext,
+  fallbackTx: Tx,
+  input: { adjustmentId: string; checkerUserId: string; checkerRole: string; approvalRequestId?: string | null },
+  initial?: { sourceAttemptId?: unknown } | null,
+): Promise<
+  | { kind: "skipped"; result: GovernanceExecutionResult }
+  | { kind: "in_flight"; result: GovernanceExecutionResult }
+  | {
+      kind: "claimed";
+      adjustment: any;
+      sourceAttempt: any;
+      amount: Decimal;
+      merchantId: string;
+    }
+> => {
+  return runIsolatedTransaction(ctx, fallbackTx, async (tx) => {
+    // The attempt lock is deliberately the FIRST statement of the claim
+    // transaction. If a concurrent refund already holds it, we wait before
+    // taking the read snapshot, so the refund cap below sees every committed
+    // EXECUTING / EXECUTED sibling.
+    const initialAttemptId = initial?.sourceAttemptId ? String(initial.sourceAttemptId) : null;
+    let lockedAttempt = initialAttemptId
+      ? await lockAttemptForGovernance(ctx, tx, initialAttemptId)
+      : null;
+    const adjustments = modelOf(tx, "adjustment");
+    const adjustment = await adjustments.findUnique({ where: { id: input.adjustmentId } });
+    if (!adjustment) {
+      throw new ApiError(404, "ADJUSTMENT_NOT_FOUND", "The adjustment does not exist");
+    }
+    if (String(adjustment.type) !== "REFUND") {
+      throw new ApiError(409, "ADJUSTMENT_NOT_REFUND", "The adjustment is not a refund");
+    }
+    if (adjustment.state === "EXECUTED") {
+      return { kind: "skipped" as const, result: refundSkippedResult(adjustment, "ADJUSTMENT_ALREADY_EXECUTED") };
+    }
+    if (adjustment.state === "REJECTED") {
+      return { kind: "skipped" as const, result: refundSkippedResult(adjustment, "ADJUSTMENT_REJECTED") };
+    }
+    if (adjustment.state === "EXECUTING") {
+      return { kind: "in_flight" as const, result: refundInFlightResult(adjustment) };
+    }
+    const amount = toDecimal(adjustment.amount);
+    if (!amount.gt(0)) {
+      throw new ApiError(400, "INVALID_LEDGER_AMOUNT", "The adjustment amount must be greater than zero");
+    }
+    if (!adjustment.sourceAttemptId) {
+      throw new ApiError(
+        409,
+        "REFUND_ATTEMPT_REQUIRED",
+        "A refund adjustment must point at the payment attempt that is refunded",
+      );
+    }
+    if (!ctx.engine) {
+      throw new ApiError(
+        503,
+        "REFUND_ENGINE_UNAVAILABLE",
+        "The universal rail engine is not available to execute the gateway refund",
+      );
+    }
+    // Locking the attempt serialises concurrent refunds of the same payment.
+    // The lock is released by the commit at the end of this transaction, long
+    // before the gateway is called.
+    if (!lockedAttempt) {
+      lockedAttempt = await lockAttemptForGovernance(ctx, tx, String(adjustment.sourceAttemptId));
+    }
+    if (!lockedAttempt) {
+      throw new ApiError(404, "PAYMENT_ATTEMPT_NOT_FOUND", "The refunded payment attempt does not exist");
+    }
+    const refundableAmount = lockedAttempt.settledAmount !== null && lockedAttempt.settledAmount !== undefined
+      ? toDecimal(lockedAttempt.settledAmount)
+      : toDecimal(lockedAttempt.totalChargedAmount);
+    await assertRefundAllowedByRail(tx, lockedAttempt, amount, refundableAmount);
+    const priorRefunds = await sumGovernanceRefunds(ctx, tx, String(lockedAttempt.id), ["EXECUTED", "EXECUTING"]);
+    const remainingRefundable = refundableAmount.minus(priorRefunds);
+    if (priorRefunds.plus(amount).gt(refundableAmount)) {
+      throw new ApiError(
+        409,
+        "REFUND_EXCEEDS_SETTLED_AMOUNT",
+        `The refund of ${amount.toFixed(4)} exceeds the unrefunded settled amount of ${Decimal.max(remainingRefundable, new Decimal(0)).toFixed(4)}`,
+        {
+          attemptId: String(lockedAttempt.id),
+          refundableAmount: refundableAmount.toFixed(4),
+          alreadyRefunded: priorRefunds.toFixed(4),
+          requestedAmount: amount.toFixed(4),
+        },
+      );
+    }
+    // A conditional claim makes a concurrent execution a no-op instead of a
+    // second gateway call: only the transaction that still sees the
+    // pre-execution state wins.
+    const claimed = await adjustments.updateMany({
+      where: { id: String(adjustment.id), state: { in: ["DRAFT", "PENDING_REVIEW", "APPROVED"] } },
+      data: { state: "EXECUTING" },
+    });
+    if (!claimed || Number(claimed.count ?? 0) === 0) {
+      const current = await adjustments.findUnique({ where: { id: String(adjustment.id) } });
+      if (!current) {
+        throw new ApiError(404, "ADJUSTMENT_NOT_FOUND", "The adjustment does not exist");
+      }
+      if (current.state === "EXECUTED") {
+        return { kind: "skipped" as const, result: refundSkippedResult(current, "ADJUSTMENT_ALREADY_EXECUTED") };
+      }
+      if (current.state === "REJECTED") {
+        return { kind: "skipped" as const, result: refundSkippedResult(current, "ADJUSTMENT_REJECTED") };
+      }
+      return { kind: "in_flight" as const, result: refundInFlightResult(current) };
+    }
+    const merchantId = await resolveAdjustmentMerchantId(tx, adjustment);
+    return { kind: "claimed" as const, adjustment, sourceAttempt: lockedAttempt, amount, merchantId };
+  });
+};
+
+/**
+ * Phase 3 of an approved refund: re-read the attempt and the adjustment,
+ * post `FULL_REFUND` / `INTERNAL_REFUND` (the poster dedupes on
+ * `(refType, refId)`), mark the adjustment `EXECUTED` and write the audit row
+ * in one transaction.
+ */
+const finalizeRefundAdjustment = async (
+  ctx: GovernanceExecutionContext,
+  fallbackTx: Tx,
+  input: {
+    adjustmentId: string;
+    checkerUserId: string;
+    checkerRole: string;
+    approvalRequestId?: string | null;
+  },
+  gatewayResult: { status: string; attempt?: { ownershipMode?: string | null } | null },
+): Promise<GovernanceExecutionResult> => {
+  return runIsolatedTransaction(ctx, fallbackTx, async (tx) => {
+    const adjustments = modelOf(tx, "adjustment");
+    const adjustment = await adjustments.findUnique({ where: { id: input.adjustmentId } });
+    if (!adjustment) {
+      throw new ApiError(404, "ADJUSTMENT_NOT_FOUND", "The adjustment does not exist");
+    }
+    if (adjustment.state === "EXECUTED") {
+      return refundSkippedResult(adjustment, "ADJUSTMENT_ALREADY_EXECUTED");
+    }
+    if (adjustment.state === "REJECTED") {
+      return refundSkippedResult(adjustment, "ADJUSTMENT_REJECTED");
+    }
+    const amount = toDecimal(adjustment.amount);
+    const sourceAttempt = adjustment.sourceAttemptId
+      ? await modelOf(tx, "paymentAttempt").findUnique({ where: { id: String(adjustment.sourceAttemptId) } })
+      : null;
+    const merchantId = await resolveAdjustmentMerchantId(tx, adjustment);
+    const reverseCommission = adjustment.reverseCommission === true;
+    const commission = reverseCommission
+      ? Decimal.min(toDecimal(sourceAttempt?.platformCommissionAmount), amount)
+      : new Decimal(0);
+    const merchantAmount = amount.minus(commission);
+    if (merchantAmount.lt(0)) {
+      throw new ApiError(409, "ADJUSTMENT_AMOUNT_INCONSISTENT", "The platform commission exceeds the adjustment amount");
+    }
+    const targetAccount = await modelOf(tx, "glAccount").findUnique({
+      where: { id: String(adjustment.targetGlAccountId) },
+    });
+    const accounts = targetAccount?.accountType === "MERCHANT_WALLET"
+      ? { MERCHANT_WALLET: String(adjustment.targetGlAccountId) }
+      : undefined;
+
+    let ownershipMode = gatewayResult.attempt?.ownershipMode ?? null;
+    if (!ownershipMode) {
+      const gatewayVersion = sourceAttempt?.gatewayVersionId
+        ? await modelOf(tx, "gatewayVersion").findUnique({ where: { id: String(sourceAttempt.gatewayVersionId) } })
+        : null;
+      const gateway = gatewayVersion
+        ? await modelOf(tx, "gateway").findUnique({ where: { id: String(gatewayVersion.gatewayId) } })
+        : null;
+      ownershipMode = gateway?.kind === "INTERNAL"
+        ? "INTERNAL"
+        : sourceAttempt?.settlementTarget === "MERCHANT_DIRECT"
+          ? "MERCHANT_DIRECT"
+          : "PLATFORM_CLEARING";
+    }
+    const templateName = ownershipMode === "INTERNAL" ? "INTERNAL_REFUND" : "FULL_REFUND";
+    const journal = buildLedgerTemplate(templateName, {
+      amount,
+      commissionAmount: commission,
+      merchantAmount,
+    });
+    // Keyed by the adjustment, so even a race between two finalisers can only
+    // ever create one journal entry.
+    journal.refId = String(adjustment.id);
+    if (journal.refType === "PAYMENT_ATTEMPT") {
+      journal.refType = "ADJUSTMENT";
+    }
+    const posted = await ctx.ledgerPoster.post(
+      journal,
+      await walletLedgerContext(tx, merchantId, accounts),
+      tx as never,
+    );
+    await adjustments.update({
+      where: { id: String(adjustment.id) },
+      data: { state: "EXECUTED", journalEntryId: posted.entry.id },
+    });
+    await writeAudit(ctx, tx, {
+      actorId: input.checkerUserId,
+      role: input.checkerRole,
+      action: "ADJUSTMENT_EXECUTED",
+      entityType: "ADJUSTMENT",
+      entityId: String(adjustment.id),
+      beforeJson: { state: "EXECUTING", type: "REFUND" },
+      afterJson: {
+        state: "EXECUTED",
+        type: "REFUND",
+        template: templateName,
+        journalEntryId: posted.entry.id,
+        amount: amount.toFixed(4),
+        outcome: null,
+      },
+      approvalRequestId: input.approvalRequestId ?? null,
+    });
+    return {
+      status: "EXECUTED" as const,
+      entityId: String(adjustment.id),
+      template: templateName,
+      journalEntryId: posted.entry.id,
+      idempotent: posted.idempotent,
+    };
+  });
+};
+
+/**
+ * Executes an approved refund in claim -> gateway -> finalize phases.
+ */
+const executeRefundAdjustment = async (
+  ctx: GovernanceExecutionContext,
+  fallbackTx: Tx,
+  input: { adjustmentId: string; checkerUserId: string; checkerRole: string; approvalRequestId?: string | null },
+  initial?: { sourceAttemptId?: unknown } | null,
+): Promise<GovernanceExecutionResult> => {
+  const claim = await claimRefundAdjustment(ctx, fallbackTx, input, initial);
+  if (claim.kind === "skipped" || claim.kind === "in_flight") {
+    return claim.result;
+  }
+  const sourceAttemptId = String(claim.sourceAttempt.id);
+  const gatewayResult = await ctx.engine!.refund(claim.sourceAttempt, claim.amount, String(claim.adjustment.id));
+  const gatewayStatus = String(gatewayResult.status ?? "").toUpperCase();
+  if (gatewayStatus === "UNKNOWN" || gatewayStatus === "FAILED") {
+    // The gateway may or may not have moved the money. Keep the adjustment
+    // EXECUTING and schedule reconciliation; never book a refund the gateway
+    // did not confirm.
+    await runIsolatedTransaction(ctx, fallbackTx, async (tx) => {
+      const current = await modelOf(tx, "adjustment").findUnique({ where: { id: input.adjustmentId } });
+      if (!current || current.state !== "EXECUTING") {
+        return;
+      }
+      if (!ctx.reconciliationScheduler) {
+        await modelOf(tx, "paymentAttempt").update({
+          where: { id: sourceAttemptId },
+          data: { nextCheckAt: new Date(Date.now() + 60_000) },
+        });
+      }
+      await writeAudit(ctx, tx, {
+        actorId: input.checkerUserId,
+        role: input.checkerRole,
+        action: "ADJUSTMENT_REFUND_PENDING_RECONCILIATION",
+        entityType: "ADJUSTMENT",
+        entityId: String(current.id),
+        afterJson: {
+          state: "EXECUTING",
+          gatewayStatus,
+          attemptId: sourceAttemptId,
+          amount: claim.amount.toFixed(4),
+        },
+        approvalRequestId: input.approvalRequestId ?? null,
+      });
+    });
+    if (ctx.reconciliationScheduler) {
+      await ctx.reconciliationScheduler.schedule(sourceAttemptId, String(claim.adjustment.id));
+    }
+    return {
+      status: "HELD",
+      reason: gatewayStatus === "FAILED" ? "REFUND_GATEWAY_FAILED" : "REFUND_GATEWAY_UNKNOWN",
+      entityId: String(claim.adjustment.id),
+    };
+  }
+  return finalizeRefundAdjustment(ctx, fallbackTx, input, gatewayResult);
+};
 
 /**
  * Executes an adjustment and posts the matching journal entry.
@@ -712,6 +1897,8 @@ export async function openDisputeWithDraftedAdjustment(
  * `CHARGEBACK_RESERVE_AND_LOST`, stage `LOST`), a fee correction posts
  * `FEE_VARIANCE_TRUE_UP` and a manual debit or credit posts the matching
  * wallet movement. The posting and the state change share one transaction.
+ * A `REFUND` instead runs in the three short phases above so that no
+ * transaction is ever held across the gateway call (design §8.2).
  */
 export async function executeAdjustment(
   ctx: GovernanceExecutionContext,
@@ -749,6 +1936,9 @@ export async function executeAdjustment(
   }
 
   const type = String(adjustment.type);
+  if (type === "REFUND") {
+    return executeRefundAdjustment(ctx, tx, input, adjustment);
+  }
   const amount = toDecimal(adjustment.amount);
   if (!amount.gt(0)) {
     throw new ApiError(400, "INVALID_LEDGER_AMOUNT", "The adjustment amount must be greater than zero");
@@ -758,7 +1948,9 @@ export async function executeAdjustment(
     ? await modelOf(tx, "paymentAttempt").findUnique({ where: { id: String(adjustment.sourceAttemptId) } })
     : null;
   const reverseCommission = adjustment.reverseCommission === true;
-  const commission = reverseCommission ? toDecimal(sourceAttempt?.platformCommissionAmount) : new Decimal(0);
+  const commission = reverseCommission
+    ? Decimal.min(toDecimal(sourceAttempt?.platformCommissionAmount), amount)
+    : new Decimal(0);
   const merchantAmount = amount.minus(commission);
   if (merchantAmount.lt(0)) {
     throw new ApiError(409, "ADJUSTMENT_AMOUNT_INCONSISTENT", "The platform commission exceeds the adjustment amount");
@@ -852,19 +2044,32 @@ export async function executeAdjustment(
       };
     }
 
-    journal = disputeOutcome === "WON"
-      ? buildLedgerTemplate("CHARGEBACK_WON", {
+    if (disputeOutcome === "WON") {
+      journal = buildLedgerTemplate("CHARGEBACK_WON", {
         amount,
         commissionAmount: commission,
         merchantAmount,
-      })
-      : buildLedgerTemplate("CHARGEBACK_RESERVE_AND_LOST", {
+      });
+      templateName = "CHARGEBACK_WON";
+    } else if (projected.lt(0)) {
+      // The wallet goes negative but stays inside the merchant's recovery
+      // net: book the chargeback against the insufficient wallet (design
+      // §11.3 entry 15) instead of holding it.
+      journal = buildLedgerTemplate("CHARGEBACK_INSUFFICIENT", {
+        amount,
+        commissionAmount: commission,
+        merchantAmount,
+      });
+      templateName = "CHARGEBACK_INSUFFICIENT";
+    } else {
+      journal = buildLedgerTemplate("CHARGEBACK_RESERVE_AND_LOST", {
         amount,
         commissionAmount: commission,
         merchantAmount,
         stage: "LOST",
       });
-    templateName = disputeOutcome === "WON" ? "CHARGEBACK_WON" : "CHARGEBACK_RESERVE_AND_LOST";
+      templateName = "CHARGEBACK_RESERVE_AND_LOST";
+    }
   } else if (type === "CORRECTION") {
     journal = buildLedgerTemplate("FEE_VARIANCE_TRUE_UP", { amount, varianceAmount: amount });
     templateName = "FEE_VARIANCE_TRUE_UP";
@@ -878,13 +2083,6 @@ export async function executeAdjustment(
       merchantAmount: amount,
     });
     templateName = "INTERNAL_CONFIRMATION";
-  } else if (type === "REFUND") {
-    journal = buildLedgerTemplate("FULL_REFUND", {
-      amount,
-      commissionAmount: commission,
-      merchantAmount,
-    });
-    templateName = "FULL_REFUND";
   } else {
     throw new ApiError(409, "ADJUSTMENT_TYPE_NOT_EXECUTABLE", `The adjustment type '${type}' cannot be executed`);
   }
@@ -1087,6 +2285,100 @@ export async function executeCashout(
   };
 }
 
+const executeRegulatoryReportApproval = async (
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  input: { approvalId: string; reportId: string; checkerUserId: string; checkerRole: string },
+): Promise<GovernanceExecutionResult> => {
+  const reports = modelOf(tx, "regulatoryReport");
+  const report = await reports.findUnique({ where: { id: input.reportId } });
+  if (!report) {
+    throw new ApiError(404, "REGULATORY_REPORT_NOT_FOUND", "The regulatory report does not exist");
+  }
+  if (report.status === "APPROVED") {
+    return {
+      status: "SKIPPED",
+      reason: "REGULATORY_REPORT_ALREADY_APPROVED",
+      entityId: String(report.id),
+      idempotent: true,
+    };
+  }
+  if (report.status !== "PENDING_CHECKER" && report.status !== "DRAFT") {
+    throw new ApiError(
+      409,
+      "REGULATORY_REPORT_NOT_PENDING_CHECKER",
+      `The regulatory report is '${report.status}' and cannot be approved`,
+      { reportId: String(report.id), status: String(report.status) },
+    );
+  }
+  const updated = await reports.update({
+    where: { id: String(report.id) },
+    data: { status: "APPROVED", approvalRequestId: input.approvalId },
+  });
+  await writeAudit(ctx, tx, {
+    actorId: input.checkerUserId,
+    role: input.checkerRole,
+    action: "REGULATORY_REPORT_APPROVED",
+    entityType: "REGULATORY_REPORT",
+    entityId: String(report.id),
+    beforeJson: { status: String(report.status) },
+    afterJson: { status: "APPROVED", reportType: updated.reportType, authority: updated.authority },
+    approvalRequestId: input.approvalId,
+  });
+  return {
+    status: "EXECUTED",
+    entityId: String(report.id),
+    idempotent: false,
+  };
+};
+
+const executeReportingRuleApproval = async (
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  input: { approvalId: string; ruleId: string; checkerUserId: string; checkerRole: string },
+): Promise<GovernanceExecutionResult> => {
+  const rules = modelOf(tx, "reportingRule");
+  const rule = await rules.findUnique({ where: { id: input.ruleId } });
+  if (!rule) {
+    throw new ApiError(404, "REPORTING_RULE_NOT_FOUND", "The reporting rule does not exist");
+  }
+  if (rule.status === "CONFIRMED") {
+    return {
+      status: "SKIPPED",
+      reason: "REPORTING_RULE_ALREADY_CONFIRMED",
+      entityId: String(rule.id),
+      idempotent: true,
+    };
+  }
+  if (rule.status !== "PROVISIONAL") {
+    throw new ApiError(
+      409,
+      "REPORTING_RULE_NOT_PROMOTABLE",
+      `The reporting rule is '${rule.status}' and cannot be promoted`,
+      { ruleId: String(rule.id), status: String(rule.status) },
+    );
+  }
+  const updated = await rules.update({
+    where: { id: String(rule.id) },
+    data: { status: "CONFIRMED", approvalRequestId: input.approvalId },
+  });
+  await writeAudit(ctx, tx, {
+    actorId: input.checkerUserId,
+    role: input.checkerRole,
+    action: "REPORTING_RULE_CONFIRMED",
+    entityType: "REPORTING_RULE",
+    entityId: String(rule.id),
+    beforeJson: { status: "PROVISIONAL" },
+    afterJson: { status: "CONFIRMED", reportType: updated.reportType, authority: updated.authority },
+    approvalRequestId: input.approvalId,
+  });
+  return {
+    status: "EXECUTED",
+    entityId: String(rule.id),
+    idempotent: false,
+  };
+};
+
 /**
  * Executes whatever an approved request is about.
  *
@@ -1135,5 +2427,91 @@ export async function executeApprovalSubject(
       approvalRequestId: input.approval.id,
     });
   }
-  return { status: "SKIPPED", reason: "NO_EXECUTABLE_SUBJECT", entityId: input.approval.subjectId };
+  if (subjectType === "REGULATORY_REPORT") {
+    return executeRegulatoryReportApproval(ctx, tx, {
+      approvalId: input.approval.id,
+      reportId: input.approval.subjectId,
+      checkerUserId: input.checkerUserId,
+      checkerRole: input.checkerRole,
+    });
+  }
+  if (subjectType === "REPORTING_RULE") {
+    return executeReportingRuleApproval(ctx, tx, {
+      approvalId: input.approval.id,
+      ruleId: input.approval.subjectId,
+      checkerUserId: input.checkerUserId,
+      checkerRole: input.checkerRole,
+    });
+  }
+  if (subjectType === "JOIN_REQUEST") {
+    const payload = asRecord(input.approval.payloadDiffJson);
+    const decision = String(payload.decision ?? "APPROVED").toUpperCase();
+    if (decision !== "APPROVED") {
+      throw new ApiError(
+        409,
+        "JOIN_REQUEST_NOT_APPROVABLE",
+        `The join request approval carries a '${decision}' decision, so it cannot activate the merchant`,
+      );
+    }
+    const activated = await activateApprovedJoinRequest(ctx, tx, {
+      joinRequestId: input.approval.subjectId,
+      checkerUserId: input.checkerUserId,
+      checkerRole: input.checkerRole,
+      approvalRequestId: input.approval.id,
+      decisionReasonCode: payload.reasonCode === undefined ? null : String(payload.reasonCode),
+      decisionNotes: payload.notes === undefined ? null : String(payload.notes),
+      proposedRiskTier: payload.proposedRiskTier === undefined ? null : String(payload.proposedRiskTier),
+    });
+    return {
+      status: "EXECUTED",
+      entityId: activated.joinRequestId,
+      idempotent: false,
+    };
+  }
+  if (subjectType === "MERCHANT") {
+    return executeMerchantPatch(ctx, tx, {
+      approvalId: input.approval.id,
+      merchantId: input.approval.subjectId,
+      patch: input.approval.payloadDiffJson,
+      checkerUserId: input.checkerUserId,
+      checkerRole: input.checkerRole,
+    });
+  }
+  if (subjectType === "USER") {
+    return executeUserAuthorityChange(ctx, tx, {
+      approvalId: input.approval.id,
+      userId: input.approval.subjectId,
+      payload: input.approval.payloadDiffJson,
+      checkerUserId: input.checkerUserId,
+      checkerRole: input.checkerRole,
+    });
+  }
+  if (subjectType === "GATEWAY_VERSION") {
+    const activated = await activateGatewayVersionInTransaction(
+      tx,
+      input.approval.subjectId,
+      input.checkerUserId,
+    );
+    await writeAudit(ctx, tx, {
+      actorId: input.checkerUserId,
+      role: input.checkerRole,
+      action: "GATEWAY_VERSION_ACTIVATED",
+      entityType: "GATEWAY_VERSION",
+      entityId: activated.versionId,
+      beforeJson: {},
+      afterJson: { state: "LIVE", gatewayId: activated.gatewayId },
+      approvalRequestId: input.approval.id,
+    });
+    return {
+      status: "EXECUTED",
+      entityId: activated.versionId,
+      template: "GATEWAY_VERSION_LIVE",
+    };
+  }
+  throw new ApiError(
+    409,
+    "NO_EXECUTABLE_SUBJECT",
+    `The approval subject type '${subjectType}' has no executable handler`,
+    { subjectType, subjectId: input.approval.subjectId },
+  );
 }

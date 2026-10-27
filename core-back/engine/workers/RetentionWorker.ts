@@ -142,15 +142,21 @@ export interface RetentionWorkerDeps extends WorkerOptions {
  *  - `audit_log`        : the rows that are older than the period.
  *  - `detail_change_logs`: the rows that are older than the period.
  *  - `payment_attempts` : the terminal attempts that are older than the
- *                          period, together with their dependent rows.
- *  - `journal_entries`  : the entries that are older than the period and that
- *                          no attempt references any more, together with
- *                          their lines.
+ *                          period, together with their dependent rows. An
+ *                          attempt only goes when its journal entry is
+ *                          retained (or when it never had one).
  *
- * Two invariants hold for every purge:
- *
- *  - an attempt is never purged while its journal entry survives, and
- *  - a journal entry is never purged while an attempt references it.
+ * The ledger (`journal_entries` / `journal_lines`) is deliberately OUT of the
+ * retention scope. The GL account balances are derived from the journal lines
+ * (`checkpoint_balance + SUM(lines since the checkpoint)`) and a merchant holds
+ * no mutable balance of its own (design §7.1). Deleting a journal line without
+ * first folding its amount into `gl_accounts.checkpoint_balance` would make a
+ * merchant balance silently drop to zero while the system-wide invariant still
+ * looks balanced (design §11.2). The ledger is the immutable audit evidence of
+ * money that really moved, so the purger never removes it. The non-ledger
+ * evidence of an attempt (step logs, inbound events, disputes, operator cases)
+ * is still purged, and the attempt row may go once its ledger entry is
+ * retained.
  *
  * The worker is a dry run when `RETENTION_DRY_RUN` is set: it then reports
  * what it would purge and deletes nothing.
@@ -173,7 +179,6 @@ export class RetentionWorker extends BaseWorker {
 
     await this.purgeStandaloneTables(cutoff, summary);
     await this.purgeAttempts(cutoff, summary);
-    await this.purgeOrphanJournalEntries(cutoff, summary);
 
     this.logger.info("RetentionWorker: the retention pass is over", {
       dryRun: this.dryRun,
@@ -323,48 +328,47 @@ export class RetentionWorker extends BaseWorker {
   /**
    * Purges the terminal attempts that passed the retention period.
    *
-   * The attempt and its journal entry go together: an attempt is only
-   * purged when its journal entry is purged in the very same transaction,
-   * and a journal entry is only purged when no attempt references it any
-   * more. The dependent rows are removed first, in the order the foreign
-   * keys demand:
+   * The journal entries and their lines are NEVER removed here. An attempt
+   * only goes when its ledger entry is retained (or when it never had one), so
+   * the ledger evidence of the money and the GL balances stay intact. The
+   * dependent rows are removed first, in the order the foreign keys demand:
    *
-   *   journal lines -> adjustments -> disputes -> operator cases ->
-   *   inbound events -> step logs -> the attempt -> the attempt groups ->
-   *   the journal entries
+   *   adjustments -> disputes -> operator cases -> inbound events ->
+   *   step logs -> the attempt -> the attempt groups
    */
   private async purgeAttempts(cutoff: Date, summary: RetentionSummary): Promise<void> {
     for (let batch = 0; batch < MAX_BATCHES_PER_TABLE; batch += 1) {
       const result = await this.db.$transaction(async (tx: Tx) => {
         const candidates = await this.lockExpiredAttempts(tx, cutoff);
         if (candidates.length === 0) {
-          return { selected: 0, purged: 0, entries: 0 };
+          return { selected: 0, purged: 0 };
         }
 
-        const verdict = await this.journalEntryVerdict(tx, cutoff, candidates);
+        // The ledger entries are retained, so an attempt may only be deleted
+        // when the entry it points at is still there. An attempt without an
+        // entry has no ledger evidence to protect and may go as usual.
+        const retainedEntries = await this.retainedJournalEntries(tx, candidates);
         const attempts = candidates.filter(
           (candidate) =>
-            candidate.ledgerEntryId === null || verdict.purgeable.includes(candidate.ledgerEntryId),
+            candidate.ledgerEntryId === null || retainedEntries.has(candidate.ledgerEntryId),
         );
         if (attempts.length === 0) {
-          return { selected: candidates.length, purged: 0, entries: 0 };
+          return { selected: candidates.length, purged: 0 };
         }
 
         const attemptIds = attempts.map((attempt) => attempt.id);
-        const entryIds = verdict.purgeable.filter((entry) =>
-          attempts.some((attempt) => attempt.ledgerEntryId === entry),
-        );
+        const entryIds = [
+          ...new Set(
+            attempts
+              .map((attempt) => attempt.ledgerEntryId)
+              .filter((entryId): entryId is string => entryId !== null),
+          ),
+        ];
         const disputeIds = await this.disputeIdsOf(tx, attemptIds);
 
-        // The dependents go first: the journal lines and the adjustments
-        // point at the journal entries and at the disputes, so they have to
-        // be gone before their parents are removed.
-        summary.journalLines += await this.purgeRows(
-          tx,
-          "journal_lines",
-          "`entry_id` IN (" + mysqlPlaceholders(entryIds.length) + ")",
-          entryIds,
-        );
+        // The dependents go first: the adjustments point at the journal
+        // entries and at the disputes, so they have to be gone before their
+        // parents are removed. The journal entries themselves stay.
         summary.adjustments += await this.purgeAdjustments(tx, attemptIds, disputeIds, entryIds);
         summary.disputes += await this.purgeRows(
           tx,
@@ -412,21 +416,12 @@ export class RetentionWorker extends BaseWorker {
           );
         }
 
-        const purgedEntries = await this.purgeRows(
-          tx,
-          "journal_entries",
-          "`id` IN (" + mysqlPlaceholders(entryIds.length) + ")",
-          entryIds,
-        );
-        summary.journalEntries += purgedEntries;
-
-        return { selected: candidates.length, purged: purgedAttempts, entries: purgedEntries };
+        return { selected: candidates.length, purged: purgedAttempts };
       });
 
       if (result.purged > 0) {
         this.logger.info("RetentionWorker: purged the expired attempts", {
           attempts: result.purged,
-          journalEntries: result.entries,
           dryRun: this.dryRun,
         });
       }
@@ -435,8 +430,8 @@ export class RetentionWorker extends BaseWorker {
         return;
       }
       if (result.purged === 0) {
-        // Nothing could be purged: the remaining attempts wait for the entry
-        // they reference, so the pass stops here.
+        // Nothing could be purged: the remaining attempts wait for the ledger
+        // entry that protects them, so the pass stops here.
         if (result.selected > 0) {
           this.logger.warn("RetentionWorker: an expired attempt waits for its journal entry", {
             selected: result.selected,
@@ -451,71 +446,6 @@ export class RetentionWorker extends BaseWorker {
     this.logger.warn("RetentionWorker: the batch bound of the tick is reached", {
       table: "payment_attempts",
     });
-  }
-
-  /**
-   * Purges the journal entries that passed the retention period and that no
-   * attempt references any more.
-   *
-   * The entries of the purged attempts are already gone, so this step is
-   * about the entries of the other references (an adjustment, an AML hold,
-   * a settlement sweep).
-   */
-  private async purgeOrphanJournalEntries(cutoff: Date, summary: RetentionSummary): Promise<void> {
-    const table: RetentionTable = {
-      table: "journal_entries",
-      summaryKey: "journalEntries",
-      predicate:
-        "`created_at` < ?" +
-        " AND `id` NOT IN (SELECT `ledger_entry_id` FROM `payment_attempts` WHERE `ledger_entry_id` IS NOT NULL)" +
-        " AND `id` NOT IN (SELECT `hold_journal_entry_id` FROM `aml_cases` WHERE `hold_journal_entry_id` IS NOT NULL)",
-      params: [cutoff],
-      orderBy: "`created_at` ASC",
-    };
-    const selectSql =
-      `SELECT \`id\` FROM \`${table.table}\`` +
-      ` WHERE ${table.predicate}` +
-      ` ORDER BY ${table.orderBy}` +
-      " LIMIT ?";
-    const countSql = `SELECT COUNT(*) AS \`total\` FROM \`${table.table}\` WHERE ${table.predicate}`;
-
-    for (let batch = 0; batch < MAX_BATCHES_PER_TABLE; batch += 1) {
-      const purged = await this.db.$transaction(async (tx: Tx) => {
-        if (this.dryRun) {
-          const total = await this.countRows(tx, countSql, table.params);
-          return { entries: total, drained: true };
-        }
-        const ids = await this.selectIds(tx, selectSql, [...table.params, this.batchSize]);
-        if (ids.length === 0) {
-          return { entries: 0, drained: true };
-        }
-        const lines = await this.purgeRows(
-          tx,
-          "journal_lines",
-          "`entry_id` IN (" + mysqlPlaceholders(ids.length) + ")",
-          ids,
-        );
-        const entries = await this.purgeRows(
-          tx,
-          "journal_entries",
-          "`id` IN (" + mysqlPlaceholders(ids.length) + ")",
-          ids,
-        );
-        summary.journalLines += lines;
-        return { entries, drained: ids.length < this.batchSize };
-      });
-
-      summary.journalEntries += purged.entries;
-      if (purged.entries > 0) {
-        this.logger.info("RetentionWorker: purged the expired journal entries", {
-          journalEntries: purged.entries,
-          dryRun: this.dryRun,
-        });
-      }
-      if (purged.drained) {
-        return;
-      }
-    }
   }
 
   /**
@@ -551,19 +481,15 @@ export class RetentionWorker extends BaseWorker {
   }
 
   /**
-   * The verdict on the journal entries of the candidates.
+   * The journal entries of the candidates that are retained.
    *
-   * An entry may be purged with its attempt when it passed the retention
-   * period, when no attempt outside the batch references it and when no AML
-   * case holds it. An entry that does not exist any more protects nothing,
-   * so its attempt may go. Every other entry blocks the purge of its
-   * attempt, so an attempt never outlives the evidence of its entry.
+   * A missing entry is not "retained": the attempt is left in place rather
+   * than risk deleting evidence that a legacy pass already removed.
    */
-  private async journalEntryVerdict(
+  private async retainedJournalEntries(
     tx: Tx,
-    cutoff: Date,
     candidates: Array<{ id: string; ledgerEntryId: string | null }>,
-  ): Promise<{ purgeable: string[]; blocked: string[] }> {
+  ): Promise<Set<string>> {
     const entryIds = [
       ...new Set(
         candidates
@@ -572,66 +498,15 @@ export class RetentionWorker extends BaseWorker {
       ),
     ];
     if (entryIds.length === 0) {
-      return { purgeable: [], blocked: [] };
+      return new Set();
     }
-
     const existing = await this.selectIds(
       tx,
       "SELECT `id` FROM `journal_entries`" +
       " WHERE `id` IN (" + mysqlPlaceholders(entryIds.length) + ")",
       entryIds,
     );
-    const existingSet = new Set(existing);
-    const missing = entryIds.filter((entryId) => !existingSet.has(entryId));
-    if (existing.length === 0) {
-      // Every entry of the candidates is already gone, so nothing protects
-      // the attempts.
-      return { purgeable: missing, blocked: [] };
-    }
-
-    const expired = await this.selectIds(
-      tx,
-      "SELECT `id` FROM `journal_entries`" +
-      " WHERE `id` IN (" + mysqlPlaceholders(existing.length) + ")" +
-      " AND `created_at` < ?",
-      [...existing, cutoff],
-    );
-    if (expired.length === 0) {
-      return { purgeable: missing, blocked: existing };
-    }
-
-    const candidateIds = new Set(candidates.map((candidate) => candidate.id));
-    const referrers = await tx.$queryRawUnsafe(
-      "SELECT `id`, `ledger_entry_id` FROM `payment_attempts`" +
-      " WHERE `ledger_entry_id` IN (" + mysqlPlaceholders(expired.length) + ")",
-      ...expired,
-    );
-    const referencedOutside = new Set<string>();
-    for (const referrer of referrers) {
-      const record = referrer as { id?: unknown; ledger_entry_id?: unknown };
-      const id = String(record.id ?? "");
-      const entryId = String(record.ledger_entry_id ?? "");
-      if (!candidateIds.has(id)) {
-        referencedOutside.add(entryId);
-      }
-    }
-
-    const held = await this.selectIds(
-      tx,
-      "SELECT `id` FROM `aml_cases`" +
-      " WHERE `hold_journal_entry_id` IN (" + mysqlPlaceholders(expired.length) + ")",
-      expired,
-    );
-
-    const blocked = [
-      ...existing.filter((entryId) => !expired.includes(entryId)),
-      ...expired.filter((entryId) => referencedOutside.has(entryId) || held.includes(entryId)),
-    ];
-    const purgeable = [
-      ...missing,
-      ...expired.filter((entryId) => !referencedOutside.has(entryId) && !held.includes(entryId)),
-    ];
-    return { purgeable, blocked };
+    return new Set(existing);
   }
 
   /**

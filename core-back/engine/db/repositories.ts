@@ -173,6 +173,59 @@ export class PrismaRepositories implements Repositories {
       if (!merchant) return 0n;
       return moneyFromDecimal(merchant.negativeBalanceCeiling ?? 0);
     },
+    getCommissionReceivableBalance: async (tx, merchantId) => {
+      // COMMISSION_RECEIVABLE is a global ledger account, so the merchant's
+      // share is resolved through the attempt referenced by each posting.
+      if (typeof (tx as Any).$queryRaw === "function") {
+        const result = await tx.$queryRaw`
+          SELECT COALESCE(SUM(CASE WHEN jl.direction = 'DEBIT' THEN jl.amount ELSE -jl.amount END), 0) AS receivable
+          FROM journal_lines jl
+          INNER JOIN gl_accounts a ON a.id = jl.gl_account_id
+          INNER JOIN journal_entries je ON je.id = jl.entry_id
+          INNER JOIN payment_attempts pa ON pa.id = je.ref_id
+          WHERE a.account_type = 'COMMISSION_RECEIVABLE'
+            AND pa.merchant_id = ${merchantId}
+            AND je.ref_type IN ('PAYMENT_ATTEMPT', 'COMMISSION_NETTING')
+        `;
+        const first = rows<Any>(result)[0];
+        return moneyFromDecimal(first?.receivable ?? 0);
+      }
+
+      // In-memory transaction fallback (tests and non-SQL clients).
+      const accounts = rows<Any>(await model(tx, "glAccount").findMany({
+        where: { accountType: "COMMISSION_RECEIVABLE" },
+      }));
+      const accountIds = new Set(accounts.map((account) => String(account.id)));
+      if (accountIds.size === 0) {
+        return 0n;
+      }
+      const attempts = rows<Any>(await model(tx, "paymentAttempt").findMany({
+        where: { merchantId },
+      }));
+      const attemptIds = new Set(attempts.map((attempt) => String(attempt.id)));
+      if (attemptIds.size === 0) {
+        return 0n;
+      }
+      const entries = rows<Any>(await model(tx, "journalEntry").findMany({
+        where: { refType: { in: ["PAYMENT_ATTEMPT", "COMMISSION_NETTING"] } },
+      })).filter((entry) => attemptIds.has(String(entry.refId)));
+      const entryIds = entries.map((entry) => String(entry.id));
+      if (entryIds.length === 0) {
+        return 0n;
+      }
+      const lines = rows<Any>(await model(tx, "journalLine").findMany({
+        where: { entryId: { in: entryIds } },
+      }));
+      let receivable = 0n;
+      for (const line of lines) {
+        if (!accountIds.has(String(line.glAccountId))) {
+          continue;
+        }
+        const amount = moneyFromDecimal(line.amount);
+        receivable += line.direction === "DEBIT" ? amount : -amount;
+      }
+      return receivable;
+    },
   };
 
   onboarding: OnboardingRepository = {
@@ -395,6 +448,18 @@ export class PrismaRepositories implements Repositories {
     findAttemptById: async (tx, id) => {
       return (await model(tx, "paymentAttempt").findUnique({ where: { id } })) as PaymentAttemptRow | null;
     },
+    lockAttemptById: async (tx, id) => {
+      if (typeof (tx as Any).$queryRaw === "function") {
+        const result = await tx.$queryRaw`
+          SELECT * FROM payment_attempts WHERE id = ${id} LIMIT 1 FOR UPDATE
+        `;
+        const found = mapRawRows<PaymentAttemptRow>(result)[0];
+        if (found) {
+          return found;
+        }
+      }
+      return (await model(tx, "paymentAttempt").findUnique({ where: { id } })) as PaymentAttemptRow | null;
+    },
     findAttemptByReference: async (tx, reference) => {
       return (await model(tx, "paymentAttempt").findUnique({ where: { reference } })) as PaymentAttemptRow | null;
     },
@@ -543,6 +608,20 @@ export class PrismaRepositories implements Repositories {
       });
       const sum = (result as Any)?._sum?.amount;
       return sum === null || sum === undefined ? 0n : moneyFromDecimal(sum);
+    },
+    sumRefundsForAttempt: async (tx, attemptId, states = ["EXECUTED"]) => {
+      const result = await model(tx, "adjustment").findMany({
+        where: {
+          sourceAttemptId: attemptId,
+          type: "REFUND",
+          state: { in: states },
+        },
+      });
+      let total = 0n;
+      for (const row of rows<Any>(result)) {
+        total += moneyFromDecimal(row.amount);
+      }
+      return total;
     },
   };
 

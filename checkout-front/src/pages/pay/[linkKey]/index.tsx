@@ -291,12 +291,38 @@ const PayPage = dc(() => {
         }
     };
 
+    // The edge contract is `{ event, payload, idempotencyKey }` and the event
+    // names are the canonical `ClientAction` events, so the widget events are
+    // translated here instead of being sent verbatim.
+    const CLIENT_EVENT_ALIASES: Record<string, string> = {
+        ready: "widgetEvent",
+        widget_ready: "widgetEvent",
+        widget_ready_event: "widgetEvent",
+        closed: "widgetEvent",
+        widget_closed: "widgetEvent",
+        complete: "completeCallback",
+        completed: "completeCallback",
+        complete_callback: "completeCallback",
+        error: "errorCallback",
+        error_callback: "errorCallback",
+        cancel: "errorCallback",
+        cancelled: "errorCallback",
+        cancel_callback: "errorCallback",
+        return: "returnHint",
+        return_hint: "returnHint",
+    };
+
     const sendClientEvent = async (event: string, data: Record<string, unknown>) => {
         if (!attempt.value) {
             return;
         }
+        const normalized = event.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+        const canonical = CLIENT_EVENT_ALIASES[normalized] ?? event;
         try {
-            await api.post(urlsMap.payClientEvent(linkKey.value, attempt.value.attemptId), { event, data });
+            await api.post(urlsMap.payClientEvent(linkKey.value, attempt.value.attemptId), {
+                event: canonical,
+                payload: data,
+            });
         } catch (e) {
             actionError.value = extractApiErrorMessage(e);
         }

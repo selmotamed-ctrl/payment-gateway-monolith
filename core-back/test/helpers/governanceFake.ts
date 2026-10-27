@@ -214,6 +214,8 @@ export const createFakePrisma = (): FakePrisma => {
     paymentAttempt: model("paymentAttempt"),
     gatewayVersion: model("gatewayVersion"),
     gateway: model("gateway"),
+    regulatoryReport: model("regulatoryReport"),
+    reportingRule: model("reportingRule"),
   };
 
   client.$transaction = async <R>(callback: (tx: FakePrisma) => Promise<R>): Promise<R> => {

@@ -20,6 +20,9 @@ import { PrismaCallbackVerifier } from "./callbackVerifier";
 import { createComputeRegistry } from "./computeRegistry";
 import { resolveCredentialValues } from "./credentials";
 import { VaultContextCipher } from "./contextCipher";
+import { PrismaOperatorCaseSink } from "../compliance/OperatorCaseSink";
+import { PrismaReportingRuleSource, ReportingRuleEvaluator } from "../compliance/ReportingRuleEvaluator";
+import { invalidationBus } from "../../lib/invalidationBus";
 import { ApiError } from "../../lib/error";
 import { ApiConsumerError } from "../apiConsumer/ApiConsumer";
 import type { DynamicAttempt } from "../flow/DynamicRailEngine";
@@ -43,6 +46,7 @@ interface CredentialRow {
   type: string;
   value: string;
   isSecret: boolean;
+  secretVersion?: number;
 }
 
 const asEntries = (value: unknown): CredentialRow[] =>
@@ -108,6 +112,20 @@ export const createPlatformRuntime = (db: PrismaLike): PlatformRuntime => {
   const slots = new PrismaSlotReservationStore(db);
   const flowProvider = new PrismaFlowProvider(db);
   const callbackVerifier = new PrismaCallbackVerifier(db, vault, crypto);
+  const contextCipher = new VaultContextCipher(vault);
+  const reportingCipher = new VaultContextCipher(vault, "reporting-payload");
+  const reportingEvaluator = new ReportingRuleEvaluator(
+    new PrismaReportingRuleSource(db),
+    {
+      codec: {
+        encode: async (plaintext) => await reportingCipher.encrypt(plaintext),
+        decode: async (ciphertext) => {
+          const decoded = await reportingCipher.decrypt(ciphertext);
+          return typeof decoded === "string" ? decoded : JSON.stringify(decoded);
+        },
+      },
+    },
+  );
   const credentialCheck = new CredentialCheckService({
     db,
     vault,
@@ -123,7 +141,10 @@ export const createPlatformRuntime = (db: PrismaLike): PlatformRuntime => {
     stepExecutor,
     ledgerPoster,
     callbackVerifier,
-    contextCipher: new VaultContextCipher(vault),
+    contextCipher,
+    operatorCaseSink: new PrismaOperatorCaseSink(db),
+    reportingEvaluator,
+    invalidationBus,
     credentialResolver: async (attempt) => {
       // A credential set that was never verified is verified on its first
       // use, so a merchant can register a credential and start a payment
@@ -179,7 +200,7 @@ const gatewayIdOfVersion = async (
  * consumer therefore never mixes the authentication recipe of one version
  * with the secrets of another one.
  */
-const loadConsumerConfig = async (
+export const loadConsumerConfig = async (
   db: PrismaLike,
   vault: Vault,
   key: ConsumerConfigKey,
@@ -240,6 +261,46 @@ const loadConsumerConfig = async (
       ...(typeof auth?.refreshConfigJson === "object" && auth?.refreshConfigJson !== null
         ? (auth.refreshConfigJson as Record<string, never>)
         : {}),
+    },
+    // Safeguard 5 (design §8.1): a rotated refresh token must be persisted
+    // BEFORE the refresh promise resolves, otherwise a restart (or the next
+    // refresh) replays the old token and the gateway rejects the session.
+    rotatingRefreshTokenPersistence: async (input) => {
+      const current = await db.credentialSet.findUnique({
+        where: { id: input.credentialSetId },
+      });
+      if (!current) {
+        return;
+      }
+      const entries = asEntries(current.entriesCiphertext);
+      const encrypted = await vault.encryptSecret(input.newRefreshToken, "credential-set");
+      const nextVersion = entries.reduce(
+        (max, entry) => Math.max(max, Number(entry.secretVersion ?? 1)),
+        1,
+      ) + 1;
+      const updated = entries.map((entry) =>
+        entry.key === input.selector
+          ? { ...entry, value: encrypted, isSecret: true, secretVersion: nextVersion }
+          : entry,
+      );
+      if (!updated.some((entry) => entry.key === input.selector)) {
+        // The selector names the credential the gateway rotates.
+        updated.push({
+          key: input.selector,
+          type: "BODY",
+          value: encrypted,
+          isSecret: true,
+          secretVersion: nextVersion,
+        });
+      }
+      await db.$transaction(async (tx: PrismaLike) => {
+        await tx.credentialSet.update({
+          where: { id: input.credentialSetId },
+          data: { entriesCiphertext: updated },
+        });
+      });
+      // The consumer cache of this credential set is now stale.
+      await invalidationBus.invalidateCredential(input.credentialSetId, "refresh-token-rotated");
     },
   };
 };

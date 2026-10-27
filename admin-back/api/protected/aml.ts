@@ -30,7 +30,10 @@ export const dispositionSchema = z
 export const caseProposeSchema = z
   .object({
     severity: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]),
-    action: z.enum(["CASE_ONLY", "AML_HOLD", "BLOCK", "REPORT"]),
+    // The core expresses the checker's decision as HOLD / RELEASE / REJECT /
+    // ESCALATE. The public enum keeps the product vocabulary and adds the two
+    // decisions a release or a void needs.
+    action: z.enum(["CASE_ONLY", "AML_HOLD", "BLOCK", "REPORT", "RELEASE", "REJECT"]),
     reason: zReason,
     notes: z.string().max(2000).optional(),
     reportingRuleId: zIdentifier.optional(),
@@ -44,7 +47,10 @@ export const ruleSchema = z
     layer: z.number().int().min(1).max(7),
     type: z.enum(["SINGLE_AMOUNT", "CUMULATIVE_WINDOW", "STRUCTURING"]),
     parameters: zJsonObject,
-    action: z.enum(["CASE_ONLY", "AML_HOLD", "BLOCK", "REPORT"]),
+    // The core expresses the checker's decision as HOLD / RELEASE / REJECT /
+    // ESCALATE. The public enum keeps the product vocabulary and adds the two
+    // decisions a release or a void needs.
+    action: z.enum(["CASE_ONLY", "AML_HOLD", "BLOCK", "REPORT", "RELEASE", "REJECT"]),
     active: z.boolean().optional(),
     severity: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).optional(),
   })
@@ -114,6 +120,8 @@ router.post(
     paramsSchema: idParamsSchema,
     schema: caseProposeSchema,
     bodyFrom: (_req, body) => toCoreAmlCasePropose(body),
+    // The proposal is an approval request: core answers `202 Accepted`.
+    relayStatus: true,
   }),
 );
 

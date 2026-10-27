@@ -21,6 +21,12 @@ export interface ExpirySweeperWorkerDeps extends WorkerOptions {
 
 const EXPIRABLE_STATUSES = ["CREATED", "INITIATING", "AWAITING_CUSTOMER", "AUTHORIZING", "VERIFYING"];
 const RELEASE_SLOT_STATUSES = ["FAILED", "EXPIRED", "CANCELLED"];
+/**
+ * An AML-held attempt is owned by its case until the case is resolved. Its
+ * expiry is the case SLA, not the payment session TTL, so the generic sweeper
+ * must never expire it (and must never release its reserved slot).
+ */
+const AML_HOLD_SUBSTATUS = "AML_HOLD";
 
 export class ExpirySweeperWorker extends BaseWorker {
   private readonly inquiry: InquiryPort | undefined;
@@ -60,14 +66,26 @@ export class ExpirySweeperWorker extends BaseWorker {
       " AND expires_at <= ?" +
       " AND terminal_at IS NULL" +
       ` AND status IN (${statusPlaceholders})` +
+      " AND (substatus IS NULL OR substatus <> ?)" +
       " ORDER BY expires_at ASC" +
       " LIMIT ?" +
       " FOR UPDATE SKIP LOCKED";
-    const result = await this.db.$queryRawUnsafe(sql, now, ...EXPIRABLE_STATUSES, this.batchSize);
+    const result = await this.db.$queryRawUnsafe(
+      sql,
+      now,
+      ...EXPIRABLE_STATUSES,
+      AML_HOLD_SUBSTATUS,
+      this.batchSize,
+    );
     return toCamelRows<PaymentAttemptRow>(result);
   }
 
   private async handleAttempt(attempt: PaymentAttemptRow, now: Date): Promise<void> {
+    // Defence in depth: even if a held attempt is handed to the worker (for
+    // example by a stale lock snapshot), the AML case remains its only writer.
+    if (attempt.substatus === AML_HOLD_SUBSTATUS) {
+      return;
+    }
     const routeId = attempt.routeId;
     const supportsInquiry = routeId ? this.inquirySupport.get(routeId) === true : false;
 

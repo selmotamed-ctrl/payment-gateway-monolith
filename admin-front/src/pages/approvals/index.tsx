@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VCard, VCardText, VDialog, VTextField, VTextarea } from "vuetify/components";
+import { VBtn, VCard, VCardText, VDialog, VSelect, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -45,6 +45,8 @@ const ApprovalsPage = dc(() => {
     const detailsOpen = ref(false);
     const selected = ref<Approval | null>(null);
     const decisionReason = ref<string>("");
+    // A chargeback adjustment needs an explicit outcome before it can execute.
+    const outcome = ref<"WON" | "LOST" | "">("");
     const actionLoading = ref(false);
 
     const load = async () => {
@@ -69,6 +71,7 @@ const ApprovalsPage = dc(() => {
     const openDetails = async (row: Approval) => {
         selected.value = row;
         decisionReason.value = "";
+        outcome.value = "";
         detailsOpen.value = true;
         try {
             const response = await api.get(urlsMap.approvalDetail(row.id));
@@ -94,6 +97,7 @@ const ApprovalsPage = dc(() => {
         actionLoading.value = true;
         try {
             await api.post(approve ? urlsMap.approvalApprove(selected.value.id) : urlsMap.approvalReject(selected.value.id), {
+                ...(approve && outcome.value ? { outcome: outcome.value } : {}),
                 reason: decisionReason.value,
             });
             detailsOpen.value = false;
@@ -181,7 +185,15 @@ const ApprovalsPage = dc(() => {
                             <JsonPatchDiff operations={selected.value?.payloadDiff ?? []} />
                         </ThemedView>
 
-                        <VTextarea
+                        <VSelect
+                                label={t("Dispute Outcome")}
+                                items={["WON", "LOST"]}
+                                clearable
+                                modelValue={outcome.value}
+                                onUpdate:modelValue={(v: string | null) => (outcome.value = (v as "WON" | "LOST" | null) ?? "")}
+                                class="mb-3"
+                            />
+                            <VTextarea
                             modelValue={decisionReason.value}
                             onUpdate:modelValue={(v: string) => (decisionReason.value = v)}
                             label={t("Decision Reason")}

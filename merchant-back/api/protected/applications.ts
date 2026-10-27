@@ -88,6 +88,8 @@ router.patch(
     schema: applicationPatchSchema,
     bodyMapper: toCoreApplicationPatch,
     coreSchema: coreApplicationPatchSchema,
+    // A sensitive change is an approval request: core answers `202 Accepted`.
+    relayStatus: true,
   }),
 );
 

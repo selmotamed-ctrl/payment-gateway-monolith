@@ -1,5 +1,10 @@
-import express from "express";
+import express, { type Request, type Response } from "express";
 import { z } from "zod";
+import { env } from "../../lib/env";
+import { parseOrThrow } from "../../lib/error";
+import { callCoreResponse } from "../../lib/mtlsClient";
+import { parseCidrList, resolveClientIp } from "../../lib/net";
+import { resolveRequestId } from "../../lib/requestLogger";
 import { zAdminRole, zBaseVersion, zEmail, zIdentifier, zPassword, zPaginationQuery } from "../../lib/zReady";
 import { toCoreUserCreate, toCoreUserUpdate, toCoreUserUpdates } from "../contract";
 import { coreForward } from "../forward";
@@ -62,14 +67,35 @@ router.post(
   }),
 );
 
+/**
+ * Bulk update: core accepts a single subject per request, so the edge fans
+ * the patch out and answers with `202 Accepted` when any of the parts became
+ * an approval request (a role or authority change).
+ */
 router.patch(
   "/",
-  coreForward({
-    method: "PATCH",
-    path: () => "/internal/admin/users",
-    schema: userBulkPatchSchema,
-    splitBodyFrom: (_req, body) => toCoreUserUpdates(body),
-  }),
+  async (req: Request, res: Response): Promise<void> => {
+    const body = parseOrThrow(userBulkPatchSchema, req.body ?? {});
+    const parts = toCoreUserUpdates(body);
+    const results: unknown[] = [];
+    let accepted = false;
+    let lastStatus = 200;
+    for (const part of parts) {
+      const response = await callCoreResponse({
+        method: "PATCH",
+        path: "/internal/admin/users",
+        body: part,
+        requestId: resolveRequestId(req),
+        clientIp: resolveClientIp(req, parseCidrList(env.TRUSTED_PROXY_CIDRS)),
+        userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
+        authorization: req.headers.authorization,
+      });
+      results.push(response.body);
+      if (response.status === 202) accepted = true;
+      lastStatus = response.status;
+    }
+    res.status(accepted ? 202 : lastStatus).json(results);
+  },
 );
 
 router.patch(
@@ -80,6 +106,7 @@ router.patch(
     paramsSchema: userParamsSchema,
     schema: userPatchSchema,
     bodyFrom: (_req, body) => toCoreUserUpdate(body),
+    relayStatus: true,
   }),
 );
 

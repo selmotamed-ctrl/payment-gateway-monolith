@@ -310,6 +310,7 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
     .object({
       notes: z.string().max(2000).optional(),
       riskAcceptanceNote: z.string().max(2000).optional(),
+      outcome: z.enum(["WON", "LOST"]).optional(),
     })
     .strict(),
   "POST /approvals/:id/reject": z.object({ reason: z.string().min(2).max(2000) }).strict(),

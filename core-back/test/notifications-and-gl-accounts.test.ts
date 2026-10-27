@@ -414,7 +414,7 @@ describe("the notification transport of the production runtime", () => {
 
 describe("the notification environment", () => {
   const baseEnvironment = {
-    DATABASE_URL: "mysql://gateway:gateway_pw@127.0.0.1:3307/payment_gateway",
+    DATABASE_URL: "mysql://admin:admin@127.0.0.1:3306/payment_gateway_monolith",
     MTLS_CA_CERT_PATH: "./certs/internal-ca.crt",
     MTLS_SERVER_CERT_PATH: "./certs/core-back.crt",
     MTLS_SERVER_KEY_PATH: "./certs/core-back.key",

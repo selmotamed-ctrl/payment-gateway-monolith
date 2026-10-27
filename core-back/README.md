@@ -30,7 +30,7 @@ outbound gateway calls. It is reachable exclusively over Mutual TLS on the priva
 ## Runtime
 
 ```bash
-./scripts/start-mariadb.sh    # a local MariaDB on 127.0.0.1:3307 (no container runtime needed)
+./scripts/prepare-databases.sh # create the application and test databases on the MySQL server
 bun run generate-mtls-certs   # internal CA, server certificate, three client certificates
 bun run migrate-deploy         # apply the 64 table migration
 bun run db-seed                # GL accounts, OD-1..OD-11 settings, roles, blueprints
@@ -48,7 +48,7 @@ green on a machine without a database.
 | Variable | Purpose |
 | :--- | :--- |
 | `PORT` / `HOST` | Listener binding, defaults `4000` / `127.0.0.1` |
-| `DATABASE_URL` | MySQL / MariaDB connection string (`mysql://user:password@host:3306/payment_gateway`) |
+| `DATABASE_URL` | MySQL / MariaDB connection string (`mysql://user:password@host:3306/payment_gateway_monolith`) |
 | `MTLS_CA_CERT_PATH` | Internal CA used to verify client certificates |
 | `MTLS_SERVER_CERT_PATH` / `MTLS_SERVER_KEY_PATH` | Server certificate and key |
 | `KMS_MASTER_KEY` | Root key for the AES-256-GCM vault and session signing |

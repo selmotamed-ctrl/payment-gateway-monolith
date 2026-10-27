@@ -124,6 +124,35 @@ const readBody = (request: IncomingMessage): Promise<Buffer> =>
     request.on("error", reject);
   });
 
+const parseJsonBody = (body: Buffer): Record<string, unknown> => {
+  const raw = body.toString("utf8");
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+};
+
+const isAcceptedMerchantResponse = (
+  method: string,
+  rawPath: string,
+  body: Record<string, unknown>,
+): boolean => {
+  const path = rawPath.split("?")[0] ?? rawPath;
+  if (method !== "PATCH" || !/^\/internal\/merchant\/applications\/[^/]+$/.test(path)) {
+    return false;
+  }
+  return (
+    body.assignedWalletId !== undefined ||
+    body.railWhitelist !== undefined ||
+    body.redirectDomainAllowlist !== undefined
+  );
+};
+
 export const startTestCore = async (pki: TestPki): Promise<TestCore> => {
   const requests: CoreRequestRecord[] = [];
   const server = https.createServer(
@@ -149,7 +178,12 @@ export const startTestCore = async (pki: TestPki): Promise<TestCore> => {
         response.end();
         return;
       }
-      response.writeHead(200, { "content-type": "application/json" });
+      const accepted = isAcceptedMerchantResponse(
+        request.method ?? "GET",
+        request.url ?? "/",
+        parseJsonBody(body),
+      );
+      response.writeHead(accepted ? 202 : 200, { "content-type": "application/json" });
       response.end(
         JSON.stringify({
           ok: true,
@@ -158,6 +192,7 @@ export const startTestCore = async (pki: TestPki): Promise<TestCore> => {
           authorization: request.headers.authorization ?? null,
           bodyLength: body.byteLength,
           body: body.toString("utf8").slice(0, 512),
+          ...(accepted ? { approvalRequestId: "approval-1", status: "PENDING_REVIEW" } : {}),
         }),
       );
     },

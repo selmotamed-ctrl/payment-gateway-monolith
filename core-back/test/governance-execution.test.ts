@@ -415,9 +415,9 @@ describe("governance execution", () => {
     );
 
     const result = await approve(fixture, {
-      approvalId: intake.approvalRequestId,
+      approvalId: intake.approvalRequestId!,
       subjectType: "ADJUSTMENT",
-      subjectId: intake.adjustmentId,
+      subjectId: intake.adjustmentId!,
       payloadDiffJson: { type: "CHARGEBACK" },
       makerUserId: SYSTEM_AUTOMATION_USER_ID,
       checkerUserId: "user-finance",
@@ -426,7 +426,7 @@ describe("governance execution", () => {
     });
 
     expect(result.status).toBe("EXECUTED");
-    const outcome = entryOf("DISPUTE_OUTCOME", intake.adjustmentId);
+    const outcome = entryOf("DISPUTE_OUTCOME", intake.adjustmentId!);
     expect(outcome).toBeDefined();
     const byAccount = new Map(
       line(String(outcome?.id)).map((row) => [String(row.glAccountId), row]),
@@ -435,7 +435,7 @@ describe("governance execution", () => {
     expect(amountOf(byAccount.get("acc-chargeback")!)).toBe("100.0000");
     expect(String(byAccount.get("acc-treasury")?.direction)).toBe("CREDIT");
 
-    const adjustment = rowsOf("adjustment").find((row) => row.id === intake.adjustmentId);
+    const adjustment = rowsOf("adjustment").find((row) => row.id === intake.adjustmentId!);
     expect(adjustment?.state).toBe("EXECUTED");
     expect(adjustment?.journalEntryId).toBe(String(outcome?.id));
     const dispute = rowsOf("dispute").find((row) => row.id === intake.disputeId);
@@ -464,9 +464,9 @@ describe("governance execution", () => {
     // The merchant wallet is empty, so the chargeback pushes it below the
     // ceiling of zero.
     const result = await approve(fixture, {
-      approvalId: intake.approvalRequestId,
+      approvalId: intake.approvalRequestId!,
       subjectType: "ADJUSTMENT",
-      subjectId: intake.adjustmentId,
+      subjectId: intake.adjustmentId!,
       payloadDiffJson: { type: "CHARGEBACK" },
       makerUserId: SYSTEM_AUTOMATION_USER_ID,
       checkerUserId: "user-finance",
@@ -476,9 +476,9 @@ describe("governance execution", () => {
 
     expect(result.status).toBe("HELD");
     expect(result.reason).toBe("NEGATIVE_BALANCE_CEILING_EXCEEDED");
-    const adjustment = rowsOf("adjustment").find((row) => row.id === intake.adjustmentId);
+    const adjustment = rowsOf("adjustment").find((row) => row.id === intake.adjustmentId!);
     expect(adjustment?.state).toBe("PENDING_REVIEW");
-    expect(entryOf("DISPUTE_OUTCOME", intake.adjustmentId)).toBeUndefined();
+    expect(entryOf("DISPUTE_OUTCOME", intake.adjustmentId!)).toBeUndefined();
     const operatorCase = rowsOf("operatorCase")[0];
     expect(operatorCase?.priority).toBe("P1");
   });
@@ -748,9 +748,9 @@ describe("governance execution", () => {
 
     expect(
       approve(fixture, {
-        approvalId: intake.approvalRequestId,
+        approvalId: intake.approvalRequestId!,
         subjectType: "ADJUSTMENT",
-        subjectId: intake.adjustmentId,
+        subjectId: intake.adjustmentId!,
         payloadDiffJson: { type: "CHARGEBACK" },
         makerUserId: SYSTEM_AUTOMATION_USER_ID,
         checkerUserId: "user-checker",
@@ -759,9 +759,9 @@ describe("governance execution", () => {
       }),
     ).rejects.toThrow(/finance/i);
 
-    const adjustment = rowsOf("adjustment").find((row) => row.id === intake.adjustmentId);
+    const adjustment = rowsOf("adjustment").find((row) => row.id === intake.adjustmentId!);
     expect(adjustment?.state).toBe("PENDING_REVIEW");
-    expect(entryOf("DISPUTE_OUTCOME", intake.adjustmentId)).toBeUndefined();
+    expect(entryOf("DISPUTE_OUTCOME", intake.adjustmentId!)).toBeUndefined();
   });
 
   test("a merchant direct dispute is never escrowed", async () => {
@@ -787,7 +787,7 @@ describe("governance execution", () => {
     expect(intake.escrowed).toBe(false);
     expect(intake.journalEntryId).toBeNull();
     expect(entryOf("DISPUTE_OUTCOME", intake.disputeId)).toBeUndefined();
-    const adjustment = rowsOf("adjustment").find((row) => row.id === intake.adjustmentId);
+    const adjustment = rowsOf("adjustment").find((row) => row.id === intake.adjustmentId!);
     expect(adjustment?.state).toBe("PENDING_REVIEW");
   });
 
@@ -851,4 +851,108 @@ describe("governance execution", () => {
     expect(String(creditLines.get("acc-wallet")?.direction)).toBe("CREDIT");
     expect(amountOf(creditLines.get("acc-wallet")!)).toBe("15.0000");
   });
+  test("a second partial refund cannot exceed the charged amount", async () => {
+    const calls: string[] = [];
+    fixture.context.engine = {
+      refund: async (_attempt, amount, adjustmentId) => {
+        calls.push(`${adjustmentId}:${amount.toFixed(4)}`);
+        return { status: "REFUNDED", attempt: { ownershipMode: "PLATFORM_CLEARING" } };
+      },
+    };
+    await fixture.client.adjustment.create({
+      data: {
+        id: "refund-a",
+        type: "REFUND",
+        targetGlAccountId: "acc-wallet",
+        sourceAttemptId: "attempt-1",
+        amount: new Decimal(60),
+        reverseCommission: true,
+        reason: "First partial refund",
+        draftedBySystem: false,
+        state: "PENDING_REVIEW",
+      },
+    });
+    await fixture.client.adjustment.create({
+      data: {
+        id: "refund-b",
+        type: "REFUND",
+        targetGlAccountId: "acc-wallet",
+        sourceAttemptId: "attempt-1",
+        amount: new Decimal(60),
+        reverseCommission: true,
+        reason: "Second partial refund",
+        draftedBySystem: false,
+        state: "PENDING_REVIEW",
+      },
+    });
+
+    const first = await approve(fixture, {
+      approvalId: "approval-refund-a",
+      subjectType: "ADJUSTMENT",
+      subjectId: "refund-a",
+      payloadDiffJson: { type: "REFUND" },
+      makerUserId: "user-maker",
+      checkerUserId: "user-finance",
+      checkerRole: "FINANCE",
+    });
+    expect(first.status).toBe("EXECUTED");
+    expect(calls).toEqual(["refund-a:60.0000"]);
+
+    await expect(
+      approve(fixture, {
+        approvalId: "approval-refund-b",
+        subjectType: "ADJUSTMENT",
+        subjectId: "refund-b",
+        payloadDiffJson: { type: "REFUND" },
+        makerUserId: "user-maker",
+        checkerUserId: "user-finance",
+        checkerRole: "FINANCE",
+      }),
+    ).rejects.toThrow(/REFUND_EXCEEDS_SETTLED_AMOUNT|exceed/i);
+    expect(calls).toEqual(["refund-a:60.0000"]);
+    expect(rowsOf("adjustment").find((row) => row.id === "refund-b")?.state).toBe("PENDING_REVIEW");
+    expect(entryOf("ADJUSTMENT", "refund-b")).toBeUndefined();
+  });
+
+  test("a chargeback is capped to the unrefunded amount after a partial refund", async () => {
+    await fixture.client.adjustment.create({
+      data: {
+        id: "refund-partial",
+        type: "REFUND",
+        targetGlAccountId: "acc-wallet",
+        sourceAttemptId: "attempt-1",
+        amount: new Decimal(40),
+        reverseCommission: true,
+        reason: "Partial refund before the chargeback",
+        draftedBySystem: false,
+        state: "EXECUTED",
+      },
+    });
+
+    const intake = await fixture.client.$transaction(async (tx) =>
+      openDisputeWithDraftedAdjustment(fixture.context, tx as never, {
+        attemptId: "attempt-1",
+        gatewayId: "gateway-1",
+        railId: "rail-1",
+        externalDisputeRef: "DSP-PARTIAL",
+        source: "MANUAL",
+        amount: new Decimal(100),
+        currency: "LYD",
+        actorUserId: "user-finance",
+        actorRole: "FINANCE",
+      }),
+    );
+    expect(intake.status).toBe("DRAFTED");
+    expect(intake.adjustmentId).not.toBeNull();
+    const adjustment = rowsOf("adjustment").find((row) => row.id === intake.adjustmentId);
+    expect(new Decimal(String(adjustment?.amount)).toFixed(4)).toBe("60.0000");
+
+    const reserve = entryOf("DISPUTE_OUTCOME", intake.disputeId);
+    expect(reserve).toBeDefined();
+    const byAccount = new Map(line(String(reserve?.id)).map((row) => [String(row.glAccountId), row]));
+    expect(amountOf(byAccount.get("acc-wallet")!)).toBe("57.0000");
+    expect(amountOf(byAccount.get("acc-income")!)).toBe("3.0000");
+    expect(amountOf(byAccount.get("acc-chargeback")!)).toBe("60.0000");
+  });
+
 });

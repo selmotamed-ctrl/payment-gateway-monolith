@@ -84,16 +84,18 @@ const designModelNames = [
   "PlatformSetting",
   // The durable job queue of the background workers.
   "BackgroundJob",
+  // The persisted evidence the 12 go-live gates are evaluated against.
+  "GatewayVersionEvidence",
 ];
 
 describe("prisma schema", () => {
   const schema = fs.readFileSync(schemaPath, "utf8");
 
-  test("declares exactly the 65 design models", () => {
+  test("declares exactly the 66 design models", () => {
     const modelNames = [...schema.matchAll(/^model\s+(\w+)\s*\{/gm)].map(
       (match) => match[1] as string,
     );
-    expect(modelNames.length).toBe(65);
+    expect(modelNames.length).toBe(66);
     expect([...modelNames].sort()).toEqual([...designModelNames].sort());
   });
 
@@ -196,7 +198,7 @@ describe("core-back mTLS server", () => {
     process.env.NODE_ENV = "test";
     process.env.DATABASE_URL =
       process.env.DATABASE_URL ??
-      "mysql://gateway:gateway_pw@127.0.0.1:3307/payment_gateway";
+      "mysql://admin:admin@127.0.0.1:3306/payment_gateway_monolith";
     process.env.MTLS_CA_CERT_PATH = path.join(
       certificateDirectory,
       "internal-ca.crt",

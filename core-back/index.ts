@@ -4,7 +4,12 @@ import http from "node:http";
 import tls from "node:tls";
 import { randomUUID } from "node:crypto";
 import { apiRouter, internalRouter } from "./api";
-import { createProductionWorkerRuntime } from "./engine/workers/productionRuntime";
+import {
+  assertBackgroundJobQueueDrainable,
+  createProductionWorkerRuntime,
+  readBackgroundJobQueueHealth,
+  type QueueHealthDatabase,
+} from "./engine/workers/productionRuntime";
 import { env } from "./lib/env";
 import { isApiError, toErrorEnvelope } from "./lib/error";
 import { requestLoggerMiddleware } from "./lib/requestLogger";
@@ -44,7 +49,16 @@ const readSecretFile = (label: string, filePath: string): Buffer => {
   }
 };
 
-export const createApp = () => {
+export interface CreateAppOptions {
+  /**
+   * The database the health probe reads the durable queue from. The tests
+   * inject a fake; a deployment uses the Prisma client.
+   */
+  db?: QueueHealthDatabase;
+  now?: () => Date;
+}
+
+export const createApp = (options: CreateAppOptions = {}) => {
   const app = express();
   app.disable("x-powered-by");
   app.set("trust proxy", env.TRUST_PROXY);
@@ -54,8 +68,44 @@ export const createApp = () => {
   app.use(express.json({ limit: "1mb" }));
   app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
-  app.get("/health", (_request, response) => {
-    response.json({ msg: "OK", service: "core-back" });
+  const healthDb = options.db ?? (baseClient as unknown as QueueHealthDatabase);
+  const healthClock = options.now ?? (() => new Date());
+  app.get("/health", async (_request, response) => {
+    const thresholdMs = env.WORKER_BACKGROUND_JOBS_MAX_QUEUE_AGE_MS;
+    const workersEnabled = env.WORKER_ENABLED && env.WORKER_BACKGROUND_JOBS_ENABLED;
+    let queue: Awaited<ReturnType<typeof readBackgroundJobQueueHealth>>;
+    let queueReachable = true;
+    try {
+      queue = await readBackgroundJobQueueHealth(healthDb, {
+        now: healthClock(),
+        thresholdMs,
+      });
+    } catch {
+      // The liveness probe stays reachable even when the database is not:
+      // the payload says the queue cannot be inspected instead of leaking
+      // the error or the tenant rows.
+      queueReachable = false;
+      queue = {
+        queued: 0,
+        oldestQueuedAgeMs: null,
+        thresholdMs,
+        degraded: true,
+      };
+    }
+    const degraded = !workersEnabled || !queueReachable || queue.degraded;
+    response.json({
+      msg: degraded ? "DEGRADED" : "OK",
+      status: degraded ? "degraded" : "ok",
+      service: "core-back",
+      queue: {
+        enabled: workersEnabled,
+        queued: queue.queued,
+        oldestQueuedAgeMs: queue.oldestQueuedAgeMs,
+        thresholdMs: queue.thresholdMs,
+        degraded: degraded,
+        ...(queueReachable ? {} : { error: "QUEUE_HEALTH_UNAVAILABLE" }),
+      },
+    });
   });
 
   app.use("/internal", internalRouter);
@@ -146,6 +196,12 @@ export const createHttpsServer = (): CoreHttpsServer => {
 };
 
 export const start = async () => {
+  // The statement upload and the dispute intake are queue-only routes: the
+  // service refuses to boot if nothing can drain the durable jobs.
+  assertBackgroundJobQueueDrainable({
+    workerEnabled: env.WORKER_ENABLED,
+    backgroundJobsEnabled: env.WORKER_BACKGROUND_JOBS_ENABLED,
+  });
   const server = createHttpsServer();
   const workers = env.WORKER_ENABLED
     ? createProductionWorkerRuntime({
