@@ -455,11 +455,11 @@ All phase verification gates were executed in this workspace with the following 
 | Phase 3 | `cd core-back && bun test test/phase3-dynamic-engine-and-blueprints.test.ts` | 12 tests pass (7 production blueprints, 15 deterministic mock scenarios, initiate/confirm/ledger flow, 12 go-live gates, closed transform library) |
 | Phase 4 | `cd core-back && bun test test/phase4-onboarding-aml-disputes-recon.test.ts` | 16 tests pass (duplicate detection, AML hold/case-only/critical escalation, Arabic normalisation, no tipping-off, dispute dedupe, statement parsing) |
 | Phase 8 | `cd core-back && bun test test/edge-cases/catalog-140.test.ts` | 140 catalogued edge cases with 140 executable regression checks, all pass |
-| All backends | `cd <service> && bun run typecheck && bun test` | `core-back` 597 tests, `admin-back` 398 tests, `merchant-back` 67 tests, `checkout-back` 45 tests — all pass with clean TypeScript |
+| All backends | `cd <service> && bun run typecheck && bun test` | `core-back` 605 tests, `admin-back` 398 tests, `merchant-back` 67 tests, `checkout-back` 45 tests — all pass with clean TypeScript |
 | All frontends | `cd <spa> && bun run build` | `admin-front`, `merchant-front`, `checkout-front` all build (type-check + Vite) |
 | Schema parity | `cd core-back && bunx prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script` | 64 model tables and 100 enum types, identical to the committed migration (plus the hand written `schema_versions` table, the three domain `CHECK` constraints and the `approval_requests_checker_not_maker` `BEFORE INSERT` trigger) |
 
-**Outstanding environment dependency:** `T-1.4` remains in progress because this workspace has no reachable MySQL / MariaDB instance (no local server and no container runtime), so `prisma migrate deploy` and `bun run db-seed` could not be executed against a live database. The migration was generated from the schema and verified to match it exactly via `prisma migrate diff --from-empty --to-schema`, and the seed script is idempotent (verified twice against an in-memory Prisma stand-in).
+**Live database verification (Delivery Run 3):** a **MariaDB 13.0.2** instance is running locally and the platform has been migrated to it. `prisma migrate deploy` applies the 64-table migration cleanly and `bun run db-seed` seeds 15 gateways, 13 gateway versions, 43 flows, 63 flow steps, 107 step parameters, 147 step outputs, 12 crypto profiles, 28 confirmation channels, 23 rail fields, 13 routes, 33 GL accounts, 7 admin users, 18 notification templates and 11 platform settings. The ledger invariant reports `0.0000` drift after a live payment, and `test/e2e/mariadb-payment.test.ts` drives a complete payment (initiate → confirm → journal entry → slot commit) against the live database.
 
 ## 10. Hardening Pass · Audit Findings Closed (Delivery Run 2)
 
@@ -547,14 +547,40 @@ defect list. The following are the defects that were **closed** in this pass, gr
 | :--- | :--- |
 | The edge environment was cached on first read, and Bun executes the test files of a directory in an arbitrary order. A configuration written by one test file was therefore served to the next one, and the whole edge suite failed with `500 MTLS_MATERIAL_UNAVAILABLE` | The edge environment is no longer cached in the test environment (the same rule `core-back` already used), each test file now configures its environment in `beforeAll`, and `test/env-isolation.test.ts` in every edge service guards the behaviour |
 
+## 10.7 Database engine migration · PostgreSQL → MySQL / MariaDB
+
+The platform was designed against PostgreSQL and has been migrated to **MySQL 8.0+ / MariaDB 10.6+**.
+
+| Change | Detail |
+| :--- | :--- |
+| Datasource | `provider = "mysql"`; the database name comes from the connection string (`mysql://user:password@host:3306/payment_gateway`) |
+| Driver | `@prisma/adapter-mariadb` + the `mariadb` driver replace `@prisma/adapter-pg` |
+| Bounded strings | MySQL maps an unbounded `String` to `VARCHAR(191)`, not to `TEXT`. Every field that carries free-form or serialized content is now declared explicitly as `@db.Text`; every column that participates in an index or a foreign key stays a bounded `VARCHAR` |
+| Binary payloads | `Bytes` maps to `BLOB` (64 KB), so the inbound webhook body is `@db.LongBlob` |
+| JSON | `Json` maps to `JSON` (LONGTEXT plus a validity check in MariaDB) |
+| Money | `DECIMAL(18,4)`, never `FLOAT`/`DOUBLE` |
+| Enums | The Prisma enums are generated as native `ENUM` columns |
+| Maker ≠ Checker | MariaDB forbids a `CHECK` constraint on a column that participates in a foreign key, so the invariant is enforced by a `BEFORE INSERT` trigger on `approval_requests` that raises `SIGNAL SQLSTATE '45000'`, in addition to `ApprovalService` and `makerCheckerGuard`. The other three domain invariants remain `CHECK` constraints |
+| Raw SQL | Every statement was converted: `$1` → `?`, `"identifier"` → `` `identifier` ``, `UPDATE … RETURNING` → a `SELECT … FOR UPDATE` plus a conditional `UPDATE` inside one transaction |
+| Row locking | `FOR UPDATE SKIP LOCKED` requires MySQL 8.0+ / MariaDB 10.6+; the terminal transitions are additionally guarded by a conditional `UPDATE … WHERE terminal_at IS NULL` so a terminal state is applied at most once |
+| Migration | `prisma/migrations/20261027000000_init/migration.sql` is plain MySQL/MariaDB DDL and applies cleanly to a live instance |
+
+Two defects were found by the new end-to-end suite and fixed:
+
+| Defect | Fix |
+| :--- | :--- |
+| The engine never supplied the provider fee, so a platform-held confirmation could not be posted at all | The route fee is one economic amount; it is now supplied under both names and the ledger template decides whether it is booked as `PROVIDER_FEE_EXPENSE` (deducted at source) or as `GATEWAY_FEE_EXPENSE` + `GATEWAY_FEE_ACCRUAL` (accrued at T+N) |
+| The declarative step outputs (`SETTLED_AMOUNT`, `PROVIDER_FEE`, `PROVIDER_REF`, `NETWORK_REF`) were resolved by the step executor but never left the phase, so the attempt was never enriched with the gateway's facts | The engine now carries them out of the phase and persists them on the attempt |
+
 ## 11. Continuation Plan · Open Items
 
 These items are **not** closed by this pass. They are ordered by operational risk.
 
 | # | Item | Severity | Notes |
 | :--- | :--- | :--- | :--- |
-| 1 | Apply the migration and the seed to a live MySQL / MariaDB instance and re-run the phase gates against it | HIGH | Blocked only by the absence of a database in this workspace (`T-1.4`) |
-| 2 | Run an end-to-end payment against a sandbox gateway with the seeded blueprints | HIGH | The declarative flows are seeded and projected, but no real gateway credentials exist yet |
+| 1 | ~~Apply the migration and the seed to a live database~~ | — | **CLOSED**: the migration and the seed were applied to a live MariaDB 13.0.2 instance and the phase gates were re-run against it |
+| 2 | ~~Run an end-to-end payment through the engine~~ | — | **CLOSED**: `test/e2e/mariadb-payment.test.ts` drives a complete payment against the live database (initiate → confirm → balanced journal entry → slot commit → `0.0000` invariant). What is still missing is a **real** partner gateway: the suite uses a local HTTP stand-in |
+| 2b | Run the same end-to-end path against a real sandbox gateway of one of the seven blueprints (Edfali/Sadad OTP, Moamalat, CBL LYPay, MyPay, MPGS, NeomPay) | HIGH | The declarative flows, the crypto profiles and the confirmation channels are seeded; only the partner credentials and a reachable sandbox endpoint are missing |
 | 3 | Bind the real SMS/email aggregator credentials to the notification webhook transport | MEDIUM | The transport is implemented and signed; it only needs the provider endpoint and its secret |
 | 4 | Execute the regulatory report submission (`PROVISIONAL` → `CONFIRMED`) | MEDIUM | `POST /aml/reports` records the report in `PENDING_CHECKER`; the submission to the authority is still a manual step |
 | 5 | Add the retention job for the 5 year record-keeping obligation (OD-4) | MEDIUM | `audit_log` writes are in place, the purge is not |

@@ -593,6 +593,14 @@ export class DynamicRailEngine {
     const credentials = this.options.credentialResolver
       ? await this.options.credentialResolver(attempt)
       : undefined;
+    // The declarative outputs that the step executor resolves (the settled
+    // amount, the provider fee and the provider/network references) have to be
+    // carried out of the phase, otherwise the attempt is never enriched with
+    // the facts the gateway reported.
+    let settledAmount: DecimalInput | undefined;
+    let providerFee: DecimalInput | undefined;
+    let providerReference: string | undefined;
+    let networkReference: string | undefined;
     for (let index = 0; index < steps.length; index += 1) {
       const step = steps[index];
       if (!step) {
@@ -613,6 +621,18 @@ export class DynamicRailEngine {
       const result = await this.options.stepExecutor.execute(step, context);
       Object.assign(state, result.output.state);
       Object.assign(publicOutputs, result.output.public);
+      if (result.output.settledAmount !== undefined) {
+        settledAmount = result.output.settledAmount as DecimalInput;
+      }
+      if (result.output.providerFee !== undefined) {
+        providerFee = result.output.providerFee as DecimalInput;
+      }
+      if (result.output.providerReference !== undefined) {
+        providerReference = String(result.output.providerReference);
+      }
+      if (result.output.networkReference !== undefined) {
+        networkReference = String(result.output.networkReference);
+      }
       response = result.response;
       rawText = result.rawText ?? rawText;
       clientAction = this.clientActionFrom(result) ?? clientAction;
@@ -623,7 +643,14 @@ export class DynamicRailEngine {
           canonicalError: result.canonicalError,
           response,
           rawText,
-          outputs: { state, public: publicOutputs },
+          outputs: {
+            state,
+            public: publicOutputs,
+            settledAmount,
+            providerFee,
+            providerReference,
+            networkReference,
+          },
           clientAction,
         };
       }
@@ -634,7 +661,14 @@ export class DynamicRailEngine {
           canonicalError: result.canonicalError,
           response,
           rawText,
-          outputs: { state, public: publicOutputs },
+          outputs: {
+            state,
+            public: publicOutputs,
+            settledAmount,
+            providerFee,
+            providerReference,
+            networkReference,
+          },
           clientAction,
         };
       }
@@ -645,7 +679,14 @@ export class DynamicRailEngine {
           canonicalError: result.canonicalError,
           response,
           rawText,
-          outputs: { state, public: publicOutputs },
+          outputs: {
+            state,
+            public: publicOutputs,
+            settledAmount,
+            providerFee,
+            providerReference,
+            networkReference,
+          },
           clientAction,
         };
       }
@@ -666,7 +707,20 @@ export class DynamicRailEngine {
       }
     }
     const status = this.phaseStatus(phase, steps.length > 0);
-    return { status, response, rawText, outputs: { state, public: publicOutputs }, clientAction };
+    return {
+      status,
+      response,
+      rawText,
+      outputs: {
+        state,
+        public: publicOutputs,
+        settledAmount,
+        providerFee,
+        providerReference,
+        networkReference,
+      },
+      clientAction,
+    };
   }
 
   private phaseStatus(phase: FlowPhase, hasSteps: boolean): AdapterAttemptStatus {
@@ -748,6 +802,11 @@ export class DynamicRailEngine {
       const merchantAmount = attempt.netMerchantAmount === undefined
         ? amount.minus(commission)
         : decimal(attempt.netMerchantAmount);
+      // The route fee is ONE economic amount. The ledger template decides how
+      // it is booked: deducted at source (`PROVIDER_FEE_EXPENSE`) or accrued
+      // until the T+N settlement (`GATEWAY_FEE_EXPENSE` + `GATEWAY_FEE_ACCRUAL`).
+      // The fee therefore has to be supplied under both names, otherwise a
+      // confirmation could never be posted.
       const gatewayFee = attempt.gatewayFeeAmount === undefined
         ? undefined
         : decimal(attempt.gatewayFeeAmount);
@@ -761,7 +820,9 @@ export class DynamicRailEngine {
           surchargeAmount: surcharge,
           commissionAmount: commission,
           merchantAmount,
-          ...(gatewayFee === undefined ? {} : { gatewayFeeAmount: gatewayFee }),
+          ...(gatewayFee === undefined
+            ? {}
+            : { gatewayFeeAmount: gatewayFee, providerFeeAmount: gatewayFee }),
         },
         this.ledgerContext(attempt),
         transaction,

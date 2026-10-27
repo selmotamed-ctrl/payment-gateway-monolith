@@ -40,7 +40,7 @@ interface AttemptRow {
   platformCommissionAmount?: unknown;
   netMerchantAmount?: unknown;
   gatewayVersion?: { setting?: { maxOtpAttempts: number } | null; gateway?: { kind?: string } | null } | null;
-  route?: { mismatchPolicy?: unknown } | null;
+  route?: { mismatchPolicy?: unknown; costModel?: unknown } | null;
 }
 
 /**
@@ -76,6 +76,20 @@ const toleranceOf = (row: AttemptRow): string | undefined => {
   } catch {
     return undefined;
   }
+};
+
+/**
+ * Whether the route accrues the gateway fee until the T+N settlement instead of
+ * deducting it at source. The flag is pinned with the route.
+ */
+const feeAccrualOf = (row: AttemptRow): boolean => {
+  const model = row.route?.costModel;
+  if (!model || typeof model !== "object") {
+    return false;
+  }
+  const value = (model as Record<string, unknown>).accrue_fee_at_confirm
+    ?? (model as Record<string, unknown>).accrueFeeAtConfirm;
+  return value === true || value === "true" || value === 1;
 };
 
 const toAttempt = (row: AttemptRow): DynamicAttempt => {
@@ -125,6 +139,7 @@ const toAttempt = (row: AttemptRow): DynamicAttempt => {
       : decimal(row.netMerchantAmount as never).toFixed(4),
     ownershipMode: ownershipModeOf(row),
     mismatchTolerance: toleranceOf(row),
+    feeAccrual: feeAccrualOf(row),
   };
 };
 
@@ -140,7 +155,7 @@ export class PrismaAttemptRepository implements AttemptRepository {
       where: { id: attemptId },
       include: {
         gatewayVersion: { include: { setting: true } },
-        route: { select: { mismatchPolicy: true } },
+        route: { select: { mismatchPolicy: true, costModel: true } },
       },
     }) as AttemptRow | null;
     return row ? toAttempt(row) : null;
@@ -180,7 +195,7 @@ export class PrismaAttemptRepository implements AttemptRepository {
       data,
       include: {
         gatewayVersion: { include: { setting: true } },
-        route: { select: { mismatchPolicy: true } },
+        route: { select: { mismatchPolicy: true, costModel: true } },
       },
     }) as AttemptRow;
     return toAttempt(row);

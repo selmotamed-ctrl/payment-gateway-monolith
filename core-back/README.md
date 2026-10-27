@@ -25,6 +25,7 @@ outbound gateway calls. It is reachable exclusively over Mutual TLS on the priva
 ## Runtime
 
 ```bash
+./scripts/start-mariadb.sh    # a local MariaDB on 127.0.0.1:3307 (no container runtime needed)
 bun run generate-mtls-certs   # internal CA, server certificate, three client certificates
 bun run migrate-deploy         # apply the 64 table migration
 bun run db-seed                # GL accounts, OD-1..OD-11 settings, roles, blueprints
@@ -32,6 +33,10 @@ bun run start                  # TLS 1.3 mTLS server on $PORT (default 4000)
 bun run typecheck
 bun test
 ```
+
+`test/e2e/mariadb-payment.test.ts` drives a complete payment against the live
+database. It skips itself when MariaDB is not reachable, so `bun test` stays
+green on a machine without a database.
 
 ## Environment
 
