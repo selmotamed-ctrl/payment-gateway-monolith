@@ -106,8 +106,8 @@ describe("prisma schema", () => {
     }
   });
 
-  test("uses PostgreSQL with no floating point money", () => {
-    expect(schema).toMatch(/provider\s*=\s*"postgresql"/);
+  test("uses MySQL with no floating point money", () => {
+    expect(schema).toMatch(/provider\s*=\s*"mysql"/);
     expect(schema).not.toMatch(/\b(Float|Double)\b/);
     const decimalFields = [
       ...schema.matchAll(/^\s*(\w+)\s+Decimal\b[^\n]*$/gm),
@@ -194,7 +194,7 @@ describe("core-back mTLS server", () => {
     process.env.NODE_ENV = "test";
     process.env.DATABASE_URL =
       process.env.DATABASE_URL ??
-      "postgresql://postgres:postgres@127.0.0.1:5432/payment_gateway";
+      "mysql://gateway:gateway_pw@127.0.0.1:3307/payment_gateway";
     process.env.MTLS_CA_CERT_PATH = path.join(
       certificateDirectory,
       "internal-ca.crt",
@@ -299,12 +299,12 @@ describe("core-back mTLS server", () => {
   test("keeps the schema version table when patching migrations", async () => {
     const { patchMigrationSql } = await import("../prisma/migrateDev");
     const patched = patchMigrationSql(
-      '-- DropTable\nDROP TABLE "schema_versions";\nCREATE TABLE "sample" ("id" TEXT);',
+      "-- DropTable\nDROP TABLE `schema_versions`;\nCREATE TABLE `sample` (`id` TEXT);",
     );
-    expect(patched).not.toContain('DROP TABLE "schema_versions"');
-    expect(patched).toContain('CREATE TABLE IF NOT EXISTS "schema_versions"');
-    expect(patched).toContain('ON CONFLICT ("id") DO UPDATE');
-    expect(patched).toContain('CREATE TABLE "sample"');
+    expect(patched).not.toContain("DROP TABLE `schema_versions`");
+    expect(patched).toContain("CREATE TABLE IF NOT EXISTS `schema_versions`");
+    expect(patched).toContain("ON DUPLICATE KEY UPDATE `version`");
+    expect(patched).toContain("CREATE TABLE `sample`");
   });
 
   test("issues the peer certificate common names expected by the guard", async () => {

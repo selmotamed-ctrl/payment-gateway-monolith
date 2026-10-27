@@ -67,7 +67,7 @@ export class InboundInboxWorker extends BaseWorker {
       "SELECT * FROM inbound_events" +
       " WHERE processed_at IS NULL" +
       " ORDER BY received_at ASC" +
-      " LIMIT $1" +
+      " LIMIT ?" +
       " FOR UPDATE SKIP LOCKED";
     const result = await this.db.$queryRawUnsafe(sql, this.batchSize);
     return toCamelRows<InboundEventRow>(result);
@@ -100,7 +100,7 @@ export class InboundInboxWorker extends BaseWorker {
 
   private async markProcessed(event: InboundEventRow, result: string): Promise<void> {
     await this.db.$executeRawUnsafe(
-      "UPDATE inbound_events SET processed_at = $1, processing_result = $2 WHERE id = $3",
+      "UPDATE inbound_events SET processed_at = ?, processing_result = ? WHERE id = ?",
       this.clock(),
       result.slice(0, 500),
       event.id,
@@ -109,7 +109,7 @@ export class InboundInboxWorker extends BaseWorker {
 
   private async markRetry(event: InboundEventRow, attempt: number, message: string): Promise<void> {
     await this.db.$executeRawUnsafe(
-      "UPDATE inbound_events SET processing_result = $1 WHERE id = $2",
+      "UPDATE inbound_events SET processing_result = ? WHERE id = ?",
       `RETRY(${attempt}):${message}`.slice(0, 500),
       event.id,
     );
@@ -117,7 +117,7 @@ export class InboundInboxWorker extends BaseWorker {
 
   private async markFailed(event: InboundEventRow, attempt: number, message: string): Promise<void> {
     await this.db.$executeRawUnsafe(
-      "UPDATE inbound_events SET processed_at = $1, processing_result = $2 WHERE id = $3",
+      "UPDATE inbound_events SET processed_at = ?, processing_result = ? WHERE id = ?",
       this.clock(),
       `FAILED(${attempt}):${message}`.slice(0, 500),
       event.id,
@@ -156,7 +156,7 @@ export class InboundInboxWorker extends BaseWorker {
   }): Promise<{ id: string; duplicate: boolean }> {
     const body = typeof input.rawBody === "string" ? Buffer.from(input.rawBody, "utf8") : Buffer.from(input.rawBody);
     const existing = await this.db.$queryRawUnsafe(
-      "SELECT id FROM inbound_events WHERE channel_id = $1 AND dedupe_key = $2 LIMIT 1",
+      "SELECT id FROM inbound_events WHERE channel_id = ? AND dedupe_key = ? LIMIT 1",
       input.channelId,
       input.dedupeKey,
     );
@@ -164,10 +164,14 @@ export class InboundInboxWorker extends BaseWorker {
     if (found?.id) {
       return { id: found.id, duplicate: true };
     }
+    // `updated_at` has no database default, so the raw insert has to carry it.
+    const now = this.clock();
     await this.db.$executeRawUnsafe(
-      "INSERT INTO inbound_events (id, channel_id, gateway_id, env, raw_body_bytes, redacted_headers_json, source_ip, verified, verification_error, dedupe_key, attempt_id, received_at)" +
-        " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+      "INSERT INTO inbound_events (id, created_at, updated_at, channel_id, gateway_id, env, raw_body_bytes, redacted_headers_json, source_ip, verified, verification_error, dedupe_key, attempt_id, received_at)" +
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       randomUUID(),
+      now,
+      now,
       input.channelId,
       input.gatewayId,
       input.env,
@@ -178,10 +182,10 @@ export class InboundInboxWorker extends BaseWorker {
       input.verificationError,
       input.dedupeKey,
       input.attemptId ?? null,
-      this.clock(),
+      now,
     );
     const inserted = await this.db.$queryRawUnsafe(
-      "SELECT id FROM inbound_events WHERE channel_id = $1 AND dedupe_key = $2 LIMIT 1",
+      "SELECT id FROM inbound_events WHERE channel_id = ? AND dedupe_key = ? LIMIT 1",
       input.channelId,
       input.dedupeKey,
     );

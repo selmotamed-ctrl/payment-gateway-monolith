@@ -927,7 +927,7 @@ route.post("/pay/:linkKey/logs/:attemptId/cancel", async (request: Request, resp
   }
   const updated = await client.$transaction(async (tx) => {
     await tx.$queryRawUnsafe(
-      "UPDATE payment_links SET active_locked_count = GREATEST(0, active_locked_count - 1), updated_at = NOW() WHERE id = $1",
+      "UPDATE payment_links SET active_locked_count = GREATEST(0, active_locked_count - 1), updated_at = NOW() WHERE id = ?",
       attempt.linkId,
     );
     return tx.paymentAttempt.update({

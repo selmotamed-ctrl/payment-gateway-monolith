@@ -20,9 +20,9 @@ export const ensureSchemaVersion = async (): Promise<void> => {
       const instance = getBaseClient();
       await instance.$connect();
       const rows = await instance.$queryRaw<Array<{ version: number }>>`
-        SELECT "version"
-        FROM "schema_versions"
-        WHERE "id" = 1
+        SELECT \`version\`
+        FROM \`schema_versions\`
+        WHERE \`id\` = 1
       `;
       const version = rows[0]?.version;
       if (version !== REQUIRED_SCHEMA_VERSION) {

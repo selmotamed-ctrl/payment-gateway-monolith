@@ -348,7 +348,7 @@ export class PrismaRepositories implements Repositories {
   payments: PaymentRepository = {
     lockLinkByKey: async (tx, key) => {
       const result = await tx.$queryRaw`
-        SELECT * FROM payment_links WHERE "key" = ${key} LIMIT 1 FOR UPDATE
+        SELECT * FROM payment_links WHERE \`key\` = ${key} LIMIT 1 FOR UPDATE
       `;
       const found = mapRawRows<PaymentLinkRow>(result)[0];
       if (!found) {

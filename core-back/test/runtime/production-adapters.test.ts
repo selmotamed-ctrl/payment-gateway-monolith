@@ -58,43 +58,67 @@ const createFakeClient = (options: FakeOptions = {}) => {
     rows(store, "statusRule").push(options.statusRule);
   }
 
+  /**
+   * The slot counters of the payment link, as the database would apply them.
+   * The reservation is a lock followed by a conditional update, so the
+   * update reports how many rows it changed.
+   */
+  const applySlotUpdate = (sql: string): number => {
+    const link = rows(store, "paymentLink")[0];
+    if (!link) {
+      return 0;
+    }
+    if (sql.includes("active_locked_count = active_locked_count + 1")) {
+      const confirmed = Number(link.confirmedCount ?? 0);
+      const locked = Number(link.activeLockedCount ?? 0);
+      const useCount = Number(link.useCount ?? 1);
+      if (!link.infiniteUse && confirmed + locked >= useCount) {
+        return 0;
+      }
+      link.activeLockedCount = locked + 1;
+      return 1;
+    }
+    if (sql.includes("confirmed_count = confirmed_count + 1")) {
+      link.confirmedCount = Number(link.confirmedCount ?? 0) + 1;
+      link.activeLockedCount = Math.max(0, Number(link.activeLockedCount ?? 0) - 1);
+      if (Number(link.confirmedCount) >= Number(link.useCount ?? 1)) {
+        link.state = "COMPLETED";
+      }
+      return 1;
+    }
+    if (sql.includes("active_locked_count = GREATEST(0, active_locked_count - 1)")) {
+      link.activeLockedCount = Math.max(0, Number(link.activeLockedCount ?? 0) - 1);
+      return 1;
+    }
+    return 0;
+  };
+
+  /** The row lock of the reservation: it only sees the links with a free slot. */
+  const lockSlot = (): Array<{ id: string }> => {
+    const link = rows(store, "paymentLink")[0];
+    if (!link) {
+      return [];
+    }
+    const confirmed = Number(link.confirmedCount ?? 0);
+    const locked = Number(link.activeLockedCount ?? 0);
+    const useCount = Number(link.useCount ?? 1);
+    if (!link.infiniteUse && confirmed + locked >= useCount) {
+      return [];
+    }
+    return [{ id: String(link.id) }];
+  };
+
   const client = {
-    $queryRawUnsafe: async (_sql: string, ..._params: unknown[]) => {
-      const sql = String(_sql);
-      if (sql.includes("active_locked_count = active_locked_count + 1")) {
-        const link = rows(store, "paymentLink")[0];
-        if (!link) {
-          return [];
-        }
-        const confirmed = Number(link.confirmedCount ?? 0);
-        const locked = Number(link.activeLockedCount ?? 0);
-        const useCount = Number(link.useCount ?? 1);
-        if (!link.infiniteUse && confirmed + locked >= useCount) {
-          return [];
-        }
-        link.activeLockedCount = locked + 1;
-        return [{ id: link.id }];
-      }
-      if (sql.includes("confirmed_count = confirmed_count + 1")) {
-        const link = rows(store, "paymentLink")[0];
-        if (link) {
-          link.confirmedCount = Number(link.confirmedCount ?? 0) + 1;
-          link.activeLockedCount = Math.max(0, Number(link.activeLockedCount ?? 0) - 1);
-          if (Number(link.confirmedCount) >= Number(link.useCount ?? 1)) {
-            link.state = "COMPLETED";
-          }
-        }
-        return [];
-      }
-      if (sql.includes("active_locked_count = GREATEST(0, active_locked_count - 1)")) {
-        const link = rows(store, "paymentLink")[0];
-        if (link) {
-          link.activeLockedCount = Math.max(0, Number(link.activeLockedCount ?? 0) - 1);
-        }
-        return [];
+    $queryRawUnsafe: async (sql: string, ..._params: unknown[]) => {
+      const text = String(sql);
+      if (text.includes("SELECT id FROM payment_links")) {
+        return lockSlot();
       }
       return [];
     },
+    $executeRawUnsafe: async (sql: string, ..._params: unknown[]) =>
+      applySlotUpdate(String(sql)),
+    $transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback(client),
     paymentLink: {
       findUnique: async ({ where }: { where: Row }) =>
         rows(store, "paymentLink").find((row) => row.id === where.id) ?? null,

@@ -47,9 +47,9 @@ export class OutboxNotificationWorker extends BaseWorker {
     const sql =
       "SELECT * FROM notifications" +
       " WHERE status = 'QUEUED'" +
-      " AND (next_attempt_at IS NULL OR next_attempt_at <= $1)" +
+      " AND (next_attempt_at IS NULL OR next_attempt_at <= ?)" +
       " ORDER BY next_attempt_at ASC" +
-      " LIMIT $2" +
+      " LIMIT ?" +
       " FOR UPDATE SKIP LOCKED";
     const result = await this.db.$queryRawUnsafe(sql, now, this.batchSize);
     return toCamelRows<NotificationRow>(result);

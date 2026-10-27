@@ -1,4 +1,4 @@
-import { toCamelRows, postgresPlaceholders } from "../db/rawRows";
+import { toCamelRows, mysqlPlaceholders } from "../db/rawRows";
 import type { PaymentAttemptRow, Tx } from "../db/ports";
 import { BaseWorker, type WorkerOptions } from "./workerRuntime";
 import type { InquiryOutcome, InquiryPort } from "./ExpirySweeperWorker";
@@ -89,15 +89,15 @@ export class PollWorker extends BaseWorker {
   }
 
   private async lockDueAttempts(now: Date): Promise<PaymentAttemptRow[]> {
-    const statusPlaceholders = postgresPlaceholders(POLLABLE_STATUSES.length, 2);
+    const statusPlaceholders = mysqlPlaceholders(POLLABLE_STATUSES.length);
     const sql =
       "SELECT * FROM payment_attempts" +
       " WHERE next_check_at IS NOT NULL" +
-      " AND next_check_at <= $1" +
+      " AND next_check_at <= ?" +
       " AND terminal_at IS NULL" +
       ` AND status IN (${statusPlaceholders})` +
       " ORDER BY next_check_at ASC" +
-      ` LIMIT $${POLLABLE_STATUSES.length + 2}` +
+      " LIMIT ?" +
       " FOR UPDATE SKIP LOCKED";
     const result = await this.db.$queryRawUnsafe(sql, now, ...POLLABLE_STATUSES, this.batchSize);
     return toCamelRows<PaymentAttemptRow>(result);
@@ -178,7 +178,7 @@ export class PollWorker extends BaseWorker {
    */
   private async terminate(attemptId: string, status: string, now: Date): Promise<boolean> {
     const result = await this.db.$executeRawUnsafe(
-      "UPDATE payment_attempts SET status = $1, terminal_at = $2, next_check_at = NULL, updated_at = NOW() WHERE id = $3 AND terminal_at IS NULL",
+      "UPDATE payment_attempts SET status = ?, terminal_at = ?, next_check_at = NULL, updated_at = NOW() WHERE id = ? AND terminal_at IS NULL",
       status,
       now,
       attemptId,

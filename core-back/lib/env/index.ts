@@ -17,10 +17,13 @@ const booleanFromEnvironment = z.preprocess((value) => {
   return value;
 }, z.boolean());
 
-const postgresUrl = z
+const mysqlUrl = z
   .string()
   .min(1, "DATABASE_URL is required")
-  .refine((value) => /^postgres(?:ql)?:\/\//i.test(value), "DATABASE_URL must be a PostgreSQL URL");
+  .refine(
+    (value) => /^mysql:\/\//i.test(value),
+    "DATABASE_URL must be a MySQL/MariaDB URL (mysql://user:password@host:port/database)",
+  );
 
 const filePath = (label: string) =>
   z
@@ -32,7 +35,7 @@ export const envSchema = z.strictObject({
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
   HOST: z.string().min(1).default("127.0.0.1"),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  DATABASE_URL: postgresUrl,
+  DATABASE_URL: mysqlUrl,
   MTLS_CA_CERT_PATH: filePath("MTLS_CA_CERT_PATH"),
   MTLS_SERVER_CERT_PATH: filePath("MTLS_SERVER_CERT_PATH"),
   MTLS_SERVER_KEY_PATH: filePath("MTLS_SERVER_KEY_PATH"),
@@ -114,7 +117,7 @@ const resolveEnvironment = (): CoreEnv => {
     PORT: 4000,
     HOST: "127.0.0.1",
     NODE_ENV: "test",
-    DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/payment_gateway",
+    DATABASE_URL: "mysql://gateway:gateway_pw@127.0.0.1:3307/payment_gateway",
     MTLS_CA_CERT_PATH: "./certs/internal-ca.crt",
     MTLS_SERVER_CERT_PATH: "./certs/core-back.crt",
     MTLS_SERVER_KEY_PATH: "./certs/core-back.key",

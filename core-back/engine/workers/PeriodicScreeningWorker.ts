@@ -29,6 +29,9 @@ export interface PeriodicScreeningWorkerDeps extends WorkerOptions {
  * is older than the re-screening interval. The rows are locked with
  * `FOR UPDATE SKIP LOCKED`, so several worker nodes spread the work over the
  * merchant book instead of screening the same merchant twice.
+ *
+ * The placeholders are bound in the order they appear in the statement: the
+ * epoch of the `COALESCE` fallback, then the cut-off, then the batch size.
  */
 export const DUE_MERCHANTS_SQL =
   "SELECT m.* FROM merchants m" +
@@ -36,10 +39,10 @@ export const DUE_MERCHANTS_SQL =
   " AND COALESCE(" +
   " (SELECT MAX(s.requested_at) FROM aml_screenings s" +
   "  WHERE s.subject_type = 'MERCHANT' AND s.subject_id = m.id)," +
-  " $3" +
-  " ) <= $1" +
+  " ?" +
+  " ) <= ?" +
   " ORDER BY m.id" +
-  " LIMIT $2" +
+  " LIMIT ?" +
   " FOR UPDATE SKIP LOCKED";
 
 const OPEN_CASE_STATUSES = ["OPEN", "IN_REVIEW", "PENDING_CHECKER", "FROZEN", "ESCALATED_STR"];
@@ -102,9 +105,9 @@ export class PeriodicScreeningWorker extends BaseWorker {
   private async lockDueMerchants(cutoff: Date): Promise<MerchantRow[]> {
     const result = await this.db.$queryRawUnsafe(
       DUE_MERCHANTS_SQL,
+      new Date(0),
       cutoff,
       this.screenBatchSize,
-      new Date(0),
     );
     return toCamelRows<MerchantRow>(result);
   }
