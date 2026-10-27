@@ -455,7 +455,7 @@ All phase verification gates were executed in this workspace with the following 
 | Phase 3 | `cd core-back && bun test test/phase3-dynamic-engine-and-blueprints.test.ts` | 12 tests pass (7 production blueprints, 15 deterministic mock scenarios, initiate/confirm/ledger flow, 12 go-live gates, closed transform library) |
 | Phase 4 | `cd core-back && bun test test/phase4-onboarding-aml-disputes-recon.test.ts` | 16 tests pass (duplicate detection, AML hold/case-only/critical escalation, Arabic normalisation, no tipping-off, dispute dedupe, statement parsing) |
 | Phase 8 | `cd core-back && bun test test/edge-cases/catalog-140.test.ts` | 140 catalogued edge cases with 140 executable regression checks, all pass |
-| All backends | `cd <service> && bun run typecheck && bun test` | `core-back` 759 tests, `admin-back` 408 tests, `merchant-back` 67 tests, `checkout-back` 45 tests — all pass with clean TypeScript |
+| All backends | `cd <service> && bun run typecheck && bun test` | `core-back` 788 tests, `admin-back` 412 tests, `merchant-back` 67 tests, `checkout-back` 45 tests — all pass with clean TypeScript |
 | All frontends | `cd <spa> && bun run build` | `admin-front`, `merchant-front`, `checkout-front` all build (type-check + Vite) |
 | Schema parity | `cd core-back && bunx prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script` | 64 model tables and 100 enum types, identical to the committed migration (plus the hand written `schema_versions` table, the three domain `CHECK` constraints and the `approval_requests_checker_not_maker` `BEFORE INSERT` trigger) |
 
@@ -701,3 +701,51 @@ A final audit of the **composed** production paths (rather than the units) found
 | AML hold protection | 4 new tests (cancel and expiry both refuse a held attempt) |
 | Regulatory report lifecycle | 6 new tests (approval, PROVISIONAL refusal, submit, acknowledge, reject, rule promotion) |
 | Frontends | all three build |
+
+## 15. Smart AI-Assisted Provider Onboarding (Bring-Your-Own-AI)
+
+Implemented from `design/smart_ai_rail_and_voucher_onboarding_plan.md`. The platform never calls an external AI and never receives a live secret before the import; the admin drives a frontier model in their own browser and the platform verifies the result offline.
+
+### 15.1 The four-stage flow
+
+| Stage | Endpoint | What happens |
+| :--- | :--- | :--- |
+| 1. Download the kit | `GET /internal/admin/gateways/ai-transcript` (edge: `GET /api/v1/admin/gateways/ai-transcript`) | `engine/specImporter/TranscriptBuilder.ts` emits a self-contained Markdown kit generated from the LIVE Zod schema (`z.toJSONSchema`), the LIVE closed lists (auth methods, parameter sources, transform operations, statuses, channel types, …), two gold-standard examples (OTP and Redirect) and a fill-in section. It instructs the AI to give only credential *names*, never a secret. |
+| 2. AI generates a spec | (outside the platform) | The admin pastes the kit + the provider docs into any AI and gets one `integration-spec.json`. |
+| 3. Upload & verify | `POST /internal/admin/gateways/spec-verify` (edge: `…/spec-verify`) | `SpecSimulator.ts` runs the four layers and returns a report with a `aiRepairPrompt` when it fails. |
+| 4. Bind secrets & import | `POST /internal/admin/gateways/spec-import` (edge: `…/spec-import`) | `SpecMaterializer.ts` re-verifies (double-check), Vault-encrypts the supplied secrets, and writes the whole configuration in ONE transaction as a **DRAFT** version (route `PAUSED`, credential set `UNTESTED`), then runs the live credential check. |
+
+### 15.2 The four verification layers
+
+| Layer | Module | What it proves |
+| :--- | :--- | :--- |
+| 1. Schema & version | `specSchema.ts` (Zod 4, `strictObject`) | The JSON matches the master schema and `spec_version` is exact. Failures carry `{ path, code: "SCHEMA_INVALID", message, aiFixHint }`. |
+| 2. Semantic & security guard | `specValidator.ts` | Cross-field rules: `https` only, every base-URL host pinned in `allowed_hosts`, private/loopback/`.local`/`.internal` hosts blocked, `PREVIOUS_RESPONSE` never on step 0, `MOVES_MONEY` must be `retry_policy: NEVER` (unless a proven idempotency key), every `CRYPTO_SIGNATURE` parameter names a declared profile, url placeholders resolve to a base URL or a PATH parameter, weak inbound channels must inquire, transform pipes validated against the closed library with the float-money ban, unique path tokens / profile names / step ids, at least one test vector. |
+| 3. Offline vector simulation | `SpecSimulator.ts` | Drives the **real `StepExecutor`** against the spec's own `test_vectors` with a captured in-memory transport: it builds the request (transforms, crypto signing), parses the documented response, applies the status rules and the output extractors, and asserts the reached canonical status, the extractions, the signature and the wire amount. No network, no database. |
+| 4. Collision check | `admin.ts` `collisionCheck` | Reports whether the gateway code / rail code already exist and how many versions exist, so the UI offers "Create New" vs "New Version". |
+
+### 15.3 Safety properties
+
+- **Air-gap safe:** no AI SDK, no outbound call to an AI provider. The transcript is generated locally; the AI runs in the admin's browser.
+- **Zero-secret prompting:** the spec declares a `required_credentials` manifest (key, `is_secret`, `encoding`, `type`); the portal renders an input per declared key and the real values are entered directly into the platform, then Vault-encrypted. A secret is never required to verify a spec.
+- **Never live on import:** the version is `DRAFT`, the route is `PAUSED` and the credential set `UNTESTED`. Promotion still requires the live credential check and the 12 go-live gates.
+- **Double-check:** the materializer re-runs the full verification inside `core-back`; the edge is never trusted.
+- **AI-repair loop:** every diagnostic carries an `aiFixHint`, and the API returns a ready-to-paste `aiRepairPrompt`, so one failed verification is not a dead end.
+
+### 15.4 Scope limits (deliberate)
+
+- The import path materializes `HTTP`, `COMPUTE` and `RENDER` steps. A `WAIT` / `ASSERT` / `BRANCH` step is refused with `STEP_TYPE_NOT_IMPORTABLE` and a hint to add it in the wizard's flow editor afterwards (the runtime projection of `PrismaFlowProvider` does not carry them yet). HTTP `assertions` are supported (`success_check`).
+- The Voucher Provider Management System half of the plan is **not implemented here**: that codebase is not in this workspace (only its design documents are). The module is written so the domain half (`specSchema` / `specValidator` / `SpecSimulator` / `SpecMaterializer` / `TranscriptBuilder`) can be forked for the voucher provider shape.
+
+### 15.5 A defect found by the feature
+
+The offline simulator found a real engine bug: a `required` step output stored as `PROVIDER_REF` / `SETTLED_AMOUNT` / `PROVIDER_FEE` / `NETWORK_REF` was treated as **missing** by `StepExecutor` (it only checked `state` / `public`), so a money step whose provider reference was successfully extracted was forced to `UNKNOWN`. Fixed in `engine/flow/StepExecutor.ts` (`isOutputPresent`), with the spec-importer vectors as the regression.
+
+### 15.6 Verification
+
+| Gate | Result |
+| :--- | :--- |
+| `core-back` typecheck + test | **788 pass, 0 fail** (+25 spec importer, +4 live materializer, and the engine fix) |
+| `admin-back` | 412 pass (4 new route tests: transcript query forwarding, verify forwarding, import 201, unknown rail kind rejected before core) |
+| `admin-front` build | passes (new `pages/gateways/ai-import` wizard + router entry) |
+| Live MariaDB import | a verified spec materializes 2 environments, 2 auth, 1 crypto profile, 2 flows / 2 steps, 1 channel, 1 error map, 2 rail fields, a `DRAFT` version and a `PAUSED` route; `NEW_VERSION` adds a second draft; a `CREATE_NEW` on an existing code is refused; an invalid spec writes nothing |

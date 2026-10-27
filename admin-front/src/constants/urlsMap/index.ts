@@ -72,6 +72,9 @@ export const urlsMap = {
     gatewayVersionRunSuite: (versionId: string) => `v1/admin/gateway-versions/${versionId}/run-suite`,
     gatewayVersionSubmitApproval: (versionId: string) => `v1/admin/gateway-versions/${versionId}/submit-approval`,
     gatewayRollback: (id: string) => `v1/admin/gateways/${id}/rollback`,
+    gatewayAiTranscript: "v1/admin/gateways/ai-transcript",
+    gatewaySpecVerify: "v1/admin/gateways/spec-verify",
+    gatewaySpecImport: "v1/admin/gateways/spec-import",
 
     railsList: "v1/admin/rails",
     railFields: (id: string) => `v1/admin/rails/${id}/fields`,

@@ -204,6 +204,59 @@ export const rollbackSchema = z
 
 export const gatewaysRouter = router;
 
+// ---- Smart AI-assisted onboarding -----------------------------------------
+// Download the transcript, upload the AI-generated spec, verify it offline,
+// then import it as a DRAFT version. The three routes are registered before
+// `/:id` so the exact paths can never be captured as a gateway id.
+
+export const aiTranscriptQuerySchema = z
+  .object({
+    railKind: z
+      .enum(["OTP_PULL", "REDIRECT", "EMBEDDED", "QR_DISPLAY", "PUSH_APPROVAL", "HYBRID"])
+      .optional(),
+  })
+  .strict();
+
+export const specVerifySchema = z.object({ spec: z.unknown() }).strict();
+
+export const specImportSchema = z
+  .object({
+    spec: z.unknown(),
+    // The real secrets are typed in the portal for the declared keys only.
+    credentialsValues: z.record(z.string().max(64), z.string().max(4096)).optional(),
+    credentials_values: z.record(z.string().max(64), z.string().max(4096)).optional(),
+    mode: z.enum(["CREATE_NEW", "NEW_VERSION"]).optional(),
+  })
+  .strict();
+
+router.get(
+  "/ai-transcript",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/gateways/ai-transcript",
+    querySchema: aiTranscriptQuerySchema,
+  }),
+);
+
+router.post(
+  "/spec-verify",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/admin/gateways/spec-verify",
+    schema: specVerifySchema,
+  }),
+);
+
+router.post(
+  "/spec-import",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/admin/gateways/spec-import",
+    schema: specImportSchema,
+    status: 201,
+  }),
+);
+
 router.get(
   "/",
   coreForward({

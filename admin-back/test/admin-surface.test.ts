@@ -366,6 +366,58 @@ describe("admin statement upload", () => {
   });
 });
 
+describe("smart AI onboarding routes", () => {
+  test("forwards the transcript request with the rail kind", async () => {
+    const response = await call("GET", "/api/v1/admin/gateways/ai-transcript?railKind=OTP_PULL", {
+      token: operator,
+    });
+    expect(response.status).toBe(200);
+    const forwarded = core.requests.at(-1);
+    expect(forwarded?.url).toBe("/internal/admin/gateways/ai-transcript?railKind=OTP_PULL");
+  });
+
+  test("forwards the spec verification request verbatim", async () => {
+    const spec = { spec_version: "1.0", gateway: { code: "acme" } };
+    const response = await call("POST", "/api/v1/admin/gateways/spec-verify", {
+      token: operator,
+      body: { spec },
+    });
+    expect(response.status).toBe(200);
+    const forwarded = core.requests.at(-1);
+    expect(forwarded?.url).toBe("/internal/admin/gateways/spec-verify");
+    expect(JSON.parse(forwarded?.body.toString("utf8") ?? "{}")).toEqual({ spec });
+  });
+
+  test("forwards the spec import request and answers 201", async () => {
+    const spec = { spec_version: "1.0" };
+    const response = await call("POST", "/api/v1/admin/gateways/spec-import", {
+      token: operator,
+      body: {
+        spec,
+        credentialsValues: { MID: "m", MerchantSecretKey: "s" },
+        mode: "NEW_VERSION",
+      },
+    });
+    expect(response.status).toBe(201);
+    const forwarded = core.requests.at(-1);
+    expect(forwarded?.url).toBe("/internal/admin/gateways/spec-import");
+    expect(JSON.parse(forwarded?.body.toString("utf8") ?? "{}")).toEqual({
+      spec,
+      credentialsValues: { MID: "m", MerchantSecretKey: "s" },
+      mode: "NEW_VERSION",
+    });
+  });
+
+  test("rejects an unknown rail kind before contacting core", async () => {
+    const before = core.requests.length;
+    const response = await call("GET", "/api/v1/admin/gateways/ai-transcript?railKind=UNKNOWN", {
+      token: operator,
+    });
+    expect(response.status).toBe(400);
+    expect(core.requests.length).toBe(before);
+  });
+});
+
 describe("admin core contract forwarding", () => {
   test("forwards a canonical gateway create body", async () => {    const response = await call("POST", "/api/v1/admin/gateways", {
       token: operator,

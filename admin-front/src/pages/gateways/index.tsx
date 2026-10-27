@@ -110,7 +110,19 @@ const GatewaysPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Gateways")} />
+                <PageHeader
+                    title={t("Gateways")}
+                    end={() => (
+                        <VBtn
+                            color="primary"
+                            variant="tonal"
+                            prependIcon={"mdi-robot-outline"}
+                            onClick={() => void router.push({ name: "GatewayAiImport" })}
+                        >
+                            {t("Smart AI Integration")}
+                        </VBtn>
+                    )}
+                />
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />

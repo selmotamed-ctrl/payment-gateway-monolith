@@ -503,8 +503,13 @@ export class StepExecutor {
           continue;
         }
         const outputs = await this.extractOutputs(step, response.data, response.rawText, context);
+        // A required output is "missing" only when its DECLARATIVE store is
+        // empty. A PROVIDER_REF / SETTLED_AMOUNT / PROVIDER_FEE / NETWORK_REF
+        // output is not written to `state` / `public`, so checking only those
+        // two maps would mark a successfully extracted provider reference as
+        // missing and turn a money step into UNKNOWN.
         const missingRequired = (step.outputs ?? []).some(
-          (output) => output.required && outputs.state[output.name] === undefined && outputs.public[output.name] === undefined,
+          (output) => output.required && !isOutputPresent(outputs, output),
         );
         const mapped = this.mapStatus(step, response.data, response.status);
         let status = mapped.status;
@@ -1132,6 +1137,28 @@ function mergeBody(current: unknown, addition: Record<string, unknown>): unknown
   const output = { ...current };
   mergeMaps(output, addition);
   return output;
+}
+
+function isOutputPresent(
+  outputs: { state: Record<string, unknown>; public: Record<string, unknown>; settledAmount?: unknown; providerFee?: unknown; providerReference?: unknown; networkReference?: unknown },
+  output: { name: string; store_as: string },
+): boolean {
+  switch (output.store_as) {
+    case "STATE":
+      return outputs.state[output.name] !== undefined;
+    case "PUBLIC":
+      return outputs.public[output.name] !== undefined;
+    case "SETTLED_AMOUNT":
+      return outputs.settledAmount !== undefined;
+    case "PROVIDER_FEE":
+      return outputs.providerFee !== undefined;
+    case "PROVIDER_REF":
+      return outputs.providerReference !== undefined;
+    case "NETWORK_REF":
+      return outputs.networkReference !== undefined;
+    default:
+      return outputs.state[output.name] !== undefined || outputs.public[output.name] !== undefined;
+  }
 }
 
 function evaluateAssertion(

@@ -105,6 +105,11 @@ const router = createRouter({
                     component: () => import("@/pages/gateways/index"),
                 },
                 {
+                    path: "gateways/ai-import",
+                    name: "GatewayAiImport",
+                    component: () => import("@/pages/gateways/ai-import/index"),
+                },
+                {
                     path: "gateways/wizard/:id",
                     name: "GatewayWizard",
                     component: () => import("@/pages/gateways/wizard/[id]"),

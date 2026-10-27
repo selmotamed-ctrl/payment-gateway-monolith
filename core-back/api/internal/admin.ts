@@ -45,6 +45,14 @@ import {
 import { evaluateRouteDailyCap } from "../../engine/flow/VisibleRailsResolver";
 import { dayWindowInTimeZone, resolveGatewayTimezone } from "../../engine/flow/DailyRouteVolume";
 import { PrismaRepositories } from "../../engine/db/repositories";
+import {
+  buildTranscriptKit,
+  materializeSpec,
+  parseImportRequest,
+  simulateSpec,
+  type CollisionResult,
+} from "../../engine/specImporter";
+import { createComputeRegistry } from "../../engine/runtime/computeRegistry";
 import type { Tx } from "../../engine/db/ports";
 import { validateTransformUsage, type TransformPipe, type TransformUsage } from "../../engine/transforms/TransformPipeline";
 import { json, jsonOptional } from "./json";
@@ -1529,6 +1537,123 @@ router.post("/attempts/:id/inquire", async (request: Request, response: Response
     data: { status: "VERIFYING", nextCheckAt: new Date(Date.now() + 1000) },
   });
   response.json({ id: updated.id, status: updated.status, inquiryScheduled: true });
+});
+
+/**
+ * The Smart AI-Assisted Provider Onboarding kit.
+ *
+ * Download -> the admin hands the transcript to an external AI -> upload the
+ * generated spec -> the platform verifies it offline and imports it as a DRAFT
+ * gateway version. The platform never calls an external AI, and a live secret
+ * never leaves the admin's machine before the import.
+ */
+const AI_TRANSCRIPT_RAIL_KINDS = [
+  "OTP_PULL",
+  "REDIRECT",
+  "EMBEDDED",
+  "QR_DISPLAY",
+  "PUSH_APPROVAL",
+  "HYBRID",
+] as const;
+
+router.get("/gateways/ai-transcript", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["gateway:read"]);
+  const query = parseOrThrow(
+    z
+      .object({ railKind: z.enum(AI_TRANSCRIPT_RAIL_KINDS).optional() })
+      .strict(),
+    request.query ?? {},
+  );
+  const kit = buildTranscriptKit({ railKind: query.railKind });
+  response.json({
+    filename: kit.filename,
+    contentType: kit.contentType,
+    specVersion: kit.specVersion,
+    markdown: kit.markdown,
+    vocabulary: kit.vocabulary,
+  });
+});
+
+/** Layer 4: is the code already taken? */
+const collisionCheck = async (spec: {
+  gateway: { code: string };
+  rail: { code: string };
+}): Promise<CollisionResult> => {
+  const [gateway, rail, versions] = await Promise.all([
+    client.gateway.findUnique({ where: { code: spec.gateway.code }, select: { id: true } }),
+    client.rail.findUnique({ where: { code: spec.rail.code }, select: { id: true } }),
+    client.gateway.findUnique({
+      where: { code: spec.gateway.code },
+      select: { _count: { select: { versions: true } } },
+    }),
+  ]);
+  return {
+    gatewayExists: Boolean(gateway),
+    railCodeExists: Boolean(rail),
+    versionCount: versions?._count.versions ?? 0,
+  };
+};
+
+const specSimulatorOptions = () => ({
+  collisionChecker: collisionCheck,
+  computeRegistry: createComputeRegistry({ db: client as never }),
+});
+
+router.post("/gateways/spec-verify", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["gateway:write"]);
+  const body = parseOrThrow(z.object({ spec: z.unknown() }).strict(), request.body ?? {});
+  const report = await simulateSpec(body.spec, specSimulatorOptions());
+  response.json(report);
+});
+
+router.post("/gateways/spec-import", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["gateway:write"]);
+  const actor = actorFromRequest(request);
+  const body = parseOrThrow(
+    z
+      .object({
+        spec: z.unknown(),
+        credentialsValues: z.record(z.string().max(64), z.string().max(4096)).optional(),
+        credentials_values: z.record(z.string().max(64), z.string().max(4096)).optional(),
+        mode: z.enum(["CREATE_NEW", "NEW_VERSION"]).optional(),
+      })
+      .strict(),
+    request.body ?? {},
+  );
+  const parsed = parseImportRequest(body);
+  const platform = getPlatformRuntime(client as never);
+  const result = await materializeSpec(
+    client as never,
+    {
+      spec: parsed.spec,
+      credentialsValues: parsed.credentialsValues,
+      mode: parsed.mode,
+      actorId: actor.userId,
+    },
+    specSimulatorOptions(),
+    platform.vault,
+  );
+
+  // The live probe runs AFTER the draft is safely committed: a failing probe
+  // marks the credential set FAILING, it never loses the imported draft.
+  let credentialCheck: { status: string; method?: string; reason?: string } | undefined;
+  if (result.credentialSetId) {
+    try {
+      const check = await platform.credentialCheck.verify(result.credentialSetId, {
+        gatewayVersionId: result.gatewayVersionId,
+      });
+      credentialCheck = { status: check.status, method: check.method, reason: check.reason };
+    } catch (error) {
+      credentialCheck = { status: "FAILING", reason: (error as Error).message };
+    }
+  }
+
+  response.status(201).json({
+    ...result,
+    credentialCheck,
+    nextStep:
+      "Bind the remaining secrets in the portal (if any), then submit the version for approval. It stays DRAFT and its route PAUSED until all 12 go-live gates pass.",
+  });
 });
 
 router.get("/gateways", async (request: Request, response: Response) => {
