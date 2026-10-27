@@ -260,7 +260,9 @@ Dynamic Payment Gateway Management: Design v2
 
 ## 4. Data model 
 
-All tables carry id, created_at and updated_at. Money is NUMERIC(18,4): the dinar has three decimal places, so never use floats, and amounts travel as decimal strings. Secret columns are encrypted at rest (AES-256-GCM, key id stored per value) and redacted in every log. 
+All tables carry id, created_at and updated_at. Money is DECIMAL(18,4): the dinar has three decimal places, so never use floats, and amounts travel as decimal strings. Secret columns are encrypted at rest (AES-256-GCM, key id stored per value) and redacted in every log.
+
+The database engine is MySQL 8.0+ / MariaDB 10.6+ (the platform was originally designed for PostgreSQL and has since been migrated). The Prisma datasource is `provider = "mysql"`, reached through `@prisma/adapter-mariadb` on top of the `mariadb` driver package; `String` maps to `VARCHAR(191)` with free-form content declared `@db.Text`, `Bytes` maps to `BLOB` (the inbound webhook body is `@db.LongBlob`), `Json` maps to `JSON`, and Prisma enums become native `ENUM` columns.
 
 ### 4.1 Gateway definition (versioned) 
 

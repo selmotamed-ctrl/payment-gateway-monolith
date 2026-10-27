@@ -17,6 +17,7 @@ When executing this delivery plan, the **OpenCode AI Agent** must follow these s
 2. **Strict Database & Secret Isolation (`core-back` Exclusivity):**
    - **ONLY `core-back`** may contain `prisma/`, `@prisma/client`, database connection strings (`DATABASE_URL`), `KMS_MASTER_KEY`, or outbound payment gateway execution code.
    - `admin-back`, `merchant-back`, and `checkout-back` MUST have **zero database packages** in `package.json`. They communicate with `core-back` exclusively via the mTLS client (`lib/mtlsClient/index.ts`).
+   - **Database engine:** MySQL 8.0+ / MariaDB 10.6+ only. The Prisma datasource is `provider = "mysql"`, the connection is made through `@prisma/adapter-mariadb` on top of the `mariadb` driver package, and `DATABASE_URL` is a `mysql://user:password@host:3306/payment_gateway` string. No Postgres adapter, no `pg` package and no Postgres-only SQL dialect may be introduced anywhere in the platform.
 3. **Strict Checkout Zero-Trust Rule (`checkout-back` & `checkout-front`):**
    - Never add endpoints or fields in `checkout-back` or `checkout-front` that create links, modify link details, or accept `amount` or `currency` from the client. `core-back` always resolves `amount` and `currency` from `payment_links` by `linkKey`.
 4. **Template Code Conventions (`selmotamed-ctrl/template-back-front`):**
@@ -26,11 +27,15 @@ When executing this delivery plan, the **OpenCode AI Agent** must follow these s
    - Never use `eval()`, `new Function()`, or `vm.runInNewContext()` in the Flow Engine; use only the closed `TransformPipe[]` library.
    - Never use JavaScript `number` / `parseFloat` for ledger or fee arithmetic; use `Prisma.Decimal` / `decimal.js` (`Decimal(18,4)`).
 
+### 1.1 Database Engine
+
+The platform was originally designed for PostgreSQL and has since been migrated to **MySQL / MariaDB** (MySQL 8.0+ / MariaDB 10.6+). The implementation is already converted: `core-back/prisma/schema.prisma` declares `provider = "mysql"`, the connection is made through `@prisma/adapter-mariadb` on top of the `mariadb` driver package, and the initial migration `core-back/prisma/migrations/20261027000000_init/migration.sql` is plain MySQL / MariaDB DDL. The PostgreSQL references that remain in this document are deliberate historical notes about the pre-migration state; the authoritative rules are the MySQL / MariaDB rules of §7 of `design/payment_gateway_final_design-v5.md`.
+
 ## 2. Workspace Directory Architecture & Port Allocation
 
 | Project Directory | Role | Local Port | Reverse Proxy / Network Binding | Upstream Target |
 | :--- | :--- | :--- | :--- | :--- |
-| **`core-back`** | Core Engine, Prisma DB, Ledger, Outbound Gateway Executor, Workers | `4000` (mTLS 1.3 HTTPS) | Bound to private LAN IP / `127.0.0.1:4000` (**No public proxy, no port forward**) | PostgreSQL/MySQL DB + External Gateways |
+| **`core-back`** | Core Engine, Prisma DB, Ledger, Outbound Gateway Executor, Workers | `4000` (mTLS 1.3 HTTPS) | Bound to private LAN IP / `127.0.0.1:4000` (**No public proxy, no port forward**) | MySQL / MariaDB DB + External Gateways |
 | **`admin-back`** | Admin Edge API Server | `4101` (HTTP local) | LAN Reverse Proxy `https://admin.internal:8443/api` (LAN-only, non-forwarded port) | `https://core-back:4000/internal/admin/*` (mTLS `CN=admin-back`) |
 | **`admin-front`** | Admin Back Office SPA | `5101` (Dev) / Static `dist/` | LAN Reverse Proxy `https://admin.internal:8443/` | `/api` -> `admin-back:4101` |
 | **`merchant-back`** | Merchant Edge API Server | `4102` (HTTP local) | Public SSL Reverse Proxy `https://merchant.<domain>/api` (80->443) | `https://core-back:4000/internal/merchant/*` (mTLS `CN=merchant-back`) |
@@ -81,7 +86,7 @@ core-back/
 │   ├── mockGateway/
 │   │   └── MockGatewayServer.ts        # Built-in simulator for the 15-scenario sandbox suite & chaos tests
 │   └── workers/
-│       ├── ExpirySweeperWorker.ts      # Polls expires_at with FOR UPDATE SKIP LOCKED -> inquire() -> EXPIRED
+│       ├── ExpirySweeperWorker.ts      # Polls expires_at with FOR UPDATE SKIP LOCKED (MySQL 8.0+ / MariaDB 10.6+) -> inquire() -> EXPIRED
 │       ├── PollWorker.ts               # Polls next_check_at with backoff schedule
 │       ├── InboundInboxWorker.ts       # Drains inbound_events asynchronously
 │       └── OutboxNotificationWorker.ts # Sends SMS/Email/In-App notifications from notifications table
@@ -291,7 +296,7 @@ export function recursiveSet(
   - **Action:** Define strict Zod 4 environment schemas. Ensure `admin-back`, `merchant-back`, and `checkout-back` remove all `DATABASE_*` variables and require `CORE_BACK_URL`, `MTLS_CLIENT_CERT_PATH`, `MTLS_CLIENT_KEY_PATH`, and `MTLS_CA_CERT_PATH`. Verify `package.json` in all 3 edge backends has **no** `prisma` or `@prisma/*` packages.
 - [x] **`T-1.3` Implement Complete 64-Table Prisma Schema in `core-back`**
   - **Target:** `core-back/prisma/schema.prisma`
-  - **Action:** Author all 64 models across Groups A–F exactly as specified in `design/payment-gateway-final-design.md` §7.1–§7.6:
+  - **Action:** Author all 64 models across Groups A–F exactly as specified in `design/payment-gateway-final-design.md` §7.1–§7.6, against the MySQL / MariaDB Prisma rules of §7 (`provider = "mysql"`, `@prisma/adapter-mariadb` + `mariadb` driver, `String` → `VARCHAR(191)` with free-form content declared `@db.Text`, `Bytes` → `@db.LongBlob`, `Json` → `JSON`, money → `@db.Decimal(18, 4)`, enums → native `ENUM`):
     - Group A (18): `Merchant`, `User`, `Application`, `Wallet`, `AccessToken`, `AccessTokenIp`, `PaymentLink`, `PosTerminal`, `PosScreen`, `GlAccount`, `JournalEntry`, `JournalLine`, `CommissionProfile`, `VelocityRule`, `AmlCase`, `Adjustment`, `CashoutRequest`, `ApprovalRequest`.
     - Group B (6): `Gateway`, `GatewayVersion`, `GatewayEnvironment`, `GatewayAuth`, `GatewaySetting`, `CredentialSet`.
     - Group C (4): `Asset`, `Rail`, `RailField`, `RailRoute`.
@@ -300,7 +305,7 @@ export function recursiveSet(
     - Group F (13): `UserIdentity`, `JoinRequest`, `KybDocument`, `BeneficialOwner`, `AmlScreening`, `AmlScreeningMatch`, `AmlRule`, `ReportingRule`, `RegulatoryReport`, `Dispute`, `NotificationTemplate`, `Notification`, `PlatformSetting`.
 - [/] **`T-1.4` Run Prisma Migrations & Build Seed Script**
   - **Target:** `core-back/prisma/migrations/`, `core-back/prisma/seed.ts`
-  - **Action:** Run `bun run migrate-dev`. Seed system GL Accounts (`TREASURY`, `PLATFORM_INCOME`, `PROVIDER_FEE_EXPENSE`, `GATEWAY_FEE_EXPENSE`, `GATEWAY_FEE_ACCRUAL`, `AML_HOLD`, `CHARGEBACK_RESERVE`, `SUSPENSE`), default `platform_settings` (`OD-1` to `OD-11`), bilingual `notification_templates`, initial admin users (`GATEWAY_ADMIN`, `SECURITY_ADMIN`, `FINANCE`, `COMPLIANCE`, `MLRO`, `OPERATOR`, `SUPPORT`), and default `CommissionProfile`.
+  - **Action:** Run `bun run migrate-dev` against MySQL 8.0+ / MariaDB 10.6+; the initial migration `core-back/prisma/migrations/20261027000000_init/migration.sql` is plain MySQL / MariaDB DDL. Seed system GL Accounts (`TREASURY`, `PLATFORM_INCOME`, `PROVIDER_FEE_EXPENSE`, `GATEWAY_FEE_EXPENSE`, `GATEWAY_FEE_ACCRUAL`, `AML_HOLD`, `CHARGEBACK_RESERVE`, `SUSPENSE`), default `platform_settings` (`OD-1` to `OD-11`), bilingual `notification_templates`, initial admin users (`GATEWAY_ADMIN`, `SECURITY_ADMIN`, `FINANCE`, `COMPLIANCE`, `MLRO`, `OPERATOR`, `SUPPORT`), and default `CommissionProfile`.
 - [x] **`T-1.5` Implement mTLS Server in `core-back` & `mtlsClient` in All 3 Edge Backends**
   - **Target:** `core-back/index.ts`, `core-back/api/middleware/mtlsGuard.ts`, `{admin,merchant,checkout}-back/lib/mtlsClient/index.ts`
   - **Action:** Wire TLS 1.3 mutual authentication, CN-to-route enforcement (`/internal/admin`, `/internal/merchant`, `/internal/checkout`), and write an integration test verifying that `checkout-back` client cert gets `403 FORBIDDEN_SERVICE_IDENTITY` if it attempts to call `/internal/admin/health`.
@@ -317,7 +322,7 @@ export function recursiveSet(
   - **Action:** Implement all 15 journal entry templates (§11.3 of Final Design), enforcing `SUM(DEBIT) == SUM(CREDIT) > 0` with `Prisma.Decimal`, `UNIQUE(ref_type, ref_id)` idempotency, Ledger Rule INTERNAL-1 for `INTERNAL` gateways (NeomPay), `GATEWAY_CLEARING` + `GATEWAY_FEE_ACCRUAL` for external gateways, and `COMMISSION_RECEIVABLE` for `MERCHANT_DIRECT`.
 - [x] **`T-2.3` Implement Universal Maker-Checker Engine (`approval_requests`) & Detail Change Logger**
   - **Target:** `core-back/engine/governance/ApprovalService.ts`, `DetailChangeService.ts`
-  - **Action:** Implement `proposeApproval`, `approveRequest`, `rejectRequest`, and `emergencyExecuteWithRatification`. Enforce `checker_user_id != maker_user_id`, prevent `SYSTEM_AUTOMATION` from ever acting as a checker, validate `base_version` for JSON-Patch entity edits, and execute the underlying state change or ledger posting atomically inside the approval transaction.
+  - **Action:** Implement `proposeApproval`, `approveRequest`, `rejectRequest`, and `emergencyExecuteWithRatification`. Enforce `checker_user_id != maker_user_id` in the application layer (`ApprovalService`) and in the `makerCheckerGuard` middleware, and rely on the `approval_requests_checker_not_maker` `BEFORE INSERT` trigger (`SIGNAL SQLSTATE '45000'`) at the database layer, because MariaDB forbids a `CHECK` constraint on a column that participates in a foreign key. Prevent `SYSTEM_AUTOMATION` from ever acting as a checker, validate `base_version` for JSON-Patch entity edits, and execute the underlying state change or ledger posting atomically inside the approval transaction.
 - **Phase 2 Verification Gate:**
   - `cd core-back && bun test test/phase2-ledger-and-governance.test.ts` (Verifies all 15 journal entry scenarios, `0.0000` invariant drift, Maker != Checker enforcement, and secret redaction).
 
@@ -354,7 +359,7 @@ export function recursiveSet(
   - **Action:** Implement webhook/statement/manual dispute intake (`UNIQUE(gateway_id, external_dispute_ref)`), `SYSTEM_AUTOMATION` drafting of `CHARGEBACK` Adjustments into `PENDING_REVIEW`, human `FINANCE` checker execution, `negative_balance_ceiling` netting, and configurable CSV/XLSX/JSON `StatementSource` ingestion with fee variance true-ups.
 - [x] **`T-4.4` Implement Background Workers (`ExpirySweeper`, `PollWorker`, `InboundInbox`, `OutboxNotification`)**
   - **Target:** `core-back/engine/workers/*.ts`
-  - **Action:** Implement stateless `FOR UPDATE SKIP LOCKED` polling workers and realtime event fan-out to `checkout-back` and `merchant-back`.
+  - **Action:** Implement stateless `FOR UPDATE SKIP LOCKED` polling workers (requires MySQL 8.0+ / MariaDB 10.6+) and realtime event fan-out to `checkout-back` and `merchant-back`. The terminal transitions are guarded by a conditional `UPDATE ... WHERE terminal_at IS NULL`, so a terminal state is applied at most once.
 - **Phase 4 Verification Gate:**
   - `cd core-back && bun test test/phase4-onboarding-aml-disputes-recon.test.ts`
 
@@ -445,16 +450,16 @@ All phase verification gates were executed in this workspace with the following 
 
 | Verification Gate | Command | Result |
 | :--- | :--- | :--- |
-| Phase 1 | `cd core-back && bunx prisma validate && bun test test/phase1-mtls-and-schema.test.ts` | Schema valid (64 models, PostgreSQL, `Decimal(18,4)`), 11 tests pass, mTLS channel binding enforced (`checkout-back` cert rejected on `/internal/admin` with `403 FORBIDDEN_SERVICE_IDENTITY`) |
+| Phase 1 | `cd core-back && bunx prisma validate && bun test test/phase1-mtls-and-schema.test.ts` | Schema valid (64 models, MySQL / MariaDB, `Decimal(18,4)`), 11 tests pass, mTLS channel binding enforced (`checkout-back` cert rejected on `/internal/admin` with `403 FORBIDDEN_SERVICE_IDENTITY`) |
 | Phase 2 | `cd core-back && bun test test/phase2-ledger-and-governance.test.ts` | 11 tests pass (Vault round trip, 15 balanced journal templates, idempotent posting, checkpoint balance, `0.0000` invariant drift, maker/checker separation, detail change log) |
 | Phase 3 | `cd core-back && bun test test/phase3-dynamic-engine-and-blueprints.test.ts` | 12 tests pass (7 production blueprints, 15 deterministic mock scenarios, initiate/confirm/ledger flow, 12 go-live gates, closed transform library) |
 | Phase 4 | `cd core-back && bun test test/phase4-onboarding-aml-disputes-recon.test.ts` | 16 tests pass (duplicate detection, AML hold/case-only/critical escalation, Arabic normalisation, no tipping-off, dispute dedupe, statement parsing) |
 | Phase 8 | `cd core-back && bun test test/edge-cases/catalog-140.test.ts` | 140 catalogued edge cases with 140 executable regression checks, all pass |
 | All backends | `cd <service> && bun run typecheck && bun test` | `core-back` 597 tests, `admin-back` 398 tests, `merchant-back` 67 tests, `checkout-back` 45 tests — all pass with clean TypeScript |
 | All frontends | `cd <spa> && bun run build` | `admin-front`, `merchant-front`, `checkout-front` all build (type-check + Vite) |
-| Schema parity | `cd core-back && bunx prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script` | 64 model tables and 100 enum types, identical to the committed migration (plus the hand written `schema_versions` table and the four domain `CHECK` constraints) |
+| Schema parity | `cd core-back && bunx prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script` | 64 model tables and 100 enum types, identical to the committed migration (plus the hand written `schema_versions` table, the three domain `CHECK` constraints and the `approval_requests_checker_not_maker` `BEFORE INSERT` trigger) |
 
-**Outstanding environment dependency:** `T-1.4` remains in progress because this workspace has no reachable PostgreSQL instance (no local server and no container runtime), so `prisma migrate deploy` and `bun run db-seed` could not be executed against a live database. The migration was generated from the schema and verified to match it exactly via `prisma migrate diff --from-empty --to-schema`, and the seed script is idempotent (verified twice against an in-memory Prisma stand-in).
+**Outstanding environment dependency:** `T-1.4` remains in progress because this workspace has no reachable MySQL / MariaDB instance (no local server and no container runtime), so `prisma migrate deploy` and `bun run db-seed` could not be executed against a live database. The migration was generated from the schema and verified to match it exactly via `prisma migrate diff --from-empty --to-schema`, and the seed script is idempotent (verified twice against an in-memory Prisma stand-in).
 
 ## 10. Hardening Pass · Audit Findings Closed (Delivery Run 2)
 
@@ -548,7 +553,7 @@ These items are **not** closed by this pass. They are ordered by operational ris
 
 | # | Item | Severity | Notes |
 | :--- | :--- | :--- | :--- |
-| 1 | Apply the migration and the seed to a live PostgreSQL instance and re-run the phase gates against it | HIGH | Blocked only by the absence of a database in this workspace (`T-1.4`) |
+| 1 | Apply the migration and the seed to a live MySQL / MariaDB instance and re-run the phase gates against it | HIGH | Blocked only by the absence of a database in this workspace (`T-1.4`) |
 | 2 | Run an end-to-end payment against a sandbox gateway with the seeded blueprints | HIGH | The declarative flows are seeded and projected, but no real gateway credentials exist yet |
 | 3 | Bind the real SMS/email aggregator credentials to the notification webhook transport | MEDIUM | The transport is implemented and signed; it only needs the provider endpoint and its secret |
 | 4 | Execute the regulatory report submission (`PROVISIONAL` → `CONFIRMED`) | MEDIUM | `POST /aml/reports` records the report in `PENDING_CHECKER`; the submission to the authority is still a manual step |

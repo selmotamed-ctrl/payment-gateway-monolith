@@ -11,6 +11,17 @@ outbound gateway calls. It is reachable exclusively over Mutual TLS on the priva
   to exactly one client certificate common name (`admin-back`, `merchant-back`, `checkout-back`).
 - Never listens on a public interface and is never published by a reverse proxy.
 
+## Database
+
+- **Engine:** MySQL 8.0+ / MariaDB 10.6+. The Prisma datasource is `provider = "mysql"`.
+- **Adapter & driver:** `@prisma/adapter-mariadb` on top of the `mariadb` driver package.
+- **Schema:** `prisma/schema.prisma`; the initial migration
+  `prisma/migrations/20261027000000_init/migration.sql` is plain MySQL / MariaDB DDL.
+- **Type mapping:** `String` → `VARCHAR(191)` (free-form content is declared `@db.Text`),
+  `Bytes` → `BLOB` (the webhook body is `@db.LongBlob`), `Json` → `JSON`, money →
+  `DECIMAL(18,4)`, Prisma enums → native `ENUM` columns.
+- **Row locks:** `SELECT ... FOR UPDATE SKIP LOCKED` requires MySQL 8.0+ / MariaDB 10.6+.
+
 ## Runtime
 
 ```bash
@@ -27,7 +38,7 @@ bun test
 | Variable | Purpose |
 | :--- | :--- |
 | `PORT` / `HOST` | Listener binding, defaults `4000` / `127.0.0.1` |
-| `DATABASE_URL` | PostgreSQL connection string |
+| `DATABASE_URL` | MySQL / MariaDB connection string (`mysql://user:password@host:3306/payment_gateway`) |
 | `MTLS_CA_CERT_PATH` | Internal CA used to verify client certificates |
 | `MTLS_SERVER_CERT_PATH` / `MTLS_SERVER_KEY_PATH` | Server certificate and key |
 | `KMS_MASTER_KEY` | Root key for the AES-256-GCM vault and session signing |

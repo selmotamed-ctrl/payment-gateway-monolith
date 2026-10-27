@@ -30,7 +30,7 @@ This service lets an administrator plug in multiple voucher providers dynamicall
 - **Query Engine**: runs a provider's purchase query stack and extracts the voucher.
 - **Catalog Resolver**: builds the aggregated, ranked product listing for a service and keeps it in a short-lived cache.
 - **Asset, Token and Audit services**.
-- **Storage**: PostgreSQL (money as `NUMERIC(18,4)`, never floats) and file storage for assets.
+- **Storage**: MySQL / MariaDB 8.0+ / 10.6+ (money as `DECIMAL(18,4)`, never floats) and file storage for assets. The Prisma datasource is `provider = "mysql"`, reached through `@prisma/adapter-mariadb` on top of the `mariadb` driver package; the platform was originally designed for PostgreSQL and has since been migrated.
 
 Deployment is a single instance for now. Every in-memory cache (ApiConsumer registry, aggregated listings) sits behind an `InvalidationBus` interface: an in-process emitter today, Redis pub/sub later, with no change to callers.
 
