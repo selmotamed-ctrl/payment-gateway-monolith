@@ -6,7 +6,6 @@ import type {
   AmlScreeningMatchRow,
   AmlScreeningRow,
   ApprovalRequestRow,
-  AttemptWindowFilter,
   AttemptWindowStats,
   BeneficialOwnerRow,
   DisputeRepository,
@@ -135,6 +134,16 @@ export class PrismaRepositories implements Repositories {
     },
     updateMerchant: async (tx, id, patch) => {
       return model(tx, "merchant").update({ where: { id }, data: patch }) as Promise<MerchantRow>;
+    },
+    lockMerchantById: async (tx, id) => {
+      const result = await tx.$queryRaw`
+        SELECT * FROM merchants WHERE id = ${id} LIMIT 1 FOR UPDATE
+      `;
+      const found = mapRawRows<MerchantRow>(result)[0];
+      if (!found) {
+        return (await model(tx, "merchant").findUnique({ where: { id } })) as MerchantRow | null;
+      }
+      return found;
     },
     findMerchantsByDuplicateSignals: async (tx, signals) => {
       const where: Any = { status: { not: "CLOSED" } };
@@ -273,6 +282,9 @@ export class PrismaRepositories implements Repositories {
     },
     createScreening: async (tx, data) => {
       return model(tx, "amlScreening").create({ data }) as Promise<AmlScreeningRow>;
+    },
+    createScreeningMatch: async (tx, data) => {
+      return model(tx, "amlScreeningMatch").create({ data }) as Promise<AmlScreeningMatchRow>;
     },
     findScreeningById: async (tx, id) => {
       return (await model(tx, "amlScreening").findUnique({ where: { id } })) as AmlScreeningRow | null;
@@ -419,6 +431,27 @@ export class PrismaRepositories implements Repositories {
       }
       const stats: AttemptWindowStats = { count: amounts.length, totalAmount: total, amounts };
       return stats;
+    },
+    sumSucceededAmountByRouteInWindow: async (tx, window) => {
+      const result = await tx.$queryRaw`
+        SELECT route_id, SUM(total_charged_amount) AS processed_amount
+        FROM payment_attempts
+        WHERE status = 'SUCCEEDED'
+          AND route_id IS NOT NULL
+          AND COALESCE(terminal_at, created_at) >= ${window.since}
+          AND COALESCE(terminal_at, created_at) < ${window.until}
+        GROUP BY route_id
+      `;
+      const totals = new Map<string, Money>();
+      for (const row of rows<Any>(result)) {
+        const routeId = String(row.route_id ?? row.routeId ?? "");
+        if (routeId.length === 0) {
+          continue;
+        }
+        const amount = moneyFromDecimal(row.processed_amount ?? row.processedAmount ?? 0);
+        totals.set(routeId, (totals.get(routeId) ?? 0n) + amount);
+      }
+      return totals;
     },
     listSettledAttemptsInWindow: async (tx, input) => {
       const result = await tx.$queryRaw`

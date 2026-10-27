@@ -2,6 +2,7 @@ import "dotenv/config";
 import { Prisma } from "../generated/prisma/client";
 import { client, ensureSchemaVersion } from "./client";
 import { seedBlueprints } from "./seedBlueprints";
+import { seedSystemGlAccounts } from "./seedGlAccounts";
 
 const platformSettings = [
   {
@@ -90,20 +91,6 @@ const platformSettings = [
       description: "Named organizational checker accounts are provisioned without embedded credentials.",
     },
   },
-] as const;
-
-const glAccountTypes = [
-  "TREASURY",
-  "GATEWAY_CLEARING",
-  "MERCHANT_WALLET",
-  "PLATFORM_INCOME",
-  "PROVIDER_FEE_EXPENSE",
-  "GATEWAY_FEE_EXPENSE",
-  "GATEWAY_FEE_ACCRUAL",
-  "COMMISSION_RECEIVABLE",
-  "AML_HOLD",
-  "CHARGEBACK_RESERVE",
-  "SUSPENSE",
 ] as const;
 
 const adminUsers = [
@@ -294,18 +281,9 @@ const seed = async () => {
     });
   }
 
-  for (const accountType of glAccountTypes) {
-    await client.glAccount.upsert({
-      where: { seedKey: `system:${accountType}` },
-      update: {},
-      create: {
-        accountType,
-        currency: "LYD",
-        checkpointBalance: new Prisma.Decimal(0),
-        seedKey: `system:${accountType}`,
-      },
-    });
-  }
+  // One system GL account per (account type, currency): the ledger resolves
+  // its accounts by currency, so every supported currency needs its own row.
+  await seedSystemGlAccounts(client);
 
   for (const user of adminUsers) {
     await client.user.upsert({

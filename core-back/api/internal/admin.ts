@@ -6,6 +6,7 @@ import { client } from "../../prisma/client";
 import { invalidationBus } from "../../lib/invalidationBus";
 import { StatementIngestor } from "../../engine/reconciliation/StatementIngestor";
 import { getPlatformRuntime } from "../../engine/runtime";
+import { InvariantVerifier, naturalBalance } from "../../engine/ledger/InvariantVerifier";
 import { moneyToString } from "../../engine/db/money";
 import { ApiError, parseOrThrow } from "../../lib/error";
 import {
@@ -21,12 +22,48 @@ import type { Decimal } from "decimal.js";
 import { decimal } from "../../engine/ledger/LedgerPoster";
 import { LedgerPoster } from "../../engine/ledger/LedgerPoster";
 import { GoLiveGateValidator } from "../../engine/flow/GoLiveGateValidator";
+import {
+  executeApprovalSubject,
+  executeCashout,
+  openDisputeWithDraftedAdjustment,
+  type GovernanceExecutionContext,
+} from "../../engine/governance/GovernanceExecution";
+import { evaluateRouteDailyCap } from "../../engine/flow/VisibleRailsResolver";
+import { dayWindowInTimeZone, resolveGatewayTimezone } from "../../engine/flow/DailyRouteVolume";
+import { PrismaRepositories } from "../../engine/db/repositories";
 import { validateTransformUsage, type TransformPipe, type TransformUsage } from "../../engine/transforms/TransformPipeline";
 import { json, jsonOptional } from "./json";
 import { requireAuthentication, requireAuthorities, principalOf } from "../middleware/authDoubleCheck";
-import { actorFromRequest, assertCheckerAuthority, assertCheckerIsNotMaker } from "../middleware/makerCheckerGuard";
+import { actorFromRequest, assertCheckerAuthority, assertCheckerIsNotMaker, SYSTEM_AUTOMATION_PRINCIPAL } from "../middleware/makerCheckerGuard";
 
 const router = express.Router();
+
+/**
+ * The execution context of the governance module.
+ *
+ * The ledger poster, the repositories and the database are the very same
+ * instances the rest of the service uses, so a governance execution posts
+ * through the production ledger.
+ */
+const governanceContext = (platform: ReturnType<typeof getPlatformRuntime>): GovernanceExecutionContext => ({
+  ledgerPoster: platform.ledgerPoster,
+  repositories: platform.repositories,
+});
+
+/**
+ * The actor of a governance write.
+ *
+ * A dispute may be opened by a rail webhook, so a non-human principal is
+ * tolerated here. The maker-checker guard is never relaxed: the system
+ * principal can never check an approval.
+ */
+const auditActorOf = (request: Request): { userId: string | null; role: string | null } => {
+  const principal = principalOf(request);
+  if (principal.userId && principal.role !== SYSTEM_AUTOMATION_PRINCIPAL) {
+    return { userId: principal.userId, role: principal.role ?? null };
+  }
+  return { userId: null, role: "SYSTEM" };
+};
 
 router.get("/health", (_request, response) => {
   response.json({ status: "ok", channel: "admin" });
@@ -403,6 +440,26 @@ router.post("/join-requests/:id/decide", async (request: Request, response: Resp
   if (!["IN_REVIEW", "INFO_REQUESTED", "SUBMITTED", "PENDING_CHECKER"].includes(joinRequest.status)) {
     throw new ApiError(409, "JOIN_REQUEST_NOT_DECIDABLE", "The join request is not in a decidable state");
   }
+  if (body.decision === "APPROVED") {
+    // A merchant with an open confirmed screening match is never activated.
+    const blockingCase = await client.amlCase.findFirst({
+      where: {
+        subjectType: "MERCHANT",
+        subjectId: joinRequest.merchantId,
+        status: { in: ["OPEN", "IN_REVIEW", "PENDING_CHECKER", "FROZEN", "ESCALATED_STR"] },
+        triggerReason: { startsWith: "SCREENING_CONFIRMED_MATCH" },
+      },
+      select: { id: true, triggerReason: true, severity: true },
+    });
+    if (blockingCase) {
+      throw new ApiError(
+        409,
+        "AML_CONFIRMED_MATCH",
+        "The merchant has an open confirmed watch list match and cannot be activated",
+        { amlCaseId: blockingCase.id, severity: blockingCase.severity },
+      );
+    }
+  }
   const fourEyesRequired = joinRequest.fourEyesRequired;
   if (fourEyesRequired && body.decision === "APPROVED") {
     const approval = await client.approvalRequest.create({
@@ -633,7 +690,13 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
   requireAuthorities(request, ["approval:check", "approval:write"]);
   const { id } = parseOrThrow(idSchema, request.params);
   const body = parseOrThrow(
-    z.object({ notes: z.string().max(2000).optional(), riskAcceptanceNote: z.string().max(2000).optional() }).strict(),
+    z
+      .object({
+        notes: z.string().max(2000).optional(),
+        riskAcceptanceNote: z.string().max(2000).optional(),
+        outcome: z.enum(["WON", "LOST"]).optional(),
+      })
+      .strict(),
     request.body ?? {},
   );
   const actor = actorFromRequest(request);
@@ -646,19 +709,53 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
   if (approval.state !== "PENDING_REVIEW" && approval.state !== "DRAFT") {
     throw new ApiError(409, "APPROVAL_NOT_PENDING", "The approval request is not pending review");
   }
-  const updated = await client.approvalRequest.update({
-    where: { id },
-    data: {
+  const platform = getPlatformRuntime(client as never);
+  // The approved change is executed, not just recorded: the ledger posting,
+  // the state change of the subject and the audit trail share one transaction.
+  const { updated, execution } = await client.$transaction(async (tx) => {
+    const result = await executeApprovalSubject(governanceContext(platform), tx as never, {
+      approval: {
+        id: approval.id,
+        subjectType: approval.subjectType,
+        subjectId: approval.subjectId,
+        payloadDiffJson: approval.payloadDiffJson,
+        makerUserId: approval.makerUserId,
+      },
       checkerUserId: actor.userId,
-      state: "APPROVED",
-      riskAcceptanceNote: body.riskAcceptanceNote,
-    },
+      checkerRole: actor.role,
+      notes: body.notes ?? null,
+      outcome: body.outcome ?? null,
+    });
+    const state = result.status === "HELD"
+      ? "PENDING_REVIEW"
+      : result.reason === "NO_EXECUTABLE_SUBJECT"
+        ? "APPROVED"
+        : "EXECUTED";
+    const updatedApproval = await tx.approvalRequest.update({
+      where: { id },
+      data: {
+        checkerUserId: actor.userId,
+        state,
+        riskAcceptanceNote: body.riskAcceptanceNote,
+      },
+    });
+    return { updated: updatedApproval, execution: result };
   });
-  // The approved change is executed, not just recorded.
   if (approval.subjectType === "GATEWAY_VERSION") {
     await activateGatewayVersion(approval.subjectId);
   }
-  response.json({ id: updated.id, state: updated.state, checkerUserId: updated.checkerUserId });
+  response.json({
+    id: updated.id,
+    state: updated.state,
+    checkerUserId: updated.checkerUserId,
+    execution: {
+      status: execution.status,
+      reason: execution.reason ?? null,
+      template: execution.template ?? null,
+      journalEntryId: execution.journalEntryId ?? null,
+      operatorCaseId: execution.operatorCaseId ?? null,
+    },
+  });
 });
 
 /**
@@ -2308,27 +2405,32 @@ router.post("/disputes", async (request: Request, response: Response) => {
       .strict(),
     request.body,
   );
-  const existing = await client.dispute.findFirst({
-    where: { gatewayId: body.gatewayId, externalDisputeRef: body.externalDisputeRef },
-  });
-  if (existing) {
-    throw new ApiError(409, "DISPUTE_ALREADY_EXISTS", "A dispute with this reference already exists");
-  }
-  const dispute = await client.dispute.create({
-    data: {
+  const actor = auditActorOf(request);
+  const platform = getPlatformRuntime(client as never);
+  // The dispute, the drafted chargeback adjustment, the approval request and
+  // the reserve posting are written in one transaction.
+  const result = await client.$transaction(async (tx) =>
+    openDisputeWithDraftedAdjustment(governanceContext(platform), tx as never, {
       attemptId: body.attemptId,
       gatewayId: body.gatewayId,
       railId: body.railId,
       externalDisputeRef: body.externalDisputeRef,
       source: body.source,
-      reasonCode: body.reasonCode,
-      amount: new Prisma.Decimal(body.amount),
-      currency: body.currency.toUpperCase(),
-      status: "OPENED",
-      openedAt: new Date(),
-    },
+      reasonCode: body.reasonCode ?? null,
+      amount: decimal(body.amount),
+      currency: body.currency,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+    }),
+  );
+  response.status(201).json({
+    id: result.disputeId,
+    status: "OPENED",
+    adjustmentId: result.adjustmentId,
+    approvalRequestId: result.approvalRequestId,
+    escrowed: result.escrowed,
+    journalEntryId: result.journalEntryId,
   });
-  response.status(201).json({ id: dispute.id, status: dispute.status });
 });
 
 router.get("/adjustments", async (request: Request, response: Response) => {
@@ -2354,21 +2456,57 @@ router.post("/adjustments", async (request: Request, response: Response) => {
       .strict(),
     request.body,
   );
-  const adjustment = await client.adjustment.create({
-    data: {
-      type: body.type,
-      targetGlAccountId: body.targetGlAccountId,
-      sourceAttemptId: body.sourceAttemptId,
-      disputeId: body.disputeId,
-      amount: new Prisma.Decimal(body.amount),
-      reverseCommission: body.reverseCommission,
-      reason: body.reason,
-      externalDisputeRef: body.externalDisputeRef,
-      draftedBySystem: false,
-      state: "PENDING_REVIEW",
-    },
+  const actor = actorFromRequest(request);
+  const platform = getPlatformRuntime(client as never);
+  // A draft adjustment is never executable until a human checker approves it,
+  // so the draft and its approval request are created together.
+  const { adjustment, approval } = await client.$transaction(async (tx) => {
+    const draft = await tx.adjustment.create({
+      data: {
+        type: body.type,
+        targetGlAccountId: body.targetGlAccountId,
+        sourceAttemptId: body.sourceAttemptId,
+        disputeId: body.disputeId,
+        amount: new Prisma.Decimal(body.amount),
+        reverseCommission: body.reverseCommission,
+        reason: body.reason,
+        externalDisputeRef: body.externalDisputeRef,
+        draftedBySystem: false,
+        state: "PENDING_REVIEW",
+      },
+    });
+    const approvalRequest = await tx.approvalRequest.create({
+      data: {
+        subjectType: "ADJUSTMENT",
+        subjectId: draft.id,
+        payloadDiffJson: json({ type: body.type, amount: body.amount, reason: body.reason }),
+        mode: "STANDARD",
+        makerUserId: actor.userId,
+        state: "PENDING_REVIEW",
+        expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+      },
+    });
+    await platform.repositories.governance.writeAuditLog(tx as never, {
+      actorId: actor.userId,
+      role: actor.role,
+      action: "ADJUSTMENT_DRAFTED",
+      entityType: "ADJUSTMENT",
+      entityId: draft.id,
+      afterJson: {
+        type: body.type,
+        state: "PENDING_REVIEW",
+        amount: body.amount,
+        approvalRequestId: approvalRequest.id,
+      },
+      approvalRequestId: approvalRequest.id,
+    });
+    return { adjustment: draft, approval: approvalRequest };
   });
-  response.status(201).json({ id: adjustment.id, state: adjustment.state });
+  response.status(201).json({
+    id: adjustment.id,
+    state: adjustment.state,
+    approvalRequestId: approval.id,
+  });
 });
 
 router.get("/cashouts", async (request: Request, response: Response) => {
@@ -2385,45 +2523,27 @@ router.post("/cashouts/:id/process", async (request: Request, response: Response
     request.body,
   );
   const actor = actorFromRequest(request);
+  const platform = getPlatformRuntime(client as never);
+  // The cash-out decision moves the money (or releases it) in the very same
+  // transaction as the state change of the request.
+  const result = await client.$transaction(async (tx) =>
+    executeCashout(governanceContext(platform), tx as never, {
+      cashoutId: id,
+      decision: body.decision,
+      reason: body.reason ?? null,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+    }),
+  );
   const cashout = await client.cashoutRequest.findUnique({ where: { id } });
-  if (!cashout) {
-    throw new ApiError(404, "CASHOUT_NOT_FOUND", "The cash-out request does not exist");
-  }
-  if (body.decision === "REJECT") {
-    const updated = await client.cashoutRequest.update({ where: { id }, data: { state: "REJECTED" } });
-    response.json({ id: updated.id, state: updated.state });
-    return;
-  }
-  const wallet = await client.wallet.findUnique({ where: { id: cashout.walletId } });
-  if (!wallet) {
-    throw new ApiError(404, "WALLET_NOT_FOUND", "The wallet does not exist");
-  }
-  const adjustment = await client.adjustment.create({
-    data: {
-      type: "CASHOUT_SUBTRACTION",
-      targetGlAccountId: wallet.glAccountId,
-      amount: cashout.amount,
-      reason: `Cash-out approval for request ${cashout.id}`,
-      draftedBySystem: false,
-      state: "APPROVED",
-    },
+  response.json({
+    id,
+    state: cashout?.state ?? null,
+    adjustmentId: cashout?.adjustmentId ?? null,
+    journalEntryId: result.journalEntryId ?? null,
+    status: result.status,
+    idempotent: result.idempotent === true,
   });
-  const updated = await client.cashoutRequest.update({
-    where: { id },
-    data: { state: "COMPLETE", adjustmentId: adjustment.id },
-  });
-  await client.auditLog.create({
-    data: {
-      actorId: actor.userId,
-      role: actor.role,
-      action: "CASHOUT_APPROVED",
-      entityType: "CASHOUT_REQUEST",
-      entityId: cashout.id,
-      beforeJson: { state: cashout.state },
-      afterJson: { state: updated.state, adjustmentId: adjustment.id },
-    },
-  });
-  response.json({ id: updated.id, state: updated.state, adjustmentId: adjustment.id });
 });
 
 router.get("/commission-profiles", async (request: Request, response: Response) => {
@@ -2507,15 +2627,24 @@ router.post("/velocity-rules", async (request: Request, response: Response) => {
   response.status(201).json({ id: rule.id, version: rule.version });
 });
 
+/**
+ * The live balance of every GL account, grouped by account type.
+ *
+ * A live balance is the checkpoint balance plus the journal lines that were
+ * posted after the checkpoint. Summing every line would double count the
+ * window the checkpoint already covers.
+ */
 const loadLedgerBalances = async (): Promise<Map<string, Decimal>> => {
   const accounts = await client.glAccount.findMany();
   const balances = new Map<string, Decimal>();
   for (const account of accounts) {
     const lines = await client.journalLine.findMany({
-      where: { glAccountId: account.id },
+      where: account.checkpointAt
+        ? { glAccountId: account.id, createdAt: { gt: account.checkpointAt } }
+        : { glAccountId: account.id },
       select: { direction: true, amount: true },
     });
-    let balance = decimal(account.checkpointBalance);
+    let balance = decimal(account.checkpointBalance ?? 0);
     for (const line of lines) {
       const value = decimal(line.amount);
       balance = line.direction === "DEBIT" ? balance.plus(value) : balance.minus(value);
@@ -2585,13 +2714,18 @@ router.get("/finance/profitability", async (request: Request, response: Response
   }
 
   const balances = await loadLedgerBalances();
-  const debitPositive = (type: string): Decimal => balances.get(type) ?? decimal(0);
-  const creditPositive = (type: string): Decimal => (balances.get(type) ?? decimal(0)).neg();
+  // The natural balance of an account: positive for a debit-normal account
+  // (assets and expenses) and positive for a credit-normal account
+  // (liabilities and income).
+  const natural = (type: string): Decimal => {
+    const raw = balances.get(type) ?? decimal(0);
+    return naturalBalance(type, raw);
+  };
 
-  const gatewayCostRealized = debitPositive("GATEWAY_FEE_EXPENSE").plus(debitPositive("PROVIDER_FEE_EXPENSE"));
-  const gatewayCostAccrued = debitPositive("GATEWAY_FEE_ACCRUAL");
-  const chargebackLosses = debitPositive("CHARGEBACK_RESERVE");
-  const commissionReceivable = debitPositive("COMMISSION_RECEIVABLE");
+  const gatewayCostRealized = natural("GATEWAY_FEE_EXPENSE").plus(natural("PROVIDER_FEE_EXPENSE"));
+  const gatewayCostAccrued = natural("GATEWAY_FEE_ACCRUAL");
+  const chargebackLosses = natural("CHARGEBACK_RESERVE");
+  const commissionReceivable = natural("COMMISSION_RECEIVABLE");
   const netRevenue = grossCommission.minus(gatewayCostRealized);
   const netContribution = netRevenue.minus(chargebackLosses);
 
@@ -2621,6 +2755,64 @@ router.get("/finance/profitability", async (request: Request, response: Response
     byRail: toRows(byRail, "railCode"),
     byDay: toRows(byDay, "day"),
     byGateway: toRows(byGateway, "gatewayId"),
+  });
+});
+
+/**
+ * The operational reporting of the daily cap guard.
+ *
+ * The processed volume is derived from the succeeded attempts of the current
+ * business day, exactly like the checkout resolution does, and the headroom
+ * is evaluated with the very same helper the visible rails formula uses. An
+ * operator therefore sees the same cap the customer sees.
+ */
+router.get("/finance/route-caps", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["finance:read"]);
+  const now = new Date();
+  const timeZone = await resolveGatewayTimezone(client as never);
+  const window = dayWindowInTimeZone(now, timeZone);
+  const repositories = new PrismaRepositories(client as never);
+  const processed = await repositories.payments.sumSucceededAmountByRouteInWindow(
+    client as never,
+    window,
+  );
+  const routes = await client.railRoute.findMany({ include: { rail: true } });
+
+  const rows = routes.map((route) => {
+    const processedAmount = processed.get(route.id) ?? 0n;
+    const cap = evaluateRouteDailyCap(
+      {
+        dailyCapAmount: route.dailyCapAmount,
+        dailyProcessedAmount: moneyToString(processedAmount),
+      },
+      0,
+    );
+    // The very same evaluation the visible rails formula performs: a route
+    // whose daily cap is exhausted is excluded with `DAILY_CAP_EXCEEDED`.
+    return {
+      routeId: route.id,
+      railCode: route.rail.code,
+      gatewayId: route.gatewayId,
+      dailyCapAmount: cap.cap?.toFixed(4) ?? null,
+      dailyProcessedAmount: cap.processed.toFixed(4),
+      dailyCapRemaining: cap.remaining?.toFixed(4) ?? null,
+      capExhausted: cap.cap !== null && cap.remaining !== null && cap.remaining.lte(0),
+      exclusionReason: cap.withinCap ? null : "DAILY_CAP_EXCEEDED",
+      utilisation:
+        cap.cap !== null && cap.cap.gt(0)
+          ? cap.processed.div(cap.cap).mul(100).toFixed(2)
+          : null,
+    };
+  });
+
+  response.json({
+    currency: "LYD",
+    timeZone,
+    businessDay: {
+      since: window.since.toISOString(),
+      until: window.until.toISOString(),
+    },
+    routes: rows,
   });
 });
 
@@ -2704,32 +2896,36 @@ router.get("/finance/liquidity", async (request: Request, response: Response) =>
 
 router.get("/finance/invariant-check", async (request: Request, response: Response) => {
   requireAuthorities(request, ["finance:read"]);
-  const balances = await loadLedgerBalances();
-  const debitPositive = (type: string): Decimal => balances.get(type) ?? decimal(0);
-  const creditPositive = (type: string): Decimal => (balances.get(type) ?? decimal(0)).neg();
+  // The invariant has exactly ONE implementation: the `InvariantVerifier`.
+  // A second copy of the formula in the admin API is how a sign error reaches
+  // the operator panel and halts the payouts for a ledger that is balanced.
+  const verifier = new InvariantVerifier(client as never);
+  const result = await verifier.verify();
+  const sides = new Map<string, Decimal>();
+  for (const balance of result.accountBalances) {
+    const current = sides.get(balance.accountType) ?? decimal(0);
+    sides.set(balance.accountType, current.plus(decimal(balance.liveBalance)));
+  }
+  const natural = (type: string): Decimal => {
+    const raw = sides.get(type) ?? decimal(0);
+    return naturalBalance(type, raw);
+  };
 
-  const treasury = debitPositive("TREASURY");
-  const clearing = debitPositive("GATEWAY_CLEARING");
-  const commissionReceivable = debitPositive("COMMISSION_RECEIVABLE");
-  const merchantWallet = creditPositive("MERCHANT_WALLET");
-  const platformIncome = creditPositive("PLATFORM_INCOME");
-  const providerFeeExpense = debitPositive("PROVIDER_FEE_EXPENSE");
-  const gatewayFeeExpense = debitPositive("GATEWAY_FEE_EXPENSE");
-  const gatewayFeeAccrual = debitPositive("GATEWAY_FEE_ACCRUAL");
-  const amlHold = creditPositive("AML_HOLD");
-  const chargebackReserve = creditPositive("CHARGEBACK_RESERVE");
-  const suspense = creditPositive("SUSPENSE");
+  const treasury = natural("TREASURY");
+  const clearing = natural("GATEWAY_CLEARING");
+  const commissionReceivable = natural("COMMISSION_RECEIVABLE");
+  const merchantWallet = natural("MERCHANT_WALLET");
+  const platformIncome = natural("PLATFORM_INCOME");
+  const providerFeeExpense = natural("PROVIDER_FEE_EXPENSE");
+  const gatewayFeeExpense = natural("GATEWAY_FEE_EXPENSE");
+  const gatewayFeeAccrual = natural("GATEWAY_FEE_ACCRUAL");
+  const amlHold = natural("AML_HOLD");
+  const chargebackReserve = natural("CHARGEBACK_RESERVE");
+  const suspense = natural("SUSPENSE");
 
-  const left = treasury.plus(clearing).plus(commissionReceivable);
-  const right = merchantWallet
-    .plus(platformIncome)
-    .minus(providerFeeExpense)
-    .minus(gatewayFeeExpense)
-    .plus(gatewayFeeAccrual)
-    .plus(amlHold)
-    .plus(chargebackReserve)
-    .plus(suspense);
-  const drift = left.minus(right);
+  const left = result.leftSide;
+  const right = result.rightSide;
+  const drift = result.drift;
 
   response.json({
     ok: drift.isZero(),

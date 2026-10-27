@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { EDGE_CASE_CATALOG, EDGE_CASE_GROUPS, type EdgeCaseGroup } from "./catalog";
-import { recursiveSet } from "../../engine/apiConsumer/recursiveSet";
 import { compileUrl, assertNoControlCharacters, validateFinalUrl } from "../../engine/apiConsumer/compileUrl";
 import { TransformPipeline } from "../../engine/transforms/TransformPipeline";
 import { CryptoEngine, canonicalize } from "../../engine/crypto/CryptoEngine";

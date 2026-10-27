@@ -153,6 +153,7 @@ export const start = async () => {
         intervalMs: env.WORKER_POLL_INTERVAL_MS,
         batchSize: env.WORKER_BATCH_SIZE,
         maxAttempts: env.WORKER_MAX_ATTEMPTS,
+        rescreenIntervalMs: env.WORKER_RESCREEN_INTERVAL_MS,
       })
     : undefined;
   workers?.start();

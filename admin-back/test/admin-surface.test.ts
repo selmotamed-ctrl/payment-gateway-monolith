@@ -8,12 +8,6 @@ import { amlAuthorityToken, complianceToken, mlroToken, operatorToken, signSessi
 const pki: TestPki = createTestPki("admin-back");
 const core: TestCore = await startTestCore(pki);
 
-process.env.NODE_ENV = "test";
-process.env.CORE_BACK_URL = core.url;
-process.env.MTLS_CLIENT_CERT_PATH = pki.clientCert;
-process.env.MTLS_CLIENT_KEY_PATH = pki.clientKey;
-process.env.MTLS_CA_CERT_PATH = pki.caCert;
-process.env.ADMIN_LAN_CIDRS = "10.0.0.0/8,192.168.0.0/16,127.0.0.1/32";
 
 const { createApp } = await import("../index");
 
@@ -24,6 +18,14 @@ const operator = operatorToken();
 const compliance = complianceToken();
 const mlro = mlroToken();
 
+beforeAll(() => {
+  process.env.NODE_ENV = "test";
+  process.env.CORE_BACK_URL = core.url;
+  process.env.MTLS_CLIENT_CERT_PATH = pki.clientCert;
+  process.env.MTLS_CLIENT_KEY_PATH = pki.clientKey;
+  process.env.MTLS_CA_CERT_PATH = pki.caCert;
+  process.env.ADMIN_LAN_CIDRS = "10.0.0.0/8,192.168.0.0/16,127.0.0.1/32";
+});
 beforeAll(async () => {
   const app = createApp();
   edgeServer = app.listen(0, "127.0.0.1");

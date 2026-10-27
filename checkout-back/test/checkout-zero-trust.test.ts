@@ -4,11 +4,6 @@ import { createTestPki, startTestCore, type TestCore, type TestPki } from "./hel
 const pki: TestPki = createTestPki();
 const core: TestCore = await startTestCore(pki);
 
-process.env.NODE_ENV = "test";
-process.env.CORE_BACK_URL = core.url;
-process.env.MTLS_CLIENT_CERT_PATH = pki.clientCert;
-process.env.MTLS_CLIENT_KEY_PATH = pki.clientKey;
-process.env.MTLS_CA_CERT_PATH = pki.caCert;
 
 const { createApp } = await import("../index");
 const { pickForwardableHeaders, translateInboundEnvironment } = await import("../api/public/inbound");
@@ -24,6 +19,13 @@ const post = (path: string, body: unknown) =>
     body: JSON.stringify(body),
   });
 
+beforeAll(() => {
+  process.env.NODE_ENV = "test";
+  process.env.CORE_BACK_URL = core.url;
+  process.env.MTLS_CLIENT_CERT_PATH = pki.clientCert;
+  process.env.MTLS_CLIENT_KEY_PATH = pki.clientKey;
+  process.env.MTLS_CA_CERT_PATH = pki.caCert;
+});
 beforeAll(async () => {
   const app = createApp();
   edgeServer = app.listen(0, "127.0.0.1");

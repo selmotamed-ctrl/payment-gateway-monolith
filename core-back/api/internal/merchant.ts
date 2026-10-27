@@ -18,6 +18,13 @@ import {
 } from "../../lib/auth";
 import { Vault } from "../../engine/crypto/Vault";
 import { decimal } from "../../engine/ledger/LedgerPoster";
+import { getPlatformRuntime } from "../../engine/runtime";
+import type { BeneficialOwnerRow, MerchantRow } from "../../engine/db/ports";
+import {
+  MerchantScreeningService,
+  type OnboardingScreeningOutcome,
+} from "../../engine/guards/MerchantScreeningService";
+import { asStringArray, resolveVisibleRails } from "../../engine/flow/VisibleRailsCatalog";
 import { json, jsonOptional } from "./json";
 import { requireAuthentication, requireMerchantScope, principalOf } from "../middleware/authDoubleCheck";
 
@@ -32,6 +39,64 @@ const vault = new Vault();
 
 const normalizePhone = (value: string): string => value.replace(/[\s\-().]/g, "").replace(/^218/, "0");
 const normalizeEmail = (value: string): string => value.trim().toLowerCase();
+
+/**
+ * The national identifier of a beneficial owner is stored encrypted. It is
+ * decrypted for the screening only; a payload that cannot be decrypted is
+ * screened without an identifier instead of failing the whole onboarding.
+ */
+const decryptOwnerIdentifiers = async (
+  owners: readonly BeneficialOwnerRow[],
+): Promise<Map<string, string | null>> => {
+  const decrypted = new Map<string, string | null>();
+  for (const owner of owners) {
+    const ciphertext = owner.nationalIdCiphertext;
+    if (!ciphertext) {
+      decrypted.set(owner.id, null);
+      continue;
+    }
+    try {
+      decrypted.set(owner.id, await vault.decryptSecret(ciphertext));
+    } catch {
+      decrypted.set(owner.id, null);
+    }
+  }
+  return decrypted;
+};
+
+/**
+ * The onboarding screening (L1).
+ *
+ * The merchant and its beneficial owners are screened against the watch
+ * list, the screening is linked to the join request and a confirmed match
+ * raises an AML case and blocks the activation of the merchant.
+ */
+const runOnboardingScreening = async (
+  merchantId: string,
+  joinRequestId: string,
+): Promise<OnboardingScreeningOutcome> => {
+  const platform = getPlatformRuntime(client as never);
+  const merchant = await client.merchant.findUnique({ where: { id: merchantId } });
+  if (!merchant) {
+    throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
+  }
+  const owners = await client.beneficialOwner.findMany({ where: { merchantId, active: true } });
+  const decryptedOwnerIdentifiers = await decryptOwnerIdentifiers(
+    owners as unknown as BeneficialOwnerRow[],
+  );
+  const service = new MerchantScreeningService({
+    repositories: platform.repositories,
+    screening: platform.screening,
+  });
+  return platform.repositories.transaction((tx) =>
+    service.submitOnboarding(tx, {
+      merchant: merchant as unknown as MerchantRow,
+      joinRequestId,
+      owners: owners as unknown as BeneficialOwnerRow[],
+      decryptedOwnerIdentifiers,
+    }),
+  );
+};
 
 const idSchema = z.object({ id: z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/) });
 
@@ -510,11 +575,29 @@ router.post("/onboarding/submit", async (request: Request, response: Response) =
   if (documents === 0) {
     throw new ApiError(409, "KIB_DOCUMENTS_REQUIRED", "At least one KYB document is required before submission");
   }
-  const updated = await client.joinRequest.update({
-    where: { id: joinRequest.id },
-    data: { status: "SUBMITTED", submittedAt: new Date() },
+
+  // The onboarding screening (L1) screens the merchant and its beneficial
+  // owners. A confirmed match raises an AML case and blocks the activation.
+  const screening = await runOnboardingScreening(merchantId, joinRequest.id);
+  if (screening.blocked) {
+    throw new ApiError(
+      403,
+      "AML_CONFIRMED_MATCH",
+      "The onboarding screening produced a confirmed watch list match",
+      {
+        screeningId: screening.screeningId,
+        amlCaseId: screening.amlCaseId,
+      },
+    );
+  }
+
+  response.json({
+    id: joinRequest.id,
+    status: screening.joinRequestStatus,
+    slaDueAt: joinRequest.slaDueAt,
+    screeningId: screening.screeningId,
+    screeningResult: screening.result,
   });
-  response.json({ id: updated.id, status: updated.status, slaDueAt: updated.slaDueAt });
 });
 
 router.get("/wallets", async (request: Request, response: Response) => {
@@ -774,6 +857,10 @@ const createLink = async (merchantId: string, body: z.infer<typeof linkCreateSch
   if (!wallet) {
     throw new ApiError(404, "WALLET_NOT_FOUND", "The settlement wallet does not exist");
   }
+  const merchant = await client.merchant.findUnique({ where: { id: merchantId } });
+  if (!merchant) {
+    throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
+  }
   const key = `pl_${randomBytes(12).toString("base64url")}`;
   const link = await client.paymentLink.create({
     data: {
@@ -791,7 +878,25 @@ const createLink = async (merchantId: string, body: z.infer<typeof linkCreateSch
       expiresAt: body.expiresAt ? new Date(body.expiresAt) : null,
     },
   });
-  return link;
+  // The rails of the new link are resolved with the same formula as the
+  // checkout, so the daily cap of the current business day is already
+  // applied when the link is created.
+  const visible = await resolveVisibleRails(client as never, {
+    application: {
+      id: application.id,
+      merchantId,
+      riskTier: merchant.riskTier,
+      railWhitelist: asStringArray(application.railWhitelist),
+    },
+    link: {
+      amount: link.amount,
+      currency: link.currency,
+      railWhitelist: asStringArray(link.railWhitelist),
+    },
+    channel: "WEB",
+    env: merchant.status === "ACTIVE" ? "LIVE" : "SANDBOX",
+  });
+  return { link, visible };
 };
 
 router.get("/links", async (request: Request, response: Response) => {
@@ -821,7 +926,7 @@ router.get("/links", async (request: Request, response: Response) => {
 router.post("/links", async (request: Request, response: Response) => {
   const merchantId = merchantIdOf(request);
   const body = parseOrThrow(linkCreateSchema, request.body);
-  const link = await createLink(merchantId, body);
+  const { link, visible } = await createLink(merchantId, body);
   response.status(201).json({
     id: link.id,
     key: link.key,
@@ -829,6 +934,8 @@ router.post("/links", async (request: Request, response: Response) => {
     currency: link.currency,
     feeBearer: link.feeBearer,
     state: link.state,
+    visibleRails: visible.rails.map((entry) => entry.rail.code),
+    excludedRails: visible.excluded,
   });
 });
 
@@ -930,7 +1037,7 @@ router.post("/disputes/:id/evidence", async (request: Request, response: Respons
     where: { id: dispute.id },
     data: {
       status: "EVIDENCE_SUBMITTED",
-      evidenceJson: json({ ...((dispute.evidenceJson as Record<string, unknown> | null) ?? {}), ...body.evidence }),
+      evidenceJson: json({ ...(dispute.evidenceJson as Record<string, unknown> | null), ...body.evidence }),
     },
   });
   response.json({ id: updated.id, status: updated.status });
@@ -1504,13 +1611,15 @@ router.post("/external/links", async (request: Request, response: Response) => {
     throw new ApiError(403, "API_TOKEN_REQUIRED", "An API access token is required for the external API");
   }
   const body = parseOrThrow(linkCreateSchema, request.body);
-  const link = await createLink(principal.merchantId as string, body);
+  const { link, visible } = await createLink(principal.merchantId as string, body);
   response.status(201).json({
     key: link.key,
     amount: decimal(link.amount).toFixed(4),
     currency: link.currency,
     feeBearer: link.feeBearer,
     state: link.state,
+    visibleRails: visible.rails.map((entry) => entry.rail.code),
+    excludedRails: visible.excluded,
   });
 });
 

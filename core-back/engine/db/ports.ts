@@ -518,6 +518,11 @@ export interface MerchantRepository {
   findMerchantById(tx: Tx, id: string): Promise<MerchantRow | null>;
   findMerchantByApplication(tx: Tx, applicationId: string): Promise<MerchantRow | null>;
   updateMerchant(tx: Tx, id: string, patch: Partial<MerchantRow>): Promise<MerchantRow>;
+  /**
+   * Takes a row lock on the merchant. Two workers can therefore never
+   * process the same merchant at the same time.
+   */
+  lockMerchantById(tx: Tx, id: string): Promise<MerchantRow | null>;
   findMerchantsByDuplicateSignals(tx: Tx, signals: {
     taxId?: string | null;
     registrationNo?: string | null;
@@ -577,6 +582,13 @@ export interface RiskRepository {
     providerCode: string;
     inputHash: string;
   }): Promise<AmlScreeningRow>;
+  createScreeningMatch(tx: Tx, data: Partial<AmlScreeningMatchRow> & {
+    screeningId: string;
+    listType: string;
+    listName: string;
+    listEntryRef: string;
+    matchedName: string;
+  }): Promise<AmlScreeningMatchRow>;
   findScreeningById(tx: Tx, id: string): Promise<AmlScreeningRow | null>;
   listScreenings(tx: Tx, filter: { subjectId?: string; result?: string; limit: number; offset: number }): Promise<AmlScreeningRow[]>;
   listScreeningMatches(tx: Tx, screeningId: string): Promise<AmlScreeningMatchRow[]>;
@@ -609,6 +621,14 @@ export interface PaymentRepository {
   findAttemptByProviderReference(tx: Tx, providerReference: string): Promise<PaymentAttemptRow | null>;
   updateAttempt(tx: Tx, id: string, patch: Partial<PaymentAttemptRow>): Promise<PaymentAttemptRow>;
   collectWindowStats(tx: Tx, filter: AttemptWindowFilter): Promise<AttemptWindowStats>;
+  /**
+   * The processed volume of a window, grouped by route. It is derived from
+   * the attempts themselves, so a daily cap can never drift from the ledger.
+   */
+  sumSucceededAmountByRouteInWindow(
+    tx: Tx,
+    window: { since: Date; until: Date },
+  ): Promise<Map<string, Money>>;
   listSettledAttemptsInWindow(tx: Tx, input: { gatewayId: string; since: Date; until: Date }): Promise<PaymentAttemptRow[]>;
   listPollPolicies(tx: Tx): Promise<{ routeId: string; firstAfterSeconds: number; backoffSeconds: number[]; maxDurationSeconds: number; stopOnStates: string[] }[]>;
   listRouteInquirySupport(tx: Tx): Promise<{ routeId: string; supportsStatusCheck: boolean }[]>;

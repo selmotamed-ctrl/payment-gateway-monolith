@@ -205,7 +205,7 @@ export class PrismaCallbackVerifier implements CallbackVerifier {
     timestamp: number | null;
     signature: string;
   }): boolean {
-    const { profile, verifyMethod, payload, rawBody, timestamp, signature, secret } = input;
+    const { profile, payload, rawBody, timestamp, signature, secret } = input;
     const algorithm = String(profile?.algorithm ?? "HMAC_SHA256");
     const keyEncoding = String(profile?.secretKeyEncoding ?? "UTF8") as KeyEncoding;
     const outputEncoding = String(profile?.outputEncoding ?? "HEX_LOWER") as HashOutputEncoding;

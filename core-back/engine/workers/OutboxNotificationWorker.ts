@@ -1,6 +1,7 @@
 import { assertNoTippingOff, redactAmlPayload, renderTemplate } from "../compliance/tippingOff";
 import { toCamelRows } from "../db/rawRows";
 import type { NotificationRow, Tx } from "../db/ports";
+import type { RenderedNotification } from "../notifications/NotificationTransport";
 import { BaseWorker, backoffDelayMs, type WorkerOptions } from "./workerRuntime";
 
 export interface NotificationSendResult {
@@ -10,7 +11,7 @@ export interface NotificationSendResult {
 }
 
 export interface NotificationSender {
-  send(notification: NotificationRow, rendered: { subject: string | null; body: string }): Promise<NotificationSendResult>;
+  send(notification: NotificationRow, rendered: RenderedNotification): Promise<NotificationSendResult>;
 }
 
 export interface OutboxNotificationWorkerDeps extends WorkerOptions {
@@ -89,7 +90,14 @@ export class OutboxNotificationWorker extends BaseWorker {
     }
 
     try {
-      const result = await this.sender.send(notification, { subject, body });
+      const result = await this.sender.send(notification, {
+        subject,
+        body,
+        templateCode: template.code,
+        confidentialityClass: template.confidentialityClass,
+        subjectTemplate: template.subjectTemplate,
+        bodyTemplate: template.bodyTemplate,
+      });
       if (result.status === "FAILED") {
         await this.fail(notification, now, result.error ?? "Sender reported failure", notification.attempts);
         return;

@@ -1,15 +1,12 @@
-import express from "express";
 import { adminInternalRouter } from "./admin";
 import { checkoutInternalRouter } from "./checkout";
 import { merchantInternalRouter } from "./merchant";
 
-const createInternalRouter = (channel: "admin" | "merchant" | "checkout") => {
-  const router = express.Router();
-  router.get("/health", (_request, response) => {
-    response.json({ status: "ok", channel });
-  });
-  return router;
-};
-
+/**
+ * The internal channel routers.
+ *
+ * The live router is mounted in `core-back/api/index.ts`, which binds every
+ * namespace to the client certificate that may call it. This module only
+ * exports the channel routers themselves.
+ */
 export { adminInternalRouter, checkoutInternalRouter, merchantInternalRouter };
-export const internalRouter = express.Router();

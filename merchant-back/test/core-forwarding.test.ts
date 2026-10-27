@@ -6,12 +6,6 @@ import { createTestPki, startTestCore, type CoreRequestRecord, type TestCore, ty
 const pki: TestPki = createTestPki("merchant-back");
 const core: TestCore = await startTestCore(pki);
 
-process.env.NODE_ENV = "test";
-process.env.CORE_BACK_URL = core.url;
-process.env.MTLS_CLIENT_CERT_PATH = pki.clientCert;
-process.env.MTLS_CLIENT_KEY_PATH = pki.clientKey;
-process.env.MTLS_CA_CERT_PATH = pki.caCert;
-process.env.MAX_UPLOAD_BYTES = "1048576";
 resetEnvCache();
 resetCoreAgent();
 
@@ -51,6 +45,14 @@ const putJson = (path: string, body: unknown) =>
     body: JSON.stringify(body),
   });
 
+beforeAll(() => {
+  process.env.NODE_ENV = "test";
+  process.env.CORE_BACK_URL = core.url;
+  process.env.MTLS_CLIENT_CERT_PATH = pki.clientCert;
+  process.env.MTLS_CLIENT_KEY_PATH = pki.clientKey;
+  process.env.MTLS_CA_CERT_PATH = pki.caCert;
+  process.env.MAX_UPLOAD_BYTES = "1048576";
+});
 beforeAll(async () => {
   const app = createApp();
   edgeServer = app.listen(0, "127.0.0.1");

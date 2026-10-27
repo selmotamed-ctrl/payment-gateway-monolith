@@ -1,6 +1,6 @@
 import type { PrismaLike } from "../db/ports";
 import { PrismaRepositories } from "../db/repositories";
-import { ApiConsumer, type ApiConsumerConfig } from "../apiConsumer/ApiConsumer";
+import type { ApiConsumerConfig } from "../apiConsumer/ApiConsumer";
 import { ConsumerRegistry, consumerRegistryKey } from "../apiConsumer/ConsumerRegistry";
 import { DynamicRailEngine } from "../flow/DynamicRailEngine";
 import { StepExecutor } from "../flow/StepExecutor";
@@ -8,7 +8,11 @@ import { LedgerPoster } from "../ledger/LedgerPoster";
 import { Vault } from "../crypto/Vault";
 import { CryptoEngine } from "../crypto/CryptoEngine";
 import { AttemptGuardPipeline } from "../guards/AttemptGuardPipeline";
-import { CachedScreeningProvider, InternalWatchlistProvider } from "../guards/ScreeningProvider";
+import {
+  CachedScreeningProvider,
+  InternalWatchlistProvider,
+  type ScreeningProvider,
+} from "../guards/ScreeningProvider";
 import { PrismaAttemptRepository } from "./attemptRepository";
 import { PrismaSlotReservationStore } from "./slotStore";
 import { PrismaFlowProvider } from "./flowProvider";
@@ -21,6 +25,7 @@ export interface PlatformRuntime {
   engine: DynamicRailEngine;
   ledgerPoster: LedgerPoster;
   guardPipeline: AttemptGuardPipeline;
+  screening: ScreeningProvider;
   consumerRegistry: ConsumerRegistry;
   stepExecutor: StepExecutor;
   callbackVerifier: PrismaCallbackVerifier;
@@ -99,6 +104,7 @@ export const createPlatformRuntime = (db: PrismaLike): PlatformRuntime => {
     engine,
     ledgerPoster,
     guardPipeline,
+    screening,
     consumerRegistry,
     stepExecutor,
     callbackVerifier,

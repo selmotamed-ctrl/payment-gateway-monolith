@@ -2,7 +2,6 @@ import { createHmac } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import ipaddr from "ipaddr.js";
 import { isIP } from "node:net";
-import { ApiError } from "../../lib/error";
 import { compileUrl, assertNoControlCharacters, validateFinalUrl, type QueryValue } from "./compileUrl";
 import { recursiveSelect } from "./recursiveSelect";
 

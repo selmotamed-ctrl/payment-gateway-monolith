@@ -99,33 +99,38 @@ export class InvariantVerifier {
     return result;
   }
 
+  /**
+   * The live balance of an account is the checkpoint balance plus the journal
+   * lines that were posted after the checkpoint. Summing every line would
+   * double count the window that the checkpoint already covers.
+   */
   private async loadBalances(): Promise<AccountBalance[]> {
     if (!this.client) {
       return [];
     }
-    const [accounts, lines] = await Promise.all([
-      this.client.glAccount.findMany(),
-      this.client.journalLine.findMany(),
-    ]);
-    const totals = new Map<string, Decimal>();
-    for (const line of lines) {
-      const current = totals.get(line.glAccountId) ?? new Decimal(0);
-      const amount = decimal(line.amount);
-      totals.set(
-        line.glAccountId,
-        line.direction === "DEBIT" ? current.plus(amount) : current.minus(amount),
-      );
-    }
-    return accounts.map((account) => {
-      const liveBalance = totals.get(account.id) ?? new Decimal(0);
-      return {
+    const accounts = await this.client.glAccount.findMany();
+    const balances: AccountBalance[] = [];
+    for (const account of accounts) {
+      const checkpointBalance = decimal(account.checkpointBalance ?? 0);
+      const lines = await this.client.journalLine.findMany({
+        where: account.checkpointAt
+          ? { glAccountId: account.id, createdAt: { gt: account.checkpointAt } }
+          : { glAccountId: account.id },
+      });
+      let delta = new Decimal(0);
+      for (const line of lines) {
+        const amount = decimal(line.amount);
+        delta = line.direction === "DEBIT" ? delta.plus(amount) : delta.minus(amount);
+      }
+      balances.push({
         accountId: account.id,
         accountType: account.accountType,
-        checkpointBalance: new Decimal(0),
-        delta: liveBalance,
-        liveBalance,
+        checkpointBalance,
+        delta,
+        liveBalance: checkpointBalance.plus(delta),
         checkpointAt: account.checkpointAt ?? undefined,
-      };
-    });
+      });
+    }
+    return balances;
   }
 }

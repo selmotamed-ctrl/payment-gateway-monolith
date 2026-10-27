@@ -47,6 +47,23 @@ export const envSchema = z.strictObject({
   WORKER_CONCURRENCY: z.coerce.number().int().positive().max(100).default(4),
   WORKER_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
   WORKER_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
+  /**
+   * How long a merchant stays screened before the periodic re-screening (L2)
+   * picks it up again.
+   */
+  WORKER_RESCREEN_INTERVAL_MS: z.coerce.number().int().positive().default(86_400_000),
+  /**
+   * The endpoint of the SMS / email aggregator of the deployment.
+   *
+   * The variable is optional: without it the platform keeps working in
+   * development through the log transport, which reports `SENT` instead of
+   * `DELIVERED` because no provider confirmed the delivery.
+   */
+  NOTIFICATION_WEBHOOK_URL: z.url().optional(),
+  /**
+   * The strict timeout of a single delivery attempt against the aggregator.
+   */
+  NOTIFICATION_WEBHOOK_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(5000),
 });
 
 export type CoreEnv = z.infer<typeof envSchema>;
@@ -110,6 +127,9 @@ const resolveEnvironment = (): CoreEnv => {
     WORKER_CONCURRENCY: 4,
     WORKER_MAX_ATTEMPTS: 3,
     WORKER_REQUEST_TIMEOUT_MS: 15000,
+    WORKER_RESCREEN_INTERVAL_MS: 86_400_000,
+    NOTIFICATION_WEBHOOK_URL: undefined,
+    NOTIFICATION_WEBHOOK_TIMEOUT_MS: 5000,
   };
 };
 

@@ -5,7 +5,8 @@ import { z } from "zod";
 import { Prisma } from "../../generated/prisma/client";
 import { client } from "../../prisma/client";
 import { ApiError, parseOrThrow } from "../../lib/error";
-import { VisibleRailsResolver, type RailRecord, type RailRouteRecord, type CredentialSetRecord, type CommissionProfileRecord } from "../../engine/flow/VisibleRailsResolver";
+import { VisibleRailsResolver, evaluateRouteDailyCap, type RailRecord, type RailRouteRecord, type CredentialSetRecord, type CommissionProfileRecord } from "../../engine/flow/VisibleRailsResolver";
+import { loadRailCatalog, asStringArray } from "../../engine/flow/VisibleRailsCatalog";
 import { decimal } from "../../engine/ledger/LedgerPoster";
 import { getPlatformRuntime } from "../../engine/runtime";
 import type { DynamicAttempt } from "../../engine/flow/DynamicRailEngine";
@@ -96,16 +97,6 @@ interface LoadedLink {
   merchantRiskTier: string;
 }
 
-const asStringArray = (value: unknown): string[] | null => {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  if (!Array.isArray(value)) {
-    return null;
-  }
-  return value.map((entry) => String(entry));
-};
-
 const loadLink = async (linkKey: string): Promise<LoadedLink | null> => {
   const link = await client.paymentLink.findUnique({
     where: { key: linkKey },
@@ -146,60 +137,7 @@ interface Catalog {
   commissionProfiles: CommissionProfileRecord[];
 }
 
-const loadCatalog = async (): Promise<Catalog> => {
-  const [rails, routes, credentialSets, commissionProfiles] = await Promise.all([
-    client.rail.findMany({ orderBy: { displayOrder: "asc" } }),
-    client.railRoute.findMany(),
-    client.credentialSet.findMany(),
-    client.commissionProfile.findMany(),
-  ]);
-  return {
-    rails: rails.map((rail) => ({
-      id: rail.id,
-      code: rail.code,
-      nameAr: rail.nameAr,
-      nameEn: rail.nameEn,
-      currency: rail.currency,
-      blocked: rail.blocked,
-      displayOrder: rail.displayOrder,
-      collectionMode: rail.collectionMode,
-    })),
-    routes: routes.map((entry) => ({
-      id: entry.id,
-      railId: entry.railId,
-      gatewayId: entry.gatewayId,
-      credentialPolicy: entry.credentialPolicy,
-      priority: entry.priority,
-      routingStrategy: entry.routingStrategy,
-      weight: entry.weight,
-      costModel: (entry.costModel ?? undefined) as RailRouteRecord["costModel"],
-      minAmount: entry.minAmount,
-      maxAmount: entry.maxAmount,
-      dailyCapAmount: entry.dailyCapAmount,
-      status: entry.status,
-      healthState: entry.healthState,
-      maintenanceWindows: (entry.maintenanceWindows ?? undefined) as RailRouteRecord["maintenanceWindows"],
-      scope: (entry.scope ?? undefined) as RailRouteRecord["scope"],
-    })),
-    credentialSets: credentialSets.map((entry) => ({
-      id: entry.id,
-      gatewayId: entry.gatewayId,
-      env: entry.env,
-      ownerType: entry.ownerType,
-      ownerMerchantId: entry.ownerMerchantId,
-      settlementTarget: entry.settlementTarget,
-      status: entry.status,
-    })),
-    commissionProfiles: commissionProfiles.map((entry) => ({
-      id: entry.id,
-      merchantId: entry.merchantId,
-      applicationId: entry.applicationId,
-      railCode: entry.railCode,
-      effectiveFrom: entry.effectiveFrom,
-      effectiveTo: entry.effectiveTo,
-    })),
-  };
-};
+const loadCatalog = async (): Promise<Catalog> => loadRailCatalog(client as never);
 
 const resolveEnvironment = (merchantStatus: string): "SANDBOX" | "LIVE" =>
   merchantStatus === "ACTIVE" ? "LIVE" : "SANDBOX";
@@ -552,19 +490,6 @@ const toClientActionPayload = (action: {
   }
 };
 
-const ownershipModeFor = (
-  settlementTarget: string,
-  gatewayKind: string | null | undefined,
-): "INTERNAL" | "PLATFORM_CLEARING" | "MERCHANT_DIRECT" => {
-  if (gatewayKind === "INTERNAL") {
-    return "INTERNAL";
-  }
-  if (settlementTarget === "MERCHANT_DIRECT") {
-    return "MERCHANT_DIRECT";
-  }
-  return "PLATFORM_CLEARING";
-};
-
 const ensureLinkUsable = (link: LoadedLink): void => {
   if (link.state !== "PENDING") {
     throw new ApiError(409, "PAYMENT_LINK_NOT_AVAILABLE", "The payment link is no longer available");
@@ -628,6 +553,17 @@ route.get("/pay/:linkKey", async (request: Request, response: Response) => {
           options: fieldOptions(field.optionsJson),
           sensitivity: field.sensitivity,
         })),
+      routes: entry.routes.map((ranked) => {
+        const cap = evaluateRouteDailyCap(ranked.route, link.amount);
+        return {
+          routeId: ranked.route.id,
+          rank: ranked.rank,
+          dailyCapAmount: cap.cap?.toFixed(4) ?? null,
+          dailyProcessedAmount: cap.processed.toFixed(4),
+          dailyCapRemaining: cap.remaining?.toFixed(4) ?? null,
+          withinDailyCap: cap.withinCap,
+        };
+      }),
       fee: breakdown,
     };
   });
@@ -659,6 +595,9 @@ route.get("/pay/:linkKey", async (request: Request, response: Response) => {
       ? splitRatio(link.splitRatioJson).mul(100).toFixed(0)
       : null,
     visibleRails: rails,
+    // The rails that were not visible, with the reason why. The daily cap
+    // guard is observable instead of being an invisible filter.
+    excludedRails: visible.excluded,
     expiresAt: link.expiresAt ? link.expiresAt.toISOString() : null,
     status: link.state,
     redirectUrl: null,
@@ -742,7 +681,6 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
   const breakdown = buildBreakdown(link, profile);
   const gatewayFee = gatewayFeeForRoute(routeRow.costModel, breakdown.totalCharged);
   const settlementTarget = credentialSet.settlementTarget;
-  const gatewayKind = gateway?.kind ?? null;
 
   const attempt = await client.$transaction(async (tx) => {
     const group = await tx.attemptGroup.upsert({

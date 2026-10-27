@@ -201,6 +201,22 @@ function requireNonNegative(value: DecimalInput, label: string): Decimal {
   return amount;
 }
 
+/**
+ * Builds the optional legs of a journal template.
+ *
+ * A zero amount is never booked: a journal line always carries a strictly
+ * positive amount. When a leg is not applicable (no commission on a manual
+ * credit, no commission reversal on a refund) the leg is simply absent, which
+ * is the same convention the provider and gateway fee legs already use.
+ */
+function optionalLine(
+  direction: LedgerDirection,
+  amount: Decimal,
+  account: LedgerAccountSelector,
+): LedgerLineTemplate[] {
+  return amount.isZero() ? [] : [{ direction, amount, account }];
+}
+
 function account(accountType: LedgerAccountType, overrides: Partial<LedgerAccountSelector> = {}): LedgerAccountSelector {
   return { accountType, ...overrides };
 }
@@ -216,7 +232,7 @@ export function buildLedgerTemplate(
   const amount = requirePositive(input.amount, "Transaction amount");
   const commission = input.commissionAmount === undefined
     ? defaultCommission(amount)
-    : requirePositive(input.commissionAmount, "Commission amount");
+    : requireNonNegative(input.commissionAmount, "Commission amount");
   const providerFee = input.providerFeeAmount === undefined
     ? new Decimal("1")
     : requireNonNegative(input.providerFeeAmount, "Provider fee amount");
@@ -225,7 +241,7 @@ export function buildLedgerTemplate(
     : requireNonNegative(input.gatewayFeeAmount, "Gateway fee amount");
   const merchantAmount = input.merchantAmount === undefined
     ? amount.minus(commission)
-    : requirePositive(input.merchantAmount, "Merchant amount");
+    : requireNonNegative(input.merchantAmount, "Merchant amount");
   const reference = "scenario";
 
   switch (scenario) {
@@ -240,8 +256,8 @@ export function buildLedgerTemplate(
           ...(providerFee.isZero()
             ? []
             : [{ direction: "DEBIT" as const, amount: providerFee, account: account("PROVIDER_FEE_EXPENSE") }]),
-          { direction: "CREDIT", amount: merchantAmount, account: account("MERCHANT_WALLET") },
-          { direction: "CREDIT", amount: commission, account: account("PLATFORM_INCOME") },
+          ...optionalLine("CREDIT", merchantAmount, account("MERCHANT_WALLET")),
+          ...optionalLine("CREDIT", commission, account("PLATFORM_INCOME")),
         ],
       };
     }
@@ -255,8 +271,8 @@ export function buildLedgerTemplate(
           ...(gatewayFee.isZero()
             ? []
             : [{ direction: "DEBIT" as const, amount: gatewayFee, account: account("GATEWAY_FEE_EXPENSE") }]),
-          { direction: "CREDIT", amount: merchantAmount, account: account("MERCHANT_WALLET") },
-          { direction: "CREDIT", amount: commission, account: account("PLATFORM_INCOME") },
+          ...optionalLine("CREDIT", merchantAmount, account("MERCHANT_WALLET")),
+          ...optionalLine("CREDIT", commission, account("PLATFORM_INCOME")),
           ...(gatewayFee.isZero()
             ? []
             : [{ direction: "CREDIT" as const, amount: gatewayFee, account: account("GATEWAY_FEE_ACCRUAL") }]),
@@ -308,7 +324,7 @@ export function buildLedgerTemplate(
             ? []
             : [{ direction: "DEBIT" as const, amount: gatewayFee, account: account("GATEWAY_FEE_EXPENSE") }]),
           { direction: "CREDIT", amount, account: account("MERCHANT_WALLET") },
-          { direction: "CREDIT", amount: commission, account: account("PLATFORM_INCOME") },
+          ...optionalLine("CREDIT", commission, account("PLATFORM_INCOME")),
           ...(gatewayFee.isZero()
             ? []
             : [{ direction: "CREDIT" as const, amount: gatewayFee, account: account("GATEWAY_FEE_ACCRUAL") }]),
@@ -330,7 +346,7 @@ export function buildLedgerTemplate(
             ? []
             : [{ direction: "DEBIT" as const, amount: gatewayFee, account: account("GATEWAY_FEE_EXPENSE") }]),
           { direction: "CREDIT", amount: merchantAmount, account: account("MERCHANT_WALLET") },
-          { direction: "CREDIT", amount: commission, account: account("PLATFORM_INCOME") },
+          ...optionalLine("CREDIT", commission, account("PLATFORM_INCOME")),
           ...(gatewayFee.isZero()
             ? []
             : [{ direction: "CREDIT" as const, amount: gatewayFee, account: account("GATEWAY_FEE_ACCRUAL") }]),
@@ -344,8 +360,8 @@ export function buildLedgerTemplate(
           refId: reference,
           description: "Merchant-direct commission netting",
           lines: [
-            { direction: "DEBIT", amount: commission, account: account("MERCHANT_WALLET") },
-            { direction: "CREDIT", amount: commission, account: account("COMMISSION_RECEIVABLE") },
+            ...optionalLine("DEBIT", commission, account("MERCHANT_WALLET")),
+            ...optionalLine("CREDIT", commission, account("COMMISSION_RECEIVABLE")),
           ],
         };
       }
@@ -354,8 +370,8 @@ export function buildLedgerTemplate(
         refId: reference,
         description: "Merchant-owned direct settlement commission recognition",
         lines: [
-          { direction: "DEBIT", amount: commission, account: account("COMMISSION_RECEIVABLE") },
-          { direction: "CREDIT", amount: commission, account: account("PLATFORM_INCOME") },
+          ...optionalLine("DEBIT", commission, account("COMMISSION_RECEIVABLE")),
+          ...optionalLine("CREDIT", commission, account("PLATFORM_INCOME")),
         ],
       };
     }
@@ -367,8 +383,8 @@ export function buildLedgerTemplate(
           description: "AML hold checker release",
           lines: [
             { direction: "DEBIT", amount, account: account("AML_HOLD") },
-            { direction: "CREDIT", amount: merchantAmount, account: account("MERCHANT_WALLET") },
-            { direction: "CREDIT", amount: commission, account: account("PLATFORM_INCOME") },
+            ...optionalLine("CREDIT", merchantAmount, account("MERCHANT_WALLET")),
+            ...optionalLine("CREDIT", commission, account("PLATFORM_INCOME")),
           ],
         };
       }
@@ -398,8 +414,8 @@ export function buildLedgerTemplate(
         refId: reference,
         description: "Full refund with commission reversal",
         lines: [
-          { direction: "DEBIT", amount: merchantAmount, account: account("MERCHANT_WALLET") },
-          { direction: "DEBIT", amount: commission, account: account("PLATFORM_INCOME") },
+          ...optionalLine("DEBIT", merchantAmount, account("MERCHANT_WALLET")),
+          ...optionalLine("DEBIT", commission, account("PLATFORM_INCOME")),
           { direction: "CREDIT", amount, account: account("TREASURY") },
         ],
       };
@@ -421,7 +437,7 @@ export function buildLedgerTemplate(
         description: "Chargeback reserve",
         lines: [
           { direction: "DEBIT", amount: merchantAmount, account: account("MERCHANT_WALLET") },
-          { direction: "DEBIT", amount: commission, account: account("PLATFORM_INCOME") },
+          ...optionalLine("DEBIT", commission, account("PLATFORM_INCOME")),
           { direction: "CREDIT", amount, account: account("CHARGEBACK_RESERVE") },
         ],
       };
@@ -443,8 +459,8 @@ export function buildLedgerTemplate(
         description: "Chargeback won and reserve released",
         lines: [
           { direction: "DEBIT", amount, account: account("CHARGEBACK_RESERVE") },
-          { direction: "CREDIT", amount: merchantAmount, account: account("MERCHANT_WALLET") },
-          { direction: "CREDIT", amount: commission, account: account("PLATFORM_INCOME") },
+          ...optionalLine("CREDIT", merchantAmount, account("MERCHANT_WALLET")),
+          ...optionalLine("CREDIT", commission, account("PLATFORM_INCOME")),
         ],
       };
     case "INTERNAL_CONFIRMATION":
@@ -454,8 +470,8 @@ export function buildLedgerTemplate(
         description: "NeomPay internal confirmation under INTERNAL-1",
         lines: [
           { direction: "DEBIT", amount, account: account("TREASURY") },
-          { direction: "CREDIT", amount: merchantAmount, account: account("MERCHANT_WALLET") },
-          { direction: "CREDIT", amount: commission, account: account("PLATFORM_INCOME") },
+          ...optionalLine("CREDIT", merchantAmount, account("MERCHANT_WALLET")),
+          ...optionalLine("CREDIT", commission, account("PLATFORM_INCOME")),
         ],
       };
     case "INTERNAL_REFUND":
@@ -464,8 +480,8 @@ export function buildLedgerTemplate(
         refId: reference,
         description: "NeomPay internal refund",
         lines: [
-          { direction: "DEBIT", amount: merchantAmount, account: account("MERCHANT_WALLET") },
-          { direction: "DEBIT", amount: commission, account: account("PLATFORM_INCOME") },
+          ...optionalLine("DEBIT", merchantAmount, account("MERCHANT_WALLET")),
+          ...optionalLine("DEBIT", commission, account("PLATFORM_INCOME")),
           { direction: "CREDIT", amount, account: account("TREASURY") },
         ],
       };
@@ -475,8 +491,8 @@ export function buildLedgerTemplate(
         refId: reference,
         description: "Chargeback against insufficient merchant wallet",
         lines: [
-          { direction: "DEBIT", amount: merchantAmount, account: account("MERCHANT_WALLET") },
-          { direction: "DEBIT", amount: commission, account: account("PLATFORM_INCOME") },
+          ...optionalLine("DEBIT", merchantAmount, account("MERCHANT_WALLET")),
+          ...optionalLine("DEBIT", commission, account("PLATFORM_INCOME")),
           { direction: "CREDIT", amount, account: account("CHARGEBACK_RESERVE") },
         ],
       };
@@ -545,13 +561,21 @@ export class LedgerPoster {
         : async <R>(callback: (transaction: LedgerPrismaClient) => Promise<R>) => callback(client));
   }
 
+  /**
+   * Posts a journal template.
+   *
+   * When a transaction is supplied the posting joins that transaction, so the
+   * money movement and the state change that authorises it commit together.
+   * Without a transaction the poster opens its own, exactly as before.
+   */
   async post(
     template: JournalTemplate,
     context: LedgerPostContext = {},
+    transaction?: LedgerPrismaClient,
   ): Promise<LedgerPostResult> {
     this.validateTemplate(template);
-    return this.transactionRunner(async (transaction) => {
-      const existing = await transaction.journalEntry.findFirst({
+    const write = async (runner: LedgerPrismaClient): Promise<LedgerPostResult> => {
+      const existing = await runner.journalEntry.findFirst({
         where: { refType: template.refType, refId: template.refId },
       });
       if (existing) {
@@ -559,7 +583,7 @@ export class LedgerPoster {
       }
       let entry: JournalEntryRecord;
       try {
-        entry = await transaction.journalEntry.create({
+        entry = await runner.journalEntry.create({
           data: {
             refType: template.refType,
             refId: template.refId,
@@ -568,7 +592,7 @@ export class LedgerPoster {
         });
       } catch (error) {
         if (isUniqueConstraintError(error)) {
-          const raced = await transaction.journalEntry.findFirst({
+          const raced = await runner.journalEntry.findFirst({
             where: { refType: template.refType, refId: template.refId },
           });
           if (raced) {
@@ -579,8 +603,8 @@ export class LedgerPoster {
       }
       const lines: JournalLineRecord[] = [];
       for (const line of template.lines) {
-        const accountId = await this.resolveAccountId(transaction, line.account, context);
-        const created = await transaction.journalLine.create({
+        const accountId = await this.resolveAccountId(runner, line.account, context);
+        const created = await runner.journalLine.create({
           data: {
             entryId: entry.id,
             glAccountId: accountId,
@@ -591,7 +615,8 @@ export class LedgerPoster {
         lines.push(created);
       }
       return { entry, lines, created: true, idempotent: false };
-    });
+    };
+    return transaction ? write(transaction) : this.transactionRunner(write);
   }
 
   async postScenario(
@@ -599,20 +624,22 @@ export class LedgerPoster {
     refId: string,
     input: LedgerScenarioInput,
     context: LedgerPostContext = {},
+    transaction?: LedgerPrismaClient,
   ): Promise<LedgerPostResult> {
     const template = buildLedgerTemplate(scenario, input);
     template.refId = refId;
-    return this.post(template, context);
+    return this.post(template, context, transaction);
   }
 
   async postPaymentConfirmation(
     refId: string,
     input: PaymentConfirmationInput,
     context: LedgerPostContext = {},
+    transaction?: LedgerPrismaClient,
   ): Promise<LedgerPostResult> {
     const template = buildPaymentConfirmationTemplate(input);
     template.refId = refId;
-    return this.post(template, context);
+    return this.post(template, context, transaction);
   }
 
   validateTemplate(template: JournalTemplate): void {

@@ -584,12 +584,12 @@ export class DynamicRailEngine {
   }> {
     const steps = await this.options.flowProvider.getSteps(phase, attempt);
     const state = await this.readContext(attempt);
-    const publicOutputs = { ...(attempt.publicOutputs ?? {}) };
+    const publicOutputs = { ...attempt.publicOutputs };
     let response: unknown;
     let rawText: string | undefined;
     let clientAction: AdapterClientAction | undefined;
     const storedFields = (attempt.context as { fields?: Record<string, unknown> } | undefined)?.fields;
-    const customerFields = { ...(storedFields ?? {}), ...input };
+    const customerFields = { ...storedFields, ...input };
     const credentials = this.options.credentialResolver
       ? await this.options.credentialResolver(attempt)
       : undefined;
@@ -735,7 +735,7 @@ export class DynamicRailEngine {
     });
   }
 
-  private async finalizeSuccess(attempt: DynamicAttempt, evidence: AdapterEvidence): Promise<void> {
+  private async finalizeSuccess(attempt: DynamicAttempt, _evidence: AdapterEvidence): Promise<void> {
     const post = async (transaction?: unknown): Promise<string> => {
       if (!this.options.ledgerPoster) {
         return `unposted:${attempt.id}`;
@@ -838,7 +838,7 @@ export class DynamicRailEngine {
       const decrypted = await this.options.contextCipher.decrypt(attempt.contextCiphertext);
       return decrypted && typeof decrypted === "object" ? decrypted as Record<string, unknown> : {};
     }
-    return { ...(attempt.context ?? {}) };
+    return { ...attempt.context };
   }
 
   private async releaseSlot(attempt: DynamicAttempt, reason: string): Promise<void> {

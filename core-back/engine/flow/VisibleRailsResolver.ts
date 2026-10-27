@@ -119,10 +119,77 @@ export interface VisibleRail {
   routes: readonly RankedRoute[];
 }
 
+/**
+ * Why a rail or a route did not make it into the visible set. The reason is
+ * part of the resolution result, so the daily cap guard is observable
+ * instead of being an invisible filter.
+ */
+export type RouteExclusionReason =
+  | "RAIL_BLOCKED"
+  | "CURRENCY_MISMATCH"
+  | "RAIL_NOT_WHITELISTED"
+  | "NO_COMMISSION_PROFILE"
+  | "NO_VERIFIED_CREDENTIAL_SET"
+  | "ROUTE_NOT_ACTIVE"
+  | "ROUTE_NOT_HEALTHY"
+  | "AMOUNT_BELOW_MINIMUM"
+  | "AMOUNT_ABOVE_MAXIMUM"
+  | "DAILY_CAP_EXCEEDED"
+  | "MAINTENANCE_WINDOW"
+  | "OUT_OF_SCOPE";
+
+export interface ExcludedRoute {
+  railCode: string;
+  railId: string;
+  routeId: string | null;
+  reason: RouteExclusionReason;
+  detail?: Record<string, unknown>;
+}
+
 export interface VisibleRailsResult {
   rails: readonly VisibleRail[];
+  excluded: readonly ExcludedRoute[];
   evaluatedAt: Date;
 }
+
+export interface DailyCapEvaluation {
+  /** True when the route may still take the requested amount. */
+  withinCap: boolean;
+  /** The processed volume of the current business day. */
+  processed: Decimal;
+  /** The daily cap of the route, when it has one. */
+  cap: Decimal | null;
+  /** The headroom that is left for the requested amount. */
+  remaining: Decimal | null;
+}
+
+/**
+ * The daily cap condition of the visible rails formula:
+ * `(route.daily_processed_amount + link.amount) <= route.daily_cap_amount`.
+ *
+ * It is exported so that the operational reporting evaluates the cap with
+ * exactly the same semantics as the checkout resolution.
+ */
+export const evaluateRouteDailyCap = (
+  route: { dailyCapAmount?: DecimalInput | null; dailyProcessedAmount?: DecimalInput },
+  amount: DecimalInput,
+): DailyCapEvaluation => {
+  const processed = decimal(route.dailyProcessedAmount ?? 0);
+  const cap = route.dailyCapAmount === null || route.dailyCapAmount === undefined
+    ? null
+    : decimal(route.dailyCapAmount);
+  if (cap === null) {
+    return { withinCap: true, processed, cap: null, remaining: null };
+  }
+  const requested = decimal(amount);
+  const remaining = cap.minus(processed);
+  return {
+    withinCap: processed.plus(requested).lte(cap),
+    processed,
+    cap,
+    remaining,
+  };
+};
 
 const scopeValue = <T>(scope: RouteScope, snakeKey: keyof RouteScope, camelKey: keyof RouteScope): T[] | undefined => {
   const snake = scope[snakeKey] as T[] | undefined;
@@ -144,12 +211,35 @@ export class VisibleRailsResolver {
         ? applicationWhitelist
         : new Set([...applicationWhitelist].filter((railCode) => linkWhitelist.has(railCode)));
     const visible: VisibleRail[] = [];
+    const excluded: ExcludedRoute[] = [];
 
     for (const rail of input.rails) {
-      if (rail.blocked === true || rail.currency !== input.link.currency) {
+      if (rail.blocked === true) {
+        excluded.push({
+          railCode: rail.code,
+          railId: rail.id,
+          routeId: null,
+          reason: "RAIL_BLOCKED",
+        });
+        continue;
+      }
+      if (rail.currency !== input.link.currency) {
+        excluded.push({
+          railCode: rail.code,
+          railId: rail.id,
+          routeId: null,
+          reason: "CURRENCY_MISMATCH",
+          detail: { railCurrency: rail.currency, linkCurrency: input.link.currency },
+        });
         continue;
       }
       if (allowedRailCodes !== null && !allowedRailCodes.has(rail.code)) {
+        excluded.push({
+          railCode: rail.code,
+          railId: rail.id,
+          routeId: null,
+          reason: "RAIL_NOT_WHITELISTED",
+        });
         continue;
       }
       const commissionProfile = this.resolveCommissionProfile(
@@ -160,6 +250,12 @@ export class VisibleRailsResolver {
         now,
       );
       if (!commissionProfile) {
+        excluded.push({
+          railCode: rail.code,
+          railId: rail.id,
+          routeId: null,
+          reason: "NO_COMMISSION_PROFILE",
+        });
         continue;
       }
       const candidates = input.routes
@@ -167,9 +263,23 @@ export class VisibleRailsResolver {
         .flatMap((route) => {
           const credentialSet = this.resolveCredentialSet(input, route);
           if (!credentialSet) {
+            excluded.push({
+              railCode: rail.code,
+              railId: rail.id,
+              routeId: route.id,
+              reason: "NO_VERIFIED_CREDENTIAL_SET",
+            });
             return [];
           }
-          if (!this.isRouteEligible(route, input, amount, now)) {
+          const exclusion = this.routeExclusion(route, input, amount, now);
+          if (exclusion) {
+            excluded.push({
+              railCode: rail.code,
+              railId: rail.id,
+              routeId: route.id,
+              reason: exclusion.reason,
+              detail: exclusion.detail,
+            });
             return [];
           }
           return [{ route, credentialSet }];
@@ -185,7 +295,7 @@ export class VisibleRailsResolver {
       const displayOrder = (left.rail.displayOrder ?? 0) - (right.rail.displayOrder ?? 0);
       return displayOrder !== 0 ? displayOrder : left.rail.code.localeCompare(right.rail.code);
     });
-    return { rails: visible, evaluatedAt: now };
+    return { rails: visible, excluded, evaluatedAt: now };
   }
 
   resolveCommissionProfile(
@@ -249,26 +359,41 @@ export class VisibleRailsResolver {
     return platform ?? matching[0];
   }
 
-  private isRouteEligible(
+  private routeExclusion(
     route: RailRouteRecord,
     input: VisibleRailsInput,
     amount: Decimal,
     now: Date,
-  ): boolean {
-    if (route.status !== "ACTIVE" || route.healthState !== "HEALTHY") {
-      return false;
+  ): { reason: RouteExclusionReason; detail?: Record<string, unknown> } | null {
+    if (route.status !== "ACTIVE") {
+      return { reason: "ROUTE_NOT_ACTIVE", detail: { status: route.status } };
+    }
+    if (route.healthState !== "HEALTHY") {
+      return { reason: "ROUTE_NOT_HEALTHY", detail: { healthState: route.healthState } };
     }
     if (amount.lt(decimal(route.minAmount))) {
-      return false;
+      return {
+        reason: "AMOUNT_BELOW_MINIMUM",
+        detail: { amount: amount.toFixed(4), minAmount: decimal(route.minAmount).toFixed(4) },
+      };
     }
     if (route.maxAmount !== null && route.maxAmount !== undefined && amount.gt(decimal(route.maxAmount))) {
-      return false;
+      return {
+        reason: "AMOUNT_ABOVE_MAXIMUM",
+        detail: { amount: amount.toFixed(4), maxAmount: decimal(route.maxAmount).toFixed(4) },
+      };
     }
-    if (route.dailyCapAmount !== null && route.dailyCapAmount !== undefined) {
-      const processed = decimal(route.dailyProcessedAmount ?? 0);
-      if (processed.plus(amount).gt(decimal(route.dailyCapAmount))) {
-        return false;
-      }
+    const cap = evaluateRouteDailyCap(route, amount);
+    if (!cap.withinCap) {
+      return {
+        reason: "DAILY_CAP_EXCEEDED",
+        detail: {
+          amount: amount.toFixed(4),
+          dailyProcessedAmount: cap.processed.toFixed(4),
+          dailyCapAmount: cap.cap?.toFixed(4) ?? null,
+          remaining: cap.remaining?.toFixed(4) ?? null,
+        },
+      };
     }
     const windows = route.maintenanceWindows ?? [];
     if (windows.some((window) => {
@@ -276,9 +401,12 @@ export class VisibleRailsResolver {
       const end = new Date(window.end).getTime();
       return now.getTime() >= start && now.getTime() < end;
     })) {
-      return false;
+      return { reason: "MAINTENANCE_WINDOW" };
     }
-    return this.isInScope(route.scope, input);
+    if (!this.isInScope(route.scope, input)) {
+      return { reason: "OUT_OF_SCOPE" };
+    }
+    return null;
   }
 
   private isInScope(scope: RouteScope | null | undefined, input: VisibleRailsInput): boolean {

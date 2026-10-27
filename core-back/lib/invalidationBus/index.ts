@@ -144,7 +144,7 @@ export class InvalidationBus {
       if (!topicMatchesPattern(event.topic, pattern)) {
         continue;
       }
-      for (const listener of [...listeners]) {
+      for (const listener of listeners) {
         await (listener as InvalidationListener<T>)(event);
       }
     }

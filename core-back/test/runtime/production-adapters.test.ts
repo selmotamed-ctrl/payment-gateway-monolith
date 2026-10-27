@@ -6,6 +6,7 @@ import { PrismaFlowProvider } from "../../engine/runtime/flowProvider";
 import { PrismaAttemptRepository } from "../../engine/runtime/attemptRepository";
 import type { PrismaLike } from "../../engine/db/ports";
 import { decimal } from "../../engine/ledger/LedgerPoster";
+import { InvariantVerifier } from "../../engine/ledger/InvariantVerifier";
 
 type Row = Record<string, unknown>;
 
@@ -58,7 +59,7 @@ const createFakeClient = (options: FakeOptions = {}) => {
   }
 
   const client = {
-    $queryRawUnsafe: async (_sql: string, ...params: unknown[]) => {
+    $queryRawUnsafe: async (_sql: string, ..._params: unknown[]) => {
       const sql = String(_sql);
       if (sql.includes("active_locked_count = active_locked_count + 1")) {
         const link = rows(store, "paymentLink")[0];
@@ -425,6 +426,105 @@ describe("production settled amount tolerance", () => {
     const repository = new PrismaAttemptRepository(client);
     const attempt = await repository.getAttempt("attempt-1");
     expect(attempt?.mismatchTolerance).toBe("0.0100");
+  });
+});
+
+describe("production ledger invariant", () => {
+  /**
+   * The design's worked example: a platform-held confirmation with a gateway
+   * fee accrual. `GATEWAY_FEE_ACCRUAL` is a CREDIT-normal account, so a
+   * debit-positive reading of it would report a false drift.
+   */
+  const buildInvariantClient = (options: { checkpointBalance?: string; checkpointAt?: Date } = {}) => {
+    const accounts = [
+      { id: "clearing", accountType: "GATEWAY_CLEARING", checkpointBalance: options.checkpointBalance ?? "0", checkpointAt: options.checkpointAt ?? null },
+      { id: "fee-expense", accountType: "GATEWAY_FEE_EXPENSE", checkpointBalance: "0", checkpointAt: null },
+      { id: "fee-accrual", accountType: "GATEWAY_FEE_ACCRUAL", checkpointBalance: "0", checkpointAt: null },
+      { id: "wallet", accountType: "MERCHANT_WALLET", checkpointBalance: "0", checkpointAt: null },
+      { id: "income", accountType: "PLATFORM_INCOME", checkpointBalance: "0", checkpointAt: null },
+    ];
+    const postedAt = options.checkpointAt
+      ? new Date(options.checkpointAt.getTime() + 1000)
+      : new Date("2026-03-01T00:00:00.000Z");
+    const lines = [
+      { id: "l1", glAccountId: "clearing", direction: "DEBIT", amount: "100.0000", createdAt: postedAt },
+      { id: "l2", glAccountId: "fee-expense", direction: "DEBIT", amount: "0.8000", createdAt: postedAt },
+      { id: "l3", glAccountId: "wallet", direction: "CREDIT", amount: "97.0000", createdAt: postedAt },
+      { id: "l4", glAccountId: "income", direction: "CREDIT", amount: "3.0000", createdAt: postedAt },
+      { id: "l5", glAccountId: "fee-accrual", direction: "CREDIT", amount: "0.8000", createdAt: postedAt },
+    ];
+    return {
+      glAccount: { findMany: async () => accounts },
+      journalLine: {
+        findMany: async (args?: {
+          where?: { glAccountId?: string; createdAt?: { gt?: Date } };
+        }) => {
+          const glAccountId = args?.where?.glAccountId;
+          const after = args?.where?.createdAt?.gt;
+          return lines.filter((line) => {
+            if (glAccountId && line.glAccountId !== glAccountId) {
+              return false;
+            }
+            if (after && line.createdAt.getTime() <= after.getTime()) {
+              return false;
+            }
+            return true;
+          });
+        },
+      },
+    } as never;
+  };
+
+  test("a balanced ledger with an accrued gateway fee reports no drift", async () => {
+    const verifier = new InvariantVerifier(buildInvariantClient());
+    const result = await verifier.verify();
+    expect(result.ok).toBe(true);
+    expect(result.drift.toFixed(4)).toBe("0.0000");
+    expect(result.leftSide.toFixed(4)).toBe("100.0000");
+    expect(result.rightSide.toFixed(4)).toBe("100.0000");
+  });
+
+  test("the checkpoint is not double counted", async () => {
+    // The checkpoint already covers the window that was closed, so a line that
+    // was posted BEFORE the checkpoint must not be added to it again.
+    const checkpointAt = new Date("2026-03-01T00:00:00.000Z");
+    const before = new Date("2026-02-28T00:00:00.000Z");
+    const accounts = [
+      { id: "clearing", accountType: "GATEWAY_CLEARING", checkpointBalance: "100.0000", checkpointAt },
+      // A credit-normal account keeps a NEGATIVE debit-positive balance.
+      { id: "wallet", accountType: "MERCHANT_WALLET", checkpointBalance: "-100.0000", checkpointAt },
+    ];
+    const lines = [
+      { id: "l1", glAccountId: "clearing", direction: "DEBIT", amount: "100.0000", createdAt: before },
+      { id: "l2", glAccountId: "wallet", direction: "CREDIT", amount: "100.0000", createdAt: before },
+    ];
+    const client = {
+      glAccount: { findMany: async () => accounts },
+      journalLine: {
+        findMany: async (args?: {
+          where?: { glAccountId?: string; createdAt?: { gt?: Date } };
+        }) => {
+          const glAccountId = args?.where?.glAccountId;
+          const after = args?.where?.createdAt?.gt;
+          return lines.filter((line) => {
+            if (glAccountId && line.glAccountId !== glAccountId) {
+              return false;
+            }
+            if (after && line.createdAt.getTime() <= after.getTime()) {
+              return false;
+            }
+            return true;
+          });
+        },
+      },
+    } as never;
+    const verifier = new InvariantVerifier(client);
+    const result = await verifier.verify();
+    const clearing = result.accountBalances.find((balance) => balance.accountType === "GATEWAY_CLEARING");
+    expect(clearing?.checkpointBalance.toFixed(4)).toBe("100.0000");
+    expect(clearing?.delta.toFixed(4)).toBe("0.0000");
+    expect(clearing?.liveBalance.toFixed(4)).toBe("100.0000");
+    expect(result.ok).toBe(true);
   });
 });
 

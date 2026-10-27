@@ -6,12 +6,6 @@ import { createTestPki, startTestCore, type TestCore, type TestPki } from "./hel
 const pki: TestPki = createTestPki("merchant-back");
 const core: TestCore = await startTestCore(pki);
 
-process.env.NODE_ENV = "test";
-process.env.CORE_BACK_URL = core.url;
-process.env.MTLS_CLIENT_CERT_PATH = pki.clientCert;
-process.env.MTLS_CLIENT_KEY_PATH = pki.clientKey;
-process.env.MTLS_CA_CERT_PATH = pki.caCert;
-process.env.MAX_UPLOAD_BYTES = "1048576";
 resetEnvCache();
 resetCoreAgent();
 
@@ -27,6 +21,14 @@ const jpegBytes = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0
 const pdfBytes = Buffer.from("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n", "utf8");
 const fakeImage = Buffer.from("this is definitely not an image payload", "utf8");
 
+beforeAll(() => {
+  process.env.NODE_ENV = "test";
+  process.env.CORE_BACK_URL = core.url;
+  process.env.MTLS_CLIENT_CERT_PATH = pki.clientCert;
+  process.env.MTLS_CLIENT_KEY_PATH = pki.clientKey;
+  process.env.MTLS_CA_CERT_PATH = pki.caCert;
+  process.env.MAX_UPLOAD_BYTES = "1048576";
+});
 beforeAll(async () => {
   const app = createApp();
   edgeServer = app.listen(0, "127.0.0.1");

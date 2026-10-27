@@ -1,16 +1,18 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { ApiError } from "../lib/error";
 
-process.env.NODE_ENV = "test";
-process.env.CORE_BACK_URL = "https://core-back.internal:4000";
-process.env.MTLS_CLIENT_CERT_PATH = "/tmp/opencode/edge-tests/client.crt";
-process.env.MTLS_CLIENT_KEY_PATH = "/tmp/opencode/edge-tests/client.key";
-process.env.MTLS_CA_CERT_PATH = "/tmp/opencode/edge-tests/ca.crt";
 
 const { env } = await import("../lib/env");
 const { assertCorePath, buildCoreHeaders, mapCoreHttpError, mapCoreTransportError, resolveCoreUrl } =
   await import("../lib/mtlsClient");
 
+beforeAll(() => {
+  process.env.NODE_ENV = "test";
+  process.env.CORE_BACK_URL = "https://core-back.internal:4000";
+  process.env.MTLS_CLIENT_CERT_PATH = "/tmp/opencode/edge-tests/client.crt";
+  process.env.MTLS_CLIENT_KEY_PATH = "/tmp/opencode/edge-tests/client.key";
+  process.env.MTLS_CA_CERT_PATH = "/tmp/opencode/edge-tests/ca.crt";
+});
 describe("merchant channel confinement", () => {
   test("accepts the merchant namespace", () => {
     expect(assertCorePath("/internal/merchant/wallets")).toBe("/internal/merchant/wallets");

@@ -15,7 +15,12 @@ import type {
   VelocityRuleRow,
 } from "../db/ports";
 import { AmlRuleEngine, type AmlRuleHit } from "./AmlRuleEngine";
-import { normalizeIdentifier, type ScreeningProvider, type ScreeningResultCode } from "./ScreeningProvider";
+import {
+  buildScreeningSubject,
+  normalizeIdentifier,
+  type ScreeningProvider,
+  type ScreeningResultCode,
+} from "./ScreeningProvider";
 
 export type GuardOutcome = "ALLOW" | "FLAG" | "HOLD" | "CASE_ONLY" | "BLOCK";
 
@@ -650,19 +655,18 @@ export class AttemptGuardPipeline {
     if (!this.screening.screenLocal) {
       return null;
     }
-    const names = [input.merchant.legalName, input.merchant.tradeName, input.customer.name].filter(
-      (value): value is string => typeof value === "string" && value.length > 0,
-    );
     const identifiers = [input.merchant.registrationNo, input.merchant.taxId, input.clientPhone, input.cardAlias].filter(
       (value): value is string => typeof value === "string" && value.length > 0,
     );
-    return this.screening.screenLocal({
-      subjectType: "MERCHANT",
-      subjectId: input.merchant.id,
-      names,
-      identifier: identifiers[0] ?? null,
-      aliases: identifiers.slice(1),
-    });
+    return this.screening.screenLocal(
+      buildScreeningSubject({
+        subjectType: "MERCHANT",
+        subjectId: input.merchant.id,
+        names: [input.merchant.legalName, input.merchant.tradeName, input.customer.name],
+        identifier: identifiers[0] ?? null,
+        aliases: identifiers.slice(1),
+      }),
+    );
   }
 
   private async evaluateVelocity(

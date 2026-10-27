@@ -450,7 +450,7 @@ All phase verification gates were executed in this workspace with the following 
 | Phase 3 | `cd core-back && bun test test/phase3-dynamic-engine-and-blueprints.test.ts` | 12 tests pass (7 production blueprints, 15 deterministic mock scenarios, initiate/confirm/ledger flow, 12 go-live gates, closed transform library) |
 | Phase 4 | `cd core-back && bun test test/phase4-onboarding-aml-disputes-recon.test.ts` | 16 tests pass (duplicate detection, AML hold/case-only/critical escalation, Arabic normalisation, no tipping-off, dispute dedupe, statement parsing) |
 | Phase 8 | `cd core-back && bun test test/edge-cases/catalog-140.test.ts` | 140 catalogued edge cases with 140 executable regression checks, all pass |
-| All backends | `cd <service> && bun run typecheck && bun test` | `core-back` 543 tests, `admin-back` 397 tests, `merchant-back` 66 tests, `checkout-back` 44 tests — all pass with clean TypeScript |
+| All backends | `cd <service> && bun run typecheck && bun test` | `core-back` 597 tests, `admin-back` 398 tests, `merchant-back` 67 tests, `checkout-back` 45 tests — all pass with clean TypeScript |
 | All frontends | `cd <spa> && bun run build` | `admin-front`, `merchant-front`, `checkout-front` all build (type-check + Vite) |
 | Schema parity | `cd core-back && bunx prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script` | 64 model tables and 100 enum types, identical to the committed migration (plus the hand written `schema_versions` table and the four domain `CHECK` constraints) |
 
@@ -507,6 +507,9 @@ defect list. The following are the defects that were **closed** in this pass, gr
 | The blueprint seed created no flows, steps, crypto profiles, channels or rail fields, so the engine found nothing to execute | `prisma/seedBlueprints.ts` now seeds the full declarative configuration of all 7 blueprints (43 flows, 63 steps, 107 parameters, 147 outputs, 41 status rules, 28 channels, 23 rail fields, 13 routes) |
 | A maker-checker approval of a gateway version only recorded the decision | The approved change is executed: the previous version is superseded, the new one goes `LIVE` and the consumer cache is invalidated |
 | `rails.capabilities` used `partialRefund` instead of the design's `partial_refund`; T-LYNC was seeded as an aggregator | Both corrected |
+| The admin panel reported a **false ledger drift** whenever a gateway fee was accrued but not yet swept: it read the credit-normal `GATEWAY_FEE_ACCRUAL` with a debit-positive sign, and it re-implemented the §11.2 formula a second time | The admin endpoint now delegates to the single `InvariantVerifier` implementation, and the verifier itself uses the design's debit-normal / credit-normal convention |
+| The live balance double counted the window a checkpoint already covers (the checkpoint balance **and** every journal line were added) | The live balance is the checkpoint balance plus the lines posted after the checkpoint, in the `InvariantVerifier`, the `CheckpointService` and the admin finance endpoints |
+| The dead `engine/workers/runtime.ts` and the unused shadow export of `api/internal/index.ts` were still in the tree | Both removed; the production worker runtime is the only implementation |
 
 ### 10.4 Tests added
 
@@ -514,6 +517,30 @@ defect list. The following are the defects that were **closed** in this pass, gr
 `core-back/test/engine/engine-hardening.test.ts`, `core-back/test/blueprint-seed.test.ts`,
 `admin-back/test/core-contract.test.ts`, `merchant-back/test/core-contract.test.ts`,
 `merchant-back/test/core-forwarding.test.ts`, `checkout-back/test/checkout-zero-trust.test.ts` (extended).
+
+### 10.5 Governance execution, screening layers and observability
+
+| Defect | Fix |
+| :--- | :--- |
+| An approved AML case only recorded the decision: the `AML_HOLD` escrow was never moved and the merchant never paid | New `core-back/engine/governance/GovernanceExecution.ts` — approving an AML case posts `AML_HOLD_AND_RELEASE` (release) or `AML_VOID` (void) and closes the case; a `MERCHANT_DIRECT` case is closed with **no** posting |
+| A dispute never drafted the adjustment nor escrowed the money | Dispute intake now drafts a `CHARGEBACK` adjustment in `PENDING_REVIEW` made by `SYSTEM_AUTOMATION` and posts `CHARGEBACK_RESERVE_AND_LOST` (reserve) |
+| A cash-out never moved the money | `POST /admin/cashouts/:id/process` posts the `CASHOUT` template and completes the request; a rejection creates a `REJECTED` adjustment instead of a posting |
+| A chargeback could take a merchant wallet below its `negative_balance_ceiling` | A chargeback that breaches the ceiling is **held** (`PENDING_REVIEW` + a `P1` operator case) instead of executed, and always requires a human `FINANCE` checker |
+| Every execution was two separate writes | The ledger posting, the state change and the audit log now run in **one** transaction (`LedgerPoster.post` accepts the caller's transaction) |
+| The reconciliation upload stored the file and never parsed it | The upload now runs the `StatementIngestor`: the statement is parsed, matched against the local attempts, and the fee variance is trued up through the ledger |
+| L1 (onboarding) screening did not exist | `POST /onboarding/submit` screens the merchant and every beneficial owner, writes the `aml_screenings`/`aml_screening_matches` rows, links the screening to the join request, and blocks the activation on a confirmed match |
+| L2 (periodic) screening did not exist and `subscribeListUpdates` was a no-op | New `PeriodicScreeningWorker` re-screens the due merchants and raises one case for a merchant that became a confirmed match; the cached watch list is now really invalidated when a list version changes |
+| The §6 daily-cap formula was never evaluated against the day's volume | `DailyRouteVolume` derives the business-day volume (in the gateway's timezone) from the attempts — no denormalised counter, so it cannot drift — and `evaluateRouteDailyCap` is shared by the checkout and the finance report |
+| A rail could disappear silently | Every exclusion now carries a machine-readable reason (`DAILY_CAP_EXCEEDED`, `AMOUNT_BELOW_MINIMUM`, `OUT_OF_SCOPE`, …) and `GET /internal/admin/finance/route-caps` reports the utilisation per route |
+| The notification transport was a `console.log` that reported `DELIVERED` | New `engine/notifications/NotificationTransport.ts` — a signed webhook transport (HMAC-SHA256, purpose-bound key), a log transport that reports `SENT`, and a composite that routes `IN_APP` to `DELIVERED`; an `INTERNAL` template body never reaches the log |
+| A non-LYD posting had no GL account | The seed now creates one system GL account per (account type, currency) for `LYD`, `USD` and `EUR` |
+| Two cluster nodes could expire or poll the same attempt | The terminal transitions of the expiry sweeper and the poll worker are now conditional (`WHERE terminal_at IS NULL`), so a terminal state is applied at most once |
+
+### 10.6 Test isolation
+
+| Defect | Fix |
+| :--- | :--- |
+| The edge environment was cached on first read, and Bun executes the test files of a directory in an arbitrary order. A configuration written by one test file was therefore served to the next one, and the whole edge suite failed with `500 MTLS_MATERIAL_UNAVAILABLE` | The edge environment is no longer cached in the test environment (the same rule `core-back` already used), each test file now configures its environment in `beforeAll`, and `test/env-isolation.test.ts` in every edge service guards the behaviour |
 
 ## 11. Continuation Plan · Open Items
 
@@ -523,10 +550,9 @@ These items are **not** closed by this pass. They are ordered by operational ris
 | :--- | :--- | :--- | :--- |
 | 1 | Apply the migration and the seed to a live PostgreSQL instance and re-run the phase gates against it | HIGH | Blocked only by the absence of a database in this workspace (`T-1.4`) |
 | 2 | Run an end-to-end payment against a sandbox gateway with the seeded blueprints | HIGH | The declarative flows are seeded and projected, but no real gateway credentials exist yet |
-| 3 | Replace the `console.log` notification transport with a real SMS/email provider | MEDIUM | `engine/workers/productionRuntime.ts` renders and validates the message, then logs it |
-| 4 | Execute the AML case resolution, the dispute drafting and the reconciliation parsing from the admin API | MEDIUM | The ledger templates and the parsers exist, but the admin routes still record instead of execute the state change (the same class of defect that was closed for gateway versions) |
-| 5 | Move the `FOR UPDATE SKIP LOCKED` worker selects inside an explicit transaction | MEDIUM | Two cluster nodes can currently select the same batch |
-| 6 | Add the onboarding-time (L1) and periodic (L2) screening passes | MEDIUM | `AttemptGuardPipeline` covers the hot path (L3); the onboarding and periodic layers are still stubs |
-| 7 | Enforce the §6 daily-cap formula against the processed volume of the day | MEDIUM | The resolver reads `daily_processed_amount`, which is not yet aggregated |
-| 8 | Seed the system GL accounts per currency | LOW | A non-LYD posting context has no matching account and would raise `GL_ACCOUNT_NOT_FOUND` |
-| 9 | Bind the SAML/OIDC provider configuration of the corporate identity module | LOW | The module is not part of this delivery scope |
+| 3 | Bind the real SMS/email aggregator credentials to the notification webhook transport | MEDIUM | The transport is implemented and signed; it only needs the provider endpoint and its secret |
+| 4 | Execute the regulatory report submission (`PROVISIONAL` → `CONFIRMED`) | MEDIUM | `POST /aml/reports` records the report in `PENDING_CHECKER`; the submission to the authority is still a manual step |
+| 5 | Add the retention job for the 5 year record-keeping obligation (OD-4) | MEDIUM | `audit_log` writes are in place, the purge is not |
+| 6 | Add an index on `payment_attempts (route_id, status)` for the daily-volume aggregate | LOW | The aggregate runs on every rail resolution |
+| 7 | Move the reconciliation and dispute executions onto a durable queue instead of the request path | LOW | They are already atomic, they are just synchronous |
+| 8 | Bind the SAML/OIDC provider configuration of the corporate identity module | LOW | The module is not part of this delivery scope |

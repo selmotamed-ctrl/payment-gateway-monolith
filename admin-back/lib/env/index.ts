@@ -58,9 +58,30 @@ const readEnv = (): EdgeEnv => {
   return result.data;
 };
 
+/**
+ * The environment is read once in every environment except the test
+ * environment. A test run executes several test files inside one process and
+ * each of them configures its own environment, so a cached configuration
+ * would leak from one file into the next.
+ */
+const isTestEnvironment = (): boolean => process.env.NODE_ENV === "test";
+
 let cached: EdgeEnv | undefined;
+let warnedAboutTestEnvironment = false;
 
 export const loadEnv = (): EdgeEnv => {
+  if (isTestEnvironment()) {
+    const parsed = envSchema.safeParse(process.env);
+    if (parsed.success) {
+      return parsed.data;
+    }
+    const issues = parsed.error.issues.map((issue) => issue.path.join(".") || "environment");
+    if (!warnedAboutTestEnvironment) {
+      warnedAboutTestEnvironment = true;
+      console.error(`Test environment is missing configuration: ${issues.join(", ")}`);
+    }
+    throw new Error(`Invalid test environment configuration: ${issues.join(", ")}`);
+  }
   cached ??= readEnv();
   return cached;
 };

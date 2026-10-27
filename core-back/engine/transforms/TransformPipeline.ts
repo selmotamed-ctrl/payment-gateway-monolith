@@ -108,7 +108,6 @@ interface DecimalValue {
 
 const ARABIC_DIGITS = "٠١٢٣٤٥٦٧٨٩";
 const EASTERN_ARABIC_DIGITS = "۰۱۲۳۴۵۶۷۸۹";
-const HEX_PATTERN = /^[0-9a-fA-F]*$/;
 
 function decimalToPlainString(value: DecimalValue): string {
   if (value.scale === 0) {
@@ -175,17 +174,6 @@ function parseDecimal(value: unknown): DecimalValue {
   return { negative: match[1] === "-", coefficient, scale: fraction.length };
 }
 
-function decimalToString(value: DecimalValue): string {
-  const sign = value.negative && value.coefficient !== 0n ? "-" : "";
-  if (value.scale === 0) {
-    return `${sign}${value.coefficient}`;
-  }
-  const digits = value.coefficient.toString().padStart(value.scale + 1, "0");
-  const whole = digits.slice(0, -value.scale);
-  const fraction = digits.slice(-value.scale);
-  return `${sign}${whole}.${fraction}`;
-}
-
 function rescale(value: DecimalValue, scale: number): DecimalValue {
   if (scale === value.scale) {
     return value;
@@ -202,23 +190,6 @@ function rescale(value: DecimalValue, scale: number): DecimalValue {
     coefficient: value.coefficient / 10n ** BigInt(value.scale - scale),
     scale,
   };
-}
-
-function fixedDecimal(value: DecimalValue, places: number): DecimalValue {
-  if (places < 0) {
-    throw new Error("Decimal places cannot be negative");
-  }
-  const scaled = rescale(value, places);
-  if (scaled.scale === 0) {
-    return scaled;
-  }
-  const digits = scaled.coefficient.toString().padStart(scaled.scale + 1, "0");
-  const whole = digits.slice(0, -scaled.scale);
-  const fraction = digits.slice(-scaled.scale).replace(/0+$/, "");
-  if (!fraction) {
-    return { negative: scaled.negative, coefficient: BigInt(whole), scale: 0 };
-  }
-  return { negative: scaled.negative, coefficient: BigInt(`${whole}${fraction}`), scale: fraction.length };
 }
 
 function roundDecimal(value: DecimalValue, mode: "NONE" | "NEAREST" | "UP" | "DOWN", places = 0): DecimalValue {
@@ -271,15 +242,6 @@ function asInteger(value: unknown): number {
   const decimal = parseDecimal(value);
   const rounded = roundDecimal(decimal, "DOWN", 0);
   return Number(rounded.coefficient);
-}
-
-function formatDecimal(value: unknown, places: number): string {
-  const decimal = fixedDecimal(parseDecimal(value), places);
-  const negative = decimal.negative && decimal.coefficient !== 0n;
-  const digits = decimal.coefficient.toString().padStart(decimal.scale + 1, "0");
-  const whole = digits.slice(0, -decimal.scale);
-  const fraction = decimal.scale > 0 ? `.${digits.slice(-decimal.scale)}` : "";
-  return `${negative ? "-" : ""}${whole}${fraction}`;
 }
 
 function formatDecimalPlaces(value: unknown, places: number): string {

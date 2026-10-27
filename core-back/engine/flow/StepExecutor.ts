@@ -606,7 +606,7 @@ export class StepExecutor {
     if (!step.render) {
       throw executorError("MISSING_RENDER_DEFINITION", "RENDER step requires a declarative render definition");
     }
-    let value: Record<string, unknown> = { ...(step.render.values ?? {}) };
+    let value: Record<string, unknown> = { ...step.render.values };
     if (step.render.transforms) {
       value = await this.pipeline.apply(value, step.render.transforms, context.transformContext) as Record<string, unknown>;
     }

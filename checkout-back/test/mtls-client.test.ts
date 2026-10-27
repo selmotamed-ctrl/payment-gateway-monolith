@@ -1,11 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { ApiError } from "../lib/error";
 
-process.env.NODE_ENV = "test";
-process.env.CORE_BACK_URL = "https://core-back.internal:4000";
-process.env.MTLS_CLIENT_CERT_PATH = "/tmp/opencode/edge-tests/client.crt";
-process.env.MTLS_CLIENT_KEY_PATH = "/tmp/opencode/edge-tests/client.key";
-process.env.MTLS_CA_CERT_PATH = "/tmp/opencode/edge-tests/ca.crt";
 
 const { env } = await import("../lib/env");
 
@@ -17,6 +12,13 @@ const {
   buildCoreHeaders,
 } = await import("../lib/mtlsClient");
 
+beforeAll(() => {
+  process.env.NODE_ENV = "test";
+  process.env.CORE_BACK_URL = "https://core-back.internal:4000";
+  process.env.MTLS_CLIENT_CERT_PATH = "/tmp/opencode/edge-tests/client.crt";
+  process.env.MTLS_CLIENT_KEY_PATH = "/tmp/opencode/edge-tests/client.key";
+  process.env.MTLS_CA_CERT_PATH = "/tmp/opencode/edge-tests/ca.crt";
+});
 describe("core http error mapping", () => {
   test("keeps the core envelope code and message", () => {
     const error = mapCoreHttpError(404, { code: "LINK_NOT_FOUND", message: "payment link not found" });

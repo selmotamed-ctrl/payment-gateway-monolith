@@ -54,8 +54,24 @@ export interface ScreeningProvider {
   getResult(providerRequestRef: string): Promise<ScreeningResult>;
   listVersions(): Promise<Record<string, string>>;
   subscribeListUpdates?(callbackUrl: string): Promise<void>;
+  /**
+   * Re-reads the list versions of the upstream provider. A provider that
+   * caches a watch list uses it to drop the entries that were screened
+   * against a stale list.
+   */
+  refreshListVersions?(): Promise<boolean>;
   capabilities(): ScreeningCapabilities;
   screenLocal?(subject: ScreeningSubject): ScreeningResult;
+}
+
+export interface ScreeningSubjectInput {
+  subjectType: ScreeningSubjectType;
+  subjectId: string;
+  names: readonly (string | null | undefined)[];
+  dateOfBirth?: string | null;
+  nationality?: string | null;
+  identifier?: string | null;
+  aliases?: readonly (string | null | undefined)[];
 }
 
 const ARABIC_DIACRITICS = /[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]/g;
@@ -110,8 +126,8 @@ const levenshtein = (a: string, b: string): number => {
   if (a === b) return 0;
   if (a.length === 0) return b.length;
   if (b.length === 0) return a.length;
-  let previous = new Array<number>(b.length + 1);
-  let current = new Array<number>(b.length + 1);
+  let previous: number[] = Array.from({ length: b.length + 1 }, () => 0);
+  let current: number[] = Array.from({ length: b.length + 1 }, () => 0);
   for (let j = 0; j <= b.length; j += 1) previous[j] = j;
   for (let i = 1; i <= a.length; i += 1) {
     current[0] = i;
@@ -163,6 +179,63 @@ export const computeScreeningInputHash = (subject: ScreeningSubject): string => 
   return sha256Hex(canonical);
 };
 
+const compactNames = (values: readonly (string | null | undefined)[]): string[] => {
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const value of values) {
+    if (typeof value !== "string") {
+      continue;
+    }
+    const trimmed = value.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    const key = normalizeArabicName(trimmed);
+    if (key.length === 0 || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    output.push(trimmed);
+  }
+  return output;
+};
+
+/**
+ * Builds the canonical screening subject.
+ *
+ * Every screening layer (L1 onboarding, L2 periodic, L3 transaction time)
+ * funnels through this helper, so the names, the aliases and the identifiers
+ * are folded exactly once and in exactly one way. The normalisation logic is
+ * never re-implemented by a caller.
+ */
+export const buildScreeningSubject = (input: ScreeningSubjectInput): ScreeningSubject => {
+  const names = compactNames(input.names);
+  const nameKeys = new Set(names.map((name) => normalizeArabicName(name)));
+  const aliases = compactNames(input.aliases ?? []).filter(
+    (alias) => !nameKeys.has(normalizeArabicName(alias)),
+  );
+  const identifier = typeof input.identifier === "string" ? input.identifier.trim() : "";
+  return {
+    subjectType: input.subjectType,
+    subjectId: input.subjectId,
+    names,
+    dateOfBirth: input.dateOfBirth ?? null,
+    nationality: input.nationality ?? null,
+    identifier: identifier.length > 0 ? identifier : null,
+    aliases,
+  };
+};
+
+/**
+ * The fingerprint of a set of list versions. Two fingerprints are equal when
+ * the same lists are published at the same version.
+ */
+export const listVersionsFingerprint = (versions: Record<string, string> | null | undefined): string =>
+  Object.keys(versions ?? {})
+    .sort()
+    .map((listName) => `${listName}=${(versions ?? {})[listName] ?? ""}`)
+    .join("&");
+
 export interface WatchlistProviderOptions {
   providerCode?: string;
   entries?: WatchlistEntry[];
@@ -173,17 +246,37 @@ export interface WatchlistProviderOptions {
 
 export class InternalWatchlistProvider implements ScreeningProvider {
   readonly code: string;
-  private readonly entries: WatchlistEntry[];
+  private entries: WatchlistEntry[];
   private readonly potentialThreshold: number;
   private readonly confirmedThreshold: number;
-  private readonly versions: Record<string, string>;
+  private versions: Record<string, string>;
 
   constructor(options: WatchlistProviderOptions = {}) {
     this.code = options.providerCode ?? "INTERNAL_WATCHLIST";
-    this.entries = options.entries ?? [];
+    this.entries = [...(options.entries ?? [])];
     this.potentialThreshold = options.potentialScoreThreshold ?? 75;
     this.confirmedThreshold = options.confirmedScoreThreshold ?? 90;
     this.versions = options.listVersions ?? { INTERNAL_WATCHLIST: "internal-v1" };
+  }
+
+  /**
+   * Publishes a new revision of the watch list. The list version is what
+   * invalidates the cached screening results of `CachedScreeningProvider`.
+   */
+  setListVersions(versions: Record<string, string>): void {
+    this.versions = { ...versions };
+  }
+
+  /**
+   * Replaces the published entries. A list update callback uses it to make the
+   * new entries effective without a restart.
+   */
+  setEntries(entries: readonly WatchlistEntry[]): void {
+    this.entries = [...entries];
+  }
+
+  listEntries(): WatchlistEntry[] {
+    return [...this.entries];
   }
 
   capabilities(): ScreeningCapabilities {
@@ -363,6 +456,7 @@ export class CachedScreeningProvider implements ScreeningProvider {
   private readonly ttlMs: number;
   private readonly maxEntries: number;
   private readonly cache = new Map<string, { expiresAt: number; value: ScreeningResult }>();
+  private publishedListVersions: string | null = null;
 
   constructor(delegate: ScreeningProvider, options: CachedScreeningProviderOptions = {}) {
     this.delegate = delegate;
@@ -379,9 +473,40 @@ export class CachedScreeningProvider implements ScreeningProvider {
     return this.delegate.listVersions();
   }
 
-  subscribeListUpdates(callbackUrl: string): Promise<void> {
-    if (!this.delegate.subscribeListUpdates) return Promise.resolve();
-    return this.delegate.subscribeListUpdates(callbackUrl);
+  /**
+   * Registers the list update callback with the upstream provider and then
+   * re-reads the published list versions.
+   *
+   * A cached screening result is only valid for the list version it was
+   * produced against, so a version change drops the whole cache. Without this
+   * the cache would keep serving results that were screened against a
+   * superseded watch list.
+   */
+  async subscribeListUpdates(callbackUrl: string): Promise<void> {
+    if (this.delegate.subscribeListUpdates) {
+      await this.delegate.subscribeListUpdates(callbackUrl);
+    }
+    await this.refreshListVersions();
+  }
+
+  /**
+   * Drops every cached result that was screened against a list version that
+   * is no longer published. Returns true when the cache was invalidated.
+   */
+  async refreshListVersions(): Promise<boolean> {
+    const versions = await this.delegate.listVersions();
+    const fingerprint = listVersionsFingerprint(versions);
+    const versionChanged =
+      this.publishedListVersions !== null && this.publishedListVersions !== fingerprint;
+    const stale = [...this.cache.values()].some(
+      (entry) => listVersionsFingerprint(entry.value.listVersions) !== fingerprint,
+    );
+    this.publishedListVersions = fingerprint;
+    if (stale || versionChanged) {
+      this.invalidate();
+      return true;
+    }
+    return false;
   }
 
   screenLocal(subject: ScreeningSubject): ScreeningResult {

@@ -33,6 +33,8 @@ bun test
 | `KMS_MASTER_KEY` | Root key for the AES-256-GCM vault and session signing |
 | `WORKER_ENABLED` | Starts the expiry, poll, inbox and notification workers |
 | `WORKER_POLL_INTERVAL_MS` / `WORKER_BATCH_SIZE` | Worker cadence and batch size |
+| `NOTIFICATION_WEBHOOK_URL` | Endpoint of the SMS / email aggregator. Optional: without it the platform uses the log transport, which reports `SENT` instead of `DELIVERED` |
+| `NOTIFICATION_WEBHOOK_TIMEOUT_MS` | Strict timeout of a single delivery attempt against the aggregator, defaults `5000` |
 
 ## Design references
 
