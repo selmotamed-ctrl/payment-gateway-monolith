@@ -2,7 +2,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { env } from "../lib/env";
 import { ApiError, parseOrThrow } from "../lib/error";
-import { callCore, type CoreCallOptions, type CoreHttpMethod } from "../lib/mtlsClient";
+import { callCoreResponse, type CoreCallOptions, type CoreHttpMethod } from "../lib/mtlsClient";
 import { parseCidrList, resolveClientIp } from "../lib/net";
 import { resolveRequestId } from "../lib/requestLogger";
 import type { PublicPayload } from "./contract";
@@ -28,6 +28,11 @@ export interface ForwardOptions {
   paramsSchema?: z.ZodType;
   querySchema?: z.ZodType;
   status?: number;
+  /**
+   * Answers with the status code that core returned instead of the declared
+   * one. Used by the routes whose outcome became asynchronous.
+   */
+  relayStatus?: boolean;
   requireAuth?: boolean;
   /**
    * Replaces the forwarded body entirely (raw or multipart payloads).
@@ -98,7 +103,7 @@ export const coreForward =
     if (options.coreSchema && body !== undefined) {
       body = parseOrThrow(options.coreSchema, body);
     }
-    const payload = await callCore({
+    const response = await callCoreResponse({
       method: options.method,
       path: options.path({ params, body, query: query ?? {} }),
       body,
@@ -109,7 +114,7 @@ export const coreForward =
       userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
       authorization,
     });
-    res.status(options.status ?? 200).json(payload);
+    res.status(options.relayStatus === true ? response.status : options.status ?? 200).json(response.body);
   };
 
 export const coreProxyStream =

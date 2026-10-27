@@ -130,10 +130,17 @@ export const emptyRepositories = (): Repositories => ({
     findStatementSourceById: async () => null,
     listStatementSources: async () => [],
     findRunByFileHash: async () => null,
+    findRunById: async () => null,
     createRun: async () => { throw new Error("unused"); },
     updateRunStats: async () => undefined,
+    markRunIngested: async () => false,
     createItem: async () => { throw new Error("unused"); },
     listItemsByRun: async () => [],
+  },
+  jobs: {
+    enqueueJob: async () => { throw new Error("unused"); },
+    findJobById: async () => null,
+    findLiveJobForReference: async () => null,
   },
 });
 

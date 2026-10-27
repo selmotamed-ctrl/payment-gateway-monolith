@@ -62,6 +62,20 @@ export interface ScreeningProvider {
   refreshListVersions?(): Promise<boolean>;
   capabilities(): ScreeningCapabilities;
   screenLocal?(subject: ScreeningSubject): ScreeningResult;
+  /**
+   * Publishes a new revision of the watch list.
+   *
+   * A provider that screens against a locally held list (the internal
+   * watch list of the platform) uses it to make a new list effective without
+   * a restart. The cached provider forwards the publication to its delegate
+   * and drops every cached result that was screened against the old list.
+   */
+  setEntries?(entries: readonly WatchlistEntry[]): void;
+  /**
+   * Publishes the version of the published lists. The version is what
+   * invalidates the cached screening results.
+   */
+  setListVersions?(versions: Record<string, string>): void;
 }
 
 export interface ScreeningSubjectInput {
@@ -243,6 +257,97 @@ export interface WatchlistProviderOptions {
   confirmedScoreThreshold?: number;
   listVersions?: Record<string, string>;
 }
+
+/**
+ * The watch list of the platform, as it is published in the platform
+ * settings.
+ *
+ * The internal watch list is maintained by the compliance team, so it is a
+ * versioned platform setting: `{ version, entries }`. The version is what
+ * invalidates the cached screening results, so a published list that changes
+ * without changing its version would keep serving stale results.
+ */
+export interface PublishedWatchlist {
+  version: string;
+  entries: WatchlistEntry[];
+}
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
+const toWatchlistEntry = (value: unknown): WatchlistEntry | null => {
+  const record = asRecord(value);
+  const entryRef = typeof record.entryRef === "string" ? record.entryRef : null;
+  const listType = typeof record.listType === "string" ? record.listType : null;
+  if (!entryRef || !listType) {
+    return null;
+  }
+  const names = Array.isArray(record.names)
+    ? record.names.filter((name): name is string => typeof name === "string" && name.length > 0)
+    : [];
+  const identifiers = Array.isArray(record.identifiers)
+    ? record.identifiers.filter((id): id is string => typeof id === "string" && id.length > 0)
+    : [];
+  if (names.length === 0 && identifiers.length === 0) {
+    return null;
+  }
+  return {
+    entryRef,
+    listType: listType as WatchlistEntry["listType"],
+    listName: typeof record.listName === "string" ? record.listName : listType,
+    names,
+    ...(identifiers.length > 0 ? { identifiers } : {}),
+    ...(record.attributes && typeof record.attributes === "object"
+      ? { attributes: record.attributes as Record<string, unknown> }
+      : {}),
+  };
+};
+
+/**
+ * Parses the published watch list of a platform setting.
+ *
+ * A missing or malformed setting yields `null`: the caller then keeps the
+ * list the provider already holds instead of publishing an empty one.
+ */
+export const parsePublishedWatchlist = (value: unknown): PublishedWatchlist | null => {
+  if (!value) {
+    return null;
+  }
+  const record = asRecord(value);
+  const rawEntries = Array.isArray(record.entries) ? record.entries : [];
+  const entries = rawEntries
+    .map((entry) => toWatchlistEntry(entry))
+    .filter((entry): entry is WatchlistEntry => entry !== null);
+  const version = typeof record.version === "string" && record.version.length > 0
+    ? record.version
+    : "internal-v1";
+  return { version, entries };
+};
+
+/**
+ * Publishes a watch list into a screening provider.
+ *
+ * The provider that holds the list is the one that caches the results, so
+ * the publication invalidates the cache of the results that were screened
+ * against the previous revision.
+ */
+export const publishWatchlist = (
+  provider: ScreeningProvider,
+  value: unknown,
+): PublishedWatchlist | null => {
+  const published = parsePublishedWatchlist(value);
+  if (!published) {
+    return null;
+  }
+  if (!provider.setEntries) {
+    return published;
+  }
+  provider.setEntries(published.entries);
+  provider.setListVersions?.({ INTERNAL_WATCHLIST: published.version });
+  return published;
+};
 
 export class InternalWatchlistProvider implements ScreeningProvider {
   readonly code: string;
@@ -474,6 +579,24 @@ export class CachedScreeningProvider implements ScreeningProvider {
   }
 
   /**
+   * Publishes a new revision of the watch list into the delegate and drops
+   * every result that was screened against the previous revision.
+   */
+  setEntries(entries: readonly WatchlistEntry[]): void {
+    this.delegate.setEntries?.(entries);
+    this.invalidate();
+  }
+
+  /**
+   * Publishes the version of the published lists and drops every result that
+   * was screened against a different version.
+   */
+  setListVersions(versions: Record<string, string>): void {
+    this.delegate.setListVersions?.(versions);
+    this.invalidate();
+  }
+
+  /**
    * Registers the list update callback with the upstream provider and then
    * re-reads the published list versions.
    *
@@ -509,31 +632,44 @@ export class CachedScreeningProvider implements ScreeningProvider {
     return false;
   }
 
+  /**
+   * The hot path screening.
+   *
+   * The local screening is the one the transaction hot path uses, so it is
+   * cached exactly like the deferred one: the cache key is the hash of the
+   * screened input and a cached result is only reused while the watch list
+   * version it was produced against is still published.
+   */
   screenLocal(subject: ScreeningSubject): ScreeningResult {
-    if (this.delegate.screenLocal) return this.delegate.screenLocal(subject);
-    return {
-      result: "CLEAR",
-      matches: [],
-      highestScore: null,
-      providerCode: this.delegate.code,
-      providerRequestRef: null,
-      listVersions: {},
-      inputHash: computeScreeningInputHash(subject),
-    };
+    const key = this.cacheKey(subject);
+    const cached = this.cache.get(key);
+    if (cached && cached.expiresAt > Date.now() && this.isCacheEntryFresh(cached.value)) {
+      return cached.value;
+    }
+    if (!this.delegate.screenLocal) {
+      return {
+        result: "CLEAR",
+        matches: [],
+        highestScore: null,
+        providerCode: this.delegate.code,
+        providerRequestRef: null,
+        listVersions: {},
+        inputHash: computeScreeningInputHash(subject),
+      };
+    }
+    const value = this.delegate.screenLocal(subject);
+    this.remember(key, value);
+    return value;
   }
 
   async screenSubject(subject: ScreeningSubject, options?: ScreeningOptions): Promise<ScreeningResult> {
-    const key = `${this.delegate.code}:${computeScreeningInputHash(subject)}`;
+    const key = this.cacheKey(subject);
     const cached = this.cache.get(key);
-    if (cached && cached.expiresAt > Date.now()) {
+    if (cached && cached.expiresAt > Date.now() && this.isCacheEntryFresh(cached.value)) {
       return cached.value;
     }
     const value = await this.delegate.screenSubject(subject, options);
-    this.cache.set(key, { expiresAt: Date.now() + this.ttlMs, value });
-    if (this.cache.size > this.maxEntries) {
-      const oldest = this.cache.keys().next();
-      if (!oldest.done) this.cache.delete(oldest.value);
-    }
+    this.remember(key, value);
     return value;
   }
 
@@ -543,5 +679,29 @@ export class CachedScreeningProvider implements ScreeningProvider {
 
   invalidate(): void {
     this.cache.clear();
+  }
+
+  private cacheKey(subject: ScreeningSubject): string {
+    return `${this.delegate.code}:${computeScreeningInputHash(subject)}`;
+  }
+
+  /**
+   * A cached result is only valid for the list version it was screened
+   * against. As long as the published version is unknown, the entry is
+   * trusted: the version is published with the first list update.
+   */
+  private isCacheEntryFresh(value: ScreeningResult): boolean {
+    if (this.publishedListVersions === null) {
+      return true;
+    }
+    return listVersionsFingerprint(value.listVersions) === this.publishedListVersions;
+  }
+
+  private remember(key: string, value: ScreeningResult): void {
+    this.cache.set(key, { expiresAt: Date.now() + this.ttlMs, value });
+    if (this.cache.size > this.maxEntries) {
+      const oldest = this.cache.keys().next();
+      if (!oldest.done) this.cache.delete(oldest.value);
+    }
   }
 }

@@ -82,16 +82,18 @@ const designModelNames = [
   "NotificationTemplate",
   "Notification",
   "PlatformSetting",
+  // The durable job queue of the background workers.
+  "BackgroundJob",
 ];
 
 describe("prisma schema", () => {
   const schema = fs.readFileSync(schemaPath, "utf8");
 
-  test("declares exactly the 64 design models", () => {
+  test("declares exactly the 65 design models", () => {
     const modelNames = [...schema.matchAll(/^model\s+(\w+)\s*\{/gm)].map(
       (match) => match[1] as string,
     );
-    expect(modelNames.length).toBe(64);
+    expect(modelNames.length).toBe(65);
     expect([...modelNames].sort()).toEqual([...designModelNames].sort());
   });
 

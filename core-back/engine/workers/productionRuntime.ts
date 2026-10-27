@@ -10,6 +10,13 @@ import { InboundInboxWorker } from "./InboundInboxWorker";
 import { OutboxNotificationWorker } from "./OutboxNotificationWorker";
 import { LedgerInvariantWorker } from "./LedgerInvariantWorker";
 import { PeriodicScreeningWorker } from "./PeriodicScreeningWorker";
+import { RetentionWorker } from "./RetentionWorker";
+import { BackgroundJobWorker } from "./BackgroundJobWorker";
+import {
+  createAdjustmentJobHandler,
+  createFeeVariancePoster,
+  createReconciliationJobHandler,
+} from "./BackgroundJobHandlers";
 import { PrismaRepositories } from "../db/repositories";
 import { toCamelRows } from "../db/rawRows";
 import { Vault } from "../crypto/Vault";
@@ -32,6 +39,47 @@ export interface ProductionWorkerRuntimeOptions {
    * picks it up again.
    */
   rescreenIntervalMs?: number;
+  /**
+   * The record retention worker (OD-4). It is off unless the deployment
+   * turns it on, because it removes evidence.
+   */
+  retentionEnabled?: boolean;
+  /**
+   * How often the retention worker runs.
+   */
+  retentionIntervalMs?: number;
+  /**
+   * How many rows the retention worker purges in one batch.
+   */
+  retentionBatchSize?: number;
+  /**
+   * The retention period in days. Without it the period comes from the
+   * platform setting `OD-4`.
+   */
+  retentionDays?: number;
+  /**
+   * The dry run of the retention worker: it reports what it would purge
+   * without deleting anything.
+   */
+  retentionDryRun?: boolean;
+  /**
+   * The durable job queue worker. It drains the background jobs (the
+   * statement reconciliation and the dispute / adjustment execution).
+   */
+  backgroundJobsEnabled?: boolean;
+  /**
+   * How often the background job queue is drained.
+   */
+  backgroundJobsIntervalMs?: number;
+  /**
+   * How many background jobs are claimed in one drain.
+   */
+  backgroundJobsBatchSize?: number;
+  /**
+   * The lease of a claimed background job: a job that is still `RUNNING`
+   * when its lease expired belongs to a crashed node and is re-queued.
+   */
+  backgroundJobsLeaseSeconds?: number;
 }
 
 export interface ProductionWorkerRuntime {
@@ -128,6 +176,45 @@ export const createProductionWorkerRuntime = (
       screening: platform.screening,
       rescreenIntervalMs: options.rescreenIntervalMs,
     }),
+    // The record retention worker (OD-4) removes the regulatory evidence
+    // that passed the retention period. It only runs when the deployment
+    // turns it on, and it can run as a dry run.
+    ...((options.retentionEnabled ?? env.WORKER_RETENTION_ENABLED)
+      ? [
+          new RetentionWorker({
+            ...workerOptions,
+            intervalMs: options.retentionIntervalMs ?? env.WORKER_RETENTION_INTERVAL_MS,
+            batchSize: options.retentionBatchSize ?? env.WORKER_RETENTION_BATCH_SIZE,
+            retentionDays: options.retentionDays,
+            dryRun: options.retentionDryRun ?? env.RETENTION_DRY_RUN,
+          }),
+        ]
+      : []),
+    // The durable job queue: the statement reconciliation and the dispute /
+    // adjustment execution are executed by a stateless worker that claims
+    // the due jobs with `FOR UPDATE SKIP LOCKED`.
+    ...((options.backgroundJobsEnabled ?? env.WORKER_BACKGROUND_JOBS_ENABLED)
+      ? [
+          new BackgroundJobWorker({
+            ...workerOptions,
+            intervalMs: options.backgroundJobsIntervalMs ?? env.WORKER_BACKGROUND_JOBS_INTERVAL_MS,
+            batchSize: options.backgroundJobsBatchSize ?? env.WORKER_BACKGROUND_JOBS_BATCH_SIZE,
+            leaseSeconds: options.backgroundJobsLeaseSeconds ?? env.WORKER_BACKGROUND_JOBS_LEASE_SECONDS,
+            handlers: {
+              RECONCILIATION_RUN: createReconciliationJobHandler({
+                db: options.db,
+                repositories,
+                feeVariancePoster: createFeeVariancePoster(platform.ledgerPoster),
+              }),
+              ADJUSTMENT_EXECUTION: createAdjustmentJobHandler({
+                db: options.db,
+                ledgerPoster: platform.ledgerPoster,
+                repositories,
+              }),
+            },
+          }),
+        ]
+      : []),
   ];
 
   return {

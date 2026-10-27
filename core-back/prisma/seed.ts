@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { Prisma } from "../generated/prisma/client";
 import { client, ensureSchemaVersion } from "./client";
-import { seedBlueprints } from "./seedBlueprints";
+import { seedBlueprints, seedPlatformCredentialSets } from "./seedBlueprints";
 import { seedSystemGlAccounts } from "./seedGlAccounts";
 
 const platformSettings = [
@@ -89,6 +89,30 @@ const platformSettings = [
     valueJson: {
       checkerRoles: ["MLRO", "COMPLIANCE", "FINANCE"],
       description: "Named organizational checker accounts are provisioned without embedded credentials.",
+    },
+  },
+  {
+    // The canonical key of the OD-2 policy: the design names the setting
+    // `join_request.four_eyes_policy`, the decision register keys it as
+    // `OD-2`. Both carry the same value, so the policy is the same
+    // whichever key a deployment reads.
+    key: "join_request.four_eyes_policy",
+    valueJson: {
+      policy: "RISK_BASED",
+      ownerThresholdPercent: 25,
+      description:
+        "A second reviewer is required for a risky applicant: a high risk tier, a sanctions or PEP match, a controlling beneficial owner, an adverse media flag or a high risk business category.",
+    },
+  },
+  {
+    // The internal watch list of the platform. The compliance team maintains
+    // the entries; the version is what invalidates the cached screening
+    // results, so a published revision always carries a new version.
+    key: "screening.watchlist",
+    valueJson: {
+      version: "internal-v1",
+      description: "The internal watch list the transaction hot path screens against.",
+      entries: [],
     },
   },
 ] as const;
@@ -364,6 +388,12 @@ const seed = async () => {
   });
 
   await seedBlueprints(client);
+
+  // The platform owned credential sets of the seeded gateways. Without them a
+  // route with the `PLATFORM` credential policy has no `VERIFIED` credential
+  // set, so no rail is ever visible and no payment can start.
+  const seededCredentialSets = await seedPlatformCredentialSets(client);
+  process.stdout.write(`Seeded ${seededCredentialSets} platform credential sets.\n`);
 };
 
 try {

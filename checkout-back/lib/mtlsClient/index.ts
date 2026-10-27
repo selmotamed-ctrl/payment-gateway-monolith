@@ -295,13 +295,30 @@ export const parseJsonBuffer = (buffer: Buffer): unknown => {
   }
 };
 
-export const callCore = async <T = unknown>(options: CoreCallOptions): Promise<T> => {
+export interface CoreResponsePayload<T = unknown> {
+  status: number;
+  body: T;
+}
+
+/**
+ * Calls core and returns the parsed body TOGETHER with the status code the
+ * core answered. A route whose outcome became asynchronous (a queued job) is
+ * relayed with the core's own status instead of a hard coded one.
+ */
+export const callCoreResponse = async <T = unknown>(
+  options: CoreCallOptions,
+): Promise<CoreResponsePayload<T>> => {
   const response = await callCoreRaw(options);
   const payload = parseJsonBuffer(response.body);
   if (response.statusCode >= 400) {
     throw mapCoreHttpError(response.statusCode, payload);
   }
-  return payload as T;
+  return { status: response.statusCode, body: payload as T };
+};
+
+export const callCore = async <T = unknown>(options: CoreCallOptions): Promise<T> => {
+  const response = await callCoreResponse<T>(options);
+  return response.body;
 };
 
 export const openCoreStream = (options: CoreCallOptions): Promise<CoreStream> =>

@@ -46,6 +46,32 @@ export class PrismaFlowProvider implements FlowProvider {
     if (!flowPhase) {
       return [];
     }
+    return this.getStepsOfFlowPhase(flowPhase, attempt);
+  }
+
+  /**
+   * The steps of the `CREDENTIAL_CHECK` phase of the pinned version.
+   *
+   * The credential check is not a lifecycle phase of an attempt, so it has no
+   * entry in the engine phase union. The phase is nevertheless part of the
+   * declarative datamodel (design v5 §7.4), and a gateway version may define
+   * the steps that prove that its credentials work.
+   */
+  async getCredentialCheckSteps(attempt: DynamicAttempt): Promise<readonly FlowStep[]> {
+    if (!attempt.gatewayVersionId) {
+      return [];
+    }
+    return this.getStepsOfFlowPhase("CREDENTIAL_CHECK", attempt);
+  }
+
+  private async getStepsOfFlowPhase(
+    flowPhase: string,
+    attempt: DynamicAttempt,
+  ): Promise<readonly FlowStep[]> {
+    const gatewayVersionId = attempt.gatewayVersionId;
+    if (!gatewayVersionId) {
+      return [];
+    }
 
     const flows = await this.client.flow.findMany({
       where: {
@@ -72,7 +98,7 @@ export class PrismaFlowProvider implements FlowProvider {
     });
 
     const statusRules = await this.client.statusRule.findMany({
-      where: { gatewayVersionId, phase: phaseName(phase) },
+      where: { gatewayVersionId, phase: flowPhase },
       orderBy: { orderIndex: "asc" },
     });
 
@@ -123,8 +149,6 @@ const PHASE_TO_FLOW_PHASE: Record<string, string> = {
   REFUND: "REFUND",
   VOID: "VOID",
 };
-
-const phaseName = (phase: FlowPhase): string => phase;
 
 const BASE_URL_PATTERN = /\{\{([A-Za-z0-9_.-]+)\}\}|\{([A-Za-z0-9_.-]+)\}/g;
 

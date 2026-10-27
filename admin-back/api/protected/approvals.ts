@@ -43,6 +43,10 @@ router.post(
     paramsSchema: idParamsSchema,
     schema: decisionSchema,
     bodyFrom: (_req, body) => toCoreApprovalApprove(body),
+    // An adjustment approval is executed by a queued job (`202 Accepted`),
+    // every other subject is executed inline (`200 OK`). The edge relays the
+    // status that core answered.
+    relayStatus: true,
   }),
 );
 

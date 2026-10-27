@@ -18,12 +18,15 @@ import {
 } from "../../lib/auth";
 import { Vault } from "../../engine/crypto/Vault";
 import { decimal } from "../../engine/ledger/LedgerPoster";
+import { moneyFromDecimal } from "../../engine/db/money";
 import { getPlatformRuntime } from "../../engine/runtime";
-import type { BeneficialOwnerRow, MerchantRow } from "../../engine/db/ports";
+import type { BeneficialOwnerRow, MerchantRow, Tx } from "../../engine/db/ports";
 import {
   MerchantScreeningService,
   type OnboardingScreeningOutcome,
 } from "../../engine/guards/MerchantScreeningService";
+import { WATCHLIST_SETTING_KEY } from "../../engine/guards/AttemptGuardPipeline";
+import { publishWatchlist } from "../../engine/guards/ScreeningProvider";
 import { asStringArray, resolveVisibleRails } from "../../engine/flow/VisibleRailsCatalog";
 import { json, jsonOptional } from "./json";
 import { requireAuthentication, requireMerchantScope, principalOf } from "../middleware/authDoubleCheck";
@@ -88,13 +91,293 @@ const runOnboardingScreening = async (
     repositories: platform.repositories,
     screening: platform.screening,
   });
-  return platform.repositories.transaction((tx) =>
-    service.submitOnboarding(tx, {
+  return platform.repositories.transaction(async (tx) => {
+    // The watch list of the platform is published before the screening, so
+    // the screening is run against the list the compliance team maintains
+    // and not against the list the process started with.
+    await publishPlatformWatchlist(platform, tx);
+    return service.submitOnboarding(tx, {
       merchant: merchant as unknown as MerchantRow,
       joinRequestId,
       owners: owners as unknown as BeneficialOwnerRow[],
       decryptedOwnerIdentifiers,
+    });
+  });
+};
+
+/**
+ * Publishes the watch list of the platform into the screening provider.
+ *
+ * The list is a versioned platform setting, so every screening layer reads
+ * the published revision. A provider that holds no local list (an external
+ * provider, a mock) is left untouched.
+ */
+const publishPlatformWatchlist = async (
+  platform: ReturnType<typeof getPlatformRuntime>,
+  tx: Tx,
+): Promise<void> => {
+  if (!platform.screening.setEntries) {
+    return;
+  }
+  const setting = await platform.repositories.governance.getPlatformSetting(tx, WATCHLIST_SETTING_KEY);
+  if (!setting) {
+    return;
+  }
+  publishWatchlist(platform.screening, setting);
+  await platform.screening.refreshListVersions?.();
+};
+
+/**
+ * The four-eyes policy of the join request (design §18 and OD-2).
+ *
+ * The policy is a versioned platform setting. It is read under the design
+ * key `join_request.four_eyes_policy` and under the decision register key
+ * `OD-2`, so a deployment that carries only one of the two conventions
+ * still gets the configured policy. The policy itself lives in the `policy`
+ * field of the value.
+ */
+export const FOUR_EYES_SETTING_KEYS = ["join_request.four_eyes_policy", "OD-2"] as const;
+
+export type FourEyesPolicy = "ALWAYS" | "RISK_BASED" | "NEVER";
+
+export interface FourEyesPolicySetting {
+  policy: FourEyesPolicy;
+  ownerThresholdPercent: number;
+  highRiskCategories: string[];
+}
+
+export interface ParsedFourEyesSetting {
+  policy: FourEyesPolicy | null;
+  ownerThresholdPercent: number | null;
+  highRiskCategories: string[] | null;
+}
+
+export const DEFAULT_FOUR_EYES_POLICY: FourEyesPolicy = "RISK_BASED";
+
+/**
+ * The beneficial ownership threshold of OD-6: an owner at or above this
+ * share is a controlling owner.
+ */
+export const DEFAULT_OWNER_THRESHOLD_PERCENT = 25;
+
+/**
+ * The business categories that are always reviewed by two pairs of eyes.
+ */
+export const DEFAULT_HIGH_RISK_CATEGORIES = [
+  "ADULT",
+  "ARMS",
+  "CRYPTO",
+  "CRYPTO_CURRENCY",
+  "GAMBLING",
+  "HIGH_VALUE_GOODS",
+  "MONEY_TRANSMISSION",
+  "P2P",
+  "PHARMACEUTICALS",
+  "PRECIOUS_METALS",
+];
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
+const asPolicy = (value: unknown): FourEyesPolicy | null => {
+  const raw = typeof value === "string" ? value.toUpperCase() : "";
+  return raw === "ALWAYS" || raw === "RISK_BASED" || raw === "NEVER" ? raw : null;
+};
+
+/**
+ * Reads the fields of a four-eyes setting.
+ *
+ * The seeded shape is `{ policy: "RISK_BASED", ... }`, so the policy is read
+ * from the `policy` field of the value. The dotted and the snake case
+ * spellings of the threshold and of the category list are accepted too, so
+ * a hand written setting is never silently ignored.
+ */
+export const parseFourEyesSetting = (value: unknown): ParsedFourEyesSetting => {
+  if (typeof value === "string") {
+    return { policy: asPolicy(value), ownerThresholdPercent: null, highRiskCategories: null };
+  }
+  const record = asRecord(value);
+  const policy = asPolicy(record.policy ?? record.fourEyesPolicy ?? record.value);
+  const rawThreshold = record.ownerThresholdPercent ?? record.owner_threshold_percent;
+  const threshold = typeof rawThreshold === "number" && Number.isFinite(rawThreshold)
+    ? rawThreshold
+    : typeof rawThreshold === "string" && rawThreshold.trim().length > 0 && Number.isFinite(Number(rawThreshold))
+      ? Number(rawThreshold)
+      : null;
+  const rawCategories = record.highRiskCategories ?? record.high_risk_categories;
+  const categories = Array.isArray(rawCategories)
+    ? rawCategories
+      .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+      .map((entry) => entry.trim().toUpperCase())
+    : null;
+  return {
+    policy,
+    ownerThresholdPercent: threshold,
+    highRiskCategories: categories,
+  };
+};
+
+/**
+ * Merges the four-eyes settings into the effective policy.
+ *
+ * The first setting that carries a value wins, so the canonical key
+ * (`join_request.four_eyes_policy`) takes precedence over the decision
+ * register key (`OD-2`).
+ */
+export const resolveFourEyesSetting = (values: readonly unknown[]): FourEyesPolicySetting => {
+  const parsed = values.map((value) => parseFourEyesSetting(value));
+  return {
+    policy: parsed.find((entry) => entry.policy !== null)?.policy ?? DEFAULT_FOUR_EYES_POLICY,
+    ownerThresholdPercent:
+      parsed.find((entry) => entry.ownerThresholdPercent !== null)?.ownerThresholdPercent
+      ?? DEFAULT_OWNER_THRESHOLD_PERCENT,
+    highRiskCategories:
+      parsed.find((entry) => entry.highRiskCategories !== null)?.highRiskCategories
+      ?? DEFAULT_HIGH_RISK_CATEGORIES,
+  };
+};
+
+export interface FourEyesSubject {
+  /** The risk tier of the applicant. */
+  riskTier: string | null;
+  /** The result of the onboarding screening. */
+  screeningResult: string | null;
+  /** The lists the screening matched. */
+  screeningListTypes: readonly string[];
+  /** The beneficial owners of the applicant. */
+  owners: ReadonlyArray<{
+    ownershipPercent: unknown;
+    pepDeclared: boolean;
+    screeningStatus: string;
+  }>;
+  businessCategory: string | null;
+  /** The applicant was rejected before. */
+  previouslyRejected: boolean;
+}
+
+export interface FourEyesDecision {
+  policy: FourEyesPolicy;
+  required: boolean;
+  reasons: string[];
+}
+
+/**
+ * The four-eyes decision of a join request (design §18, OD-2).
+ *
+ * Under the default `RISK_BASED` policy a second reviewer is required when
+ * the applicant is risky: a high risk tier, a sanctions or PEP screening
+ * match, a controlling beneficial owner, an adverse media flag, a high risk
+ * business category or a previous rejection. A clean applicant is decided by
+ * a single authorized reviewer, so the activation path stays reachable.
+ */
+export const computeFourEyesDecision = (
+  subject: FourEyesSubject,
+  setting: FourEyesPolicySetting,
+): FourEyesDecision => {
+  const reasons: string[] = [];
+  if (setting.policy === "ALWAYS") {
+    reasons.push("POLICY_ALWAYS");
+  } else if (setting.policy !== "NEVER") {
+    if ((subject.riskTier ?? "").toUpperCase() === "HIGH") {
+      reasons.push("RISK_TIER_HIGH");
+    }
+    const listTypes = new Set(subject.screeningListTypes.map((entry) => entry.toUpperCase()));
+    const screeningResult = (subject.screeningResult ?? "CLEAR").toUpperCase();
+    const notClear = screeningResult !== "CLEAR" && screeningResult !== "ERROR";
+    if (listTypes.has("SANCTIONS")) {
+      reasons.push("SCREENING_SANCTIONS_MATCH");
+    }
+    if (listTypes.has("PEP")) {
+      reasons.push("SCREENING_PEP_MATCH");
+    }
+    if (listTypes.has("ADVERSE_MEDIA")) {
+      reasons.push("SCREENING_ADVERSE_MEDIA_MATCH");
+    }
+    if (notClear && listTypes.size === 0) {
+      reasons.push("SCREENING_NOT_CLEAR");
+    }
+    const threshold = moneyFromDecimal(String(setting.ownerThresholdPercent));
+    for (const owner of subject.owners) {
+      const detectedPep = owner.screeningStatus === "POTENTIAL_MATCH" || owner.screeningStatus === "CONFIRMED_MATCH";
+      if (owner.pepDeclared || detectedPep) {
+        reasons.push("PEP_BENEFICIAL_OWNER");
+      }
+      if (owner.ownershipPercent !== null && owner.ownershipPercent !== undefined) {
+        try {
+          if (moneyFromDecimal(owner.ownershipPercent as never) >= threshold) {
+            reasons.push("LARGE_OWNERSHIP_SHARE");
+          }
+        } catch {
+          // An ownership share that cannot be read is not a large share.
+        }
+      }
+    }
+    const category = (subject.businessCategory ?? "").trim().toUpperCase();
+    if (category.length > 0 && setting.highRiskCategories.includes(category)) {
+      reasons.push("HIGH_RISK_CATEGORY");
+    }
+    if (subject.previouslyRejected) {
+      reasons.push("PREVIOUSLY_REJECTED");
+    }
+  }
+  const unique = [...new Set(reasons)];
+  return {
+    policy: setting.policy,
+    required: setting.policy === "ALWAYS" ? true : setting.policy === "NEVER" ? false : unique.length > 0,
+    reasons: unique,
+  };
+};
+
+/**
+ * Reads the four-eyes policy of the platform.
+ */
+const readFourEyesSetting = async (): Promise<FourEyesPolicySetting> => {
+  const values: unknown[] = [];
+  for (const key of FOUR_EYES_SETTING_KEYS) {
+    const setting = await client.platformSetting.findFirst({
+      where: { key },
+      orderBy: { version: "desc" },
+    });
+    if (setting) {
+      values.push(setting.valueJson);
+    }
+  }
+  return resolveFourEyesSetting(values);
+};
+
+/**
+ * The four-eyes decision of a join request at submission time.
+ */
+const resolveFourEyesForSubmission = async (
+  merchantId: string,
+  screening: OnboardingScreeningOutcome,
+): Promise<FourEyesDecision> => {
+  const [merchant, owners, setting, priorRejection] = await Promise.all([
+    client.merchant.findUnique({ where: { id: merchantId } }),
+    client.beneficialOwner.findMany({ where: { merchantId, active: true } }),
+    readFourEyesSetting(),
+    client.joinRequest.findFirst({
+      where: { merchantId, status: "REJECTED" },
+      select: { id: true },
     }),
+  ]);
+  const matches = [...screening.report.confirmedMatches, ...screening.report.potentialMatches];
+  return computeFourEyesDecision(
+    {
+      riskTier: merchant?.riskTier ?? null,
+      screeningResult: screening.result,
+      screeningListTypes: matches.map((match) => match.listType),
+      owners: owners.map((owner) => ({
+        ownershipPercent: owner.ownershipPercent,
+        pepDeclared: owner.pepDeclared,
+        screeningStatus: owner.screeningStatus,
+      })),
+      businessCategory: merchant?.businessCategory ?? null,
+      previouslyRejected: priorRejection !== null,
+    },
+    setting,
   );
 };
 
@@ -267,8 +550,11 @@ router.post("/auth/register", async (request: Request, response: Response) => {
         onboardingChannel: "SELF_SERVICE",
         slaDueAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
         proposedRiskTier: "STANDARD",
-        fourEyesRequired: true,
-        fourEyesReasons: ["ONBOARDING"],
+        // The four-eyes decision is taken at submission time, when the risk
+        // of the applicant is known (design §18, OD-2). A draft request
+        // carries no decision yet.
+        fourEyesRequired: false,
+        fourEyesReasons: [],
       },
     });
     return { merchant, user, wallet };
@@ -591,12 +877,27 @@ router.post("/onboarding/submit", async (request: Request, response: Response) =
     );
   }
 
+  // The four-eyes policy (design §18, OD-2) is evaluated at submission time:
+  // a risky applicant needs a second pair of eyes, a clean one is decided by
+  // a single authorized reviewer.
+  const fourEyes = await resolveFourEyesForSubmission(merchantId, screening);
+  const submitted = await client.joinRequest.update({
+    where: { id: joinRequest.id },
+    data: {
+      fourEyesRequired: fourEyes.required,
+      fourEyesReasons: fourEyes.reasons,
+    },
+  });
+
   response.json({
     id: joinRequest.id,
     status: screening.joinRequestStatus,
     slaDueAt: joinRequest.slaDueAt,
     screeningId: screening.screeningId,
     screeningResult: screening.result,
+    fourEyesRequired: submitted.fourEyesRequired,
+    fourEyesReasons: submitted.fourEyesReasons ?? [],
+    fourEyesPolicy: fourEyes.policy,
   });
 });
 
@@ -1259,7 +1560,20 @@ router.post("/credential-sets", async (request: Request, response: Response) => 
     },
   });
   await invalidationBus.invalidateCredential(credentialSet.id, "credential-set-created");
-  response.status(201).json({ id: credentialSet.id, status: credentialSet.status });
+  // The credential check runs as soon as the merchant registers the
+  // credentials, so a set that works is trusted (and a route that needs it
+  // becomes visible) without an operator in the loop.
+  const verification = await getPlatformRuntime(client as never).credentialCheck.verify(credentialSet.id);
+  await invalidationBus.invalidateCredential(credentialSet.id, "credential-set-verified");
+  response.status(201).json({
+    id: credentialSet.id,
+    status: verification.status,
+    verification: {
+      status: verification.status,
+      method: verification.method,
+      reason: verification.reason ?? null,
+    },
+  });
 });
 
 router.put("/credential-sets/:id", async (request: Request, response: Response) => {
@@ -1321,12 +1635,48 @@ router.get("/credential-sets/:id", async (request: Request, response: Response) 
     env: credentialSet.env,
     status: credentialSet.status,
     settlementTarget: credentialSet.settlementTarget,
+    lastVerifiedAt: credentialSet.lastVerifiedAt,
     entries: (credentialSet.entriesCiphertext as Array<{ key: string; type: string; isSecret: boolean }>).map((entry) => ({
       key: entry.key,
       type: entry.type,
       isSecret: entry.isSecret,
       value: entry.isSecret ? "[REDACTED]" : "[WRITE_ONLY]",
     })),
+  });
+});
+
+/**
+ * Runs the credential check of a credential set (design v5 §16.2).
+ *
+ * The merchant proves that the credentials it registered work; the platform
+ * records the verdict on the credential set (`VERIFIED` with the
+ * verification time, or `FAILING`).
+ */
+router.post("/credential-sets/:id/verify", async (request: Request, response: Response) => {
+  const merchantId = merchantIdOf(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const credentialSet = await client.credentialSet.findFirst({
+    where: { id, ownerType: "MERCHANT", ownerMerchantId: merchantId },
+  });
+  if (!credentialSet) {
+    throw new ApiError(404, "CREDENTIAL_SET_NOT_FOUND", "The credential set does not exist");
+  }
+  const platform = getPlatformRuntime(client as never);
+  const result = await platform.credentialCheck.verify(id);
+  await invalidationBus.invalidateCredential(id, "credential-set-verified");
+  if (result.status !== "VERIFIED") {
+    throw new ApiError(
+      502,
+      "CREDENTIAL_VERIFICATION_FAILED",
+      result.reason ?? "The credentials of the gateway could not be verified",
+      { credentialSetId: id, method: result.method, httpStatus: result.httpStatus ?? null },
+    );
+  }
+  response.json({
+    id: result.credentialSetId,
+    status: result.status,
+    method: result.method,
+    lastVerifiedAt: result.checkedAt.toISOString(),
   });
 });
 

@@ -154,6 +154,14 @@ export const start = async () => {
         batchSize: env.WORKER_BATCH_SIZE,
         maxAttempts: env.WORKER_MAX_ATTEMPTS,
         rescreenIntervalMs: env.WORKER_RESCREEN_INTERVAL_MS,
+        retentionEnabled: env.WORKER_RETENTION_ENABLED,
+        retentionIntervalMs: env.WORKER_RETENTION_INTERVAL_MS,
+        retentionBatchSize: env.WORKER_RETENTION_BATCH_SIZE,
+        retentionDryRun: env.RETENTION_DRY_RUN,
+        backgroundJobsEnabled: env.WORKER_BACKGROUND_JOBS_ENABLED,
+        backgroundJobsIntervalMs: env.WORKER_BACKGROUND_JOBS_INTERVAL_MS,
+        backgroundJobsBatchSize: env.WORKER_BACKGROUND_JOBS_BATCH_SIZE,
+        backgroundJobsLeaseSeconds: env.WORKER_BACKGROUND_JOBS_LEASE_SECONDS,
       })
     : undefined;
   workers?.start();

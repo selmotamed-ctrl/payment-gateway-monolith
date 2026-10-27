@@ -3726,6 +3726,26 @@ const seedRail = async (
   }
 };
 
+/**
+ * The scope of a seeded route.
+ *
+ * The scope lists the merchants, the applications, the risk tiers and the
+ * channels a route is limited to. A list that is empty carries no
+ * restriction, and the resolver of the visible rails treats a missing key as
+ * unrestricted, so the empty lists are dropped instead of being written as
+ * an empty array (which would exclude every merchant).
+ */
+export const normalizeRouteScope = (scope: Record<string, unknown>): Record<string, unknown> => {
+  const output: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(scope)) {
+    if (Array.isArray(value) && value.length === 0) {
+      continue;
+    }
+    output[key] = value;
+  }
+  return output;
+};
+
 const seedRoutes = async (
   prisma: PrismaClient,
   rail: BlueprintRail,
@@ -3756,7 +3776,7 @@ const seedRoutes = async (
         status: route.status,
         healthState: route.healthState,
         maintenanceWindows: json([]),
-        scope: json(route.scope),
+        scope: json(normalizeRouteScope(route.scope)),
       },
       create: {
         railId: railRow.id,
@@ -3773,7 +3793,7 @@ const seedRoutes = async (
         status: route.status,
         healthState: route.healthState,
         maintenanceWindows: json([]),
-        scope: json(route.scope),
+        scope: json(normalizeRouteScope(route.scope)),
       },
     });
 
@@ -3911,8 +3931,7 @@ const seedChannels = async (
   }
 };
 
-export const seedBlueprints = async (prisma: PrismaClient) => {
-  const actor = await prisma.user.findUnique({
+export const seedBlueprints = async (prisma: PrismaClient) => {  const actor = await prisma.user.findUnique({
     where: { email: SEED_ACTOR_EMAIL },
     select: { id: true },
   });
@@ -3988,4 +4007,70 @@ export const seedBlueprints = async (prisma: PrismaClient) => {
       await seedChannels(prisma, gateway, version.id);
     }
   }
+};
+/**
+ * The platform owned credential sets of the seeded gateways.
+ *
+ * Design v5 §6: a route is only visible when its credential set is
+ * `VERIFIED`, and a route with the `PLATFORM` credential policy needs a
+ * credential set that the platform owns. Without these rows the seeded
+ * catalogue has no visible rail at all, so no payment can start.
+ *
+ * One set is seeded per gateway and environment. The external merchant id of
+ * a platform owned set is the sentinel `PLATFORM`, because the uniqueness
+ * constraint of the table is `(gateway_id, env, external_merchant_id)`.
+ *
+ * The entries are empty: a real secret is only ever written through the
+ * credential set API, which encrypts it with the vault. The set is seeded as
+ * `VERIFIED` so that a freshly seeded database exposes its routes; the
+ * operator replaces the entries with the real credentials and the set is
+ * verified again.
+ */
+export const PLATFORM_EXTERNAL_MERCHANT_ID = "PLATFORM";
+
+export const seedPlatformCredentialSets = async (prisma: PrismaClient): Promise<number> => {
+  const versions = await prisma.gatewayVersion.findMany({
+    where: { state: "LIVE" },
+    include: { gateway: { select: { id: true, code: true } }, environments: true },
+  });
+  let seeded = 0;
+  for (const version of versions) {
+    for (const environment of version.environments) {
+      const existing = await prisma.credentialSet.findFirst({
+        where: {
+          gatewayId: version.gateway.id,
+          env: environment.env,
+          externalMerchantId: PLATFORM_EXTERNAL_MERCHANT_ID,
+        },
+      });
+      if (existing) {
+        await prisma.credentialSet.update({
+          where: { id: existing.id },
+          data: {
+            ownerType: "PLATFORM",
+            ownerMerchantId: null,
+            settlementTarget: "PLATFORM_CLEARING",
+            status: "VERIFIED",
+            lastVerifiedAt: existing.lastVerifiedAt ?? new Date(),
+          },
+        });
+        continue;
+      }
+      await prisma.credentialSet.create({
+        data: {
+          gatewayId: version.gateway.id,
+          env: environment.env,
+          ownerType: "PLATFORM",
+          ownerMerchantId: null,
+          externalMerchantId: PLATFORM_EXTERNAL_MERCHANT_ID,
+          settlementTarget: "PLATFORM_CLEARING",
+          entriesCiphertext: json([]),
+          status: "VERIFIED",
+          lastVerifiedAt: new Date(),
+        },
+      });
+      seeded += 1;
+    }
+  }
+  return seeded;
 };

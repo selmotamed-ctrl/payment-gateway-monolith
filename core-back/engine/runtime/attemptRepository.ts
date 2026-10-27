@@ -36,10 +36,14 @@ interface AttemptRow {
   credentialSetId?: string;
   commissionProfileId?: string;
   feeBearer?: string;
+  gatewayId?: string;
   settlementTarget?: string;
   platformCommissionAmount?: unknown;
   netMerchantAmount?: unknown;
-  gatewayVersion?: { setting?: { maxOtpAttempts: number } | null; gateway?: { kind?: string } | null } | null;
+  gatewayVersion?: {
+    setting?: { maxOtpAttempts: number } | null;
+    gateway?: { id?: string; kind?: string } | null;
+  } | null;
   route?: { mismatchPolicy?: unknown; costModel?: unknown } | null;
 }
 
@@ -128,6 +132,11 @@ const toAttempt = (row: AttemptRow): DynamicAttempt => {
     railId: row.railId,
     routeId: row.routeId,
     gatewayVersionId: row.gatewayVersionId,
+    // `payment_attempts` has no `gateway_id` column: the gateway of an
+    // attempt is the gateway of the version the attempt pins (design v5 §9.1
+    // rule 1). The outbound consumer is resolved from it, so the projection
+    // has to carry it.
+    gatewayId: row.gatewayVersion?.gateway?.id ?? row.gatewayId,
     credentialSetId: row.credentialSetId,
     commissionProfileId: row.commissionProfileId,
     feeBearer: row.feeBearer as DynamicAttempt["feeBearer"],
@@ -154,7 +163,7 @@ export class PrismaAttemptRepository implements AttemptRepository {
     const row = await this.client.paymentAttempt.findUnique({
       where: { id: attemptId },
       include: {
-        gatewayVersion: { include: { setting: true } },
+        gatewayVersion: { include: { setting: true, gateway: { select: { id: true, kind: true } } } },
         route: { select: { mismatchPolicy: true, costModel: true } },
       },
     }) as AttemptRow | null;
@@ -194,7 +203,7 @@ export class PrismaAttemptRepository implements AttemptRepository {
       where: { id: attemptId },
       data,
       include: {
-        gatewayVersion: { include: { setting: true } },
+        gatewayVersion: { include: { setting: true, gateway: { select: { id: true, kind: true } } } },
         route: { select: { mismatchPolicy: true, costModel: true } },
       },
     }) as AttemptRow;

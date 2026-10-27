@@ -4,7 +4,7 @@ import { z } from "zod";
 import { Prisma, type ContentType } from "../../generated/prisma/client";
 import { client } from "../../prisma/client";
 import { invalidationBus } from "../../lib/invalidationBus";
-import { StatementIngestor } from "../../engine/reconciliation/StatementIngestor";
+import { createReconciliationUploadHandler } from "./reconciliationUpload";
 import { getPlatformRuntime } from "../../engine/runtime";
 import { InvariantVerifier, naturalBalance } from "../../engine/ledger/InvariantVerifier";
 import { moneyToString } from "../../engine/db/money";
@@ -21,11 +21,22 @@ import {
 import type { Decimal } from "decimal.js";
 import { decimal } from "../../engine/ledger/LedgerPoster";
 import { LedgerPoster } from "../../engine/ledger/LedgerPoster";
-import { GoLiveGateValidator } from "../../engine/flow/GoLiveGateValidator";
+import {
+  GoLiveGateValidator,
+  type ChannelVerificationEvidence,
+  type GoLiveValidationResult,
+} from "../../engine/flow/GoLiveGateValidator";
+import { Vault } from "../../engine/crypto/Vault";
+import { ApiConsumerError } from "../../engine/apiConsumer/ApiConsumer";
+import type { AdapterAttempt } from "../../engine/flow/NativeAdapterRegistry";
+import {
+  MOCK_SCENARIOS,
+  MockGatewayServer,
+  type MockScenario,
+} from "../../engine/mockGateway/MockGatewayServer";
 import {
   executeApprovalSubject,
   executeCashout,
-  openDisputeWithDraftedAdjustment,
   type GovernanceExecutionContext,
 } from "../../engine/governance/GovernanceExecution";
 import { evaluateRouteDailyCap } from "../../engine/flow/VisibleRailsResolver";
@@ -37,6 +48,12 @@ import { requireAuthentication, requireAuthorities, principalOf } from "../middl
 import { actorFromRequest, assertCheckerAuthority, assertCheckerIsNotMaker, SYSTEM_AUTOMATION_PRINCIPAL } from "../middleware/makerCheckerGuard";
 
 const router = express.Router();
+
+/**
+ * The vault of the credential sets. The secrets are encrypted with the very
+ * same key the merchant route uses, so a secret is never stored in clear.
+ */
+const vault = new Vault();
 
 /**
  * The execution context of the governance module.
@@ -710,6 +727,49 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
     throw new ApiError(409, "APPROVAL_NOT_PENDING", "The approval request is not pending review");
   }
   const platform = getPlatformRuntime(client as never);
+  if (approval.subjectType === "GATEWAY_VERSION") {
+    // The go-live gates are evaluated before the approval is consumed, so a
+    // version that fails them keeps its pending approval and the operator
+    // sees the failed gates.
+    await assertGoLiveGates(approval.subjectId, actor.userId);
+  }
+  if (approval.subjectType === "ADJUSTMENT") {
+    // The execution of an adjustment moves the money, so it is a background
+    // job: the request records the checker and queues the execution. The job
+    // never invents a checker, it executes with the one that is recorded on
+    // the approval request.
+    const { updated, job } = await client.$transaction(async (tx) => {
+      const updatedApproval = await tx.approvalRequest.update({
+        where: { id },
+        data: {
+          checkerUserId: actor.userId,
+          state: "APPROVED",
+          riskAcceptanceNote: body.riskAcceptanceNote,
+        },
+      });
+      const queued = await platform.repositories.jobs.enqueueJob(tx as never, {
+        jobType: "ADJUSTMENT_EXECUTION",
+        referenceType: "APPROVAL_REQUEST",
+        referenceId: id,
+        payload: {
+          kind: "ADJUSTMENT_EXECUTION",
+          approvalRequestId: id,
+          outcome: body.outcome ?? null,
+          notes: body.notes ?? null,
+          checkerRole: actor.role,
+        },
+      });
+      return { updated: updatedApproval, job: queued };
+    });
+    response.status(202).json({
+      id: updated.id,
+      state: updated.state,
+      checkerUserId: updated.checkerUserId,
+      jobId: job.id,
+      status: "QUEUED",
+    });
+    return;
+  }
   // The approved change is executed, not just recorded: the ledger posting,
   // the state change of the subject and the audit trail share one transaction.
   const { updated, execution } = await client.$transaction(async (tx) => {
@@ -742,7 +802,7 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
     return { updated: updatedApproval, execution: result };
   });
   if (approval.subjectType === "GATEWAY_VERSION") {
-    await activateGatewayVersion(approval.subjectId);
+    await activateGatewayVersion(approval.subjectId, actor.userId);
   }
   response.json({
     id: updated.id,
@@ -759,14 +819,25 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
 });
 
 /**
- * Promotes a gateway version to LIVE. The previous live version is
- * superseded and the outbound consumer cache of the gateway is invalidated.
+ * Promotes a gateway version to LIVE.
+ *
+ * Design v5 §14: "No `gateway_versions` row can transition to `LIVE` without
+ * passing all 12 Go-Live Gates." The gates are evaluated against the
+ * evidence the sandbox suite runner persisted, and the transition is refused
+ * with the ids of the failed gates. The previous live version is superseded
+ * and the outbound consumer cache of the gateway is invalidated.
  */
-const activateGatewayVersion = async (versionId: string): Promise<void> => {
+export const activateGatewayVersion = async (
+  versionId: string,
+  checkerUserId: string | null = null,
+): Promise<void> => {
   const version = await client.gatewayVersion.findUnique({ where: { id: versionId } });
   if (!version) {
-    return;
+    throw new ApiError(404, "GATEWAY_VERSION_NOT_FOUND", "The gateway version does not exist");
   }
+  // The gates are evaluated before anything is written, so a version that
+  // fails them never becomes the live configuration of the gateway.
+  await assertGoLiveGates(versionId, checkerUserId);
   await client.$transaction(async (tx) => {
     await tx.gatewayVersion.updateMany({
       where: { gatewayId: version.gatewayId, state: "LIVE", id: { not: version.id } },
@@ -1229,6 +1300,266 @@ router.post("/gateways/:id/rollback", async (request: Request, response: Respons
   // The outbound consumers of the gateway are now stale.
   await invalidationBus.invalidateGateway(id, "gateway-version-rolled-back");
   response.json({ id: gateway.id, activeVersionId: gateway.activeVersionId });
+});
+
+/* ------------------------------------------------------------------ *
+ * Credential sets (design v5 §6 layer 2, §7.2 and §16.3)
+ * ------------------------------------------------------------------ */
+
+/**
+ * The sentinel of the external merchant id of a platform owned credential
+ * set. A platform owned set has no merchant on the other side, but the
+ * uniqueness constraint of the table is `(gateway_id, env,
+ * external_merchant_id)`, so the platform sets need a stable value as well.
+ */
+const PLATFORM_EXTERNAL_MERCHANT_ID = "PLATFORM";
+
+const credentialEntrySchema = z.object({
+  key: z.string().min(1).max(64),
+  type: z.enum(["HEADER", "QUERY", "BODY", "CERTIFICATE"]),
+  value: z.string().max(4096),
+  isSecret: z.boolean().default(true),
+});
+
+const credentialSetSchema = z
+  .object({
+    gatewayCode: z.string().min(2).max(64),
+    env: z.enum(["SANDBOX", "LIVE"]),
+    ownerType: z.enum(["PLATFORM", "MERCHANT"]),
+    ownerMerchantId: z.string().min(1).max(64).optional(),
+    externalMerchantId: z.string().min(2).max(120).optional(),
+    settlementTarget: z.enum(["PLATFORM_CLEARING", "MERCHANT_DIRECT", "PROVIDER_HELD"]),
+    entries: z.array(credentialEntrySchema).min(1).max(40),
+  })
+  .strict();
+
+const credentialSetEntry = (entry: {
+  key: string;
+  type: string;
+  value: string;
+  isSecret: boolean;
+  secretVersion?: number;
+}) => ({
+  key: entry.key,
+  type: entry.type,
+  value: entry.value,
+  isSecret: entry.isSecret,
+  secretVersion: entry.secretVersion ?? 1,
+});
+
+const credentialSetView = (credentialSet: {
+  id: string;
+  env: string;
+  ownerType: string;
+  ownerMerchantId: string | null;
+  externalMerchantId: string | null;
+  settlementTarget: string;
+  status: string;
+  lastVerifiedAt: Date | null;
+  expiresAt: Date | null;
+  gateway?: { code: string } | null;
+}) => ({
+  id: credentialSet.id,
+  gatewayCode: credentialSet.gateway?.code ?? null,
+  env: credentialSet.env,
+  ownerType: credentialSet.ownerType,
+  ownerMerchantId: credentialSet.ownerMerchantId,
+  externalMerchantId: credentialSet.externalMerchantId,
+  settlementTarget: credentialSet.settlementTarget,
+  status: credentialSet.status,
+  lastVerifiedAt: credentialSet.lastVerifiedAt,
+  expiresAt: credentialSet.expiresAt,
+});
+
+router.get("/credential-sets", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["credential:read", "gateway:read"]);
+  const query = z
+    .object({
+      gatewayCode: z.string().max(64).optional(),
+      env: z.enum(["SANDBOX", "LIVE"]).optional(),
+      ownerType: z.enum(["PLATFORM", "MERCHANT"]).optional(),
+      status: z.enum(["UNTESTED", "VERIFIED", "FAILING", "REVOKED"]).optional(),
+    })
+    .parse(request.query ?? {});
+  const credentialSets = await client.credentialSet.findMany({
+    where: {
+      ...(query.gatewayCode ? { gateway: { code: query.gatewayCode } } : {}),
+      ...(query.env ? { env: query.env } : {}),
+      ...(query.ownerType ? { ownerType: query.ownerType } : {}),
+      ...(query.status ? { status: query.status } : {}),
+    },
+    include: { gateway: { select: { code: true } } },
+    orderBy: { createdAt: "desc" },
+    take: 500,
+  });
+  response.json({ credentialSets: credentialSets.map(credentialSetView) });
+});
+
+router.get("/credential-sets/:id", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["credential:read", "gateway:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const credentialSet = await client.credentialSet.findUnique({
+    where: { id },
+    include: { gateway: { select: { code: true } } },
+  });
+  if (!credentialSet) {
+    throw new ApiError(404, "CREDENTIAL_SET_NOT_FOUND", "The credential set does not exist");
+  }
+  response.json({
+    ...credentialSetView(credentialSet),
+    // The secrets are write only: they are never read back.
+    entries: (credentialSet.entriesCiphertext as Array<{ key: string; type: string; isSecret: boolean }>).map(
+      (entry) => ({
+        key: entry.key,
+        type: entry.type,
+        isSecret: entry.isSecret,
+        value: entry.isSecret ? "[REDACTED]" : "[WRITE_ONLY]",
+      }),
+    ),
+  });
+});
+
+router.post("/credential-sets", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["credential:write", "gateway:write"]);
+  const body = parseOrThrow(credentialSetSchema, request.body);
+  const gateway = await client.gateway.findUnique({ where: { code: body.gatewayCode } });
+  if (!gateway) {
+    throw new ApiError(404, "GATEWAY_NOT_FOUND", "The gateway does not exist");
+  }
+  if (body.ownerType === "MERCHANT" && !body.ownerMerchantId) {
+    throw new ApiError(
+      400,
+      "CREDENTIAL_SET_OWNER_REQUIRED",
+      "A merchant owned credential set requires the merchant that owns it",
+    );
+  }
+  const externalMerchantId = body.ownerType === "PLATFORM"
+    ? (body.externalMerchantId ?? PLATFORM_EXTERNAL_MERCHANT_ID)
+    : (body.externalMerchantId ?? body.ownerMerchantId ?? "");
+  const encryptedEntries = await Promise.all(
+    body.entries.map(async (entry) =>
+      credentialSetEntry({
+        ...entry,
+        value: entry.isSecret ? await vault.encryptSecret(entry.value, "credential-set") : entry.value,
+      }),
+    ),
+  );
+  const credentialSet = await client.credentialSet.create({
+    data: {
+      gatewayId: gateway.id,
+      env: body.env,
+      ownerType: body.ownerType,
+      ownerMerchantId: body.ownerType === "MERCHANT" ? body.ownerMerchantId : null,
+      externalMerchantId,
+      settlementTarget: body.settlementTarget,
+      entriesCiphertext: encryptedEntries,
+      // A new credential set is never trusted before it was proven.
+      status: "UNTESTED",
+    },
+  });
+  await invalidationBus.invalidateCredential(credentialSet.id, "credential-set-created");
+  response.status(201).json({ id: credentialSet.id, status: credentialSet.status });
+});
+
+router.put("/credential-sets/:id", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["credential:write", "gateway:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z.object({ entries: z.array(credentialEntrySchema).min(1).max(40) }).strict(),
+    request.body,
+  );
+  const credentialSet = await client.credentialSet.findUnique({ where: { id } });
+  if (!credentialSet) {
+    throw new ApiError(404, "CREDENTIAL_SET_NOT_FOUND", "The credential set does not exist");
+  }
+  const encryptedEntries = await Promise.all(
+    body.entries.map(async (entry) =>
+      credentialSetEntry({
+        ...entry,
+        secretVersion: 2,
+        value: entry.isSecret ? await vault.encryptSecret(entry.value, "credential-set") : entry.value,
+      }),
+    ),
+  );
+  // A rotated secret is untrusted again until the credential check proves it.
+  const updated = await client.credentialSet.update({
+    where: { id: credentialSet.id },
+    data: { entriesCiphertext: encryptedEntries, status: "UNTESTED", lastVerifiedAt: null },
+  });
+  await invalidationBus.invalidateCredential(updated.id, "credential-set-rotated");
+  response.json({ id: updated.id, status: updated.status });
+});
+
+/**
+ * Runs the credential check of a credential set.
+ *
+ * The check is the `CREDENTIAL_CHECK` phase of design v5 §7.4: the version
+ * either defines the steps that prove the credentials or the platform probes
+ * the environment of the gateway with the `ApiConsumer`. The verdict is
+ * recorded on the credential set: `VERIFIED` with the verification time, or
+ * `FAILING`.
+ */
+router.post("/credential-sets/:id/verify", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["credential:write", "gateway:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z.object({ gatewayVersionId: z.string().min(1).max(64).optional() }).strict(),
+    request.body ?? {},
+  );
+  const credentialSet = await client.credentialSet.findUnique({ where: { id } });
+  if (!credentialSet) {
+    throw new ApiError(404, "CREDENTIAL_SET_NOT_FOUND", "The credential set does not exist");
+  }
+  const platform = getPlatformRuntime(client as never);
+  const result = await platform.credentialCheck.verify(id, {
+    ...(body.gatewayVersionId ? { gatewayVersionId: body.gatewayVersionId } : {}),
+  });
+  await invalidationBus.invalidateCredential(id, "credential-set-verified");
+  if (result.status !== "VERIFIED") {
+    throw new ApiError(
+      502,
+      "CREDENTIAL_VERIFICATION_FAILED",
+      result.reason ?? "The credentials of the gateway could not be verified",
+      { credentialSetId: id, method: result.method, httpStatus: result.httpStatus ?? null },
+    );
+  }
+  response.json({
+    id: result.credentialSetId,
+    status: result.status,
+    method: result.method,
+    lastVerifiedAt: result.checkedAt.toISOString(),
+  });
+});
+
+router.post("/credential-sets/:id/revoke", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["credential:write", "gateway:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z.object({ reason: z.string().min(2).max(500).optional() }).strict(),
+    request.body ?? {},
+  );
+  const credentialSet = await client.credentialSet.findUnique({ where: { id } });
+  if (!credentialSet) {
+    throw new ApiError(404, "CREDENTIAL_SET_NOT_FOUND", "The credential set does not exist");
+  }
+  const actor = actorFromRequest(request);
+  const updated = await client.credentialSet.update({
+    where: { id: credentialSet.id },
+    data: { status: "REVOKED" },
+  });
+  await invalidationBus.invalidateCredential(updated.id, "credential-set-revoked");
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role,
+      action: "CREDENTIAL_SET_REVOKED",
+      entityType: "CREDENTIAL_SET",
+      entityId: updated.id,
+      beforeJson: { status: credentialSet.status },
+      afterJson: { status: updated.status, reason: body.reason ?? null },
+    },
+  });
+  response.json({ id: updated.id, status: updated.status });
 });
 
 const versionParamsSchema = z.object({ vid: z.string().min(1).max(64) });
@@ -1861,12 +2192,12 @@ router.post("/gateway-versions/:vid/run-suite", async (request: Request, respons
     z.object({ scenarios: z.array(z.string().max(64)).max(30).optional() }).strict(),
     request.body ?? {},
   );
+  // The evidence is collected from the database and from the sandbox suite
+  // itself, and it is persisted: the activation reads it back instead of
+  // trusting a set of constants.
+  const evidence = await collectGoLiveEvidence(vid);
+  await persistGoLiveEvidence(vid, evidence);
   const gates = new GoLiveGateValidator();
-  const channels = await client.confirmationChannel.findMany({ where: { gatewayVersionId: vid } });
-  const gateway = await client.gateway.findUnique({ where: { id: version.gatewayId } });
-  const routes = await client.railRoute.findMany({ where: { gatewayId: version.gatewayId } });
-  const profiles = await client.commissionProfile.findMany({ where: { railCode: { in: (await client.rail.findMany({ where: { routes: { some: { gatewayId: version.gatewayId } } } })).map((rail) => rail.code) } } });
-  const sources = await client.statementSource.findMany({ where: { gatewayId: version.gatewayId } });
   const checker = await client.approvalRequest.findFirst({
     where: { subjectType: "GATEWAY_VERSION", subjectId: vid, checkerUserId: { not: null } },
     orderBy: { updatedAt: "desc" },
@@ -1874,31 +2205,12 @@ router.post("/gateway-versions/:vid/run-suite", async (request: Request, respons
   const report = await gates.validate({
     makerUserId: version.createdById,
     checkerUserId: checker?.checkerUserId ?? "",
-    scenarioResults: [],
-    amountPipelineContractPassed: false,
-    referenceFormatContractPassed: false,
-    cryptographicSignatureContractPassed: false,
-    channels: channels.map((channel) => ({
-      type: channel.type,
-      verificationMethod: channel.verifyMethod,
-      mustInquire: channel.mustInquire,
-    })),
-    rollbackVersionId: version.rollbackVersionId,
-    routeLimitsPreviewed: routes.length > 0,
-    commissionProfilePreviewed: profiles.length > 0,
-    statementParserPreviewed: sources.length > 0,
-    evidenceLevel: gateway?.verificationState === "VERIFIED" ? "VERIFIED" : "UNVERIFIED",
-    internalContractSuitePassed: false,
-    highRiskExecutiveAcceptanceSigned: false,
-    panFieldCount: 0,
-    pciScopeReviewPassed: false,
-    canaryTrafficPlanConfigured: false,
-    routeAlertsConfigured: false,
-    runbooksConfigured: false,
+    ...evidence,
   });
   response.json({
     gatewayVersionId: version.id,
     requestedScenarios: body.scenarios ?? [],
+    evidence,
     report,
   });
 });
@@ -1924,6 +2236,759 @@ router.post("/gateway-versions/:vid/submit-approval", async (request: Request, r
     data: { state: "PENDING_APPROVAL", approvalRequestId: approval.id },
   });
   response.status(202).json({ status: "PENDING_APPROVAL", approvalRequestId: approval.id });
+});
+
+/* ------------------------------------------------------------------ *
+ * The go-live evidence of design v5 §14
+ * ------------------------------------------------------------------ */
+
+/**
+ * The result of one contract test.
+ */
+interface ContractResult {
+  passed: boolean;
+  details: string[];
+}
+
+/**
+ * The evidence the twelve go-live gates consume.
+ *
+ * Every field is collected from the database or from the sandbox suite, so
+ * the gate decision is a decision about recorded facts.
+ */
+interface GoLiveEvidenceRecord {
+  scenarioResults: { scenario: string; passed: boolean; details?: string }[];
+  amountPipelineContractPassed: boolean;
+  referenceFormatContractPassed: boolean;
+  cryptographicSignatureContractPassed: boolean;
+  channels: ChannelVerificationEvidence[];
+  rollbackVersionId: string | null;
+  routeLimitsPreviewed: boolean;
+  commissionProfilePreviewed: boolean;
+  statementParserPreviewed: boolean;
+  evidenceLevel: "VERIFIED" | "INTERNAL" | "UNVERIFIED" | "PARTIAL" | "HIGH_RISK";
+  internalContractSuitePassed: boolean;
+  highRiskExecutiveAcceptanceSigned: boolean;
+  panFieldCount: number;
+  pciScopeReviewPassed: boolean;
+  canaryTrafficPlanConfigured: boolean;
+  routeAlertsConfigured: boolean;
+  runbooksConfigured: boolean;
+  /** The findings of the contract tests, for the operator panel. */
+  contractDetails: Record<string, string[]>;
+}
+
+const AMOUNT_PIPELINE_SCALES = [1, 100, 1000];
+const AMOUNT_PIPELINE_PRECISIONS = [0, 1, 2, 3, 4];
+const AMOUNT_PIPELINE_ROUNDINGS = ["NONE", "NEAREST", "UP", "DOWN"];
+const AMOUNT_PIPELINE_FORMATS = ["STRING_DECIMAL", "INTEGER_MINOR_UNITS", "NUMBER"];
+/** The platform stores money with four decimals (design v5 §7 rule 6). */
+const PLATFORM_MONEY_PRECISION = 4;
+
+const CRYPTO_ALGORITHMS = ["HMAC_SHA256", "HMAC_SHA512", "RSA_SHA256", "SHA256"];
+const CRYPTO_CANONICALIZATIONS = [
+  "MOAMALAT_SECURE_HASH",
+  "DPAY_WEBHOOK_VERIFY",
+  "PLUTU_CALLBACK_HASH",
+  "MYPAY_RAW_BODY",
+  "SORTED_KEY_VALUE_AMP",
+  "TIMESTAMP_DOT_RAW_BODY",
+  "SORTED_VALUES_HASH",
+  "TEMPLATE_STRING",
+  "JSON_CANONICAL",
+  "RAW_BODY",
+];
+const CRYPTO_KEY_ENCODINGS = ["UTF8", "HEX", "BASE64"];
+const CRYPTO_OUTPUT_ENCODINGS = ["HEX_LOWER", "HEX_UPPER", "BASE64"];
+
+const CANONICAL_AMOUNT = "100.0000";
+const CANONICAL_REFERENCE = "PA-CONTRACT-0001";
+
+/**
+ * Rounds an amount to the precision of the gateway.
+ *
+ * The arithmetic is exact: no floating point is involved at any point of the
+ * money pipeline.
+ */
+const roundAmount = (
+  value: Decimal,
+  precision: number,
+  rounding: string,
+): Decimal => {
+  const factor = decimal(10).pow(precision);
+  if (rounding === "NONE") {
+    return value;
+  }
+  const scaled = value.mul(factor);
+  if (rounding === "UP") {
+    return scaled.ceil().div(factor);
+  }
+  if (rounding === "DOWN") {
+    return scaled.floor().div(factor);
+  }
+  return scaled.round().div(factor);
+};
+
+/**
+ * Contract test of gate 3: the amount pipeline of the gateway version.
+ *
+ * The pipeline has to be exact, reversible and inside the closed sets of the
+ * design. A gateway that asks for more decimals than the platform stores, or
+ * a scale that produces fractional minor units, fails the contract.
+ */
+const runAmountPipelineContract = (setting: {
+  amountScale: number;
+  amountPrecision: number;
+  amountRounding: string;
+  amountFormat: string;
+} | null): ContractResult => {
+  const details: string[] = [];
+  if (!setting) {
+    return { passed: false, details: ["The gateway version has no settings"] };
+  }
+  const scale = Number(setting.amountScale);
+  const precision = Number(setting.amountPrecision);
+  const rounding = String(setting.amountRounding ?? "NONE").toUpperCase();
+  const format = String(setting.amountFormat ?? "STRING_DECIMAL").toUpperCase();
+  if (!AMOUNT_PIPELINE_SCALES.includes(scale)) {
+    details.push(`The amount scale '${scale}' is not one of ${AMOUNT_PIPELINE_SCALES.join(", ")}`);
+  }
+  if (!AMOUNT_PIPELINE_PRECISIONS.includes(precision)) {
+    details.push(`The amount precision '${precision}' is not a number of decimals`);
+  }
+  if (precision > PLATFORM_MONEY_PRECISION) {
+    details.push(
+      `The gateway asks for ${precision} decimals while the platform stores ${PLATFORM_MONEY_PRECISION}`,
+    );
+  }
+  if (!AMOUNT_PIPELINE_ROUNDINGS.includes(rounding)) {
+    details.push(`The amount rounding '${rounding}' is not one of ${AMOUNT_PIPELINE_ROUNDINGS.join(", ")}`);
+  }
+  if (!AMOUNT_PIPELINE_FORMATS.includes(format)) {
+    details.push(`The amount format '${format}' is not one of ${AMOUNT_PIPELINE_FORMATS.join(", ")}`);
+  }
+  if (details.length > 0) {
+    return { passed: false, details };
+  }
+  for (const canonical of [CANONICAL_AMOUNT, "10.5000", "0.0100"]) {
+    const value = decimal(canonical);
+    const rounded = roundAmount(value, precision, rounding);
+    if (rounding === "NONE" && !rounded.eq(value)) {
+      details.push(`The amount ${canonical} is not representable with ${precision} decimals and the rounding is NONE`);
+      continue;
+    }
+    const minorUnits = rounded.mul(scale);
+    if (!minorUnits.isInteger()) {
+      details.push(`The scaled amount of ${canonical} is not a whole number of minor units`);
+      continue;
+    }
+    if (!minorUnits.div(scale).eq(rounded)) {
+      details.push(`The amount pipeline is not reversible for ${canonical}`);
+      continue;
+    }
+    if (format === "INTEGER_MINOR_UNITS" && !minorUnits.isInteger()) {
+      details.push(`The amount ${canonical} cannot be sent as integer minor units`);
+    }
+  }
+  return { passed: details.length === 0, details };
+};
+
+/**
+ * Renders the reference of an attempt with the reference format of the
+ * gateway version.
+ */
+const renderReference = (template: string, prefix: string, reference: string): string => {
+  const rendered = template
+    .replace(/\{attempt\.reference\}/g, reference)
+    .replace(/\{reference\}/g, reference);
+  return rendered.startsWith(prefix) ? rendered : `${prefix}${rendered}`;
+};
+
+/**
+ * Contract test of gate 4: the reference format of the gateway version.
+ *
+ * The format has to carry a prefix, a template and a pattern, and the
+ * rendered reference has to match the pattern of the gateway.
+ */
+const runReferenceFormatContract = (
+  setting: { referenceFormat: unknown } | null,
+): ContractResult => {
+  const details: string[] = [];
+  if (!setting) {
+    return { passed: false, details: ["The gateway version has no settings"] };
+  }
+  const format = (setting.referenceFormat ?? {}) as Record<string, unknown>;
+  const prefix = typeof format.prefix === "string" ? format.prefix : "";
+  const template = typeof format.template === "string" ? format.template : "";
+  const pattern = typeof format.pattern === "string" ? format.pattern : "";
+  if (!prefix) {
+    details.push("The reference format has no prefix");
+  }
+  if (!template) {
+    details.push("The reference format has no template");
+  }
+  if (!pattern) {
+    details.push("The reference format has no pattern");
+  }
+  if (details.length > 0) {
+    return { passed: false, details };
+  }
+  const rendered = renderReference(template, prefix, CANONICAL_REFERENCE);
+  if (!rendered.startsWith(prefix)) {
+    details.push(`The rendered reference '${rendered}' does not start with the prefix '${prefix}'`);
+  }
+  let matches = false;
+  try {
+    matches = new RegExp(pattern).test(rendered);
+  } catch {
+    details.push(`The reference pattern '${pattern}' is not a valid regular expression`);
+  }
+  if (!matches) {
+    details.push(`The rendered reference '${rendered}' does not match '${pattern}'`);
+  }
+  return { passed: details.length === 0, details };
+};
+
+/**
+ * Contract test of gate 5: the cryptographic profiles of the gateway version.
+ *
+ * Every profile has to be complete, and every signing step has to reference
+ * a profile that exists.
+ */
+const runCryptoSignatureContract = (
+  profiles: readonly {
+    id: string;
+    name: string;
+    purpose: string;
+    algorithm: string;
+    secretKeyRef: string | null;
+    secretKeyEncoding: string;
+    canonicalizationMode: string;
+    outputEncoding: string;
+  }[],
+  signingProfileIds: readonly string[],
+): ContractResult => {
+  const details: string[] = [];
+  if (profiles.length === 0) {
+    details.push("The gateway version has no cryptographic profile");
+  }
+  for (const profile of profiles) {
+    if (!CRYPTO_ALGORITHMS.includes(profile.algorithm)) {
+      details.push(`The profile '${profile.name}' uses the unknown algorithm '${profile.algorithm}'`);
+    }
+    if (!CRYPTO_CANONICALIZATIONS.includes(profile.canonicalizationMode)) {
+      details.push(
+        `The profile '${profile.name}' uses the unknown canonicalization '${profile.canonicalizationMode}'`,
+      );
+    }
+    if (!CRYPTO_KEY_ENCODINGS.includes(profile.secretKeyEncoding)) {
+      details.push(
+        `The profile '${profile.name}' uses the unknown key encoding '${profile.secretKeyEncoding}'`,
+      );
+    }
+    if (!CRYPTO_OUTPUT_ENCODINGS.includes(profile.outputEncoding)) {
+      details.push(
+        `The profile '${profile.name}' uses the unknown output encoding '${profile.outputEncoding}'`,
+      );
+    }
+    if (profile.purpose === "OUTBOUND_SIGN" && !profile.secretKeyRef) {
+      details.push(`The signing profile '${profile.name}' has no secret key reference`);
+    }
+  }
+  for (const profileId of signingProfileIds) {
+    if (!profiles.some((profile) => profile.id === profileId)) {
+      details.push(`A signing step references the unknown crypto profile '${profileId}'`);
+    }
+  }
+  return { passed: details.length === 0, details };
+};
+
+const sandboxAttempt = (
+  scenario: MockScenario,
+  overrides: Partial<AdapterAttempt> = {},
+): AdapterAttempt => ({
+  id: `sandbox-${scenario}`,
+  reference: `PA-SANDBOX-${scenario}`,
+  status: "CREATED",
+  env: "SANDBOX",
+  currency: "LYD",
+  requestedAmount: CANONICAL_AMOUNT,
+  totalChargedAmount: CANONICAL_AMOUNT,
+  maxOtpAttempts: 3,
+  context: { scenario },
+  ...overrides,
+});
+
+const scenarioFailure = (message: string): Error => new Error(message);
+
+/**
+ * Runs one scenario of the sandbox suite.
+ *
+ * The scenario is not a snapshot of a happy path: every scenario asserts the
+ * behaviour the platform has to show, so a gateway that answers wrongly (a
+ * mismatching amount, a webhook of the wrong environment, an out of order
+ * webhook) is detected by the suite.
+ */
+const runSandboxScenario = async (
+  mock: MockGatewayServer,
+  scenario: MockScenario,
+): Promise<string> => {
+  const attempt = sandboxAttempt(scenario);
+  if (scenario === "CANCEL") {
+    const cancelled = await mock.initiate(attempt, { phone: "+218910000000" });
+    if (cancelled.status !== "CANCELLED") {
+      throw scenarioFailure(`the initiation ended in '${cancelled.status}' instead of 'CANCELLED'`);
+    }
+    return "the initiation was cancelled";
+  }
+  const initiated = await mock.initiate(attempt, { phone: "+218910000000" });
+  if (initiated.status !== "AWAITING_CUSTOMER") {
+    throw scenarioFailure(`the initiation ended in '${initiated.status}' instead of 'AWAITING_CUSTOMER'`);
+  }
+  const confirmed = async (evidence: Record<string, unknown>) =>
+    mock.confirm(initiated.attempt, evidence);
+
+  switch (scenario) {
+    case "HAPPY_PATH": {
+      const result = await confirmed({ otp: "1234" });
+      if (result.status !== "SUCCEEDED") {
+        throw scenarioFailure(`the confirmation ended in '${result.status}' instead of 'SUCCEEDED'`);
+      }
+      const settled = decimal(String((result.outputs.response as { amount?: string } | undefined)?.amount ?? "0"));
+      if (!settled.eq(decimal(CANONICAL_AMOUNT))) {
+        throw scenarioFailure(`the confirmed amount '${settled.toFixed(4)}' is not the charged amount`);
+      }
+      return "the payment succeeded with the charged amount";
+    }
+    case "WRONG_OTP_RETRY_SUCCESS": {
+      const first = await confirmed({ otp: "0000" });
+      if (first.status !== "AWAITING_CUSTOMER" || first.canonicalError !== "RETRYABLE_OTP") {
+        throw scenarioFailure("the wrong OTP was not reported as a retryable OTP");
+      }
+      const second = await confirmed({ otp: "1234" });
+      if (second.status !== "SUCCEEDED") {
+        throw scenarioFailure(`the second confirmation ended in '${second.status}' instead of 'SUCCEEDED'`);
+      }
+      return "the wrong OTP was retried and the retry succeeded";
+    }
+    case "EXPIRED_OTP":
+    case "INSUFFICIENT_FUNDS":
+    case "CUSTOMER_LIMIT_HIT": {
+      const result = await confirmed({ otp: "1234" });
+      if (result.status !== "FAILED") {
+        throw scenarioFailure(`the confirmation ended in '${result.status}' instead of 'FAILED'`);
+      }
+      if (!result.canonicalError) {
+        throw scenarioFailure("the failure carried no canonical error");
+      }
+      return `the confirmation failed with '${result.canonicalError}'`;
+    }
+    case "CONFIRM_5XX":
+    case "CONFIRM_TIMEOUT": {
+      let uncertain = false;
+      try {
+        await confirmed({ otp: "1234" });
+      } catch (error) {
+        uncertain = error instanceof ApiConsumerError && error.moneyUncertain === true;
+      }
+      if (!uncertain) {
+        throw scenarioFailure("the uncertain outcome of the gateway was not detected");
+      }
+      return "the uncertain outcome of the gateway was detected";
+    }
+    case "MALFORMED_RESPONSE": {
+      const result = await confirmed({ otp: "1234" });
+      if (result.status !== "UNKNOWN") {
+        throw scenarioFailure(`the malformed answer ended in '${result.status}' instead of 'UNKNOWN'`);
+      }
+      return "the malformed answer was held as UNKNOWN";
+    }
+    case "AMOUNT_MISMATCH": {
+      const result = await confirmed({ otp: "1234" });
+      const settled = decimal(String((result.outputs.response as { amount?: string } | undefined)?.amount ?? "0"));
+      if (settled.eq(decimal(CANONICAL_AMOUNT))) {
+        throw scenarioFailure("the mismatching amount was not detected");
+      }
+      return "the mismatching amount was detected";
+    }
+    case "THREE_DECIMAL_ROUNDING": {
+      const rounded = roundAmount(decimal(CANONICAL_AMOUNT), 3, "NONE");
+      if (!rounded.eq(decimal(CANONICAL_AMOUNT))) {
+        throw scenarioFailure("the three decimal amount was not preserved");
+      }
+      const result = await confirmed({ otp: "1234" });
+      if (result.status !== "SUCCEEDED") {
+        throw scenarioFailure(`the confirmation ended in '${result.status}' instead of 'SUCCEEDED'`);
+      }
+      return "the three decimal amount was preserved";
+    }
+    case "DUPLICATE_WEBHOOK": {
+      const first = await mock.verifyCallback("webhook", {
+        attemptId: attempt.id,
+        scenario,
+        dedupeKey: `${scenario}:${attempt.id}`,
+        reference: attempt.reference,
+        amount: CANONICAL_AMOUNT,
+        currency: "LYD",
+        environment: "SANDBOX",
+      });
+      if (first.status !== "SUCCEEDED") {
+        throw scenarioFailure(`the webhook ended in '${first.status}' instead of 'SUCCEEDED'`);
+      }
+      const second = await mock.verifyCallback("webhook", {
+        attemptId: attempt.id,
+        scenario,
+        dedupeKey: `${scenario}:${attempt.id}`,
+        reference: attempt.reference,
+        amount: CANONICAL_AMOUNT,
+        currency: "LYD",
+        environment: "SANDBOX",
+      });
+      if (second.outputs.duplicate !== true) {
+        throw scenarioFailure("the duplicated webhook was not detected");
+      }
+      return "the duplicated webhook was detected";
+    }
+    case "OUT_OF_ORDER_WEBHOOK": {
+      const result = await mock.verifyCallback("webhook", {
+        attemptId: attempt.id,
+        scenario,
+        dedupeKey: `${scenario}:${attempt.id}`,
+        reference: attempt.reference,
+        amount: CANONICAL_AMOUNT,
+        currency: "LYD",
+        environment: "SANDBOX",
+      });
+      if (result.status !== "VERIFYING") {
+        throw scenarioFailure(`the out of order webhook ended in '${result.status}' instead of 'VERIFYING'`);
+      }
+      return "the out of order webhook was held for verification";
+    }
+    case "LATE_WEBHOOK_AFTER_EXPIRY": {
+      const result = await mock.verifyCallback("webhook", {
+        attemptId: attempt.id,
+        scenario,
+        dedupeKey: `${scenario}:${attempt.id}`,
+        reference: attempt.reference,
+        amount: CANONICAL_AMOUNT,
+        currency: "LYD",
+        environment: "SANDBOX",
+      });
+      if (result.status !== "SUCCEEDED") {
+        throw scenarioFailure(`the late webhook ended in '${result.status}' instead of 'SUCCEEDED'`);
+      }
+      if (result.outputs.scenario !== "LATE_SUCCESS") {
+        throw scenarioFailure("the late webhook was not reported as a late success");
+      }
+      return "the late webhook was recovered";
+    }
+    case "CROSS_ENVIRONMENT_WEBHOOK": {
+      const result = await mock.verifyCallback("webhook", {
+        attemptId: attempt.id,
+        scenario,
+        dedupeKey: `${scenario}:${attempt.id}`,
+        reference: attempt.reference,
+        amount: CANONICAL_AMOUNT,
+        currency: "LYD",
+        environment: "LIVE",
+      });
+      const response = result.outputs.response as { environment?: string } | undefined;
+      if (response?.environment === attempt.env) {
+        throw scenarioFailure("the webhook of the wrong environment was not detected");
+      }
+      return "the webhook of the wrong environment was detected";
+    }
+    default:
+      throw scenarioFailure(`The scenario '${scenario}' is not part of the sandbox suite`);
+  }
+};
+
+/**
+ * The fifteen scenarios of the sandbox suite (design v5 §14 gate 2).
+ */
+const runSandboxScenarioSuite = async (): Promise<
+  { scenario: string; passed: boolean; details?: string }[]
+> => {
+  const mock = new MockGatewayServer();
+  const results: { scenario: string; passed: boolean; details?: string }[] = [];
+  for (const scenario of MOCK_SCENARIOS) {
+    try {
+      const details = await runSandboxScenario(mock, scenario);
+      results.push({ scenario, passed: true, details });
+    } catch (error) {
+      results.push({
+        scenario,
+        passed: false,
+        details: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return results;
+};
+
+/**
+ * The operational go-live configuration of a gateway.
+ *
+ * It is operator provided configuration in the platform settings, so the
+ * gates read what the operator actually configured and never a constant.
+ */
+const goLiveSettingKey = (gatewayCode: string, aspect: string): string =>
+  `gateway.go_live.${gatewayCode}.${aspect}`;
+
+const readGoLiveSetting = async (
+  gatewayCode: string,
+  aspect: string,
+): Promise<Record<string, unknown> | null> => {
+  const setting = await client.platformSetting.findFirst({
+    where: { key: goLiveSettingKey(gatewayCode, aspect), scope: "PLATFORM" },
+    orderBy: { version: "desc" },
+  });
+  const value = setting?.valueJson;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+};
+
+const isConfigured = (value: Record<string, unknown> | null): boolean =>
+  value !== null && Object.keys(value).length > 0;
+
+/**
+ * Collects the go-live evidence of a gateway version.
+ *
+ * The scenario suite is executed against the sandbox gateway, the contract
+ * tests are executed against the configuration of the version and the
+ * operational evidence is read from the platform settings.
+ */
+const collectGoLiveEvidence = async (versionId: string): Promise<GoLiveEvidenceRecord> => {
+  const version = await client.gatewayVersion.findUnique({
+    where: { id: versionId },
+    include: { setting: true },
+  });
+  if (!version) {
+    throw new ApiError(404, "GATEWAY_VERSION_NOT_FOUND", "The gateway version does not exist");
+  }
+  const gateway = await client.gateway.findUnique({ where: { id: version.gatewayId } });
+  const gatewayCode = gateway?.code ?? "";
+  const channels = await client.confirmationChannel.findMany({
+    where: { gatewayVersionId: versionId },
+  });
+  const profiles = await client.cryptoProfile.findMany({
+    where: { gatewayVersionId: versionId },
+  });
+  const flows = await client.flow.findMany({
+    where: { gatewayVersionId: versionId },
+    include: { steps: { include: { parameters: true } } },
+  });
+  const signingProfileIds = flows.flatMap((flow) =>
+    flow.steps.flatMap((step) =>
+      step.parameters
+        .filter((parameter) => parameter.source === "CRYPTO_SIGNATURE")
+        .map((parameter) => parameter.cryptoProfileId)
+        .filter((id): id is string => typeof id === "string" && id.length > 0),
+    ),
+  );
+  const routes = await client.railRoute.findMany({ where: { gatewayId: version.gatewayId } });
+  const rails = await client.rail.findMany({
+    where: { routes: { some: { gatewayId: version.gatewayId } } },
+    include: { fields: true },
+  });
+  const railCodes = rails.map((rail) => rail.code);
+  const commissionProfiles = await client.commissionProfile.findMany({
+    where: { railCode: { in: railCodes } },
+  });
+  const sources = await client.statementSource.findMany({
+    where: { gatewayId: version.gatewayId },
+  });
+  const panFieldCount = rails.reduce(
+    (total, rail) => total + rail.fields.filter((field) => field.sensitivity === "PAN").length,
+    0,
+  );
+
+  const amountContract = runAmountPipelineContract(version.setting);
+  const referenceContract = runReferenceFormatContract(version.setting);
+  const cryptoContract = runCryptoSignatureContract(profiles, signingProfileIds);
+  const scenarioResults = await runSandboxScenarioSuite();
+
+  const canaryPlan = await readGoLiveSetting(gatewayCode, "canary_traffic_plan");
+  const routeAlerts = await readGoLiveSetting(gatewayCode, "route_alerts");
+  const runbooks = await readGoLiveSetting(gatewayCode, "runbooks");
+  const pciReview = await readGoLiveSetting(gatewayCode, "pci_scope_review");
+  const executiveAcceptance = await readGoLiveSetting(gatewayCode, "executive_acceptance");
+
+  const evidenceLevel: GoLiveEvidenceRecord["evidenceLevel"] =
+    gateway?.verificationState === "VERIFIED"
+      ? "VERIFIED"
+      : gateway?.kind === "INTERNAL"
+        ? "INTERNAL"
+        : gateway?.riskClass === "HIGH_RISK"
+          ? "HIGH_RISK"
+          : "UNVERIFIED";
+
+  return {
+    scenarioResults,
+    amountPipelineContractPassed: amountContract.passed,
+    referenceFormatContractPassed: referenceContract.passed,
+    cryptographicSignatureContractPassed: cryptoContract.passed,
+    channels: channels.map((channel) => ({
+      type: channel.type,
+      verificationMethod: channel.verifyMethod,
+      mustInquire: channel.mustInquire,
+    })) as ChannelVerificationEvidence[],
+    rollbackVersionId: version.rollbackVersionId,
+    routeLimitsPreviewed:
+      routes.length > 0 && routes.every((route) => route.minAmount !== null && route.maxAmount !== null),
+    commissionProfilePreviewed:
+      railCodes.length > 0 && railCodes.every((code) => commissionProfiles.some((profile) => profile.railCode === code)),
+    statementParserPreviewed: sources.some((source) => {
+      const parser = source.parserConfig as Record<string, unknown> | null;
+      return Boolean(parser) && Object.keys(parser as Record<string, unknown>).length > 0;
+    }),
+    evidenceLevel,
+    internalContractSuitePassed:
+      amountContract.passed && referenceContract.passed && cryptoContract.passed,
+    highRiskExecutiveAcceptanceSigned: executiveAcceptance?.signed === true,
+    panFieldCount,
+    pciScopeReviewPassed: pciReview?.reviewed === true,
+    canaryTrafficPlanConfigured: isConfigured(canaryPlan),
+    routeAlertsConfigured: isConfigured(routeAlerts),
+    runbooksConfigured: isConfigured(runbooks),
+    contractDetails: {
+      amountPipeline: amountContract.details,
+      referenceFormat: referenceContract.details,
+      cryptographicSignature: cryptoContract.details,
+    },
+  };
+};
+
+/**
+ * Persists the go-live evidence of a gateway version, so that the activation
+ * reads the recorded facts back.
+ */
+const persistGoLiveEvidence = async (
+  versionId: string,
+  evidence: GoLiveEvidenceRecord,
+): Promise<void> => {
+  await client.gatewayVersionEvidence.upsert({
+    where: { gatewayVersionId: versionId },
+    update: { evidenceJson: json(evidence), ranAt: new Date() },
+    create: { gatewayVersionId: versionId, evidenceJson: json(evidence), ranAt: new Date() },
+  });
+};
+
+/**
+ * The evidence of a version, as the gates consume it.
+ */
+const goLiveEvidenceOf = (
+  version: { id: string; createdById: string; rollbackVersionId: string | null },
+  record: GoLiveEvidenceRecord,
+  checkerUserId: string | null,
+) => ({
+  makerUserId: version.createdById,
+  checkerUserId: checkerUserId ?? "",
+  scenarioResults: record.scenarioResults,
+  amountPipelineContractPassed: record.amountPipelineContractPassed,
+  referenceFormatContractPassed: record.referenceFormatContractPassed,
+  cryptographicSignatureContractPassed: record.cryptographicSignatureContractPassed,
+  channels: record.channels,
+  rollbackVersionId: record.rollbackVersionId ?? version.rollbackVersionId,
+  routeLimitsPreviewed: record.routeLimitsPreviewed,
+  commissionProfilePreviewed: record.commissionProfilePreviewed,
+  statementParserPreviewed: record.statementParserPreviewed,
+  evidenceLevel: record.evidenceLevel,
+  internalContractSuitePassed: record.internalContractSuitePassed,
+  highRiskExecutiveAcceptanceSigned: record.highRiskExecutiveAcceptanceSigned,
+  panFieldCount: record.panFieldCount,
+  pciScopeReviewPassed: record.pciScopeReviewPassed,
+  canaryTrafficPlanConfigured: record.canaryTrafficPlanConfigured,
+  routeAlertsConfigured: record.routeAlertsConfigured,
+  runbooksConfigured: record.runbooksConfigured,
+});
+
+/**
+ * The twelve go-live gates of a gateway version.
+ *
+ * The gates are evaluated against the persisted evidence, so a version that
+ * was never tested can never become live.
+ */
+const assertGoLiveGates = async (
+  versionId: string,
+  checkerUserId: string | null,
+): Promise<GoLiveValidationResult> => {
+  const version = await client.gatewayVersion.findUnique({
+    where: { id: versionId },
+    include: { approvalRequest: true },
+  });
+  if (!version) {
+    throw new ApiError(404, "GATEWAY_VERSION_NOT_FOUND", "The gateway version does not exist");
+  }
+  const record = await client.gatewayVersionEvidence.findUnique({
+    where: { gatewayVersionId: versionId },
+  });
+  if (!record) {
+    throw new ApiError(
+      409,
+      "GO_LIVE_EVIDENCE_MISSING",
+      "The go-live evidence of the gateway version was never collected",
+      { failedGateIds: ["SANDBOX_SCENARIO_SUITE"] },
+    );
+  }
+  const evidence = record.evidenceJson as unknown as GoLiveEvidenceRecord;
+  const gates = new GoLiveGateValidator();
+  const result = await gates.validate(
+    goLiveEvidenceOf(
+      version,
+      evidence,
+      checkerUserId ?? version.approvalRequest?.checkerUserId ?? null,
+    ),
+  );
+  if (!result.passed) {
+    throw new ApiError(
+      409,
+      "GO_LIVE_GATES_FAILED",
+      `The gateway version does not pass the go-live gates: ${result.failedGateIds.join(", ")}`,
+      { failedGateIds: result.failedGateIds, gates: result.gates },
+    );
+  }
+  return result;
+};
+
+
+/**
+ * The named rollback version of a gateway version.
+ *
+ * Design v5 §14 gate 7: a version that may become live names the version the
+ * gateway falls back to. Without it the gate can never be satisfied, so the
+ * rollback version is part of the version configuration.
+ */
+router.put("/gateway-versions/:vid/rollback-version", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["gateway:write"]);
+  const { vid } = parseOrThrow(versionParamsSchema, request.params);
+  const version = await loadVersion(vid);
+  const body = parseOrThrow(
+    z.object({ versionId: z.string().min(1).max(64) }).strict(),
+    request.body,
+  );
+  const target = await client.gatewayVersion.findUnique({ where: { id: body.versionId } });
+  if (!target || target.gatewayId !== version.gatewayId) {
+    throw new ApiError(
+      404,
+      "GATEWAY_VERSION_NOT_FOUND",
+      "The rollback version does not belong to the gateway of this version",
+    );
+  }
+  if (target.versionNumber >= version.versionNumber) {
+    throw new ApiError(
+      400,
+      "ROLLBACK_VERSION_INVALID",
+      "The rollback version must be an older version of the gateway",
+    );
+  }
+  const updated = await client.gatewayVersion.update({
+    where: { id: version.id },
+    data: { rollbackVersionId: target.id },
+  });
+  response.json({ id: updated.id, rollbackVersionId: updated.rollbackVersionId });
 });
 
 router.get("/rails", async (request: Request, response: Response) => {
@@ -2297,79 +3362,15 @@ router.get("/reconciliation/runs", async (request: Request, response: Response) 
   response.json({ runs });
 });
 
+// The statement is never parsed in the request: the upload stores the file
+// in the run record, queues a reconciliation job and answers `202 Accepted`.
 router.post("/reconciliation/upload", async (request: Request, response: Response) => {
   requireAuthorities(request, ["reconciliation:write"]);
-  const raw = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
-  if (raw.byteLength === 0) {
-    throw new ApiError(400, "STATEMENT_FILE_REQUIRED", "A statement file payload is required");
-  }
-  const sourceId = String(request.headers["x-statement-source-id"] ?? "");
-  if (!sourceId) {
-    throw new ApiError(400, "STATEMENT_SOURCE_REQUIRED", "The statement source identifier header is required");
-  }
-  const metadataHeader = request.headers["x-upload-metadata"];
-  let metadata: Record<string, unknown> = {};
-  if (typeof metadataHeader === "string" && metadataHeader.length > 0) {
-    try {
-      metadata = JSON.parse(Buffer.from(metadataHeader, "base64url").toString("utf8")) as Record<string, unknown>;
-    } catch {
-      metadata = {};
-    }
-  }
-  const windowStart = typeof metadata.periodStart === "string"
-    ? new Date(metadata.periodStart)
-    : new Date(Date.now() - 31 * 24 * 60 * 60 * 1000);
-  const windowEnd = typeof metadata.periodEnd === "string"
-    ? new Date(metadata.periodEnd)
-    : new Date();
-
-  // The statement is parsed and matched against the local attempts, and the
-  // fee variance is trued up through the ledger.
-  const platform = getPlatformRuntime(client as never);
-  const ingestor = new StatementIngestor({
+  const upload = createReconciliationUploadHandler({
     db: client as never,
-    repositories: platform.repositories,
-    feeVariancePoster: {
-      postFeeVariance: async (posting) => {
-        const variance = moneyToString(posting.variance);
-        if (variance === "0.0000") {
-          return { journalEntryId: null };
-        }
-        const result = await platform.ledgerPoster.postScenario(
-          "FEE_VARIANCE_TRUE_UP",
-          posting.attemptId ?? `fee-variance:${posting.statementSourceId}`,
-          { amount: "0.0001", varianceAmount: variance },
-          {
-            gatewayId: posting.gatewayId,
-          },
-        );
-        return { journalEntryId: result.entry.id };
-      },
-    },
+    repositories: getPlatformRuntime(client as never).repositories,
   });
-
-  const result = await ingestor.ingest({
-    statementSourceId: sourceId,
-    content: raw,
-    fileName: typeof request.headers["x-upload-filename"] === "string"
-      ? decodeURIComponent(String(request.headers["x-upload-filename"]))
-      : undefined,
-    windowStart: Number.isNaN(windowStart.getTime()) ? undefined : windowStart,
-    windowEnd: Number.isNaN(windowEnd.getTime()) ? undefined : windowEnd,
-  });
-
-  response.status(result.idempotent ? 200 : 201).json({
-    runId: result.runId,
-    fileHash: result.fileHash,
-    idempotent: result.idempotent,
-    totalRows: result.totalRows,
-    matched: result.matched,
-    amountMismatch: result.amountMismatch,
-    missingAtGateway: result.missingAtGateway,
-    missingLocally: result.missingLocally,
-    duplicates: result.duplicates,
-    feeVariances: result.feeVariances,
-  });
+  await upload(request, response);
 });
 
 router.get("/disputes", async (request: Request, response: Response) => {
@@ -2407,29 +3408,34 @@ router.post("/disputes", async (request: Request, response: Response) => {
   );
   const actor = auditActorOf(request);
   const platform = getPlatformRuntime(client as never);
-  // The dispute, the drafted chargeback adjustment, the approval request and
-  // the reserve posting are written in one transaction.
-  const result = await client.$transaction(async (tx) =>
-    openDisputeWithDraftedAdjustment(governanceContext(platform), tx as never, {
-      attemptId: body.attemptId,
-      gatewayId: body.gatewayId,
-      railId: body.railId,
-      externalDisputeRef: body.externalDisputeRef,
-      source: body.source,
-      reasonCode: body.reasonCode ?? null,
-      amount: decimal(body.amount),
-      currency: body.currency,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
+  // The dispute intake moves the money (the reserve posting) and writes the
+  // audit trail, so it is a background job: the request queues the work and
+  // answers `202 Accepted`. The job performs the whole intake in one
+  // transaction, exactly as the request used to do.
+  const job = await client.$transaction(async (tx) =>
+    platform.repositories.jobs.enqueueJob(tx as never, {
+      jobType: "ADJUSTMENT_EXECUTION",
+      referenceType: "DISPUTE_INTAKE",
+      referenceId: `${body.gatewayId}:${body.externalDisputeRef}`,
+      payload: {
+        kind: "DISPUTE_INTAKE",
+        attemptId: body.attemptId,
+        gatewayId: body.gatewayId,
+        railId: body.railId,
+        externalDisputeRef: body.externalDisputeRef,
+        source: body.source,
+        reasonCode: body.reasonCode ?? null,
+        amount: body.amount,
+        currency: body.currency,
+        actorUserId: actor.userId,
+        actorRole: actor.role,
+      },
     }),
   );
-  response.status(201).json({
-    id: result.disputeId,
-    status: "OPENED",
-    adjustmentId: result.adjustmentId,
-    approvalRequestId: result.approvalRequestId,
-    escrowed: result.escrowed,
-    journalEntryId: result.journalEntryId,
+  response.status(202).json({
+    jobId: job.id,
+    status: "QUEUED",
+    externalDisputeRef: body.externalDisputeRef,
   });
 });
 

@@ -455,6 +455,34 @@ export interface ReconciliationRunRow {
   windowEnd: Date;
   fileHash: string;
   statsJson: unknown;
+  fileName?: string | null;
+  fileContent?: unknown;
+  ingestedAt?: Date | null;
+}
+
+/**
+ * The kind of work a durable background job carries.
+ */
+export type BackgroundJobType = "RECONCILIATION_RUN" | "ADJUSTMENT_EXECUTION";
+
+/**
+ * The lifecycle of a durable background job.
+ */
+export type BackgroundJobState = "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED";
+
+export interface BackgroundJobRow {
+  id: string;
+  jobType: BackgroundJobType;
+  referenceType: string;
+  referenceId: string;
+  payloadJson: unknown;
+  state: BackgroundJobState;
+  attempts: number;
+  maxAttempts: number;
+  availableAt: Date;
+  lockedAt: Date | null;
+  lastError: string | null;
+  completedAt: Date | null;
 }
 
 export interface ReconciliationItemRow {
@@ -701,10 +729,57 @@ export interface ReconciliationRepository {
   findStatementSourceById(tx: Tx, id: string): Promise<StatementSourceRow | null>;
   listStatementSources(tx: Tx): Promise<StatementSourceRow[]>;
   findRunByFileHash(tx: Tx, fileHash: string): Promise<ReconciliationRunRow | null>;
-  createRun(tx: Tx, data: { statementSourceId: string; windowStart: Date; windowEnd: Date; fileHash: string; statsJson: unknown }): Promise<ReconciliationRunRow>;
+  findRunById(tx: Tx, id: string): Promise<ReconciliationRunRow | null>;
+  createRun(tx: Tx, data: {
+    statementSourceId: string;
+    windowStart: Date;
+    windowEnd: Date;
+    fileHash: string;
+    statsJson: unknown;
+    fileName?: string | null;
+    fileContent?: unknown;
+  }): Promise<ReconciliationRunRow>;
   updateRunStats(tx: Tx, id: string, stats: unknown): Promise<void>;
+  /**
+   * Marks the run as ingested.
+   *
+   * The update is conditional (`ingested_at IS NULL`), so it succeeds at most
+   * once: a retried reconciliation job never matches the same statement
+   * twice and never posts the fee variance twice.
+   */
+  markRunIngested(tx: Tx, id: string, stats: unknown): Promise<boolean>;
   createItem(tx: Tx, data: Partial<ReconciliationItemRow> & { runId: string }): Promise<ReconciliationItemRow>;
   listItemsByRun(tx: Tx, runId: string): Promise<ReconciliationItemRow[]>;
+}
+
+/**
+ * The durable job queue.
+ *
+ * The queue is written by the request paths (the reconciliation upload, the
+ * dispute intake, the approval of an adjustment) and drained by the
+ * stateless `BackgroundJobWorker`.
+ */
+export interface BackgroundJobRepository {
+  enqueueJob(tx: Tx, data: {
+    jobType: BackgroundJobType;
+    referenceType: string;
+    referenceId: string;
+    payload?: unknown;
+    maxAttempts?: number;
+    availableAt?: Date;
+  }): Promise<BackgroundJobRow>;
+  findJobById(tx: Tx, id: string): Promise<BackgroundJobRow | null>;
+  /**
+   * The live job of a reference: a job that is still queued or running.
+   *
+   * It is what keeps a repeated request from queueing the same work twice.
+   */
+  findLiveJobForReference(
+    tx: Tx,
+    jobType: BackgroundJobType,
+    referenceType: string,
+    referenceId: string,
+  ): Promise<BackgroundJobRow | null>;
 }
 
 export interface Repositories {
@@ -717,4 +792,5 @@ export interface Repositories {
   governance: GovernanceRepository;
   notifications: NotificationRepository;
   reconciliation: ReconciliationRepository;
+  jobs: BackgroundJobRepository;
 }

@@ -207,6 +207,37 @@ describe("admin authority hints", () => {
   });
 });
 
+describe("admin asynchronous routes", () => {
+  test("the dispute intake relays the accepted status of core", async () => {
+    const response = await call("POST", "/api/v1/admin/disputes", {
+      token: operator,
+      body: {
+        merchantId: "mch_1",
+        gatewayId: "gw_1",
+        railId: "rail_1",
+        paymentReference: "PA-1",
+        externalDisputeRef: "EXT-1",
+        type: "CHARGEBACK",
+        amount: "10.0000",
+        currency: "LYD",
+        reason: "duplicate capture",
+        source: "WEBHOOK",
+      },
+    });
+    expect(response.status).toBe(202);
+    const payload = (await response.json()) as { jobId?: string };
+    expect(payload.jobId).toBe("job-1");
+  });
+
+  test("an approval relays the accepted status of core", async () => {
+    const response = await call("POST", "/api/v1/admin/approvals/apr_1/approve", {
+      token: operator,
+      body: { reason: "reviewed and approved" },
+    });
+    expect(response.status).toBe(202);
+  });
+});
+
 describe("admin statement upload", () => {
   test("forwards a validated csv statement to core", async () => {
     const form = new FormData();

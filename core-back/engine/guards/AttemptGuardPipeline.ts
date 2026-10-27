@@ -3,10 +3,12 @@ import { ApiError } from "../../lib/error";
 import { moneyFromDecimal, moneyToString, type Money } from "../db/money";
 import type {
   AmlAction,
+  AttemptWindowStats,
   Channel,
   Environment,
   MerchantRow,
   PaymentAttemptRow,
+  PaymentRepository,
   PrismaLike,
   Repositories,
   Severity,
@@ -14,10 +16,12 @@ import type {
   Tx,
   VelocityRuleRow,
 } from "../db/ports";
-import { AmlRuleEngine, type AmlRuleHit } from "./AmlRuleEngine";
+import { buildLedgerTemplate, LedgerPoster } from "../ledger/LedgerPoster";
+import { AmlRuleEngine, slaHoursForSeverity, type AmlRuleHit } from "./AmlRuleEngine";
 import {
   buildScreeningSubject,
   normalizeIdentifier,
+  publishWatchlist,
   type ScreeningProvider,
   type ScreeningResultCode,
 } from "./ScreeningProvider";
@@ -31,6 +35,41 @@ export interface GuardCustomerContext {
   deviceFingerprint?: string | null;
   walletId?: string | null;
   name?: string | null;
+}
+
+/**
+ * The configuration that is pinned on the attempt at creation
+ * (design §9.1 rule 1).
+ *
+ * The caller resolves the route that the visible rails produced, so the
+ * attempt is pinned to the route the customer was actually offered. When it
+ * is absent the pipeline resolves the route itself.
+ */
+export interface GuardPinnedRoute {
+  railId: string;
+  routeId: string;
+  credentialSetId: string;
+  gatewayVersionId: string;
+  commissionProfileId: string;
+  settlementTarget?: SettlementTarget | null;
+  gatewayId?: string | null;
+  mode?: string | null;
+}
+
+/**
+ * The monetary breakdown of the attempt.
+ *
+ * The amounts are resolved from the pinned commission profile and the pinned
+ * route cost model by the caller, so the guard evaluates the AML rules
+ * against the amount that is actually at stake and escrows exactly that
+ * amount.
+ */
+export interface GuardAttemptAmounts {
+  surchargeAmount?: string | null;
+  totalChargedAmount?: string | null;
+  platformCommissionAmount?: string | null;
+  netMerchantAmount?: string | null;
+  gatewayFeeAmount?: string | null;
 }
 
 export interface AttemptGuardRequest {
@@ -47,6 +86,13 @@ export interface AttemptGuardRequest {
   clientIp?: string | null;
   userAgent?: string | null;
   requestedByUserId?: string | null;
+  pinnedRoute?: GuardPinnedRoute | null;
+  amounts?: GuardAttemptAmounts | null;
+  /** The already masked customer fields of the caller. */
+  customerFields?: Record<string, unknown> | null;
+  expiresAt?: Date | null;
+  graceExpiresAt?: Date | null;
+  nextCheckAt?: Date | null;
 }
 
 export interface GuardDecision {
@@ -89,6 +135,23 @@ interface ResolvedRoute {
   commissionProfileId: string;
   mode: string;
 }
+
+/**
+ * The monetary breakdown of an attempt, as exact money.
+ */
+interface ResolvedAmounts {
+  requested: Money;
+  surcharge: Money;
+  totalCharged: Money;
+  commission: Money;
+  net: Money;
+  gatewayFee: Money | null;
+}
+
+/**
+ * The platform setting that publishes the internal watch list.
+ */
+export const WATCHLIST_SETTING_KEY = "screening.watchlist";
 
 const ACTIVE_ATTEMPT_STATUSES = [
   "CREATED",
@@ -178,22 +241,36 @@ export class AttemptGuardPipeline {
     this.clock = deps.clock ?? (() => new Date());
   }
 
-  async guard(request: AttemptGuardRequest): Promise<GuardDecision> {
-    const now = this.clock();
-    const customer = request.customer ?? {};
-    const clientIp = request.clientIp ?? customer.ip ?? null;
-    const clientPhone = customer.phone ? normalizeIdentifier(customer.phone) : null;
-    const cardAlias = customer.cardAlias ?? null;
+  /**
+   * The attempt-creation guard.
+   *
+   * The guard is the transaction that reserves the slot of the link and
+   * creates the attempt (design §9.1 rule 2): the velocity rules, the watch
+   * list and the AML rules are evaluated inside it, so a rejected payment
+   * leaves a terminal `BLOCKED` attempt behind and a held payment leaves its
+   * money escrowed.
+   *
+   * The caller may supply the transaction it already runs in, so the guard
+   * joins the initiation transaction of the caller instead of opening a
+   * second one.
+   */
+  async guard(request: AttemptGuardRequest, transaction?: Tx): Promise<GuardDecision> {
+    const run = async (tx: Tx): Promise<GuardDecision> => {
+      const now = this.clock();
+      const customer = request.customer ?? {};
+      const clientIp = request.clientIp ?? customer.ip ?? null;
+      const clientPhone = customer.phone ? normalizeIdentifier(customer.phone) : null;
+      const cardAlias = customer.cardAlias ?? null;
 
-    return this.db.$transaction(async (tx: Tx) => {
       if (request.idempotencyKey) {
         const existing = await this.repositories.payments.findAttemptByIdempotencyKey(tx, request.idempotencyKey);
         if (existing) {
-          const settlementTarget = await this.repositories.payments.resolveSettlementTarget(tx, {
-            railCode: request.railCode,
-            merchantId: request.merchantId ?? null,
-            env: request.env,
-          });
+          const settlementTarget = request.pinnedRoute?.settlementTarget
+            ?? await this.repositories.payments.resolveSettlementTarget(tx, {
+              railCode: request.railCode,
+              merchantId: request.merchantId ?? null,
+              env: request.env,
+            });
           return {
             outcome: "ALLOW" as GuardOutcome,
             attemptId: existing.id,
@@ -230,19 +307,51 @@ export class AttemptGuardPipeline {
       if (!merchant) {
         throw new ApiError(404, "MERCHANT_NOT_FOUND", "Payment link merchant not found");
       }
+
+      // The route is resolved before the posture check, because the blocked
+      // attempt of a merchant that may not pay still has to be pinned to the
+      // configuration it was refused on.
+      const route = await this.resolveRoute(tx, request, merchant.id, applicationId);
+      const amounts = this.resolveAmounts(request, moneyFromDecimal(link.amount));
+      const currency = link.currency;
+      const settlementTarget = request.pinnedRoute?.settlementTarget
+        ?? await this.repositories.payments.resolveSettlementTarget(tx, {
+          railCode: request.railCode,
+          merchantId: merchant.id,
+          env: request.env,
+        });
+
       const posture = await this.merchantPosture(tx, merchant, request.env, now);
       if (!posture.allowed) {
-        throw new ApiError(403, "MERCHANT_NOT_ALLOWED", posture.reason);
+        // A merchant that may not pay is blocked the same way a rejected
+        // velocity rule is blocked: a terminal attempt keeps the refusal
+        // auditable and no slot is reserved.
+        const blocked = await this.createBlockedAttempt(tx, {
+          link,
+          merchant,
+          request,
+          route,
+          amounts,
+          currency,
+          reason: posture.reason,
+          velocityRuleIds: [],
+          clientIp,
+          clientPhone,
+          now,
+        });
+        return blockDecision(
+          posture.reason,
+          "PAYMENT_CANNOT_BE_PROCESSED",
+          [],
+          blocked.id,
+          blocked.reference,
+          amounts.totalCharged,
+          currency,
+          null,
+          null,
+          settlementTarget,
+        );
       }
-
-      const route = await this.resolveRoute(tx, request, merchant.id, applicationId);
-      const amount = moneyFromDecimal(link.amount);
-      const currency = link.currency;
-      const settlementTarget = await this.repositories.payments.resolveSettlementTarget(tx, {
-        railCode: request.railCode,
-        merchantId: merchant.id,
-        env: request.env,
-      });
 
       if (!link.infiniteUse && link.confirmedCount + link.activeLockedCount >= link.useCount) {
         const blocked = await this.createBlockedAttempt(tx, {
@@ -250,10 +359,12 @@ export class AttemptGuardPipeline {
           merchant,
           request,
           route,
-          amount,
+          amounts,
           currency,
           reason: "PAYMENT_LINK_SLOT_UNAVAILABLE",
           velocityRuleIds: [],
+          clientIp,
+          clientPhone,
           now,
         });
         return blockDecision(
@@ -262,13 +373,18 @@ export class AttemptGuardPipeline {
           [],
           blocked.id,
           blocked.reference,
-          amount,
+          amounts.totalCharged,
           currency,
           null,
           null,
           settlementTarget,
         );
       }
+
+      // The watch list of the platform is published before the hot path
+      // screening, so the screening is run against the list that is
+      // published and not against the list the process started with.
+      await this.publishWatchlist(tx);
 
       const screening = this.screenHotPath({
         merchant,
@@ -287,10 +403,12 @@ export class AttemptGuardPipeline {
           merchant,
           request,
           route,
-          amount,
+          amounts,
           currency,
           reason: `SCREENING_CONFIRMED_MATCH:${listType}`,
           velocityRuleIds: [],
+          clientIp,
+          clientPhone,
           now,
         });
         return blockDecision(
@@ -299,7 +417,7 @@ export class AttemptGuardPipeline {
           [],
           blocked.id,
           blocked.reference,
-          amount,
+          amounts.totalCharged,
           currency,
           "CRITICAL",
           null,
@@ -313,7 +431,8 @@ export class AttemptGuardPipeline {
         merchant,
         link: { id: link.id, applicationId: link.applicationId },
         request,
-        amount,
+        route,
+        amounts,
         clientIp,
         clientPhone,
         cardAlias,
@@ -328,10 +447,12 @@ export class AttemptGuardPipeline {
           merchant,
           request,
           route,
-          amount,
+          amounts,
           currency,
           reason: `VELOCITY_REJECT:${rejectedRules[0]?.rule.id ?? "UNKNOWN"}`,
           velocityRuleIds: rejectedRules.map((evaluation) => evaluation.rule.id),
+          clientIp,
+          clientPhone,
           now,
         });
         return blockDecision(
@@ -340,7 +461,7 @@ export class AttemptGuardPipeline {
           rejectedRules.map((evaluation) => evaluation.rule.id),
           blocked.id,
           blocked.reference,
-          amount,
+          amounts.totalCharged,
           currency,
           null,
           null,
@@ -348,13 +469,11 @@ export class AttemptGuardPipeline {
         );
       }
 
+      // The AML window is the merchant window: an attempt of another
+      // merchant never contributes to the cumulative counters of this one.
       const windowStats = await this.repositories.payments.collectWindowStats(tx, {
         merchantId: merchant.id,
         applicationId: link.applicationId,
-        linkId: link.id,
-        clientIp,
-        clientPhone,
-        cardAlias,
         since: new Date(now.getTime() - 24 * 60 * 60 * 1000),
       });
       const engine = new AmlRuleEngine({ risk: this.repositories.risk, tx });
@@ -362,7 +481,7 @@ export class AttemptGuardPipeline {
         subjectType: "PAYMENT_ATTEMPT",
         subjectId: link.id,
         merchantId: merchant.id,
-        amount,
+        amount: amounts.totalCharged,
         currency,
         railCode: request.railCode,
         riskTier: merchant.riskTier,
@@ -384,10 +503,12 @@ export class AttemptGuardPipeline {
           merchant,
           request,
           route,
-          amount,
+          amounts,
           currency,
           reason: `AML_BLOCK:${amlResult.hits[0]?.ruleCode ?? "UNKNOWN"}`,
           velocityRuleIds: flaggedVelocityRuleIds,
+          clientIp,
+          clientPhone,
           now,
         });
         return blockDecision(
@@ -396,7 +517,7 @@ export class AttemptGuardPipeline {
           flaggedVelocityRuleIds,
           blocked.id,
           blocked.reference,
-          amount,
+          amounts.totalCharged,
           currency,
           amlResult.severity ?? "HIGH",
           null,
@@ -406,7 +527,22 @@ export class AttemptGuardPipeline {
 
       await this.repositories.payments.updateLinkSlotCount(tx, link.id, 1);
       const attemptGroupId = await this.resolveAttemptGroup(tx, link.id, customer, clientIp, clientPhone);
-      const attempt = await this.repositories.payments.createAttempt(tx, {
+      // A held attempt waits for the resolution of its case, so it outlives
+      // the session of the payment: the slot of the link stays reserved
+      // until the case is decided (the SLA of the case is the deadline).
+      const holdSlaHours = amlAction === "HOLD"
+        ? slaHoursForSeverity(amlResult.severity ?? "MEDIUM")
+        : 0;
+      const attemptExpiresAt = holdSlaHours > 0
+        ? new Date(now.getTime() + holdSlaHours * 60 * 60 * 1000)
+        : request.expiresAt ?? link.expiresAt ?? new Date(now.getTime() + 20 * 60 * 1000);
+      const attemptGraceExpiresAt = request.graceExpiresAt
+        && request.graceExpiresAt.getTime() > attemptExpiresAt.getTime()
+        ? request.graceExpiresAt
+        : new Date(attemptExpiresAt.getTime() + 24 * 60 * 60 * 1000);
+      const attemptData: Parameters<PaymentRepository["createAttempt"]>[1] & {
+        settlementTarget?: SettlementTarget;
+      } = {
         reference: this.buildReference(),
         idempotencyKey: request.idempotencyKey ?? null,
         linkId: link.id,
@@ -422,13 +558,15 @@ export class AttemptGuardPipeline {
         mode: request.mode ?? route.mode,
         subMode: request.subMode ?? null,
         status: "CREATED",
-        requestedAmount: moneyToString(amount),
-        totalChargedAmount: moneyToString(amount),
-        surchargeAmount: moneyToString(0n),
-        platformCommissionAmount: moneyToString(0n),
-        netMerchantAmount: moneyToString(0n),
+        requestedAmount: moneyToString(amounts.requested),
+        totalChargedAmount: moneyToString(amounts.totalCharged),
+        surchargeAmount: moneyToString(amounts.surcharge),
+        platformCommissionAmount: moneyToString(amounts.commission),
+        netMerchantAmount: moneyToString(amounts.net),
+        ...(amounts.gatewayFee === null ? {} : { gatewayFeeAmount: moneyToString(amounts.gatewayFee) }),
         currency,
         feeBearer: link.feeBearer,
+        settlementTarget,
         clientIp: clientIp,
         userAgent: request.userAgent ?? null,
         customerFieldsMasked: {
@@ -437,22 +575,28 @@ export class AttemptGuardPipeline {
           card_alias: cardAlias,
           device_fingerprint: customer.deviceFingerprint ?? null,
           walletId: customer.walletId ?? null,
+          ...(request.customerFields ?? {}),
         },
         contextCiphertext: "",
-        expiresAt: link.expiresAt ?? new Date(now.getTime() + 20 * 60 * 1000),
-        graceExpiresAt: new Date((link.expiresAt ?? now).getTime() + 24 * 60 * 60 * 1000),
-      });
+        expiresAt: attemptExpiresAt,
+        graceExpiresAt: attemptGraceExpiresAt,
+        nextCheckAt: request.nextCheckAt ?? null,
+      };
+      const attempt = await this.repositories.payments.createAttempt(tx, attemptData);
 
       let amlCaseId: string | null = null;
       let severity: Severity | null = amlResult.severity;
-      if (amlResult.hits.length > 0 || screening?.result === "POTENTIAL_MATCH") {
+      const screeningMatch = screening && screening.result !== "CLEAR" && screening.result !== "ERROR"
+        ? screening
+        : null;
+      if (amlResult.hits.length > 0 || screeningMatch) {
         const caseRow = await this.createAmlCase(tx, {
           merchant,
           subjectType: "PAYMENT_ATTEMPT",
           subjectId: attempt.id,
           triggerReason: amlResult.hits.length > 0
             ? `AML_RULE:${amlResult.hits.map((hit) => hit.ruleCode).join(",")}`
-            : `SCREENING_POTENTIAL_MATCH:${screening?.matches[0]?.listType ?? "UNKNOWN"}`,
+            : `SCREENING_${screeningMatch?.result}:${screeningMatch?.matches[0]?.listType ?? "UNKNOWN"}`,
           severity: severity ?? "MEDIUM",
           severityInputs: amlResult.severityInputs,
           ruleId: amlResult.hits[0]?.ruleId ?? null,
@@ -462,6 +606,38 @@ export class AttemptGuardPipeline {
         amlCaseId = caseRow.id;
       } else if (flaggedRules.length > 0) {
         severity = "MEDIUM";
+      }
+
+      const outcome: GuardOutcome = amlAction === "HOLD"
+        ? "HOLD"
+        : amlAction === "CASE_ONLY"
+          ? "CASE_ONLY"
+          : flaggedRules.length > 0
+            ? "FLAG"
+            : "ALLOW";
+
+      let holdJournalEntryId: string | null = null;
+      if (outcome === "HOLD") {
+        // The money of a held payment is escrowed (design §11.3 entry 7:
+        // `Dr GATEWAY_CLEARING` / `Cr AML_HOLD`) and the attempt waits for the
+        // resolution of the case. It is never settled from here.
+        holdJournalEntryId = await this.postAmlHoldEscrow(tx, {
+          attemptId: attempt.id,
+          amount: amounts.totalCharged,
+          currency,
+          gatewayId: request.pinnedRoute?.gatewayId ?? null,
+          credentialSetId: route.credentialSetId,
+          env: request.env,
+        });
+        if (amlCaseId) {
+          await this.repositories.risk.updateAmlCase(tx, amlCaseId, {
+            holdJournalEntryId,
+          });
+        }
+        await this.repositories.payments.updateAttempt(tx, attempt.id, {
+          substatus: "AML_HOLD",
+          nextCheckAt: null,
+        });
       }
 
       if (request.requestedByUserId) {
@@ -476,22 +652,16 @@ export class AttemptGuardPipeline {
             aml_hits: amlResult.hits.map((hit) => hit.ruleCode),
             velocity_rules: flaggedVelocityRuleIds,
             settlement_target: settlementTarget,
+            ...(holdJournalEntryId ? { hold_journal_entry_id: holdJournalEntryId } : {}),
           },
         });
       }
 
-      const outcome: GuardOutcome = amlAction === "HOLD"
-        ? "HOLD"
-        : amlAction === "CASE_ONLY"
-          ? "CASE_ONLY"
-          : flaggedRules.length > 0
-            ? "FLAG"
-            : "ALLOW";
       return {
         outcome,
         attemptId: attempt.id,
         reference: attempt.reference,
-        amount,
+        amount: amounts.totalCharged,
         currency,
         severity,
         amlCaseId,
@@ -500,14 +670,21 @@ export class AttemptGuardPipeline {
         reasons: [
           ...amlResult.hits.map((hit) => `AML:${hit.ruleCode}:${hit.action}`),
           ...flaggedVelocityRuleIds.map((id) => `VELOCITY_FLAG:${id}`),
+          ...(outcome === "HOLD" ? ["AML_HOLD_ESCROWED"] : []),
         ],
-        customerMessageCode: outcome === "ALLOW" ? "OK" : "PAYMENT_CANNOT_BE_PROCESSED",
+        customerMessageCode: outcome === "ALLOW" || outcome === "FLAG"
+          ? "OK"
+          : "PAYMENT_UNDER_REVIEW",
         holdRequired: outcome === "HOLD",
         settlementTarget,
         correlatedEscalation: amlResult.correlatedEscalation,
         slotReserved: true,
       };
-    }) as Promise<GuardDecision>;
+    };
+
+    return transaction
+      ? run(transaction)
+      : (this.db.$transaction(run) as Promise<GuardDecision>);
   }
 
   private async resolveMerchant(
@@ -530,6 +707,19 @@ export class AttemptGuardPipeline {
     merchantId: string,
     applicationId: string,
   ): Promise<ResolvedRoute> {
+    const pinned = request.pinnedRoute;
+    if (pinned) {
+      // The caller resolved the route that the customer was offered, so the
+      // attempt is pinned to exactly that configuration (design §9.1 rule 1).
+      return {
+        railId: pinned.railId,
+        routeId: pinned.routeId,
+        credentialSetId: pinned.credentialSetId,
+        gatewayVersionId: pinned.gatewayVersionId,
+        commissionProfileId: pinned.commissionProfileId,
+        mode: String(pinned.mode ?? request.mode ?? "OTP_PULL"),
+      };
+    }
     const client = tx as Record<string, any>;
     const rail = await client.rail.findUnique({ where: { code: request.railCode } });
     if (!rail) {
@@ -676,7 +866,8 @@ export class AttemptGuardPipeline {
       merchant: MerchantRow;
       link: { id: string; applicationId: string };
       request: AttemptGuardRequest;
-      amount: Money;
+      route: ResolvedRoute;
+      amounts: ResolvedAmounts;
       clientIp: string | null;
       clientPhone: string | null;
       cardAlias: string | null;
@@ -707,19 +898,21 @@ export class AttemptGuardPipeline {
         continue;
       }
       const since = new Date(input.now.getTime() - Math.max(1, rule.windowSeconds) * 1000);
-      const stats = await this.repositories.payments.collectWindowStats(tx, {
+      const stats = await this.collectScopedWindowStats(tx, {
+        scopeType: rule.scopeType,
         merchantId: input.merchant.id,
-        applicationId: rule.scopeType === "APPLICATION" ? input.link.applicationId : null,
-        linkId: rule.scopeType === "LINK" ? input.link.id : null,
-        clientIp: rule.scopeType === "END_CLIENT_IP" ? input.clientIp : null,
-        clientPhone: rule.scopeType === "END_CLIENT_PHONE" ? input.clientPhone : null,
-        cardAlias: rule.scopeType === "END_CLIENT_CARD" ? input.cardAlias : null,
+        applicationId: input.link.applicationId,
+        linkId: input.link.id,
+        railId: input.route.railId,
+        clientIp: input.clientIp,
+        clientPhone: input.clientPhone,
+        cardAlias: input.cardAlias,
         since,
       });
       const maxCount = rule.maxCount === null || rule.maxCount === undefined ? null : Number(rule.maxCount);
       const maxAmount = rule.maxAmount === null || rule.maxAmount === undefined ? null : moneyFromDecimal(rule.maxAmount);
       const countExceeded = maxCount !== null && stats.count >= maxCount;
-      const amountExceeded = maxAmount !== null && stats.totalAmount + input.amount > maxAmount;
+      const amountExceeded = maxAmount !== null && stats.totalAmount + input.amounts.totalCharged > maxAmount;
       results.push({
         rule,
         count: stats.count,
@@ -730,6 +923,80 @@ export class AttemptGuardPipeline {
     return results;
   }
 
+  /**
+   * The window of a velocity rule, counted in the scope of the rule.
+   *
+   * The scope is what makes a sliding window meaningful: an
+   * `END_CLIENT_IP` rule counts the attempts of that address, a `MERCHANT`
+   * rule counts the attempts of the merchant. The counters therefore never
+   * mix the volume of one scope into another.
+   */
+  private async collectScopedWindowStats(
+    tx: Tx,
+    scope: {
+      scopeType: VelocityRuleRow["scopeType"];
+      merchantId: string;
+      applicationId: string;
+      linkId: string;
+      railId: string | null;
+      clientIp: string | null;
+      clientPhone: string | null;
+      cardAlias: string | null;
+      since: Date;
+    },
+  ): Promise<AttemptWindowStats> {
+    const where: Record<string, unknown> = {
+      createdAt: { gte: scope.since },
+      status: { in: ACTIVE_ATTEMPT_STATUSES },
+    };
+    switch (scope.scopeType) {
+      case "MERCHANT":
+        where.merchantId = scope.merchantId;
+        break;
+      case "APPLICATION":
+        where.applicationId = scope.applicationId;
+        break;
+      case "LINK":
+        where.linkId = scope.linkId;
+        break;
+      case "RAIL":
+        if (scope.railId) {
+          where.railId = scope.railId;
+        }
+        break;
+      case "END_CLIENT_IP":
+        if (scope.clientIp) {
+          where.clientIp = scope.clientIp;
+        }
+        break;
+      case "END_CLIENT_PHONE":
+        if (scope.clientPhone) {
+          where.customerFieldsMasked = { path: ["phone"], equals: scope.clientPhone };
+        }
+        break;
+      case "END_CLIENT_CARD":
+        if (scope.cardAlias) {
+          where.customerFieldsMasked = { path: ["card_alias"], equals: scope.cardAlias };
+        }
+        break;
+      default:
+        break;
+    }
+    const client = tx as Record<string, any>;
+    const rows = await client.paymentAttempt.findMany({
+      where,
+      select: { requestedAmount: true, totalChargedAmount: true },
+    });
+    const amounts: Money[] = [];
+    let total = 0n;
+    for (const attempt of (Array.isArray(rows) ? rows : []) as Array<Record<string, unknown>>) {
+      const value = moneyFromDecimal(attempt.totalChargedAmount ?? attempt.requestedAmount ?? 0);
+      amounts.push(value);
+      total += value;
+    }
+    return { count: amounts.length, totalAmount: total, amounts };
+  }
+
   private async createBlockedAttempt(
     tx: Tx,
     input: {
@@ -737,10 +1004,12 @@ export class AttemptGuardPipeline {
       merchant: MerchantRow | null;
       request: AttemptGuardRequest;
       route: ResolvedRoute;
-      amount: Money;
+      amounts: ResolvedAmounts;
       currency: string;
       reason: string;
       velocityRuleIds: string[];
+      clientIp: string | null;
+      clientPhone: string | null;
       now: Date;
     },
   ): Promise<PaymentAttemptRow> {
@@ -752,8 +1021,8 @@ export class AttemptGuardPipeline {
         tx,
         input.link.id,
         input.request.customer ?? {},
-        input.request.clientIp ?? null,
-        input.request.customer?.phone ? normalizeIdentifier(input.request.customer.phone) : null,
+        input.clientIp,
+        input.clientPhone,
       ),
       applicationId: input.link.applicationId,
       merchantId: input.merchant?.id ?? input.request.merchantId ?? "",
@@ -767,11 +1036,11 @@ export class AttemptGuardPipeline {
       subMode: input.request.subMode ?? null,
       status: "BLOCKED",
       substatus: input.reason,
-      requestedAmount: moneyToString(input.amount),
-      totalChargedAmount: moneyToString(input.amount),
-      surchargeAmount: moneyToString(0n),
-      platformCommissionAmount: moneyToString(0n),
-      netMerchantAmount: moneyToString(0n),
+      requestedAmount: moneyToString(input.amounts.requested),
+      totalChargedAmount: moneyToString(input.amounts.totalCharged),
+      surchargeAmount: moneyToString(input.amounts.surcharge),
+      platformCommissionAmount: moneyToString(input.amounts.commission),
+      netMerchantAmount: moneyToString(input.amounts.net),
       currency: input.currency,
       feeBearer: "MERCHANT_ABSORBS",
       customerFieldsMasked: {},
@@ -789,6 +1058,147 @@ export class AttemptGuardPipeline {
       });
     }
     return attempt;
+  }
+
+  /**
+   * The monetary breakdown of the attempt.
+   *
+   * The amounts are resolved by the caller from the pinned commission profile
+   * and the pinned route cost model, so the guard evaluates the rules
+   * against the money that is really at stake. A missing amount falls back
+   * to the amount of the link, and never to a floating point value.
+   */
+  private resolveAmounts(request: AttemptGuardRequest, requested: Money): ResolvedAmounts {
+    const amounts = request.amounts ?? {};
+    const surcharge = amounts.surchargeAmount === null || amounts.surchargeAmount === undefined
+      ? 0n
+      : moneyFromDecimal(amounts.surchargeAmount);
+    const totalCharged = amounts.totalChargedAmount === null || amounts.totalChargedAmount === undefined
+      ? requested + surcharge
+      : moneyFromDecimal(amounts.totalChargedAmount);
+    const commission = amounts.platformCommissionAmount === null || amounts.platformCommissionAmount === undefined
+      ? 0n
+      : moneyFromDecimal(amounts.platformCommissionAmount);
+    const net = amounts.netMerchantAmount === null || amounts.netMerchantAmount === undefined
+      ? (totalCharged > commission ? totalCharged - commission : 0n)
+      : moneyFromDecimal(amounts.netMerchantAmount);
+    const gatewayFee = amounts.gatewayFeeAmount === null || amounts.gatewayFeeAmount === undefined
+      ? null
+      : moneyFromDecimal(amounts.gatewayFeeAmount);
+    return { requested, surcharge, totalCharged, commission, net, gatewayFee };
+  }
+
+  /**
+   * Publishes the watch list of the platform into the screening provider.
+   *
+   * The list is a versioned platform setting, so the provider screens
+   * against the list the compliance team maintains instead of the list the
+   * process started with. A provider that holds no local list (a mock, an
+   * external provider) is left untouched.
+   */
+  private async publishWatchlist(tx: Tx): Promise<void> {
+    if (!this.screening.setEntries) {
+      return;
+    }
+    const setting = await this.repositories.governance.getPlatformSetting(tx, WATCHLIST_SETTING_KEY);
+    if (!setting) {
+      return;
+    }
+    publishWatchlist(this.screening, setting);
+    // A published list invalidates the results that were screened against
+    // the previous revision.
+    await this.screening.refreshListVersions?.();
+  }
+
+  /**
+   * Escrows the money of a held payment (design §11.3 entry 7).
+   *
+   * The posting is `Dr GATEWAY_CLEARING` / `Cr AML_HOLD` and it is written in
+   * the same transaction as the attempt and the case, so the money can never
+   * be settled while the case is open.
+   */
+  private async postAmlHoldEscrow(
+    tx: Tx,
+    input: {
+      attemptId: string;
+      amount: Money;
+      currency: string;
+      gatewayId: string | null;
+      credentialSetId: string;
+      env: Environment;
+    },
+  ): Promise<string> {
+    const accounts = await this.resolveHoldAccounts(tx, input);
+    const journal = buildLedgerTemplate("AML_HOLD_AND_RELEASE", {
+      // The amount is exact money: it is scaled by 10^4 and never a float.
+      amount: moneyToString(input.amount),
+      commissionAmount: 0,
+      merchantAmount: 0,
+    });
+    journal.refId = input.attemptId;
+    const poster = new LedgerPoster(this.db as never);
+    const posted = await poster.post(
+      journal,
+      { accounts, currency: input.currency },
+      tx as never,
+    );
+    return posted.entry.id;
+  }
+
+  /**
+   * The GL accounts of the escrow.
+   *
+   * The clearing account is the one of the pinned gateway, credential set and
+   * environment. When the platform has no such account, the currency scoped
+   * system account of the platform is used, so the escrow is never booked
+   * against a wrong account.
+   */
+  private async resolveHoldAccounts(
+    tx: Tx,
+    input: {
+      currency: string;
+      gatewayId: string | null;
+      credentialSetId: string;
+      env: Environment;
+    },
+  ): Promise<{ GATEWAY_CLEARING: string; AML_HOLD: string }> {
+    const client = tx as Record<string, any>;
+    const accounts = client.glAccount;
+    const clearing = await this.findGlAccount(accounts, [
+      ...(input.gatewayId
+        ? [{ accountType: "GATEWAY_CLEARING", gatewayId: input.gatewayId, credentialSetId: input.credentialSetId, env: input.env }]
+        : []),
+      { accountType: "GATEWAY_CLEARING", credentialSetId: input.credentialSetId, env: input.env },
+      { accountType: "GATEWAY_CLEARING", currency: input.currency },
+    ]);
+    const hold = await this.findGlAccount(accounts, [
+      { accountType: "AML_HOLD", currency: input.currency },
+      { accountType: "AML_HOLD" },
+    ]);
+    if (!clearing || !hold) {
+      throw new ApiError(
+        409,
+        "AML_HOLD_ACCOUNT_NOT_FOUND",
+        "The AML hold escrow cannot be booked: the clearing or the hold account is missing",
+      );
+    }
+    return { GATEWAY_CLEARING: clearing, AML_HOLD: hold };
+  }
+
+  private async findGlAccount(
+    accounts: Record<string, any> | undefined,
+    candidates: Array<Record<string, unknown>>,
+  ): Promise<string | null> {
+    if (!accounts?.findFirst) {
+      return null;
+    }
+    for (const where of candidates) {
+      const found = await accounts.findFirst({ where, select: { id: true } });
+      if (found?.id) {
+        return String(found.id);
+      }
+    }
+    return null;
   }
 
   private async createAmlCase(

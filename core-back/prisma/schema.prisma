@@ -576,6 +576,27 @@ enum ReconciliationResult {
   DUPLICATE
 }
 
+/// The kind of work a durable background job carries.
+enum BackgroundJobType {
+  /// Parses and matches an uploaded statement file against the local attempts.
+  RECONCILIATION_RUN
+  /// Executes a dispute intake or an approved adjustment (the ledger posting,
+  /// the state change and the audit trail in one transaction).
+  ADJUSTMENT_EXECUTION
+}
+
+/// The lifecycle of a durable background job.
+enum BackgroundJobState {
+  /// Waiting for its `available_at` timer.
+  QUEUED
+  /// Claimed by a worker node and currently executing.
+  RUNNING
+  /// Finished successfully.
+  SUCCEEDED
+  /// Exhausted its attempts and will never run again.
+  FAILED
+}
+
 enum DetailChangeSource {
   PORTAL
   ADMIN
@@ -1287,10 +1308,33 @@ model GatewayVersion {
   confirmationChannels ConfirmationChannel[]
   attemptStepLogs      AttemptStepLog[]
   paymentAttempts      PaymentAttempt[]
+  goLiveEvidence       GatewayVersionEvidence?
 
   @@unique([gatewayId, versionNumber])
   @@index([state])
   @@map("gateway_versions")
+}
+
+/**
+ * The collected go-live evidence of a gateway version.
+ *
+ * Design v5 §14: no `gateway_versions` row may become `LIVE` without passing
+ * all twelve go-live gates. The evidence is produced by the sandbox suite
+ * runner (`POST /gateway-versions/:vid/run-suite`) and read back by the
+ * activation, so the gate decision is based on recorded facts and never on
+ * hard-coded constants.
+ */
+model GatewayVersionEvidence {
+  id               String         @id @default(uuid(7))
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+  gatewayVersionId String         @unique @map("gateway_version_id")
+  evidenceJson     Json           @map("evidence_json")
+  ranAt            DateTime       @default(now()) @map("ran_at")
+
+  gatewayVersion GatewayVersion @relation(fields: [gatewayVersionId], references: [id], onDelete: Cascade)
+
+  @@map("gateway_version_evidence")
 }
 
 model GatewayEnvironment {
@@ -1848,6 +1892,9 @@ model PaymentAttempt {
   @@index([merchantId])
   @@index([status, nextCheckAt])
   @@index([gatewayVersionId])
+  // The daily volume aggregate of the rail resolution groups the succeeded
+  // attempts by route, so the pair is indexed.
+  @@index([routeId, status])
   @@map("payment_attempts")
 }
 
@@ -1933,12 +1980,50 @@ model ReconciliationRun {
   windowEnd         DateTime @map("window_end")
   fileHash          String   @unique @map("file_hash") @db.Char(64)
   statsJson         Json     @map("stats_json")
+  /// The name of the uploaded statement file.
+  fileName          String?  @map("file_name") @db.Text
+  /// The uploaded statement file itself: the reconciliation is a background
+  /// job, so the bytes have to survive the request that stored them.
+  fileContent       Bytes?   @map("file_content") @db.LongBlob
+  /// Set when the background reconciliation job finished the run. It is the
+  /// idempotency marker of the ingestion: a retried job never matches the
+  /// same statement twice.
+  ingestedAt        DateTime? @map("ingested_at")
 
   statementSource StatementSource      @relation(fields: [statementSourceId], references: [id], onDelete: Restrict)
   items           ReconciliationItem[]
 
   @@index([statementSourceId])
+  @@index([ingestedAt])
   @@map("reconciliation_runs")
+}
+
+/// The durable job queue of `core-back`.
+///
+/// The queue is drained by the stateless `BackgroundJobWorker`, which claims
+/// the due jobs with `SELECT ... FOR UPDATE SKIP LOCKED`. `available_at` is
+/// the durable timer of the retry backoff and `locked_at` is the lease of the
+/// node that currently owns the job.
+model BackgroundJob {
+  id            String             @id @default(uuid(7))
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+  jobType       BackgroundJobType  @map("job_type")
+  referenceType String             @map("reference_type")
+  referenceId   String             @map("reference_id")
+  payloadJson   Json               @map("payload_json")
+  state         BackgroundJobState @default(QUEUED)
+  attempts      Int                @default(0)
+  maxAttempts   Int                @default(5) @map("max_attempts")
+  availableAt   DateTime           @default(now()) @map("available_at")
+  lockedAt      DateTime?          @map("locked_at")
+  lastError     String?            @map("last_error") @db.Text
+  completedAt   DateTime?          @map("completed_at")
+
+  @@index([state, availableAt])
+  @@index([state, lockedAt])
+  @@index([referenceType, referenceId])
+  @@map("background_jobs")
 }
 
 model ReconciliationItem {

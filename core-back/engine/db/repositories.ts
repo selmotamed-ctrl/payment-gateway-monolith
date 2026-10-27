@@ -7,6 +7,8 @@ import type {
   AmlScreeningRow,
   ApprovalRequestRow,
   AttemptWindowStats,
+  BackgroundJobRepository,
+  BackgroundJobRow,
   BeneficialOwnerRow,
   DisputeRepository,
   DisputeRow,
@@ -626,11 +628,27 @@ export class PrismaRepositories implements Repositories {
     findRunByFileHash: async (tx, fileHash) => {
       return (await model(tx, "reconciliationRun").findUnique({ where: { fileHash: fileHash } })) as ReconciliationRunRow | null;
     },
+    findRunById: async (tx, id) => {
+      return (await model(tx, "reconciliationRun").findUnique({ where: { id } })) as ReconciliationRunRow | null;
+    },
     createRun: async (tx, data) => {
-      return model(tx, "reconciliationRun").create({ data }) as Promise<ReconciliationRunRow>;
+      // A run starts as "not ingested": the marker is set by the background
+      // job that matched the statement.
+      return model(tx, "reconciliationRun").create({
+        data: { ...data, ingestedAt: null },
+      }) as Promise<ReconciliationRunRow>;
     },
     updateRunStats: async (tx, id, stats) => {
       await model(tx, "reconciliationRun").update({ where: { id }, data: { statsJson: stats } });
+    },
+    markRunIngested: async (tx, id, stats) => {
+      // The conditional update is the idempotency guard of the ingestion: it
+      // only succeeds while the run has never been ingested.
+      const result = await model(tx, "reconciliationRun").updateMany({
+        where: { id, ingestedAt: null },
+        data: { statsJson: stats, ingestedAt: new Date() },
+      });
+      return Number(result?.count ?? 0) > 0;
     },
     createItem: async (tx, data) => {
       return model(tx, "reconciliationItem").create({ data }) as Promise<ReconciliationItemRow>;
@@ -639,6 +657,40 @@ export class PrismaRepositories implements Repositories {
       return rows<ReconciliationItemRow>(
         await model(tx, "reconciliationItem").findMany({ where: { runId: runId } }),
       );
+    },
+  };
+
+  jobs: BackgroundJobRepository = {
+    enqueueJob: async (tx, data) => {
+      const now = new Date();
+      const created = await model(tx, "backgroundJob").create({
+        data: {
+          jobType: data.jobType,
+          referenceType: data.referenceType,
+          referenceId: data.referenceId,
+          payloadJson: data.payload ?? {},
+          state: "QUEUED",
+          attempts: 0,
+          maxAttempts: data.maxAttempts ?? 5,
+          availableAt: data.availableAt ?? now,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      return created as BackgroundJobRow;
+    },
+    findJobById: async (tx, id) => {
+      return (await model(tx, "backgroundJob").findUnique({ where: { id } })) as BackgroundJobRow | null;
+    },
+    findLiveJobForReference: async (tx, jobType, referenceType, referenceId) => {
+      return (await model(tx, "backgroundJob").findFirst({
+        where: {
+          jobType,
+          referenceType,
+          referenceId,
+          state: { in: ["QUEUED", "RUNNING"] },
+        },
+      })) as BackgroundJobRow | null;
     },
   };
 

@@ -123,7 +123,8 @@ router.post(
     path: () => "/internal/admin/disputes",
     schema: disputeCreateSchema,
     bodyFrom: (_req, body) => toCoreDisputeCreate(body),
-    status: 201,
+    // The intake is a queued job: core answers `202 Accepted` with the job id.
+    relayStatus: true,
   }),
 );
 

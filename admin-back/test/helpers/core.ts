@@ -143,7 +143,11 @@ export const startTestCore = async (pki: TestPki): Promise<TestCore> => {
         headers: request.headers,
         body,
       });
-      response.writeHead(200, { "content-type": "application/json" });
+      // A route whose outcome became asynchronous answers `202 Accepted`.
+      const path = request.url ?? "/";
+      const accepted = path === "/internal/admin/disputes"
+        || path.endsWith("/approve");
+      response.writeHead(accepted ? 202 : 200, { "content-type": "application/json" });
       response.end(
         JSON.stringify({
           ok: true,
@@ -152,6 +156,7 @@ export const startTestCore = async (pki: TestPki): Promise<TestCore> => {
           authorization: request.headers.authorization ?? null,
           bodyLength: body.byteLength,
           body: body.toString("utf8").slice(0, 512),
+          ...(accepted ? { jobId: "job-1", status: "QUEUED" } : {}),
         }),
       );
     },

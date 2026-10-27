@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { ApiError } from "../../lib/error";
 import { moneyFromDecimal, moneyToString, type Money } from "../db/money";
-import type { PrismaLike, Repositories, Tx } from "../db/ports";
+import type { PrismaLike, Repositories, StatementSourceRow, Tx } from "../db/ports";
 
 export type StatementFormat = "CSV" | "XLSX" | "JSON";
 export type StatementRowType = "SETTLEMENT" | "CHARGEBACK" | "FEE" | "REVERSAL" | "UNKNOWN";
@@ -79,6 +79,15 @@ export interface IngestRequest {
   fileName?: string;
   windowStart?: Date;
   windowEnd?: Date;
+  /**
+   * The run that the upload already stored.
+   *
+   * The reconciliation is a background job: the request stores the uploaded
+   * file in the run record and the job fills the run in. When the run is
+   * given, the ingestion is idempotent on the run itself (`ingested_at`),
+   * so a retried job never matches the same statement twice.
+   */
+  runId?: string;
 }
 
 export interface IngestResult {
@@ -255,6 +264,22 @@ const normalizeColumnMap = (raw: Record<string, unknown>): StatementColumnMap =>
   return output as StatementColumnMap;
 };
 
+/**
+ * Raised when the run was already ingested by another worker.
+ *
+ * The transaction that raised it is rolled back, so the caller reports the
+ * run as the idempotent result of the ingestion.
+ */
+export class ReconciliationAlreadyIngestedError extends Error {
+  readonly runId: string;
+
+  constructor(runId: string) {
+    super(`The reconciliation run '${runId}' has already been ingested`);
+    this.name = "ReconciliationAlreadyIngestedError";
+    this.runId = runId;
+  }
+}
+
 export class StatementIngestor {
   private readonly db: PrismaLike;
   private readonly repositories: Repositories;
@@ -280,9 +305,22 @@ export class StatementIngestor {
     }
     const content = this.toBuffer(request.content);
     const fileHash = createHash("sha256").update(content).digest("hex");
-    const existing = await this.repositories.reconciliation.findRunByFileHash(this.db as Tx, fileHash);
-    if (existing) {
-      return this.resultFromExistingRun(existing.id, fileHash);
+
+    if (request.runId) {
+      // The run was stored by the upload: the ingestion is idempotent on the
+      // run, not on the file hash, because the run owns the file hash.
+      const run = await this.repositories.reconciliation.findRunById(this.db as Tx, request.runId);
+      if (!run) {
+        throw new ApiError(404, "RECONCILIATION_RUN_NOT_FOUND", "The reconciliation run does not exist");
+      }
+      if (run.ingestedAt) {
+        return this.resultFromExistingRun(run.id, fileHash);
+      }
+    } else {
+      const existing = await this.repositories.reconciliation.findRunByFileHash(this.db as Tx, fileHash);
+      if (existing) {
+        return this.resultFromExistingRun(existing.id, fileHash);
+      }
     }
 
     const config = this.parseConfig(source.parserConfig);
@@ -292,166 +330,224 @@ export class StatementIngestor {
     const windowStart = request.windowStart ?? new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000);
     const windowEnd = request.windowEnd ?? now;
 
-    return this.db.$transaction(async (tx: Tx) => {
-      const duplicateRun = await this.repositories.reconciliation.findRunByFileHash(tx, fileHash);
-      if (duplicateRun) {
-        return this.resultFromExistingRun(duplicateRun.id, fileHash);
+    try {
+      return await (this.db.$transaction(async (tx: Tx) => (
+        this.matchStatement(tx, {
+          request,
+          source,
+          normalized,
+          fileHash,
+          windowStart,
+          windowEnd,
+        })
+      )) as Promise<IngestResult>);
+    } catch (error) {
+      if (error instanceof ReconciliationAlreadyIngestedError) {
+        // Another worker ingested the very same run in the meantime: the work
+        // of this transaction was rolled back and the run is reported as the
+        // idempotent result of the ingestion.
+        return this.resultFromExistingRun(error.runId, fileHash);
       }
-      const run = await this.repositories.reconciliation.createRun(tx, {
+      throw error;
+    }
+  }
+
+  /**
+   * Matches the parsed statement rows against the local attempts.
+   *
+   * The whole matching, the report items and the fee variance posting share
+   * one transaction, so a run is either fully ingested or not ingested at all.
+   */
+  private async matchStatement(
+    tx: Tx,
+    input: {
+      request: IngestRequest;
+      source: StatementSourceRow;
+      normalized: StatementRow[];
+      fileHash: string;
+      windowStart: Date;
+      windowEnd: Date;
+    },
+  ): Promise<IngestResult> {
+    const { request, source, normalized, fileHash, windowStart, windowEnd } = input;
+
+    let run = request.runId
+      ? await this.repositories.reconciliation.findRunById(tx, request.runId)
+      : await this.repositories.reconciliation.findRunByFileHash(tx, fileHash);
+    if (request.runId) {
+      if (!run) {
+        throw new ApiError(404, "RECONCILIATION_RUN_NOT_FOUND", "The reconciliation run does not exist");
+      }
+      if (run.ingestedAt) {
+        // Another worker ingested the run in the meantime.
+        return this.resultFromExistingRun(run.id, fileHash);
+      }
+    } else {
+      if (run) {
+        return this.resultFromExistingRun(run.id, fileHash);
+      }
+      run = await this.repositories.reconciliation.createRun(tx, {
         statementSourceId: source.id,
         windowStart: windowStart,
         windowEnd: windowEnd,
         fileHash: fileHash,
         statsJson: { totalRows: normalized.length },
       });
+    }
+    const runId = String(run.id);
 
-      const seen = new Set<string>();
-      const items: IngestResult["items"] = [];
-      let matched = 0;
-      let amountMismatch = 0;
-      let missingAtGateway = 0;
-      let missingLocally = 0;
-      let duplicates = 0;
-      let feeVariances = 0;
+    const seen = new Set<string>();
+    const items: IngestResult["items"] = [];
+    let matched = 0;
+    let amountMismatch = 0;
+    let missingAtGateway = 0;
+    let missingLocally = 0;
+    let duplicates = 0;
+    let feeVariances = 0;
 
-      for (const row of normalized) {
-        const dedupeKey = row.ourReference
-          ?? row.providerReference
-          ?? row.batchReference
-          ?? `${row.amount.toString()}|${row.occurredAt?.toISOString() ?? ""}`;
-        if (seen.has(dedupeKey)) {
-          duplicates += 1;
-          const item = await this.repositories.reconciliation.createItem(tx, {
-            runId: run.id,
-            attemptId: null,
-            ourReference: row.ourReference ?? "",
-            providerReference: row.providerReference ?? "",
-            batchReference: row.batchReference,
-            statementAmount: moneyToString(row.amount),
-            statementFee: moneyToString(row.fee),
-            result: "DUPLICATE",
-          });
-          items.push({
-            id: item.id,
-            result: "DUPLICATE",
-            ourReference: row.ourReference,
-            providerReference: row.providerReference,
-          });
-          continue;
-        }
-        seen.add(dedupeKey);
-
-        const attempt = await this.resolveAttempt(tx, row);
-        if (!attempt) {
-          missingAtGateway += 1;
-          const item = await this.repositories.reconciliation.createItem(tx, {
-            runId: run.id,
-            attemptId: null,
-            ourReference: row.ourReference ?? "",
-            providerReference: row.providerReference ?? "",
-            batchReference: row.batchReference,
-            statementAmount: moneyToString(row.amount),
-            statementFee: moneyToString(row.fee),
-            result: "MISSING_AT_GATEWAY",
-          });
-          items.push({
-            id: item.id,
-            result: "MISSING_AT_GATEWAY",
-            ourReference: row.ourReference,
-            providerReference: row.providerReference,
-          });
-          continue;
-        }
-
-        const expected = attempt.settledAmount ?? attempt.totalChargedAmount ?? attempt.requestedAmount ?? 0;
-        const expectedAmount = moneyFromDecimal(expected);
-        const amountMatches = expectedAmount === row.amount;
-        const result: ReconciliationResult = amountMatches ? "MATCHED" : "AMOUNT_MISMATCH";
+    for (const row of normalized) {
+      const dedupeKey = row.ourReference
+        ?? row.providerReference
+        ?? row.batchReference
+        ?? `${row.amount.toString()}|${row.occurredAt?.toISOString() ?? ""}`;
+      if (seen.has(dedupeKey)) {
+        duplicates += 1;
         const item = await this.repositories.reconciliation.createItem(tx, {
-          runId: run.id,
-          attemptId: attempt.id,
-          ourReference: row.ourReference ?? attempt.reference,
-          providerReference: row.providerReference ?? attempt.providerReference ?? "",
+          runId: runId,
+          attemptId: null,
+          ourReference: row.ourReference ?? "",
+          providerReference: row.providerReference ?? "",
           batchReference: row.batchReference,
           statementAmount: moneyToString(row.amount),
           statementFee: moneyToString(row.fee),
-          result,
+          result: "DUPLICATE",
         });
         items.push({
           id: item.id,
-          result,
-          ourReference: row.ourReference ?? attempt.reference,
-          providerReference: row.providerReference ?? attempt.providerReference,
+          result: "DUPLICATE",
+          ourReference: row.ourReference,
+          providerReference: row.providerReference,
         });
-        if (amountMatches) {
-          matched += 1;
-        } else {
-          amountMismatch += 1;
-        }
-
-        const accruedFee = attempt.gatewayFeeAmount === null || attempt.gatewayFeeAmount === undefined
-          ? 0n
-          : moneyFromDecimal(attempt.gatewayFeeAmount);
-        const variance = row.fee - accruedFee;
-        if (variance !== 0n && this.feeVariancePoster) {
-          await this.feeVariancePoster.postFeeVariance({
-            gatewayId: source.gatewayId,
-            statementSourceId: source.id,
-            attemptId: attempt.id,
-            statementFee: row.fee,
-            accruedFee,
-            variance,
-            occurredAt: row.occurredAt,
-          });
-          feeVariances += 1;
-        }
+        continue;
       }
+      seen.add(dedupeKey);
 
-      const unmatched = await this.findUnmatchedLocalAttempts(tx, source.id, windowStart, windowEnd, seen);
-      for (const attempt of unmatched) {
-        missingLocally += 1;
+      const attempt = await this.resolveAttempt(tx, row);
+      if (!attempt) {
+        missingAtGateway += 1;
         const item = await this.repositories.reconciliation.createItem(tx, {
-          runId: run.id,
-          attemptId: attempt.id,
-          ourReference: attempt.reference,
-          providerReference: attempt.providerReference ?? "",
-          batchReference: null,
-          statementAmount: moneyToString(0n),
-          statementFee: moneyToString(0n),
-          result: "MISSING_LOCALLY",
+          runId: runId,
+          attemptId: null,
+          ourReference: row.ourReference ?? "",
+          providerReference: row.providerReference ?? "",
+          batchReference: row.batchReference,
+          statementAmount: moneyToString(row.amount),
+          statementFee: moneyToString(row.fee),
+          result: "MISSING_AT_GATEWAY",
         });
         items.push({
           id: item.id,
-          result: "MISSING_LOCALLY",
-          ourReference: attempt.reference,
-          providerReference: attempt.providerReference,
+          result: "MISSING_AT_GATEWAY",
+          ourReference: row.ourReference,
+          providerReference: row.providerReference,
         });
+        continue;
       }
 
-      const stats = {
-        totalRows: normalized.length,
-        matched,
-        amountMismatch,
-        missingAtGateway,
-        missingLocally,
-        duplicates,
-        feeVariances,
-      };
-      await this.repositories.reconciliation.updateRunStats(tx, run.id, stats);
-      return {
-        runId: run.id,
-        fileHash,
-        idempotent: false,
-        totalRows: normalized.length,
-        matched,
-        amountMismatch,
-        missingAtGateway,
-        missingLocally,
-        duplicates,
-        feeVariances,
-        items,
-      };
-    }) as Promise<IngestResult>;
+      const expected = attempt.settledAmount ?? attempt.totalChargedAmount ?? attempt.requestedAmount ?? 0;
+      const expectedAmount = moneyFromDecimal(expected);
+      const amountMatches = expectedAmount === row.amount;
+      const result: ReconciliationResult = amountMatches ? "MATCHED" : "AMOUNT_MISMATCH";
+      const item = await this.repositories.reconciliation.createItem(tx, {
+        runId: runId,
+        attemptId: attempt.id,
+        ourReference: row.ourReference ?? attempt.reference,
+        providerReference: row.providerReference ?? attempt.providerReference ?? "",
+        batchReference: row.batchReference,
+        statementAmount: moneyToString(row.amount),
+        statementFee: moneyToString(row.fee),
+        result,
+      });
+      items.push({
+        id: item.id,
+        result,
+        ourReference: row.ourReference ?? attempt.reference,
+        providerReference: row.providerReference ?? attempt.providerReference,
+      });
+      if (amountMatches) {
+        matched += 1;
+      } else {
+        amountMismatch += 1;
+      }
+
+      const accruedFee = attempt.gatewayFeeAmount === null || attempt.gatewayFeeAmount === undefined
+        ? 0n
+        : moneyFromDecimal(attempt.gatewayFeeAmount);
+      const variance = row.fee - accruedFee;
+      if (variance !== 0n && this.feeVariancePoster) {
+        await this.feeVariancePoster.postFeeVariance({
+          gatewayId: source.gatewayId,
+          statementSourceId: source.id,
+          attemptId: attempt.id,
+          statementFee: row.fee,
+          accruedFee,
+          variance,
+          occurredAt: row.occurredAt,
+        });
+        feeVariances += 1;
+      }
+    }
+
+    const unmatched = await this.findUnmatchedLocalAttempts(tx, source.id, windowStart, windowEnd, seen);
+    for (const attempt of unmatched) {
+      missingLocally += 1;
+      const item = await this.repositories.reconciliation.createItem(tx, {
+        runId: runId,
+        attemptId: attempt.id,
+        ourReference: attempt.reference,
+        providerReference: attempt.providerReference ?? "",
+        batchReference: null,
+        statementAmount: moneyToString(0n),
+        statementFee: moneyToString(0n),
+        result: "MISSING_LOCALLY",
+      });
+      items.push({
+        id: item.id,
+        result: "MISSING_LOCALLY",
+        ourReference: attempt.reference,
+        providerReference: attempt.providerReference,
+      });
+    }
+
+    const stats = {
+      totalRows: normalized.length,
+      matched,
+      amountMismatch,
+      missingAtGateway,
+      missingLocally,
+      duplicates,
+      feeVariances,
+    };
+    // The run is marked as ingested with a conditional update: it succeeds
+    // at most once, so a retried job rolls its own work back instead of
+    // matching the same statement twice.
+    const ingested = await this.repositories.reconciliation.markRunIngested(tx, runId, stats);
+    if (!ingested) {
+      throw new ReconciliationAlreadyIngestedError(runId);
+    }
+    return {
+      runId: runId,
+      fileHash,
+      idempotent: false,
+      totalRows: normalized.length,
+      matched,
+      amountMismatch,
+      missingAtGateway,
+      missingLocally,
+      duplicates,
+      feeVariances,
+      items,
+    };
   }
 
   private async resultFromExistingRun(runId: string, fileHash: string): Promise<IngestResult> {

@@ -2,7 +2,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { env } from "../lib/env";
 import { parseOrThrow } from "../lib/error";
-import { callCore, type CoreHttpMethod } from "../lib/mtlsClient";
+import { callCoreResponse, type CoreHttpMethod } from "../lib/mtlsClient";
 import { parseCidrList, resolveClientIp } from "../lib/net";
 import { resolveRequestId } from "../lib/requestLogger";
 
@@ -31,6 +31,11 @@ export interface ForwardOptions {
    */
   splitBodyFrom?: (req: Request, body: unknown) => unknown[];
   headers?: Record<string, string>;
+  /**
+   * Answers with the status code that core returned instead of the declared
+   * one. Used by the routes whose outcome became asynchronous.
+   */
+  relayStatus?: boolean;
 }
 
 const scalarQuery = (query: Record<string, unknown> | undefined) => {
@@ -59,7 +64,7 @@ export const coreForward =
     const publicBody =
       options.schema && rawBody !== undefined ? parseOrThrow(options.schema, rawBody) : rawBody;
     const call = (path: string, body: unknown) =>
-      callCore({
+      callCoreResponse({
         method: options.method,
         path,
         body,
@@ -82,6 +87,6 @@ export const coreForward =
     }
 
     const body = options.bodyFrom ? options.bodyFrom(req, publicBody) : publicBody;
-    const payload = await call(options.path({ params, body, query: query ?? {} }), body);
-    res.status(options.status ?? 200).json(payload);
+    const response = await call(options.path({ params, body, query: query ?? {} }), body);
+    res.status(options.relayStatus === true ? response.status : options.status ?? 200).json(response.body);
   };

@@ -5,6 +5,16 @@ export interface ConsumerRegistryKey {
   gatewayId: string;
   env: string;
   credentialSetId: string;
+  /**
+   * The gateway version the attempt pins.
+   *
+   * Design v5 §9.1 rule 1 pins the configuration of an attempt, so the
+   * outbound consumer is built from the pinned version and never from the
+   * latest live one. The key carries the version, because two attempts of the
+   * same gateway and environment may pin two different versions with two
+   * different authentication recipes.
+   */
+  gatewayVersionId?: string;
 }
 
 export interface ConsumerRegistryOptions {
@@ -13,8 +23,36 @@ export interface ConsumerRegistryOptions {
   invalidationBus?: InvalidationBus;
 }
 
+/**
+ * The cache key of a consumer.
+ *
+ * The three mandatory parts keep the historical format, so a consumer that is
+ * addressed without a version keeps its key. The pinned version is appended,
+ * so the cache never hands the configuration of one version to an attempt
+ * that pinned another one.
+ */
 export function consumerRegistryKey(key: ConsumerRegistryKey): string {
-  return `${key.gatewayId}:${key.env}:${key.credentialSetId}`;
+  const version = key.gatewayVersionId ? `:${key.gatewayVersionId}` : "";
+  return `${key.gatewayId}:${key.env}:${key.credentialSetId}${version}`;
+}
+
+/**
+ * The parts of a cache key. The identifiers are UUIDs, so the colon is a safe
+ * separator.
+ */
+function parseRegistryKey(mapKey: string): {
+  gatewayId: string;
+  env: string;
+  credentialSetId: string;
+  gatewayVersionId?: string;
+} {
+  const [gatewayId = "", env = "", credentialSetId = "", gatewayVersionId] = mapKey.split(":");
+  return {
+    gatewayId,
+    env,
+    credentialSetId,
+    ...(gatewayVersionId ? { gatewayVersionId } : {}),
+  };
 }
 
 export class ConsumerRegistry {
@@ -51,9 +89,8 @@ export class ConsumerRegistry {
   }
 
   async invalidateCredential(credentialSetId: string): Promise<void> {
-    const prefix = `:${credentialSetId}`;
     for (const [key, promise] of this.consumersMap) {
-      if (!key.endsWith(prefix)) {
+      if (parseRegistryKey(key).credentialSetId !== credentialSetId) {
         continue;
       }
       this.consumersMap.delete(key);
@@ -67,9 +104,8 @@ export class ConsumerRegistry {
   }
 
   async invalidateGateway(gatewayId: string): Promise<void> {
-    const prefix = `${gatewayId}:`;
     for (const [key, promise] of this.consumersMap) {
-      if (!key.startsWith(prefix)) {
+      if (parseRegistryKey(key).gatewayId !== gatewayId) {
         continue;
       }
       this.consumersMap.delete(key);

@@ -321,6 +321,38 @@ const maskedPhone = (formData: Record<string, unknown>): string => {
   return `${"*".repeat(Math.max(0, raw.length - 4))}${tail}`;
 };
 
+/**
+ * The first value of the form data that is a non empty string.
+ *
+ * The customer fields are named differently by the rails, so the guard reads
+ * the customer context from a fixed list of aliases instead of trusting one
+ * particular name.
+ */
+const formValue = (
+  formData: Record<string, unknown>,
+  keys: readonly string[],
+): string | null => {
+  for (const key of keys) {
+    const value = formData[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return null;
+};
+
+const customerPhoneOf = (formData: Record<string, unknown>): string | null =>
+  formValue(formData, ["phone", "customer_mobile", "mobile", "customer_phone"]);
+
+const customerCardAliasOf = (formData: Record<string, unknown>): string | null =>
+  formValue(formData, ["card_alias", "cardAlias", "card_bin", "bin"]);
+
+const customerNameOf = (formData: Record<string, unknown>): string | null =>
+  formValue(formData, ["name", "customer_name", "full_name"]);
+
+const customerWalletOf = (formData: Record<string, unknown>): string | null =>
+  formValue(formData, ["wallet_id", "walletId"]);
+
 const buildClientAction = (
   mode: string,
   payload: {
@@ -672,62 +704,105 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
     : null;
 
   const customerFingerprint = fingerprint([clientIp, userAgent, link.id]);
-  const reference = `PA-${Date.now().toString(36).toUpperCase()}-${createHash("sha256")
-    .update(`${link.id}:${customerFingerprint}:${body.idempotencyKey}`)
-    .digest("hex")
-    .slice(0, 10)
-    .toUpperCase()}`;
 
   const breakdown = buildBreakdown(link, profile);
   const gatewayFee = gatewayFeeForRoute(routeRow.costModel, breakdown.totalCharged);
   const settlementTarget = credentialSet.settlementTarget;
 
-  const attempt = await client.$transaction(async (tx) => {
-    const group = await tx.attemptGroup.upsert({
-      where: { linkId_customerFingerprint: { linkId: link.id, customerFingerprint } },
-      update: {},
-      create: { linkId: link.id, customerFingerprint },
-    });
-
-    return tx.paymentAttempt.create({
-      data: {
-        reference,
-        idempotencyKey: body.idempotencyKey,
-        linkId: link.id,
-        attemptGroupId: group.id,
+  // The attempt-creation guard (design §9.1 rule 2) runs inside the
+  // transaction that reserves the slot of the link: the velocity rules, the
+  // watch list and the AML rules are evaluated there, a rejected payment
+  // leaves a terminal BLOCKED attempt behind and a held payment leaves its
+  // money escrowed in `AML_HOLD`.
+  const platform = getPlatformRuntime(client as never);
+  const decision = await client.$transaction(async (tx) =>
+    platform.guardPipeline.guard(
+      {
+        linkKey,
+        railCode: body.railCode,
         applicationId: link.applicationId,
         merchantId: link.merchantId,
-        railId: rail.id,
-        routeId: routeRow.id,
-        credentialSetId: credentialSet.id,
-        gatewayVersionId: activeVersionId,
-        commissionProfileId: profile.id,
-        env: credentialSet.env,
+        env,
+        channel: "WEB",
         mode,
         subMode: body.subMode ?? null,
-        status: "CREATED",
-        requestedAmount: link.amount,
-        surchargeAmount: new Prisma.Decimal(breakdown.payerSurcharge),
-        totalChargedAmount: new Prisma.Decimal(breakdown.totalCharged),
-        platformCommissionAmount: new Prisma.Decimal(breakdown.commission),
-        netMerchantAmount: new Prisma.Decimal(breakdown.merchantCredited),
-        gatewayFeeAmount: new Prisma.Decimal(gatewayFee),
-        feeBearer: link.feeBearer,
-        settlementTarget,
-        currency: link.currency,
-        customerFieldsMasked: json({
-          fingerprint: customerFingerprint,
-          fields: maskedCustomerFields(body.formData),
-        }),
-        contextCiphertext: "",
-        expiresAt,
-        graceExpiresAt,
+        customer: {
+          phone: customerPhoneOf(body.formData),
+          ip: clientIp,
+          cardAlias: customerCardAliasOf(body.formData),
+          deviceFingerprint: customerFingerprint,
+          walletId: customerWalletOf(body.formData),
+          name: customerNameOf(body.formData),
+        },
+        idempotencyKey: body.idempotencyKey,
         clientIp,
         userAgent,
+        pinnedRoute: {
+          railId: rail.id,
+          routeId: routeRow.id,
+          credentialSetId: credentialSet.id,
+          gatewayVersionId: activeVersionId,
+          commissionProfileId: profile.id,
+          settlementTarget,
+          gatewayId: routeRow.gatewayId,
+          mode,
+        },
+        amounts: {
+          surchargeAmount: breakdown.payerSurcharge,
+          totalChargedAmount: breakdown.totalCharged,
+          platformCommissionAmount: breakdown.commission,
+          netMerchantAmount: breakdown.merchantCredited,
+          gatewayFeeAmount: gatewayFee,
+        },
+        customerFields: {
+          fingerprint: customerFingerprint,
+          fields: maskedCustomerFields(body.formData),
+        },
+        expiresAt,
+        graceExpiresAt,
         nextCheckAt: new Date(Date.now() + 5000),
       },
+      tx as never,
+    ),
+  );
+
+  if (decision.outcome === "BLOCK") {
+    // The customer sees a generic message: the reason of the refusal stays
+    // internal (design §20).
+    response.status(decision.customerMessageCode === "PAYMENT_IN_PROGRESS" ? 409 : 403).json({
+      attemptId: decision.attemptId,
+      reference: decision.reference,
+      status: "BLOCKED",
+      code: decision.customerMessageCode,
+      reasons: decision.reasons,
+      clientAction: null,
     });
-  });
+    return;
+  }
+
+  if (decision.outcome === "HOLD") {
+    // The money is escrowed and the attempt waits for the resolution of the
+    // AML case. It is never settled from here.
+    response.status(202).json({
+      attemptId: decision.attemptId,
+      reference: decision.reference,
+      status: "CREATED",
+      code: decision.customerMessageCode,
+      reasons: decision.reasons,
+      hold: true,
+      clientAction: null,
+    });
+    return;
+  }
+
+  const attemptId = decision.attemptId;
+  if (!attemptId) {
+    throw new ApiError(500, "ATTEMPT_NOT_CREATED", "The payment attempt was not created");
+  }
+  const attempt = await client.paymentAttempt.findUnique({ where: { id: attemptId } });
+  if (!attempt) {
+    throw new ApiError(500, "ATTEMPT_NOT_CREATED", "The payment attempt was not created");
+  }
 
   const widget = await client.widgetDefinition.findUnique({ where: { routeId: routeRow.id } });
   const redirect = await client.redirectDefinition.findUnique({ where: { routeId: routeRow.id } });
@@ -763,7 +838,6 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
 
   // The slot reservation, the flow execution and the state transition are
   // owned by the universal rail engine.
-  const platform = getPlatformRuntime(client as never);
   const engineResult = await platform.engine.initiate(
     attempt as unknown as DynamicAttempt,
     body.formData,

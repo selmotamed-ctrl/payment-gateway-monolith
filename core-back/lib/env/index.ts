@@ -56,6 +56,43 @@ export const envSchema = z.strictObject({
    */
   WORKER_RESCREEN_INTERVAL_MS: z.coerce.number().int().positive().default(86_400_000),
   /**
+   * The record retention worker (OD-4). It purges the regulatory evidence
+   * that passed the retention period, and it is off unless a deployment
+   * turns it on.
+   */
+  WORKER_RETENTION_ENABLED: booleanFromEnvironment.default(false),
+  /**
+   * How often the retention worker runs.
+   */
+  WORKER_RETENTION_INTERVAL_MS: z.coerce.number().int().positive().default(3_600_000),
+  /**
+   * How many rows the retention worker purges in one batch.
+   */
+  WORKER_RETENTION_BATCH_SIZE: z.coerce.number().int().positive().max(10_000).default(500),
+  /**
+   * The dry run of the retention worker: it reports what it would purge
+   * without deleting anything.
+   */
+  RETENTION_DRY_RUN: booleanFromEnvironment.default(false),
+  /**
+   * The durable job queue of `core-back`. It drains the background jobs (the
+   * statement reconciliation and the dispute / adjustment execution).
+   */
+  WORKER_BACKGROUND_JOBS_ENABLED: booleanFromEnvironment.default(true),
+  /**
+   * How often the background job queue is drained.
+   */
+  WORKER_BACKGROUND_JOBS_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
+  /**
+   * How many background jobs are claimed in one drain.
+   */
+  WORKER_BACKGROUND_JOBS_BATCH_SIZE: z.coerce.number().int().positive().max(1000).default(10),
+  /**
+   * The lease of a claimed background job. A job that is still `RUNNING`
+   * when its lease expired belonged to a crashed node and is re-queued.
+   */
+  WORKER_BACKGROUND_JOBS_LEASE_SECONDS: z.coerce.number().int().positive().default(300),
+  /**
    * The endpoint of the SMS / email aggregator of the deployment.
    *
    * The variable is optional: without it the platform keeps working in
@@ -131,6 +168,14 @@ const resolveEnvironment = (): CoreEnv => {
     WORKER_MAX_ATTEMPTS: 3,
     WORKER_REQUEST_TIMEOUT_MS: 15000,
     WORKER_RESCREEN_INTERVAL_MS: 86_400_000,
+    WORKER_RETENTION_ENABLED: false,
+    WORKER_RETENTION_INTERVAL_MS: 3_600_000,
+    WORKER_RETENTION_BATCH_SIZE: 500,
+    RETENTION_DRY_RUN: false,
+    WORKER_BACKGROUND_JOBS_ENABLED: true,
+    WORKER_BACKGROUND_JOBS_INTERVAL_MS: 2000,
+    WORKER_BACKGROUND_JOBS_BATCH_SIZE: 10,
+    WORKER_BACKGROUND_JOBS_LEASE_SECONDS: 300,
     NOTIFICATION_WEBHOOK_URL: undefined,
     NOTIFICATION_WEBHOOK_TIMEOUT_MS: 5000,
   };
