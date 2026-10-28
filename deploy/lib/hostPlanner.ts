@@ -11,7 +11,7 @@ import type { DeployConfig, DeployRole } from "./configSchema";
  */
 
 export type ServiceName = "pg-core-back" | "pg-admin-back" | "pg-merchant-back" | "pg-checkout-back";
-export type NginxSiteName = "admin-lan" | "merchant-public" | "checkout-public";
+export type NginxSiteName = "admin-lan" | "merchant-public" | "checkout-public" | "merchant-lan" | "checkout-lan";
 export type CertBundle = "core-server" | "admin-client" | "merchant-client" | "checkout-client";
 
 export interface SshTarget {
@@ -226,6 +226,28 @@ const buildNginx = (config: DeployConfig): NginxPlan[] => [
     keyPath: config.CHECKOUT_SSL_KEY_PATH ?? `/etc/letsencrypt/live/${config.CHECKOUT_DOMAIN}/privkey.pem`,
     staticRoot: `${config.CHECKOUT_REMOTE_DIR}/current/checkout-front/dist`,
   },
+  ...(config.MERCHANT_LAN_PORT > 0
+    ? [{
+        site: "merchant-lan" as const,
+        role: "merchant" as const,
+        template: "nginx.merchant.lan.conf.tpl",
+        listenPort: config.MERCHANT_LAN_PORT,
+        serverName: config.MERCHANT_PRIVATE_IP,
+        sslMode: "self_signed" as const,
+        staticRoot: `${config.MERCHANT_REMOTE_DIR}/current/merchant-front/dist`,
+      }]
+    : []),
+  ...(config.CHECKOUT_LAN_PORT > 0
+    ? [{
+        site: "checkout-lan" as const,
+        role: "checkout" as const,
+        template: "nginx.checkout.lan.conf.tpl",
+        listenPort: config.CHECKOUT_LAN_PORT,
+        serverName: config.CHECKOUT_PRIVATE_IP,
+        sslMode: "self_signed" as const,
+        staticRoot: `${config.CHECKOUT_REMOTE_DIR}/current/checkout-front/dist`,
+      }]
+    : []),
 ];
 
 const buildCertBundles = (role: DeployRole): CertBundle[] => {
@@ -286,12 +308,28 @@ const buildRoleFirewall = (config: DeployConfig, role: DeployRole): FirewallRule
         { port: config.MERCHANT_SSH_PORT, proto: "tcp", comment: "SSH" },
         { port: 80, proto: "tcp", comment: "public HTTP (redirect)" },
         { port: 443, proto: "tcp", comment: "public HTTPS" },
+        ...(config.MERCHANT_LAN_PORT > 0
+          ? [{
+              port: config.MERCHANT_LAN_PORT,
+              proto: "tcp" as const,
+              fromCidrs: config.LAN_ALLOWED_CIDRS.split(",").map((entry) => entry.trim()),
+              comment: "merchant portal on the LAN (no domain)",
+            }]
+          : []),
       ];
     case "checkout":
       return [
         { port: config.CHECKOUT_SSH_PORT, proto: "tcp", comment: "SSH" },
         { port: 80, proto: "tcp", comment: "public HTTP (redirect)" },
         { port: 443, proto: "tcp", comment: "public HTTPS" },
+        ...(config.CHECKOUT_LAN_PORT > 0
+          ? [{
+              port: config.CHECKOUT_LAN_PORT,
+              proto: "tcp" as const,
+              fromCidrs: config.LAN_ALLOWED_CIDRS.split(",").map((entry) => entry.trim()),
+              comment: "checkout portal on the LAN (no domain)",
+            }]
+          : []),
       ];
     default:
       return [];

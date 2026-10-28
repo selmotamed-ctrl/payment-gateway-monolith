@@ -78,6 +78,61 @@ CHECKOUT_SSL_MODE="self_signed"
 The planner then reports `topology: single-host (1 host(s))` and applies the
 union of every role's firewall rules once.
 
+## 1.2 The first administrator (there is no default password)
+
+`prisma/seed.ts` creates the administrator **accounts** (email, role, authority
+set, maker/checker flags) but deliberately leaves `password_hash` NULL and the
+status `INVITED`: there is no self-service activation and no default password.
+Set the first credential on the core host, which is the only host with database
+access:
+
+```bash
+ssh core-host
+cd /var/www/pg-core/current/core-back
+set -a; . ./.env; set +a
+ADMIN_EMAIL="you@example.com" ADMIN_PASSWORD='Str0ngPassw0rd!' bun run create-admin
+```
+
+Flags work too, and any seeded email can be activated:
+
+```bash
+bun run create-admin --email compliance@payment-gateway.internal \
+  --password 'Str0ngPassw0rd!' --role COMPLIANCE
+```
+
+The password policy is **12+ characters with a lowercase letter, an uppercase
+letter and a digit**. The command is idempotent: running it again resets the
+password, marks the account `ACTIVE` and clears a stale MFA secret. MFA is
+**off** by default (the code is delivered through the notification queue, so
+only enable it once SMS is configured); pass `--mfa` to require it.
+
+Sign in at the admin portal with the **email** in the "Email or phone" field.
+The seeded roles are `GATEWAY_ADMIN`, `SECURITY_ADMIN`, `FINANCE`,
+`COMPLIANCE`, `MLRO`, `OPERATOR` and `SUPPORT`; the sidebar is gated by the
+authorities of the signed-in role, so use the matching role to see a given area
+(e.g. AML screens need `COMPLIANCE`/`MLRO`, finance screens need `FINANCE`).
+
+## 1.3 LAN access without a domain name
+
+Every operator portal is also published on a **plain LAN port** so it can be
+opened by host IP during staging, with no DNS record and no public certificate:
+
+| Portal | URL | Config | Default |
+| :--- | :--- | :--- | :--- |
+| Admin back office | `https://<host-ip>:8443` | `ADMIN_NGINX_LAN_PORT` | `8443` |
+| Merchant portal | `https://<host-ip>:8081` | `MERCHANT_LAN_PORT` | `8081` |
+| Checkout (payer) | `https://<host-ip>:8082` | `CHECKOUT_LAN_PORT` | `8082` |
+
+Set either merchant/checkout LAN port to `0` to disable that listener. The LAN
+vhosts use a self-signed certificate whose **SAN contains the host IP**, so the
+IP matches even though the issuer is untrusted (browsers still warn; that is
+expected on a staging box). They serve the same SPA build and proxy `/api/` to
+the same backend, including the SSE streams.
+
+Access is restricted by UFW to `LAN_ALLOWED_CIDRS` (and loopback), so the LAN
+ports are never reachable from outside the LAN even though they listen on
+`0.0.0.0`. The public `80`/`443` vhosts stay domain-based and are unaffected.
+
 ## 2. The 1-to-5 host topology
 
 The orchestrator groups the five logical roles by their SSH endpoint

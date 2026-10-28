@@ -120,6 +120,15 @@ router.post(
   }),
 );
 
+router.get(
+  "/me",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/merchant/auth/me",
+    requireAuth: false,
+  }),
+);
+
 router.post(
   "/mfa/verify",
   coreForward({

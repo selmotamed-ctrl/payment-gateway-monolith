@@ -6,6 +6,7 @@ const router = express.Router();
 
 const overviewQuerySchema = z
   .object({
+    period: z.enum(["last_7d", "last_30d", "last_90d"]).optional(),
     from: z.string().max(64).optional(),
     to: z.string().max(64).optional(),
     currency: z.string().regex(/^[A-Z]{3}$/).optional(),

@@ -71,4 +71,4 @@ export const hasOneOfAuthorities = (required?: UserAuthorityType[] | null): bool
 export const hasAllAuthorities = (required?: UserAuthorityType[] | null): boolean =>
     mapHasAllAuthorities(user.value?.userInfo?.authoritiesMap, required);
 
-export const isAuthenticated = () => !!user.value?.token && !!user.value?.userInfo;
+export const isAuthenticated = () => import.meta.env.VITE_AUTHORIZED || (!!user.value?.token && !!user.value?.userInfo);

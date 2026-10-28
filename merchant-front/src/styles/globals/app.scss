@@ -323,16 +323,15 @@ body,
     height: 100%;
 }
 
-/* Global app scaling - Scale entire app to 0.9 */
-:root {
-    --app-scale: 0.9;
-}
-
+/*
+ * The mount point is a plain full-size surface. A global `transform: scale()`
+ * here would turn #app into the containing block for `position: fixed`
+ * children, mis-positioning the app bar/drawers/dialogs and causing horizontal
+ * overflow. Density is controlled per component instead.
+ */
 #app {
-    transform: scale(var(--app-scale));
-    transform-origin: top left;
-    width: calc(100% / var(--app-scale)); /* Compensate for scaling to maintain full width */
-    height: calc(100% / var(--app-scale)); /* Compensate for scaling to maintain full height */
+    width: 100%;
+    height: 100%;
 }
 
 // .drawer-width {
@@ -374,9 +373,17 @@ body,
 
 * {
     scrollbar-width: thin !important;
-    font-family: "Plus Jakarta Sans", sans-serif;
+    font-family: "Plus Jakarta Sans", "Cairo", system-ui, sans-serif;
     font-optical-sizing: auto;
+    letter-spacing: 0;
     scrollbar-color: rgba(100, 100, 100, 0.4) transparent;
+}
+
+/* Arabic uses Cairo; Latin keeps Plus Jakarta. No global letter-spacing. */
+[dir="rtl"] *,
+[dir="rtl"] {
+    font-family: "Cairo", "Plus Jakarta Sans", system-ui, sans-serif;
+    letter-spacing: 0;
 }
 
 .v-theme--dark * {
@@ -430,4 +437,160 @@ html {
     size: A4;
     margin-top: 1cm !important;
     margin-bottom: 1cm !important;
+}
+
+/* ---------------------------------------------------------------------------
+ * Application shell (merchant)
+ * A fixed app bar + navigation drawer + scrolling main surface. The layout is
+ * owned by the shell; pages are plain content inside `.pg-page`.
+ * ------------------------------------------------------------------------- */
+.pg-app-bar {
+    border-bottom: 1px solid var(--fintech-border);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.pg-app-bar .v-toolbar__content {
+    gap: 6px;
+    padding-inline: 12px;
+}
+
+.pg-app-bar__brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    margin-inline-start: 4px;
+}
+
+.pg-app-bar__title {
+    font-size: 15px;
+    font-weight: 800;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pg-spacer {
+    flex: 1 1 auto;
+}
+
+.pg-user-btn {
+    text-transform: none;
+    letter-spacing: 0;
+    padding-inline: 8px;
+}
+
+.pg-user-btn__name {
+    margin-inline-start: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pg-avatar {
+    background: linear-gradient(135deg, rgb(var(--v-theme-primary)), rgb(var(--v-theme-accent)));
+    color: white;
+    font-weight: 800;
+}
+
+.pg-drawer {
+    border-inline-end: 1px solid var(--fintech-border);
+    display: flex;
+    flex-direction: column;
+}
+
+.pg-drawer .v-navigation-drawer__content {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.pg-drawer__brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 18px 18px 14px;
+}
+
+.pg-drawer__brand-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.pg-drawer__title {
+    font-size: 15px;
+    font-weight: 800;
+    line-height: 1.2;
+}
+
+.pg-drawer__subtitle {
+    font-size: 11px;
+    opacity: 0.6;
+}
+
+.pg-nav {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 8px 10px 16px;
+}
+
+.pg-nav__group {
+    margin-bottom: 8px;
+}
+
+.pg-nav .v-list-subheader {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    opacity: 0.55;
+    min-height: 34px;
+}
+
+.pg-nav .v-list-item {
+    margin-bottom: 2px;
+}
+
+.pg-nav .v-list-item--active {
+    background: rgba(var(--v-theme-primary), 0.1);
+}
+
+.pg-drawer__footer {
+    padding: 12px 16px 16px;
+    border-top: 1px solid var(--fintech-border);
+}
+
+.pg-main {
+    background: rgb(var(--v-theme-background));
+}
+
+.pg-page {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    width: 100%;
+    max-width: 1600px;
+    margin-inline: auto;
+    padding: 24px 28px 40px;
+}
+
+@media (max-width: 960px) {
+    .pg-page {
+        padding: 16px 14px 32px;
+    }
+
+    .pg-user-btn__name {
+        display: none;
+    }
+}
+
+@media (max-width: 600px) {
+    .pg-app-bar__title {
+        display: none;
+    }
 }

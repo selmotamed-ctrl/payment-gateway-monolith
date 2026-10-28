@@ -135,7 +135,12 @@ CHECKOUT_SSH_KEY_PATH="~/.ssh/merchant"
 
     const edge = plan.hosts.find((host) => host.ssh.host === "203.0.113.10");
     expect(edge?.roles.sort()).toEqual(["checkout", "merchant"]);
-    expect(edge?.nginx.map((site) => site.site).sort()).toEqual(["checkout-public", "merchant-public"]);
+    expect(edge?.nginx.map((site) => site.site).sort()).toEqual([
+      "checkout-lan",
+      "checkout-public",
+      "merchant-lan",
+      "merchant-public",
+    ]);
     expect(edge?.certs.sort()).toEqual(["checkout-client", "merchant-client"]);
   });
 
@@ -161,12 +166,15 @@ CHECKOUT_PRIVATE_IP="127.0.0.1"
     const host = plan.hosts[0]!;
     expect(host.roles.sort()).toEqual(["admin", "checkout", "core", "merchant"]);
     expect(host.services).toHaveLength(4);
-    expect(host.nginx).toHaveLength(3);
+    expect(host.nginx).toHaveLength(5);
     // The firewall is the union: the core port, the LAN admin port and 443.
     const ports = host.firewall.map((rule) => rule.port);
     expect(ports).toContain(4000);
     expect(ports).toContain(8443);
     expect(ports).toContain(443);
+    // LAN-only, no-domain listeners for the merchant and checkout portals.
+    expect(ports).toContain(8081);
+    expect(ports).toContain(8082);
   });
 
   test("the firewall restricts the database and the core to the right peers", () => {
@@ -179,10 +187,12 @@ CHECKOUT_PRIVATE_IP="127.0.0.1"
     const coreRule = core?.firewall.find((rule) => rule.port === 4000);
     expect(coreRule?.fromCidrs?.sort()).toEqual(["10.10.0.30", "10.10.0.40", "10.10.0.50"]);
 
-    // The public edge only opens SSH + 80/443.
+    // The edge opens SSH + 80/443 publicly and the LAN-only portals to the LAN.
     const merchant = plan.hosts.find((host) => host.roles.includes("merchant"));
-    expect(merchant?.firewall.map((rule) => rule.port).sort((left, right) => left - right)).toEqual([22, 80, 443]);
-    expect(merchant?.firewall.every((rule) => rule.fromCidrs === undefined)).toBe(true);
+    expect(merchant?.firewall.map((rule) => rule.port).sort((left, right) => left - right)).toEqual([22, 80, 443, 8081]);
+    const lanRule = merchant?.firewall.find((rule) => rule.port === 8081);
+    expect(lanRule?.fromCidrs).toContain("192.168.0.0/16");
+    expect(merchant?.firewall.filter((rule) => rule.port === 443).every((rule) => rule.fromCidrs === undefined)).toBe(true);
   });
 
   test("an edge .env never contains a database credential or the KMS key", () => {

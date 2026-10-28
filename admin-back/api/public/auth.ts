@@ -45,6 +45,14 @@ router.post(
   }),
 );
 
+router.get(
+  "/me",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/auth/me",
+  }),
+);
+
 router.post(
   "/mfa",
   coreForward({

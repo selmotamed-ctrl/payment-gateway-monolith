@@ -231,8 +231,12 @@ export const useSections = () => {
             ],
         },
     ];
-    return sections.filter((section) => !section.if || section.if()).map((section) => ({
-        ...section,
-        routes: section.routes.filter((route) => !route.if || route.if()),
-    }));
+    return sections
+        .filter((section) => !section.if || section.if())
+        .map((section) => ({
+            ...section,
+            routes: section.routes.filter((route) => !route.if || route.if()),
+        }))
+        // A section whose every route is hidden must not render an empty header.
+        .filter((section) => section.routes.length > 0);
 };

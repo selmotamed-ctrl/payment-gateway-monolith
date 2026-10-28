@@ -140,7 +140,9 @@ const resolvePublicCertificate = (
   if (mode === "self_signed") {
     const localCert = `/etc/ssl/pg/${domain}.crt`;
     const localKey = `/etc/ssl/pg/${domain}.key`;
-    runner.run(host.ssh, `mkdir -p /etc/ssl/pg && openssl req -x509 -newkey rsa:2048 -nodes -keyout ${localKey} -out ${localCert} -days 365 -subj "/CN=${domain}" -addext "subjectAltName=DNS:${domain}"`, { sudo: true });
+    const isIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(domain);
+    const san = isIp ? `IP:${domain}` : `DNS:${domain}`;
+    runner.run(host.ssh, `mkdir -p /etc/ssl/pg && openssl req -x509 -newkey rsa:2048 -nodes -keyout ${localKey} -out ${localCert} -days 365 -subj "/CN=${domain}" -addext "subjectAltName=${san}"`, { sudo: true });
     return { certPath: localCert, keyPath: localKey };
   }
   if (mode === "certbot") {

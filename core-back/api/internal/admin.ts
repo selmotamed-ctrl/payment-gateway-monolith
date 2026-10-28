@@ -18,6 +18,7 @@ import {
   verifyMfaChallengeToken,
   verifyPassword,
 } from "../../lib/auth";
+import { buildAdminUserInfo } from "../../lib/auth/uiAuthorities";
 import type { Decimal } from "decimal.js";
 import { decimal } from "../../engine/ledger/LedgerPoster";
 import { LedgerPoster } from "../../engine/ledger/LedgerPoster";
@@ -539,6 +540,7 @@ router.post("/auth/login", async (request: Request, response: Response) => {
       mfa: false,
     }),
     expiresInSeconds: 12 * 60 * 60,
+    userInfo: buildAdminUserInfo(user, authorities),
   });
 });
 
@@ -575,6 +577,84 @@ router.post("/auth/mfa", async (request: Request, response: Response) => {
       mfa: true,
     }),
     expiresInSeconds: 12 * 60 * 60,
+    userInfo: buildAdminUserInfo(user, authorities),
+  });
+});
+
+router.get("/auth/me", (_request: Request, response: Response) => {
+  response.json({
+    platformName: "Payment Gateway",
+    version: process.env.GIT_COMMIT?.slice(0, 12) ?? "dev",
+    suspended: false,
+  });
+});
+
+router.get("/stats/overview", async (_request: Request, response: Response) => {
+  const now = new Date();
+  const staleCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+  const [
+    merchantsActive,
+    merchantsPending,
+    attemptsByStateRows,
+    unknownAggregate,
+    approvalGroups,
+    joinRequestSlaBreaches,
+    amlSlaBreaches,
+  ] = await Promise.all([
+    client.merchant.count({ where: { status: "ACTIVE" } }),
+    client.merchant.count({ where: { status: "PENDING" } }),
+    client.paymentAttempt.groupBy({ by: ["status"], _count: { _all: true } }),
+    client.paymentAttempt.aggregate({
+      where: { status: "UNKNOWN" },
+      _count: { _all: true },
+      _min: { createdAt: true },
+    }),
+    client.approvalRequest.groupBy({
+      by: ["state"],
+      where: { state: "PENDING_REVIEW" },
+      _count: { _all: true },
+      _min: { createdAt: true },
+    }),
+    client.joinRequest.count({
+      where: {
+        status: { in: ["DRAFT", "SUBMITTED", "IN_REVIEW", "INFO_REQUESTED"] },
+        createdAt: { lt: staleCutoff },
+      },
+    }),
+    client.amlCase.count({
+      where: { status: { in: ["OPEN", "IN_REVIEW"] }, createdAt: { lt: staleCutoff } },
+    }),
+  ]);
+
+  const attemptsByState: Record<string, number> = {};
+  for (const row of attemptsByStateRows) {
+    attemptsByState[String(row.status)] = (row._count as { _all: number })._all;
+  }
+
+  const unknownOldest = unknownAggregate._min.createdAt;
+  const approvalQueueAgeing = approvalGroups.map((group) => ({
+    role: String(group.state),
+    oldestHours: group._min.createdAt
+      ? Math.max(0, Math.round((now.getTime() - group._min.createdAt.getTime()) / 3_600_000))
+      : 0,
+    count: (group._count as { _all: number })._all,
+  }));
+
+  response.json({
+    attemptsByState,
+    unknownBacklog: (unknownAggregate._count as { _all: number })._all,
+    unknownOldestAgeSeconds: unknownOldest
+      ? Math.max(0, Math.round((now.getTime() - unknownOldest.getTime()) / 1000))
+      : 0,
+    openCircuitBreakers: 0,
+    webhookInboxLagSeconds: 0,
+    reconciliationMatchRate: "0",
+    approvalQueueAgeing,
+    joinRequestSlaBreaches,
+    amlSlaBreaches,
+    merchantsActive,
+    merchantsPending,
   });
 });
 

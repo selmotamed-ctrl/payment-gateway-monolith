@@ -25,7 +25,8 @@
     "db-seed": "bun ./prisma/seed.ts",
     "prisma:format": "bunx --bun prisma format",
     "prisma:validate": "bunx --bun prisma validate",
-    "generate-mtls-certs": "bun ./scripts/generate-mtls-certs.ts"
+    "generate-mtls-certs": "bun ./scripts/generate-mtls-certs.ts",
+    "create-admin": "bun ./scripts/create-admin.ts"
   },
   "peerDependencies": {
     "typescript": "^7"

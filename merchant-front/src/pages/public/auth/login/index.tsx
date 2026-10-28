@@ -16,7 +16,7 @@ const LoginPage = dc(() => {
     const identity = ref("");
     const password = ref("");
     const mfaCode = ref("");
-    const requiresMfa = ref(false);
+    const challengeId = ref<string | null>(null);
     const loading = ref(false);
     const error = ref<string | null>(null);
     const showPassword = ref(false);
@@ -71,14 +71,26 @@ const LoginPage = dc(() => {
         error.value = null;
         loading.value = true;
         try {
+            if (challengeId.value) {
+                const response = await api.post(urlsMap.authMfaVerify, {
+                    challengeId: challengeId.value,
+                    code: mfaCode.value.trim(),
+                });
+                const session = buildSession(response.data?.data ?? response.data ?? {});
+                if (!session.token) {
+                    throw new Error("missing token");
+                }
+                setUserState(session);
+                await router.push({ name: "Dashboard" });
+                return;
+            }
             const response = await api.post(urlsMap.authLogin, {
-                identity: identity.value.trim(),
+                identifier: identity.value.trim(),
                 password: password.value,
-                mfaCode: requiresMfa.value ? mfaCode.value : undefined,
             });
             const payload = response.data?.data ?? response.data ?? {};
-            if (payload?.mfaRequired && !requiresMfa.value) {
-                requiresMfa.value = true;
+            if (payload?.mfaRequired && payload?.challengeId) {
+                challengeId.value = String(payload.challengeId);
                 return;
             }
             const session = buildSession(payload);
@@ -138,25 +150,44 @@ const LoginPage = dc(() => {
                         hideDetails
                     />
 
-                    {requiresMfa.value && (
-                        <VTextField
-                            label={t("Verification Code")}
-                            prependInnerIcon="mdi-shield-key-outline"
-                            modelValue={mfaCode.value}
-                            onUpdate:modelValue={(v: string) => (mfaCode.value = v)}
-                            hideDetails
-                        />
+                    {challengeId.value && (
+                        <>
+                            <VAlert type="info" variant="tonal" density="compact">
+                                {t("Enter the six-digit code sent to your registered phone.")}
+                            </VAlert>
+                            <VTextField
+                                label={t("Verification Code")}
+                                prependInnerIcon="mdi-shield-key-outline"
+                                modelValue={mfaCode.value}
+                                onUpdate:modelValue={(v: string) => (mfaCode.value = v)}
+                                hideDetails
+                            />
+                        </>
                     )}
 
                     <VBtn
                         block
                         size="large"
                         loading={loading.value}
-                        disabled={!identity.value || !password.value}
+                        disabled={challengeId.value ? mfaCode.value.trim().length !== 6 : !identity.value || !password.value}
                         onClick={() => void submit()}
                     >
-                        {t("Login")}
+                        {challengeId.value ? t("Verify") : t("Login")}
                     </VBtn>
+
+                    {challengeId.value && (
+                        <VBtn
+                            variant="text"
+                            size="small"
+                            onClick={() => {
+                                challengeId.value = null;
+                                mfaCode.value = "";
+                                error.value = null;
+                            }}
+                        >
+                            {t("Back")}
+                        </VBtn>
+                    )}
 
                     <VBtn
                         block

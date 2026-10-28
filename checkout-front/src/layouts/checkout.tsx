@@ -1,32 +1,20 @@
 import { dc } from "kt-dc";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
 
 export type CheckoutLayoutProps = {
     title?: string;
 };
 
+/**
+ * The payer surface: one focused column, centered on desktop and top-aligned on
+ * small screens so a tall form never clips its first field.
+ */
 const CheckoutLayout = dc(
     (props: CheckoutLayoutProps, _, { slots }) => {
         return () => (
-            <ThemedView
-                style={{
-                    minHeight: "100vh",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    padding: "24px 16px 60px",
-                    background: "linear-gradient(170deg, #f4f7fb 0%, #e6eefb 55%, #e7f6f3 100%)",
-                }}
-            >
-                {props.title && (
-                    <ThemedText type="defaultSemiBold" style={{ fontSize: "17px", marginBottom: "16px" }}>
-                        {props.title}
-                    </ThemedText>
-                )}
+            <div class="pg-checkout">
+                {props.title && <div class="pg-checkout__title">{props.title}</div>}
                 {slots.default?.()}
-            </ThemedView>
+            </div>
         );
     },
     {

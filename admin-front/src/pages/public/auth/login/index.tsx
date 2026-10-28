@@ -14,9 +14,34 @@ const LoginPage = dc(() => {
     const { t } = useLocale();
     const username = ref("");
     const password = ref("");
+    const mfaCode = ref("");
+    const mfaChallengeId = ref<string | null>(null);
     const loading = ref(false);
     const error = ref<string | null>(null);
     const showPassword = ref(false);
+
+    const applySession = async (payload: any) => {
+        const session: UserState = {
+            token: payload?.token,
+            refreshToken: payload?.refreshToken ?? null,
+            userInfo: {
+                id: String(payload?.userInfo?.id ?? payload?.user?.id ?? ""),
+                name: payload?.userInfo?.name ?? payload?.user?.name ?? "",
+                username: payload?.userInfo?.username ?? payload?.user?.username ?? "",
+                role: payload?.userInfo?.role ?? payload?.user?.role ?? "",
+                email: payload?.userInfo?.email ?? null,
+                phone: payload?.userInfo?.phone ?? null,
+                authoritiesMap: payload?.userInfo?.authoritiesMap ?? payload?.authoritiesMap ?? {},
+                isMaker: !!payload?.userInfo?.isMaker,
+                isChecker: !!payload?.userInfo?.isChecker,
+            },
+        };
+        if (!session.token) {
+            throw new Error("The server did not return a session token");
+        }
+        setUserState(session);
+        await router.push({ name: "Dashboard" });
+    };
 
     const submit = async () => {
         if (loading.value) {
@@ -25,31 +50,24 @@ const LoginPage = dc(() => {
         error.value = null;
         loading.value = true;
         try {
+            if (mfaChallengeId.value) {
+                const response = await api.post(urlsMap.authMfa, {
+                    challengeId: mfaChallengeId.value,
+                    code: mfaCode.value.trim(),
+                });
+                await applySession(response.data?.data ?? response.data);
+                return;
+            }
             const response = await api.post(urlsMap.authLogin, {
-                username: username.value.trim(),
+                identifier: username.value.trim(),
                 password: password.value,
             });
             const payload = response.data?.data ?? response.data;
-            const session: UserState = {
-                token: payload?.token,
-                refreshToken: payload?.refreshToken ?? null,
-                userInfo: {
-                    id: String(payload?.userInfo?.id ?? payload?.user?.id ?? ""),
-                    name: payload?.userInfo?.name ?? payload?.user?.name ?? "",
-                    username: payload?.userInfo?.username ?? payload?.user?.username ?? "",
-                    role: payload?.userInfo?.role ?? payload?.user?.role ?? "",
-                    email: payload?.userInfo?.email ?? null,
-                    phone: payload?.userInfo?.phone ?? null,
-                    authoritiesMap: payload?.userInfo?.authoritiesMap ?? payload?.authoritiesMap ?? {},
-                    isMaker: !!payload?.userInfo?.isMaker,
-                    isChecker: !!payload?.userInfo?.isChecker,
-                },
-            };
-            if (!session.token) {
-                throw new Error("missing token");
+            if (payload?.mfaRequired && payload?.challengeId) {
+                mfaChallengeId.value = String(payload.challengeId);
+                return;
             }
-            setUserState(session);
-            await router.push({ name: "Dashboard" });
+            await applySession(payload);
         } catch (e) {
             error.value = extractApiErrorMessage(e);
         } finally {
@@ -89,36 +107,72 @@ const LoginPage = dc(() => {
                         </VAlert>
                     )}
 
-                    <VTextField
-                        label={t("Username")}
-                        prependInnerIcon="mdi-account-outline"
-                        autocomplete="username"
-                        modelValue={username.value}
-                        onUpdate:modelValue={(v: string) => (username.value = v)}
-                        hideDetails
-                    />
-
-                    <VTextField
-                        label={t("Password")}
-                        prependInnerIcon="mdi-lock-outline"
-                        type={showPassword.value ? "text" : "password"}
-                        autocomplete="current-password"
-                        modelValue={password.value}
-                        onUpdate:modelValue={(v: string) => (password.value = v)}
-                        appendInnerIcon={showPassword.value ? "mdi-eye-off-outline" : "mdi-eye-outline"}
-                        onClick:append-inner={() => (showPassword.value = !showPassword.value)}
-                        hideDetails
-                    />
-
-                    <VBtn
-                        block
-                        size="large"
-                        loading={loading.value}
-                        disabled={!username.value || !password.value}
-                        onClick={() => void submit()}
-                    >
-                        {t("Login")}
-                    </VBtn>
+                    {mfaChallengeId.value ? (
+                        <>
+                            <VAlert type="info" variant="tonal" density="compact">
+                                {t("Enter the six-digit code sent to your registered phone.")}
+                            </VAlert>
+                            <VTextField
+                                label={t("MFA code")}
+                                prependInnerIcon="mdi-shield-key-outline"
+                                autocomplete="one-time-code"
+                                modelValue={mfaCode.value}
+                                onUpdate:modelValue={(v: string) => (mfaCode.value = v)}
+                                hideDetails
+                            />
+                            <VBtn
+                                block
+                                size="large"
+                                loading={loading.value}
+                                disabled={mfaCode.value.trim().length !== 6}
+                                onClick={() => void submit()}
+                            >
+                                {t("Verify")}
+                            </VBtn>
+                            <VBtn
+                                variant="text"
+                                size="small"
+                                onClick={() => {
+                                    mfaChallengeId.value = null;
+                                    mfaCode.value = "";
+                                    error.value = null;
+                                }}
+                            >
+                                {t("Back")}
+                            </VBtn>
+                        </>
+                    ) : (
+                        <>
+                            <VTextField
+                                label={t("Email or phone")}
+                                prependInnerIcon="mdi-account-outline"
+                                autocomplete="username"
+                                modelValue={username.value}
+                                onUpdate:modelValue={(v: string) => (username.value = v)}
+                                hideDetails
+                            />
+                            <VTextField
+                                label={t("Password")}
+                                prependInnerIcon="mdi-lock-outline"
+                                type={showPassword.value ? "text" : "password"}
+                                autocomplete="current-password"
+                                modelValue={password.value}
+                                onUpdate:modelValue={(v: string) => (password.value = v)}
+                                appendInnerIcon={showPassword.value ? "mdi-eye-off-outline" : "mdi-eye-outline"}
+                                onClick:append-inner={() => (showPassword.value = !showPassword.value)}
+                                hideDetails
+                            />
+                            <VBtn
+                                block
+                                size="large"
+                                loading={loading.value}
+                                disabled={!username.value || !password.value}
+                                onClick={() => void submit()}
+                            >
+                                {t("Login")}
+                            </VBtn>
+                        </>
+                    )}
 
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                         <VBtn variant="text" size="small" onClick={() => setLocale("ar")}>

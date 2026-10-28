@@ -5,6 +5,7 @@ import { Prisma } from "../../generated/prisma/client";
 import { client } from "../../prisma/client";
 import { invalidationBus } from "../../lib/invalidationBus";
 import { ApiError, parseOrThrow } from "../../lib/error";
+import { buildMerchantUserInfo } from "../../lib/auth/uiAuthorities";
 import {
   generateAccessToken,
   generateMfaCode,
@@ -505,13 +506,25 @@ const merchantIdOf = (request: Request): string => {
   return principal.merchantId;
 };
 
-const buildSession = (user: {
-  id: string;
-  role: string;
-  merchantId: string | null;
-  authoritiesMap: unknown;
-  appScopeIds: unknown;
-}): { token: string; expiresInSeconds: number; user: Record<string, unknown> } => {
+const buildSession = (
+  user: {
+    id: string;
+    email: string | null;
+    phone: string | null;
+    role: string;
+    merchantId: string | null;
+    isMaker: boolean;
+    isChecker: boolean;
+    authoritiesMap: unknown;
+    appScopeIds: unknown;
+  },
+  mfaCompleted: boolean,
+): {
+  token: string;
+  expiresInSeconds: number;
+  userInfo: ReturnType<typeof buildMerchantUserInfo>;
+  user: Record<string, unknown>;
+} => {
   const authorities = Array.isArray(user.authoritiesMap)
     ? user.authoritiesMap.map(String)
     : Object.entries((user.authoritiesMap ?? {}) as Record<string, unknown>)
@@ -524,11 +537,12 @@ const buildSession = (user: {
     merchantId: user.merchantId,
     authorities,
     appScopeIds,
-    mfa: true,
+    mfa: mfaCompleted,
   });
   return {
     token,
     expiresInSeconds: 12 * 60 * 60,
+    userInfo: buildMerchantUserInfo(user, authorities, appScopeIds),
     user: {
       id: user.id,
       role: user.role,
@@ -722,7 +736,7 @@ router.post("/auth/login", async (request: Request, response: Response) => {
     response.json({ mfaRequired: true, challengeId });
     return;
   }
-  response.json(buildSession(user));
+  response.json(buildSession(user, false));
 });
 
 router.post("/auth/google", async (request: Request, response: Response) => {
@@ -753,7 +767,15 @@ router.post("/auth/mfa/verify", async (request: Request, response: Response) => 
   if (!user || user.status !== "ACTIVE") {
     throw new ApiError(403, "ACCOUNT_NOT_ACTIVE", "The account is not active");
   }
-  response.json(buildSession(user));
+  response.json(buildSession(user, true));
+});
+
+router.get("/auth/me", (_request: Request, response: Response) => {
+  response.json({
+    platformName: "Payment Gateway",
+    version: process.env.GIT_COMMIT?.slice(0, 12) ?? "dev",
+    suspended: false,
+  });
 });
 
 router.use(requireAuthentication);
@@ -2002,38 +2024,116 @@ router.get("/pos/screens/:screenCode/stream", async (request: Request, response:
 
 router.get("/stats/overview", async (request: Request, response: Response) => {
   const merchantId = merchantIdOf(request);
-  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const period = String(request.query.period ?? "last_30d");
+  const days = period === "last_7d" ? 7 : period === "last_90d" ? 90 : 30;
+  const now = new Date();
+  const since = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+  const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+
   const attempts = await client.paymentAttempt.findMany({
     where: { merchantId, createdAt: { gte: since } },
+    orderBy: { createdAt: "desc" },
     select: {
+      id: true,
+      reference: true,
       status: true,
       totalChargedAmount: true,
       platformCommissionAmount: true,
       netMerchantAmount: true,
       currency: true,
       createdAt: true,
+      rail: { select: { code: true } },
     },
   });
+
   let volume = decimal(0);
   let commission = decimal(0);
   let net = decimal(0);
+  let todayVolume = decimal(0);
   const byStatus: Record<string, number> = {};
+  const dayTotals = new Map<string, { gross: ReturnType<typeof decimal>; commission: ReturnType<typeof decimal>; net: ReturnType<typeof decimal> }>();
+  const railTotals = new Map<string, { gross: ReturnType<typeof decimal>; count: number }>();
+
   for (const attempt of attempts) {
     byStatus[attempt.status] = (byStatus[attempt.status] ?? 0) + 1;
-    if (attempt.status === "SUCCEEDED") {
-      volume = volume.plus(decimal(attempt.totalChargedAmount));
-      commission = commission.plus(decimal(attempt.platformCommissionAmount));
-      net = net.plus(decimal(attempt.netMerchantAmount));
+    if (attempt.status !== "SUCCEEDED") {
+      continue;
     }
+    const gross = decimal(attempt.totalChargedAmount);
+    const commissionAmount = decimal(attempt.platformCommissionAmount);
+    const netAmount = decimal(attempt.netMerchantAmount);
+    volume = volume.plus(gross);
+    commission = commission.plus(commissionAmount);
+    net = net.plus(netAmount);
+    if (attempt.createdAt >= startOfDay) {
+      todayVolume = todayVolume.plus(gross);
+    }
+
+    const day = attempt.createdAt.toISOString().slice(0, 10);
+    const dayEntry = dayTotals.get(day) ?? { gross: decimal(0), commission: decimal(0), net: decimal(0) };
+    dayTotals.set(day, {
+      gross: dayEntry.gross.plus(gross),
+      commission: dayEntry.commission.plus(commissionAmount),
+      net: dayEntry.net.plus(netAmount),
+    });
+
+    const railCode = attempt.rail?.code ?? "UNKNOWN";
+    const railEntry = railTotals.get(railCode) ?? { gross: decimal(0), count: 0 };
+    railTotals.set(railCode, { gross: railEntry.gross.plus(gross), count: railEntry.count + 1 });
   }
+
+  const [wallets, pendingCashouts] = await Promise.all([
+    client.wallet.findMany({
+      where: { merchantId },
+      select: { currency: true, glAccount: { select: { checkpointBalance: true } } },
+    }),
+    client.cashoutRequest.count({ where: { merchantId, state: { in: ["PENDING", "PROCESSING"] } } }),
+  ]);
+
+  const walletBalance = wallets.reduce(
+    (total, wallet) => total.plus(decimal(wallet.glAccount?.checkpointBalance ?? 0)),
+    decimal(0),
+  );
+  const currency = wallets[0]?.currency ?? attempts[0]?.currency ?? "LYD";
+  const succeeded = byStatus.SUCCEEDED ?? 0;
+  const successRate = attempts.length > 0 ? ((succeeded / attempts.length) * 100).toFixed(2) : "0.00";
+
   response.json({
     merchantId,
-    windowDays: 30,
+    period,
+    windowDays: days,
     attempts: attempts.length,
     byStatus,
     volume: volume.toFixed(4),
     commission: commission.toFixed(4),
     netMerchantAmount: net.toFixed(4),
+    currency,
+    walletBalance: walletBalance.toFixed(4),
+    todayVolume: todayVolume.toFixed(4),
+    successRate,
+    pendingCashouts: String(pendingCashouts),
+    recentPayments: attempts.slice(0, 6).map((attempt) => ({
+      id: attempt.id,
+      reference: attempt.reference,
+      railCode: attempt.rail?.code ?? "UNKNOWN",
+      amount: decimal(attempt.totalChargedAmount).toFixed(4),
+      currency: attempt.currency,
+      status: attempt.status,
+      createdAt: attempt.createdAt.toISOString(),
+    })),
+    volumeByDay: [...dayTotals.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([day, totals]) => ({
+        day,
+        gross: totals.gross.toFixed(4),
+        commission: totals.commission.toFixed(4),
+        net: totals.net.toFixed(4),
+      })),
+    volumeByRail: [...railTotals.entries()].map(([railCode, totals]) => ({
+      railCode,
+      gross: totals.gross.toFixed(4),
+      count: totals.count,
+    })),
   });
 });
 

@@ -13,33 +13,9 @@ export type RedirectRendererProps = {
     onRedirect?: (url: string) => void;
 };
 
-const hostOf = (url: string): string => {
-    try {
-        return new URL(url, location.origin).hostname.toLowerCase();
-    } catch {
-        return "";
-    }
-};
+import { isAllowedRedirect } from "@/utils/redirect";
 
-export const isAllowedRedirect = (url: string, allowlist?: string[]): boolean => {
-    if (!allowlist?.length) {
-        return false;
-    }
-    const host = hostOf(url);
-    if (!host) {
-        return false;
-    }
-    return allowlist.some((entry) => {
-        const normalized = entry.trim().toLowerCase();
-        if (!normalized) {
-            return false;
-        }
-        if (normalized === "*") {
-            return true;
-        }
-        return host === normalized || host.endsWith(`.${normalized}`);
-    });
-};
+export { isAllowedRedirect } from "@/utils/redirect";
 
 export const RedirectRenderer = dc(
     (props: RedirectRendererProps) => {

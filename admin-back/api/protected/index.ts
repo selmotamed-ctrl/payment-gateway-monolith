@@ -14,6 +14,7 @@ import { operationsRouter } from "./operations";
 import { railsRouter, routesRouter } from "./rails";
 import { reconciliationRouter } from "./reconciliation";
 import { settingsRouter } from "./settings";
+import { statsRouter } from "./stats";
 import { usersRouter } from "./users";
 
 const router = express.Router();
@@ -47,6 +48,7 @@ router.use("/routes", routesRouter);
 router.use("/assets", assetsRouter);
 router.use("/reconciliation", reconciliationRouter);
 router.use("/settings", settingsRouter);
+router.use("/stats", statsRouter);
 router.use("/", kybRouter);
 router.use("/", operationsRouter);
 router.use("/", financeRouter);

@@ -849,3 +849,52 @@ Validation performed on the live host:
 
 Regression after the fixes: `core-back` 796, `admin-back` 416,
 `merchant-back` 67, `checkout-back` 45, `deploy` 25 — all pass.
+
+## 19. Admin Portal Sign-In & Scaling Repair
+
+Testing the deployed portal exposed an unfinished auth/UI integration. Fixed:
+
+| # | Defect | Fix |
+| :--- | :--- | :--- |
+| 1 | The login form posted `{ username, password }` but the edge schema is strict `{ identifier, password }`, so every login returned **400 VALIDATION_FAILED**. | The form posts `identifier`; the field is labelled "Email or phone". |
+| 2 | `POST /auth/login` returned only `{ token }`, so the portal stored an empty `userInfo` (no role, no authorities) and every guarded screen vanished. | Login and MFA now return `userInfo` (id, role, email, phone, maker/checker, `authoritiesMap`). |
+| 3 | The portal calls `GET /auth/me` for app status; the route did not exist. | Added a public `GET /auth/me` returning platform name/version/suspended. |
+| 4 | The seed leaves `password_hash` NULL and status `INVITED`, with no activation path — nobody could ever sign in. | Added `bun run create-admin` (flags or `ADMIN_*` env), idempotent, `ACTIVE`, policy-checked, MFA off by default; documented in the deployment guide. |
+| 5 | The login page could not complete an MFA challenge (`missing token`). | Two-step form: login → six-digit code → `POST /auth/mfa`; a Back button returns to credentials. |
+| 6 | `#app { transform: scale(0.9) }` shrank the whole app; a transformed ancestor becomes the containing block for `position: fixed`, so the Vuetify app bar, drawer, dialogs and snackbars mis-positioned, and `transform-origin: top left` left a gap in the RTL layout. | Removed the global transform (and the dead, unimported `utils/appScale.ts`); the mount point is now a plain full-size surface. Vuetify density is the supported way to tighten the layout. |
+| 7 | The backend authority vocabulary (`gateway:write`) and the portal vocabulary (`gateways.edit`) were disjoint, so no projection could light up the menu. | `lib/auth/uiAuthorities.ts` projects the backend authorities onto the portal keys for `userInfo` (presentation-only; enforcement still uses the real strings), with unit tests. |
+
+Verified on the live host: login with the exact form payload returns a token and
+a populated `userInfo`; the built CSS contains no `app-scale`; the deployed
+`index.html` hash matches the local build.
+
+## 20. Portal Shell Redesign, RBAC UI, LAN Vhosts, and UI/E2E Test Harness
+
+The deployed portals were unusable: the app bar overlapped the body, the
+drawer/navigation did not respond, the pages were hidden, and the merchant and
+checkout apps still carried the global scaling transform. Root causes and fixes:
+
+| # | Root cause | Fix |
+| :--- | :--- | :--- |
+| 1 | `v-model={drawer.value}` is not valid Vue JSX, so `VNavigationDrawer` never received `modelValue`; the hamburger was dead and the temporary drawer could not close. | The new shell binds `modelValue` + `onUpdate:modelValue`; the drawer is permanent ≥960px, temporary below, closed on mobile and on navigation. |
+| 2 | `<VAppBar>` already renders a `VToolbar`; the layout nested a second `<VToolbar>`, producing the off-style bar and wrong height. | One `VAppBar` with a bordered surface and no nested toolbar. |
+| 3 | `VMain` had `minHeight: 100vh` and page padding came from a `flex: 1` div in a block parent. | `VMain` is a plain layout surface; `ScreenContainer` is a real block container with responsive padding and a 1600px max width. |
+| 4 | `#app { transform: scale(0.9) }` was still present in **merchant** and **checkout** (it broke fixed positioning and caused horizontal overflow). | Removed from all three portals, plus the dead `utils/appScale.ts`; guarded by an e2e assertion that `#app` has `transform: none`. |
+| 5 | Hardcoded `* { font-family: Cairo !important; letter-spacing: 1px }` fought the global font and cramped every bar. | Removed; Cairo for RTL, Plus Jakarta for LTR, no global letter-spacing. |
+| 6 | Empty navigation sections rendered headers with no items. | `useSections()` drops sections whose routes are all hidden (asserted in e2e). |
+| 7 | Merchant login posted `{identity, password, mfaCode}` against a strict `{identifier, password}` schema → 400; the merchant session had no `authoritiesMap`. | Payload fixed, MFA is a proper two-step flow, and the core returns `userInfo` with the merchant projection (28 UI authorities). |
+| 8 | The admin dashboard called a non-existent `v1/admin/stats/overview`; the merchant overview returned a different shape than the page consumed. | Added the admin overview endpoint (core + edge) and extended the merchant overview (period-aware: stats, charts, recent payments, wallet balance). |
+| 9 | New MySQL connections failed on `caching_sha2_password` (`allowPublicKeyRetrieval`), so any fresh core pool would break. | The DB adapter now builds a pool config with `allowPublicKeyRetrieval: true` (tested). |
+| 10 | No frontend tests existed. | Added Playwright e2e (geometry/a11y/auth/navigation) + a live suite against the deployed box + a Vitest unit suite. |
+
+The shell is now shared in shape between admin and merchant (branding/sections
+differ), and checkout keeps its focused single-column payer surface with the
+same tokens. LAN vhosts publish merchant on `8081` and checkout on `8082` with
+IP-SAN self-signed certificates and UFW restricted to `LAN_ALLOWED_CIDRS`.
+
+Test totals after the work: **core-back 807**, **admin-back 416**,
+**merchant-back 67**, **checkout-back 45**, **deploy 25**, Playwright **27 e2e**
++ **4 live**, Vitest **17 unit** — all green. The live suite logs into the
+deployed admin and merchant portals over the LAN ports and asserts the app bar
+never overlaps content, the drawer works on mobile, nothing overflows, and the
+scaling transform is gone on all three portals.

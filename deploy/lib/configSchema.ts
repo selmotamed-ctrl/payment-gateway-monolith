@@ -118,6 +118,7 @@ const base = z.strictObject({
   MERCHANT_SUDO_PASSWORD: z.string().max(256).default(""),
   MERCHANT_PRIVATE_IP: ipv4,
   MERCHANT_BACK_PORT: port.default(4102),
+  MERCHANT_LAN_PORT: z.coerce.number().int().min(0).max(65535).default(8081),
   MERCHANT_DOMAIN: domain,
   MERCHANT_SSL_MODE: z.enum(SSL_MODES).default("certbot"),
   MERCHANT_SSL_CERT_PATH: z.string().trim().max(300).optional(),
@@ -132,6 +133,7 @@ const base = z.strictObject({
   CHECKOUT_SUDO_PASSWORD: z.string().max(256).default(""),
   CHECKOUT_PRIVATE_IP: ipv4,
   CHECKOUT_BACK_PORT: port.default(4103),
+  CHECKOUT_LAN_PORT: z.coerce.number().int().min(0).max(65535).default(8082),
   CHECKOUT_DOMAIN: domain,
   CHECKOUT_SSL_MODE: z.enum(SSL_MODES).default("certbot"),
   CHECKOUT_SSL_CERT_PATH: z.string().trim().max(300).optional(),
@@ -181,6 +183,18 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
     }
   }
 
+  const lanPorts = [
+    ["MERCHANT_LAN_PORT", config.MERCHANT_LAN_PORT],
+    ["CHECKOUT_LAN_PORT", config.CHECKOUT_LAN_PORT],
+    ["ADMIN_NGINX_LAN_PORT", config.ADMIN_NGINX_LAN_PORT],
+  ].filter(([, port]) => Number(port) > 0);
+  for (let i = 0; i < lanPorts.length; i += 1) {
+    for (let j = i + 1; j < lanPorts.length; j += 1) {
+      if (lanPorts[i]![1] === lanPorts[j]![1]) {
+        problems.push(`${lanPorts[i]![0]} and ${lanPorts[j]![0]} must differ (two listeners on the same port)`);
+      }
+    }
+  }
   if (config.MERCHANT_DOMAIN === config.CHECKOUT_DOMAIN) {
     problems.push("MERCHANT_DOMAIN and CHECKOUT_DOMAIN must differ (two public vhosts on the edge host)");
   }

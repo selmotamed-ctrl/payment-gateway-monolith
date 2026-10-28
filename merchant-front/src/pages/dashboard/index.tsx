@@ -198,7 +198,6 @@ const DashboardPage = dc(() => {
 
                         <VCard>
                             <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                                <ThemedText type="defaultSemiBold">{t("Recent Payments")}</ThemedText>
                                 <DataTable
                                     title={t("Recent Payments")}
                                     data={overview.value?.recentPayments ?? []}
