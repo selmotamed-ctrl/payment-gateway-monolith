@@ -455,7 +455,7 @@ All phase verification gates were executed in this workspace with the following 
 | Phase 3 | `cd core-back && bun test test/phase3-dynamic-engine-and-blueprints.test.ts` | 12 tests pass (7 production blueprints, 15 deterministic mock scenarios, initiate/confirm/ledger flow, 12 go-live gates, closed transform library) |
 | Phase 4 | `cd core-back && bun test test/phase4-onboarding-aml-disputes-recon.test.ts` | 16 tests pass (duplicate detection, AML hold/case-only/critical escalation, Arabic normalisation, no tipping-off, dispute dedupe, statement parsing) |
 | Phase 8 | `cd core-back && bun test test/edge-cases/catalog-140.test.ts` | 140 catalogued edge cases with 140 executable regression checks, all pass |
-| All backends | `cd <service> && bun run typecheck && bun test` | `core-back` 788 tests, `admin-back` 412 tests, `merchant-back` 67 tests, `checkout-back` 45 tests — all pass with clean TypeScript |
+| All backends | `cd <service> && bun run typecheck && bun test` | `core-back` 796 tests, `admin-back` 416 tests, `merchant-back` 67 tests, `checkout-back` 45 tests — all pass with clean TypeScript |
 | All frontends | `cd <spa> && bun run build` | `admin-front`, `merchant-front`, `checkout-front` all build (type-check + Vite) |
 | Schema parity | `cd core-back && bunx prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script` | 64 model tables and 100 enum types, identical to the committed migration (plus the hand written `schema_versions` table, the three domain `CHECK` constraints and the `approval_requests_checker_not_maker` `BEFORE INSERT` trigger) |
 
@@ -749,3 +749,58 @@ The offline simulator found a real engine bug: a `required` step output stored a
 | `admin-back` | 412 pass (4 new route tests: transcript query forwarding, verify forwarding, import 201, unknown rail kind rejected before core) |
 | `admin-front` build | passes (new `pages/gateways/ai-import` wizard + router entry) |
 | Live MariaDB import | a verified spec materializes 2 environments, 2 auth, 1 crypto profile, 2 flows / 2 steps, 1 channel, 1 error map, 2 rail fields, a `DRAFT` version and a `PAUSED` route; `NEW_VERSION` adds a second draft; a `CREATE_NEW` on an existing code is refused; an invalid spec writes nothing |
+
+## 16. Multi-Host Deployment Engine (`deploy/`)
+
+Implemented from `design/payment_gateway_deployment_and_guides_architecture.md` Part I (PG-D1…PG-D4).
+
+### 16.1 What it does
+
+| Piece | File | Behaviour |
+| :--- | :--- | :--- |
+| Config + validation | `deploy/lib/configSchema.ts` | Parses `deploy.env` and validates every value with Zod 4 **before the first SSH connection**: IPs, CIDRs, FQDN domains, ports, identifier-safe DB names, `DATABASE_URL` ⟷ `DB_ENGINE` agreement, custom-SSL certificate paths, distinct merchant/checkout domains, distinct ports, and the database host never sharing an IP with the core. |
+| Host planner | `deploy/lib/hostPlanner.ts` | Deduplicates the 5 logical roles by `SSH_HOST:SSH_PORT` into 1…5 concrete hosts. Merges PM2 services, Nginx vhosts, certificate bundles and **unions the UFW rules**; rejects two roles on one host that use different SSH keys/users. Classifies the topology (`single-host` / `split` / `distributed`) and renders the Host Topology Map. |
+| PKI | `deploy/lib/pkiManager.ts` | Generates an offline internal CA (10y) and four leaf certificates: the core **server** certificate with `IP:<CORE_PRIVATE_IP>, IP:127.0.0.1, DNS:core-back.internal` in its SAN, and `CN=admin-back` / `CN=merchant-back` / `CN=checkout-back` client certificates. Idempotent, rotates on `--rotate-certs`, and inspects validity + SANs for the audit summary. `certFilesForHost` implements the least-privilege distribution (the CA **key** never leaves the workstation; an edge host only receives its own client certificate). |
+| SSH runner | `deploy/lib/sshRunner.ts` | `ssh` with `BatchMode`/`StrictHostKeyChecking=accept-new`, privileged commands through `sudo -S` with the password on **stdin**, `rsync` for the release trees, and `writeRemoteFile` that streams a secret over ssh stdin so it never touches the local disk. |
+| Firewall | `deploy/lib/firewallConfigurator.ts` | Base deny + role rules derived from the plan: the database only from the core IP, the core only from the three edge IPs, the admin portal only from `LAN_ALLOWED_CIDRS`, the public edge only SSH/80/443. The SSH rule is always present and `ufw --force enable` runs last, so a deploy can never lock itself out. |
+| Verification | `deploy/lib/healthVerifier.ts` | Runs ON each host with that host's own certificate: the core `/health` over mTLS, each edge backend `/health`, each edge completing a mutual TLS handshake to **its own** core channel, and the public vhosts. |
+| Orchestrator | `deploy/deploy.ts` + `deploy/deploy.sh` | The ordered 12 steps (validate → build SPAs → PKI → bootstrap+UFW → DB provisioning + pre-migration backup → core → admin → merchant → checkout → verify → prune → audit). Atomic `releases/<ts>/` + `current` symlink, `shared/.env` (0600, symlinked into each release), PM2 ecosystem per service, Nginx render + `nginx -t` + reload. Flags: `--env`, `--only`, `--fresh`, `--update`, `--enforce-firewall`, `--skip-build`, `--skip-verify`, `--rotate-certs`, `--keep`, `--dry-run`. |
+| Templates | `deploy/templates/*.tpl` | Multi-app PM2 (`core`/`edge`), LAN-only admin vhost (`allow <LAN_CIDR>; deny all;`, TLS 1.3, HSTS/CSP), public merchant vhost (80→443 + unbuffered POS SSE) and public checkout vhost (80→443 + unbuffered payer SSE + strict CSP). |
+| Operator manual | `deploy/DEPLOYMENT_GUIDE.md` | Quick start, the 1-to-5 host topology, the full environment dictionary, the certificate model, the firewall matrix, the 12 steps, the release layout, rollback and a troubleshooting table. |
+
+### 16.2 Verification
+
+- `deploy`: typecheck clean, **25 tests** (config validation incl. every rejection case, the 5/2/1-host scenarios, firewall union + restriction, the edge `.env` never containing `DATABASE_URL`/`KMS_MASTER_KEY`, the topology map, CLI parsing, env quoting and absolute cert paths, the PM2 ecosystem, and all three Nginx templates rendering with **no placeholder left**).
+- `./deploy/deploy.sh --dry-run` walks the full 12-step pipeline against a sample `deploy.env` and prints every ssh/rsync/file action without executing anything.
+
+## 17. The Four Built-In Portal Guides & Employee Academy
+
+Implemented from the same design's Part II (PG-G1…PG-G5).
+
+### 17.1 Backend (PG-G1)
+
+| Change | Detail |
+| :--- | :--- |
+| Schema | `users.academy_progress_json` and `rails.help_guide_json` (migration `20261028100000_add_guides_support`, `schema_versions = 6`, applied to the live database). |
+| Seed | `prisma/seedGuides.ts`: the `checkout.support_config` platform setting (channels, working hours, 3 bilingual FAQs) and **13 bilingual per-rail help guides** (steps, prerequisites, troubleshooting) for Edfali, Sadad, Moamalat Card, CBL LYPay, LYPay, MyPay, T-LYNC, MobiCash, OnePay, Yussor, Sahara, MPGS, Evo Pay and NeomPay. |
+| Admin API | `GET/PUT /internal/admin/settings/checkout-support` (versioned + audited) and `GET/PUT /internal/admin/academy/progress` + `GET /internal/admin/academy/progress/overview`. Edge routes: `/api/v1/admin/settings/checkout-support`, `/api/v1/admin/academy/progress[/overview]`. |
+| Checkout API | `GET /internal/checkout/pay/:linkKey` now returns `supportConfig` (only when `enabled`, honouring `show_platform_contact` / `show_merchant_contact`, the merchant's public contact, the FAQ) and a `helpGuide` on every visible rail. The projection is a whitelist: a field the admin stores but the contract does not expose can never leak to the payer. |
+
+### 17.2 The four systems (PG-G2…PG-G5)
+
+| # | Portal | What was built |
+| :--- | :--- | :--- |
+| 1 | `admin-front` `/guide` | Searchable 10-book guide + glossary (error codes, GL accounts, statuses), ranked filter with match highlighting, `Ctrl/Cmd+K` command palette, right-side slide-over chapter drawer, and three simulators: a chained **Transform Sandbox**, a **Crypto Signature Lab** that shows the exact canonical string for all four modes, and a **Ledger T-Account Explorer** over the 15 business events with a balanced/unbalanced badge (all money math in `decimal.js`, no `eval`). |
+| 2 | `admin-front` `/academy` | 8 A-to-Z modules with lessons, sandbox labs and quizzes, progress persisted through `GET/PUT /api/v1/admin/academy/progress`, a progress bar and the four role badges (`CERTIFIED_OPERATOR`, `CERTIFIED_COMPLIANCE`, `CERTIFIED_FINANCE`, `CERTIFIED_GATEWAY_ARCHITECT`), resilient to an API outage. |
+| 3 | `merchant-front` `/guide` | 9 bilingual chapters with a role filter (owner / staff / cashier / developer), a persisted "first 5 steps" onboarding checklist, an interactive **fee & net-settlement calculator** implementing the three fee bearers in `decimal.js`, and a **developer API/webhook sandbox** generating cURL, TypeScript, PHP and Python snippets with copy buttons. |
+| 4 | `checkout-front` + `admin-front` | `PerRailInstructionsBanner` (the selected rail's numbered steps + prerequisites) and `CheckoutHelpDrawer` (state-aware guidance for VERIFYING/UNKNOWN/FAILED/EXPIRED/CANCELLED, a 1-click "copy payment reference", the platform FAQ, and the admin-configured WhatsApp / call / email / merchant contact / working-hours block that disappears entirely when `checkout.support_config.enabled` is false), plus the operator page `/settings/checkout-help` with a live payer preview. |
+
+### 17.3 Verification
+
+| Gate | Result |
+| :--- | :--- |
+| `core-back` typecheck + test | **796 pass, 0 fail** (+8 guide tests: the support projection incl. the leak check, the bilingual seed content, and the live seeded rows) |
+| `admin-back` | **416 pass** (+4 route tests: checkout-support read/write, academy read/write/overview, and an invalid body rejected before core) |
+| `merchant-back` / `checkout-back` | 67 / 45 pass |
+| Live database | the `support_config` setting and all 13 rail guides are seeded; the full chain (`platform setting` + `rail.help_guide_json` → `buildCheckoutSupportConfig`/`helpGuide`) composes and returns the Sadad walkthrough, the channels and the FAQ |
+| Frontends | `admin-front` (guide + academy + settings page), `merchant-front` (guide) and `checkout-front` (help drawer + banner) all build |

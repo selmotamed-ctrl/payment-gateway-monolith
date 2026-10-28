@@ -159,6 +159,11 @@ export const useSections = () => {
                     icon: "mdi-file-table-outline",
                     if: () => hasOneOfAuthorities(["reconciliation.run", "reconciliation.resolve"]),
                 },
+                {
+                    label: t("Checkout Help"),
+                    name: "AdminCheckoutHelp",
+                    icon: "mdi-help-circle-outline",
+                },
             ],
         },
         {
@@ -206,6 +211,22 @@ export const useSections = () => {
                     name: "GatewayRoutes",
                     icon: "mdi-map-marker-path",
                     if: () => hasOneOfAuthorities(["gateways.edit"]),
+                },
+            ],
+        },
+        {
+            title: t("Learning"),
+            icon: "mdi-school-outline",
+            routes: [
+                {
+                    label: t("Interactive Guide"),
+                    name: "AdminGuide",
+                    icon: "mdi-book-open-variant",
+                },
+                {
+                    label: t("Employee Academy"),
+                    name: "AdminAcademy",
+                    icon: "mdi-school-outline",
                 },
             ],
         },

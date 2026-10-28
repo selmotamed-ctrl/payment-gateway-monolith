@@ -2,6 +2,7 @@ import express from "express";
 import rateLimiter from "express-rate-limit";
 import { env } from "../../lib/env";
 import { requireSession } from "../middleware/authorityGuard";
+import { academyRouter } from "./academy";
 import { amlRouter } from "./aml";
 import { approvalsRouter } from "./approvals";
 import { assetsRouter } from "./assets";
@@ -33,6 +34,7 @@ const adminLimiter = rateLimiter({
 router.use(adminLimiter);
 router.use(requireSession);
 
+router.use("/academy", academyRouter);
 router.use("/users", usersRouter);
 router.use("/join-requests", joinRequestsRouter);
 router.use("/merchants", merchantsRouter);

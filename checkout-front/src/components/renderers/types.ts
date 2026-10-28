@@ -15,6 +15,25 @@ export type RailFieldDescriptor = {
     placeholderEn?: string | null;
 };
 
+export type RailTroubleshootingAr = {
+    q_ar: string;
+    a_ar: string;
+};
+
+export type RailTroubleshootingEn = {
+    q_en: string;
+    a_en: string;
+};
+
+export type RailHelpGuide = {
+    steps_ar: string[];
+    steps_en: string[];
+    prerequisites_ar: string[];
+    prerequisites_en: string[];
+    troubleshooting_ar: RailTroubleshootingAr[];
+    troubleshooting_en: RailTroubleshootingEn[];
+};
+
 export type RailDescriptor = {
     code: string;
     displayNameAr: string;
@@ -25,6 +44,36 @@ export type RailDescriptor = {
     currency?: string | null;
     icon?: string | null;
     fields: RailFieldDescriptor[];
+    helpGuide?: RailHelpGuide | null;
+};
+
+export type SupportPlatformContact = {
+    phone: string | null;
+    whatsapp: string | null;
+    email: string | null;
+};
+
+export type SupportMerchantContact = {
+    phone: string | null;
+    email: string | null;
+    tradeName: string;
+};
+
+export type SupportFaqItem = {
+    q_ar: string | null;
+    a_ar: string | null;
+    q_en: string | null;
+    a_en: string | null;
+};
+
+export type SupportConfig = {
+    enabled: boolean;
+    working_hours_ar: string | null;
+    working_hours_en: string | null;
+    platform: SupportPlatformContact | null;
+    merchant: SupportMerchantContact | null;
+    faq_items: SupportFaqItem[];
+    channels: string[];
 };
 
 export type FeeBearerMode = "MERCHANT_ABSORBS" | "PAYER_SURCHARGE" | "SPLIT";
@@ -47,6 +96,7 @@ export type PayLinkSummary = {
     status: string;
     redirectUrl?: string | null;
     allowlistedRedirectHosts?: string[];
+    supportConfig?: SupportConfig | null;
 };
 
 export type AttemptStatus =

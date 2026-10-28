@@ -82,6 +82,7 @@ export const loadRailCatalog = async (
       blocked: Boolean(rail.blocked),
       displayOrder: (rail.displayOrder as number | null) ?? undefined,
       collectionMode: (rail.collectionMode as string | null) ?? undefined,
+      helpGuideJson: (rail.helpGuideJson ?? undefined) as unknown,
     })),
     routes: routes.map((entry: Record<string, unknown>) => ({
       id: String(entry.id),

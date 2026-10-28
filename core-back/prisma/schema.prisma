@@ -852,6 +852,12 @@ model User {
   mfaRequired         Boolean    @default(true) @map("mfa_required")
   mfaSecretCiphertext String?    @map("mfa_secret_ciphertext") @db.Text
   status              UserStatus @default(INVITED)
+  /**
+   * The Employee Academy progress of this user: completed module ids, quiz
+   * scores, completed sandbox labs and the earned role badges. Administered by
+   * `GET/PUT /internal/admin/academy/progress`.
+   */
+  academyProgressJson Json?      @map("academy_progress_json")
 
   merchant                 Merchant?           @relation("MerchantUsers", fields: [merchantId], references: [id], onDelete: SetNull)
   identities               UserIdentity[]
@@ -1460,6 +1466,12 @@ model Rail {
   refundWindowDays Int?           @map("refund_window_days")
   instructionsAr   String?        @map("instructions_ar") @db.Text
   instructionsEn   String?        @map("instructions_en") @db.Text
+  /**
+   * The structured bilingual checkout help of this rail: step-by-step
+   * instructions, prerequisites, troubleshooting and rail FAQs. Rendered by the
+   * checkout help center for the rail the payer selected.
+   */
+  helpGuideJson    Json?          @map("help_guide_json")
   metadata         Json?
 
   logoAsset          Asset?              @relation("RailLogoAsset", fields: [logoAssetId], references: [id], onDelete: SetNull)

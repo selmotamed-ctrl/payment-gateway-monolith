@@ -16,6 +16,8 @@ import { RedirectRenderer, isAllowedRedirect } from "@/components/renderers/Redi
 import { EmbeddedWidgetRenderer } from "@/components/renderers/EmbeddedWidgetRenderer";
 import { QrOrCodeRenderer } from "@/components/renderers/QrOrCodeRenderer";
 import { PushOrTransferRenderer } from "@/components/renderers/PushOrTransferRenderer";
+import { PerRailInstructionsBanner } from "@/components/help/PerRailInstructionsBanner";
+import { CheckoutHelpDrawer } from "@/components/help/CheckoutHelpDrawer";
 import type {
     AttemptSnapshot,
     AttemptStatus,
@@ -54,6 +56,7 @@ const PayPage = dc(() => {
     const clientAction = ref<ClientAction | null>(null);
     const attemptStatus = ref<AttemptStatus>("CREATED");
     const reference = ref<string | null>(null);
+    const helpOpen = ref(false);
 
     let stream: EventSource | null = null;
     let countdownTimer: number | null = null;
@@ -61,6 +64,7 @@ const PayPage = dc(() => {
     const remainingSeconds = ref<number | null>(null);
 
     const linkKey = computed(() => String(route.params.linkKey ?? ""));
+    const currentLocale = computed<"ar" | "en">(() => (adaptedLocale.current.value === "ar" ? "ar" : "en"));
 
     const loadSummary = async () => {
         loading.value = true;
@@ -423,9 +427,26 @@ const PayPage = dc(() => {
                     </VCard>
                 ) : (
                     <>
-                        <VCard>
+                        <VCard style={{ position: "relative" }}>
+                            <VBtn
+                                icon
+                                size="small"
+                                variant="tonal"
+                                color="primary"
+                                aria-label={t("Help & Support")}
+                                style={{
+                                    position: "absolute",
+                                    top: "10px",
+                                    insetInlineEnd: "10px",
+                                    zIndex: 1,
+                                    fontWeight: 800,
+                                }}
+                                onClick={() => (helpOpen.value = true)}
+                            >
+                                ?
+                            </VBtn>
                             <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                                <ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>
+                                <ThemedText style={{ fontSize: "13px", opacity: 0.7, paddingInlineEnd: "40px" }}>
                                     {summary.value?.description ?? t("Payment Link")}
                                 </ThemedText>
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -470,6 +491,12 @@ const PayPage = dc(() => {
                                             formValues.value = {};
                                             formErrors.value = {};
                                         }}
+                                    />
+
+                                    <PerRailInstructionsBanner
+                                        rail={selectedRail.value}
+                                        locale={currentLocale.value}
+                                        onOpenHelp={() => (helpOpen.value = true)}
                                     />
 
                                     {selectedRail.value && (
@@ -593,6 +620,16 @@ const PayPage = dc(() => {
                     {t("Powered By")} · {t("Payment Gateway")}
                 </div>
             </div>
+
+            <CheckoutHelpDrawer
+                open={helpOpen.value}
+                onClose={() => (helpOpen.value = false)}
+                summary={summary.value}
+                selectedRail={selectedRail.value}
+                attemptStatus={attemptStatus.value}
+                reference={reference.value}
+                locale={currentLocale.value}
+            />
         </CheckoutLayout>
     );
 });

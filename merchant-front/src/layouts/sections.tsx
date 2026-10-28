@@ -54,6 +54,11 @@ export const useSections = () => {
                     name: "Onboarding",
                     icon: "mdi-clipboard-account-outline",
                 },
+                {
+                    label: t("Merchant Guide"),
+                    name: "MerchantGuide",
+                    icon: "mdi-book-open-variant",
+                },
             ],
         },
         {

@@ -418,6 +418,67 @@ describe("smart AI onboarding routes", () => {
   });
 });
 
+describe("portal guide routes", () => {
+  test("forwards the checkout support config read", async () => {
+    const response = await call("GET", "/api/v1/admin/settings/checkout-support", { token: operator });
+    expect(response.status).toBe(200);
+    expect(core.requests.at(-1)?.url).toBe("/internal/admin/settings/checkout-support");
+  });
+
+  test("forwards the checkout support config write as { value }", async () => {
+    const value = {
+      enabled: true,
+      show_platform_contact: true,
+      show_merchant_contact: false,
+      support_phone: "+218910000000",
+      support_whatsapp: "+218910000000",
+      support_email: "support@example.ly",
+      working_hours_en: "Sat - Thu: 09:00 - 18:00",
+      faq_items: [{ q_ar: "س", a_ar: "ج", q_en: "Q", a_en: "A" }],
+    };
+    const response = await call("PUT", "/api/v1/admin/settings/checkout-support", {
+      token: operator,
+      body: value,
+    });
+    expect(response.status).toBe(200);
+    const forwarded = core.requests.at(-1);
+    expect(forwarded?.url).toBe("/internal/admin/settings/checkout-support");
+    expect(JSON.parse(forwarded?.body.toString("utf8") ?? "{}")).toEqual({ value });
+  });
+
+  test("forwards the academy progress read, write and overview", async () => {
+    const read = await call("GET", "/api/v1/admin/academy/progress", { token: operator });
+    expect(read.status).toBe(200);
+    expect(core.requests.at(-1)?.url).toBe("/internal/admin/academy/progress");
+
+    const progress = {
+      progress: {
+        completedModules: ["m1"],
+        quizScores: { m1: 100 },
+        completedLabs: ["lab-1"],
+        badges: ["CERTIFIED_OPERATOR"],
+      },
+    };
+    const write = await call("PUT", "/api/v1/admin/academy/progress", { token: operator, body: progress });
+    expect(write.status).toBe(200);
+    expect(JSON.parse(core.requests.at(-1)?.body.toString("utf8") ?? "{}")).toEqual(progress);
+
+    const overview = await call("GET", "/api/v1/admin/academy/progress/overview", { token: operator });
+    expect(overview.status).toBe(200);
+    expect(core.requests.at(-1)?.url).toBe("/internal/admin/academy/progress/overview");
+  });
+
+  test("rejects an invalid checkout support body before contacting core", async () => {
+    const before = core.requests.length;
+    const response = await call("PUT", "/api/v1/admin/settings/checkout-support", {
+      token: operator,
+      body: { enabled: "yes" },
+    });
+    expect(response.status).toBe(400);
+    expect(core.requests.length).toBe(before);
+  });
+});
+
 describe("admin core contract forwarding", () => {
   test("forwards a canonical gateway create body", async () => {    const response = await call("POST", "/api/v1/admin/gateways", {
       token: operator,

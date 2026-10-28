@@ -63,6 +63,8 @@ export interface RailRecord {
   blocked?: boolean;
   displayOrder?: number;
   collectionMode?: string;
+  /** The structured bilingual checkout help of the rail (optional). */
+  helpGuideJson?: unknown;
 }
 
 export interface CredentialSetRecord {

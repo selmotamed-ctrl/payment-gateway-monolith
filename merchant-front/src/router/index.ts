@@ -46,6 +46,11 @@ const router = createRouter({
                     component: () => import("@/pages/onboarding/index"),
                 },
                 {
+                    path: "guide",
+                    name: "MerchantGuide",
+                    component: () => import("@/pages/guide/index"),
+                },
+                {
                     path: "wallets",
                     name: "Wallets",
                     component: () => import("@/pages/wallets/index"),

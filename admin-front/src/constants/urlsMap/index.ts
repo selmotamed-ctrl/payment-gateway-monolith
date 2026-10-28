@@ -55,6 +55,7 @@ export const urlsMap = {
     financeInvariantCheck: "v1/admin/finance/invariant-check",
 
     settings: "v1/admin/settings",
+    checkoutSupport: "v1/admin/settings/checkout-support",
 
     gatewaysList: "v1/admin/gateways",
     gatewayDetail: (id: string) => `v1/admin/gateways/${id}`,
@@ -84,6 +85,8 @@ export const urlsMap = {
 
     branchListAll: "v1/admin/reference/branches",
     currenciesList: "v1/admin/reference/currencies",
+
+    academyProgress: "v1/admin/academy/progress",
 } as const;
 
 export type UrlsMap = typeof urlsMap;

@@ -2,6 +2,7 @@ import "dotenv/config";
 import { Prisma } from "../generated/prisma/client";
 import { client, ensureSchemaVersion } from "./client";
 import { seedBlueprints, seedPlatformCredentialSets } from "./seedBlueprints";
+import { seedCheckoutSupport, seedRailHelpGuides } from "./seedGuides";
 import { seedSystemGlAccounts } from "./seedGlAccounts";
 
 const platformSettings = [
@@ -437,6 +438,12 @@ const seed = async () => {
     seededReportingRules += 1;
   }
   process.stdout.write(`Seeded ${seededReportingRules} reporting rules.\n`);
+
+  // The four built-in portal guides: the checkout support configuration and the
+  // bilingual per-rail walkthroughs rendered by the checkout help center.
+  await seedCheckoutSupport(client);
+  const guidedRails = await seedRailHelpGuides(client);
+  process.stdout.write(`Seeded the checkout support config and ${guidedRails} rail help guides.\n`);
 };
 
 try {

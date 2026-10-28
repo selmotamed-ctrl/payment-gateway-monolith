@@ -124,6 +124,21 @@ const router = createRouter({
                     name: "GatewayRoutes",
                     component: () => import("@/pages/routes/index"),
                 },
+                {
+                    path: "guide",
+                    name: "AdminGuide",
+                    component: () => import("@/pages/guide/index"),
+                },
+                {
+                    path: "academy",
+                    name: "AdminAcademy",
+                    component: () => import("@/pages/academy/index"),
+                },
+                {
+                    path: "settings/checkout-help",
+                    name: "AdminCheckoutHelp",
+                    component: () => import("@/pages/settings/checkout-help/index"),
+                },
             ],
             meta: {
                 requiresAuth: true,

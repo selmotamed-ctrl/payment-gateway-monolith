@@ -4419,6 +4419,166 @@ router.get("/finance/invariant-check", async (request: Request, response: Respon
   });
 });
 
+/**
+ * The checkout help & support configuration of the four portal guides.
+ *
+ * The admin edits the support channels and the FAQ once; the checkout help
+ * center reads them on every link load, so disabling the section here hides the
+ * Contact Us block on every checkout page immediately.
+ */
+const CHECKOUT_SUPPORT_KEY = "checkout.support_config";
+
+const checkoutSupportSchema = z
+  .strictObject({
+    enabled: z.boolean(),
+    show_platform_contact: z.boolean().default(true),
+    show_merchant_contact: z.boolean().default(true),
+    support_phone: z.string().trim().max(40).optional(),
+    support_whatsapp: z.string().trim().max(40).optional(),
+    support_email: z.string().trim().max(160).optional(),
+    working_hours_ar: z.string().max(300).optional(),
+    working_hours_en: z.string().max(300).optional(),
+    faq_items: z
+      .array(
+        z.strictObject({
+          q_ar: z.string().max(1000),
+          a_ar: z.string().max(4000),
+          q_en: z.string().max(1000),
+          a_en: z.string().max(4000),
+        }),
+      )
+      .max(50)
+      .default([]),
+  });
+
+const loadCheckoutSupport = async (): Promise<Record<string, unknown> | null> => {
+  const setting = await client.platformSetting.findFirst({
+    where: { key: CHECKOUT_SUPPORT_KEY },
+    orderBy: { version: "desc" },
+  });
+  return (setting?.valueJson as Record<string, unknown> | undefined) ?? null;
+};
+
+router.get("/settings/checkout-support", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["settings:read"]);
+  const setting = await client.platformSetting.findFirst({
+    where: { key: CHECKOUT_SUPPORT_KEY },
+    orderBy: { version: "desc" },
+  });
+  response.json({
+    key: CHECKOUT_SUPPORT_KEY,
+    value: (setting?.valueJson ?? null) as unknown,
+    version: setting?.version ?? null,
+    updatedAt: setting?.updatedAt ?? null,
+  });
+});
+
+router.put("/settings/checkout-support", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["settings:write"]);
+  const body = parseOrThrow(z.strictObject({ value: checkoutSupportSchema }).strict(), request.body ?? {});
+  const existing = await client.platformSetting.findFirst({
+    where: { key: CHECKOUT_SUPPORT_KEY },
+    orderBy: { version: "desc" },
+  });
+  const nextVersion = (existing?.version ?? 0) + 1;
+  const value = json(body.value);
+  const task = existing
+    ? client.platformSetting.create({
+        data: {
+          key: CHECKOUT_SUPPORT_KEY,
+          scope: existing.scope,
+          version: nextVersion,
+          valueJson: value,
+          effectiveFrom: new Date(),
+        },
+      })
+    : client.platformSetting.create({
+        data: {
+          key: CHECKOUT_SUPPORT_KEY,
+          scope: "PLATFORM",
+          version: nextVersion,
+          valueJson: value,
+          effectiveFrom: new Date(),
+        },
+      });
+  const created = await task;
+  await client.auditLog.create({
+    data: {
+      actorId: actorFromRequest(request).userId,
+      role: actorFromRequest(request).role,
+      action: "CHECKOUT_SUPPORT_UPDATED",
+      entityType: "PLATFORM_SETTING",
+      entityId: created.id,
+      beforeJson: json(existing?.valueJson ?? null),
+      afterJson: value,
+    },
+  });
+  response.json({ key: CHECKOUT_SUPPORT_KEY, value: body.value, version: nextVersion });
+});
+
+/**
+ * The Employee Academy progress of the authenticated admin.
+ *
+ * It is deliberately stored on the user row: management can see whether a new
+ * hire completed the curriculum before granting `is_maker` / `is_checker`.
+ */
+const academyProgressSchema = z
+  .strictObject({
+    completedModules: z.array(z.string().max(40)).max(40).default([]),
+    quizScores: z.record(z.string().max(40), z.number().min(0).max(100)).default({}),
+    completedLabs: z.array(z.string().max(60)).max(100).default([]),
+    badges: z.array(z.string().max(60)).max(20).default([]),
+    lastModuleId: z.string().max(40).optional(),
+    updatedAt: z.string().max(40).optional(),
+  });
+
+router.get("/academy/progress", async (request: Request, response: Response) => {
+  const actor = actorFromRequest(request);
+  const user = await client.user.findUnique({ where: { id: actor.userId } });
+  if (!user) {
+    throw new ApiError(404, "USER_NOT_FOUND", "The user does not exist");
+  }
+  response.json({
+    userId: user.id,
+    progress: (user.academyProgressJson ?? {
+      completedModules: [],
+      quizScores: {},
+      completedLabs: [],
+      badges: [],
+    }) as unknown,
+  });
+});
+
+router.put("/academy/progress", async (request: Request, response: Response) => {
+  const actor = actorFromRequest(request);
+  const body = parseOrThrow(z.strictObject({ progress: academyProgressSchema }).strict(), request.body ?? {});
+  await client.user.update({
+    where: { id: actor.userId },
+    data: { academyProgressJson: json({ ...body.progress, updatedAt: new Date().toISOString() }) },
+  });
+  response.json({ userId: actor.userId, progress: body.progress });
+});
+
+/** Management view: the academy progress of every admin user. */
+router.get("/academy/progress/overview", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["user:read"]);
+  const users = await client.user.findMany({
+    where: { merchantId: null },
+    select: { id: true, email: true, role: true, academyProgressJson: true, isMaker: true, isChecker: true },
+    orderBy: { email: "asc" },
+  });
+  response.json({
+    users: users.map((user) => ({
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      isMaker: user.isMaker,
+      isChecker: user.isChecker,
+      progress: user.academyProgressJson ?? null,
+    })),
+  });
+});
+
 router.get("/settings", async (request: Request, response: Response) => {
   requireAuthorities(request, ["settings:read"]);
   const settings = await client.platformSetting.findMany({ orderBy: [{ key: "asc" }, { version: "desc" }] });

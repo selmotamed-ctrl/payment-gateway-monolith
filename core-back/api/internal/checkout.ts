@@ -95,6 +95,8 @@ interface LoadedLink {
   merchantLegalName: string;
   merchantStatus: string;
   merchantRiskTier: string;
+  merchantContactPhone: string | null;
+  merchantContactEmail: string | null;
 }
 
 const loadLink = async (linkKey: string): Promise<LoadedLink | null> => {
@@ -127,6 +129,8 @@ const loadLink = async (linkKey: string): Promise<LoadedLink | null> => {
     merchantLegalName: link.application.merchant.legalName,
     merchantStatus: link.application.merchant.status,
     merchantRiskTier: link.application.merchant.riskTier,
+    merchantContactPhone: link.application.merchant.contactPhone,
+    merchantContactEmail: link.application.merchant.contactEmail,
   };
 };
 
@@ -840,6 +844,63 @@ export const cancelAttemptAtomically = async (
     };
   });
 
+/**
+ * Projects the admin `checkout.support_config` setting onto the PUBLIC checkout
+ * contract.
+ *
+ * The merchant contact is only included when the admin enabled it for
+ * merchants, and the support channels are only included when the whole section
+ * is enabled. Nothing else of the setting leaks.
+ */
+export const buildCheckoutSupportConfig = (
+  raw: unknown,
+  link: LoadedLink,
+): Record<string, unknown> | null => {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const config = raw as Record<string, unknown>;
+  if (config.enabled !== true) {
+    return null;
+  }
+  const stringList = (value: unknown): string[] =>
+    Array.isArray(value) ? value.map((entry) => String(entry)) : [];
+  const faqItems = Array.isArray(config.faq_items)
+    ? config.faq_items
+        .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+        .map((item) => ({
+          q_ar: item.q_ar ?? null,
+          a_ar: item.a_ar ?? null,
+          q_en: item.q_en ?? null,
+          a_en: item.a_en ?? null,
+        }))
+    : [];
+  const showPlatform = config.show_platform_contact !== false;
+  const showMerchant = config.show_merchant_contact !== false;
+  return {
+    enabled: true,
+    working_hours_ar: config.working_hours_ar ?? null,
+    working_hours_en: config.working_hours_en ?? null,
+    platform: showPlatform
+      ? {
+          phone: config.support_phone ?? null,
+          whatsapp: config.support_whatsapp ?? null,
+          email: config.support_email ?? null,
+        }
+      : null,
+    merchant: showMerchant
+      ? {
+          phone: link.merchantContactPhone,
+          email: link.merchantContactEmail,
+          tradeName: link.merchantTradeName,
+        }
+      : null,
+    faq_items: faqItems,
+    // Kept for the front end that expects the flat list of channels.
+    channels: showPlatform ? stringList([config.support_whatsapp, config.support_phone, config.support_email].filter(Boolean)) : [],
+  };
+};
+
 route.get("/pay/:linkKey", async (request: Request, response: Response) => {
   const { linkKey } = parseOrThrow(linkParamsSchema, request.params);
   const link = await loadLink(linkKey);
@@ -906,6 +967,7 @@ route.get("/pay/:linkKey", async (request: Request, response: Response) => {
         };
       }),
       fee: breakdown,
+      helpGuide: entry.rail.helpGuideJson ?? null,
     };
   });
 
@@ -920,7 +982,20 @@ route.get("/pay/:linkKey", async (request: Request, response: Response) => {
         feeBearer: link.feeBearer,
       };
 
+  // The checkout help center is data driven: the admin-configured support
+  // channels and each visible rail's bilingual walkthrough travel with the
+  // link summary, so the payer never needs a second request.
+  const supportSetting = await client.platformSetting.findFirst({
+    where: { key: "checkout.support_config" },
+    orderBy: { version: "desc" },
+  });
+  const supportConfig = buildCheckoutSupportConfig(
+    supportSetting?.valueJson,
+    link,
+  );
+
   response.json({
+    supportConfig,
     linkKey: link.key,
     merchantTradeName: link.merchantTradeName,
     merchantLogoUrl: null,
