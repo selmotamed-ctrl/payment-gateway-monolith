@@ -143,12 +143,14 @@ const edgeEnv = (
       return {
         ...base,
         PORT: String(config.MERCHANT_BACK_PORT),
+        BIND_HOST: "127.0.0.1",
         PG_LIVE_TOKEN_PREFIX: "pg_live_",
       };
     case "checkout":
       return {
         ...base,
         PORT: String(config.CHECKOUT_BACK_PORT),
+        BIND_HOST: "127.0.0.1",
         CHECKOUT_FRONT_BASE_URL: `https://${config.CHECKOUT_DOMAIN}`,
         CHECKOUT_FRONT_STATUS_PATH: "/pay/status",
       };

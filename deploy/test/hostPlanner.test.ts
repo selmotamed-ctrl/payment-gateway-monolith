@@ -75,10 +75,9 @@ describe("deploy config validation", () => {
     expect(result.problems.join(" ")).toContain("DATABASE_URL must start with postgresql://");
   });
 
-  test("rejects the database and the core sharing an IP", () => {
+  test("allows a single-box install where the database is co-located with the core", () => {
     const result = loadDeployConfig(withOverrides(`CORE_PRIVATE_IP="10.10.0.10"`));
-    expect(result.ok).toBe(false);
-    expect(result.problems.join(" ")).toContain("cannot be the same host");
+    expect(result.ok).toBe(true);
   });
 
   test("rejects an invalid IP, CIDR, identifier and short password", () => {

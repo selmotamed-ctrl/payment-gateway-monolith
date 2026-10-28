@@ -122,7 +122,7 @@ const adminUsers = [
   {
     email: "gateway-admin@payment-gateway.internal",
     role: "GATEWAY_ADMIN",
-    authorities: ["gateway:read", "gateway:write", "gateway:test"],
+    authorities: ["gateway:read", "gateway:write", "gateway:test", "settings:read", "settings:write"],
     isMaker: true,
     isChecker: false,
   },

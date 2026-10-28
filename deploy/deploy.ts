@@ -186,16 +186,21 @@ export const renderNginxTemplate = (input: {
 const renderNginx = (host: HostPlan, config: DeployConfig, runner: SshRunner): void => {
   for (const site of host.nginx) {
     const template = readFileSync(nginxTemplatePath(site.template), "utf8");
-    const tls = site.sslMode === "lan"
-      ? { certPath: site.certPath ?? "", keyPath: site.keyPath ?? "" }
-      : resolvePublicCertificate(
-          runner,
-          host,
-          site.serverName,
-          site.sslMode,
-          site.certPath ?? "",
-          site.keyPath ?? "",
-        );
+    // The admin vhost is LAN-only and usually has no operator certificate; it
+    // still needs a TLS pair so `nginx -t` accepts the server block, so we mint
+    // a self-signed certificate bound to its server name when none is given.
+    const tls = site.sslMode === "lan" && site.certPath && site.keyPath
+      ? { certPath: site.certPath, keyPath: site.keyPath }
+      : site.sslMode === "lan"
+        ? resolvePublicCertificate(runner, host, site.serverName, "self_signed", "", "")
+        : resolvePublicCertificate(
+            runner,
+            host,
+            site.serverName,
+            site.sslMode,
+            site.certPath ?? "",
+            site.keyPath ?? "",
+          );
     const rendered = renderNginxTemplate({
       template,
       serverName: site.serverName,
@@ -229,8 +234,12 @@ const deployService = (input: {
   const releaseDir = `${remote}/releases/${releaseTimestamp}`;
   const frontend = service.role === "core" || service.role === "db" ? null : FRONTENDS[service.role];
   const appDir = `${releaseDir}/${service.sourceDir}`;
+  const owner = `${host.ssh.user}:${host.ssh.user}`;
 
-  runner.run(host.ssh, "mkdir -p " + [releaseDir, `${remote}/shared/certs`, `${remote}/shared/backups`, `${remote}/shared/pm2`].join(" "), { sudo: true });
+  // The tree lives under /var/www, so creating it needs sudo; everything the
+  // application reads afterwards (keys, .env, PM2 files, the release tree) is
+  // owned by the SSH user so PM2 — never root — can read it.
+  runner.run(host.ssh, "mkdir -p " + [releaseDir, `${remote}/shared/certs`, `${remote}/shared/backups`, `${remote}/shared/pm2`].join(" ") + ` && chown -R ${owner} ${remote}`, { sudo: true });
 
   // 1. The backend source.
   runner.sync({
@@ -246,6 +255,8 @@ const deployService = (input: {
     if (!existsSync(dist) && !input.runner.dryRun) {
       throw new Error(`The ${frontend} build is missing (${dist}); run without --skip-build`);
     }
+    // rsync creates only the final path component, so make the parent first.
+    runner.run(host.ssh, `mkdir -p ${releaseDir}/${frontend}`, { sudo: false });
     runner.sync({
       target: host.ssh,
       local: dist,
@@ -261,20 +272,20 @@ const deployService = (input: {
       continue;
     }
     const content = readMaterial(material);
-    runner.writeRemoteFile({ target: host.ssh, path: `${remote}/shared/certs/${material.name}.crt`, content: content.cert, mode: 0o644, sudo: true });
+    runner.writeRemoteFile({ target: host.ssh, path: `${remote}/shared/certs/${material.name}.crt`, content: content.cert, mode: 0o644, sudo: false });
     if (content.key) {
-      runner.writeRemoteFile({ target: host.ssh, path: `${remote}/shared/certs/${material.name}.key`, content: content.key, mode: 0o600, sudo: true });
+      runner.writeRemoteFile({ target: host.ssh, path: `${remote}/shared/certs/${material.name}.key`, content: content.key, mode: 0o600, sudo: false });
     }
   }
 
   // 4. The environment. It lives in `shared/` and is symlinked into the release
   //    so a release always reads the current configuration.
   const env = absoluteEnv(service.env, remote);
-  runner.writeRemoteFile({ target: host.ssh, path: `${remote}/shared/.env`, content: renderEnvFile(env), mode: 0o600, sudo: true });
-  runner.run(host.ssh, `ln -sfn ${remote}/shared/.env ${appDir}/.env`, { sudo: true });
+  runner.writeRemoteFile({ target: host.ssh, path: `${remote}/shared/.env`, content: renderEnvFile(env), mode: 0o600, sudo: false });
+  runner.run(host.ssh, `ln -sfn ${remote}/shared/.env ${appDir}/.env`, { sudo: false });
 
   // 5. Dependencies and, for the core, the schema.
-  const bun = "PATH=\"$HOME/.bun/bin:/usr/local/bin:$PATH\" bun";
+  const bun = 'PATH="$HOME/.bun/bin:/usr/local/bin:$PATH" bun';
   runner.run(host.ssh, `${bun} install --frozen-lockfile`, { cwd: appDir, sudo: false });
   if (service.role === "core") {
     runner.run(host.ssh, `${bun}x prisma generate`, { cwd: appDir, sudo: false });
@@ -285,14 +296,14 @@ const deployService = (input: {
   }
 
   // 6. Atomic symlink switch.
-  runner.run(host.ssh, `ln -sfn ${releaseDir} ${remote}/current`, { sudo: true });
+  runner.run(host.ssh, `ln -sfn ${releaseDir} ${remote}/current`, { sudo: false });
 
   // 7. PM2.
   const ecosystem = `${remote}/shared/pm2/${service.name}.config.cjs`;
-  runner.writeRemoteFile({ target: host.ssh, path: ecosystem, content: pm2Ecosystem(service, releaseDir), mode: 0o644, sudo: true });
+  runner.writeRemoteFile({ target: host.ssh, path: ecosystem, content: pm2Ecosystem(service, releaseDir), mode: 0o644, sudo: false });
   runner.run(
     host.ssh,
-    `PATH="$HOME/.bun/bin:/usr/local/bin:$PATH" pm2 startOrReload ${ecosystem} --update-env && pm2 save`,
+    `"$HOME/.bun/bin/pm2" delete ${service.name} >/dev/null 2>&1 || true; "$HOME/.bun/bin/pm2" start ${ecosystem} --update-env && "$HOME/.bun/bin/pm2" save`,
     { sudo: false },
   );
 
@@ -303,7 +314,7 @@ const deployService = (input: {
   runner.run(
     host.ssh,
     `ls -1dt ${remote}/releases/*/ 2>/dev/null | tail -n +${input.keepReleases + 1} | xargs -r rm -rf`,
-    { sudo: true },
+    { sudo: false },
   );
 
   log(`  ${service.name} -> ${releaseDir}`);
@@ -322,25 +333,51 @@ const provisionDatabase = (input: {
   }
   // The DDL runs ON the database host through its own sudo access. The
   // application credential is never used to create the database, and it never
-  // leaves the core host.
+  // leaves the core host. The SQL is streamed to a temporary file instead of
+  // quoted on the command line: it contains backticks and quotes.
   const createSql = config.DB_ENGINE === "mysql"
     ? [
         `CREATE DATABASE IF NOT EXISTS \`${config.DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`,
         `CREATE USER IF NOT EXISTS '${config.DB_USER}'@'${config.CORE_PRIVATE_IP}' IDENTIFIED BY '${config.DB_PASSWORD}';`,
+        `CREATE USER IF NOT EXISTS '${config.DB_USER}'@'127.0.0.1' IDENTIFIED BY '${config.DB_PASSWORD}';`,
         `CREATE USER IF NOT EXISTS '${config.DB_USER}'@'%' IDENTIFIED BY '${config.DB_PASSWORD}';`,
         `GRANT ALL PRIVILEGES ON \`${config.DB_NAME}\`.* TO '${config.DB_USER}'@'${config.CORE_PRIVATE_IP}';`,
+        `GRANT ALL PRIVILEGES ON \`${config.DB_NAME}\`.* TO '${config.DB_USER}'@'127.0.0.1';`,
         `GRANT ALL PRIVILEGES ON \`${config.DB_NAME}\`.* TO '${config.DB_USER}'@'%';`,
         "FLUSH PRIVILEGES;",
-      ].join(" ")
+      ].join("\n")
     : [
         `DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${config.DB_USER}') THEN CREATE ROLE "${config.DB_USER}" LOGIN PASSWORD '${config.DB_PASSWORD}'; END IF; END $$;`,
         `SELECT 'CREATE DATABASE "${config.DB_NAME}" OWNER "${config.DB_USER}"' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${config.DB_NAME}')\\gexec`,
-      ].join(" ");
+      ].join("\n");
 
-  const command = config.DB_ENGINE === "mysql"
-    ? `mysql --protocol=socket -e ${JSON.stringify(createSql)}`
-    : `sudo -u postgres psql -c ${JSON.stringify(createSql)}`;
-  runner.run(host.ssh, command, { sudo: config.DB_ENGINE === "mysql" });
+  const sqlPath = `/tmp/pg-db-init-${timestamp()}.sql`;
+  runner.writeRemoteFile({ target: host.ssh, path: sqlPath, content: `${createSql}\n`, mode: 0o600 });
+  try {
+    if (config.DB_ENGINE === "mysql") {
+      runner.run(host.ssh, `mysql --protocol=socket < ${sqlPath}`, { sudo: true });
+    } else {
+      runner.run(host.ssh, `psql -f ${sqlPath}`, { sudo: true, sudoUser: "postgres" });
+    }
+  } finally {
+    runner.run(host.ssh, `rm -f ${sqlPath}`);
+  }
+
+  // The schema enforces maker≠checker with a BEFORE INSERT trigger. MySQL
+  // requires SUPER to create a trigger while the binary log is on unless
+  // log_bin_trust_function_creators is set; the application user must not have
+  // SUPER, so raise the flag here (and persist it for the next restart).
+  if (config.DB_ENGINE === "mysql") {
+    runner.run(host.ssh, `mysql --protocol=socket -e "SET GLOBAL log_bin_trust_function_creators = 1"`, { sudo: true });
+    runner.writeRemoteFile({
+      target: host.ssh,
+      path: "/etc/mysql/conf.d/zz-payment-gateway.cnf",
+      content: "[mysqld]\nlog_bin_trust_function_creators = 1\n",
+      mode: 0o644,
+      sudo: true,
+    });
+    log("  log_bin_trust_function_creators=1 (required for the maker≠checker trigger)");
+  }
   log(`  database ${config.DB_NAME} and user ${config.DB_USER} ready on ${config.DB_PRIVATE_IP ?? host.ssh.host}`);
 };
 
@@ -424,11 +461,22 @@ const main = async (): Promise<void> => {
       if (fresh) {
         runner.run(
           host.ssh,
-          "apt-get update -y && apt-get install -y nginx rsync ufw curl ca-certificates",
+          "apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y nginx rsync ufw curl ca-certificates nodejs",
           { sudo: true },
         );
         runner.run(host.ssh, "command -v bun >/dev/null 2>&1 || curl -fsSL https://bun.sh/install | bash", { sudo: false });
-        runner.run(host.ssh, "PATH=\"$HOME/.bun/bin:/usr/local/bin:$PATH\" command -v pm2 >/dev/null 2>&1 || PATH=\"$HOME/.bun/bin:/usr/local/bin:$PATH\" bun add -g pm2", { sudo: false });
+        // PM2 is a Node program and its shebang is `node`; expose Bun on a
+        // stable absolute path so the PM2 interpreter setting always resolves.
+        runner.run(host.ssh, `ln -sfn /home/${host.ssh.user}/.bun/bin/bun /usr/local/bin/bun`, { sudo: true });
+        runner.run(host.ssh, 'test -x "$HOME/.bun/bin/pm2" || PATH="$HOME/.bun/bin:/usr/local/bin:$PATH" bun add -g pm2', { sudo: false });
+        runner.run(host.ssh, `ln -sfn /home/${host.ssh.user}/.bun/bin/bunx /usr/local/bin/bunx`, { sudo: true });
+        // Best effort: re-register the PM2 process list on boot.
+        const pm2Path = `/home/${host.ssh.user}/.bun/bin:/usr/local/bin:/usr/bin:/bin`;
+        runner.run(
+          host.ssh,
+          `env PATH=${pm2Path} pm2 startup systemd -u ${host.ssh.user} --hp /home/${host.ssh.user} >/dev/null 2>&1 || true`,
+          { sudo: true },
+        );
       }
       const firewall = applyFirewall({ runner, host, config, dryRun: options.dryRun });
       log(`  ${host.ssh.host}: ${firewall.commands.length} ufw rule(s)`);

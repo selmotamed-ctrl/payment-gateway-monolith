@@ -39,6 +39,45 @@ Flags:
 The script refuses to start if `deploy.env` is missing or invalid: every value
 is validated with Zod before the first SSH connection.
 
+## 1.1 What the bootstrap installs, and what it configures
+
+A `--fresh` run installs `nginx rsync ufw curl ca-certificates` and `nodejs`
+(PM2 runs on Node; the applications run on Bun), installs Bun, installs PM2 and
+symlinks Bun to `/usr/local/bin/bun` so the PM2 interpreter always resolves.
+
+Two host settings are applied automatically because the schema depends on them:
+
+* **`log_bin_trust_function_creators = 1`** on MySQL. The maker≠checker guard is
+  a `BEFORE INSERT` trigger, and MySQL forbids creating a trigger while the
+  binary log is on unless this flag is set or the user has `SUPER` (the
+  application user never does). The deploy sets the global value and persists it
+  in `/etc/mysql/conf.d/zz-payment-gateway.cnf`.
+* **TLS for every vhost**, including the LAN-only admin. When a public vhost is
+  in `self_signed` mode, or the admin vhost has no certificate, the deploy mints
+  a certificate bound to the server name so `nginx -t` always passes.
+
+PM2 applications are restarted with `pm2 delete` + `pm2 start` on every deploy,
+not `startOrReload`: PM2 keeps the old `script`/`cwd` when an app is reloaded by
+name, which would leave the previous (eventually pruned) release running. The
+restart is sub-second on a single-instance fork app.
+
+### A single staging box
+
+Every role may share one host. Because MySQL binds to `127.0.0.1`, point the
+application connection at the loopback and keep `DB_SSH_HOST` at the box:
+
+```dotenv
+DB_SSH_HOST="203.0.113.10"
+DB_PRIVATE_IP="127.0.0.1"
+DATABASE_URL="mysql://pg_core_user:...@127.0.0.1:3306/payment_gateway_prod"
+CORE_PRIVATE_IP="203.0.113.10"     # edge -> core mTLS target
+MERCHANT_SSL_MODE="self_signed"    # no public DNS on a test box
+CHECKOUT_SSL_MODE="self_signed"
+```
+
+The planner then reports `topology: single-host (1 host(s))` and applies the
+union of every role's firewall rules once.
+
 ## 2. The 1-to-5 host topology
 
 The orchestrator groups the five logical roles by their SSH endpoint

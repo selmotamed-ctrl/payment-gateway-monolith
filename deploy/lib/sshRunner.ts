@@ -60,12 +60,12 @@ export class SshRunner {
   }
 
   /** Runs a command on the remote host. `sudo` wraps it in `sudo -S`. */
-  run(target: SshTarget, command: string, options: { sudo?: boolean; cwd?: string } = {}): RunResult {
+  run(target: SshTarget, command: string, options: { sudo?: boolean; sudoUser?: string; cwd?: string } = {}): RunResult {
     const remoteCommand = options.cwd
       ? `cd ${shellQuote(options.cwd)} && ${command}`
       : command;
     const wrapped = options.sudo
-      ? `sudo -S -p '' bash -lc ${shellQuote(remoteCommand)}`
+      ? `sudo -S -p '' ${options.sudoUser ? `-u ${options.sudoUser} ` : ""}bash -lc ${shellQuote(remoteCommand)}`
       : `bash -lc ${shellQuote(remoteCommand)}`;
     const args = sshArgs(target);
     args.push(wrapped);
@@ -95,7 +95,7 @@ export class SshRunner {
   }
 
   /** Runs a command and returns its stdout, trimming the trailing newline. */
-  capture(target: SshTarget, command: string, options: { sudo?: boolean; cwd?: string } = {}): string {
+  capture(target: SshTarget, command: string, options: { sudo?: boolean; sudoUser?: string; cwd?: string } = {}): string {
     return this.run(target, command, options).stdout.trim();
   }
 

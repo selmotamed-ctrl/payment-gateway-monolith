@@ -14,7 +14,7 @@ import { env } from "./lib/env";
 import { isApiError, toErrorEnvelope } from "./lib/error";
 import { requestLoggerMiddleware } from "./lib/requestLogger";
 import { rawBodyMiddleware } from "./lib/rawBody";
-import { baseClient } from "./prisma/client";
+import { client } from "./prisma/client";
 
 declare global {
   namespace Express {
@@ -68,7 +68,7 @@ export const createApp = (options: CreateAppOptions = {}) => {
   app.use(express.json({ limit: "1mb" }));
   app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
-  const healthDb = options.db ?? (baseClient as unknown as QueueHealthDatabase);
+  const healthDb = options.db ?? (client as unknown as QueueHealthDatabase);
   const healthClock = options.now ?? (() => new Date());
   app.get("/health", async (_request, response) => {
     const thresholdMs = env.WORKER_BACKGROUND_JOBS_MAX_QUEUE_AGE_MS;
@@ -205,7 +205,7 @@ export const start = async () => {
   const server = createHttpsServer();
   const workers = env.WORKER_ENABLED
     ? createProductionWorkerRuntime({
-        db: baseClient as never,
+        db: client as never,
         intervalMs: env.WORKER_POLL_INTERVAL_MS,
         batchSize: env.WORKER_BATCH_SIZE,
         maxAttempts: env.WORKER_MAX_ATTEMPTS,

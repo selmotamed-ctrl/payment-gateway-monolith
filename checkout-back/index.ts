@@ -25,8 +25,8 @@ export const createApp = () => {
 
 export const start = () => {
   const app = createApp();
-  return app.listen(env.PORT, () => {
-    console.log(`checkout-back listening on port ${env.PORT}`);
+  return app.listen(env.PORT, env.BIND_HOST, () => {
+    console.log(`checkout-back listening on ${env.BIND_HOST}:${env.PORT}`);
   });
 };
 

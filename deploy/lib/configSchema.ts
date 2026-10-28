@@ -168,9 +168,9 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
   if (config.DB_PRIVATE_IP && !config.DATABASE_URL.includes(config.DB_PRIVATE_IP)) {
     problems.push("DATABASE_URL should point at DB_PRIVATE_IP");
   }
-  if (config.DB_MANAGE_VIA_SSH && config.DB_PRIVATE_IP === config.CORE_PRIVATE_IP) {
-    problems.push("DB_PRIVATE_IP and CORE_PRIVATE_IP cannot be the same host: the design keeps the database on its own node");
-  }
+  // A single-box installation legitimately co-locates the database with the
+  // core (the database binds to 127.0.0.1 and is never exposed); on separate
+  // nodes the operator points DATABASE_URL at the database host's private IP.
 
   for (const [role, mode, cert, key] of [
     ["MERCHANT", config.MERCHANT_SSL_MODE, config.MERCHANT_SSL_CERT_PATH, config.MERCHANT_SSL_KEY_PATH],

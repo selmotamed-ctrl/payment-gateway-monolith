@@ -804,3 +804,48 @@ Implemented from the same design's Part II (PG-G1…PG-G5).
 | `merchant-back` / `checkout-back` | 67 / 45 pass |
 | Live database | the `support_config` setting and all 13 rail guides are seeded; the full chain (`platform setting` + `rail.help_guide_json` → `buildCheckoutSupportConfig`/`helpGuide`) composes and returns the Sadad walkthrough, the channels and the FAQ |
 | Frontends | `admin-front` (guide + academy + settings page), `merchant-front` (guide) and `checkout-front` (help drawer + banner) all build |
+
+## 18. Live Single-Node Deployment Validation
+
+The deploy engine was executed against a real Ubuntu 26.04 host (MySQL 8.4,
+one box carrying all five roles) rather than only dry-run. The run surfaced
+seven defects that the dry-run could not, all now fixed:
+
+| # | Defect found by the live run | Fix |
+| :--- | :--- | :--- |
+| 1 | MySQL refused to create the maker≠checker trigger (`ERROR 1419`) because the binary log is on and the app user has no `SUPER`. | Provisioning now sets `log_bin_trust_function_creators = 1` and persists it in `/etc/mysql/conf.d/zz-payment-gateway.cnf`. |
+| 2 | A single-box install was rejected because `DB_PRIVATE_IP` equalled `CORE_PRIVATE_IP`. | The validator now accepts the co-located database (it binds to `127.0.0.1`). |
+| 3 | The LAN-only admin vhost rendered without a certificate, so `nginx -t` failed. | A self-signed certificate is minted for the admin server name when none is configured. |
+| 4 | App files under `/var/www` were root-owned, so PM2 (the SSH user) could not read `shared/.env` or the keys. | The deploy chowns the tree to the SSH user and writes certificate/env/PM2 files as that user, using sudo only for `/var/www` creation and Nginx. |
+| 5 | `bunx` was missing from the non-interactive PATH and PM2's shebang needs Node. | Bootstrap installs `nodejs`, symlinks `bun`/`bunx` into `/usr/local/bin`, and PM2 is invoked by absolute path. |
+| 6 | PM2's `startOrReload` kept the old `script`/`cwd`, so after a prune the core crash-looped on a deleted release. | Deploys now `pm2 delete` then `pm2 start`, pinning each release. |
+| 7 | The worker runtime was handed the `getBaseClient` **function** instead of the client (`db: baseClient`), so every background worker tick threw `$queryRawUnsafe is not a function`. | `core-back/index.ts` passes the lazily-bound `client` proxy; the workers now tick cleanly. |
+
+Two further gaps closed while validating:
+
+* The merchant and checkout edges bound `0.0.0.0`; they now honour `BIND_HOST`
+  and the deploy sets it to `127.0.0.1` (the firewall already blocked the ports,
+  this closes the socket as well).
+* No seeded admin role held `settings:read`/`settings:write`, so the new
+  checkout-help settings screen was unusable; the `GATEWAY_ADMIN` seed now
+  carries both authorities.
+
+Validation performed on the live host:
+
+| Case | Result |
+| :--- | :--- |
+| Clean `--fresh` from a wiped box | **pass**, 12/12 steps, 9/9 verification probes, ~150 s |
+| `--update` (twice) | **pass**, pre-migration `mysqldump` created, 4 services redeployed, 9/9 probes |
+| `--only=admin` | **pass**, only the admin release advanced; core/merchant/checkout untouched |
+| `--keep=1` | **pass**, pruned to one release per host, PM2 pointed at it |
+| `--rotate-certs` | **pass**, new CA + 4 leaves uploaded to every host |
+| `--dry-run` | **pass**, 12-step plan with a single-host topology |
+| Invalid config (bad CIDR, mixed keys on a shared host, custom SSL without paths) | **fail fast**, exit 1 before any SSH |
+| Firewall from another LAN host | 22/80/443 open; 3306/4000/4101/4102/4103 **blocked**; 8443 open to the LAN only |
+| Edge `.env` isolation | no `DATABASE_URL`, `KMS_MASTER_KEY` or DB password on any edge host |
+| Authenticated flow through Nginx → admin-back → core (mTLS) → DB | login (bcrypt), MFA gate, academy progress, checkout-support read **and** versioned write |
+| Seed + schema | `schema_versions = 6`, 13/13 rails carry a help guide, support config enabled |
+| Background workers | zero tick errors over a 30 s window after the runtime fix |
+
+Regression after the fixes: `core-back` 796, `admin-back` 416,
+`merchant-back` 67, `checkout-back` 45, `deploy` 25 — all pass.

@@ -62,7 +62,7 @@ const opensslConfig = (options: {
   cn: string;
   ou: string;
   sans: string[];
-  extendedKeyUsage: "serverAuth" | "clientAuth";
+  extendedKeyUsage: "serverAuth" | "clientAuth" | "serverAuth,clientAuth";
 }): string => {
   const san = options.sans.length > 0
     ? `subjectAltName = ${options.sans.join(", ")}`
@@ -156,7 +156,8 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
     material: server,
     ou: "core",
     sans: serverSans,
-    extendedKeyUsage: "serverAuth",
+    // Also usable as a client so the core host can probe its own /health.
+    extendedKeyUsage: "serverAuth,clientAuth",
     validityDays: config.MTLS_VALIDITY_DAYS,
   });
 
@@ -184,7 +185,7 @@ const signLeaf = (input: {
   material: CertMaterial;
   ou: string;
   sans: string[];
-  extendedKeyUsage: "serverAuth" | "clientAuth";
+  extendedKeyUsage: "serverAuth" | "clientAuth" | "serverAuth,clientAuth";
   validityDays: number;
 }): void => {
   const { run, directory, material } = input;
