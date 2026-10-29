@@ -230,3 +230,66 @@ ADMIN_SSH_KEY_PATH="~/.ssh/other-key"
     expect(map).toContain("8443<=10.0.0.0/8|192.168.0.0/16");
   });
 });
+
+describe("nginx ports and optional TLS", () => {
+  test("defaults are the conventional 80/443 with TLS enabled", () => {
+    const config = requireConfig(base);
+    expect(config.MERCHANT_HTTP_PORT).toBe(80);
+    expect(config.MERCHANT_HTTPS_PORT).toBe(443);
+    expect(config.MERCHANT_SSL).toBe(true);
+    expect(config.MERCHANT_LAN_SSL).toBe(true);
+    expect(config.ADMIN_SSL).toBe(true);
+  });
+
+  test("custom certificate paths are only required when TLS is enabled", () => {
+    const disabled = loadDeployConfig(withOverrides(`MERCHANT_SSL="false"\nMERCHANT_SSL_MODE="custom"`));
+    expect(disabled.ok).toBe(true);
+    const enabled = loadDeployConfig(withOverrides(`MERCHANT_SSL="true"\nMERCHANT_SSL_MODE="custom"`));
+    expect(enabled.ok).toBe(false);
+  });
+
+  test("the plan carries the configured ports and scheme", () => {
+    const config = requireConfig(withOverrides(`
+MERCHANT_HTTP_PORT="8080"
+MERCHANT_HTTPS_PORT="8443"
+CHECKOUT_HTTP_PORT="8088"
+CHECKOUT_HTTPS_PORT="9443"
+`));
+    const plan = planHosts(config);
+    const merchant = plan.hosts.flatMap((host) => host.nginx).find((site) => site.site === "merchant-public");
+    expect(merchant).toMatchObject({ ssl: true, httpPort: 8080, httpsPort: 8443, listenPort: 8443 });
+    const checkout = plan.hosts.flatMap((host) => host.nginx).find((site) => site.site === "checkout-public");
+    expect(checkout).toMatchObject({ ssl: true, httpPort: 8088, httpsPort: 9443, listenPort: 9443 });
+  });
+
+  test("TLS can be disabled per portal and the firewall follows", () => {
+    const plan = planHosts(requireConfig(withOverrides(`MERCHANT_SSL="false"\nCHECKOUT_SSL="false"`)));
+    const merchant = plan.hosts.find((host) => host.roles.includes("merchant"))!;
+    const merchantPorts = merchant.firewall.map((rule) => rule.port);
+    expect(merchantPorts).toContain(80);
+    expect(merchantPorts).not.toContain(443);
+    expect(merchantPorts).toContain(8081);
+
+    const publicSite = merchant.nginx.find((site) => site.site === "merchant-public")!;
+    expect(publicSite.ssl).toBe(false);
+    expect(publicSite.listenPort).toBe(80);
+
+    const checkout = plan.hosts.find((host) => host.roles.includes("checkout"))!;
+    expect(checkout.firewall.map((rule) => rule.port)).not.toContain(443);
+  });
+
+  test("LAN listeners can be plain HTTP", () => {
+    const plan = planHosts(requireConfig(withOverrides(`MERCHANT_LAN_SSL="false"\nCHECKOUT_LAN_SSL="false"`)));
+    const lan = plan.hosts.flatMap((host) => host.nginx).filter((site) => site.site.endsWith("-lan") && site.site !== "admin-lan");
+    expect(lan).toHaveLength(2);
+    for (const site of lan) {
+      expect(site.ssl).toBe(false);
+    }
+  });
+
+  test("rejects two listeners on the same port within a portal", () => {
+    const result = loadDeployConfig(withOverrides(`MERCHANT_HTTPS_PORT="8081"`));
+    expect(result.ok).toBe(false);
+    expect(result.problems.join(" ")).toContain("must differ");
+  });
+});

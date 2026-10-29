@@ -32,6 +32,23 @@ test("live admin: login, dashboard loads below the bar, no scaling transform", a
   await page.getByRole("button", { name: "Login", exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard/, { timeout: 20_000 });
   await assertShell(page);
+  // A GATEWAY_ADMIN must not be offered pages its role cannot use.
+  await expect(page.locator(".pg-drawer a", { hasText: "Operator Cases" })).toHaveCount(0);
+  await expect(page.locator(".pg-drawer a", { hasText: "Disputes" })).toHaveCount(0);
+});
+
+test("live finance: Disputes is offered and loads", async ({ page }) => {
+  await page.goto(`${ADMIN}/login`);
+  await page.getByLabel("Email or phone").fill(process.env.PG_FINANCE_EMAIL ?? "finance@payment-gateway.internal");
+  await page.getByLabel("Password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Login", exact: true }).click();
+  await expect(page).toHaveURL(/\/dashboard/, { timeout: 20_000 });
+  const disputes = page.locator(".pg-drawer a", { hasText: "Disputes" });
+  await expect(disputes).toBeVisible();
+  await disputes.click();
+  await expect(page).toHaveURL(/\/disputes/);
+  await expect(page.locator(".pg-page")).toBeVisible();
+  await expect(page.locator(".pg-app-bar__title")).toHaveText("Disputes");
 });
 
 test("live merchant: login, portal loads below the bar, no scaling transform", async ({ page }) => {

@@ -145,17 +145,31 @@ export const probePublicVhost = (
 ): ProbeResult[] => {
   const results: ProbeResult[] = [];
   for (const site of host.nginx) {
+    // The admin vhost is covered by the edge-backend probe; the merchant and
+    // checkout vhosts (public and LAN) are probed on their configured port and
+    // scheme, so SSL can be enabled or disabled per site.
     if (site.sslMode === "lan") continue;
+    const scheme = site.ssl ? "https" : "http";
+    const insecure = site.ssl ? " -k" : "";
+    const base = `${scheme}://127.0.0.1:${site.listenPort}`;
     try {
-      const body = runner.capture(host.ssh, `curl -fsS --max-time 10 -k https://127.0.0.1/health || curl -fsS --max-time 10 -k https://127.0.0.1/ -o /dev/null -w '%{http_code}'`);
+      const body = runner.capture(
+        host.ssh,
+        `curl -fsS --max-time 10${insecure} ${base}/health || curl -fsS --max-time 10${insecure} ${base}/ -o /dev/null -w '%{http_code}'`,
+      );
       results.push({
         host: host.ssh.host,
-        check: `public vhost ${site.serverName}`,
+        check: `vhost ${site.site} ${scheme}:${site.listenPort}`,
         ok: body.length > 0,
         detail: body.slice(0, 200),
       });
     } catch (error) {
-      results.push({ host: host.ssh.host, check: `public vhost ${site.serverName}`, ok: false, detail: (error as Error).message });
+      results.push({
+        host: host.ssh.host,
+        check: `vhost ${site.site} ${scheme}:${site.listenPort}`,
+        ok: false,
+        detail: (error as Error).message,
+      });
     }
   }
   return results;

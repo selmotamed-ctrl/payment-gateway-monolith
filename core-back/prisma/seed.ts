@@ -136,7 +136,7 @@ const adminUsers = [
   {
     email: "finance@payment-gateway.internal",
     role: "FINANCE",
-    authorities: ["finance:read", "finance:write", "commission:write", "cashout:review"],
+    authorities: ["finance:read", "finance:write", "commission:write", "cashout:review", "dispute:read", "dispute:write"],
     isMaker: false,
     isChecker: true,
   },

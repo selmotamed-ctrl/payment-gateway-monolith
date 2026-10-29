@@ -54,7 +54,7 @@ const DefaultLayout = dc(() => {
 
     const isDark = computed(() => theme.current.value.dark);
     const activeLabel = computed(() => {
-        for (const section of sections) {
+        for (const section of sections.value) {
             for (const item of section.routes) {
                 if (item.name === route.name) {
                     return item.label;
@@ -176,7 +176,7 @@ const DefaultLayout = dc(() => {
                 <VDivider />
 
                 <VList nav density="comfortable" class="pg-nav">
-                    {sections.map((section) => (
+                    {sections.value.map((section) => (
                         <div key={section.title} class="pg-nav__group">
                             <VListSubheader>{section.title}</VListSubheader>
                             {section.routes.map((item) => (

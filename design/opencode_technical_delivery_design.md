@@ -898,3 +898,42 @@ Test totals after the work: **core-back 807**, **admin-back 416**,
 deployed admin and merchant portals over the LAN ports and asserts the app bar
 never overlaps content, the drawer works on mobile, nothing overflows, and the
 scaling transform is gone on all three portals.
+
+## 21. Role-Gated Navigation and Reactive Localisation
+
+Two more portal defects were found while exercising the deployed app:
+
+| # | Defect | Fix |
+| :--- | :--- | :--- |
+| 1 | `Operator Cases` and `Disputes` were shown to every role because both had an empty authority list, but the backend correctly requires `case:read`/`operator:read` and `dispute:read`, so a `GATEWAY_ADMIN` saw a page that failed with `403/401`. | The sidebar items and the router guards now require the same authorities as the API: `Operator Cases` needs `case:read`/`operator:read`, `Disputes` needs `dispute:read`. A direct URL is redirected to the dashboard. |
+| 2 | No seeded role held `dispute:read`, so the Disputes page was unusable for everyone. | `FINANCE` now carries `dispute:read` and `dispute:write` (matching the design, where Finance handles disputes). `OPERATOR`/`SUPPORT` already had `case:read` for operator cases. |
+| 3 | The navigation labels were translated once when `useSections()` ran, so switching language required a page reload. | `useSections()` now returns a `computed` that reads the locale, and both shells consume `sections.value`; the sidebar and the app-bar title re-translate immediately. |
+
+Verified live on the deployed box: a `GATEWAY_ADMIN` no longer sees either page,
+`finance@payment-gateway.internal` sees and opens Disputes (`GET /disputes`
+returns `200`), `operator@payment-gateway.internal` opens Operator Cases
+(`200`), and switching to Arabic changes the sidebar/app-bar title without a
+reload.
+
+Final test totals: **core-back 807**, **admin-back 416**, **merchant-back 67**,
+**checkout-back 45**, **deploy 25**, Playwright **33 e2e** + **5 live**, Vitest
+**17 unit** — all green.
+
+## 22. Configurable Nginx Ports and Optional TLS
+
+Every Nginx server block now takes its ports from `deploy.env`, and TLS can be
+disabled per portal (the deployer then owns certificate setup):
+
+* `MERCHANT_HTTP_PORT` / `MERCHANT_HTTPS_PORT` / `MERCHANT_SSL`
+* `CHECKOUT_HTTP_PORT` / `CHECKOUT_HTTPS_PORT` / `CHECKOUT_SSL`
+* `MERCHANT_LAN_PORT` / `MERCHANT_LAN_SSL`, `CHECKOUT_LAN_PORT` / `CHECKOUT_LAN_SSL`
+* `ADMIN_NGINX_LAN_PORT` / `ADMIN_SSL`
+
+When `*_SSL=false` the public vhost listens on the plain HTTP port with no
+redirect and no `ssl_certificate`; the LAN vhost equally serves plain HTTP. The
+templates use `{{#SSL}}…{{/SSL}}` / `{{^SSL}}…{{/SSL}}` conditional blocks, the
+firewall opens the HTTPS port only when TLS is on, and the health probe uses
+the configured scheme and port for every vhost (public and LAN). Custom
+certificate paths are only required when TLS is enabled. Ports must be distinct
+within a portal; the LAN ports must differ across portals. `deploy` tests: 34
+(9 new for ports/TLS).

@@ -83,6 +83,9 @@ describe("nginx templates", () => {
       template: template(name),
       serverName: "example.ly",
       listenPort: 443,
+      httpPort: 80,
+      httpsPort: 443,
+      ssl: true,
       sslCertPath: "/etc/ssl/example.ly.crt",
       sslKeyPath: "/etc/ssl/example.ly.key",
       staticRoot: "/var/www/example/current/app/dist",
@@ -91,11 +94,23 @@ describe("nginx templates", () => {
       ...overrides,
     });
 
-  test("no template leaves a placeholder behind", () => {
-    for (const name of ["nginx.admin.lan.conf.tpl", "nginx.merchant.ssl.conf.tpl", "nginx.checkout.ssl.conf.tpl"]) {
-      const rendered = render(name);
-      expect(rendered).not.toContain("{{");
-      expect(rendered).not.toContain("}}");
+  test("no template leaves a placeholder behind, with and without TLS", () => {
+    const templates = [
+      "nginx.admin.lan.conf.tpl",
+      "nginx.merchant.ssl.conf.tpl",
+      "nginx.checkout.ssl.conf.tpl",
+      "nginx.merchant.lan.conf.tpl",
+      "nginx.checkout.lan.conf.tpl",
+    ];
+    for (const name of templates) {
+      for (const ssl of [true, false]) {
+        const rendered = render(name, { ssl });
+        expect(rendered, `${name} ssl=${ssl}`).not.toContain("{{");
+        expect(rendered, `${name} ssl=${ssl}`).not.toContain("}}");
+        if (!ssl) {
+          expect(rendered, `${name} ssl=${ssl}`).not.toContain("ssl_certificate");
+        }
+      }
     }
   });
 
@@ -110,7 +125,7 @@ describe("nginx templates", () => {
     expect(rendered).toContain("allow 10.0.0.0/8;");
     expect(rendered).toContain("allow 192.168.0.0/16;");
     expect(rendered).toContain("deny all;");
-    expect(rendered).toContain("ssl_protocols TLSv1.3;");
+    expect(rendered).toContain("ssl_protocols TLSv1.2 TLSv1.3;");
     expect(rendered).toContain("proxy_pass http://127.0.0.1:4101;");
     expect(rendered).toContain("X-Real-Client-IP $remote_addr");
   });
@@ -126,6 +141,35 @@ describe("nginx templates", () => {
     expect(rendered).toContain("pos/screens/[^/]+/stream");
     expect(rendered).toContain("proxy_buffering off;");
     expect(rendered).toContain("proxy_read_timeout 3600s;");
+  });
+
+  test("honours configurable HTTP and HTTPS ports", () => {
+    const rendered = render("nginx.merchant.ssl.conf.tpl", { httpPort: 8080, httpsPort: 8443 });
+    expect(rendered).toContain("listen 8080;");
+    expect(rendered).toContain("listen 8443 ssl;");
+    expect(rendered).toContain("return 308 https://$host$request_uri;");
+  });
+
+  test("when TLS is disabled the public vhost is plain HTTP with no redirect", () => {
+    const rendered = render("nginx.merchant.ssl.conf.tpl", { ssl: false, httpPort: 8080 });
+    expect(rendered).toContain("listen 8080;");
+    expect(rendered).not.toContain("return 308");
+    expect(rendered).not.toContain("ssl_certificate");
+    expect(rendered).not.toContain("Strict-Transport-Security");
+    expect(rendered).toContain("proxy_pass http://127.0.0.1:4102;");
+  });
+
+  test("the LAN vhosts can serve plain HTTP", () => {
+    const rendered = render("nginx.checkout.lan.conf.tpl", {
+      ssl: false,
+      listenPort: 9090,
+      httpPort: 9090,
+      httpsPort: 9090,
+      backendPort: 4103,
+    });
+    expect(rendered).toContain("listen 9090 default_server;");
+    expect(rendered).not.toContain("ssl_certificate");
+    expect(rendered).toContain("proxy_pass http://127.0.0.1:4103;");
   });
 
   test("the checkout vhost unbuffers the payer SSE stream", () => {

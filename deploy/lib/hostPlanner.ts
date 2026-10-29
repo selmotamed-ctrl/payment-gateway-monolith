@@ -36,6 +36,12 @@ export interface NginxPlan {
   role: DeployRole;
   template: string;
   listenPort: number;
+  /** Plain HTTP port (the redirect target when SSL is on). */
+  httpPort: number;
+  /** TLS port (equal to listenPort when SSL is on). */
+  httpsPort: number;
+  /** When false the vhost is plain HTTP: no certificate, no redirect. */
+  ssl: boolean;
   serverName: string;
   sslMode: "lan" | "certbot" | "custom" | "self_signed";
   certPath?: string;
@@ -200,6 +206,9 @@ const buildNginx = (config: DeployConfig): NginxPlan[] => [
     role: "admin",
     template: "nginx.admin.lan.conf.tpl",
     listenPort: config.ADMIN_NGINX_LAN_PORT,
+    httpPort: config.ADMIN_NGINX_LAN_PORT,
+    httpsPort: config.ADMIN_NGINX_LAN_PORT,
+    ssl: config.ADMIN_SSL,
     serverName: config.ADMIN_DOMAIN,
     sslMode: "lan",
     staticRoot: `${config.ADMIN_REMOTE_DIR}/current/admin-front/dist`,
@@ -208,7 +217,10 @@ const buildNginx = (config: DeployConfig): NginxPlan[] => [
     site: "merchant-public",
     role: "merchant",
     template: "nginx.merchant.ssl.conf.tpl",
-    listenPort: 443,
+    listenPort: config.MERCHANT_SSL ? config.MERCHANT_HTTPS_PORT : config.MERCHANT_HTTP_PORT,
+    httpPort: config.MERCHANT_HTTP_PORT,
+    httpsPort: config.MERCHANT_HTTPS_PORT,
+    ssl: config.MERCHANT_SSL,
     serverName: config.MERCHANT_DOMAIN,
     sslMode: config.MERCHANT_SSL_MODE,
     certPath: config.MERCHANT_SSL_CERT_PATH ?? `/etc/letsencrypt/live/${config.MERCHANT_DOMAIN}/fullchain.pem`,
@@ -219,7 +231,10 @@ const buildNginx = (config: DeployConfig): NginxPlan[] => [
     site: "checkout-public",
     role: "checkout",
     template: "nginx.checkout.ssl.conf.tpl",
-    listenPort: 443,
+    listenPort: config.CHECKOUT_SSL ? config.CHECKOUT_HTTPS_PORT : config.CHECKOUT_HTTP_PORT,
+    httpPort: config.CHECKOUT_HTTP_PORT,
+    httpsPort: config.CHECKOUT_HTTPS_PORT,
+    ssl: config.CHECKOUT_SSL,
     serverName: config.CHECKOUT_DOMAIN,
     sslMode: config.CHECKOUT_SSL_MODE,
     certPath: config.CHECKOUT_SSL_CERT_PATH ?? `/etc/letsencrypt/live/${config.CHECKOUT_DOMAIN}/fullchain.pem`,
@@ -232,6 +247,9 @@ const buildNginx = (config: DeployConfig): NginxPlan[] => [
         role: "merchant" as const,
         template: "nginx.merchant.lan.conf.tpl",
         listenPort: config.MERCHANT_LAN_PORT,
+        httpPort: config.MERCHANT_LAN_PORT,
+        httpsPort: config.MERCHANT_LAN_PORT,
+        ssl: config.MERCHANT_LAN_SSL,
         serverName: config.MERCHANT_PRIVATE_IP,
         sslMode: "self_signed" as const,
         staticRoot: `${config.MERCHANT_REMOTE_DIR}/current/merchant-front/dist`,
@@ -243,6 +261,9 @@ const buildNginx = (config: DeployConfig): NginxPlan[] => [
         role: "checkout" as const,
         template: "nginx.checkout.lan.conf.tpl",
         listenPort: config.CHECKOUT_LAN_PORT,
+        httpPort: config.CHECKOUT_LAN_PORT,
+        httpsPort: config.CHECKOUT_LAN_PORT,
+        ssl: config.CHECKOUT_LAN_SSL,
         serverName: config.CHECKOUT_PRIVATE_IP,
         sslMode: "self_signed" as const,
         staticRoot: `${config.CHECKOUT_REMOTE_DIR}/current/checkout-front/dist`,
@@ -306,8 +327,10 @@ const buildRoleFirewall = (config: DeployConfig, role: DeployRole): FirewallRule
     case "merchant":
       return [
         { port: config.MERCHANT_SSH_PORT, proto: "tcp", comment: "SSH" },
-        { port: 80, proto: "tcp", comment: "public HTTP (redirect)" },
-        { port: 443, proto: "tcp", comment: "public HTTPS" },
+        { port: config.MERCHANT_HTTP_PORT, proto: "tcp", comment: "public HTTP" },
+        ...(config.MERCHANT_SSL
+          ? [{ port: config.MERCHANT_HTTPS_PORT, proto: "tcp" as const, comment: "public HTTPS" }]
+          : []),
         ...(config.MERCHANT_LAN_PORT > 0
           ? [{
               port: config.MERCHANT_LAN_PORT,
@@ -320,8 +343,10 @@ const buildRoleFirewall = (config: DeployConfig, role: DeployRole): FirewallRule
     case "checkout":
       return [
         { port: config.CHECKOUT_SSH_PORT, proto: "tcp", comment: "SSH" },
-        { port: 80, proto: "tcp", comment: "public HTTP (redirect)" },
-        { port: 443, proto: "tcp", comment: "public HTTPS" },
+        { port: config.CHECKOUT_HTTP_PORT, proto: "tcp", comment: "public HTTP" },
+        ...(config.CHECKOUT_SSL
+          ? [{ port: config.CHECKOUT_HTTPS_PORT, proto: "tcp" as const, comment: "public HTTPS" }]
+          : []),
         ...(config.CHECKOUT_LAN_PORT > 0
           ? [{
               port: config.CHECKOUT_LAN_PORT,

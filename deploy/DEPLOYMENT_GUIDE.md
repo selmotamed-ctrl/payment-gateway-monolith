@@ -108,9 +108,21 @@ only enable it once SMS is configured); pass `--mfa` to require it.
 
 Sign in at the admin portal with the **email** in the "Email or phone" field.
 The seeded roles are `GATEWAY_ADMIN`, `SECURITY_ADMIN`, `FINANCE`,
-`COMPLIANCE`, `MLRO`, `OPERATOR` and `SUPPORT`; the sidebar is gated by the
-authorities of the signed-in role, so use the matching role to see a given area
-(e.g. AML screens need `COMPLIANCE`/`MLRO`, finance screens need `FINANCE`).
+`COMPLIANCE`, `MLRO`, `OPERATOR` and `SUPPORT`. The sidebar and the router are
+gated by the signed-in role's authorities, so use the matching role for each
+area:
+
+| Area | Role / authority |
+| :--- | :--- |
+| Gateways, rails, routes, checkout help | `GATEWAY_ADMIN` (`gateway:*`, `settings:*`) |
+| Operator cases (unknown payments) | `OPERATOR` / `SUPPORT` (`case:read`) |
+| Disputes | `FINANCE` (`dispute:read`/`dispute:write`) |
+| AML queues and reports | `COMPLIANCE` / `MLRO` |
+| Profitability and liquidity | `FINANCE` |
+| Approvals queue | `SECURITY_ADMIN` (checker) |
+
+A page the role cannot use is not shown, and a direct URL is redirected to the
+dashboard rather than rendering a permission error.
 
 ## 1.3 LAN access without a domain name
 
@@ -123,11 +135,32 @@ opened by host IP during staging, with no DNS record and no public certificate:
 | Merchant portal | `https://<host-ip>:8081` | `MERCHANT_LAN_PORT` | `8081` |
 | Checkout (payer) | `https://<host-ip>:8082` | `CHECKOUT_LAN_PORT` | `8082` |
 
-Set either merchant/checkout LAN port to `0` to disable that listener. The LAN
-vhosts use a self-signed certificate whose **SAN contains the host IP**, so the
+Set either merchant/checkout LAN port to `0` to disable that listener. With
+`MERCHANT_LAN_SSL`/`CHECKOUT_LAN_SSL` (default `true`) the LAN listener is
+HTTPS with a self-signed certificate whose **SAN contains the host IP**, so the
 IP matches even though the issuer is untrusted (browsers still warn; that is
-expected on a staging box). They serve the same SPA build and proxy `/api/` to
-the same backend, including the SSE streams.
+expected on a staging box). Set the flag to `false` for plain HTTP on that
+port. The LAN vhosts serve the same SPA build and proxy `/api/` to the same
+backend, including the SSE streams.
+
+### Ports and TLS are configurable
+
+Every listener has an explicit port, and TLS is optional per portal:
+
+| Key | Default | Meaning |
+| :--- | :--- | :--- |
+| `ADMIN_NGINX_LAN_PORT` / `ADMIN_SSL` | `8443` / `true` | Admin listener and whether it terminates TLS. |
+| `MERCHANT_HTTP_PORT` / `MERCHANT_HTTPS_PORT` | `80` / `443` | Public merchant ports. |
+| `MERCHANT_SSL` | `true` | `false` serves plain HTTP on `MERCHANT_HTTP_PORT` with no redirect and no certificate. |
+| `MERCHANT_SSL_MODE` | `certbot` | `certbot` / `custom` / `self_signed`; only used when `MERCHANT_SSL=true`. |
+| `CHECKOUT_HTTP_PORT` / `CHECKOUT_HTTPS_PORT` / `CHECKOUT_SSL` | `80` / `443` / `true` | Same for the payer portal. |
+
+With TLS off the deployer owns certificate setup (there is none); the deploy
+does not request, install or renew certificates, and the vhost listens on the
+plain port. With `self_signed` it mints one; with `certbot` it verifies the
+certificate exists and prints the exact `certbot` command if it does not.
+Ports must be distinct within a portal, and the merchant and checkout LAN ports
+must differ from each other and from the admin port.
 
 Access is restricted by UFW to `LAN_ALLOWED_CIDRS` (and loopback), so the LAN
 ports are never reachable from outside the LAN even though they listen on

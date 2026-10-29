@@ -1,7 +1,8 @@
-# Public merchant portal + merchant server API.
+# Merchant portal + merchant server API.
+{{#SSL}}
 server {
-    listen 80;
-    listen [::]:80;
+    listen {{HTTP_PORT}};
+    listen [::]:{{HTTP_PORT}};
     server_name {{SERVER_NAME}};
 
     location /.well-known/acme-challenge/ {
@@ -13,15 +14,23 @@ server {
     }
 }
 
+{{/SSL}}
 server {
-    listen 443 ssl;
-    listen [::]:443 ssl;
+{{#SSL}}
+    listen {{HTTPS_PORT}} ssl;
+    listen [::]:{{HTTPS_PORT}} ssl;
     http2 on;
+{{/SSL}}
+{{^SSL}}
+    listen {{HTTP_PORT}};
+    listen [::]:{{HTTP_PORT}};
+{{/SSL}}
     server_name {{SERVER_NAME}};
 
+{{#SSL}}
     ssl_certificate     {{SSL_CERT_PATH}};
     ssl_certificate_key {{SSL_KEY_PATH}};
-    ssl_protocols TLSv1.3;
+    ssl_protocols TLSv1.2 TLSv1.3;
     ssl_prefer_server_ciphers off;
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 1d;
@@ -29,6 +38,7 @@ server {
     ssl_stapling_verify on;
 
     add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+{{/SSL}}
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-Frame-Options "DENY" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
@@ -46,7 +56,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Real-Client-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Request-Id $request_id;
         proxy_read_timeout 60s;
     }
@@ -58,7 +68,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Real-Client-IP $remote_addr;
-        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_buffering off;
         proxy_cache off;
         proxy_read_timeout 3600s;

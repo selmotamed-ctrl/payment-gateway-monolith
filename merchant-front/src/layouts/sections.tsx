@@ -36,9 +36,12 @@ export const routesAuthorities: {
 };
 
 export const useSections = () => {
-    const locale = useLocale();
-    const { t } = locale;
-    const sections: Section[] = [
+    const { t, current } = useLocale();
+    // A computed so the labels are re-translated when the locale changes; the
+    // `current.value` read registers the dependency explicitly.
+    return computed<Section[]>(() => {
+        void current.value;
+        const sections: Section[] = [
         {
             title: t("Overview"),
             icon: "mdi-view-dashboard-outline",
@@ -146,12 +149,13 @@ export const useSections = () => {
             ],
         },
     ];
-    return sections
-        .filter((section) => !section.if || section.if())
-        .map((section) => ({
-            ...section,
-            routes: section.routes.filter((route) => !route.if || route.if()),
-        }))
-        // A section whose every route is hidden must not render an empty header.
-        .filter((section) => section.routes.length > 0);
+        return sections
+            .filter((section) => !section.if || section.if())
+            .map((section) => ({
+                ...section,
+                routes: section.routes.filter((route) => !route.if || route.if()),
+            }))
+            // A section whose every route is hidden must not render an empty header.
+            .filter((section) => section.routes.length > 0);
+    });
 };

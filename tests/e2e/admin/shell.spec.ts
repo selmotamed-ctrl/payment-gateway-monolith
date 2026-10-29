@@ -140,6 +140,62 @@ test.describe("admin shell", () => {
     await expect(page.locator(".pg-drawer .v-list-subheader", { hasText: "Finance" })).toHaveCount(0);
   });
 
+  test("a GATEWAY_ADMIN does not see Operator Cases or Disputes", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/dashboard");
+    await expect(page.locator(".pg-drawer a").first()).toBeVisible();
+    await expect(page.locator(".pg-drawer a", { hasText: "Operator Cases" })).toHaveCount(0);
+    await expect(page.locator(".pg-drawer a", { hasText: "Disputes" })).toHaveCount(0);
+  });
+
+  test("an operator with case:read sees Operator Cases but not Disputes", async ({ page }) => {
+    await page.addInitScript(
+      ([key, value]) => {
+        window.localStorage.setItem("locale-name", "en");
+        window.localStorage.setItem(key, JSON.stringify(value));
+      },
+      [ADMIN_KEY, { ...adminSession, userInfo: { ...adminSession.userInfo, authoritiesMap: { "case:read": true } } }] as const,
+    );
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/dashboard");
+    await expect(page.locator(".pg-drawer a", { hasText: "Operator Cases" })).toBeVisible();
+    await expect(page.locator(".pg-drawer a", { hasText: "Disputes" })).toHaveCount(0);
+  });
+
+  test("a finance user with dispute:read sees Disputes but not Operator Cases", async ({ page }) => {
+    await page.addInitScript(
+      ([key, value]) => {
+        window.localStorage.setItem("locale-name", "en");
+        window.localStorage.setItem(key, JSON.stringify(value));
+      },
+      [ADMIN_KEY, { ...adminSession, userInfo: { ...adminSession.userInfo, authoritiesMap: { "dispute:read": true } } }] as const,
+    );
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/dashboard");
+    await expect(page.locator(".pg-drawer a", { hasText: "Disputes" })).toBeVisible();
+    await expect(page.locator(".pg-drawer a", { hasText: "Operator Cases" })).toHaveCount(0);
+  });
+
+  test("direct access to a page the role cannot use is redirected", async ({ page }) => {
+    await page.goto("/disputes");
+    await expect(page).toHaveURL(/\/dashboard/);
+  });
+
+  test("the navigation labels re-translate when the locale changes", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/dashboard");
+    await expect(page.locator(".pg-drawer").getByText("Dashboard", { exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: "Language" }).click();
+    await page.getByText("العربية", { exact: true }).click();
+    await page.waitForTimeout(500);
+
+    // The sidebar and the app-bar title switch without a reload.
+    await expect(page.locator(".pg-drawer").getByText("لوحة التحكم", { exact: true })).toBeVisible();
+    await expect(page.locator(".pg-app-bar__title")).toHaveText("لوحة التحكم");
+    await expect(page.locator(".pg-drawer").getByText("Dashboard", { exact: true })).toHaveCount(0);
+  });
+
   test("the global scaling regression is gone (#app is not transformed)", async ({ page }) => {
     await page.goto("/dashboard");
     const transform = await page.evaluate(() => getComputedStyle(document.getElementById("app")!).transform);

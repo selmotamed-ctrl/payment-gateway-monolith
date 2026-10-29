@@ -107,6 +107,7 @@ const base = z.strictObject({
   ADMIN_PRIVATE_IP: ipv4,
   ADMIN_BACK_PORT: port.default(4101),
   ADMIN_NGINX_LAN_PORT: port.default(8443),
+  ADMIN_SSL: booleanish.default(true),
   ADMIN_DOMAIN: domain.default("admin.internal"),
   ADMIN_REMOTE_DIR: z.string().trim().min(1).max(200).default("/var/www/pg-admin"),
 
@@ -118,7 +119,11 @@ const base = z.strictObject({
   MERCHANT_SUDO_PASSWORD: z.string().max(256).default(""),
   MERCHANT_PRIVATE_IP: ipv4,
   MERCHANT_BACK_PORT: port.default(4102),
+  MERCHANT_HTTP_PORT: port.default(80),
+  MERCHANT_HTTPS_PORT: port.default(443),
+  MERCHANT_SSL: booleanish.default(true),
   MERCHANT_LAN_PORT: z.coerce.number().int().min(0).max(65535).default(8081),
+  MERCHANT_LAN_SSL: booleanish.default(true),
   MERCHANT_DOMAIN: domain,
   MERCHANT_SSL_MODE: z.enum(SSL_MODES).default("certbot"),
   MERCHANT_SSL_CERT_PATH: z.string().trim().max(300).optional(),
@@ -133,7 +138,11 @@ const base = z.strictObject({
   CHECKOUT_SUDO_PASSWORD: z.string().max(256).default(""),
   CHECKOUT_PRIVATE_IP: ipv4,
   CHECKOUT_BACK_PORT: port.default(4103),
+  CHECKOUT_HTTP_PORT: port.default(80),
+  CHECKOUT_HTTPS_PORT: port.default(443),
+  CHECKOUT_SSL: booleanish.default(true),
   CHECKOUT_LAN_PORT: z.coerce.number().int().min(0).max(65535).default(8082),
+  CHECKOUT_LAN_SSL: booleanish.default(true),
   CHECKOUT_DOMAIN: domain,
   CHECKOUT_SSL_MODE: z.enum(SSL_MODES).default("certbot"),
   CHECKOUT_SSL_CERT_PATH: z.string().trim().max(300).optional(),
@@ -174,12 +183,35 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
   // core (the database binds to 127.0.0.1 and is never exposed); on separate
   // nodes the operator points DATABASE_URL at the database host's private IP.
 
-  for (const [role, mode, cert, key] of [
-    ["MERCHANT", config.MERCHANT_SSL_MODE, config.MERCHANT_SSL_CERT_PATH, config.MERCHANT_SSL_KEY_PATH],
-    ["CHECKOUT", config.CHECKOUT_SSL_MODE, config.CHECKOUT_SSL_CERT_PATH, config.CHECKOUT_SSL_KEY_PATH],
+  for (const [role, enabled, mode, cert, key] of [
+    ["MERCHANT", config.MERCHANT_SSL, config.MERCHANT_SSL_MODE, config.MERCHANT_SSL_CERT_PATH, config.MERCHANT_SSL_KEY_PATH],
+    ["CHECKOUT", config.CHECKOUT_SSL, config.CHECKOUT_SSL_MODE, config.CHECKOUT_SSL_CERT_PATH, config.CHECKOUT_SSL_KEY_PATH],
   ] as const) {
-    if (mode === "custom" && (!cert || !key)) {
+    if (enabled && mode === "custom" && (!cert || !key)) {
       problems.push(`${role}_SSL_MODE=custom requires ${role}_SSL_CERT_PATH and ${role}_SSL_KEY_PATH`);
+    }
+  }
+
+  // Distinct listeners within a portal. The two public portals may share
+  // 80/443 because they are told apart by server_name.
+  for (const [role, httpPort, httpsPort, lanPort, lanEnabled] of [
+    ["MERCHANT", config.MERCHANT_HTTP_PORT, config.MERCHANT_HTTPS_PORT, config.MERCHANT_LAN_PORT, config.MERCHANT_LAN_PORT > 0],
+    ["CHECKOUT", config.CHECKOUT_HTTP_PORT, config.CHECKOUT_HTTPS_PORT, config.CHECKOUT_LAN_PORT, config.CHECKOUT_LAN_PORT > 0],
+  ] as const) {
+    const ports: Array<[string, number]> = [
+      [`${role}_HTTP_PORT`, httpPort],
+      [`${role}_HTTPS_PORT`, httpsPort],
+      ...(lanEnabled ? [[`${role}_LAN_PORT`, lanPort] as [string, number]] : []),
+    ];
+    for (let i = 0; i < ports.length; i += 1) {
+      for (let j = i + 1; j < ports.length; j += 1) {
+        if (ports[i]![1] === ports[j]![1]) {
+          problems.push(`${ports[i]![0]} and ${ports[j]![0]} must differ (two listeners on the same port)`);
+        }
+      }
+    }
+    if (httpPort === config.ADMIN_NGINX_LAN_PORT && lanEnabled) {
+      problems.push(`${role}_HTTP_PORT must differ from ADMIN_NGINX_LAN_PORT`);
     }
   }
 

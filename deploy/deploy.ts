@@ -163,6 +163,9 @@ export const renderNginxTemplate = (input: {
   template: string;
   serverName: string;
   listenPort: number;
+  httpPort: number;
+  httpsPort: number;
+  ssl: boolean;
   sslCertPath: string;
   sslKeyPath: string;
   staticRoot: string;
@@ -174,10 +177,21 @@ export const renderNginxTemplate = (input: {
     .filter((cidr) => cidr.length > 0)
     .map((cidr) => `    allow ${cidr};`)
     .join("\n");
-  return input.template
+  // `{{#SSL}}…{{/SSL}}` renders when TLS is on, `{{^SSL}}…{{/SSL}}` when it is
+  // off. Process these before the simple placeholders.
+  const withConditionals = input.template
+    .replace(/\{\{#(\w+)\}\}([\s\S]*?)\{\{\/\1\}\}/g, (_match, name: string, body: string) =>
+      name === "SSL" && input.ssl ? body : "",
+    )
+    .replace(/\{\{\^(\w+)\}\}([\s\S]*?)\{\{\/\1\}\}/g, (_match, name: string, body: string) =>
+      name === "SSL" && !input.ssl ? body : "",
+    );
+  return withConditionals
     .replaceAll("{{LAN_ALLOW_RULES}}", `${lanRules}\n    deny all;`)
     .replaceAll("{{SERVER_NAME}}", input.serverName)
     .replaceAll("{{LISTEN_PORT}}", String(input.listenPort))
+    .replaceAll("{{HTTP_PORT}}", String(input.httpPort))
+    .replaceAll("{{HTTPS_PORT}}", String(input.httpsPort))
     .replaceAll("{{SSL_CERT_PATH}}", input.sslCertPath)
     .replaceAll("{{SSL_KEY_PATH}}", input.sslKeyPath)
     .replaceAll("{{STATIC_ROOT}}", input.staticRoot)
@@ -191,22 +205,27 @@ const renderNginx = (host: HostPlan, config: DeployConfig, runner: SshRunner): v
     // The admin vhost is LAN-only and usually has no operator certificate; it
     // still needs a TLS pair so `nginx -t` accepts the server block, so we mint
     // a self-signed certificate bound to its server name when none is given.
-    const tls = site.sslMode === "lan" && site.certPath && site.keyPath
-      ? { certPath: site.certPath, keyPath: site.keyPath }
-      : site.sslMode === "lan"
-        ? resolvePublicCertificate(runner, host, site.serverName, "self_signed", "", "")
-        : resolvePublicCertificate(
-            runner,
-            host,
-            site.serverName,
-            site.sslMode,
-            site.certPath ?? "",
-            site.keyPath ?? "",
-          );
+    const tls = !site.ssl
+      ? { certPath: "", keyPath: "" }
+      : site.sslMode === "lan" && site.certPath && site.keyPath
+        ? { certPath: site.certPath, keyPath: site.keyPath }
+        : site.sslMode === "lan"
+          ? resolvePublicCertificate(runner, host, site.serverName, "self_signed", "", "")
+          : resolvePublicCertificate(
+              runner,
+              host,
+              site.serverName,
+              site.sslMode,
+              site.certPath ?? "",
+              site.keyPath ?? "",
+            );
     const rendered = renderNginxTemplate({
       template,
       serverName: site.serverName,
       listenPort: site.listenPort,
+      httpPort: site.httpPort,
+      httpsPort: site.httpsPort,
+      ssl: site.ssl,
       sslCertPath: tls.certPath,
       sslKeyPath: tls.keyPath,
       staticRoot: site.staticRoot,
@@ -218,7 +237,7 @@ const renderNginx = (host: HostPlan, config: DeployConfig, runner: SshRunner): v
     runner.run(host.ssh, `ln -sfn ${available} /etc/nginx/sites-enabled/pg-${site.site}.conf && rm -f /etc/nginx/sites-enabled/default`, { sudo: true });
     runner.run(host.ssh, "nginx -t", { sudo: true });
     runner.run(host.ssh, "systemctl reload nginx", { sudo: true });
-    log(`  nginx ${site.site} -> ${site.serverName}:${site.listenPort}`);
+    log(`  nginx ${site.site} -> ${site.serverName}:${site.listenPort} (${site.ssl ? "https" : "http"})`);
   }
 };
 

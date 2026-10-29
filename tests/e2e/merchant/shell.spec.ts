@@ -72,6 +72,16 @@ test.describe("merchant shell", () => {
     }
   });
 
+  test("the navigation labels re-translate when the locale changes", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/portal/dashboard");
+    await expect(page.locator(".pg-drawer").getByText("Dashboard", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Language" }).click();
+    await page.getByText("العربية", { exact: true }).click();
+    await page.waitForTimeout(500);
+    await expect(page.locator(".pg-drawer").getByText("لوحة التحكم", { exact: true })).toBeVisible();
+  });
+
   test("no global scaling transform remains", async ({ page }) => {
     await page.goto("/portal/dashboard");
     const transform = await page.evaluate(() => getComputedStyle(document.getElementById("app")!).transform);
