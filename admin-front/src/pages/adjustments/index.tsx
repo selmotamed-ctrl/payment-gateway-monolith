@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VCard, VCardText, VDialog, VSelect, VTextField, VTextarea } from "vuetify/components";
+import { VAutocomplete, VBtn, VCard, VCardText, VDialog, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -45,10 +45,28 @@ const AdjustmentsPage = dc(() => {
         amount: "",
         currency: "LYD",
         merchantId: "",
+        targetGlAccountId: "",
         reasonCode: "",
         notes: "",
         reverseCommission: true,
     });
+    const merchantOptions = ref<{ title: string; value: string }[]>([]);
+    const glAccountOptions = ref<{ title: string; value: string }[]>([]);
+
+    const loadOptions = async () => {
+        const [merchants, accounts] = await Promise.all([
+            api.get(urlsMap.options("merchants"), { params: { limit: 100 } }),
+            api.get(urlsMap.options("gl-accounts"), { params: { limit: 100 } }),
+        ]);
+        const toItems = (response: any) => {
+            const payload = response.data?.data ?? response.data ?? {};
+            return (payload.items ?? []).map((item: { title: string; value: string }) => ({ title: item.title, value: item.value }));
+        };
+        merchantOptions.value = toItems(merchants);
+        glAccountOptions.value = toItems(accounts);
+    };
+
+    void loadOptions();
     const actionLoading = ref(false);
 
     const load = async () => {
@@ -78,8 +96,9 @@ const AdjustmentsPage = dc(() => {
                 amount: form.value.amount,
                 currency: form.value.currency,
                 merchantId: form.value.merchantId,
-                reasonCode: form.value.reasonCode,
-                notes: form.value.notes,
+                targetGlAccountId: form.value.targetGlAccountId,
+                reason: form.value.reasonCode,
+                notes: form.value.notes || undefined,
                 reverseCommission: form.value.reverseCommission,
             });
             dialogOpen.value = false;
@@ -138,10 +157,12 @@ const AdjustmentsPage = dc(() => {
                                     amount: "",
                                     currency: "LYD",
                                     merchantId: "",
+                                    targetGlAccountId: "",
                                     reasonCode: "",
                                     notes: "",
                                     reverseCommission: true,
                                 };
+                                void loadOptions();
                                 dialogOpen.value = true;
                             }}
                         >
@@ -190,15 +211,31 @@ const AdjustmentsPage = dc(() => {
                             modelValue={form.value.currency}
                             onUpdate:modelValue={(v: string) => (form.value.currency = v.toUpperCase())}
                         />
-                        <VTextField
-                            label="merchantId"
+                        <VAutocomplete
+                            label={t("Merchant")}
+                            items={merchantOptions.value}
+                            itemTitle="title"
+                            itemValue="value"
                             modelValue={form.value.merchantId}
-                            onUpdate:modelValue={(v: string) => (form.value.merchantId = v)}
+                            onUpdate:modelValue={(v: string) => (form.value.merchantId = v ?? "")}
+                        />
+                        <VAutocomplete
+                            label={t("Target GL account")}
+                            items={glAccountOptions.value}
+                            itemTitle="title"
+                            itemValue="value"
+                            modelValue={form.value.targetGlAccountId}
+                            onUpdate:modelValue={(v: string) => (form.value.targetGlAccountId = v ?? "")}
                         />
                         <VTextField
                             label={t("Reason Code")}
                             modelValue={form.value.reasonCode}
                             onUpdate:modelValue={(v: string) => (form.value.reasonCode = v)}
+                        />
+                        <VSwitch
+                            label={t("Reverse commission")}
+                            modelValue={form.value.reverseCommission}
+                            onUpdate:modelValue={(v: any) => (form.value.reverseCommission = !!v)}
                         />
                         <VTextarea
                             label={t("Notes")}
@@ -206,7 +243,17 @@ const AdjustmentsPage = dc(() => {
                             onUpdate:modelValue={(v: string) => (form.value.notes = v)}
                             rows={3}
                         />
-                        <VBtn color="primary" loading={actionLoading.value} onClick={() => void submit()}>
+                        <VBtn
+                            color="primary"
+                            loading={actionLoading.value}
+                            disabled={
+                                !form.value.merchantId ||
+                                !form.value.targetGlAccountId ||
+                                !form.value.amount.trim() ||
+                                form.value.reasonCode.trim().length < 2
+                            }
+                            onClick={() => void submit()}
+                        >
                             {t("Propose")}
                         </VBtn>
                     </VCardText>

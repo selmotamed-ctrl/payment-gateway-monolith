@@ -46,7 +46,8 @@ const OperatorCasesPage = dc(() => {
 
     const dialogOpen = ref(false);
     const selected = ref<OperatorCase | null>(null);
-    const resolution = ref<string>("");
+    const resolutionChoice = ref<string>("RETRY_INQUIRE");
+    const resolutionReason = ref<string>("");
     const actionLoading = ref(false);
 
     const bulkIds = ref<string[]>([]);
@@ -72,12 +73,15 @@ const OperatorCasesPage = dc(() => {
     void load();
 
     const resolve = async () => {
-        if (!selected.value || !resolution.value) {
+        if (!selected.value || resolutionReason.value.trim().length < 3) {
             return;
         }
         actionLoading.value = true;
         try {
-            await api.post(urlsMap.operatorCaseResolve(selected.value.id), { resolution: resolution.value });
+            await api.post(urlsMap.operatorCaseResolve(selected.value.id), {
+                resolution: resolutionChoice.value,
+                reason: resolutionReason.value.trim(),
+            });
             dialogOpen.value = false;
             showSnackBar({ type: "success", message: t("Resolve") });
             await load();
@@ -191,7 +195,8 @@ const OperatorCasesPage = dc(() => {
                         color="primary"
                         onClick={() => {
                             selected.value = row;
-                            resolution.value = "";
+                            resolutionChoice.value = "RETRY_INQUIRE";
+                            resolutionReason.value = "";
                             dialogOpen.value = true;
                         }}
                     >
@@ -252,13 +257,30 @@ const OperatorCasesPage = dc(() => {
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                         <ThemedText type="defaultSemiBold">{selected.value?.caseRef}</ThemedText>
                         <ThemedText style={{ fontSize: "13px", opacity: 0.75 }}>{selected.value?.summary}</ThemedText>
-                        <VTextarea
-                            modelValue={resolution.value}
-                            onUpdate:modelValue={(v: string) => (resolution.value = v)}
+                        <VSelect
+                            items={[
+                                { title: t("Retry inquiry"), value: "RETRY_INQUIRE" },
+                                { title: t("Mark succeeded"), value: "MARK_SUCCEEDED" },
+                                { title: t("Mark failed"), value: "MARK_FAILED" },
+                                { title: t("Escalate"), value: "ESCALATE" },
+                                { title: t("Release reservation"), value: "RELEASE_RESERVATION" },
+                            ]}
+                            modelValue={resolutionChoice.value}
+                            onUpdate:modelValue={(v: string) => (resolutionChoice.value = v)}
                             label={t("Resolution")}
+                        />
+                        <VTextarea
+                            modelValue={resolutionReason.value}
+                            onUpdate:modelValue={(v: string) => (resolutionReason.value = v)}
+                            label={t("Reason")}
                             rows={3}
                         />
-                        <VBtn color="primary" disabled={!resolution.value} loading={actionLoading.value} onClick={() => void resolve()}>
+                        <VBtn
+                            color="primary"
+                            disabled={resolutionReason.value.trim().length < 3}
+                            loading={actionLoading.value}
+                            onClick={() => void resolve()}
+                        >
                             {t("Resolve")}
                         </VBtn>
                     </VCardText>

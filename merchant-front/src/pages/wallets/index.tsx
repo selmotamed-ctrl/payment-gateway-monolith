@@ -2,7 +2,7 @@ import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
-import { VBtn, VCard, VCardText, VDialog, VTextField } from "vuetify/components";
+import { VAutocomplete, VBtn, VCard, VCardText, VDialog, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -38,7 +38,17 @@ const WalletsPage = dc(() => {
     const search = ref<string | null>(null);
 
     const dialogOpen = ref(false);
-    const form = ref({ name: "", currency: "LYD" });
+    const form = ref({ name: "", currency: "LYD", applicationId: "" });
+    const applicationOptions = ref<{ title: string; value: string }[]>([]);
+
+    const loadApplications = async () => {
+        const response = await api.get(urlsMap.options("applications"), { params: { limit: 100 } });
+        const payload = response.data?.data ?? response.data ?? {};
+        applicationOptions.value = (payload.items ?? []).map((item: { title: string; value: string }) => ({
+            title: item.title,
+            value: item.value,
+        }));
+    };
     const actionLoading = ref(false);
 
     const load = async () => {
@@ -63,7 +73,11 @@ const WalletsPage = dc(() => {
     const createWallet = async () => {
         actionLoading.value = true;
         try {
-            await api.post(urlsMap.walletsList, form.value);
+            await api.post(urlsMap.walletsList, {
+                applicationId: form.value.applicationId,
+                label: form.value.name,
+                currency: form.value.currency,
+            });
             dialogOpen.value = false;
             showSnackBar({ type: "success", message: t("Created") });
             await load();
@@ -150,7 +164,8 @@ const WalletsPage = dc(() => {
                         <VBtn
                             variant="tonal"
                             onClick={() => {
-                                form.value = { name: "", currency: "LYD" };
+                                form.value = { name: "", currency: "LYD", applicationId: "" };
+                                void loadApplications();
                                 dialogOpen.value = true;
                             }}
                         >
@@ -183,8 +198,16 @@ const WalletsPage = dc(() => {
             <VDialog modelValue={dialogOpen.value} onUpdate:modelValue={(v: any) => (dialogOpen.value = v)} maxWidth="480px">
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                        <VAutocomplete
+                            label={t("Applications")}
+                            items={applicationOptions.value}
+                            itemTitle="title"
+                            itemValue="value"
+                            modelValue={form.value.applicationId}
+                            onUpdate:modelValue={(v: string) => (form.value.applicationId = v ?? "")}
+                        />
                         <VTextField
-                            label={t("Merchant Name")}
+                            label={t("Wallet label")}
                             modelValue={form.value.name}
                             onUpdate:modelValue={(v: string) => (form.value.name = v)}
                         />

@@ -52,7 +52,13 @@ const DeveloperTokensPage = dc(() => {
                 params: { search: search.value || undefined },
             });
             const payload = response.data?.data ?? response.data ?? {};
-            rows.value = payload.tokens ?? payload.rows ?? payload.items ?? [];
+            const tokens = payload.tokens ?? payload.rows ?? payload.items ?? [];
+            rows.value = tokens.map((token: any) => ({
+                ...token,
+                tokenPrefix: token.tokenPrefix ?? token.lastFour ?? "",
+                ipAllowlist: token.ipAllowlist ?? token.allowedCidrs ?? [],
+                ipWhitelistEnabled: token.ipWhitelistEnabled ?? (token.allowedCidrs ?? []).length > 0,
+            }));
         } catch (e) {
             error.value = extractApiErrorMessage(e);
             rows.value = [];
@@ -66,17 +72,17 @@ const DeveloperTokensPage = dc(() => {
     const createToken = async () => {
         actionLoading.value = true;
         try {
+            const cidrs = form.value.ipAllowlist
+                .split(",")
+                .map((entry) => entry.trim())
+                .filter((entry) => !!entry);
             const response = await api.post(urlsMap.tokensList, {
                 name: form.value.name,
                 scopes: form.value.scopes
                     .split(",")
                     .map((entry) => entry.trim())
                     .filter((entry) => !!entry),
-                ipWhitelistEnabled: form.value.ipWhitelistEnabled,
-                ipAllowlist: form.value.ipAllowlist
-                    .split(",")
-                    .map((entry) => entry.trim())
-                    .filter((entry) => !!entry),
+                ...(form.value.ipWhitelistEnabled && cidrs.length ? { allowedCidrs: cidrs } : {}),
             });
             const payload = response.data?.data ?? response.data ?? {};
             createdSecret.value = payload.token ?? payload.secret ?? null;
@@ -107,7 +113,7 @@ const DeveloperTokensPage = dc(() => {
         actionLoading.value = true;
         try {
             await api.put(urlsMap.tokenIps(activeToken.value.id), {
-                ipAllowlist: ipList.value
+                allowedCidrs: ipList.value
                     .split(",")
                     .map((entry) => entry.trim())
                     .filter((entry) => !!entry),

@@ -45,15 +45,19 @@ export const ruleSchema = z
   .object({
     code: z.string().min(2).max(64),
     name: z.string().min(2).max(160),
-    layer: z.number().int().min(1).max(7),
-    type: z.enum(["SINGLE_AMOUNT", "CUMULATIVE_WINDOW", "STRUCTURING"]),
-    parameters: zJsonObject,
-    // The core expresses the checker's decision as HOLD / RELEASE / REJECT /
-    // ESCALATE. The public enum keeps the product vocabulary and adds the two
-    // decisions a release or a void needs.
-    action: z.enum(["CASE_ONLY", "AML_HOLD", "BLOCK", "REPORT", "RELEASE", "REJECT"]),
-    active: z.boolean().optional(),
-    severity: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).optional(),
+    ruleType: z.enum([
+      "SINGLE_AMOUNT",
+      "CUMULATIVE_WINDOW",
+      "STRUCTURING",
+      "RISK_TIER",
+      "COUNTERPARTY_COUNTRY",
+      "RAIL",
+      "MERCHANT_DIRECT_AMOUNT",
+    ]),
+    action: z.enum(["HOLD", "FLAG", "BLOCK", "CASE_ONLY"]),
+    baseSeverity: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]),
+    params: zJsonObject.optional(),
+    effectiveFrom: z.string().max(64).optional(),
   })
   .strict();
 

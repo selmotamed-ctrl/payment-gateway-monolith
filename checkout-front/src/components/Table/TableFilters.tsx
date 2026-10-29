@@ -1,7 +1,8 @@
 import { dc } from "kt-dc";
 import { computed, onMounted, ref } from "vue";
 import { useDisplay, useLocale, useTheme } from "vuetify";
-import { VAutocomplete, VBtn, VCard, VChip, VDatePicker, VDialog, VIcon, VTextField } from "vuetify/components";
+import { VAutocomplete, VBtn, VChip, VIcon, VTextField } from "vuetify/components";
+import DateInput from "@/components/DateInput";
 import type { StatusTone } from "@/components/StatusChip";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import {
@@ -174,82 +175,41 @@ const DataAutocompleteControl = dc(
     { props: ["filter", "value", "onChange"] },
 );
 
-const DateField = dc(
-    (props: { placeholder: string; value?: string; onChange: (value?: string) => void }) => {
-        const open = ref(false);
-        const selected = computed(() => (props.value ? new Date(`${props.value}T12:00:00`) : null));
-
-        return () => (
-            <>
-                <VTextField
-                    readonly
-                    placeholder={props.placeholder}
-                    aria-label={props.placeholder}
-                    prependInnerIcon="mdi-calendar"
-                    appendInnerIcon={props.value ? "mdi-close" : undefined}
-                    onClick:append-inner={(event: MouseEvent) => {
-                        event.stopPropagation();
-                        props.onChange(undefined);
-                    }}
-                    onClick={() => (open.value = true)}
-                    modelValue={props.value ?? ""}
-                    density="compact"
-                    hideDetails
-                    style={{ cursor: "pointer" }}
-                />
-                <VDialog
-                    modelValue={open.value}
-                    onUpdate:modelValue={(value: any) => (open.value = !!value)}
-                    maxWidth={360}
-                    transition="dialog-transition"
-                >
-                    <VCard elevation={12} style={{ borderRadius: "18px", overflow: "hidden" }}>
-                        <VDatePicker
-                            modelValue={selected.value}
-                            onUpdate:modelValue={(value: any) => {
-                                const raw = Array.isArray(value) ? value[0] : value;
-                                const iso = raw instanceof Date ? toIsoDate(raw) : typeof raw === "string" ? raw.slice(0, 10) : "";
-                                if (iso) {
-                                    props.onChange(iso);
-                                    open.value = false;
-                                }
-                            }}
-                            color="primary"
-                            showAdjacentMonths
-                            hideHeader={false}
-                        />
-                    </VCard>
-                </VDialog>
-            </>
-        );
-    },
-    { props: ["placeholder", "value", "onChange"] },
-);
-
 const DateControl = dc(
-    (props: { value: unknown; onChange: (value: unknown) => void }) => {
+    (props: { label: string; value: unknown; onChange: (value: unknown) => void }) => {
         const range = computed(() => (props.value ?? {}) as { from?: string; to?: string });
-        const update = (key: "from" | "to", value?: string) => {
-            const current = { ...range.value };
-            if (value) {
-                current[key] = value;
-            } else {
-                delete current[key];
+        const model = computed<Date[]>(() => {
+            const from = range.value.from ? new Date(`${range.value.from}T12:00:00`) : undefined;
+            const to = range.value.to ? new Date(`${range.value.to}T12:00:00`) : undefined;
+            const first = from ?? to;
+            const last = to ?? from;
+            return first && last ? [first, last] : [];
+        });
+        const update = (value: Date[] | Date | null) => {
+            const dates = (Array.isArray(value) ? value : value ? [value] : []).filter(
+                (date): date is Date => date instanceof Date && !Number.isNaN(date.getTime()),
+            );
+            if (dates.length === 0) {
+                props.onChange(undefined);
+                return;
             }
-            props.onChange(Object.keys(current).length ? current : undefined);
+            props.onChange({ from: toIsoDate(dates[0]!), to: toIsoDate(dates[dates.length - 1]!) });
         };
         return () => (
-            <div style={{ display: "flex", gap: "8px", minWidth: 0 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                    <DateField placeholder="From" value={range.value.from} onChange={(value) => update("from", value)} />
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                    <DateField placeholder="To" value={range.value.to} onChange={(value) => update("to", value)} />
-                </div>
-            </div>
+            <DateInput
+                multiple="range"
+                aria-label={props.label}
+                placeholder="Select date range"
+                prependInnerIcon="mdi-calendar-range"
+                density="compact"
+                hideDetails
+                clearable
+                modelValue={model.value}
+                onUpdate:modelValue={(value: any) => update(value)}
+            />
         );
     },
-    { props: ["value", "onChange"] },
+    { props: ["label", "value", "onChange"] },
 );
 
 const NumberRangeControl = dc(
@@ -416,7 +376,7 @@ const TableFilters = dc(
                                         ) : filter.type === "data-autocomplete" || filter.type === "boolean" ? (
                                             <DataAutocompleteControl filter={filter} value={value} onChange={onChange} />
                                         ) : filter.type === "date" ? (
-                                            <DateControl value={value} onChange={onChange} />
+                                            <DateControl label={filter.label} value={value} onChange={onChange} />
                                         ) : filter.type === "number-range" ? (
                                             <NumberRangeControl filter={filter} value={value} onChange={onChange} />
                                         ) : (

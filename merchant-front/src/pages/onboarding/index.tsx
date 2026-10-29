@@ -136,7 +136,7 @@ const OnboardingPage = dc(() => {
     const saveProfile = async () => {
         saving.value = true;
         try {
-            await api.put(urlsMap.onboardingJoinRequest, { profile: profile.value });
+            await api.put(urlsMap.onboardingJoinRequest, profile.value);
             showSnackBar({ type: "success", message: t("Saved") });
         } catch (e) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
@@ -166,9 +166,9 @@ const OnboardingPage = dc(() => {
         saving.value = true;
         try {
             const body = new FormData();
-            body.append("docType", document.docType);
-            body.append("expiresOn", document.expiresOn);
-            body.append("file", document.file);
+            body.append("documentType", document.docType);
+            body.append("expiresAt", document.expiresOn);
+            body.append("document", document.file);
             await api.post(urlsMap.onboardingKybDocuments, body, {
                 headers: { "Content-Type": "multipart/form-data" },
             });
@@ -183,8 +183,7 @@ const OnboardingPage = dc(() => {
     const submit = async () => {
         saving.value = true;
         try {
-            await api.put(urlsMap.onboardingJoinRequest, { payoutBankDetails: payout.value });
-            await api.post(urlsMap.onboardingSubmit, {});
+            await api.post(urlsMap.onboardingSubmit, { acknowledgement: true });
             showSnackBar({ type: "success", message: t("Submit Application") });
             await load();
         } catch (e) {

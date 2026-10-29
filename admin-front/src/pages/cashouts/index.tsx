@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VCard, VCardText, VDialog, VSelect, VTextField } from "vuetify/components";
+import { VBtn, VCard, VCardText, VDialog, VSelect, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -37,8 +37,8 @@ const CashoutsPage = dc(() => {
 
     const dialogOpen = ref(false);
     const selected = ref<Cashout | null>(null);
-    const targetState = ref<string>("PROCESSING");
-    const note = ref<string>("");
+    const decision = ref<"APPROVE" | "REJECT">("APPROVE");
+    const reason = ref<string>("");
     const actionLoading = ref(false);
 
     const load = async () => {
@@ -67,8 +67,8 @@ const CashoutsPage = dc(() => {
         actionLoading.value = true;
         try {
             await api.post(urlsMap.cashoutProcess(selected.value.id), {
-                state: targetState.value,
-                note: note.value,
+                decision: decision.value,
+                reason: reason.value || undefined,
             });
             dialogOpen.value = false;
             showSnackBar({ type: "success", message: t("Processing") });
@@ -116,8 +116,8 @@ const CashoutsPage = dc(() => {
                     variant="tonal"
                     onClick={() => {
                         selected.value = row;
-                        targetState.value = "PROCESSING";
-                        note.value = "";
+                        decision.value = "APPROVE";
+                        reason.value = "";
                         dialogOpen.value = true;
                     }}
                 >
@@ -158,19 +158,18 @@ const CashoutsPage = dc(() => {
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                         <VSelect
                             items={[
-                                { title: t("Processing"), value: "PROCESSING" },
-                                { title: t("Complete"), value: "COMPLETE" },
-                                { title: t("Subtracted"), value: "SUBTRACTED" },
-                                { title: t("Rejected"), value: "REJECTED" },
+                                { title: t("Approve and execute"), value: "APPROVE" },
+                                { title: t("Reject and release"), value: "REJECT" },
                             ]}
-                            modelValue={targetState.value}
-                            onUpdate:modelValue={(v: string) => (targetState.value = v)}
-                            label={t("Cash-Out State")}
+                            modelValue={decision.value}
+                            onUpdate:modelValue={(v: string) => (decision.value = v as "APPROVE" | "REJECT")}
+                            label={t("Decision")}
                         />
-                        <VTextField
-                            modelValue={note.value}
-                            onUpdate:modelValue={(v: string) => (note.value = v)}
-                            label={t("Notes")}
+                        <VTextarea
+                            rows={3}
+                            modelValue={reason.value}
+                            onUpdate:modelValue={(v: string) => (reason.value = v)}
+                            label={t("Reason")}
                         />
                         <VBtn color="primary" loading={actionLoading.value} onClick={() => void process()}>
                             {t("Save")}

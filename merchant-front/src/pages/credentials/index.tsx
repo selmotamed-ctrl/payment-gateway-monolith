@@ -83,22 +83,27 @@ const CredentialsPage = dc(() => {
     const save = async () => {
         actionLoading.value = true;
         try {
+            const entries = [
+                ...(form.value.username
+                    ? [{ key: "username", type: "BODY", value: form.value.username, isSecret: false }]
+                    : []),
+                ...(form.value.secret
+                    ? [{ key: "secret", type: "BODY", value: form.value.secret, isSecret: true }]
+                    : []),
+                ...(form.value.secretRef
+                    ? [{ key: "secretRef", type: "BODY", value: form.value.secretRef, isSecret: true }]
+                    : []),
+            ];
+            const entryFields = entries.length ? { entries } : {};
             if (editing.value) {
-                await api.put(urlsMap.credentialSetDetail(editing.value.id), {
-                    label: form.value.label,
-                    username: form.value.username,
-                    secret: form.value.secret,
-                    secretRef: form.value.secretRef,
-                });
+                await api.put(urlsMap.credentialSetDetail(editing.value.id), entryFields);
             } else {
                 await api.post(urlsMap.credentialSetsList, {
-                    label: form.value.label,
+                    name: form.value.label,
                     gatewayCode: form.value.gatewayCode,
                     env: form.value.env,
                     settlementTarget: form.value.settlementTarget,
-                    username: form.value.username,
-                    secret: form.value.secret,
-                    secretRef: form.value.secretRef,
+                    ...entryFields,
                 });
             }
             dialogOpen.value = false;

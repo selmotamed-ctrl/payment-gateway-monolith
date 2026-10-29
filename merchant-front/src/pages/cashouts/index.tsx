@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VCard, VCardText, VDialog, VTextField } from "vuetify/components";
+import { VAutocomplete, VBtn, VCard, VCardText, VDialog, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -37,6 +37,20 @@ const CashoutsPage = dc(() => {
     const dialogOpen = ref(false);
     const amount = ref("");
     const currency = ref("LYD");
+    const walletId = ref("");
+    const bankName = ref("");
+    const accountNumber = ref("");
+    const iban = ref("");
+    const walletOptions = ref<{ title: string; value: string }[]>([]);
+
+    const loadWallets = async () => {
+        const response = await api.get(urlsMap.options("wallets"), { params: { limit: 100 } });
+        const payload = response.data?.data ?? response.data ?? {};
+        walletOptions.value = (payload.items ?? []).map((item: { title: string; value: string }) => ({
+            title: item.title,
+            value: item.value,
+        }));
+    };
     const actionLoading = ref(false);
 
     const load = async () => {
@@ -61,7 +75,16 @@ const CashoutsPage = dc(() => {
     const request = async () => {
         actionLoading.value = true;
         try {
-            await api.post(urlsMap.cashoutsList, { amount: amount.value, currency: currency.value.toUpperCase() });
+            await api.post(urlsMap.cashoutsList, {
+                walletId: walletId.value,
+                amount: amount.value,
+                currency: currency.value.toUpperCase(),
+                destinationBank: {
+                    bankName: bankName.value,
+                    accountNumber: accountNumber.value,
+                    ...(iban.value ? { iban: iban.value } : {}),
+                },
+            });
             dialogOpen.value = false;
             showSnackBar({ type: "success", message: t("Request Cash-Out") });
             await load();
@@ -115,6 +138,11 @@ const CashoutsPage = dc(() => {
                             onClick={() => {
                                 amount.value = "";
                                 currency.value = "LYD";
+                                walletId.value = "";
+                                bankName.value = "";
+                                accountNumber.value = "";
+                                iban.value = "";
+                                void loadWallets();
                                 dialogOpen.value = true;
                             }}
                         >
@@ -148,6 +176,14 @@ const CashoutsPage = dc(() => {
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                         <ThemedText type="defaultSemiBold">{t("Request Cash-Out")}</ThemedText>
+                        <VAutocomplete
+                            label={t("Wallet")}
+                            items={walletOptions.value}
+                            itemTitle="title"
+                            itemValue="value"
+                            modelValue={walletId.value}
+                            onUpdate:modelValue={(v: string) => (walletId.value = v ?? "")}
+                        />
                         <VTextField
                             label={t("Amount")}
                             modelValue={amount.value}
@@ -158,7 +194,27 @@ const CashoutsPage = dc(() => {
                             modelValue={currency.value}
                             onUpdate:modelValue={(v: string) => (currency.value = v.toUpperCase())}
                         />
-                        <VBtn color="primary" loading={actionLoading.value} onClick={() => void request()}>
+                        <VTextField
+                            label={t("Bank name")}
+                            modelValue={bankName.value}
+                            onUpdate:modelValue={(v: string) => (bankName.value = v)}
+                        />
+                        <VTextField
+                            label={t("Account number")}
+                            modelValue={accountNumber.value}
+                            onUpdate:modelValue={(v: string) => (accountNumber.value = v)}
+                        />
+                        <VTextField
+                            label={t("IBAN (optional)")}
+                            modelValue={iban.value}
+                            onUpdate:modelValue={(v: string) => (iban.value = v)}
+                        />
+                        <VBtn
+                            color="primary"
+                            disabled={!walletId.value || !amount.value || !bankName.value || !accountNumber.value}
+                            loading={actionLoading.value}
+                            onClick={() => void request()}
+                        >
                             {t("Request Cash-Out")}
                         </VBtn>
                     </VCardText>

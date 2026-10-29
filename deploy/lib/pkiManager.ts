@@ -127,8 +127,16 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
     .every((path) => existsSync(path));
 
   if (everythingExists && !rotate) {
-    verifyPki(bundle);
-    return bundle;
+    // The private IP is part of the server certificate SAN. A staging box that
+    // moves to a different LAN must get a new server certificate, otherwise the
+    // edges reject the core's TLS handshake. Re-sign the leaves (the CA stays).
+    const current = inspectCertificate(server.certPath, server.name);
+    const hasIp = current.sans.includes(config.CORE_PRIVATE_IP);
+    const hasLoopback = current.sans.includes("127.0.0.1");
+    if (hasIp && hasLoopback) {
+      verifyPki(bundle);
+      return bundle;
+    }
   }
 
   if (dryRun) {

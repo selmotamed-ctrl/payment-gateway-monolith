@@ -29,9 +29,9 @@ export const reinstateSchema = z
 
 export const proposeEditSchema = z
   .object({
-    reason: zReason,
+    reason: zReason.optional(),
     patch: zJsonPatch.min(1).max(200),
-    baseVersion: zBaseVersion,
+    baseVersion: zBaseVersion.optional(),
   })
   .strict();
 

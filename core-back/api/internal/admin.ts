@@ -742,6 +742,15 @@ router.get("/options/:kind", async (request: Request, response: Response) => {
       items = rows.map((row) => ({ value: row.id, title: `${row.gateway.code} · ${row.externalMerchantId ?? row.id}`, subtitle: row.env }));
       break;
     }
+    case "gl-accounts": {
+      const rows = await client.glAccount.findMany({
+        orderBy: [{ accountType: "asc" }, { currency: "asc" }],
+        take: limit,
+        select: { id: true, accountType: true, currency: true },
+      });
+      items = rows.map((row) => ({ value: row.id, title: `${row.accountType} · ${row.currency}`, subtitle: row.id.slice(0, 8) }));
+      break;
+    }
     default:
       throw new ApiError(400, "UNKNOWN_OPTION_KIND", "Unknown option kind");
   }

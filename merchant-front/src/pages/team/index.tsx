@@ -44,6 +44,8 @@ const TeamPage = dc(() => {
         username: "",
         email: "",
         phone: "",
+        password: "",
+        status: "ACTIVE",
         role: "MERCHANT_STAFF",
         appScopeIds: [] as string[],
         authorities: [] as string[],
@@ -76,6 +78,8 @@ const TeamPage = dc(() => {
             username: member?.username ?? "",
             email: member?.email ?? "",
             phone: member?.phone ?? "",
+            password: "",
+            status: member?.status === "SUSPENDED" ? "SUSPENDED" : "ACTIVE",
             role: member?.role ?? "MERCHANT_STAFF",
             appScopeIds: [...(member?.appScopeIds ?? [])],
             authorities: Object.entries(member?.authoritiesMap ?? {})
@@ -92,19 +96,22 @@ const TeamPage = dc(() => {
             for (const authority of form.value.authorities) {
                 authoritiesMap[authority] = true;
             }
-            const payload = {
-                name: form.value.name,
-                username: form.value.username,
-                email: form.value.email,
-                phone: form.value.phone,
-                role: form.value.role,
-                appScopeIds: form.value.appScopeIds,
-                authoritiesMap,
-            };
             if (editing.value) {
-                await api.patch(urlsMap.userDetail(editing.value.id), payload);
+                await api.patch(urlsMap.userDetail(editing.value.id), {
+                    fullName: form.value.name,
+                    role: form.value.role,
+                    status: form.value.status,
+                    authoritiesMap,
+                });
             } else {
-                await api.post(urlsMap.usersList, payload);
+                await api.post(urlsMap.usersList, {
+                    email: form.value.email,
+                    ...(form.value.phone ? { phone: form.value.phone } : {}),
+                    fullName: form.value.name,
+                    ...(form.value.password ? { password: form.value.password } : {}),
+                    role: form.value.role,
+                    authoritiesMap,
+                });
             }
             dialogOpen.value = false;
             showSnackBar({ type: "success", message: t("Saved") });
@@ -193,12 +200,24 @@ const TeamPage = dc(() => {
                                 onUpdate:modelValue={(v: string) => (form.value.name = v)}
                                 style={{ minWidth: "200px" }}
                             />
-                            <VTextField
-                                label={t("Username")}
-                                modelValue={form.value.username}
-                                onUpdate:modelValue={(v: string) => (form.value.username = v)}
-                                style={{ minWidth: "180px" }}
-                            />
+                            {editing.value ? (
+                                <VSelect
+                                    items={["ACTIVE", "SUSPENDED"]}
+                                    modelValue={form.value.status}
+                                    onUpdate:modelValue={(v: string) => (form.value.status = v)}
+                                    label={t("Status")}
+                                    style={{ minWidth: "180px" }}
+                                />
+                            ) : (
+                                <VTextField
+                                    label={t("Temporary password")}
+                                    type="password"
+                                    hint="at least 10 characters"
+                                    modelValue={form.value.password}
+                                    onUpdate:modelValue={(v: string) => (form.value.password = v)}
+                                    style={{ minWidth: "200px" }}
+                                />
+                            )}
                             <VTextField
                                 label={t("Email")}
                                 modelValue={form.value.email}
@@ -237,7 +256,15 @@ const TeamPage = dc(() => {
                             chips
                             closable-chips
                         />
-                        <VBtn color="primary" loading={actionLoading.value} onClick={() => void save()}>
+                        <VBtn
+                            color="primary"
+                            loading={actionLoading.value}
+                            disabled={
+                                !editing.value &&
+                                (!form.value.email.trim() || form.value.password.trim().length < 10)
+                            }
+                            onClick={() => void save()}
+                        >
                             {t("Save")}
                         </VBtn>
                     </VCardText>

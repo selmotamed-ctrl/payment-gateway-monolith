@@ -37,15 +37,21 @@ export const adjustmentCreateSchema = z
     disputeId: zIdentifier.optional(),
     merchantId: zIdentifier,
     attemptId: zIdentifier.optional(),
-    type: z.enum(["CHARGEBACK", "FEE_VARIANCE", "CORRECTION", "RECOVERY", "WRITEOFF"]),
+    type: z.enum(["CHARGEBACK", "REFUND", "MANUAL_CREDIT", "MANUAL_DEBIT", "CORRECTION", "FEE_VARIANCE", "RECOVERY", "WRITEOFF"]),
     amount: zAmount,
     currency: zCurrency,
-    reason: zReason,
+    reason: zReason.optional(),
+    reasonCode: z.string().max(64).optional(),
+    notes: z.string().max(2000).optional(),
+    reverseCommission: z.boolean().optional(),
     draft: z.boolean().optional(),
-    // core posts the adjustment against a ledger account that the public API does not carry.
-    targetGlAccountId: zIdentifier.optional(),
+    targetGlAccountId: zIdentifier,
   })
-  .strict();
+  .strict()
+  .refine((value) => Boolean(value.reason || value.reasonCode), {
+    message: "a reason or reasonCode is required",
+    path: ["reason"],
+  });
 
 export const cashoutProcessSchema = z
   .object({

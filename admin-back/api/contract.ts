@@ -681,7 +681,7 @@ export const toCoreJoinRequestDecide = (body: unknown): JsonRecord => {
     );
   }
   const result: JsonRecord = { decision: coreDecision };
-  const reason = asString(source.reason);
+  const reason = asString(source.reason) ?? asString(source.reasonCode);
   if (reason) result.reasonCode = clamp(reason, 64);
   const notes = asString(source.notes) ?? reason;
   if (notes) result.notes = clamp(notes, 4000);
@@ -816,25 +816,17 @@ const AML_SEVERITIES = ["LOW", "MEDIUM", "HIGH", "CRITICAL"] as const;
 
 export const toCoreAmlRule = (body: unknown): JsonRecord => {
   const source = asRecord(body);
-  const action = asString(source.action)?.trim().toUpperCase();
-  let coreAction: (typeof AML_RULE_ACTIONS)[number];
-  if (action === "AML_HOLD" || action === "HOLD") {
-    coreAction = "HOLD";
-  } else if (action === "BLOCK") {
-    coreAction = "BLOCK";
-  } else if (action === "CASE_ONLY") {
-    coreAction = "CASE_ONLY";
-  } else {
-    coreAction = "FLAG";
-  }
-  return {
+  const result: JsonRecord = {
     code: asString(source.code) ?? "",
     name: asString(source.name) ?? "",
-    ruleType: pickEnum(source.type, AML_RULE_TYPES) ?? "SINGLE_AMOUNT",
-    params: asRecord(source.parameters),
-    action: coreAction,
-    baseSeverity: pickEnum(source.severity, AML_SEVERITIES) ?? "MEDIUM",
+    ruleType: pickEnum(source.ruleType, AML_RULE_TYPES) ?? "SINGLE_AMOUNT",
+    action: pickEnum(source.action, AML_RULE_ACTIONS) ?? "FLAG",
+    baseSeverity: pickEnum(source.baseSeverity, AML_SEVERITIES) ?? "MEDIUM",
+    params: asRecord(source.params),
   };
+  const effectiveFrom = asString(source.effectiveFrom);
+  if (effectiveFrom) result.effectiveFrom = clamp(effectiveFrom, 64);
+  return result;
 };
 
 const REPORT_TYPES = ["LARGE_TRANSACTION", "SUSPICIOUS_ACTIVITY", "PERIODIC_RETURN"] as const;
@@ -927,12 +919,24 @@ export const toCoreRailUpdate = (body: unknown): JsonRecord => {
   const source = asRecord(body);
   const result: JsonRecord = {};
   const name = asString(source.name)?.trim();
-  if (name) {
+  const nameAr = asString(source.nameAr)?.trim();
+  const nameEn = asString(source.nameEn)?.trim();
+  if (nameAr) result.nameAr = clamp(nameAr, 160);
+  if (nameEn) result.nameEn = clamp(nameEn, 160);
+  if (name && !nameAr && !nameEn) {
     result.nameAr = clamp(name, 160);
     result.nameEn = clamp(name, 160);
   }
   const active = asBoolean(source.active);
   if (active !== undefined) result.blocked = !active;
+  for (const key of ["minAmount", "maxAmount", "instructionsAr", "instructionsEn"] as const) {
+    const value = asString(source[key]);
+    if (value !== undefined) result[key] = clamp(value, key.startsWith("instructions") ? 2000 : 40);
+  }
+  const displayOrder = clampNumber(source.displayOrder, 0, 9999);
+  if (displayOrder !== undefined) result.displayOrder = displayOrder;
+  const capabilities = asRecord(source.capabilities);
+  if (Object.keys(capabilities).length > 0) result.capabilities = capabilities;
   return result;
 };
 
@@ -1011,8 +1015,16 @@ export const toCoreRouteUpdate = (body: unknown): JsonRecord => {
   const result: JsonRecord = {};
   const priority = clampNumber(source.priority, 0, 9999);
   if (priority !== undefined) result.priority = priority;
+  const weight = clampNumber(source.weight, 1, 1000);
+  if (weight !== undefined) result.weight = weight;
   const costModel = asRecord(source.costModel);
   if (Object.keys(costModel).length > 0) result.costModel = costModel;
+  const scope = asRecord(source.scope);
+  if (Object.keys(scope).length > 0) result.scope = scope;
+  for (const key of ["minAmount", "maxAmount", "dailyCapAmount"] as const) {
+    const value = asString(source[key]);
+    if (value && DECIMAL_PATTERN.test(value)) result[key] = value;
+  }
   const limitAmount = asString(source.limitAmount);
   if (limitAmount && DECIMAL_PATTERN.test(limitAmount)) result.maxAmount = limitAmount;
   return result;
@@ -1021,7 +1033,7 @@ export const toCoreRouteUpdate = (body: unknown): JsonRecord => {
 export const toCoreRouteState = (body: unknown): JsonRecord => {
   const source = asRecord(body);
   const result: JsonRecord = {
-    status: pickEnum(source.state, ["ACTIVE", "PAUSED", "DRAINING"]) ?? missingCanonical("status"),
+    status: pickEnum(source.status ?? source.state, ["ACTIVE", "PAUSED", "DRAINING"]) ?? missingCanonical("status"),
   };
   const reason = asString(source.reason);
   if (reason) result.reason = clamp(reason, 500);
@@ -1146,8 +1158,11 @@ export const toCoreDisputeCreate = (body: unknown): JsonRecord => {
 
 const ADJUSTMENT_TYPES: Record<string, string> = {
   CHARGEBACK: "CHARGEBACK",
-  FEE_VARIANCE: "CORRECTION",
+  REFUND: "REFUND",
+  MANUAL_CREDIT: "MANUAL_CREDIT",
+  MANUAL_DEBIT: "MANUAL_DEBIT",
   CORRECTION: "CORRECTION",
+  FEE_VARIANCE: "CORRECTION",
   RECOVERY: "MANUAL_CREDIT",
   WRITEOFF: "MANUAL_DEBIT",
 };
@@ -1155,7 +1170,7 @@ const ADJUSTMENT_TYPES: Record<string, string> = {
 export const toCoreAdjustmentCreate = (body: unknown): JsonRecord => {
   const source = asRecord(body);
   const amount = asString(source.amount);
-  const reason = asString(source.reason)?.trim() ?? "";
+  const reason = (asString(source.reason) ?? asString(source.reasonCode))?.trim() ?? "";
   const result: JsonRecord = {
     type:
       ADJUSTMENT_TYPES[asString(source.type)?.trim().toUpperCase() ?? ""] ??
@@ -1170,6 +1185,8 @@ export const toCoreAdjustmentCreate = (body: unknown): JsonRecord => {
   if (attemptId) result.sourceAttemptId = clamp(attemptId, 64);
   const externalDisputeRef = asString(source.externalDisputeRef);
   if (externalDisputeRef) result.externalDisputeRef = clamp(externalDisputeRef, 120);
+  const reverseCommission = asBoolean(source.reverseCommission);
+  if (reverseCommission !== undefined) result.reverseCommission = reverseCommission;
   return result;
 };
 

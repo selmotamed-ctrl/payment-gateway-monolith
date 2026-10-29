@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VCard, VCardText, VDialog, VSelect, VTextField } from "vuetify/components";
+import { VBtn, VCard, VCardText, VDialog, VSelect, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -21,13 +21,14 @@ type GatewayRoute = {
     gatewayCode: string;
     credentialPolicy: string;
     priority: number;
-    costModel: string;
+    weight: number;
+    costModel: unknown;
     minAmount: string;
     maxAmount: string;
     dailyCapAmount: string;
     status: string;
     healthState: string;
-    scope: Record<string, unknown>;
+    scope: unknown;
 };
 
 const RoutesPage = dc(() => {
@@ -38,9 +39,18 @@ const RoutesPage = dc(() => {
     const search = ref<string | null>(null);
 
     const dialogOpen = ref(false);
-    const selected = ref<GatewayRoute | null>(null);
-    const targetStatus = ref<string>("ACTIVE");
+    const editingRoute = ref<GatewayRoute | null>(null);
     const actionLoading = ref(false);
+    const routeEditForm = ref({
+        priority: 0,
+        weight: 100,
+        minAmount: "",
+        maxAmount: "",
+        dailyCapAmount: "",
+        costModel: "{}",
+        scope: "{}",
+        status: "ACTIVE",
+    });
     const createOpen = ref(false);
     const creating = ref(false);
     const routeForm = ref({ railId: "", gatewayId: "", priority: 100, limitAmount: "" });
@@ -120,13 +130,49 @@ const RoutesPage = dc(() => {
         }
     };
 
-    const changeState = async () => {
-        if (!selected.value) {
+    const openEditRoute = (route: GatewayRoute) => {
+        editingRoute.value = route;
+        routeEditForm.value = {
+            priority: Number(route.priority ?? 0),
+            weight: Number(route.weight ?? 100),
+            minAmount: route.minAmount ?? "",
+            maxAmount: route.maxAmount ?? "",
+            dailyCapAmount: route.dailyCapAmount ?? "",
+            costModel: JSON.stringify(route.costModel ?? {}, null, 2),
+            scope: JSON.stringify(route.scope ?? {}, null, 2),
+            status: route.status,
+        };
+        dialogOpen.value = true;
+    };
+
+    const saveRoute = async () => {
+        if (!editingRoute.value || actionLoading.value) {
+            return;
+        }
+        let costModel: unknown;
+        let scope: unknown;
+        try {
+            costModel = JSON.parse(routeEditForm.value.costModel || "{}");
+            scope = JSON.parse(routeEditForm.value.scope || "{}");
+        } catch {
+            showSnackBar({ type: "error", message: t("Cost model and scope must be valid JSON") });
             return;
         }
         actionLoading.value = true;
         try {
-            await api.post(urlsMap.routeState(selected.value.id), { status: targetStatus.value });
+            const form = routeEditForm.value;
+            await api.patch(urlsMap.routeDetail(editingRoute.value.id), {
+                priority: Number(form.priority) || 0,
+                weight: Number(form.weight) || 1,
+                ...(form.minAmount.trim() ? { minAmount: form.minAmount.trim() } : {}),
+                ...(form.maxAmount.trim() ? { maxAmount: form.maxAmount.trim() } : {}),
+                ...(form.dailyCapAmount.trim() ? { dailyCapAmount: form.dailyCapAmount.trim() } : {}),
+                ...(costModel && typeof costModel === "object" && Object.keys(costModel as object).length ? { costModel } : {}),
+                ...(scope && typeof scope === "object" && Object.keys(scope as object).length ? { scope } : {}),
+            });
+            if (form.status !== editingRoute.value.status) {
+                await api.post(urlsMap.routeState(editingRoute.value.id), { status: form.status });
+            }
             dialogOpen.value = false;
             showSnackBar({ type: "success", message: t("Update") });
             await load();
@@ -166,7 +212,7 @@ const RoutesPage = dc(() => {
         { key: "gatewayCode", label: "Gateway Code", value: (row) => row.gatewayCode },
         { key: "credentialPolicy", label: "Credential Policy", value: (row) => row.credentialPolicy },
         { key: "priority", label: "Priority", value: (row) => String(row.priority ?? "") },
-        { key: "costModel", label: "Cost Model", value: (row) => row.costModel },
+        { key: "costModel", label: "Cost Model", value: (row) => (typeof row.costModel === "string" ? row.costModel : JSON.stringify(row.costModel ?? {})) },
         { key: "minAmount", label: "Amount", value: (row) => `${row.minAmount ?? ""} - ${row.maxAmount ?? ""}` },
         { key: "dailyCapAmount", label: "Amount Due", value: (row) => row.dailyCapAmount },
         {
@@ -188,11 +234,7 @@ const RoutesPage = dc(() => {
                 <VBtn
                     size="small"
                     variant="tonal"
-                    onClick={() => {
-                        selected.value = row;
-                        targetStatus.value = row.status;
-                        dialogOpen.value = true;
-                    }}
+                    onClick={() => openEditRoute(row)}
                 >
                     {t("Update")}
                 </VBtn>
@@ -233,18 +275,75 @@ const RoutesPage = dc(() => {
                 )}
             </ThemedView>
 
-            <VDialog modelValue={dialogOpen.value} onUpdate:modelValue={(v: any) => (dialogOpen.value = v)} maxWidth="460px">
+            <VDialog modelValue={dialogOpen.value} onUpdate:modelValue={(v: any) => (dialogOpen.value = v)} maxWidth="680px" scrollable>
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <VSelect
-                            items={["ACTIVE", "PAUSED", "DRAINING"]}
-                            modelValue={targetStatus.value}
-                            onUpdate:modelValue={(v: string) => (targetStatus.value = v)}
-                            label={t("Status")}
-                        />
-                        <VBtn color="primary" loading={actionLoading.value} onClick={() => void changeState()}>
-                            {t("Update")}
-                        </VBtn>
+                        <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
+                            {t("Edit route")} {editingRoute.value?.railCode} → {editingRoute.value?.gatewayCode}
+                        </ThemedText>
+                        <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
+                            <StatusChip label={editingRoute.value?.credentialPolicy ?? "-"} tone="info" />
+                            <StatusChip label={editingRoute.value?.healthState ?? "-"} tone="neutral" />
+                        </ThemedView>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 14px" }}>
+                            <VTextField
+                                label={t("Priority")}
+                                type="number"
+                                modelValue={String(routeEditForm.value.priority)}
+                                onUpdate:modelValue={(v: string) => (routeEditForm.value.priority = Number(v) || 0)}
+                            />
+                            <VTextField
+                                label={t("Weight")}
+                                type="number"
+                                modelValue={String(routeEditForm.value.weight)}
+                                onUpdate:modelValue={(v: string) => (routeEditForm.value.weight = Number(v) || 1)}
+                            />
+                            <VTextField
+                                label={t("Minimum amount")}
+                                modelValue={routeEditForm.value.minAmount}
+                                onUpdate:modelValue={(v: string) => (routeEditForm.value.minAmount = v)}
+                            />
+                            <VTextField
+                                label={t("Maximum amount")}
+                                modelValue={routeEditForm.value.maxAmount}
+                                onUpdate:modelValue={(v: string) => (routeEditForm.value.maxAmount = v)}
+                            />
+                            <VTextField
+                                label={t("Daily cap")}
+                                modelValue={routeEditForm.value.dailyCapAmount}
+                                onUpdate:modelValue={(v: string) => (routeEditForm.value.dailyCapAmount = v)}
+                            />
+                            <VSelect
+                                label={t("Status")}
+                                items={["ACTIVE", "PAUSED", "DRAINING"]}
+                                modelValue={routeEditForm.value.status}
+                                onUpdate:modelValue={(v: string) => (routeEditForm.value.status = v)}
+                            />
+                            <div style={{ gridColumn: "span 2" }}>
+                                <VTextarea
+                                    label={t("Cost model (JSON)")}
+                                    rows={4}
+                                    modelValue={routeEditForm.value.costModel}
+                                    onUpdate:modelValue={(v: string) => (routeEditForm.value.costModel = v)}
+                                />
+                            </div>
+                            <div style={{ gridColumn: "span 2" }}>
+                                <VTextarea
+                                    label={t("Scope (JSON)")}
+                                    rows={3}
+                                    modelValue={routeEditForm.value.scope}
+                                    onUpdate:modelValue={(v: string) => (routeEditForm.value.scope = v)}
+                                />
+                            </div>
+                        </div>
+                        <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
+                            <VBtn variant="text" onClick={() => (dialogOpen.value = false)}>
+                                {t("Cancel")}
+                            </VBtn>
+                            <VBtn color="primary" loading={actionLoading.value} onClick={() => void saveRoute()}>
+                                {t("Save")}
+                            </VBtn>
+                        </ThemedView>
                     </VCardText>
                 </VCard>
             </VDialog>

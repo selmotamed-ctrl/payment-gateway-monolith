@@ -451,11 +451,10 @@ const cases: ContractCase[] = [
     legacyPayload: {
       code: "R1",
       name: "rule",
-      layer: 3,
-      type: "SINGLE_AMOUNT",
-      parameters: { amount: "1000.0000" },
+      ruleType: "SINGLE_AMOUNT",
       action: "BLOCK",
-      active: true,
+      baseSeverity: "HIGH",
+      params: { amount: "1000.0000" },
     },
     allowedKeys: [
       "code",
@@ -886,7 +885,7 @@ describe("core contract translation", () => {
       expect(parsed.success).toBe(true);
     });
 
-    test(`${contract.route} still accepts the legacy public payload`, () => {
+    test(`${contract.route} accepts the documented public payload`, () => {
       const parsed = contract.publicSchema.safeParse(contract.legacyPayload);
       expect(parsed.success).toBe(true);
     });
@@ -1138,18 +1137,18 @@ describe("core contract field mapping", () => {
     expect(mapped.notes).toBe("structuring");
   });
 
-  test("aml rule maps the public action and severity onto the core vocabulary", () => {
+  test("aml rule carries the core action and severity vocabulary", () => {
     const mapped = toCoreAmlRule({
       code: "R1",
       name: "rule",
-      layer: 3,
-      type: "SINGLE_AMOUNT",
-      parameters: { amount: "1000.0000" },
-      action: "REPORT",
+      ruleType: "SINGLE_AMOUNT",
+      action: "HOLD",
+      baseSeverity: "HIGH",
+      params: { amount: "1000.0000" },
     });
-    expect(mapped.action).toBe("FLAG");
+    expect(mapped.action).toBe("HOLD");
     expect(mapped.ruleType).toBe("SINGLE_AMOUNT");
-    expect(mapped.baseSeverity).toBe("MEDIUM");
+    expect(mapped.baseSeverity).toBe("HIGH");
     expect(mapped.params).toEqual({ amount: "1000.0000" });
   });
 

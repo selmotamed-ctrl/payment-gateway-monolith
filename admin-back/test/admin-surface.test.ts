@@ -556,10 +556,10 @@ describe("admin core contract forwarding", () => {
       body: {
         code: "R1",
         name: "rule",
-        layer: 3,
-        type: "SINGLE_AMOUNT",
-        parameters: { amount: "1000.0000" },
+        ruleType: "SINGLE_AMOUNT",
         action: "BLOCK",
+        baseSeverity: "HIGH",
+        params: { amount: "1000.0000" },
       },
     });
     expect(response.status).toBe(201);
@@ -568,9 +568,9 @@ describe("admin core contract forwarding", () => {
       code: "R1",
       name: "rule",
       ruleType: "SINGLE_AMOUNT",
-      params: { amount: "1000.0000" },
       action: "BLOCK",
-      baseSeverity: "MEDIUM",
+      baseSeverity: "HIGH",
+      params: { amount: "1000.0000" },
     });
   });
 
@@ -809,10 +809,10 @@ describe("admin forwards payloads core accepts", () => {
       body: {
         code: "R1",
         name: "rule",
-        layer: 3,
-        type: "SINGLE_AMOUNT",
-        parameters: { amount: "1000.0000" },
+        ruleType: "SINGLE_AMOUNT",
         action: "BLOCK",
+        baseSeverity: "HIGH",
+        params: { amount: "1000.0000" },
       },
       contract: "POST /aml/rules",
       token: "compliance",
@@ -1035,7 +1035,7 @@ describe("admin route surface", () => {
     { method: "GET", path: "/api/v1/admin/aml/cases" },
     { method: "POST", path: "/api/v1/admin/aml/cases/c_1/propose", body: { severity: "HIGH", action: "AML_HOLD", reason: "structuring" } },
     { method: "GET", path: "/api/v1/admin/aml/rules" },
-    { method: "POST", path: "/api/v1/admin/aml/rules", body: { code: "R1", name: "rule", layer: 3, type: "SINGLE_AMOUNT", parameters: {}, action: "BLOCK" } },
+    { method: "POST", path: "/api/v1/admin/aml/rules", body: { code: "R1", name: "rule", ruleType: "SINGLE_AMOUNT", action: "BLOCK", baseSeverity: "HIGH", params: {} } },
     { method: "GET", path: "/api/v1/admin/aml/reporting-rules" },
     { method: "POST", path: "/api/v1/admin/aml/reporting-rules", body: { code: "CBL", name: "cbl", mode: "PROVISIONAL", threshold: "1000.0000", currency: "LYD", windowDays: 30 } },
     { method: "GET", path: "/api/v1/admin/aml/reports" },

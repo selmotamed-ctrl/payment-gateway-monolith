@@ -30,7 +30,7 @@ type Screening = {
 
 const DISPOSITIONS = [
     { title: "False Positive", value: "FALSE_POSITIVE" },
-    { title: "True Match", value: "TRUE_MATCH" },
+    { title: "Confirmed Match", value: "CONFIRMED_MATCH" },
     { title: "Escalated", value: "ESCALATED" },
 ];
 
@@ -75,7 +75,7 @@ const AmlScreeningsPage = dc(() => {
         try {
             await api.post(urlsMap.amlMatchDisposition(selected.value.matchId), {
                 disposition: disposition.value,
-                note: note.value,
+                notes: note.value,
             });
             dialogOpen.value = false;
             showSnackBar({ type: "success", message: t("Disposition") });
@@ -170,7 +170,12 @@ const AmlScreeningsPage = dc(() => {
                             label={t("Notes")}
                             rows={3}
                         />
-                        <VBtn color="primary" loading={actionLoading.value} onClick={() => void submitDisposition()}>
+                        <VBtn
+                            color="primary"
+                            disabled={note.value.trim().length < 3}
+                            loading={actionLoading.value}
+                            onClick={() => void submitDisposition()}
+                        >
                             {t("Save")}
                         </VBtn>
                     </VCardText>

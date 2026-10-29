@@ -82,6 +82,7 @@ export const urlsMap = {
     railDetail: (id: string) => `v1/admin/rails/${id}`,
     railFields: (id: string) => `v1/admin/rails/${id}/fields`,
     routesList: "v1/admin/routes",
+    routeDetail: (id: string) => `v1/admin/routes/${id}`,
     routeState: (id: string) => `v1/admin/routes/${id}/state`,
     assetsList: "v1/admin/assets",
 

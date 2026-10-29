@@ -286,6 +286,26 @@ Rotate: `./deploy/deploy.sh --rotate-certs` (all hosts are updated in the same
 run). Certificates are inspected in step 3 and again in the audit summary, with
 the remaining validity in days.
 
+### Changing the server IP
+
+The private IP is part of the core certificate SAN, the nginx vhosts, the DB
+grants and the UFW rules, so a new LAN address needs one coordinated run:
+
+1. Update every `*_PRIVATE_IP` and `*_SSH_HOST` in `deploy/deploy.env` to the
+   new address (all roles on one box share it).
+2. Run `./deploy/deploy.sh --update --enforce-firewall`. The `--update` flag
+   skips OS bootstrap; `--enforce-firewall` re-emits UFW for the new sources.
+3. The deploy detects the SAN drift automatically: if `core-back.crt` does not
+   contain `IP:<CORE_PRIVATE_IP>`, it re-signs the server **and** client leaf
+   certificates from the existing CA (no CA rotation) before distribution, so
+   mTLS keeps working without a manual `--rotate-certs`.
+4. The LAN self-signed vhost certificates are regenerated on every run with the
+   current host IP in their SAN.
+
+The deploy cannot guess the new address, so step 1 is always manual. Live
+Playwright specs accept overrides: `PG_ADMIN_URL`, `PG_MERCHANT_URL`,
+`PG_CHECKOUT_URL`.
+
 ## 5. Firewall policy (UFW)
 
 | Host | Opened | Bound to |

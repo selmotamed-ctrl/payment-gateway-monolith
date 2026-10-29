@@ -88,7 +88,7 @@ const MerchantsPage = dc(() => {
                 }
                 await api.post(urlsMap.merchantProposeEdit(selected.value.id), {
                     reason: reason.value,
-                    payloadDiff: operations,
+                    patch: operations,
                 });
             }
             dialogOpen.value = false;

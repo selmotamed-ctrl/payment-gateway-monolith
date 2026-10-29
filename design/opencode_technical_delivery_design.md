@@ -1076,3 +1076,43 @@ giving **every** segment the same structure:
 
 Verified visually in the browser (screenshots): aligned titles/controls, 40px
 fields, correct gaps, and a working calendar dialog. All three SPAs build.
+
+## 27. VDateInput, Update-Flow Audit, Deployment IP Resilience
+
+**Date fields.** Every date filter now uses Vuetify's labs `VDateInput`
+(`@/components/DateInput`, `multiple="range"`) instead of the custom
+`VDatePicker` dialog or native inputs. `TableFilters` no longer mounts a
+dialog; the shared `FiltersContainer`/`InputFields` use the same wrapper. The
+range is normalised to `from`/`to` query parameters.
+
+**Update-flow audit.** Every edit surface was exercised against its edge
+contract and repaired:
+
+* Rails: full edit form (Arabic/English names, active→blocked, min/max,
+  display order, instructions) with the edge mapper converting `active` to the
+  core's `blocked`.
+* Routes: full edit (priority, weight, min/max, daily cap, cost model, scope)
+  and status changes routed through `/routes/:id/state`; create now always
+  supplies the core-required `gatewayId`/`credentialPolicy`.
+* Gateway wizard, join requests (assign/request-info/decide), cashouts
+  (decision/reason), operator cases (reason enum), AML (disposition notes,
+  rule vocabulary `HOLD|FLAG|BLOCK|CASE_ONLY` + `baseSeverity`), finance
+  adjustments, merchant team (create requires a ≥10-char password; status
+  edit), credentials (`entries` omitted when empty), tokens (`allowedCidrs`),
+  wallets (`applicationId`/`label`), cashouts (wallet+bank), POS
+  (`label`/`mode`), onboarding (flat profile + acknowledgement).
+* `VTextField`/`VSelect` in TSX lost their `v-model` bindings; all 35 were
+  rewritten to `modelValue`/`onUpdate:modelValue`.
+
+**Deployment resilience.** `buildPki` now compares the server certificate's
+actual SAN with `CORE_PRIVATE_IP`; when the box moves to a new LAN it re-signs
+the leaves from the retained CA instead of failing the mTLS checks. The guide
+documents the one manual step (update `deploy.env`) and
+`--update --enforce-firewall`.
+
+**Live verification.** Deployed to `10.84.183.205` (release `20261029224709`):
+all 12 deployment checks green; live Playwright **6/6**; API smoke created a
+rail, patched it with the extended fields, created a route with a gateway,
+patched it, paused it, and created/suspended a merchant team member. Compliance
+AML rule creation is covered by the admin-back contract tests (the live account
+hit the login rate limiter).

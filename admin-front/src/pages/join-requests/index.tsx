@@ -12,6 +12,7 @@ import { statusTone } from "@/components/Table/statusTone";
 import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
+import { user } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
@@ -66,6 +67,7 @@ const JoinRequestsPage = dc(() => {
     const reasonCode = ref<string>("POLICY");
     const notes = ref<string>("");
     const infoRequest = ref<string>("");
+    const requestedItems = ref<string>("");
     const actionLoading = ref(false);
 
     const load = async () => {
@@ -94,6 +96,7 @@ const JoinRequestsPage = dc(() => {
         reasonCode.value = "POLICY";
         notes.value = "";
         infoRequest.value = "";
+        requestedItems.value = "";
         detailsOpen.value = true;
         try {
             const response = await api.get(urlsMap.joinRequestDetail(row.id));
@@ -120,13 +123,27 @@ const JoinRequestsPage = dc(() => {
 
     const assignToMe = () =>
         runAction(async () => {
-            await api.post(urlsMap.joinRequestAssign(selected.value!.id), {});
+            const assigneeUserId = user.value?.userInfo?.id;
+            if (!assigneeUserId) {
+                throw new Error(t("Your session does not carry a user id"));
+            }
+            await api.post(urlsMap.joinRequestAssign(selected.value!.id), { assigneeUserId });
             showSnackBar({ type: "success", message: t("Assigned") });
         });
 
     const requestInfo = () =>
         runAction(async () => {
-            await api.post(urlsMap.joinRequestRequestInfo(selected.value!.id), { message: infoRequest.value });
+            const items = requestedItems.value
+                .split(/[,\n]/)
+                .map((item) => item.trim())
+                .filter(Boolean);
+            if (items.length === 0 || infoRequest.value.trim().length < 3) {
+                throw new Error(t("Add at least one requested item and a message"));
+            }
+            await api.post(urlsMap.joinRequestRequestInfo(selected.value!.id), {
+                requestedItems: items,
+                message: infoRequest.value.trim(),
+            });
             detailsOpen.value = false;
             showSnackBar({ type: "success", message: t("Request Info") });
         });
@@ -277,11 +294,16 @@ const JoinRequestsPage = dc(() => {
 
                         <ThemedView style={{ flexDirection: "column", gap: "10px" }}>
                             <ThemedText type="defaultSemiBold">{t("Request Info")}</ThemedText>
+                            <VTextField
+                                modelValue={requestedItems.value}
+                                onUpdate:modelValue={(v: string) => (requestedItems.value = v)}
+                                label={t("Requested items (comma separated)")}
+                            />
                             <VTextarea
                                 modelValue={infoRequest.value}
                                 onUpdate:modelValue={(v: string) => (infoRequest.value = v)}
                                 rows={2}
-                                label={t("Reason")}
+                                label={t("Message")}
                             />
                             <VBtn
                                 variant="tonal"

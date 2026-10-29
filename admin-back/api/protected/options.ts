@@ -5,7 +5,7 @@ import { coreForward } from "../forward";
 const router = express.Router();
 
 const kindSchema = z.object({
-  kind: z.enum(["merchants", "rails", "gateways", "users", "applications", "wallets", "credential-sets"]),
+  kind: z.enum(["merchants", "rails", "gateways", "users", "applications", "wallets", "credential-sets", "gl-accounts"]),
 });
 
 const querySchema = z

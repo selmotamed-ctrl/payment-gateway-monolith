@@ -78,7 +78,10 @@ const PosTerminalsPage = dc(() => {
         }
         actionLoading.value = true;
         try {
-            await api.post(urlsMap.posScreens(activeTerminal.value.id), screenForm.value);
+            await api.post(urlsMap.posScreens(activeTerminal.value.id), {
+                label: screenForm.value.name,
+                mode: screenForm.value.role,
+            });
             screenOpen.value = false;
             showSnackBar({ type: "success", message: t("Created") });
             await load();

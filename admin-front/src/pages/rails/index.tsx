@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VCard, VCardText, VDialog, VSelect, VSwitch, VTextField } from "vuetify/components";
+import { VBtn, VCard, VCardText, VDialog, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -42,6 +42,9 @@ type Rail = {
     maxAmount: string;
     capabilities: unknown;
     blocked?: boolean;
+    displayOrder?: number;
+    instructionsAr?: string;
+    instructionsEn?: string;
     fields: RailField[];
 };
 
@@ -129,7 +132,16 @@ const RailsPage = dc(() => {
     const editOpen = ref(false);
     const savingRail = ref(false);
     const editingRail = ref<Rail | null>(null);
-    const railEditForm = ref({ name: "", active: true });
+    const railEditForm = ref({
+        nameEn: "",
+        nameAr: "",
+        active: true,
+        minAmount: "",
+        maxAmount: "",
+        displayOrder: "",
+        instructionsEn: "",
+        instructionsAr: "",
+    });
 
     // Customer catalog (rail fields)
     const dialogOpen = ref(false);
@@ -187,7 +199,16 @@ const RailsPage = dc(() => {
 
     const openEditRail = (rail: Rail) => {
         editingRail.value = rail;
-        railEditForm.value = { name: rail.nameEn || rail.nameAr || rail.code, active: true };
+        railEditForm.value = {
+            nameEn: rail.nameEn ?? "",
+            nameAr: rail.nameAr ?? "",
+            active: rail.blocked !== true,
+            minAmount: rail.minAmount ?? "",
+            maxAmount: rail.maxAmount ?? "",
+            displayOrder: rail.displayOrder === undefined || rail.displayOrder === null ? "" : String(rail.displayOrder),
+            instructionsEn: rail.instructionsEn ?? "",
+            instructionsAr: rail.instructionsAr ?? "",
+        };
         editOpen.value = true;
     };
 
@@ -195,12 +216,18 @@ const RailsPage = dc(() => {
         if (!editingRail.value || savingRail.value) {
             return;
         }
+        const form = railEditForm.value;
+        const payload: Record<string, unknown> = { active: form.active };
+        if (form.nameEn.trim()) payload.nameEn = form.nameEn.trim();
+        if (form.nameAr.trim()) payload.nameAr = form.nameAr.trim();
+        if (form.minAmount.trim()) payload.minAmount = form.minAmount.trim();
+        if (form.maxAmount.trim()) payload.maxAmount = form.maxAmount.trim();
+        if (form.displayOrder.trim()) payload.displayOrder = Number(form.displayOrder);
+        if (form.instructionsEn.trim()) payload.instructionsEn = form.instructionsEn.trim();
+        if (form.instructionsAr.trim()) payload.instructionsAr = form.instructionsAr.trim();
         savingRail.value = true;
         try {
-            await api.patch(urlsMap.railDetail(editingRail.value.id), {
-                name: railEditForm.value.name.trim(),
-                active: railEditForm.value.active,
-            });
+            await api.patch(urlsMap.railDetail(editingRail.value.id), payload);
             editOpen.value = false;
             showSnackBar({ type: "success", message: t("Update") });
             await load();
@@ -481,22 +508,63 @@ const RailsPage = dc(() => {
             </VDialog>
 
             {/* Update rail */}
-            <VDialog modelValue={editOpen.value} onUpdate:modelValue={(v: any) => (editOpen.value = v)} maxWidth="480px">
+            <VDialog modelValue={editOpen.value} onUpdate:modelValue={(v: any) => (editOpen.value = v)} maxWidth="640px">
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                         <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
                             {t("Edit")} {editingRail.value?.code}
                         </ThemedText>
-                        <VTextField
-                            label={t("Label (English)")}
-                            modelValue={railEditForm.value.name}
-                            onUpdate:modelValue={(v: string) => (railEditForm.value.name = v)}
-                        />
-                        <VSwitch
-                            label={t("Active")}
-                            modelValue={railEditForm.value.active}
-                            onUpdate:modelValue={(v: any) => (railEditForm.value.active = !!v)}
-                        />
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 14px" }}>
+                            <VTextField
+                                label={t("Label (English)")}
+                                modelValue={railEditForm.value.nameEn}
+                                onUpdate:modelValue={(v: string) => (railEditForm.value.nameEn = v)}
+                            />
+                            <VTextField
+                                label={t("Label (Arabic)")}
+                                modelValue={railEditForm.value.nameAr}
+                                onUpdate:modelValue={(v: string) => (railEditForm.value.nameAr = v)}
+                            />
+                            <VTextField
+                                label={t("Minimum amount")}
+                                modelValue={railEditForm.value.minAmount}
+                                onUpdate:modelValue={(v: string) => (railEditForm.value.minAmount = v)}
+                            />
+                            <VTextField
+                                label={t("Maximum amount")}
+                                modelValue={railEditForm.value.maxAmount}
+                                onUpdate:modelValue={(v: string) => (railEditForm.value.maxAmount = v)}
+                            />
+                            <VTextField
+                                label={t("Display order")}
+                                type="number"
+                                modelValue={railEditForm.value.displayOrder}
+                                onUpdate:modelValue={(v: string) => (railEditForm.value.displayOrder = v)}
+                            />
+                            <div style={{ display: "flex", alignItems: "center" }}>
+                                <VSwitch
+                                    label={t("Active")}
+                                    modelValue={railEditForm.value.active}
+                                    onUpdate:modelValue={(v: any) => (railEditForm.value.active = !!v)}
+                                />
+                            </div>
+                            <div style={{ gridColumn: "span 2" }}>
+                                <VTextarea
+                                    label={t("Instructions (English)")}
+                                    rows={2}
+                                    modelValue={railEditForm.value.instructionsEn}
+                                    onUpdate:modelValue={(v: string) => (railEditForm.value.instructionsEn = v)}
+                                />
+                            </div>
+                            <div style={{ gridColumn: "span 2" }}>
+                                <VTextarea
+                                    label={t("Instructions (Arabic)")}
+                                    rows={2}
+                                    modelValue={railEditForm.value.instructionsAr}
+                                    onUpdate:modelValue={(v: string) => (railEditForm.value.instructionsAr = v)}
+                                />
+                            </div>
+                        </div>
                         <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
                             <VBtn variant="text" onClick={() => (editOpen.value = false)}>
                                 {t("Cancel")}
@@ -504,7 +572,7 @@ const RailsPage = dc(() => {
                             <VBtn
                                 color="primary"
                                 loading={savingRail.value}
-                                disabled={railEditForm.value.name.trim().length < 2}
+                                disabled={!railEditForm.value.nameEn.trim() && !railEditForm.value.nameAr.trim()}
                                 onClick={() => void saveRail()}
                             >
                                 {t("Save")}

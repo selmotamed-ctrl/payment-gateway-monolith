@@ -1,8 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const ADMIN = process.env.PG_ADMIN_URL ?? "https://192.168.1.222:8443";
-const MERCHANT = process.env.PG_MERCHANT_URL ?? "https://192.168.1.222:8081";
-const CHECKOUT = process.env.PG_CHECKOUT_URL ?? "https://192.168.1.222:8082";
+const ADMIN = process.env.PG_ADMIN_URL ?? "https://10.84.183.205:8443";
+const MERCHANT = process.env.PG_MERCHANT_URL ?? "https://10.84.183.205:8081";
+const CHECKOUT = process.env.PG_CHECKOUT_URL ?? "https://10.84.183.205:8082";
 const ADMIN_EMAIL = process.env.PG_ADMIN_EMAIL ?? "gateway-admin@payment-gateway.internal";
 const MERCHANT_EMAIL = process.env.PG_MERCHANT_EMAIL ?? "merchant@pgtest.lan";
 const PASSWORD = process.env.PG_PASSWORD ?? "DeployTest!2026";
@@ -66,7 +66,7 @@ const assertShell = async (page: Page) => {
 const login = async (page: Page, baseUrl: string, label: string, email: string) => {
   await gotoAny(page, baseUrl, "/login");
   await page.getByLabel(label).fill(email);
-  await page.getByLabel("Password").fill(PASSWORD);
+  await page.locator('input[type="password"]').first().fill(PASSWORD);
   await page.getByRole("button", { name: "Login", exact: true }).click();
 };
 

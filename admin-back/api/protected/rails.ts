@@ -35,10 +35,18 @@ export const railCreateSchema = z
 export const railPatchSchema = z
   .object({
     name: z.string().min(2).max(160).optional(),
+    nameAr: z.string().min(1).max(160).optional(),
+    nameEn: z.string().min(1).max(160).optional(),
     subModes: z.array(z.string().min(1).max(64)).max(20).optional(),
     feeBearer: z.enum(["PAYER", "MERCHANT", "PLATFORM"]).optional(),
     active: z.boolean().optional(),
     labels: z.record(z.string().max(16), z.string().max(160)).optional(),
+    minAmount: zAmount.optional(),
+    maxAmount: zAmount.optional(),
+    displayOrder: z.number().int().min(0).max(9999).optional(),
+    capabilities: z.record(z.string().max(40), z.boolean()).optional(),
+    instructionsAr: z.string().max(2000).optional(),
+    instructionsEn: z.string().max(2000).optional(),
     baseVersion: zBaseVersion.optional(),
   })
   .strict();
@@ -83,9 +91,14 @@ export const routeCreateSchema = z
 
 export const routePatchSchema = z
   .object({
-    priority: z.number().int().min(0).max(10000).optional(),
+    priority: z.number().int().min(0).max(9999).optional(),
+    weight: z.number().int().min(1).max(1000).optional(),
     costModel: zJsonObject.optional(),
+    scope: zJsonObject.optional(),
     limitAmount: zAmount.optional(),
+    minAmount: zAmount.optional(),
+    maxAmount: zAmount.optional(),
+    dailyCapAmount: zAmount.optional(),
     limitCurrency: zCurrency.optional(),
     baseVersion: zBaseVersion.optional(),
   })
@@ -93,10 +106,15 @@ export const routePatchSchema = z
 
 export const routeStateSchema = z
   .object({
-    state: z.enum(["ACTIVE", "PAUSED", "DRAINING"]),
+    status: z.enum(["ACTIVE", "PAUSED", "DRAINING"]).optional(),
+    state: z.enum(["ACTIVE", "PAUSED", "DRAINING"]).optional(),
     reason: z.string().min(3).max(500).optional(),
   })
-  .strict();
+  .strict()
+  .refine((value) => value.status !== undefined || value.state !== undefined, {
+    message: "status is required",
+    path: ["status"],
+  });
 
 router.get(
   "/",

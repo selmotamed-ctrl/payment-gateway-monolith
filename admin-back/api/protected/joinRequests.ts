@@ -31,13 +31,20 @@ export const requestInfoSchema = z
 
 export const decideSchema = z
   .object({
-    decision: z.enum(["APPROVE", "REJECT", "REQUEST_INFO", "WITHDRAW"]),
-    reason: zReason,
-    notes: z.string().max(2000).optional(),
+    decision: z.enum(["APPROVE", "REJECT", "APPROVED", "REJECTED", "REQUEST_INFO", "WITHDRAW"]),
+    reason: zReason.optional(),
+    reasonCode: z.string().max(64).optional(),
+    notes: z.string().max(4000).optional(),
+    checklist: z.record(z.string().max(64), z.boolean()).optional(),
+    proposedRiskTier: z.enum(["LOW", "STANDARD", "HIGH"]).optional(),
     checkerUserId: zIdentifier.optional(),
     baseVersion: z.number().int().min(1).optional(),
   })
-  .strict();
+  .strict()
+  .refine((value) => Boolean(value.reason || value.reasonCode), {
+    message: "a reason or reasonCode is required",
+    path: ["reason"],
+  });
 
 export const kybReviewSchema = z
   .object({
