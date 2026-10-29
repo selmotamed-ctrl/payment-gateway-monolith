@@ -124,7 +124,44 @@ area:
 A page the role cannot use is not shown, and a direct URL is redirected to the
 dashboard rather than rendering a permission error.
 
-## 1.3 LAN access without a domain name
+## 1.3 Development-only superusers
+
+For testing the admin and merchant portals there is a dedicated bootstrap that
+creates a maker/checker admin pair and a merchant superuser attached to a
+seeded dev merchant:
+
+```bash
+ssh core-host
+cd /var/www/pg-core/current/core-back
+set -a; . ./.env; set +a
+DEV_PASSWORD='DevPassword123!' bun run create-dev-users
+```
+
+It creates or re-provisions:
+
+| Account | Default email | Role | Purpose |
+| :--- | :--- | :--- | :--- |
+| Admin maker | `dev-admin@payment-gateway.local` | `COMPLIANCE` | Full admin portal, all authorities |
+| Admin checker | `dev-checker@payment-gateway.local` | `MLRO` | Second admin for four-eyes approvals |
+| Merchant superuser | `dev-merchant@payment-gateway.local` | `MERCHANT_ADMIN` | Full merchant portal, attached to `Development Test Merchant` |
+
+The accounts have every authority, MFA disabled and `ACTIVE` status. The
+command is idempotent and resets the password on each run. The password is
+never stored in the repository; supply it through `DEV_PASSWORD` or
+`--password`.
+
+Production is refused by default. On a staging/test box that runs
+`NODE_ENV=production`, opt in explicitly:
+
+```bash
+DEV_USERS_ALLOW_PRODUCTION=true DEV_PASSWORD='DevPassword123!' bun run create-dev-users
+```
+
+Do not leave these accounts enabled on a real production deployment. Override
+the emails with `DEV_ADMIN_EMAIL`, `DEV_CHECKER_EMAIL`, `DEV_MERCHANT_EMAIL`
+and the merchant display name with `DEV_MERCHANT_NAME`.
+
+## 1.4 LAN access without a domain name
 
 Every operator portal is also published on a **plain LAN port** so it can be
 opened by host IP during staging, with no DNS record and no public certificate:
