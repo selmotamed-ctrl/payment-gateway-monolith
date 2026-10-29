@@ -22,34 +22,55 @@ export const railCreateSchema = z
       .min(2)
       .max(64)
       .regex(/^[A-Za-z0-9_-]+$/, "invalid rail code"),
-    name: z.string().min(2).max(160),
+    name: z.string().min(1).max(160).optional(),
+    nameAr: z.string().min(1).max(160).optional(),
+    nameEn: z.string().min(1).max(160).optional(),
     gatewayId: zIdentifier.optional(),
-    collectionMode: z.enum(["REDIRECT", "EMBEDDED", "QR", "PUSH", "TRANSFER", "CASH"]),
+    collectionMode: z.enum([
+      "OTP_PULL",
+      "REDIRECT",
+      "EMBEDDED",
+      "PUSH_APPROVAL",
+      "QR_DISPLAY",
+      "PAY_CODE",
+      "DEEP_LINK",
+      "MANUAL",
+      "HYBRID",
+      "QR",
+      "PUSH",
+      "TRANSFER",
+      "CASH",
+    ]),
     subModes: z.array(z.string().min(1).max(64)).max(20).optional(),
     feeBearer: z.enum(["PAYER", "MERCHANT", "PLATFORM"]).optional(),
     active: z.boolean().optional(),
     labels: z.record(z.string().max(16), z.string().max(160)).optional(),
+    currency: z.string().length(3).optional(),
+    minAmount: zAmount.optional(),
+    maxAmount: zAmount.optional(),
+    capabilities: z.union([z.array(z.string().max(40)).max(50), z.record(z.string().max(40), z.boolean())]).optional(),
   })
-  .strict();
+  .catchall(z.unknown());
 
 export const railPatchSchema = z
   .object({
-    name: z.string().min(2).max(160).optional(),
+    name: z.string().min(1).max(160).optional(),
     nameAr: z.string().min(1).max(160).optional(),
     nameEn: z.string().min(1).max(160).optional(),
     subModes: z.array(z.string().min(1).max(64)).max(20).optional(),
     feeBearer: z.enum(["PAYER", "MERCHANT", "PLATFORM"]).optional(),
     active: z.boolean().optional(),
     labels: z.record(z.string().max(16), z.string().max(160)).optional(),
+    currency: z.string().length(3).optional(),
     minAmount: zAmount.optional(),
     maxAmount: zAmount.optional(),
     displayOrder: z.number().int().min(0).max(9999).optional(),
-    capabilities: z.record(z.string().max(40), z.boolean()).optional(),
+    capabilities: z.union([z.array(z.string().max(40)).max(50), z.record(z.string().max(40), z.boolean())]).optional(),
     instructionsAr: z.string().max(2000).optional(),
     instructionsEn: z.string().max(2000).optional(),
     baseVersion: zBaseVersion.optional(),
   })
-  .strict();
+  .catchall(z.unknown());
 
 export const railFieldsSchema = z
   .object({
@@ -57,17 +78,27 @@ export const railFieldsSchema = z
       .array(
         z
           .object({
-            code: z.string().min(1).max(64),
-            label: z.string().min(1).max(160),
-            type: z.enum(["TEXT", "NUMBER", "PHONE", "NATIONAL_ID", "PASSPORT", "DATE", "OTP", "HIDDEN"]),
+            code: z.string().min(1).max(64).optional(),
+            key: z.string().min(1).max(64).optional(),
+            fieldKey: z.string().min(1).max(64).optional(),
+            label: z.string().min(1).max(160).optional(),
+            labelAr: z.string().min(1).max(160).optional(),
+            labelEn: z.string().min(1).max(160).optional(),
+            type: z.string().min(1).max(32).optional(),
+            inputType: z.string().min(1).max(32).optional(),
             required: z.boolean().optional(),
             pattern: z.string().max(200).optional(),
-            minLength: z.number().int().min(0).max(64).optional(),
-            maxLength: z.number().int().min(1).max(256).optional(),
+            regex: z.string().max(200).optional(),
+            minLength: z.number().int().min(0).max(64).nullable().optional(),
+            maxLength: z.number().int().min(1).max(256).nullable().optional(),
             sensitive: z.boolean().optional(),
+            sensitivity: z.enum(["NORMAL", "SENSITIVE", "PAN"]).optional(),
+            normalizer: z.union([z.string().max(64), z.record(z.string().max(64), z.unknown())]).optional(),
+            options: z.array(z.string().max(160)).max(100).optional(),
             order: z.number().int().min(0).max(100).optional(),
+            orderIndex: z.number().int().min(0).max(100).optional(),
           })
-          .strict(),
+          .passthrough(),
       )
       .min(1)
       .max(50),

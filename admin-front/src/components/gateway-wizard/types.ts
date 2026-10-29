@@ -64,6 +64,7 @@ export type WizardRailField = {
 
 export type WizardRail = {
     id?: string;
+    routeId?: string;
     code: string;
     nameAr: string;
     nameEn: string;

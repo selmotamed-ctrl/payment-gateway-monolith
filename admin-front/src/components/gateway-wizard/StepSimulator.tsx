@@ -57,7 +57,6 @@ export const StepSimulator = dc(
         const gates = ref<GateResult[]>(
             GO_LIVE_GATE_KEYS.map((key) => ({ key, passed: false, detail: "not evaluated yet" })),
         );
-        const gatesLoading = ref(false);
 
         const rollbackVersionId = ref(props.model.rollbackVersionId ?? "");
         const submitReason = ref("");
@@ -75,10 +74,12 @@ export const StepSimulator = dc(
                     throw new Error("form data must be a valid JSON object");
                 }
                 const response = await api.post(urlsMap.gatewayVersionDryRun(props.model.versionId ?? ""), {
-                    phase: phase.value,
-                    formData: parsedForm,
-                    sampleAmount: sampleAmount.value,
-                    sampleCurrency: sampleCurrency.value.toUpperCase(),
+                    scenario: phase.value,
+                    payload: {
+                        ...parsedForm,
+                        amount: sampleAmount.value,
+                        currency: sampleCurrency.value.toUpperCase(),
+                    },
                 });
                 const payload = response.data?.data ?? response.data ?? {};
                 dryRunOutput.value = JSON.stringify(payload, null, 2);
@@ -93,16 +94,25 @@ export const StepSimulator = dc(
             suiteRunning.value = true;
             suiteError.value = null;
             try {
-                const response = await api.post(urlsMap.gatewayVersionRunSuite(props.model.versionId ?? ""), {});
+                const response = await api.post(urlsMap.gatewayVersionRunSuite(props.model.versionId ?? ""), {
+                    suite: "SANDBOX_15",
+                });
                 const payload = response.data?.data ?? response.data ?? {};
-                const results = payload.scenarios ?? payload.results ?? [];
+                const results = payload.evidence?.scenarioResults ?? payload.scenarios ?? payload.results ?? [];
                 scenarios.value = results.map((scenario: any) => ({
-                    key: scenario.key ?? scenario.id ?? "",
-                    name: scenario.name ?? scenario.title ?? "",
+                    key: scenario.key ?? scenario.scenario ?? scenario.id ?? "",
+                    name: scenario.name ?? scenario.title ?? scenario.scenario ?? "",
                     passed: !!scenario.passed,
-                    detail: scenario.detail ?? scenario.message ?? "",
+                    detail: scenario.detail ?? scenario.details ?? scenario.message ?? "",
                 }));
-                await loadGates();
+                const reportGates = payload.report?.gates ?? payload.gates ?? [];
+                if (reportGates.length) {
+                    gates.value = reportGates.map((gate: any) => ({
+                        key: gate.key ?? gate.id,
+                        passed: !!gate.passed,
+                        detail: Array.isArray(gate.reasons) ? gate.reasons.join(" · ") : gate.detail ?? "",
+                    }));
+                }
             } catch (e) {
                 suiteError.value = extractApiErrorMessage(e);
             } finally {
@@ -110,35 +120,11 @@ export const StepSimulator = dc(
             }
         };
 
-        const loadGates = async () => {
-            gatesLoading.value = true;
-            try {
-                const response = await api.post(urlsMap.gatewayVersionDryRun(props.model.versionId ?? ""), {
-                    phase: "CREDENTIAL_CHECK",
-                    goLiveGates: true,
-                });
-                const payload = response.data?.data ?? response.data ?? {};
-                const list = payload.goLiveGates ?? payload.gates ?? [];
-                if (list.length) {
-                    gates.value = list.map((gate: any) => ({
-                        key: gate.key ?? gate.id,
-                        passed: !!gate.passed,
-                        detail: gate.detail ?? "",
-                    }));
-                }
-            } catch (e) {
-                showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
-            } finally {
-                gatesLoading.value = false;
-            }
-        };
-
         const submitForApproval = async () => {
             submitting.value = true;
             try {
                 await api.post(urlsMap.gatewayVersionSubmitApproval(props.model.versionId ?? ""), {
-                    reason: submitReason.value,
-                    rollbackVersionId: rollbackVersionId.value || null,
+                    reason: submitReason.value.trim() || "Ready for approval",
                 });
                 showSnackBar({ type: "success", message: t("Submit For Approval") });
             } catch (e) {
@@ -226,9 +212,6 @@ export const StepSimulator = dc(
                         >
                             <ThemedText type="defaultSemiBold">{t("Test Suite")}</ThemedText>
                             <ThemedView style={{ flexDirection: "row", gap: "8px" }}>
-                                <VBtn variant="tonal" size="small" loading={gatesLoading.value} onClick={() => void loadGates()}>
-                                    {t("Go-Live Gates")}
-                                </VBtn>
                                 <VBtn color="primary" size="small" loading={suiteRunning.value} onClick={() => void runSuite()}>
                                     {t("Run")}
                                 </VBtn>

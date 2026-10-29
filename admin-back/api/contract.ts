@@ -115,10 +115,16 @@ export const toCoreGatewayCreate = (body: unknown): JsonRecord => {
 export const toCoreGatewayUpdate = (body: unknown): JsonRecord => {
   const source = asRecord(body);
   const result: JsonRecord = {};
+  const code = asString(source.code)?.trim().toLowerCase();
+  if (code) result.code = code;
   const name = asString(source.name);
   if (name) result.name = name;
   const operator = asString(source.operator) ?? asString(source.category);
   if (operator) result.operator = operator;
+  const country = asString(source.country);
+  if (country) result.country = country.toUpperCase().slice(0, 2);
+  const kind = pickEnum(source.kind, GATEWAY_KINDS);
+  if (kind) result.kind = kind;
   const aliases = asStringArray(source.aliases).slice(0, 20);
   if (aliases.length > 0) result.aliases = aliases;
   const verificationState = toVerificationState(source.evidenceLevel);
@@ -182,26 +188,45 @@ export const toCoreGatewayVersionEnvironments = (body: unknown): JsonRecord => {
   const fallback = requested ?? "SANDBOX";
   const resolved = entries.map((entry) => ({
     entry,
-    env: resolveEnvironment(entry.code, requested ?? fallback),
+    env: resolveEnvironment(entry.env ?? entry.code, requested ?? fallback),
   }));
   const target = requested ?? resolved[0]?.env ?? fallback;
   const selected = resolved.filter((candidate) => candidate.env === target);
   const baseUrls: JsonRecord = {};
   const allowedHosts: string[] = [];
+  const inboundIpAllowlist: string[] = [];
+  const outboundEgressIps: string[] = [];
   for (const candidate of selected) {
     const code = nonEmpty(asString(candidate.entry.code), target.toLowerCase());
     const baseUrl = asString(candidate.entry.baseUrl);
-    if (!baseUrl) continue;
-    baseUrls[clamp(code, 40)] = clamp(baseUrl, 500);
-    const host = hostOf(baseUrl);
-    if (host && !allowedHosts.includes(host)) allowedHosts.push(clamp(host, 200));
+    if (baseUrl) {
+      baseUrls[clamp(code, 40)] = clamp(baseUrl, 500);
+    }
+    const explicitHosts = asStringArray(candidate.entry.allowedHosts);
+    if (explicitHosts.length > 0) {
+      for (const host of explicitHosts) {
+        if (!allowedHosts.includes(host)) allowedHosts.push(clamp(host, 200));
+      }
+    } else if (baseUrl) {
+      const host = hostOf(baseUrl);
+      if (host && !allowedHosts.includes(host)) allowedHosts.push(clamp(host, 200));
+    }
+    for (const ip of asStringArray(candidate.entry.inboundIpAllowlist)) {
+      if (!inboundIpAllowlist.includes(ip)) inboundIpAllowlist.push(clamp(ip, 64));
+    }
+    for (const ip of asStringArray(candidate.entry.outboundEgressIps)) {
+      if (!outboundEgressIps.includes(ip)) outboundEgressIps.push(clamp(ip, 64));
+    }
   }
   const result: JsonRecord = {
     env: target,
     baseUrls,
     allowedHosts: allowedHosts.slice(0, 20),
   };
-  const active = selected[0] ? asBoolean(selected[0].entry.active) : undefined;
+  if (inboundIpAllowlist.length > 0) result.inboundIpAllowlist = inboundIpAllowlist.slice(0, 50);
+  if (outboundEgressIps.length > 0) result.outboundEgressIps = outboundEgressIps.slice(0, 50);
+  const selectedEntry = selected[0]?.entry;
+  const active = selectedEntry ? asBoolean(selectedEntry.enabled) ?? asBoolean(selectedEntry.active) : undefined;
   if (active !== undefined) result.enabled = active;
   return result;
 };
@@ -223,16 +248,37 @@ const AUTH_APPLY = ["HEADER", "QUERY", "BODY"] as const;
 
 export const toCoreGatewayVersionAuth = (body: unknown): JsonRecord => {
   const source = asRecord(body);
-  const settings = asRecord(source.settings);
+  const auth = asRecord(source.auth);
+  const settings = { ...asRecord(source.settings), ...auth };
   const result: JsonRecord = {
-    env: pickEnum(source.env, GATEWAY_ENVIRONMENTS) ?? "LIVE",
-    method: pickEnum(source.authMethod, AUTH_METHODS) ?? "NONE",
+    env: pickEnum(source.env ?? auth.env, GATEWAY_ENVIRONMENTS) ?? "LIVE",
+    method: pickEnum(source.authMethod ?? auth.method, AUTH_METHODS) ?? "NONE",
     authApply:
-      pickEnum(source.authApply, AUTH_APPLY) ??
+      pickEnum(source.authApply ?? auth.authApply, AUTH_APPLY) ??
       pickEnum(settings.authApply, AUTH_APPLY) ??
       "HEADER",
   };
-  if (Object.keys(settings).length > 0) result.refreshConfigJson = settings;
+  const refreshConfig: JsonRecord = {};
+  for (const key of [
+    "username",
+    "keyRef",
+    "tokenUrl",
+    "clientIdRef",
+    "clientSecretRef",
+    "extraHeaders",
+    "header_name",
+    "query_name",
+    "body_name",
+    "token_endpoint",
+    "refresh_url",
+    "refresh_period_ms",
+    "signature_header",
+    "timestamp_header",
+    "signature_algorithm",
+  ] as const) {
+    if (settings[key] !== undefined) refreshConfig[key] = settings[key];
+  }
+  if (Object.keys(refreshConfig).length > 0) result.refreshConfigJson = refreshConfig;
   return result;
 };
 
@@ -243,7 +289,8 @@ const AMOUNT_FORMATS = ["STRING_DECIMAL", "INTEGER_MINOR_UNITS", "NUMBER"] as co
 
 export const toCoreGatewayVersionSettings = (body: unknown): JsonRecord => {
   const source = asRecord(body);
-  const settings = asRecord(source.settings);
+  const pipeline = asRecord(source.amountPipeline);
+  const settings = { ...asRecord(source.settings), ...pipeline };
   const result: JsonRecord = {
     amountScale: AMOUNT_SCALES.includes(settings.amountScale as 1)
       ? (settings.amountScale as 1)
@@ -295,6 +342,15 @@ const CANONICALIZATION_MODES = [
 ] as const;
 const OUTPUT_ENCODINGS = ["HEX_LOWER", "HEX_UPPER", "BASE64"] as const;
 
+const SECRET_KEY_ENCODINGS = ["UTF8", "HEX", "BASE64"] as const;
+
+const toSecretKeyEncoding = (value: unknown): (typeof SECRET_KEY_ENCODINGS)[number] => {
+  const normalized = asString(value)?.trim().toUpperCase() ?? "";
+  if (normalized === "HEX") return "HEX";
+  if (normalized === "BASE64") return "BASE64";
+  return "UTF8";
+};
+
 export const toCoreGatewayVersionCryptoProfiles = (body: unknown): JsonRecord => {
   const source = asRecord(body);
   const profiles = asArray(source.cryptoProfiles)
@@ -302,18 +358,25 @@ export const toCoreGatewayVersionCryptoProfiles = (body: unknown): JsonRecord =>
     .slice(0, 20)
     .map((profile) => {
       const encoding = asString(profile.encoding)?.trim().toUpperCase();
+      const canonicalization = asString(profile.canonicalization)?.trim().toUpperCase();
+      const outputEncoding = asString(profile.outputEncoding)?.trim().toUpperCase();
       const result: JsonRecord = {
         name: clamp(nonEmpty(asString(profile.code) ?? asString(profile.name), "profile"), 64),
-        purpose: pickEnum(profile.purpose, CRYPTO_PURPOSES) ?? "OUTBOUND_SIGN",
+        purpose: pickEnum(profile.purpose ?? profile.direction, CRYPTO_PURPOSES) ?? "OUTBOUND_SIGN",
         algorithm: pickEnum(profile.algorithm, CRYPTO_ALGORITHMS) ?? "SHA256",
+        secretKeyEncoding: toSecretKeyEncoding(profile.keyEncoding ?? profile.encoding),
         canonicalizationMode:
-          encoding && (CANONICALIZATION_MODES as readonly string[]).includes(encoding)
-            ? encoding
-            : "SORTED_KEY_VALUE_AMP",
+          canonicalization && (CANONICALIZATION_MODES as readonly string[]).includes(canonicalization)
+            ? canonicalization
+            : encoding && (CANONICALIZATION_MODES as readonly string[]).includes(encoding)
+              ? encoding
+              : "SORTED_KEY_VALUE_AMP",
         outputEncoding:
-          encoding && (OUTPUT_ENCODINGS as readonly string[]).includes(encoding)
-            ? encoding
-            : "HEX_LOWER",
+          outputEncoding && (OUTPUT_ENCODINGS as readonly string[]).includes(outputEncoding)
+            ? outputEncoding
+            : encoding && (OUTPUT_ENCODINGS as readonly string[]).includes(encoding)
+              ? encoding
+              : "HEX_LOWER",
       };
       const secretKeyRef = asString(profile.secretRef);
       if (secretKeyRef) result.secretKeyRef = clamp(secretKeyRef, 120);
@@ -350,20 +413,25 @@ const toCoreFlowStep = (entry: unknown): JsonRecord => {
   };
   const method = asString(step.method);
   if (method) result.method = clamp(method, 10);
-  const urlTemplate = asString(step.urlTemplate);
+  const urlTemplate = asString(step.urlTemplate) ?? asString(step.url);
   if (urlTemplate) result.urlTemplate = clamp(urlTemplate, 1000);
   const contentType = asString(step.contentType);
   if (contentType) result.contentType = clamp(contentType, 80);
   const pointOfNoReturn = asBoolean(step.pointOfNoReturn);
   if (pointOfNoReturn !== undefined) result.pointOfNoReturn = pointOfNoReturn;
-  if (isRecord(step.idempotencyConfig)) result.idempotencyConfig = step.idempotencyConfig;
+  if (isRecord(step.idempotencyConfig)) {
+    result.idempotencyConfig = step.idempotencyConfig;
+  } else {
+    const mode = asString(step.idempotencyConfig);
+    if (mode) result.idempotencyConfig = { mode: clamp(mode, 64) };
+  }
   const timeoutMs = clampNumber(step.timeoutMs, 1000, 120000);
   if (timeoutMs !== undefined) result.timeoutMs = timeoutMs;
   return result;
 };
 
 const resolveFlowPhases = (flow: JsonRecord): string[] => {
-  const mapped = asStringArray(flow.phases)
+  const mapped = [...asStringArray(flow.phases), ...(asString(flow.phase) ? [asString(flow.phase) as string] : [])]
     .map((phase) => pickEnum(phase, FLOW_PHASES))
     .filter((phase): phase is (typeof FLOW_PHASES)[number] => phase !== undefined);
   const unique = [...new Set(mapped)];
@@ -415,14 +483,27 @@ const resolvePathToken = (source: JsonRecord): string => {
     asString(source.pathToken) ??
     asString(source.token) ??
     asString(source.path) ??
-    asString(source.code);
+    asString(source.code) ??
+    asString(source.name);
   if (candidate && candidate.length >= 8 && candidate.length <= 120) return candidate;
   return randomBytes(16).toString("hex");
 };
 
+const CHANNEL_KINDS: Record<string, string> = {
+  WEBHOOK: "WEBHOOK",
+  RETURN_URL: "RETURN_URL",
+  BROWSER_CALLBACK: "BROWSER_CALLBACK",
+  INQUIRY_POLL: "POLL",
+  POLL: "POLL",
+  STATEMENT: "STATEMENT",
+  OPERATOR: "OPERATOR",
+  SYNC_RESPONSE: "WEBHOOK",
+};
+
 const toCoreChannel = (entry: unknown, forcedType?: string): JsonRecord | null => {
   if (!isRecord(entry)) return null;
-  const type = forcedType ?? pickEnum(entry.type, CHANNEL_TYPES) ?? "WEBHOOK";
+  const kind = asString(entry.kind)?.trim().toUpperCase() ?? "";
+  const type = forcedType ?? pickEnum(entry.type, CHANNEL_TYPES) ?? CHANNEL_KINDS[kind] ?? "WEBHOOK";
   const verifyMethod = pickEnum(entry.verifyMethod, VERIFY_METHODS) ?? defaultVerifyMethod(type);
   const result: JsonRecord = {
     type,
@@ -440,7 +521,11 @@ const toCoreChannel = (entry: unknown, forcedType?: string): JsonRecord | null =
   if (dedupeKeySelector) result.dedupeKeySelector = clamp(dedupeKeySelector, 160);
   const ackBodyTemplate = asString(entry.ackBodyTemplate);
   if (ackBodyTemplate) result.ackBodyTemplate = clamp(ackBodyTemplate, 1000);
-  const timestampToleranceSec = clampNumber(entry.timestampToleranceSec, 30, 86400);
+  const timestampToleranceSec = clampNumber(
+    entry.timestampToleranceSec ?? entry.timestampToleranceSeconds,
+    30,
+    86400,
+  );
   if (timestampToleranceSec !== undefined) result.timestampToleranceSec = timestampToleranceSec;
   const ipAllowlist = asStringArray(entry.ipAllowlist).slice(0, 50);
   if (ipAllowlist.length > 0) result.ipAllowlist = ipAllowlist;
@@ -470,22 +555,40 @@ export const toCoreGatewayVersionChannels = (body: unknown): JsonRecord => {
 const STATUS_RULE_OPS = ["equals", "not_equals", "in", "exists", "matches"] as const;
 const CANONICAL_STATUSES = ["AWAITING_CUSTOMER", "VERIFYING", "SUCCEEDED", "FAILED", "UNKNOWN"] as const;
 
+const toCanonicalStatus = (value: unknown): (typeof CANONICAL_STATUSES)[number] => {
+  const direct = pickEnum(value, CANONICAL_STATUSES);
+  if (direct) return direct;
+  const status = asString(value)?.trim().toUpperCase() ?? "";
+  if (["SUCCEEDED", "REFUNDED", "PARTIALLY_REFUNDED", "CAPTURED", "SETTLED"].includes(status)) {
+    return "SUCCEEDED";
+  }
+  if (["FAILED", "EXPIRED", "CANCELLED", "BLOCKED", "DISPUTED", "DECLINED", "REJECTED"].includes(status)) {
+    return "FAILED";
+  }
+  if (["CREATED", "INITIATING", "AUTHORIZING", "PROCESSING", "PENDING"].includes(status)) {
+    return "VERIFYING";
+  }
+  if (status === "AWAITING_CUSTOMER") return "AWAITING_CUSTOMER";
+  return "UNKNOWN";
+};
+
 export const toCoreGatewayVersionStatusRules = (body: unknown): JsonRecord => {
   const source = asRecord(body);
   const rules = asArray(source.statusRules)
     .filter(isRecord)
     .slice(0, 50)
     .map((rule) => {
+      const gatewayCode = asString(rule.gatewayCode) ?? asString(rule.selector);
       const result: JsonRecord = {
         phase: clamp(nonEmpty(asString(rule.phase), "INITIATE"), 40),
-        selector: clamp(nonEmpty(asString(rule.selector), "status"), 160),
+        selector: clamp(nonEmpty(gatewayCode, "status"), 160),
         op: pickEnum(rule.op, STATUS_RULE_OPS) ?? "equals",
-        value: rule.value === undefined ? null : rule.value,
-        canonicalStatus: pickEnum(rule.canonicalStatus, CANONICAL_STATUSES) ?? "UNKNOWN",
+        value: rule.value === undefined ? gatewayCode ?? null : rule.value,
+        canonicalStatus: toCanonicalStatus(rule.canonicalStatus),
       };
       const canonicalSubstatus = asString(rule.canonicalSubstatus);
       if (canonicalSubstatus) result.canonicalSubstatus = clamp(canonicalSubstatus, 80);
-      const canonicalError = asString(rule.canonicalError);
+      const canonicalError = asString(rule.canonicalError) ?? asString(rule.messageEn);
       if (canonicalError) result.canonicalError = clamp(canonicalError, 80);
       return result;
     });
@@ -510,13 +613,19 @@ export const toCoreGatewayVersionErrorMaps = (body: unknown): JsonRecord => {
         nonEmpty(asString(entry.gatewayCode) ?? asString(entry.code), "UNKNOWN"),
         80,
       );
+      const otpRetryable = asBoolean(entry.otpRetryable);
       const result: JsonRecord = {
         gatewayCode,
         canonicalError: clamp(
-          nonEmpty(asString(entry.canonicalError) ?? asString(entry.errorCode), gatewayCode),
+          nonEmpty(
+            asString(entry.canonicalError) ?? asString(entry.canonicalStatus) ?? asString(entry.errorCode),
+            gatewayCode,
+          ),
           80,
         ),
-        classification: pickEnum(entry.classification, ERROR_CLASSIFICATIONS) ?? "AMBIGUOUS",
+        classification:
+          pickEnum(entry.classification, ERROR_CLASSIFICATIONS) ??
+          (otpRetryable ? "RETRYABLE_OTP" : "AMBIGUOUS"),
       };
       const retryable = asBoolean(entry.retryable);
       if (retryable !== undefined) result.retryable = retryable;
@@ -524,9 +633,9 @@ export const toCoreGatewayVersionErrorMaps = (body: unknown): JsonRecord => {
       if (countsTowardLockout !== undefined) result.countsTowardLockout = countsTowardLockout;
       const countsTowardBreaker = asBoolean(entry.countsTowardBreaker);
       if (countsTowardBreaker !== undefined) result.countsTowardBreaker = countsTowardBreaker;
-      const customerMessageAr = asString(entry.customerMessageAr);
+      const customerMessageAr = asString(entry.customerMessageAr) ?? asString(entry.messageAr);
       if (customerMessageAr) result.customerMessageAr = clamp(customerMessageAr, 500);
-      const customerMessageEn = asString(entry.customerMessageEn);
+      const customerMessageEn = asString(entry.customerMessageEn) ?? asString(entry.messageEn);
       if (customerMessageEn) result.customerMessageEn = clamp(customerMessageEn, 500);
       const operatorHint = asString(entry.operatorHint);
       if (operatorHint) result.operatorHint = clamp(operatorHint, 500);
@@ -888,12 +997,19 @@ export const toCoreAmlReport = (body: unknown): JsonRecord => {
 /* -------------------------------------------------------------------------------- rails */
 
 const RAIL_COLLECTION_MODES: Record<string, string> = {
+  OTP_PULL: "OTP_PULL",
   REDIRECT: "REDIRECT",
   EMBEDDED: "EMBEDDED",
+  PUSH_APPROVAL: "PUSH_APPROVAL",
+  QR_DISPLAY: "QR_DISPLAY",
   QR: "QR_DISPLAY",
   PUSH: "PUSH_APPROVAL",
+  PAY_CODE: "PAY_CODE",
+  DEEP_LINK: "DEEP_LINK",
+  MANUAL: "MANUAL",
   TRANSFER: "MANUAL",
   CASH: "PAY_CODE",
+  HYBRID: "HYBRID",
 };
 
 const toCoreCollectionMode = (value: unknown): string | undefined => {
@@ -901,17 +1017,34 @@ const toCoreCollectionMode = (value: unknown): string | undefined => {
   return RAIL_COLLECTION_MODES[mode];
 };
 
+const toCapabilitiesRecord = (value: unknown): JsonRecord => {
+  if (isRecord(value)) return value;
+  const record: JsonRecord = {};
+  for (const key of asStringArray(value)) record[clamp(key, 40)] = true;
+  return record;
+};
+
 export const toCoreRailCreate = (body: unknown): JsonRecord => {
   const source = asRecord(body);
   const name = clamp(nonEmpty(asString(source.name), "rail"), 160);
+  const nameAr = clamp(nonEmpty(asString(source.nameAr), name), 160);
+  const nameEn = clamp(nonEmpty(asString(source.nameEn), name), 160);
   const result: JsonRecord = {
     code: (asString(source.code) ?? "").trim().toLowerCase(),
-    nameAr: name,
-    nameEn: name,
+    nameAr,
+    nameEn,
     collectionMode: toCoreCollectionMode(source.collectionMode) ?? missingCanonical("collectionMode"),
   };
   const subModes = asStringArray(source.subModes).slice(0, 20);
   if (subModes.length > 0) result.subModes = subModes;
+  const currency = asString(source.currency);
+  if (currency && currency.length === 3) result.currency = currency.toUpperCase();
+  for (const key of ["minAmount", "maxAmount"] as const) {
+    const value = asString(source[key]);
+    if (value && DECIMAL_PATTERN.test(value)) result[key] = value;
+  }
+  const capabilities = toCapabilitiesRecord(source.capabilities);
+  if (Object.keys(capabilities).length > 0) result.capabilities = capabilities;
   return result;
 };
 
@@ -935,20 +1068,32 @@ export const toCoreRailUpdate = (body: unknown): JsonRecord => {
   }
   const displayOrder = clampNumber(source.displayOrder, 0, 9999);
   if (displayOrder !== undefined) result.displayOrder = displayOrder;
-  const capabilities = asRecord(source.capabilities);
+  const capabilities = toCapabilitiesRecord(source.capabilities);
   if (Object.keys(capabilities).length > 0) result.capabilities = capabilities;
   return result;
 };
 
 const RAIL_FIELD_TYPES: Record<string, string> = {
   TEXT: "string",
+  STRING: "string",
   NUMBER: "number",
+  NUMERIC: "number",
   PHONE: "phone",
   OTP: "otp",
   NATIONAL_ID: "string",
   PASSPORT: "string",
   DATE: "string",
   HIDDEN: "string",
+  WALLET_ID: "wallet_id",
+  SELECT: "from_list",
+  FROM_LIST: "from_list",
+};
+
+const NORMALIZERS: Record<string, string> = {
+  ARABIC_DIGITS_TO_ASCII: "arabic_digits_to_ascii",
+  PHONE_NORMALIZE_LOCAL_09: "phone_normalize_local_09",
+  PHONE_NORMALIZE_INTL_218: "phone_normalize_intl_218",
+  PHONE_NORMALIZE_E164: "phone_normalize_e164",
 };
 
 const toCoreFieldKey = (value: unknown): string => {
@@ -966,24 +1111,35 @@ export const toCoreRailFields = (body: unknown): JsonRecord => {
     .filter(isRecord)
     .slice(0, 40)
     .map((field, index) => {
-      const key = toCoreFieldKey(field.code);
-      const label = clamp(nonEmpty(asString(field.label), key), 200);
+      const key = toCoreFieldKey(field.code ?? field.key ?? field.fieldKey);
+      const labelEn = clamp(nonEmpty(asString(field.labelEn) ?? asString(field.label), key), 200);
+      const labelAr = clamp(nonEmpty(asString(field.labelAr) ?? asString(field.label), labelEn), 200);
+      const typeValue = asString(field.type) ?? asString(field.inputType);
       const result: JsonRecord = {
         key,
-        type: RAIL_FIELD_TYPES[asString(field.type)?.trim().toUpperCase() ?? ""] ?? "string",
-        labelAr: label,
-        labelEn: label,
-        orderIndex: clampNumber(field.order, 0, 999) ?? index,
+        type: RAIL_FIELD_TYPES[(typeValue ?? "").trim().toUpperCase()] ?? "string",
+        labelAr,
+        labelEn,
+        orderIndex: clampNumber(field.orderIndex ?? field.order, 0, 999) ?? index,
       };
       const required = asBoolean(field.required);
       if (required !== undefined) result.required = required;
-      if (asBoolean(field.sensitive)) result.sensitivity = "SENSITIVE";
-      const pattern = asString(field.pattern);
+      const sensitivity = asString(field.sensitivity)?.trim().toUpperCase();
+      if (sensitivity === "SENSITIVE" || sensitivity === "PAN") {
+        result.sensitivity = sensitivity;
+      } else if (asBoolean(field.sensitive)) {
+        result.sensitivity = "SENSITIVE";
+      }
+      const pattern = asString(field.pattern) ?? asString(field.regex);
       if (pattern) result.regex = clamp(pattern, 200);
       const minLength = clampNumber(field.minLength, 0, 64);
       if (minLength !== undefined) result.minLength = minLength;
       const maxLength = clampNumber(field.maxLength, 0, 64);
       if (maxLength !== undefined) result.maxLength = maxLength;
+      const normalizer = asString(field.normalizer)?.trim().toUpperCase() ?? "";
+      if (NORMALIZERS[normalizer]) result.normalizer = { type: NORMALIZERS[normalizer] };
+      const options = asStringArray(field.options).slice(0, 100);
+      if (options.length > 0) result.optionsJson = { options };
       return result;
     });
   return { fields };

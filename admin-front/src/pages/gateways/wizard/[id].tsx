@@ -39,37 +39,37 @@ const mergeDraft = (base: WizardDraft, payload: any): WizardDraft => {
     if (source.identity) {
         next.identity = { ...base.identity, ...source.identity };
     }
-    if (source.environments) {
+    if (Array.isArray(source.environments) && source.environments.length > 0) {
         next.environments = source.environments;
     }
     if (source.auth) {
         next.auth = { ...base.auth, ...source.auth };
     }
-    if (source.credentialSets) {
+    if (Array.isArray(source.credentialSets) && source.credentialSets.length > 0) {
         next.credentialSets = source.credentialSets;
     }
-    if (source.rails) {
+    if (Array.isArray(source.rails) && source.rails.length > 0) {
         next.rails = source.rails;
     }
-    if (source.cryptoProfiles) {
+    if (Array.isArray(source.cryptoProfiles) && source.cryptoProfiles.length > 0) {
         next.cryptoProfiles = source.cryptoProfiles;
     }
-    if (source.flows) {
+    if (Array.isArray(source.flows) && source.flows.length > 0) {
         next.flows = source.flows;
     }
-    if (source.clientActions) {
+    if (Array.isArray(source.clientActions) && source.clientActions.length > 0) {
         next.clientActions = source.clientActions;
     }
-    if (source.confirmationChannels) {
+    if (Array.isArray(source.confirmationChannels) && source.confirmationChannels.length > 0) {
         next.confirmationChannels = source.confirmationChannels;
     }
-    if (source.pollPolicies) {
+    if (Array.isArray(source.pollPolicies) && source.pollPolicies.length > 0) {
         next.pollPolicies = source.pollPolicies;
     }
-    if (source.statusRules) {
+    if (Array.isArray(source.statusRules) && source.statusRules.length > 0) {
         next.statusRules = source.statusRules;
     }
-    if (source.errorMaps) {
+    if (Array.isArray(source.errorMaps) && source.errorMaps.length > 0) {
         next.errorMaps = source.errorMaps;
     }
     if (source.amountPipeline) {
@@ -99,16 +99,60 @@ const GatewayWizardPage = dc(() => {
     const saving = ref(false);
     const saveError = ref<string | null>(null);
 
-    const versionId = computed(() => String(route.params.id ?? ""));
+    const gatewayId = computed(() => String(route.params.id ?? ""));
+    const versionId = ref("");
 
     const load = async () => {
         loading.value = true;
         error.value = null;
         try {
+            const gatewayResponse = await api.get(urlsMap.gatewayDetail(gatewayId.value));
+            const gatewayPayload = gatewayResponse.data?.data ?? gatewayResponse.data ?? {};
+            const gateway = gatewayPayload.gateway ?? gatewayPayload;
+            const versions: any[] = Array.isArray(gateway.versions) ? gateway.versions : [];
+            const newestFirst = [...versions].sort(
+                (left, right) => (right.versionNumber ?? 0) - (left.versionNumber ?? 0),
+            );
+            let version =
+                newestFirst.find((entry) => entry.state === "DRAFT") ??
+                versions.find((entry) => entry.id === gateway.activeVersionId) ??
+                newestFirst[0];
+
+            if (!version?.id) {
+                const created = await api.post(urlsMap.gatewayVersions(gatewayId.value), {
+                    version: 1,
+                    changelog: "Initial wizard draft",
+                });
+                const createdPayload = created.data?.data ?? created.data ?? {};
+                version = {
+                    id: createdPayload.id ?? createdPayload.versionId,
+                    versionNumber: createdPayload.versionNumber,
+                };
+            }
+            if (!version?.id) {
+                throw new Error("The gateway version could not be resolved");
+            }
+            versionId.value = String(version.id);
+
             const response = await api.get(urlsMap.gatewayVersionDetail(versionId.value));
             const payload = response.data?.data ?? response.data ?? {};
-            draft.value = mergeDraft(emptyDraft(), payload);
-            draft.value.versionId = payload?.versionId ?? payload?.id ?? versionId.value;
+            const merged = mergeDraft(emptyDraft(), payload);
+            merged.versionId = payload?.versionId ?? payload?.id ?? versionId.value;
+            merged.id = gateway.id ?? gatewayId.value;
+            if (gateway.code) {
+                merged.identity = {
+                    ...merged.identity,
+                    code: gateway.code,
+                    name: gateway.name ?? merged.identity.name,
+                    operator: gateway.operator ?? merged.identity.operator,
+                    country: gateway.country ?? merged.identity.country,
+                    aliases: gateway.aliases ?? merged.identity.aliases,
+                    kind: gateway.kind ?? merged.identity.kind,
+                    verificationState: gateway.verificationState ?? merged.identity.verificationState,
+                    riskClass: gateway.riskClass ?? merged.identity.riskClass,
+                };
+            }
+            draft.value = merged;
         } catch (e) {
             error.value = extractApiErrorMessage(e);
         } finally {
@@ -118,52 +162,189 @@ const GatewayWizardPage = dc(() => {
 
     void load();
 
-    watch(versionId, () => {
+    watch(gatewayId, () => {
         void load();
     });
 
+    const amountOrUndefined = (value: string) => {
+        const trimmed = (value ?? "").trim();
+        return trimmed.length > 0 ? trimmed : undefined;
+    };
+
     const saveStep = async (stepNumber: number) => {
         const vid = draft.value.versionId ?? versionId.value;
+        const gid = draft.value.id ?? gatewayId.value;
         saving.value = true;
         saveError.value = null;
         try {
             if (stepNumber === 1) {
-                await api.put(urlsMap.gatewayVersionSettings(vid), { identity: draft.value.identity });
+                await api.patch(urlsMap.gatewayDetail(gid), {
+                    code: draft.value.identity.code,
+                    name: draft.value.identity.name,
+                    operator: draft.value.identity.operator,
+                    country: draft.value.identity.country,
+                    kind: draft.value.identity.kind,
+                    aliases: draft.value.identity.aliases,
+                    riskClass: draft.value.identity.riskClass,
+                    evidenceLevel: draft.value.identity.verificationState === "VERIFIED" ? "VERIFIED" : "PARTIAL",
+                });
             } else if (stepNumber === 2) {
-                await api.put(urlsMap.gatewayVersionEnvironments(vid), {
-                    environments: draft.value.environments,
-                    credentialSets: draft.value.credentialSets.map((credential) => ({
-                        label: credential.label,
-                        ownerType: credential.ownerType,
-                        settlementTarget: credential.settlementTarget,
-                        env: credential.env,
-                        secret: credential.secret,
-                        secretRef: credential.secretRef,
-                    })),
+                for (const environment of draft.value.environments) {
+                    await api.put(urlsMap.gatewayVersionEnvironments(vid), {
+                        environments: [
+                            {
+                                code: environment.env,
+                                env: environment.env,
+                                baseUrl: environment.baseUrl,
+                                allowedHosts: environment.allowedHosts,
+                                inboundIpAllowlist: environment.inboundIpAllowlist,
+                                active: environment.enabled,
+                                enabled: environment.enabled,
+                            },
+                        ],
+                        env: environment.env,
+                    });
+                }
+                await api.put(urlsMap.gatewayVersionAuth(vid), {
+                    env: "LIVE",
+                    authMethod: draft.value.auth.method,
+                    authApply: "HEADER",
+                    settings: {
+                        username: draft.value.auth.username,
+                        keyRef: draft.value.auth.keyRef,
+                        tokenUrl: draft.value.auth.tokenUrl,
+                        clientIdRef: draft.value.auth.clientIdRef,
+                        clientSecretRef: draft.value.auth.clientSecretRef,
+                        extraHeaders: draft.value.auth.extraHeaders,
+                    },
                 });
-                await api.put(urlsMap.gatewayVersionAuth(vid), { auth: draft.value.auth });
+                for (const credential of draft.value.credentialSets) {
+                    const secret = credential.secret || credential.secretRef;
+                    if (!secret) continue;
+                    const entries = [
+                        {
+                            key: credential.label || "secret",
+                            type: "HEADER" as const,
+                            value: secret,
+                            isSecret: true,
+                        },
+                    ];
+                    if (credential.id) {
+                        await api.put(urlsMap.credentialSetDetail(credential.id), { entries });
+                    } else if (credential.ownerType === "PLATFORM") {
+                        const response = await api.post(urlsMap.credentialSetsList, {
+                            gatewayCode: draft.value.identity.code,
+                            env: credential.env,
+                            ownerType: credential.ownerType,
+                            settlementTarget: credential.settlementTarget,
+                            externalMerchantId: credential.label || "PLATFORM",
+                            entries,
+                        });
+                        const created = response.data?.data ?? response.data ?? {};
+                        if (created.id) credential.id = created.id;
+                    }
+                }
             } else if (stepNumber === 3) {
-                await api.put(urlsMap.gatewayVersionSettings(vid), { rails: draft.value.rails });
+                for (const rail of draft.value.rails) {
+                    const code = rail.code?.trim().toLowerCase();
+                    if (!code) continue;
+                    const capabilities: Record<string, boolean> = {};
+                    for (const capability of rail.capabilities ?? []) capabilities[capability] = true;
+                    let railId = rail.id;
+                    if (railId) {
+                        await api.patch(urlsMap.railDetail(railId), {
+                            nameAr: rail.nameAr || rail.nameEn || code,
+                            nameEn: rail.nameEn || rail.nameAr || code,
+                            minAmount: amountOrUndefined(rail.minAmount) ?? "0",
+                            maxAmount: amountOrUndefined(rail.maxAmount),
+                            capabilities,
+                            active: true,
+                        });
+                    } else {
+                        const response = await api.post(urlsMap.railsList, {
+                            code,
+                            nameAr: rail.nameAr || rail.nameEn || code,
+                            nameEn: rail.nameEn || rail.nameAr || code,
+                            collectionMode: rail.collectionMode,
+                            currency: (rail.currency || "LYD").toUpperCase(),
+                            minAmount: amountOrUndefined(rail.minAmount) ?? "0",
+                            maxAmount: amountOrUndefined(rail.maxAmount),
+                            capabilities,
+                        });
+                        railId = response.data?.data?.id ?? response.data?.id;
+                        if (railId) rail.id = railId;
+                    }
+                    if (railId && rail.fields.length > 0) {
+                        await api.put(urlsMap.railFields(railId), {
+                            fields: rail.fields.map((field, index) => ({
+                                code: field.fieldKey || `field_${index + 1}`,
+                                labelAr: field.labelAr || field.labelEn || field.fieldKey || `field_${index + 1}`,
+                                labelEn: field.labelEn || field.labelAr || field.fieldKey || `field_${index + 1}`,
+                                type: field.inputType,
+                                required: field.required,
+                                regex: field.regex || undefined,
+                                minLength: field.minLength ?? undefined,
+                                maxLength: field.maxLength ?? undefined,
+                                sensitivity: field.sensitivity,
+                                normalizer: field.normalizer,
+                                options: field.options,
+                                order: index,
+                            })),
+                        });
+                    }
+                    if (railId && !rail.routeId) {
+                        const routeResponse = await api.post(urlsMap.routesList, {
+                            railId,
+                            gatewayId: gid,
+                            environment: "sandbox",
+                            priority: 0,
+                            credentialPolicy: "PLATFORM",
+                        });
+                        const route = routeResponse.data?.data ?? routeResponse.data ?? {};
+                        if (route.id) rail.routeId = route.id;
+                    }
+                }
             } else if (stepNumber === 4) {
-                await api.put(urlsMap.gatewayVersionCryptoProfiles(vid), {
-                    cryptoProfiles: draft.value.cryptoProfiles,
-                });
+                if (draft.value.cryptoProfiles.length > 0) {
+                    await api.put(urlsMap.gatewayVersionCryptoProfiles(vid), {
+                        cryptoProfiles: draft.value.cryptoProfiles,
+                    });
+                }
             } else if (stepNumber === 5) {
                 await api.put(urlsMap.gatewayVersionFlows(vid), { flows: draft.value.flows });
             } else if (stepNumber === 6) {
-                await api.put(urlsMap.gatewayVersionChannels(vid), {
-                    clientActions: draft.value.clientActions,
-                    confirmationChannels: draft.value.confirmationChannels,
-                    pollPolicies: draft.value.pollPolicies,
-                });
+                if (draft.value.confirmationChannels.length > 0 || draft.value.pollPolicies.length > 0) {
+                    await api.put(urlsMap.gatewayVersionChannels(vid), {
+                        clientActions: draft.value.clientActions,
+                        confirmationChannels: draft.value.confirmationChannels,
+                        pollPolicies: draft.value.pollPolicies,
+                    });
+                }
             } else if (stepNumber === 7) {
-                await api.put(urlsMap.gatewayVersionStatusRules(vid), { statusRules: draft.value.statusRules });
-                await api.put(urlsMap.gatewayVersionErrorMaps(vid), { errorMaps: draft.value.errorMaps });
+                if (draft.value.statusRules.length > 0) {
+                    await api.put(urlsMap.gatewayVersionStatusRules(vid), {
+                        statusRules: draft.value.statusRules,
+                    });
+                }
+                if (draft.value.errorMaps.length > 0) {
+                    await api.put(urlsMap.gatewayVersionErrorMaps(vid), { errorMaps: draft.value.errorMaps });
+                }
                 await api.put(urlsMap.gatewayVersionSettings(vid), {
                     amountPipeline: draft.value.amountPipeline,
-                    costModel: draft.value.costModel,
-                    statementMapping: draft.value.statementMapping,
                 });
+                const routeId = draft.value.rails.find((rail) => rail.routeId)?.routeId;
+                if (routeId) {
+                    await api.patch(urlsMap.routeDetail(routeId), {
+                        costModel: {
+                            model: draft.value.costModel.model,
+                            flatFee: draft.value.costModel.flatFee,
+                            percentFee: draft.value.costModel.percentFee,
+                            minFee: draft.value.costModel.minFee,
+                            maxFee: draft.value.costModel.maxFee,
+                            currency: draft.value.costModel.currency,
+                        },
+                    });
+                }
             }
             showSnackBar({ type: "success", message: t("Saved") });
             return true;

@@ -32,7 +32,7 @@ const MiniStatCard = dc((props: StatItem & { loading?: boolean }) => {
                 <VCardText style={{ padding: isMobile ? "12px" : "16px" }}>
                     <div style={{ display: "flex", "align-items": "flex-start", gap: "12px" }}>
                         {props.loading ? (
-                            <VProgressCircular indeterminate size={"32px"} color="primary" />
+                            <VProgressCircular indeterminate size={32} color="primary" />
                         ) : (
                             <div
                                 style={{

@@ -45,9 +45,12 @@ export const gatewayCreateSchema = z
 
 export const gatewayPatchSchema = z
   .object({
+    code: zGatewayCode.optional(),
     name: z.string().min(2).max(160).optional(),
     description: z.string().max(2000).optional(),
     category: z.string().min(2).max(64).optional(),
+    country: z.string().length(2).optional(),
+    kind: z.enum(["DIRECT", "AGGREGATOR", "NATIVE_ADAPTER", "INTERNAL"]).optional(),
     evidenceLevel: z.enum(["VERIFIED", "PARTIAL", "INTERNAL"]).optional(),
     active: z.boolean().optional(),
     baseVersion: zBaseVersion.optional(),
@@ -73,12 +76,17 @@ export const environmentsSchema = z
       .array(
         z
           .object({
-            code: z.string().min(2).max(32),
-            baseUrl: z.string().min(1).max(300),
+            code: z.string().min(1).max(32).optional(),
+            env: z.enum(["SANDBOX", "LIVE"]).optional(),
+            baseUrl: z.string().min(1).max(300).optional(),
+            allowedHosts: z.array(z.string().max(200)).max(20).optional(),
+            inboundIpAllowlist: z.array(z.string().max(64)).max(50).optional(),
+            outboundEgressIps: z.array(z.string().max(64)).max(50).optional(),
             active: z.boolean().optional(),
+            enabled: z.boolean().optional(),
             timeoutMs: z.number().int().min(100).max(120000).optional(),
           })
-          .strict(),
+          .passthrough(),
       )
       .min(1)
       .max(10),
@@ -88,18 +96,21 @@ export const environmentsSchema = z
 
 export const authSchema = z
   .object({
-    authMethod: z.enum([
-      "NONE",
-      "API_KEY",
-      "PERMANENT_TOKEN",
-      "TOKEN_ENDPOINT",
-      "REFRESH_TOKEN",
-      "USERNAME_PASSWORD",
-      "BASIC",
-      "REQUEST_SIGNATURE",
-      "OAUTH2_CLIENT_CREDENTIALS",
-      "MUTUAL_TLS",
-    ]),
+    authMethod: z
+      .enum([
+        "NONE",
+        "API_KEY",
+        "PERMANENT_TOKEN",
+        "TOKEN_ENDPOINT",
+        "REFRESH_TOKEN",
+        "USERNAME_PASSWORD",
+        "BASIC",
+        "REQUEST_SIGNATURE",
+        "OAUTH2_CLIENT_CREDENTIALS",
+        "MUTUAL_TLS",
+      ])
+      .optional(),
+    auth: zJsonObject.optional(),
     credentialSetId: zIdentifier.optional(),
     settings: zJsonObject.optional(),
     env: z.enum(["SANDBOX", "LIVE"]).optional(),
@@ -121,14 +132,19 @@ export const cryptoProfilesSchema = z
       .array(
         z
           .object({
-            code: z.string().min(2).max(64),
-            algorithm: z.enum(["HMAC_SHA256", "HMAC_SHA512", "RSA_SHA256", "PLAIN", "NONE"]),
-            encoding: z.enum(["HEX_UPPER", "HEX_LOWER", "BASE64", "RAW", "SORTED_KEY_VALUE_AMP", "TIMESTAMP_DOT_RAW_BODY", "SORTED_VALUES_HASH"]),
+            code: z.string().min(1).max(64).optional(),
+            name: z.string().min(1).max(64).optional(),
+            algorithm: z.enum(["HMAC_SHA256", "HMAC_SHA512", "RSA_SHA256", "SHA256", "PLAIN", "NONE"]).optional(),
+            encoding: z.string().max(64).optional(),
+            keyEncoding: z.string().max(32).optional(),
+            canonicalization: z.string().max(64).optional(),
             secretRef: z.string().max(128).optional(),
             fields: z.array(z.string().max(64)).max(50).optional(),
             purpose: z.enum(["OUTBOUND_SIGN", "INBOUND_VERIFY"]).optional(),
+            direction: z.enum(["OUTBOUND_SIGN", "INBOUND_VERIFY"]).optional(),
+            toleranceSeconds: z.number().int().min(0).max(86400).optional(),
           })
-          .strict(),
+          .passthrough(),
       )
       .min(1)
       .max(20),
@@ -141,13 +157,14 @@ export const flowsSchema = z
       .array(
         z
           .object({
-            code: z.string().min(2).max(64),
-            name: z.string().min(2).max(160),
+            code: z.string().min(1).max(64).optional(),
+            name: z.string().min(1).max(160).optional(),
+            phase: z.string().min(2).max(64).optional(),
             phases: z.array(z.string().min(2).max(64)).max(30).optional(),
             steps: z.array(zJsonObject).max(200).optional(),
             amountPipeline: z.array(zJsonObject).max(50).optional(),
           })
-          .strict(),
+          .passthrough(),
       )
       .min(1)
       .max(50),
@@ -331,6 +348,15 @@ router.post(
 );
 
 const versionRouter = express.Router();
+
+versionRouter.get(
+  "/:vid",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/gateway-versions/${encodeURIComponent(context.params.vid ?? "")}`,
+    paramsSchema: versionParamsSchema,
+  }),
+);
 
 versionRouter.put(
   "/:vid/environments",

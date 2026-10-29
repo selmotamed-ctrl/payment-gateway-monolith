@@ -1971,9 +1971,12 @@ router.patch("/gateways/:id", async (request: Request, response: Response) => {
   const body = parseOrThrow(
     z
       .object({
+        code: z.string().min(2).max(64).regex(/^[a-z0-9_-]+$/).optional(),
         name: z.string().min(2).max(160).optional(),
         operator: z.string().min(2).max(160).optional(),
+        country: z.string().length(2).optional(),
         aliases: z.array(z.string().min(1).max(64)).max(20).optional(),
+        kind: z.enum(["DIRECT", "AGGREGATOR", "NATIVE_ADAPTER", "INTERNAL"]).optional(),
         verificationState: z.enum(["VERIFIED", "UNVERIFIED"]).optional(),
         riskClass: z.enum(["NORMAL", "HIGH_RISK"]).optional(),
       })
@@ -1987,9 +1990,12 @@ router.patch("/gateways/:id", async (request: Request, response: Response) => {
   const updated = await client.gateway.update({
     where: { id },
     data: {
+      code: body.code,
       name: body.name,
       operator: body.operator,
+      country: body.country?.toUpperCase(),
       aliases: body.aliases,
+      kind: body.kind,
       verificationState: body.verificationState,
       riskClass: body.riskClass,
     },
@@ -2363,6 +2369,342 @@ const loadVersion = async (versionId: string) => {
   }
   return version;
 };
+
+const asStringArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+
+const asRecordValue = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+
+const asRecordArray = (value: unknown): Record<string, unknown>[] =>
+  Array.isArray(value)
+    ? value.filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object" && !Array.isArray(entry))
+    : [];
+
+const asNumberArray = (value: unknown): number[] =>
+  Array.isArray(value)
+    ? value.map((entry) => Number(entry)).filter((entry) => Number.isFinite(entry))
+    : [];
+
+const wizardFieldType = (type: string): string => {
+  switch (type) {
+    case "NUMBER":
+      return "numeric";
+    case "PHONE":
+      return "phone";
+    case "WALLET_ID":
+      return "wallet_id";
+    case "OTP":
+      return "otp";
+    case "FROM_LIST":
+      return "select";
+    default:
+      return "text";
+  }
+};
+
+/**
+ * The wizard reads one version as a single draft document. The relational rows
+ * stay authoritative; this projection only renames the fields to the wizard
+ * contract so the eight steps can render and round-trip their state.
+ */
+router.get("/gateway-versions/:vid", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["gateway:read"]);
+  const { vid } = parseOrThrow(versionParamsSchema, request.params);
+  const version = await client.gatewayVersion.findUnique({
+    where: { id: vid },
+    include: {
+      gateway: { include: { credentialSets: true } },
+      environments: true,
+      auth: true,
+      setting: true,
+      cryptoProfiles: true,
+      flows: { include: { steps: true } },
+      statusRules: { orderBy: { orderIndex: "asc" } },
+      errorMaps: true,
+      confirmationChannels: true,
+    },
+  });
+  if (!version) {
+    throw new ApiError(404, "GATEWAY_VERSION_NOT_FOUND", "The gateway version does not exist");
+  }
+
+  const routes = await client.railRoute.findMany({
+    where: { gatewayId: version.gatewayId },
+    include: {
+      rail: { include: { fields: { orderBy: { orderIndex: "asc" } } } },
+      widgetDefinitions: true,
+      redirectDefinitions: true,
+      pollPolicies: true,
+    },
+    orderBy: { priority: "desc" },
+  });
+
+  const environments = version.environments.map((environment) => {
+    const baseUrls = asRecordValue(environment.baseUrls);
+    const baseUrl =
+      (typeof baseUrls[environment.env] === "string" ? (baseUrls[environment.env] as string) : "") ||
+      (Object.values(baseUrls).find((entry): entry is string => typeof entry === "string") ?? "");
+    return {
+      env: environment.env,
+      baseUrl,
+      baseUrls,
+      allowedHosts: asStringArray(environment.allowedHosts),
+      inboundIpAllowlist: asStringArray(environment.inboundIpAllowlist),
+      enabled: environment.enabled,
+    };
+  });
+
+  const authRow = version.auth.find((entry) => entry.env === "LIVE") ?? version.auth[0];
+  const authConfig = asRecordValue(authRow?.refreshConfigJson);
+  const auth = {
+    method: authRow?.method ?? "API_KEY",
+    authApply: authRow?.authApply ?? "HEADER",
+    username: typeof authConfig.username === "string" ? authConfig.username : "",
+    keyRef: typeof authConfig.keyRef === "string" ? authConfig.keyRef : "",
+    tokenUrl: typeof authConfig.tokenUrl === "string" ? authConfig.tokenUrl : typeof authConfig.token_endpoint === "string" ? authConfig.token_endpoint : "",
+    clientIdRef: typeof authConfig.clientIdRef === "string" ? authConfig.clientIdRef : "",
+    clientSecretRef: typeof authConfig.clientSecretRef === "string" ? authConfig.clientSecretRef : "",
+    extraHeaders: asRecordArray(authConfig.extraHeaders).map((entry) => ({
+      key: typeof entry.key === "string" ? entry.key : "",
+      value: typeof entry.value === "string" ? entry.value : "",
+    })),
+  };
+
+  const credentialSets = version.gateway.credentialSets.map((credential) => ({
+    id: credential.id,
+    label: credential.externalMerchantId ?? credential.id.slice(0, 8),
+    ownerType: credential.ownerType,
+    settlementTarget: credential.settlementTarget,
+    env: credential.env,
+    secret: "",
+    secretRef: "",
+    status: credential.status,
+  }));
+
+  const cryptoProfiles = version.cryptoProfiles.map((profile) => ({
+    id: profile.id,
+    name: profile.name,
+    direction: profile.purpose,
+    algorithm: profile.algorithm,
+    keyEncoding:
+      profile.secretKeyEncoding === "UTF8"
+        ? "utf8"
+        : profile.secretKeyEncoding === "HEX"
+          ? "hex"
+          : "base64",
+    canonicalization: profile.canonicalizationMode,
+    secretRef: profile.secretKeyRef ?? "",
+    fields: asStringArray(profile.includedFields),
+    toleranceSeconds: 300,
+  }));
+
+  const flows = version.flows.map((flow) => ({
+    id: flow.id,
+    phase: flow.phase,
+    steps: [...flow.steps]
+      .sort((left, right) => left.orderIndex - right.orderIndex)
+      .map((step) => ({
+        id: step.id,
+        phase: flow.phase,
+        order: step.orderIndex,
+        type: step.type,
+        name: step.method ?? step.type,
+        method: step.method ?? "",
+        url: step.urlTemplate ?? "",
+        sideEffect: step.sideEffect,
+        retryPolicy: step.retryPolicy,
+        idempotencyConfig: "",
+        pointOfNoReturn: step.pointOfNoReturn,
+        transforms: [],
+        assertExpression: "",
+        outputName: "",
+      })),
+  }));
+
+  const statusRules = version.statusRules.map((rule) => ({
+    id: rule.id,
+    gatewayCode: rule.selector,
+    canonicalStatus: rule.canonicalStatus,
+    messageAr: rule.canonicalError ?? "",
+    messageEn: rule.canonicalSubstatus ?? "",
+    terminal: rule.canonicalStatus === "SUCCEEDED" || rule.canonicalStatus === "FAILED",
+  }));
+
+  const errorMaps = version.errorMaps.map((entry) => ({
+    id: entry.id,
+    gatewayCode: entry.gatewayCode,
+    canonicalStatus: entry.canonicalError,
+    retryable: entry.retryable,
+    otpRetryable: entry.classification === "RETRYABLE_OTP",
+    messageAr: entry.customerMessageAr ?? "",
+    messageEn: entry.customerMessageEn ?? "",
+  }));
+
+  const confirmationChannels = version.confirmationChannels.map((channel) => ({
+    id: channel.id,
+    kind: channel.type === "POLL" ? "INQUIRY_POLL" : channel.type,
+    name: channel.pathToken,
+    eventMap: asRecordArray(channel.eventMap).map((entry) => ({
+      event: typeof entry.event === "string" ? entry.event : "",
+      canonical: typeof entry.canonical === "string" ? entry.canonical : "",
+    })),
+    secretRef: channel.cryptoProfileId ?? "",
+    ipAllowlist: asStringArray(channel.ipAllowlist),
+    mustInquire: channel.mustInquire,
+    timestampToleranceSeconds: channel.timestampToleranceSec,
+  }));
+
+  const rails = new Map<string, Record<string, unknown>>();
+  const clientActions: Record<string, unknown>[] = [];
+  const pollPolicies: Record<string, unknown>[] = [];
+  let costModel: Record<string, unknown> | undefined;
+  for (const route of routes) {
+    if (!rails.has(route.rail.id)) {
+      rails.set(route.rail.id, {
+        id: route.rail.id,
+        routeId: route.id,
+        code: route.rail.code,
+        nameAr: route.rail.nameAr,
+        nameEn: route.rail.nameEn,
+        collectionMode: route.rail.collectionMode,
+        currency: route.rail.currency,
+        minAmount: String(route.rail.minAmount),
+        maxAmount: route.rail.maxAmount === null ? "" : String(route.rail.maxAmount),
+        capabilities: Object.entries(asRecordValue(route.rail.capabilities))
+          .filter(([, enabled]) => enabled === true)
+          .map(([key]) => key),
+        fields: route.rail.fields.map((field) => ({
+          id: field.id,
+          fieldKey: field.key,
+          labelAr: field.labelAr,
+          labelEn: field.labelEn,
+          inputType: wizardFieldType(field.type),
+          required: field.required,
+          regex: field.regex ?? "",
+          minLength: field.minLength,
+          maxLength: field.maxLength,
+          normalizer: "NONE",
+          sensitivity: field.sensitivity,
+          options: Array.isArray(field.optionsJson)
+            ? asStringArray(field.optionsJson)
+            : asStringArray(asRecordValue(field.optionsJson).options),
+        })),
+      });
+    }
+    costModel ??= asRecordValue(route.costModel);
+    for (const widget of route.widgetDefinitions) {
+      clientActions.push({
+        id: widget.id,
+        kind: "RENDER_EMBEDDED",
+        name: route.rail.code,
+        scriptUrls: asStringArray(widget.scriptUrls),
+        scriptSriHashes: asStringArray(widget.scriptSriHashes),
+        allowedOrigins: asStringArray(widget.allowedOrigins),
+        iframeSandbox: asStringArray(widget.iframeSandboxAttrs).join(" "),
+        otpLength: 6,
+        maxOtpAttempts: 3,
+        resendCooldownSeconds: 30,
+        redirectMethod: "GET",
+        redirectUrl: "",
+        qrPayload: "",
+        payCode: "",
+        instructionsAr: "",
+        instructionsEn: "",
+        deepLinkUrl: "",
+        walletHint: "",
+        destinationAccount: "",
+      });
+    }
+    for (const redirect of route.redirectDefinitions) {
+      clientActions.push({
+        id: redirect.id,
+        kind: "HTTP_REDIRECT",
+        name: route.rail.code,
+        scriptUrls: [],
+        scriptSriHashes: [],
+        allowedOrigins: [],
+        iframeSandbox: "",
+        otpLength: 6,
+        maxOtpAttempts: 3,
+        resendCooldownSeconds: 30,
+        redirectMethod: redirect.method === "POST_FORM" ? "POST_FORM" : "GET",
+        redirectUrl: redirect.urlSourceOutput,
+        qrPayload: "",
+        payCode: "",
+        instructionsAr: "",
+        instructionsEn: "",
+        deepLinkUrl: "",
+        walletHint: "",
+        destinationAccount: "",
+      });
+    }
+    for (const policy of route.pollPolicies) {
+      pollPolicies.push({
+        id: policy.id,
+        name: route.rail.code,
+        intervalSeconds: policy.firstAfterSeconds,
+        backoffSchedule: asNumberArray(policy.backoffSeconds),
+        maxAttempts: asNumberArray(policy.backoffSeconds).length,
+        timeoutSeconds: policy.maxDurationSeconds,
+      });
+    }
+  }
+
+  const setting = version.setting;
+  const amountPipeline = {
+    scale: setting?.amountScale ?? 1,
+    precision: setting?.amountPrecision ?? 3,
+    rounding: setting?.amountRounding ?? "NONE",
+    currency: "LYD",
+  };
+
+  response.json({
+    id: version.id,
+    versionId: version.id,
+    gatewayId: version.gatewayId,
+    versionNumber: version.versionNumber,
+    state: version.state,
+    rollbackVersionId: version.rollbackVersionId,
+    identity: {
+      code: version.gateway.code,
+      name: version.gateway.name,
+      operator: version.gateway.operator,
+      country: version.gateway.country,
+      aliases: asStringArray(version.gateway.aliases),
+      kind: version.gateway.kind,
+      verificationState: version.gateway.verificationState,
+      riskClass: version.gateway.riskClass,
+    },
+    environments,
+    auth,
+    credentialSets,
+    rails: [...rails.values()],
+    cryptoProfiles,
+    flows,
+    clientActions,
+    confirmationChannels,
+    pollPolicies,
+    statusRules,
+    errorMaps,
+    amountPipeline,
+    costModel: {
+      model: "FLAT",
+      flatFee: typeof costModel?.flatFee === "string" ? costModel.flatFee : "0",
+      percentFee: typeof costModel?.percentFee === "string" ? costModel.percentFee : "0",
+      minFee: typeof costModel?.minFee === "string" ? costModel.minFee : "0",
+      maxFee: typeof costModel?.maxFee === "string" ? costModel.maxFee : "0",
+      currency: typeof costModel?.currency === "string" ? costModel.currency : "LYD",
+    },
+    statementMapping: {
+      sourceId: "",
+      format: "CSV",
+      delimiter: ",",
+      columnMapping: [],
+    },
+  });
+});
+
 
 router.put("/gateway-versions/:vid/environments", async (request: Request, response: Response) => {
   requireAuthorities(request, ["gateway:write"]);
