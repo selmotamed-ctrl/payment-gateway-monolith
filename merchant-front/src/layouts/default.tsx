@@ -30,6 +30,15 @@ const DefaultLayout = dc(() => {
     const display = useDisplay();
     const route = useRoute();
     const sections = useSections();
+    const collapsedSections = ref<number[]>([]);
+
+    const isSectionCollapsed = (index: number) => collapsedSections.value.includes(index);
+
+    const toggleSection = (index: number) => {
+        collapsedSections.value = isSectionCollapsed(index)
+            ? collapsedSections.value.filter((entry) => entry !== index)
+            : [...collapsedSections.value, index];
+    };
 
     // A 280px permanent drawer needs room; below 960px it becomes temporary.
     const isCompact = computed(() => display.smAndDown.value);
@@ -176,21 +185,47 @@ const DefaultLayout = dc(() => {
                 <VDivider />
 
                 <VList nav density="comfortable" class="pg-nav">
-                    {sections.value.map((section) => (
-                        <div key={section.title} class="pg-nav__group">
-                            <VListSubheader>{section.title}</VListSubheader>
-                            {section.routes.map((item) => (
-                                <VListItem
-                                    key={item.name}
-                                    to={{ name: item.name }}
-                                    prependIcon={item.icon}
-                                    title={item.label}
-                                    rounded="lg"
-                                    activeColor="primary"
-                                />
-                            ))}
-                        </div>
-                    ))}
+                    {sections.value.map((section, index) => {
+                        const collapsed = isSectionCollapsed(index);
+                        return (
+                            <div key={`${section.title}-${index}`} class="pg-nav__group">
+                                <div
+                                    class="pg-nav__section-wrap"
+                                    role="button"
+                                    tabindex={0}
+                                    aria-expanded={!collapsed}
+                                    onClick={() => toggleSection(index)}
+                                    onKeydown={(event: KeyboardEvent) => {
+                                        if (event.key === "Enter" || event.key === " ") {
+                                            event.preventDefault();
+                                            toggleSection(index);
+                                        }
+                                    }}
+                                >
+                                    <VListSubheader
+                                        class={["pg-nav__section", { "pg-nav__section--collapsed": collapsed }]}
+                                    >
+                                        <span class="pg-nav__section-title">{section.title}</span>
+                                        <VIcon
+                                            icon={collapsed ? "mdi-chevron-down" : "mdi-chevron-up"}
+                                            size={18}
+                                        />
+                                    </VListSubheader>
+                                </div>
+                                {!collapsed &&
+                                    section.routes.map((item) => (
+                                        <VListItem
+                                            key={item.name}
+                                            to={{ name: item.name }}
+                                            prependIcon={item.icon}
+                                            title={item.label}
+                                            rounded="lg"
+                                            activeColor="primary"
+                                        />
+                                    ))}
+                            </div>
+                        );
+                    })}
                 </VList>
 
                 <div class="pg-drawer__footer">

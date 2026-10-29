@@ -48,6 +48,37 @@ test.describe("admin shell", () => {
     expect(restored!.x).toBeLessThanOrEqual(2);
   });
 
+  test("drawer sections collapse and expand", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/dashboard");
+    const overview = page.locator(".pg-nav__section", { hasText: "Overview" });
+    const dashboard = page.locator(".pg-drawer a", { hasText: "Dashboard" });
+
+    await expect(dashboard).toBeVisible();
+    await overview.click();
+    await expect(dashboard).toBeHidden();
+    await overview.click();
+    await expect(dashboard).toBeVisible();
+  });
+
+  test("the drawer navigation scrolls when its content exceeds the viewport", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 420 });
+    await page.goto("/dashboard");
+    const metrics = await page.locator(".pg-nav").evaluate((element) => ({
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+      overflowY: getComputedStyle(element).overflowY,
+    }));
+    expect(metrics.overflowY).toBe("auto");
+    expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+
+    const scrolled = await page.locator(".pg-nav").evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      return element.scrollTop;
+    });
+    expect(scrolled).toBeGreaterThan(0);
+  });
+
   test("on a phone the drawer starts closed, opens, and closes after navigating", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/dashboard");

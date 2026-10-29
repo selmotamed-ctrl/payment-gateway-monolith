@@ -491,16 +491,22 @@ html {
     border-inline-end: 1px solid var(--fintech-border);
     display: flex;
     flex-direction: column;
+    height: 100%;
+    max-height: 100dvh;
+    overflow: hidden;
 }
 
 .pg-drawer .v-navigation-drawer__content {
     display: flex;
     flex-direction: column;
     height: 100%;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .pg-drawer__brand {
     display: flex;
+    flex: 0 0 auto;
     align-items: center;
     gap: 12px;
     padding: 18px 18px 14px;
@@ -523,9 +529,12 @@ html {
     opacity: 0.6;
 }
 
-.pg-nav {
+.pg-drawer .v-navigation-drawer__content .pg-nav {
     flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
     padding: 8px 10px 16px;
 }
 
@@ -533,13 +542,53 @@ html {
     margin-bottom: 8px;
 }
 
-.pg-nav .v-list-subheader {
+.pg-nav .v-list-subheader,
+.pg-nav__section {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 38px;
+    margin-top: 2px;
+    padding-inline: 12px;
+    border-radius: 10px;
     font-size: 11px;
     font-weight: 800;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    opacity: 0.55;
-    min-height: 34px;
+    opacity: 0.62;
+    cursor: pointer;
+    user-select: none;
+}
+
+.pg-nav__section-wrap {
+    outline: none;
+}
+
+.pg-nav__section:hover {
+    background: rgba(var(--v-theme-primary), 0.08);
+    opacity: 0.9;
+}
+
+.pg-nav__section-wrap:focus-visible .pg-nav__section {
+    background: rgba(var(--v-theme-primary), 0.08);
+    box-shadow: 0 0 0 2px rgba(var(--v-theme-primary), 0.35);
+    opacity: 0.9;
+}
+
+.pg-nav__section-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pg-nav__section .v-icon {
+    flex: 0 0 auto;
+    opacity: 0.7;
+}
+
+.pg-nav .v-list-group__items {
+    padding-top: 2px;
 }
 
 .pg-nav .v-list-item {
@@ -551,6 +600,7 @@ html {
 }
 
 .pg-drawer__footer {
+    flex: 0 0 auto;
     padding: 12px 16px 16px;
     border-top: 1px solid var(--fintech-border);
 }
