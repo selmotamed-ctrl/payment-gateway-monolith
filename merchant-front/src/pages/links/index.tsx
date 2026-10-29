@@ -275,7 +275,7 @@ const LinksPage = dc(() => {
                 )}
             </ThemedView>
 
-            <VDialog v-model={createOpen.value} maxWidth="620px">
+            <VDialog modelValue={createOpen.value} onUpdate:modelValue={(v: any) => (createOpen.value = v)} maxWidth="620px">
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                         <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
@@ -332,7 +332,7 @@ const LinksPage = dc(() => {
                 </VCard>
             </VDialog>
 
-            <VDialog v-model={qrOpen.value} maxWidth="460px">
+            <VDialog modelValue={qrOpen.value} onUpdate:modelValue={(v: any) => (qrOpen.value = v)} maxWidth="460px">
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px" }}>
                         <ThemedText type="defaultSemiBold">{t("QR Code")}</ThemedText>
@@ -348,7 +348,7 @@ const LinksPage = dc(() => {
                 </VCard>
             </VDialog>
 
-            <VDialog v-model={attemptsOpen.value} maxWidth="900px" scrollable>
+            <VDialog modelValue={attemptsOpen.value} onUpdate:modelValue={(v: any) => (attemptsOpen.value = v)} maxWidth="900px" scrollable>
                 <VCard>
                     <VCardText>
                         <ThemedText type="defaultSemiBold" style={{ fontSize: "17px", marginBottom: "10px" }}>

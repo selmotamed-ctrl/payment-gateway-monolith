@@ -1,6 +1,6 @@
 import express from "express";
 import { z } from "zod";
-import { zAmount, zBaseVersion, zCurrency, zIdentifier, zJsonObject } from "../../lib/zReady";
+import { zAmount, zBaseVersion, zCurrency, zIdentifier, zJsonObject, zListQuery, zPaginationQuery } from "../../lib/zReady";
 import {
   toCoreRailCreate,
   toCoreRailFields,
@@ -103,6 +103,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/rails",
+    querySchema: zListQuery,
   }),
 );
 
@@ -156,6 +157,7 @@ routesRouter.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/routes",
+    querySchema: zPaginationQuery,
   }),
 );
 

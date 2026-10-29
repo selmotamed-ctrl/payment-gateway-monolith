@@ -8,6 +8,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
+import { statusTone } from "@/components/Table/statusTone";
 import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
@@ -135,7 +136,7 @@ const OperatorCasesPage = dc(() => {
             Value: ({ row }: { row: OperatorCase }) => <StatusChip label={row.caseType} tone={toneFor(row.caseType)} />,
         },
         { key: "priority", label: "Priority", value: (row) => row.priority },
-        { key: "state", label: "Status", value: (row) => row.state },
+        { key: "state", label: "Status", Value: ({ row }: { row: OperatorCase }) => <StatusChip label={row.state} tone={statusTone(row.state)} /> },
         { key: "merchantName", label: "Merchant Name", value: (row) => row.merchantName },
         { key: "railCode", label: "Rail Code", value: (row) => row.railCode },
         { key: "amount", label: "Amount", value: (row) => `${row.amount ?? ""} ${row.currency ?? ""}` },
@@ -246,7 +247,7 @@ const OperatorCasesPage = dc(() => {
                 )}
             </ThemedView>
 
-            <VDialog v-model={dialogOpen.value} maxWidth="560px">
+            <VDialog modelValue={dialogOpen.value} onUpdate:modelValue={(v: any) => (dialogOpen.value = v)} maxWidth="560px">
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                         <ThemedText type="defaultSemiBold">{selected.value?.caseRef}</ThemedText>

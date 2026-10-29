@@ -33,7 +33,7 @@ const ThemedAndLanguageControls = dc(() => {
                     }}
                 >
                     {/* Language Selector */}
-                    <VMenu v-model={languageMenu.value} location="bottom end" offset={8}>
+                    <VMenu modelValue={languageMenu.value} onUpdate:modelValue={(v: any) => (languageMenu.value = v)} location="bottom end" offset={8}>
                         {{
                             activator: ({ props }: { props: any }) => (
                                 <VBtn

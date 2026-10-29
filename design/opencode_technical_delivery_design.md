@@ -937,3 +937,98 @@ the configured scheme and port for every vhost (public and LAN). Custom
 certificate paths are only required when TLS is enabled. Ports must be distinct
 within a portal; the LAN ports must differ across portals. `deploy` tests: 34
 (9 new for ports/TLS).
+
+## 23. Gateway/Rail/Route Creation UI and Dialog Fixes
+
+`GATEWAY_ADMIN` **is** allowed to create gateways, rails and routes: the core
+and edge endpoints (`POST /gateways`, `/rails`, `/routes`) require
+`gateway:write`, which the role carries. The portal, however, offered no create
+action except the Smart AI transcript import — a UI gap, not a permission gate.
+Added:
+
+* **Gateways** — a "New Gateway" button (next to "Smart AI Integration") opens a
+  dialog (code, name, operator, kind, country, risk class), posts to
+  `/gateways`, refreshes the list and opens the created gateway's wizard.
+* **Rails** — an "Add Rail" button opens a dialog (code, label, collection mode)
+  and posts to `/rails`.
+* **Routes** — an "Add Route" button loads the rail and gateway lists, lets the
+  operator pick both (plus priority and an optional max amount) and posts to
+  `/routes` with the platform credential policy.
+
+Two systemic defects surfaced while wiring these:
+
+1. **`v-model` in TSX is not a directive.** 35 occurrences across the three
+   portals (`VDialog`, `VMenu`, `VStepper`, `VTabs`, `VWindow`, `VTextField`)
+   compiled to an attribute named `v-model`, so dialogs never opened and
+   steppers/tabs never synced. Every occurrence was converted to
+   `modelValue` + `onUpdate:modelValue`; the "Customer Catalog"/"Update" dialogs
+   now open.
+2. **The table search box did not filter.** `DataTable` (and `ApiTable`) only
+   re-ran `refresh` on `skip`/`data` changes, never on `searchValue`. Both now
+   watch `searchValue` and reset to the first page.
+
+Tests: Playwright e2e **38** (5 new: create gateway/rail/route, dialog-open, and
+search filtering), live **6** (one now creates a gateway through the deployed
+UI and reads it back via the API), Vitest **17** — all green. Deployed and
+verified.
+
+## 24. Server-Side Table Filtering, Sorting, Colors and Persistence
+
+The guessed, client-only filter bar was removed. Every back-office table now
+uses an explicit per-table filter specification, a shared query contract, and
+server-side filtering/sorting with database indexes.
+
+### Backend
+
+* `core-back/lib/listQuery.ts` — one parser/builder for every list endpoint:
+  `search` (case-insensitive `contains` over declared fields and relations),
+  `in` for multi-value enums, `equals`, booleans, inclusive date ranges
+  (`from`/`to`, plus a second `dateFrom`/`dateTo`), decimal/number ranges,
+  allowlisted sorting (with `id` as a stable tiebreak), pagination
+  (`page`/`pageSize`, max 200) and the `{ rows, total, page, pageSize }` envelope.
+* Rewrote the list endpoints (admin: gateways, rails, routes, merchants, users,
+  join-requests, approvals, AML cases/screenings/rules/reports, adjustments,
+  cashouts, disputes, operator cases, reconciliation sources/runs, credential
+  sets; merchant: applications, links, payments, wallets, cashouts, disputes,
+  credential sets, tokens, users, POS terminals) to use the builder. Responses
+  keep their existing keys and add `total`/`page`/`pageSize`.
+* Added relation-aware filters/sorts and flattened fields the UI needs
+  (`merchantName`, `railCode`, `gatewayCode`, `caseType`, `openedAt`, …).
+* `GET /options/:kind` on both portals feeds API autocompletes (merchants,
+  rails, gateways, users, applications, wallets, credential sets) with
+  `search`/`limit`; the admin stat overview now requires authentication.
+* Migration `20261029140000_list_filter_indexes` adds ~50 composite indexes
+  (filter column first, then the date column) across the listed tables.
+
+### Frontend
+
+* `components/Table/filters.ts` — explicit descriptors: text, API autocomplete,
+  data autocomplete (single/multi), boolean (Yes/No), number range, date range.
+* `components/Table/TableFilters.tsx` — the real filter panel: active count,
+  result count, coloured summary chips with per-chip clear, **Clear all**,
+  API autocompletes with a prepended refresh button, spinner, inline error and
+  Retry, coloured enum/boolean options, date picker with operators and presets
+  (Today, Last 7/30 days, Next 30 days) and number ranges.
+* `components/Table/tableRegistry.ts` — one registry per portal keyed by route
+  name, so every page gets its filters automatically (no per-page boilerplate).
+* `DataTable` server mode: fetches with filters/search/sort, 300 ms debounce,
+  stale-response guard, error + retry, `sessionStorage` persistence per table
+  (filters, search, sort) restored on navigation, and 200-row windows with the
+  existing client pagination.
+* Shared `statusTone`: success/warning/error/neutral for chips, filter options
+  and **row tints** (8–10% background + stripe) so active/pending/failed rows are
+  recognisable; status filters show the same colours.
+* Added the missing state columns/chips: Gateway **Status**, Rail
+  **Active/Blocked**, and coloured chips for AML case status, join-request
+  status/risk, approval state, operator-case state, reconciliation-run state,
+  merchant risk, gateway risk, and KYB view filters.
+
+### Verification
+
+* Backend: core **812**, admin **416**, merchant **67**, checkout **45**,
+  deploy **34** — all pass. New unit tests cover the query builder
+  (search/in/date/amount/sort/pagination).
+* Frontend: Playwright **38** (admin 24, merchant 10, checkout 4) including a
+  server-side filter test that asserts the request carries `status=LIVE` and the
+  rows are filtered, plus Clear-all resetting the query; Vitest **17**; all three
+  SPAs build. No deployment was performed for this change.

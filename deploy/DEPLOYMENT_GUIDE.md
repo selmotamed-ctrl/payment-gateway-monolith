@@ -162,9 +162,21 @@ certificate exists and prints the exact `certbot` command if it does not.
 Ports must be distinct within a portal, and the merchant and checkout LAN ports
 must differ from each other and from the admin port.
 
-Access is restricted by UFW to `LAN_ALLOWED_CIDRS` (and loopback), so the LAN
-ports are never reachable from outside the LAN even though they listen on
-`0.0.0.0`. The public `80`/`443` vhosts stay domain-based and are unaffected.
+Access is restricted by UFW to `LAN_ALLOWED_CIDRS`, so the LAN ports are never
+reachable from outside the LAN even though they listen on `0.0.0.0`. The
+shipped default covers every private range:
+
+```dotenv
+LAN_ALLOWED_CIDRS="127.0.0.1/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+```
+
+(Class A `10/8`, Class B `172.16/12`, Class C `192.168/16`, plus loopback.)
+The same list is applied to the Nginx `allow` rules and the UFW rules. The
+public vhosts stay domain-based and are unaffected.
+
+`ADMIN_DOMAIN`, `MERCHANT_DOMAIN` and `CHECKOUT_DOMAIN` accept a FQDN, a bare
+IP, or `_` (the Nginx catch-all). Set `ADMIN_DOMAIN="_"` when the admin portal
+is only reached by IP.
 
 ## 2. The 1-to-5 host topology
 
@@ -201,7 +213,7 @@ which is the fastest way to confirm that your deduplication is what you meant.
 | `KEEP_RELEASES` | `5` | Releases kept per host; older ones are pruned in step 11. |
 | `ROTATE_MTLS_CERTS` | `false` | Force a CA + leaf regeneration. |
 | `MTLS_VALIDITY_DAYS` | `825` | Leaf certificate validity. |
-| `LAN_ALLOWED_CIDRS` | `10.0.0.0/8,192.168.0.0/16` | Nginx allowlist and `ADMIN_LAN_CIDRS` for the admin host. |
+| `LAN_ALLOWED_CIDRS` | `127.0.0.1/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` | Nginx allowlist and `ADMIN_LAN_CIDRS` for the admin host. |
 
 ### Database (`DB_*`)
 

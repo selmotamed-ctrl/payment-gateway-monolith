@@ -227,7 +227,7 @@ ADMIN_SSH_KEY_PATH="~/.ssh/other-key"
     expect(map).toContain("Topology: distributed (5 hosts)");
     expect(map).toContain("pg-core-back");
     expect(map).toContain("admin-lan");
-    expect(map).toContain("8443<=10.0.0.0/8|192.168.0.0/16");
+    expect(map).toContain("8443<=127.0.0.1/32|10.0.0.0/8|172.16.0.0/12|192.168.0.0/16");
   });
 });
 

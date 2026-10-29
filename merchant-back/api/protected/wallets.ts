@@ -1,6 +1,6 @@
+import { zAmount, zCurrency, zIdentifier, zJsonObject, zListQuery, zMonth } from "../../lib/zReady";
 import express from "express";
 import { z } from "zod";
-import { zAmount, zCurrency, zIdentifier, zJsonObject, zMonth } from "../../lib/zReady";
 import { coreWalletCreateSchema, toCoreWalletCreate } from "../contract";
 import { coreForward } from "../forward";
 
@@ -23,13 +23,14 @@ const statementQuerySchema = z
     page: z.coerce.number().int().min(1).max(10000).optional(),
     pageSize: z.coerce.number().int().min(1).max(200).optional(),
   })
-  .strict();
+  .passthrough();
 
 router.get(
   "/",
   coreForward({
     method: "GET",
     path: () => "/internal/merchant/wallets",
+    querySchema: zListQuery,
   }),
 );
 

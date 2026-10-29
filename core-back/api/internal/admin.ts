@@ -9,6 +9,7 @@ import { getPlatformRuntime } from "../../engine/runtime";
 import { InvariantVerifier, naturalBalance } from "../../engine/ledger/InvariantVerifier";
 import { moneyToString } from "../../engine/db/money";
 import { ApiError, parseOrThrow } from "../../lib/error";
+import { buildListQuery, listResponse } from "../../lib/listQuery";
 import {
   generateMfaCode,
   hashMfaCode,
@@ -589,6 +590,9 @@ router.get("/auth/me", (_request: Request, response: Response) => {
   });
 });
 
+
+router.use(requireAuthentication);
+
 router.get("/stats/overview", async (_request: Request, response: Response) => {
   const now = new Date();
   const staleCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -658,27 +662,117 @@ router.get("/stats/overview", async (_request: Request, response: Response) => {
   });
 });
 
-router.use(requireAuthentication);
+const OPTION_LIMIT = 100;
+
+router.get("/options/:kind", async (request: Request, response: Response) => {
+  const kind = String(request.params.kind ?? "");
+  const rawSearch = typeof request.query.search === "string" ? request.query.search.trim() : "";
+  const limit = Math.min(OPTION_LIMIT, Math.max(1, Number(request.query.limit ?? 50) || 50));
+  const contains = rawSearch ? { contains: rawSearch } : undefined;
+  let items: Array<{ value: string; title: string; subtitle?: string }> = [];
+
+  switch (kind) {
+    case "merchants": {
+      const rows = await client.merchant.findMany({
+        where: rawSearch ? { OR: [{ tradeName: contains! }, { legalName: contains! }] } : {},
+        orderBy: { tradeName: "asc" },
+        take: limit,
+        select: { id: true, tradeName: true, legalName: true },
+      });
+      items = rows.map((row) => ({ value: row.id, title: row.tradeName, subtitle: row.legalName }));
+      break;
+    }
+    case "rails": {
+      const rows = await client.rail.findMany({
+        where: rawSearch ? { OR: [{ code: contains! }, { nameEn: contains! }, { nameAr: contains! }] } : {},
+        orderBy: { code: "asc" },
+        take: limit,
+        select: { id: true, code: true, nameEn: true, nameAr: true },
+      });
+      items = rows.map((row) => ({ value: row.id, title: `${row.nameEn} (${row.code})`, subtitle: row.nameAr }));
+      break;
+    }
+    case "gateways": {
+      const rows = await client.gateway.findMany({
+        where: rawSearch ? { OR: [{ code: contains! }, { name: contains! }] } : {},
+        orderBy: { code: "asc" },
+        take: limit,
+        select: { id: true, code: true, name: true },
+      });
+      items = rows.map((row) => ({ value: row.id, title: `${row.name} (${row.code})` }));
+      break;
+    }
+    case "users": {
+      const rows = await client.user.findMany({
+        where: rawSearch ? { OR: [{ email: contains! }, { phone: contains! }] } : {},
+        orderBy: { email: "asc" },
+        take: limit,
+        select: { id: true, email: true, role: true },
+      });
+      items = rows.map((row) => ({ value: row.id, title: row.email, subtitle: row.role }));
+      break;
+    }
+    case "applications": {
+      const rows = await client.application.findMany({
+        where: rawSearch ? { name: contains! } : {},
+        orderBy: { name: "asc" },
+        take: limit,
+        select: { id: true, name: true, merchant: { select: { tradeName: true } } },
+      });
+      items = rows.map((row) => ({ value: row.id, title: row.name, subtitle: row.merchant?.tradeName }));
+      break;
+    }
+    case "wallets": {
+      const rows = await client.wallet.findMany({
+        where: rawSearch ? { currency: contains! } : {},
+        orderBy: { createdAt: "desc" },
+        take: limit,
+        select: { id: true, currency: true, merchant: { select: { tradeName: true } } },
+      });
+      items = rows.map((row) => ({ value: row.id, title: `${row.merchant?.tradeName ?? row.id} · ${row.currency}` }));
+      break;
+    }
+    case "credential-sets": {
+      const rows = await client.credentialSet.findMany({
+        where: rawSearch ? { externalMerchantId: contains! } : {},
+        orderBy: { createdAt: "desc" },
+        take: limit,
+        select: { id: true, externalMerchantId: true, env: true, gateway: { select: { code: true } } },
+      });
+      items = rows.map((row) => ({ value: row.id, title: `${row.gateway.code} · ${row.externalMerchantId ?? row.id}`, subtitle: row.env }));
+      break;
+    }
+    default:
+      throw new ApiError(400, "UNKNOWN_OPTION_KIND", "Unknown option kind");
+  }
+  response.json({ items, total: items.length });
+});
+
 
 router.get("/users", async (request: Request, response: Response) => {
   requireAuthorities(request, ["user:read", "security:read"]);
-  const users = await client.user.findMany({
-    orderBy: { createdAt: "desc" },
-    take: 500,
+  const built = buildListQuery(request.query, {
+    search: ["email", "phone"],
+    in: { status: "status" }, equals: {role: "role", merchantId: "merchantId"},
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { email: "email", role: "role", status: "status", createdAt: "createdAt" },
+    defaultSort: { createdAt: "desc" },
   });
-  response.json({
-    users: users.map((user) => ({
-      id: user.id,
-      email: user.email,
-      phone: user.phone,
-      role: user.role,
-      merchantId: user.merchantId,
-      authoritiesMap: user.authoritiesMap,
-      status: user.status,
-      isMaker: user.isMaker,
-      isChecker: user.isChecker,
-    })),
-  });
+  const [users, total] = await Promise.all([
+    client.user.findMany({ where: built.where as never, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
+    client.user.count({ where: built.where as never }),
+  ]);
+  response.json(listResponse("users", users.map((user) => ({
+    id: user.id,
+    email: user.email,
+    phone: user.phone,
+    role: user.role,
+    merchantId: user.merchantId,
+    authoritiesMap: user.authoritiesMap,
+    status: user.status,
+    isMaker: user.isMaker,
+    isChecker: user.isChecker,
+  })), total, built));
 });
 
 router.get("/users/:id", async (request: Request, response: Response) => {
@@ -805,23 +899,24 @@ router.patch("/users/:id", async (request: Request, response: Response) => {
 
 router.get("/join-requests", async (request: Request, response: Response) => {
   requireAuthorities(request, ["kyb:read", "compliance:read"]);
-  const query = z
-    .object({
-      status: z.string().max(40).optional(),
-      page: z.coerce.number().int().min(1).max(10000).optional(),
-      pageSize: z.coerce.number().int().min(1).max(200).optional(),
-    })
-    .parse(request.query ?? {});
-  const take = query.pageSize ?? 50;
-  const skip = ((query.page ?? 1) - 1) * take;
-  const joinRequests = await client.joinRequest.findMany({
-    where: query.status ? { status: query.status as never } : {},
-    include: { merchant: true, kybDocuments: true },
-    orderBy: { createdAt: "desc" },
-    take,
-    skip,
+  const built = buildListQuery(request.query, {
+    search: ["merchant.legalName", "merchant.tradeName"],
+    in: { status: "status" }, equals: {proposedRiskTier: "proposedRiskTier", onboardingChannel: "onboardingChannel", assignedReviewerId: "assignedReviewerId"},
+    dates: { createdAt: { path: "createdAt" }, slaDueAt: { path: "slaDueAt", fromKey: "dateFrom", toKey: "dateTo" } },
+    sortable: { status: "status", submittedAt: "createdAt", slaDueAt: "slaDueAt", riskTier: "proposedRiskTier" },
+    defaultSort: { createdAt: "desc" },
   });
-  response.json({ joinRequests });
+  const [joinRequests, total] = await Promise.all([
+    client.joinRequest.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { merchant: true, kybDocuments: true, assignedReviewer: { select: { email: true } } }, skip: built.skip, take: built.take }),
+    client.joinRequest.count({ where: built.where as never }),
+  ]);
+  response.json(listResponse("joinRequests", joinRequests.map((entry) => ({
+    ...entry,
+    merchantName: entry.merchant?.tradeName ?? "",
+    riskTier: entry.proposedRiskTier,
+    submittedAt: entry.submittedAt ?? entry.createdAt,
+    reviewer: entry.assignedReviewer?.email ?? "",
+  })), total, built));
 });
 
 router.get("/join-requests/:id", async (request: Request, response: Response) => {
@@ -993,8 +1088,18 @@ router.post("/kyb-documents/:id/review", async (request: Request, response: Resp
 
 router.get("/merchants", async (request: Request, response: Response) => {
   requireAuthorities(request, ["merchant:read"]);
-  const merchants = await client.merchant.findMany({ orderBy: { createdAt: "desc" }, take: 500 });
-  response.json({ merchants });
+  const built = buildListQuery(request.query, {
+    search: ["legalName", "tradeName", "email", "phone"],
+    in: { status: "status" }, equals: {kybStatus: "kybStatus", riskTier: "riskTier"},
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { legalName: "legalName", tradeName: "tradeName", status: "status", riskTier: "riskTier", kybStatus: "kybStatus", createdAt: "createdAt" },
+    defaultSort: { createdAt: "desc" },
+  });
+  const [merchants, total] = await Promise.all([
+    client.merchant.findMany({ where: built.where as never, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
+    client.merchant.count({ where: built.where as never }),
+  ]);
+  response.json(listResponse("merchants", merchants, total, built));
 });
 
 router.get("/merchants/:id", async (request: Request, response: Response) => {
@@ -1097,22 +1202,22 @@ router.get("/merchants/:id/detail-changes", async (request: Request, response: R
 
 router.get("/approvals", async (request: Request, response: Response) => {
   requireAuthorities(request, ["approval:read"]);
-  const query = z
-    .object({
-      state: z.string().max(40).optional(),
-      page: z.coerce.number().int().min(1).max(10000).optional(),
-      pageSize: z.coerce.number().int().min(1).max(200).optional(),
-    })
-    .parse(request.query ?? {});
-  const take = query.pageSize ?? 50;
-  const skip = ((query.page ?? 1) - 1) * take;
-  const approvals = await client.approvalRequest.findMany({
-    where: query.state ? { state: query.state as never } : {},
-    orderBy: { createdAt: "desc" },
-    take,
-    skip,
+  const built = buildListQuery(request.query, {
+    search: ["subjectId"],
+    in: { state: "state" }, equals: {subjectType: "subjectType", domain: "domain", makerUserId: "makerUserId", checkerUserId: "checkerUserId"},
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { state: "state", subjectType: "subjectType", createdAt: "createdAt" },
+    defaultSort: { createdAt: "desc" },
   });
-  response.json({ approvals });
+  const [approvals, total] = await Promise.all([
+    client.approvalRequest.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { maker: { select: { email: true } }, checker: { select: { email: true } } }, skip: built.skip, take: built.take }),
+    client.approvalRequest.count({ where: built.where as never }),
+  ]);
+  response.json(listResponse("approvals", approvals.map((approval) => ({
+    ...approval,
+    makerName: approval.maker?.email ?? "",
+    checkerName: approval.checker?.email ?? "",
+  })), total, built));
 });
 
 router.get("/approvals/:id", async (request: Request, response: Response) => {
@@ -1277,12 +1382,24 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
 
 router.get("/aml/screenings", async (request: Request, response: Response) => {
   assertConfidential(request);
-  const screenings = await client.amlScreening.findMany({
-    include: { matches: true },
-    orderBy: { requestedAt: "desc" },
-    take: 200,
+  const built = buildListQuery(request.query, {
+    search: ["subjectId", "providerCode"],
+    in: { result: "result" }, equals: {subjectType: "subjectType", providerCode: "providerCode"},
+    ranges: { score: { path: "highestScore", kind: "decimal" } },
+    dates: { createdAt: { path: "requestedAt" } },
+    sortable: { result: "result", requestedAt: "requestedAt", score: "highestScore" },
+    defaultSort: { requestedAt: "desc" },
   });
-  response.json({ screenings });
+  const [screenings, total] = await Promise.all([
+    client.amlScreening.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { matches: true }, skip: built.skip, take: built.take }),
+    client.amlScreening.count({ where: built.where as never }),
+  ]);
+  response.json(listResponse("screenings", screenings.map((screening) => ({
+    ...screening,
+    provider: screening.providerCode,
+    score: screening.highestScore,
+    screenedAt: screening.requestedAt,
+  })), total, built));
 });
 
 router.post("/aml/matches/:id/disposition", async (request: Request, response: Response) => {
@@ -1319,11 +1436,18 @@ router.post("/aml/matches/:id/disposition", async (request: Request, response: R
 
 router.get("/aml/cases", async (request: Request, response: Response) => {
   assertConfidential(request);
-  const cases = await client.amlCase.findMany({
-    orderBy: { createdAt: "desc" },
-    take: 200,
+  const built = buildListQuery(request.query, {
+    search: ["caseRef"],
+    in: { status: "status" }, equals: {severity: "severity", subjectType: "subjectType", ruleCode: "rule.code"},
+    dates: { createdAt: { path: "createdAt" }, slaDueAt: { path: "slaDueAt", fromKey: "dateFrom", toKey: "dateTo" } },
+    sortable: { caseRef: "caseRef", status: "status", severity: "severity", openedAt: "createdAt", slaDueAt: "slaDueAt" },
+    defaultSort: { createdAt: "desc" },
   });
-  response.json({ cases });
+  const [cases, total] = await Promise.all([
+    client.amlCase.findMany({ where: built.where as never, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
+    client.amlCase.count({ where: built.where as never }),
+  ]);
+  response.json(listResponse("cases", cases.map((entry) => ({ ...entry, openedAt: entry.createdAt })), total, built));
 });
 
 router.post("/aml/cases/:id/propose", async (request: Request, response: Response) => {
@@ -1355,8 +1479,20 @@ router.post("/aml/cases/:id/propose", async (request: Request, response: Respons
 
 router.get("/aml/rules", async (request: Request, response: Response) => {
   assertConfidential(request);
-  const rules = await client.amlRule.findMany({ orderBy: { code: "asc" } });
-  response.json({ rules });
+  const built = buildListQuery(request.query, {
+    search: ["code", "name"],
+    equals: { ruleType: "ruleType", action: "action", baseSeverity: "baseSeverity" },
+    booleans: { active: "active" },
+    ranges: { version: { path: "version", kind: "number" } },
+    dates: { effectiveFrom: { path: "effectiveFrom" } },
+    sortable: { code: "code", name: "name", ruleType: "ruleType", baseSeverity: "baseSeverity", active: "active", effectiveFrom: "effectiveFrom" },
+    defaultSort: { code: "asc" },
+  });
+  const [rules, total] = await Promise.all([
+    client.amlRule.findMany({ where: built.where as never, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
+    client.amlRule.count({ where: built.where as never }),
+  ]);
+  response.json(listResponse("rules", rules, total, built));
 });
 
 router.post("/aml/rules", async (request: Request, response: Response) => {
@@ -1450,19 +1586,27 @@ router.post("/aml/reporting-rules/:id/promote", async (request: Request, respons
 
 router.get("/aml/reports", async (request: Request, response: Response) => {
   assertConfidential(request);
-  const reports = await client.regulatoryReport.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
-  response.json({
-    reports: reports.map((report) => ({
-      id: report.id,
-      reportType: report.reportType,
-      authority: report.authority,
-      status: report.status,
-      confidential: report.confidential,
-      submissionRef: report.submissionRef,
-      submittedAt: report.submittedAt,
-      approvalRequestId: report.approvalRequestId,
-    })),
+  const built = buildListQuery(request.query, {
+    search: ["subjectId", "submissionRef"],
+    in: { status: "status" }, equals: {reportType: "reportType", authority: "authority",},
+    dates: { createdAt: { path: "createdAt" }, submittedAt: { path: "submittedAt", fromKey: "dateFrom", toKey: "dateTo" } },
+    sortable: { reportType: "reportType", authority: "authority", status: "status", createdAt: "createdAt", submittedAt: "submittedAt" },
+    defaultSort: { createdAt: "desc" },
   });
+  const [reports, total] = await Promise.all([
+    client.regulatoryReport.findMany({ where: built.where as never, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
+    client.regulatoryReport.count({ where: built.where as never }),
+  ]);
+  response.json(listResponse("reports", reports.map((report) => ({
+    id: report.id,
+    reportType: report.reportType,
+    authority: report.authority,
+    status: report.status,
+    confidential: report.confidential,
+    submissionRef: report.submissionRef,
+    submittedAt: report.submittedAt,
+    approvalRequestId: report.approvalRequestId,
+  })), total, built));
 });
 
 router.post("/aml/reports", async (request: Request, response: Response) => {
@@ -1560,11 +1704,26 @@ router.post("/aml/reports/:id/acknowledge", async (request: Request, response: R
 
 router.get("/operator-cases", async (request: Request, response: Response) => {
   requireAuthorities(request, ["case:read", "operator:read"]);
-  const cases = await client.operatorCase.findMany({
-    orderBy: [{ priority: "asc" }, { createdAt: "desc" }],
-    take: 200,
+  const built = buildListQuery(request.query, {
+    search: ["attempt.reference"],
+    in: { state: "state" }, equals: {kind: "kind", priority: "priority", assigneeUserId: "assigneeUserId"},
+    dates: { createdAt: { path: "createdAt" }, slaDueAt: { path: "slaDueAt", fromKey: "dateFrom", toKey: "dateTo" } },
+    sortable: { priority: "priority", state: "state", openedAt: "createdAt", slaDueAt: "slaDueAt" },
+    defaultSort: [{ priority: "asc" }, { createdAt: "desc" }],
   });
-  response.json({ cases });
+  const [cases, total] = await Promise.all([
+    client.operatorCase.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { attempt: { select: { reference: true, totalChargedAmount: true, merchant: { select: { tradeName: true } }, rail: { select: { code: true } } } } }, skip: built.skip, take: built.take }),
+    client.operatorCase.count({ where: built.where as never }),
+  ]);
+  response.json(listResponse("cases", cases.map((entry) => ({
+    ...entry,
+    caseRef: entry.attempt?.reference ?? entry.id,
+    caseType: entry.kind,
+    openedAt: entry.createdAt,
+    merchantName: entry.attempt?.merchant?.tradeName ?? "",
+    railCode: entry.attempt?.rail?.code ?? "",
+    amount: entry.attempt?.totalChargedAmount ?? null,
+  })), total, built));
 });
 
 router.get("/operator-cases/:id", async (request: Request, response: Response) => {
@@ -1738,8 +1897,18 @@ router.post("/gateways/spec-import", async (request: Request, response: Response
 
 router.get("/gateways", async (request: Request, response: Response) => {
   requireAuthorities(request, ["gateway:read"]);
-  const gateways = await client.gateway.findMany({ orderBy: { code: "asc" } });
-  response.json({ gateways });
+  const built = buildListQuery(request.query, {
+    search: ["code", "name", "operator"],
+    in: { status: "status" }, equals: {kind: "kind", verificationState: "verificationState", riskClass: "riskClass", country: "country"},
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { code: "code", name: "name", operator: "operator", status: "status", kind: "kind", createdAt: "createdAt" },
+    defaultSort: { code: "asc" },
+  });
+  const [gateways, total] = await Promise.all([
+    client.gateway.findMany({ where: built.where as never, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
+    client.gateway.count({ where: built.where as never }),
+  ]);
+  response.json(listResponse("gateways", gateways, total, built));
 });
 
 router.get("/gateways/:id", async (request: Request, response: Response) => {
@@ -1995,26 +2164,18 @@ const credentialSetView = (credentialSet: {
 
 router.get("/credential-sets", async (request: Request, response: Response) => {
   requireAuthorities(request, ["credential:read", "gateway:read"]);
-  const query = z
-    .object({
-      gatewayCode: z.string().max(64).optional(),
-      env: z.enum(["SANDBOX", "LIVE"]).optional(),
-      ownerType: z.enum(["PLATFORM", "MERCHANT"]).optional(),
-      status: z.enum(["UNTESTED", "VERIFIED", "FAILING", "REVOKED"]).optional(),
-    })
-    .parse(request.query ?? {});
-  const credentialSets = await client.credentialSet.findMany({
-    where: {
-      ...(query.gatewayCode ? { gateway: { code: query.gatewayCode } } : {}),
-      ...(query.env ? { env: query.env } : {}),
-      ...(query.ownerType ? { ownerType: query.ownerType } : {}),
-      ...(query.status ? { status: query.status } : {}),
-    },
-    include: { gateway: { select: { code: true } } },
-    orderBy: { createdAt: "desc" },
-    take: 500,
+  const built = buildListQuery(request.query, {
+    search: ["externalMerchantId", "gateway.code"],
+    in: { status: "status" }, equals: {gatewayCode: "gateway.code", env: "env", ownerType: "ownerType",},
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { gatewayCode: "gatewayId", env: "env", status: "status", createdAt: "createdAt" },
+    defaultSort: { createdAt: "desc" },
   });
-  response.json({ credentialSets: credentialSets.map(credentialSetView) });
+  const [credentialSets, total] = await Promise.all([
+    client.credentialSet.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { gateway: { select: { code: true } } }, skip: built.skip, take: built.take }),
+    client.credentialSet.count({ where: built.where as never }),
+  ]);
+  response.json(listResponse("credentialSets", credentialSets, total, built));
 });
 
 router.get("/credential-sets/:id", async (request: Request, response: Response) => {
@@ -3537,8 +3698,20 @@ router.put("/gateway-versions/:vid/rollback-version", async (request: Request, r
 
 router.get("/rails", async (request: Request, response: Response) => {
   requireAuthorities(request, ["gateway:read"]);
-  const rails = await client.rail.findMany({ include: { fields: true }, orderBy: { displayOrder: "asc" } });
-  response.json({ rails });
+  const built = buildListQuery(request.query, {
+    search: ["code", "nameEn", "nameAr"],
+    equals: { collectionMode: "collectionMode", currency: "currency" },
+    booleans: { blocked: "blocked" },
+    ranges: { amount: { path: "minAmount", kind: "decimal" } },
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { code: "code", nameEn: "nameEn", collectionMode: "collectionMode", currency: "currency", status: "blocked" },
+    defaultSort: { displayOrder: "asc" },
+  });
+  const [rails, total] = await Promise.all([
+    client.rail.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { fields: true }, skip: built.skip, take: built.take }),
+    client.rail.count({ where: built.where as never }),
+  ]);
+  response.json(listResponse("rails", rails, total, built));
 });
 
 router.get("/rails/:id", async (request: Request, response: Response) => {
@@ -3713,8 +3886,19 @@ router.put("/rails/:id/fields", async (request: Request, response: Response) => 
 
 router.get("/routes", async (request: Request, response: Response) => {
   requireAuthorities(request, ["gateway:read"]);
-  const routes = await client.railRoute.findMany({ include: { rail: true, gateway: true } });
-  response.json({ routes });
+  const built = buildListQuery(request.query, {
+    search: ["rail.code", "gateway.code"],
+    in: { status: "status" }, equals: {railId: "railId", gatewayId: "gatewayId", credentialPolicy: "credentialPolicy", healthState: "healthState"},
+    ranges: { amount: { path: "minAmount", kind: "decimal" } },
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { railCode: "railId", gatewayCode: "gatewayId", priority: "priority", status: "status", healthState: "healthState", minAmount: "minAmount" },
+    defaultSort: [{ priority: "asc" }, { createdAt: "desc" }],
+  });
+  const [routes, total] = await Promise.all([
+    client.railRoute.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { rail: true, gateway: true }, skip: built.skip, take: built.take }),
+    client.railRoute.count({ where: built.where as never }),
+  ]);
+  response.json(listResponse("routes", routes.map((route) => ({ ...route, railCode: route.rail?.code ?? "", gatewayCode: route.gateway?.code ?? "" })), total, built));
 });
 
 router.get("/routes/:id", async (request: Request, response: Response) => {
@@ -3864,8 +4048,17 @@ router.post("/assets", async (request: Request, response: Response) => {
 
 router.get("/reconciliation/sources", async (request: Request, response: Response) => {
   requireAuthorities(request, ["reconciliation:read"]);
-  const sources = await client.statementSource.findMany({ include: { gateway: true } });
-  response.json({ sources });
+  const built = buildListQuery(request.query, {
+    search: ["gateway.code"],
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { name: "gatewayId", createdAt: "createdAt" },
+    defaultSort: { createdAt: "desc" },
+  });
+  const [sources, total] = await Promise.all([
+    client.statementSource.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { gateway: true }, skip: built.skip, take: built.take }),
+    client.statementSource.count({ where: built.where as never }),
+  ]);
+  response.json(listResponse("sources", sources, total, built));
 });
 
 router.post("/reconciliation/sources", async (request: Request, response: Response) => {
@@ -3898,12 +4091,18 @@ router.post("/reconciliation/sources", async (request: Request, response: Respon
 
 router.get("/reconciliation/runs", async (request: Request, response: Response) => {
   requireAuthorities(request, ["reconciliation:read"]);
-  const runs = await client.reconciliationRun.findMany({
-    orderBy: { createdAt: "desc" },
-    take: 100,
-    include: { items: true },
+  const built = buildListQuery(request.query, {
+    search: ["fileName"],
+    equals: { statementSourceId: "statementSourceId" },
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { fileName: "fileName", createdAt: "createdAt" },
+    defaultSort: { createdAt: "desc" },
   });
-  response.json({ runs });
+  const [runs, total] = await Promise.all([
+    client.reconciliationRun.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { items: true }, skip: built.skip, take: built.take }),
+    client.reconciliationRun.count({ where: built.where as never }),
+  ]);
+  response.json(listResponse("runs", runs, total, built));
 });
 
 // The statement is never parsed in the request: the upload stores the file
@@ -3919,8 +4118,24 @@ router.post("/reconciliation/upload", async (request: Request, response: Respons
 
 router.get("/disputes", async (request: Request, response: Response) => {
   requireAuthorities(request, ["dispute:read"]);
-  const disputes = await client.dispute.findMany({ orderBy: { openedAt: "desc" }, take: 200 });
-  response.json({ disputes });
+  const built = buildListQuery(request.query, {
+    search: ["disputeRef", "externalDisputeRef", "reasonCode"],
+    in: { status: "status" }, equals: {railId: "railId", gatewayId: "gatewayId"},
+    ranges: { amount: { path: "amount", kind: "decimal" } },
+    dates: { createdAt: { path: "openedAt" }, evidenceDueAt: { path: "evidenceDueAt", fromKey: "dateFrom", toKey: "dateTo" } },
+    sortable: { disputeRef: "disputeRef", status: "status", amount: "amount", openedAt: "openedAt", evidenceDueAt: "evidenceDueAt" },
+    defaultSort: { openedAt: "desc" },
+  });
+  const [disputes, total] = await Promise.all([
+    client.dispute.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { attempt: { select: { merchant: { select: { tradeName: true } }, rail: { select: { code: true } } } } }, skip: built.skip, take: built.take }),
+    client.dispute.count({ where: built.where as never }),
+  ]);
+  response.json(listResponse("disputes", disputes.map((dispute) => ({
+    ...dispute,
+    state: dispute.status,
+    merchantName: dispute.attempt?.merchant?.tradeName ?? "",
+    railCode: dispute.attempt?.rail?.code ?? "",
+  })), total, built));
 });
 
 router.get("/disputes/:id", async (request: Request, response: Response) => {
@@ -3985,8 +4200,23 @@ router.post("/disputes", async (request: Request, response: Response) => {
 
 router.get("/adjustments", async (request: Request, response: Response) => {
   requireAuthorities(request, ["finance:read"]);
-  const adjustments = await client.adjustment.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
-  response.json({ adjustments });
+  const built = buildListQuery(request.query, {
+    search: ["reason", "externalDisputeRef"],
+    in: { state: "state" }, equals: {type: "type",},
+    booleans: { draftedBySystem: "draftedBySystem" },
+    ranges: { amount: { path: "amount", kind: "decimal" } },
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { type: "type", state: "state", amount: "amount", createdAt: "createdAt" },
+    defaultSort: { createdAt: "desc" },
+  });
+  const [adjustments, total] = await Promise.all([
+    client.adjustment.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { sourceAttempt: { select: { merchant: { select: { tradeName: true } } } } }, skip: built.skip, take: built.take }),
+    client.adjustment.count({ where: built.where as never }),
+  ]);
+  response.json(listResponse("adjustments", adjustments.map((adjustment) => ({
+    ...adjustment,
+    merchantName: adjustment.sourceAttempt?.merchant?.tradeName ?? "",
+  })), total, built));
 });
 
 router.post("/adjustments", async (request: Request, response: Response) => {
@@ -4061,8 +4291,23 @@ router.post("/adjustments", async (request: Request, response: Response) => {
 
 router.get("/cashouts", async (request: Request, response: Response) => {
   requireAuthorities(request, ["cashout:read"]);
-  const cashouts = await client.cashoutRequest.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
-  response.json({ cashouts });
+  const built = buildListQuery(request.query, {
+    search: ["merchant.tradeName", "walletId"],
+    in: { state: "state" }, equals: {merchantId: "merchantId", walletId: "walletId"},
+    ranges: { amount: { path: "amount", kind: "decimal" } },
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { merchantName: "merchantId", state: "state", amount: "amount", requestedAt: "createdAt" },
+    defaultSort: { createdAt: "desc" },
+  });
+  const [cashouts, total] = await Promise.all([
+    client.cashoutRequest.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { merchant: { select: { tradeName: true } } }, skip: built.skip, take: built.take }),
+    client.cashoutRequest.count({ where: built.where as never }),
+  ]);
+  response.json(listResponse("cashouts", cashouts.map((cashout) => ({
+    ...cashout,
+    merchantName: cashout.merchant?.tradeName ?? "",
+    requestedAt: cashout.createdAt,
+  })), total, built));
 });
 
 router.post("/cashouts/:id/process", async (request: Request, response: Response) => {

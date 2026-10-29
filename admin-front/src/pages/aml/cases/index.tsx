@@ -8,6 +8,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
+import { statusTone } from "@/components/Table/statusTone";
 import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
@@ -114,7 +115,7 @@ const AmlCasesPage = dc(() => {
             label: "Case Severity",
             Value: ({ row }: { row: AmlCase }) => <StatusChip label={row.severity} tone={severityTone(row.severity)} />,
         },
-        { key: "status", label: "Case Status", value: (row) => row.status },
+        { key: "status", label: "Case Status", Value: ({ row }: { row: AmlCase }) => <StatusChip label={row.status} tone={statusTone(row.status)} /> },
         { key: "amount", label: "Amount", value: (row) => `${row.amount ?? ""} ${row.currency ?? ""}` },
         { key: "ruleCode", label: "Rule Type", value: (row) => row.ruleCode },
         { key: "openedAt", label: "Opened At", value: (row) => row.openedAt },
@@ -164,7 +165,7 @@ const AmlCasesPage = dc(() => {
                 </ThemedText>
             </ThemedView>
 
-            <VDialog v-model={dialogOpen.value} maxWidth="560px">
+            <VDialog modelValue={dialogOpen.value} onUpdate:modelValue={(v: any) => (dialogOpen.value = v)} maxWidth="560px">
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                         <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>

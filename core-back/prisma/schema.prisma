@@ -833,6 +833,9 @@ model Merchant {
 
   @@index([status])
   @@index([kybStatus])
+  @@index([status, createdAt])
+  @@index([riskTier])
+  @@index([kybStatus, status])
   @@map("merchants")
 }
 
@@ -876,6 +879,7 @@ model User {
 
   @@index([merchantId])
   @@index([role])
+  @@index([merchantId, status])
   @@map("users")
 }
 
@@ -902,6 +906,7 @@ model Application {
 
   @@index([merchantId])
   @@index([assignedWalletId])
+  @@index([merchantId, status])
   @@map("applications")
 }
 
@@ -921,6 +926,7 @@ model Wallet {
   cashoutRequests CashoutRequest[]
 
   @@index([merchantId])
+  @@index([merchantId, status])
   @@map("wallets")
 }
 
@@ -944,6 +950,7 @@ model AccessToken {
 
   @@index([merchantId])
   @@index([applicationId])
+  @@index([merchantId, revokedAt])
   @@map("access_tokens")
 }
 
@@ -988,6 +995,8 @@ model PaymentLink {
   @@index([applicationId])
   @@index([walletId])
   @@index([state])
+  @@index([applicationId, createdAt])
+  @@index([state, createdAt])
   @@map("payment_links")
 }
 
@@ -1004,6 +1013,7 @@ model PosTerminal {
   screens     PosScreen[]
 
   @@index([applicationId])
+  @@index([applicationId, status])
   @@map("pos_terminals")
 }
 
@@ -1167,6 +1177,9 @@ model AmlCase {
 
   @@index([status])
   @@index([subjectType, subjectId])
+  @@index([status, createdAt])
+  @@index([severity, status])
+  @@index([slaDueAt])
   @@map("aml_cases")
 }
 
@@ -1195,6 +1208,8 @@ model Adjustment {
 
   @@index([targetGlAccountId])
   @@index([state])
+  @@index([state, createdAt])
+  @@index([type, createdAt])
   @@map("adjustments")
 }
 
@@ -1215,6 +1230,8 @@ model CashoutRequest {
 
   @@index([merchantId])
   @@index([walletId])
+  @@index([merchantId, state, createdAt])
+  @@index([walletId, createdAt])
   @@map("cashout_requests")
 }
 
@@ -1252,6 +1269,8 @@ model ApprovalRequest {
   @@index([makerUserId])
   @@index([checkerUserId])
   @@index([state])
+  @@index([state, createdAt])
+  @@index([subjectType, state])
   @@map("approval_requests")
 }
 
@@ -1281,6 +1300,9 @@ model Gateway {
   disputes         Dispute[]
 
   @@index([status])
+  @@index([kind])
+  @@index([verificationState])
+  @@index([riskClass])
   @@map("gateways")
 }
 
@@ -1429,6 +1451,8 @@ model CredentialSet {
 
   @@unique([gatewayId, env, externalMerchantId])
   @@index([ownerMerchantId])
+  @@index([ownerMerchantId, status])
+  @@index([env])
   @@map("credential_sets")
 }
 
@@ -1483,6 +1507,7 @@ model Rail {
   disputes           Dispute[]
 
   @@index([collectionMode])
+  @@index([blocked])
   @@map("rails")
 }
 
@@ -1546,6 +1571,7 @@ model RailRoute {
 
   @@unique([railId, gatewayId, credentialPolicy])
   @@index([status, healthState])
+  @@index([credentialPolicy])
   @@map("rail_routes")
 }
 
@@ -1907,6 +1933,10 @@ model PaymentAttempt {
   // The daily volume aggregate of the rail resolution groups the succeeded
   // attempts by route, so the pair is indexed.
   @@index([routeId, status])
+  @@index([merchantId, createdAt])
+  @@index([status, createdAt])
+  @@index([railId, createdAt])
+  @@index([applicationId, createdAt])
   @@map("payment_attempts")
 }
 
@@ -1980,6 +2010,11 @@ model OperatorCase {
   approvalRequest    ApprovalRequest?    @relation("OperatorCaseApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
 
   @@index([state, priority])
+  @@index([state, createdAt])
+  @@index([priority])
+  @@index([kind])
+  @@index([slaDueAt])
+  @@index([assigneeUserId])
   @@map("operator_cases")
 }
 
@@ -2007,6 +2042,8 @@ model ReconciliationRun {
 
   @@index([statementSourceId])
   @@index([ingestedAt])
+  @@index([createdAt])
+  @@index([statementSourceId, createdAt])
   @@map("reconciliation_runs")
 }
 
@@ -2177,6 +2214,10 @@ model JoinRequest {
 
   @@index([merchantId])
   @@index([status])
+  @@index([status, createdAt])
+  @@index([proposedRiskTier])
+  @@index([assignedReviewerId])
+  @@index([slaDueAt])
   @@map("join_requests")
 }
 
@@ -2206,6 +2247,9 @@ model KybDocument {
 
   @@index([merchantId])
   @@index([sha256])
+  @@index([merchantId, status])
+  @@index([docType])
+  @@index([expiresOn])
   @@map("kyb_documents")
 }
 
@@ -2257,6 +2301,8 @@ model AmlScreening {
 
   @@index([subjectType, subjectId])
   @@index([result])
+  @@index([result, requestedAt])
+  @@index([providerCode])
   @@map("aml_screenings")
 }
 
@@ -2305,6 +2351,8 @@ model AmlRule {
   amlCases        AmlCase[]        @relation("AmlCaseRule")
 
   @@index([active])
+  @@index([active, code])
+  @@index([ruleType])
   @@map("aml_rules")
 }
 
@@ -2353,6 +2401,8 @@ model RegulatoryReport {
   approvalRequest ApprovalRequest? @relation("RegulatoryReportApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
 
   @@index([status])
+  @@index([status, createdAt])
+  @@index([reportType])
   @@map("regulatory_reports")
 }
 
@@ -2382,6 +2432,8 @@ model Dispute {
 
   @@unique([gatewayId, externalDisputeRef])
   @@index([attemptId])
+  @@index([status, openedAt])
+  @@index([evidenceDueAt])
   @@map("disputes")
 }
 

@@ -1,5 +1,6 @@
 import express from "express";
 import { z } from "zod";
+import { zListQuery } from "../../lib/zReady";
 import { zBaseVersion, zConfigDocument, zGatewayCode, zIdentifier, zJsonObject } from "../../lib/zReady";
 import {
   toCoreGatewayCreate,
@@ -262,6 +263,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/gateways",
+    querySchema: zListQuery,
   }),
 );
 

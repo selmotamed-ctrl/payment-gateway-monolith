@@ -229,7 +229,7 @@ const DeveloperTokensPage = dc(() => {
                 )}
             </ThemedView>
 
-            <VDialog v-model={createOpen.value} maxWidth="560px">
+            <VDialog modelValue={createOpen.value} onUpdate:modelValue={(v: any) => (createOpen.value = v)} maxWidth="560px">
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                         <VTextField
@@ -258,7 +258,7 @@ const DeveloperTokensPage = dc(() => {
                 </VCard>
             </VDialog>
 
-            <VDialog v-model={ipOpen.value} maxWidth="520px">
+            <VDialog modelValue={ipOpen.value} onUpdate:modelValue={(v: any) => (ipOpen.value = v)} maxWidth="520px">
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                         <ThemedText type="defaultSemiBold">{activeToken.value?.name}</ThemedText>

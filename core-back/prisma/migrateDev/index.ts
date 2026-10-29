@@ -1,3 +1,12 @@
+
+process.env.MTLS_CA_CERT_PATH = "non-of-your-business";
+process.env.MTLS_SERVER_CERT_PATH = "non-of-your-business";
+process.env.MTLS_SERVER_KEY_PATH = "non-of-your-business";
+process.env.KMS_MASTER_KEY = "non-of-your-business";
+
+
+
+
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";

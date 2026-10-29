@@ -8,6 +8,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
+import { statusTone } from "@/components/Table/statusTone";
 import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
@@ -125,7 +126,7 @@ const ReconciliationPage = dc(() => {
     const runHeaders: TableHeader<ReconciliationRun>[] = [
         { key: "sourceName", label: "Statement Source", value: (row) => row.sourceName },
         { key: "fileName", label: "Uploaded File", value: (row) => row.fileName },
-        { key: "state", label: "Status", value: (row) => row.state },
+        { key: "state", label: "Status", Value: ({ row }: { row: ReconciliationRun }) => <StatusChip label={row.state} tone={statusTone(row.state)} /> },
         { key: "totalRows", label: "Total", value: (row) => formatPlainNumber(row.totalRows ?? 0) },
         { key: "matchedRows", label: "Matched", value: (row) => formatPlainNumber(row.matchedRows ?? 0) },
         { key: "unmatchedRows", label: "Unmatched", value: (row) => formatPlainNumber(row.unmatchedRows ?? 0) },
@@ -244,6 +245,16 @@ const ReconciliationPage = dc(() => {
                                     showNumber={true}
                                     xlsx={false}
                                     noElevation={true}
+                                    server={{
+                                        url: urlsMap.reconciliationRuns,
+                                        listKey: "runs",
+                                        filters: [
+                                            { key: "fileName", label: "File", type: "text", query: "search" },
+                                            { key: "from", label: "Started", type: "date", queryFrom: "from", queryTo: "to" },
+                                        ],
+                                        defaultSort: { key: "createdAt", direction: "desc" },
+                                        storageKey: "pg.admin.reconciliation.runs",
+                                    }}
                                 />
                             </VCardText>
                         </VCard>

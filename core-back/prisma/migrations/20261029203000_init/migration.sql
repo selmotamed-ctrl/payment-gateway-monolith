@@ -25,6 +25,9 @@ CREATE TABLE `merchants` (
 
     INDEX `merchants_status_idx`(`status`),
     INDEX `merchants_kybStatus_idx`(`kybStatus`),
+    INDEX `merchants_status_created_at_idx`(`status`, `created_at`),
+    INDEX `merchants_riskTier_idx`(`riskTier`),
+    INDEX `merchants_kybStatus_status_idx`(`kybStatus`, `status`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -45,10 +48,12 @@ CREATE TABLE `users` (
     `mfa_required` BOOLEAN NOT NULL DEFAULT true,
     `mfa_secret_ciphertext` TEXT NULL,
     `status` ENUM('INVITED', 'ACTIVE', 'SUSPENDED', 'DISABLED') NOT NULL DEFAULT 'INVITED',
+    `academy_progress_json` JSON NULL,
 
     UNIQUE INDEX `users_email_key`(`email`),
     INDEX `users_merchant_id_idx`(`merchant_id`),
     INDEX `users_role_idx`(`role`),
+    INDEX `users_merchant_id_status_idx`(`merchant_id`, `status`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -68,6 +73,7 @@ CREATE TABLE `applications` (
 
     INDEX `applications_merchant_id_idx`(`merchant_id`),
     INDEX `applications_assigned_wallet_id_idx`(`assigned_wallet_id`),
+    INDEX `applications_merchant_id_status_idx`(`merchant_id`, `status`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -83,6 +89,7 @@ CREATE TABLE `wallets` (
 
     UNIQUE INDEX `wallets_gl_account_id_key`(`gl_account_id`),
     INDEX `wallets_merchant_id_idx`(`merchant_id`),
+    INDEX `wallets_merchant_id_status_idx`(`merchant_id`, `status`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -104,6 +111,7 @@ CREATE TABLE `access_tokens` (
     UNIQUE INDEX `access_tokens_token_hash_key`(`token_hash`),
     INDEX `access_tokens_merchant_id_idx`(`merchant_id`),
     INDEX `access_tokens_application_id_idx`(`application_id`),
+    INDEX `access_tokens_merchant_id_revoked_at_idx`(`merchant_id`, `revoked_at`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -144,6 +152,8 @@ CREATE TABLE `payment_links` (
     INDEX `payment_links_application_id_idx`(`application_id`),
     INDEX `payment_links_wallet_id_idx`(`wallet_id`),
     INDEX `payment_links_state_idx`(`state`),
+    INDEX `payment_links_application_id_created_at_idx`(`application_id`, `created_at`),
+    INDEX `payment_links_state_created_at_idx`(`state`, `created_at`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -158,6 +168,7 @@ CREATE TABLE `pos_terminals` (
     `status` ENUM('ACTIVE', 'INACTIVE', 'BLOCKED') NOT NULL DEFAULT 'ACTIVE',
 
     INDEX `pos_terminals_application_id_idx`(`application_id`),
+    INDEX `pos_terminals_application_id_status_idx`(`application_id`, `status`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -302,6 +313,9 @@ CREATE TABLE `aml_cases` (
 
     INDEX `aml_cases_status_idx`(`status`),
     INDEX `aml_cases_subject_type_subject_id_idx`(`subject_type`, `subject_id`),
+    INDEX `aml_cases_status_created_at_idx`(`status`, `created_at`),
+    INDEX `aml_cases_severity_status_idx`(`severity`, `status`),
+    INDEX `aml_cases_sla_due_at_idx`(`sla_due_at`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -327,6 +341,8 @@ CREATE TABLE `adjustments` (
     UNIQUE INDEX `adjustments_journal_entry_id_key`(`journal_entry_id`),
     INDEX `adjustments_target_gl_account_id_idx`(`target_gl_account_id`),
     INDEX `adjustments_state_idx`(`state`),
+    INDEX `adjustments_state_created_at_idx`(`state`, `created_at`),
+    INDEX `adjustments_type_created_at_idx`(`type`, `created_at`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -344,6 +360,8 @@ CREATE TABLE `cashout_requests` (
 
     INDEX `cashout_requests_merchant_id_idx`(`merchant_id`),
     INDEX `cashout_requests_wallet_id_idx`(`wallet_id`),
+    INDEX `cashout_requests_merchant_id_state_created_at_idx`(`merchant_id`, `state`, `created_at`),
+    INDEX `cashout_requests_wallet_id_created_at_idx`(`wallet_id`, `created_at`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -368,6 +386,8 @@ CREATE TABLE `approval_requests` (
     INDEX `approval_requests_maker_user_id_idx`(`maker_user_id`),
     INDEX `approval_requests_checker_user_id_idx`(`checker_user_id`),
     INDEX `approval_requests_state_idx`(`state`),
+    INDEX `approval_requests_state_created_at_idx`(`state`, `created_at`),
+    INDEX `approval_requests_subject_type_state_idx`(`subject_type`, `state`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -391,6 +411,9 @@ CREATE TABLE `gateways` (
     UNIQUE INDEX `gateways_code_key`(`code`),
     UNIQUE INDEX `gateways_active_version_id_key`(`active_version_id`),
     INDEX `gateways_status_idx`(`status`),
+    INDEX `gateways_kind_idx`(`kind`),
+    INDEX `gateways_verificationState_idx`(`verificationState`),
+    INDEX `gateways_riskClass_idx`(`riskClass`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -507,6 +530,8 @@ CREATE TABLE `credential_sets` (
     `expires_at` DATETIME(3) NULL,
 
     INDEX `credential_sets_owner_merchant_id_idx`(`owner_merchant_id`),
+    INDEX `credential_sets_owner_merchant_id_status_idx`(`owner_merchant_id`, `status`),
+    INDEX `credential_sets_env_idx`(`env`),
     UNIQUE INDEX `credential_sets_gateway_id_env_external_merchant_id_key`(`gateway_id`, `env`, `external_merchant_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -547,10 +572,12 @@ CREATE TABLE `rails` (
     `refund_window_days` INTEGER NULL,
     `instructions_ar` TEXT NULL,
     `instructions_en` TEXT NULL,
+    `help_guide_json` JSON NULL,
     `metadata` JSON NULL,
 
     UNIQUE INDEX `rails_code_key`(`code`),
     INDEX `rails_collection_mode_idx`(`collection_mode`),
+    INDEX `rails_blocked_idx`(`blocked`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -604,6 +631,7 @@ CREATE TABLE `rail_routes` (
     `scope` JSON NOT NULL,
 
     INDEX `rail_routes_status_health_state_idx`(`status`, `health_state`),
+    INDEX `rail_routes_credential_policy_idx`(`credential_policy`),
     UNIQUE INDEX `rail_routes_rail_id_gateway_id_credential_policy_key`(`rail_id`, `gateway_id`, `credential_policy`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -923,6 +951,10 @@ CREATE TABLE `payment_attempts` (
     INDEX `payment_attempts_status_next_check_at_idx`(`status`, `next_check_at`),
     INDEX `payment_attempts_gateway_version_id_idx`(`gateway_version_id`),
     INDEX `payment_attempts_route_id_status_idx`(`route_id`, `status`),
+    INDEX `payment_attempts_merchant_id_created_at_idx`(`merchant_id`, `created_at`),
+    INDEX `payment_attempts_status_created_at_idx`(`status`, `created_at`),
+    INDEX `payment_attempts_rail_id_created_at_idx`(`rail_id`, `created_at`),
+    INDEX `payment_attempts_application_id_created_at_idx`(`application_id`, `created_at`),
     UNIQUE INDEX `payment_attempts_link_id_idempotency_key_key`(`link_id`, `idempotency_key`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -988,6 +1020,11 @@ CREATE TABLE `operator_cases` (
 
     UNIQUE INDEX `operator_cases_reconciliation_item_id_key`(`reconciliation_item_id`),
     INDEX `operator_cases_state_priority_idx`(`state`, `priority`),
+    INDEX `operator_cases_state_created_at_idx`(`state`, `created_at`),
+    INDEX `operator_cases_priority_idx`(`priority`),
+    INDEX `operator_cases_kind_idx`(`kind`),
+    INDEX `operator_cases_sla_due_at_idx`(`sla_due_at`),
+    INDEX `operator_cases_assignee_user_id_idx`(`assignee_user_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -1008,6 +1045,8 @@ CREATE TABLE `reconciliation_runs` (
     UNIQUE INDEX `reconciliation_runs_file_hash_key`(`file_hash`),
     INDEX `reconciliation_runs_statement_source_id_idx`(`statement_source_id`),
     INDEX `reconciliation_runs_ingested_at_idx`(`ingested_at`),
+    INDEX `reconciliation_runs_created_at_idx`(`created_at`),
+    INDEX `reconciliation_runs_statement_source_id_created_at_idx`(`statement_source_id`, `created_at`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -1156,6 +1195,10 @@ CREATE TABLE `join_requests` (
 
     INDEX `join_requests_merchant_id_idx`(`merchant_id`),
     INDEX `join_requests_status_idx`(`status`),
+    INDEX `join_requests_status_created_at_idx`(`status`, `created_at`),
+    INDEX `join_requests_proposed_risk_tier_idx`(`proposed_risk_tier`),
+    INDEX `join_requests_assigned_reviewer_id_idx`(`assigned_reviewer_id`),
+    INDEX `join_requests_sla_due_at_idx`(`sla_due_at`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -1182,6 +1225,9 @@ CREATE TABLE `kyb_documents` (
 
     INDEX `kyb_documents_merchant_id_idx`(`merchant_id`),
     INDEX `kyb_documents_sha256_idx`(`sha256`),
+    INDEX `kyb_documents_merchant_id_status_idx`(`merchant_id`, `status`),
+    INDEX `kyb_documents_doc_type_idx`(`doc_type`),
+    INDEX `kyb_documents_expires_on_idx`(`expires_on`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -1229,6 +1275,8 @@ CREATE TABLE `aml_screenings` (
 
     INDEX `aml_screenings_subject_type_subject_id_idx`(`subject_type`, `subject_id`),
     INDEX `aml_screenings_result_idx`(`result`),
+    INDEX `aml_screenings_result_requested_at_idx`(`result`, `requested_at`),
+    INDEX `aml_screenings_provider_code_idx`(`provider_code`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -1274,6 +1322,8 @@ CREATE TABLE `aml_rules` (
 
     UNIQUE INDEX `aml_rules_code_key`(`code`),
     INDEX `aml_rules_active_idx`(`active`),
+    INDEX `aml_rules_active_code_idx`(`active`, `code`),
+    INDEX `aml_rules_rule_type_idx`(`rule_type`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -1320,6 +1370,8 @@ CREATE TABLE `regulatory_reports` (
 
     UNIQUE INDEX `regulatory_reports_aml_case_id_key`(`aml_case_id`),
     INDEX `regulatory_reports_status_idx`(`status`),
+    INDEX `regulatory_reports_status_created_at_idx`(`status`, `created_at`),
+    INDEX `regulatory_reports_report_type_idx`(`report_type`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -1344,6 +1396,8 @@ CREATE TABLE `disputes` (
     `evidence_json` JSON NULL,
 
     INDEX `disputes_attempt_id_idx`(`attempt_id`),
+    INDEX `disputes_status_opened_at_idx`(`status`, `opened_at`),
+    INDEX `disputes_evidence_due_at_idx`(`evidence_due_at`),
     UNIQUE INDEX `disputes_gateway_id_external_dispute_ref_key`(`gateway_id`, `external_dispute_ref`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -1761,7 +1815,17 @@ ALTER TABLE `notifications` ADD CONSTRAINT `notifications_recipient_merchant_id_
 
 -- AddForeignKey
 ALTER TABLE `platform_settings` ADD CONSTRAINT `platform_settings_approval_request_id_fkey` FOREIGN KEY (`approval_request_id`) REFERENCES `approval_requests`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
--- Schema version support (single-row table managed outside the Prisma datamodel).
+
+
+-- =============================================================================
+-- Domain invariants and tables managed outside the Prisma datamodel.
+-- =============================================================================
+
+ALTER TABLE `journal_lines` ADD CONSTRAINT `journal_lines_amount_positive` CHECK (`amount` > 0);
+ALTER TABLE `attempt_groups` ADD CONSTRAINT `attempt_groups_single_success` CHECK (`success_count` <= 1);
+ALTER TABLE `payment_links` ADD CONSTRAINT `payment_links_slot_reservation_invariant` CHECK (`infinite_use` = true OR (`confirmed_count` + `active_locked_count`) <= `use_count`);
+
+-- Schema version support (single-row table checked by the core at boot).
 CREATE TABLE IF NOT EXISTS `schema_versions` (
     `id` INTEGER NOT NULL DEFAULT 1,
     `version` INTEGER NOT NULL,
@@ -1770,13 +1834,8 @@ CREATE TABLE IF NOT EXISTS `schema_versions` (
     CONSTRAINT `schema_versions_pkey` PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO `schema_versions` (`id`, `version`) VALUES (1, 5)
+INSERT INTO `schema_versions` (`id`, `version`) VALUES (1, 6)
 ON DUPLICATE KEY UPDATE `version` = VALUES(`version`);
-
--- Domain invariants that the Prisma datamodel cannot express.
-ALTER TABLE `journal_lines` ADD CONSTRAINT `journal_lines_amount_positive` CHECK (`amount` > 0);
-
-ALTER TABLE `attempt_groups` ADD CONSTRAINT `attempt_groups_single_success` CHECK (`success_count` <= 1);
 
 -- MariaDB forbids a CHECK constraint on a column that is part of a foreign
 -- key, so the maker != checker invariant is enforced by a trigger instead.
@@ -1788,5 +1847,3 @@ BEGIN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'checker_user_id must differ from maker_user_id';
     END IF;
 END;
-
-ALTER TABLE `payment_links` ADD CONSTRAINT `payment_links_slot_reservation_invariant` CHECK (`infinite_use` = true OR (`confirmed_count` + `active_locked_count`) <= `use_count`);

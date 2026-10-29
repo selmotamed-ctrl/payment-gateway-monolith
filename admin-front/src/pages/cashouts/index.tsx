@@ -153,7 +153,7 @@ const CashoutsPage = dc(() => {
                 )}
             </ThemedView>
 
-            <VDialog v-model={dialogOpen.value} maxWidth="540px">
+            <VDialog modelValue={dialogOpen.value} onUpdate:modelValue={(v: any) => (dialogOpen.value = v)} maxWidth="540px">
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                         <VSelect

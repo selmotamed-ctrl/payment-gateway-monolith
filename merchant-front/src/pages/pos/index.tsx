@@ -197,7 +197,7 @@ const PosTerminalsPage = dc(() => {
                 )}
             </ThemedView>
 
-            <VDialog v-model={terminalOpen.value} maxWidth="480px">
+            <VDialog modelValue={terminalOpen.value} onUpdate:modelValue={(v: any) => (terminalOpen.value = v)} maxWidth="480px">
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                         <VTextField
@@ -217,7 +217,7 @@ const PosTerminalsPage = dc(() => {
                 </VCard>
             </VDialog>
 
-            <VDialog v-model={screenOpen.value} maxWidth="480px">
+            <VDialog modelValue={screenOpen.value} onUpdate:modelValue={(v: any) => (screenOpen.value = v)} maxWidth="480px">
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                         <ThemedText type="defaultSemiBold">{activeTerminal.value?.name}</ThemedText>

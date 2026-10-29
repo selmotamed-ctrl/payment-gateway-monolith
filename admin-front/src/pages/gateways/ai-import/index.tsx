@@ -1208,7 +1208,7 @@ const GatewayAiImportPage = dc(() => {
                     </ThemedView>
                 </VAlert>
 
-                <VStepper v-model={step.value} flat style={{ background: "transparent" }}>
+                <VStepper modelValue={step.value} onUpdate:modelValue={(v: any) => (step.value = v)} flat style={{ background: "transparent" }}>
                     <VStepperHeader>
                         <VStepperItem title={t("Download Kit")} value={1} />
                         <VStepperItem title={t("Verify Spec")} value={2} />

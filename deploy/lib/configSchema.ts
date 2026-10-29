@@ -39,6 +39,10 @@ const domain = z
   .max(253)
   .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i, "must be a fully qualified domain name");
 
+// A vhost name may be a FQDN, a bare IP, or "_" (nginx catch-all) so a box can
+// be served without DNS during staging.
+const serverName = z.union([domain, z.literal("_"), ipv4]);
+
 const port = z.coerce.number().int().min(1).max(65535);
 const positive = z.coerce.number().int().min(1);
 const booleanish = z
@@ -60,7 +64,7 @@ const base = z.strictObject({
   KEEP_RELEASES: z.coerce.number().int().min(1).max(100).default(5),
   ROTATE_MTLS_CERTS: booleanish.default(false),
   MTLS_VALIDITY_DAYS: z.coerce.number().int().min(1).max(3650).default(825),
-  LAN_ALLOWED_CIDRS: cidrList.default("10.0.0.0/8,192.168.0.0/16"),
+  LAN_ALLOWED_CIDRS: cidrList.default("127.0.0.1/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"),
 
   // 1. Database
   DB_MANAGE_VIA_SSH: booleanish.default(true),
@@ -108,7 +112,7 @@ const base = z.strictObject({
   ADMIN_BACK_PORT: port.default(4101),
   ADMIN_NGINX_LAN_PORT: port.default(8443),
   ADMIN_SSL: booleanish.default(true),
-  ADMIN_DOMAIN: domain.default("admin.internal"),
+  ADMIN_DOMAIN: serverName.default("admin.internal"),
   ADMIN_REMOTE_DIR: z.string().trim().min(1).max(200).default("/var/www/pg-admin"),
 
   // 4. Merchant
@@ -124,7 +128,7 @@ const base = z.strictObject({
   MERCHANT_SSL: booleanish.default(true),
   MERCHANT_LAN_PORT: z.coerce.number().int().min(0).max(65535).default(8081),
   MERCHANT_LAN_SSL: booleanish.default(true),
-  MERCHANT_DOMAIN: domain,
+  MERCHANT_DOMAIN: serverName,
   MERCHANT_SSL_MODE: z.enum(SSL_MODES).default("certbot"),
   MERCHANT_SSL_CERT_PATH: z.string().trim().max(300).optional(),
   MERCHANT_SSL_KEY_PATH: z.string().trim().max(300).optional(),
@@ -143,7 +147,7 @@ const base = z.strictObject({
   CHECKOUT_SSL: booleanish.default(true),
   CHECKOUT_LAN_PORT: z.coerce.number().int().min(0).max(65535).default(8082),
   CHECKOUT_LAN_SSL: booleanish.default(true),
-  CHECKOUT_DOMAIN: domain,
+  CHECKOUT_DOMAIN: serverName,
   CHECKOUT_SSL_MODE: z.enum(SSL_MODES).default("certbot"),
   CHECKOUT_SSL_CERT_PATH: z.string().trim().max(300).optional(),
   CHECKOUT_SSL_KEY_PATH: z.string().trim().max(300).optional(),

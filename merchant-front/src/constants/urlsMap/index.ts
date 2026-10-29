@@ -1,4 +1,5 @@
 export const urlsMap = {
+    options: (kind: string) => `v1/merchant/options/${kind}`,
     authLogin: "v1/merchant/auth/login",
     authRegister: "v1/merchant/auth/register",
     authVerifyIdentity: "v1/merchant/auth/verify-identity",

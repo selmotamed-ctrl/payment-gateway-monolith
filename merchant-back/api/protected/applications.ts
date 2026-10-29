@@ -1,6 +1,6 @@
+import { zIdentifier, zListQuery } from "../../lib/zReady";
 import express from "express";
 import { z } from "zod";
-import { zIdentifier } from "../../lib/zReady";
 import {
   coreApplicationCreateSchema,
   coreApplicationPatchSchema,
@@ -64,6 +64,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/merchant/applications",
+    querySchema: zListQuery,
   }),
 );
 

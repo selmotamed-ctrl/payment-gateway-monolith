@@ -31,7 +31,8 @@ const HeaderCell = defineComponent(
             if (h.Header) {
                 return <h.Header key={h.key}></h.Header>;
             }
-            const isSortSelected = props.sortBy == h.sortKey;
+            const sortKey = h.sortKey ?? h.key;
+            const isSortSelected = !!props.sortBy && props.sortBy === sortKey;
 
             return (
                 <ThemedView
@@ -77,22 +78,25 @@ const HeaderCell = defineComponent(
                             <h.HeaderIcon {...headerIconProps}></h.HeaderIcon>
                         </>
                     )}
-                    {!!(h.sortable && h.sortKey) && (
+                    {!!(h.sortable !== false && !h.Header && !!h.label && h.key !== "actions" && sortKey) && (
                         <>
                             <Button
                                 variant="text"
                                 color={!isSortSelected ? colors.grey.darken1 : colors.blue.base}
                                 onClick={() => {
-                                    if (!h.sortKey) {
+                                    if (isSortSelected) {
+                                        props.onSetSort(sortKey, props.sortDirection == "asc" ? "desc" : "asc");
                                         return;
                                     }
-                                    if (isSortSelected) {
-                                        props.onSetSort(h.sortKey, props.sortDirection == "asc" ? "desc" : "asc");
-                                        return
-                                    }
-                                    props.onSetSort(h.sortKey, props.sortDirection);
+                                    props.onSetSort(sortKey, "asc");
                                 }}
-                                iconName={props.sortDirection == "asc" ? "mdi-chevron-up": "mdi-chevron-down"}
+                                iconName={
+                                    !isSortSelected
+                                        ? "mdi-unfold-more-horizontal"
+                                        : props.sortDirection == "asc"
+                                          ? "mdi-chevron-up"
+                                          : "mdi-chevron-down"
+                                }
                             ></Button>
                         </>
                     )}

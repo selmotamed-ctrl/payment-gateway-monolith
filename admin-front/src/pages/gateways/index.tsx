@@ -2,17 +2,20 @@ import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
-import { VBtn, VCard, VCardText } from "vuetify/components";
+import { VBtn, VCard, VCardText, VDialog, VSelect, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
+import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
+import { statusTone } from "@/components/Table/statusTone";
 import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
+import { showSnackBar } from "@/utils/snackBar";
 
 type Gateway = {
     id: string;
@@ -23,6 +26,7 @@ type Gateway = {
     kind: string;
     verificationState: string;
     riskClass: string;
+    status: string;
     aliases: string[];
     activeVersionId: string | null;
     versions: { id: string; version: number; status: string; createdAt: string }[];
@@ -35,6 +39,9 @@ const GatewaysPage = dc(() => {
     const loading = ref(true);
     const error = ref<string | null>(null);
     const search = ref<string | null>(null);
+    const createOpen = ref(false);
+    const creating = ref(false);
+    const form = ref({ code: "", name: "", operator: "", kind: "DIRECT", country: "LY", riskClass: "NORMAL" });
 
     const load = async () => {
         loading.value = true;
@@ -54,6 +61,39 @@ const GatewaysPage = dc(() => {
     };
 
     void load();
+
+    const openCreate = () => {
+        form.value = { code: "", name: "", operator: "", kind: "DIRECT", country: "LY", riskClass: "NORMAL" };
+        createOpen.value = true;
+    };
+
+    const createGateway = async () => {
+        if (creating.value) {
+            return;
+        }
+        creating.value = true;
+        try {
+            const response = await api.post(urlsMap.gatewaysList, {
+                code: form.value.code.trim().toLowerCase(),
+                name: form.value.name.trim(),
+                operator: form.value.operator.trim() || form.value.name.trim(),
+                kind: form.value.kind,
+                country: form.value.country.trim().toUpperCase() || "LY",
+                riskClass: form.value.riskClass,
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            createOpen.value = false;
+            showSnackBar({ type: "success", message: t("Saved") });
+            await load();
+            if (payload.id) {
+                await router.push({ name: "GatewayWizard", params: { id: payload.id } });
+            }
+        } catch (e) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+        } finally {
+            creating.value = false;
+        }
+    };
 
     const kindTone = (kind: string) => {
         switch (kind) {
@@ -88,7 +128,12 @@ const GatewaysPage = dc(() => {
                 />
             ),
         },
-        { key: "riskClass", label: "Risk Class", value: (row) => row.riskClass },
+        { key: "status", label: "Status", Value: ({ row }: { row: Gateway }) => <StatusChip label={row.status} tone={statusTone(row.status)} /> },
+        {
+            key: "riskClass",
+            label: "Risk Class",
+            Value: ({ row }: { row: Gateway }) => <StatusChip label={row.riskClass} tone={statusTone(row.riskClass)} />,
+        },
         { key: "aliases", label: "Aliases", value: (row) => (row.aliases ?? []).join(", ") },
         { key: "versions", label: "Version", value: (row) => String(row.versions?.length ?? 0) },
         {
@@ -113,14 +158,24 @@ const GatewaysPage = dc(() => {
                 <PageHeader
                     title={t("Gateways")}
                     end={() => (
-                        <VBtn
-                            color="primary"
-                            variant="tonal"
-                            prependIcon={"mdi-robot-outline"}
-                            onClick={() => void router.push({ name: "GatewayAiImport" })}
-                        >
-                            {t("Smart AI Integration")}
-                        </VBtn>
+                        <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
+                            <VBtn
+                                color="primary"
+                                variant="flat"
+                                prependIcon={"mdi-plus"}
+                                onClick={() => openCreate()}
+                            >
+                                {t("New Gateway")}
+                            </VBtn>
+                            <VBtn
+                                color="primary"
+                                variant="tonal"
+                                prependIcon={"mdi-robot-outline"}
+                                onClick={() => void router.push({ name: "GatewayAiImport" })}
+                            >
+                                {t("Smart AI Integration")}
+                            </VBtn>
+                        </ThemedView>
                     )}
                 />
 
@@ -144,6 +199,62 @@ const GatewaysPage = dc(() => {
                     </VCard>
                 )}
             </ThemedView>
+
+            <VDialog modelValue={createOpen.value} onUpdate:modelValue={(v: any) => (createOpen.value = v)} maxWidth="560px">
+                <VCard>
+                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                        <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
+                            {t("New Gateway")}
+                        </ThemedText>
+                        <VTextField
+                            label={t("Gateway Code")}
+                            hint="lowercase letters, digits, - and _"
+                            modelValue={form.value.code}
+                            onUpdate:modelValue={(v: string) => (form.value.code = v)}
+                        />
+                        <VTextField
+                            label={t("Gateway")}
+                            modelValue={form.value.name}
+                            onUpdate:modelValue={(v: string) => (form.value.name = v)}
+                        />
+                        <VTextField
+                            label={t("Operator")}
+                            modelValue={form.value.operator}
+                            onUpdate:modelValue={(v: string) => (form.value.operator = v)}
+                        />
+                        <VSelect
+                            label={t("Kind")}
+                            items={["DIRECT", "AGGREGATOR", "NATIVE_ADAPTER", "INTERNAL"]}
+                            modelValue={form.value.kind}
+                            onUpdate:modelValue={(v: string) => (form.value.kind = v)}
+                        />
+                        <VTextField
+                            label={t("Country")}
+                            modelValue={form.value.country}
+                            onUpdate:modelValue={(v: string) => (form.value.country = v)}
+                        />
+                        <VSelect
+                            label={t("Risk Class")}
+                            items={["NORMAL", "HIGH_RISK"]}
+                            modelValue={form.value.riskClass}
+                            onUpdate:modelValue={(v: string) => (form.value.riskClass = v)}
+                        />
+                        <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
+                            <VBtn variant="text" onClick={() => (createOpen.value = false)}>
+                                {t("Cancel")}
+                            </VBtn>
+                            <VBtn
+                                color="primary"
+                                loading={creating.value}
+                                disabled={!form.value.code.trim() || !form.value.name.trim()}
+                                onClick={() => void createGateway()}
+                            >
+                                {t("Create")}
+                            </VBtn>
+                        </ThemedView>
+                    </VCardText>
+                </VCard>
+            </VDialog>
         </ScreenContainer>
     );
 });

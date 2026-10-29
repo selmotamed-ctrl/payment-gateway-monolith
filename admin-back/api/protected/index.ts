@@ -14,6 +14,7 @@ import { operationsRouter } from "./operations";
 import { railsRouter, routesRouter } from "./rails";
 import { reconciliationRouter } from "./reconciliation";
 import { settingsRouter } from "./settings";
+import { optionsRouter } from "./options";
 import { statsRouter } from "./stats";
 import { usersRouter } from "./users";
 
@@ -48,6 +49,7 @@ router.use("/routes", routesRouter);
 router.use("/assets", assetsRouter);
 router.use("/reconciliation", reconciliationRouter);
 router.use("/settings", settingsRouter);
+router.use("/options", optionsRouter);
 router.use("/stats", statsRouter);
 router.use("/", kybRouter);
 router.use("/", operationsRouter);

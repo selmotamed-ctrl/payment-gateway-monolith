@@ -1,6 +1,6 @@
+import { zCidrList, zIdentifier, zListQuery } from "../../lib/zReady";
 import express from "express";
 import { z } from "zod";
-import { zCidrList, zIdentifier } from "../../lib/zReady";
 import { coreTokenCreateSchema, coreTokenIpsSchema } from "../contract";
 import { coreForward } from "../forward";
 
@@ -28,6 +28,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/merchant/tokens",
+    querySchema: zListQuery,
   }),
 );
 

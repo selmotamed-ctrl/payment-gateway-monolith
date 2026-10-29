@@ -221,7 +221,7 @@ const GatewayWizardPage = dc(() => {
                     <StateView loading={true} />
                 ) : (
                     <>
-                        <VStepper v-model={step.value} flat style={{ background: "transparent" }}>
+                        <VStepper modelValue={step.value} onUpdate:modelValue={(v: any) => (step.value = v)} flat style={{ background: "transparent" }}>
                             <VStepperHeader>
                                 {STEPS.map((item) => (
                                     <VStepperItem key={item.key} title={t(item.title)} value={STEPS.indexOf(item) + 1} />

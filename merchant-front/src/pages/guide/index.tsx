@@ -940,14 +940,14 @@ print(payment.status_code, payment.json())`;
                             GET {paymentEndpoint.value}
                         </ThemedText>
 
-                        <VTabs v-model={snippetTab.value} density="compact">
+                        <VTabs modelValue={snippetTab.value} onUpdate:modelValue={(v: any) => (snippetTab.value = v)} density="compact">
                             <VTab value="curl">cURL</VTab>
                             <VTab value="javascript">JavaScript / TypeScript</VTab>
                             <VTab value="php">PHP (Laravel Http)</VTab>
                             <VTab value="python">Python (requests)</VTab>
                         </VTabs>
 
-                        <VWindow v-model={snippetTab.value}>
+                        <VWindow modelValue={snippetTab.value} onUpdate:modelValue={(v: any) => (snippetTab.value = v)}>
                             <VWindowItem value="curl">
                                 <ThemedView style={{ gap: "8px" }}>
                                     <VBtn
@@ -1053,7 +1053,7 @@ ${webhookPayload.value}`}
                 </VCard>
             </ThemedView>
 
-            <VDialog v-model={chapterOpen.value} maxWidth="760px" scrollable>
+            <VDialog modelValue={chapterOpen.value} onUpdate:modelValue={(v: any) => (chapterOpen.value = v)} maxWidth="760px" scrollable>
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                         <ThemedView

@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
+import { statusTone } from "@/components/Table/statusTone";
 import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
@@ -111,7 +112,7 @@ const MerchantsPage = dc(() => {
             ),
         },
         { key: "kybStatus", label: "Verified Docs", value: (row) => row.kybStatus },
-        { key: "riskTier", label: "Risk Class", value: (row) => row.riskTier },
+        { key: "riskTier", label: "Risk Class", Value: ({ row }: { row: any }) => <StatusChip label={row.riskTier} tone={statusTone(row.riskTier)} /> },
         { key: "email", label: "Email", value: (row) => row.email },
         { key: "phone", label: "Phone", value: (row) => row.phone },
         { key: "createdAt", label: "Created At", value: (row) => row.createdAt },
@@ -155,7 +156,7 @@ const MerchantsPage = dc(() => {
                 )}
             </ThemedView>
 
-            <VDialog v-model={dialogOpen.value} maxWidth="620px">
+            <VDialog modelValue={dialogOpen.value} onUpdate:modelValue={(v: any) => (dialogOpen.value = v)} maxWidth="620px">
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                         <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>

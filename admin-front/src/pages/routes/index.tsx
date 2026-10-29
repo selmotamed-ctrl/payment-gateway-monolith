@@ -1,10 +1,11 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VCard, VCardText, VDialog, VSelect } from "vuetify/components";
+import { VBtn, VCard, VCardText, VDialog, VSelect, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
+import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
 import { DataTable } from "@/components/Table/DataTable";
@@ -40,6 +41,11 @@ const RoutesPage = dc(() => {
     const selected = ref<GatewayRoute | null>(null);
     const targetStatus = ref<string>("ACTIVE");
     const actionLoading = ref(false);
+    const createOpen = ref(false);
+    const creating = ref(false);
+    const routeForm = ref({ railId: "", gatewayId: "", priority: 100, limitAmount: "" });
+    const railOptions = ref<{ title: string; value: string }[]>([]);
+    const gatewayOptions = ref<{ title: string; value: string }[]>([]);
 
     const load = async () => {
         loading.value = true;
@@ -59,6 +65,60 @@ const RoutesPage = dc(() => {
     };
 
     void load();
+
+    const openCreateRoute = async () => {
+        createOpen.value = true;
+        try {
+            const [railsResponse, gatewaysResponse] = await Promise.all([
+                api.get(urlsMap.railsList),
+                api.get(urlsMap.gatewaysList),
+            ]);
+            const railsPayload = railsResponse.data?.data ?? railsResponse.data ?? {};
+            const gatewaysPayload = gatewaysResponse.data?.data ?? gatewaysResponse.data ?? {};
+            const rails = railsPayload.rails ?? railsPayload.rows ?? railsPayload.items ?? [];
+            const gateways = gatewaysPayload.gateways ?? gatewaysPayload.rows ?? gatewaysPayload.items ?? [];
+            railOptions.value = rails.map((rail: { id: string; code: string; nameEn?: string }) => ({
+                title: `${rail.nameEn ?? rail.code} (${rail.code})`,
+                value: rail.id,
+            }));
+            gatewayOptions.value = gateways.map((gateway: { id: string; code: string; name: string }) => ({
+                title: `${gateway.name} (${gateway.code})`,
+                value: gateway.id,
+            }));
+            routeForm.value = {
+                railId: railOptions.value[0]?.value ?? "",
+                gatewayId: gatewayOptions.value[0]?.value ?? "",
+                priority: 100,
+                limitAmount: "",
+            };
+        } catch (e) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+        }
+    };
+
+    const createRoute = async () => {
+        if (creating.value || !routeForm.value.railId || !routeForm.value.gatewayId) {
+            return;
+        }
+        creating.value = true;
+        try {
+            await api.post(urlsMap.routesList, {
+                railId: routeForm.value.railId,
+                gatewayId: routeForm.value.gatewayId,
+                credentialPolicy: "PLATFORM",
+                environment: "live",
+                priority: Number(routeForm.value.priority) || 0,
+                ...(routeForm.value.limitAmount.trim() ? { limitAmount: routeForm.value.limitAmount.trim() } : {}),
+            });
+            createOpen.value = false;
+            showSnackBar({ type: "success", message: t("Saved") });
+            await load();
+        } catch (e) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+        } finally {
+            creating.value = false;
+        }
+    };
 
     const changeState = async () => {
         if (!selected.value) {
@@ -143,7 +203,14 @@ const RoutesPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Routes")} />
+                <PageHeader
+                    title={t("Routes")}
+                    end={() => (
+                        <VBtn color="primary" variant="flat" prependIcon={"mdi-plus"} onClick={() => void openCreateRoute()}>
+                            {t("Add Route")}
+                        </VBtn>
+                    )}
+                />
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
@@ -166,7 +233,7 @@ const RoutesPage = dc(() => {
                 )}
             </ThemedView>
 
-            <VDialog v-model={dialogOpen.value} maxWidth="460px">
+            <VDialog modelValue={dialogOpen.value} onUpdate:modelValue={(v: any) => (dialogOpen.value = v)} maxWidth="460px">
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                         <VSelect
@@ -178,6 +245,53 @@ const RoutesPage = dc(() => {
                         <VBtn color="primary" loading={actionLoading.value} onClick={() => void changeState()}>
                             {t("Update")}
                         </VBtn>
+                    </VCardText>
+                </VCard>
+            </VDialog>
+
+            <VDialog modelValue={createOpen.value} onUpdate:modelValue={(v: any) => (createOpen.value = v)} maxWidth="560px">
+                <VCard>
+                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                        <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
+                            {t("Add Route")}
+                        </ThemedText>
+                        <VSelect
+                            label={t("Rails")}
+                            items={railOptions.value}
+                            modelValue={routeForm.value.railId}
+                            onUpdate:modelValue={(v: string) => (routeForm.value.railId = v)}
+                        />
+                        <VSelect
+                            label={t("Gateways")}
+                            items={gatewayOptions.value}
+                            modelValue={routeForm.value.gatewayId}
+                            onUpdate:modelValue={(v: string) => (routeForm.value.gatewayId = v)}
+                        />
+                        <VTextField
+                            label={t("Priority")}
+                            type="number"
+                            modelValue={String(routeForm.value.priority)}
+                            onUpdate:modelValue={(v: string) => (routeForm.value.priority = Number(v) || 0)}
+                        />
+                        <VTextField
+                            label={t("Max Amount")}
+                            hint="optional, e.g. 5000.0000"
+                            modelValue={routeForm.value.limitAmount}
+                            onUpdate:modelValue={(v: string) => (routeForm.value.limitAmount = v)}
+                        />
+                        <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
+                            <VBtn variant="text" onClick={() => (createOpen.value = false)}>
+                                {t("Cancel")}
+                            </VBtn>
+                            <VBtn
+                                color="primary"
+                                loading={creating.value}
+                                disabled={!routeForm.value.railId || !routeForm.value.gatewayId}
+                                onClick={() => void createRoute()}
+                            >
+                                {t("Create")}
+                            </VBtn>
+                        </ThemedView>
                     </VCardText>
                 </VCard>
             </VDialog>

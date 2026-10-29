@@ -1,6 +1,6 @@
+import { zIdentifier, zJsonObject, zListQuery } from "../../lib/zReady";
 import express from "express";
 import { z } from "zod";
-import { zIdentifier, zJsonObject } from "../../lib/zReady";
 import {
   coreCredentialSetCreateSchema,
   coreCredentialSetUpdateSchema,
@@ -65,6 +65,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/merchant/credential-sets",
+    querySchema: zListQuery,
   }),
 );
 

@@ -164,7 +164,7 @@ const DisputesPage = dc(() => {
                 )}
             </ThemedView>
 
-            <VDialog v-model={dialogOpen.value} maxWidth="560px">
+            <VDialog modelValue={dialogOpen.value} onUpdate:modelValue={(v: any) => (dialogOpen.value = v)} maxWidth="560px">
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                         <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>

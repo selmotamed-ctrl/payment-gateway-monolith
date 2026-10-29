@@ -1,5 +1,6 @@
 import express, { type Request, type Response } from "express";
 import { z } from "zod";
+import { zListQuery } from "../../lib/zReady";
 import { parseOrThrow } from "../../lib/error";
 import { zIdentifier, zPaginationQuery } from "../../lib/zReady";
 import { toCoreReconciliationSourceCreate, toCoreReconciliationUpload } from "../contract";
@@ -43,6 +44,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/reconciliation/sources",
+    querySchema: zListQuery,
   }),
 );
 

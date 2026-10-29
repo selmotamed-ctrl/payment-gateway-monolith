@@ -25,7 +25,7 @@ const cashoutQuerySchema = z
     page: z.coerce.number().int().min(1).max(10000).optional(),
     pageSize: z.coerce.number().int().min(1).max(200).optional(),
   })
-  .strict();
+  .passthrough();
 
 router.get(
   "/",

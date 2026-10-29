@@ -1,40 +1,182 @@
 import { Table } from "./Table";
+import TableFilters from "./TableFilters";
+import { buildFilterQuery, type FilterValues } from "./filters";
+import { rowTone as rowToneFor, statusTone } from "./statusTone";
+import { tableRegistry } from "./tableRegistry";
 import {
     type DataTableProps,
     defaultNumberOfItemsPerPageChoices,
     type RefreshMethodApiWithoutSkip,
     type RefreshMethodData,
     type TableHeader as TableHeaderType,
+    sortRowsByHeader,
 } from "./types";
 import { ThemedView } from "../ThemedView";
 import { ThemedText } from "../ThemedText";
 import { TableFooter, TableHeader } from "./HeaderFooter";
 import { useDisplay, useLocale, useTheme } from "vuetify";
-import { VDivider, VProgressCircular } from "vuetify/components";
-import { computed, defineComponent, ref, watch } from "vue";
+import { VBtn, VDivider, VProgressCircular } from "vuetify/components";
+import { computed, defineComponent, onMounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
+import { api } from "@/state/api";
+import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { defaultBoxShadow } from "@/constants/styling";
 import { xlsxUIPipeline, type XlsxHeader } from "@/utils/xlsx";
 import { colors } from "@/plugins/vuetify";
 
 export const DataTable = defineComponent(
     <T,>(props: DataTableProps<T>) => {
-        const allData = computed(() => props.data);
+        const allData = computed(() => (isServer.value ? serverRows.value : props.data) as T[]);
 
         const sortDirection = ref("asc" as "asc" | "desc");
         const sortBy = ref(null as null | string);
+        // A table filters even when the page does not own a search ref.
+        const internalSearch = ref<string | null>(null);
+        const effectiveSearch = computed(() =>
+            isServer.value
+                ? serverSearch.value
+                : props.searchValue !== undefined
+                  ? props.searchValue
+                  : internalSearch.value,
+        );
+        const setSearchValue = (value: string | null) => {
+            if (isServer.value) {
+                serverSearch.value = value;
+                return;
+            }
+            if (props.setSearchValue) {
+                props.setSearchValue(value);
+            } else {
+                internalSearch.value = value;
+            }
+        };
         const total = ref(props.data.length);
         const data = ref<T[]>([]);
         const skip = ref(0);
 
+        const route = useRoute();
+        const server = computed(() => props.server ?? tableRegistry[String(route.name)] ?? null);
+        const isServer = computed(() => server.value !== null);
+        const storageKey = computed(() => (server.value ? server.value.storageKey ?? `pg.table.${String(route.name)}` : ""));
+        const serverRows = ref<T[]>([]);
+        const serverTotal = ref(0);
+        const serverLoading = ref(false);
+        const serverError = ref<string | null>(null);
+        const serverSearch = ref<string | null>(null);
+        const serverFilterValues = ref<FilterValues>({});
+        const serverSortBy = ref<string | null>(server.value?.defaultSort?.key ?? null);
+        const serverSortDirection = ref<"asc" | "desc">(server.value?.defaultSort?.direction ?? "asc");
+        const effectiveLoading = computed(() => (isServer.value ? serverLoading.value : props.loading));
+        const activeSortBy = computed(() => (isServer.value ? serverSortBy.value : sortBy.value));
+        const activeSortDirection = computed(() => (isServer.value ? serverSortDirection.value : sortDirection.value));
+
+        let fetchTimer: ReturnType<typeof setTimeout> | undefined;
+        let fetchSequence = 0;
+
+        const persistServerState = () => {
+            if (!isServer.value || typeof sessionStorage === "undefined") return;
+            try {
+                sessionStorage.setItem(storageKey.value, JSON.stringify({
+                    search: serverSearch.value,
+                    filters: serverFilterValues.value,
+                    sortBy: serverSortBy.value,
+                    sortDirection: serverSortDirection.value,
+                }));
+            } catch {
+                // storage is best-effort
+            }
+        };
+
+        const fetchServerRows = async () => {
+            const config = server.value;
+            if (!config) return;
+            const mine = ++fetchSequence;
+            serverLoading.value = true;
+            serverError.value = null;
+            try {
+                const response = await api.get(config.url, {
+                    params: {
+                        page: 1,
+                        pageSize: 200,
+                        ...(serverSearch.value ? { search: serverSearch.value } : {}),
+                        ...(serverSortBy.value ? { sortKey: serverSortBy.value, sortDirection: serverSortDirection.value } : {}),
+                        ...buildFilterQuery(config.filters ?? [], serverFilterValues.value),
+                        ...(config.params ?? {}),
+                    },
+                });
+                if (mine !== fetchSequence) return;
+                const payload = response.data?.data ?? response.data ?? {};
+                const raw = payload[config.listKey] ?? payload.rows ?? payload.items ?? [];
+                const rows = (config.map ? config.map(raw as any[]) : raw) as T[];
+                serverRows.value = rows;
+                serverTotal.value = Number(payload.total ?? rows.length);
+                refresh({ nextSkip: 0 });
+            } catch (cause) {
+                if (mine === fetchSequence) {
+                    serverError.value = extractApiErrorMessage(cause);
+                    serverRows.value = [];
+                    refresh({ nextSkip: 0 });
+                }
+            } finally {
+                if (mine === fetchSequence) serverLoading.value = false;
+            }
+        };
+
+        const scheduleServerFetch = (delay = 0) => {
+            if (!isServer.value) return;
+            if (fetchTimer) clearTimeout(fetchTimer);
+            fetchTimer = setTimeout(() => void fetchServerRows(), delay);
+        };
+
+        if (isServer.value && typeof sessionStorage !== "undefined") {
+            try {
+                const raw = sessionStorage.getItem(storageKey.value);
+                if (raw) {
+                    const saved = JSON.parse(raw);
+                    serverSearch.value = saved.search ?? null;
+                    serverFilterValues.value = saved.filters ?? {};
+                    serverSortBy.value = saved.sortBy ?? null;
+                    serverSortDirection.value = saved.sortDirection ?? "asc";
+                }
+            } catch {
+                // ignore malformed persisted state
+            }
+        }
+
+        onMounted(() => scheduleServerFetch());
+
+        watch(
+            [serverSearch, serverFilterValues, serverSortBy, serverSortDirection],
+            () => {
+                persistServerState();
+                scheduleServerFetch(300);
+            },
+            { deep: true },
+        );
+
         const numberOfItemsPerPage = computed(() => props.numberOfItemsPerPage || 10);
 
         const refresh: RefreshMethodData = async ({ nextSkip }: { nextSkip: number }) => {
+            if (isServer.value) {
+                const totalLength = allData.value.length;
+                let target = nextSkip;
+                if (target > totalLength - 1) target = 0;
+                const pageRows = numberOfItemsPerPage.value > 0
+                    ? allData.value.slice(target, target + numberOfItemsPerPage.value)
+                    : allData.value;
+                total.value = totalLength;
+                skip.value = target;
+                data.value = pageRows as T[];
+                return;
+            }
+            const search = effectiveSearch.value;
             let _data = allData.value.filter((row) => {
-                if (props.searchValue) {
-                    return JSON.stringify(row).toLowerCase().includes(props.searchValue.toLowerCase());
+                if (search) {
+                    return JSON.stringify(row).toLowerCase().includes(search.toLowerCase());
                 }
                 return true;
             });
+            _data = sortRowsByHeader(_data, props.headers, sortBy.value, sortDirection.value);
             const totalLength = _data.length;
             if (nextSkip > _data.length - 1) {
                 nextSkip = 0;
@@ -67,6 +209,17 @@ export const DataTable = defineComponent(
             },
             {
                 immediate: true,
+            },
+        );
+
+        watch(
+            () => effectiveSearch.value,
+            () => {
+                if (isServer.value) {
+                    scheduleServerFetch(300);
+                    return;
+                }
+                reset();
             },
         );
 
@@ -218,10 +371,10 @@ export const DataTable = defineComponent(
                         )}
 
                         <TableHeader
-                            loading={!!props.loading}
+                            loading={!!effectiveLoading.value}
                             onSearch={onSearch}
-                            searchValue={props.searchValue}
-                            setSearchValue={props.setSearchValue}
+                            searchValue={effectiveSearch.value}
+                            setSearchValue={setSearchValue}
                             title={props.title}
                             xlsx={
                                 (props.xlsx ?? true)
@@ -236,7 +389,40 @@ export const DataTable = defineComponent(
                             Icon={props.Icon}
                             iconName={props.iconName}
                         ></TableHeader>
-                        {props.loading ? (
+
+                        {server.value?.filters?.length ? (
+                            <TableFilters
+                                filters={server.value.filters}
+                                values={serverFilterValues.value}
+                                total={serverTotal.value}
+                                onChange={(key, value) => {
+                                    serverFilterValues.value = { ...serverFilterValues.value, [key]: value };
+                                }}
+                                onClear={() => {
+                                    serverFilterValues.value = {};
+                                }}
+                            />
+                        ) : null}
+
+                        {serverError.value ? (
+                            <ThemedView
+                                style={{
+                                    flexDirection: "row",
+                                    alignItems: "center",
+                                    gap: "10px",
+                                    padding: "10px 14px",
+                                    borderRadius: "10px",
+                                    background: "rgba(var(--v-theme-error), 0.08)",
+                                    color: "rgb(var(--v-theme-error))",
+                                }}
+                            >
+                                <ThemedText style={{ flex: 1, fontSize: "13px" }}>{serverError.value}</ThemedText>
+                                <VBtn size="small" variant="tonal" color="error" onClick={() => scheduleServerFetch()}>
+                                    {t("Retry")}
+                                </VBtn>
+                            </ThemedView>
+                        ) : null}
+                        {effectiveLoading.value ? (
                             <>
                                 <ThemedView
                                     style={{
@@ -255,12 +441,22 @@ export const DataTable = defineComponent(
                                 <Table
                                     {...props}
                                     onSetSort={(_sortBy, _sortDirection) => {
+                                        if (isServer.value) {
+                                            serverSortBy.value = _sortBy;
+                                            serverSortDirection.value = _sortDirection;
+                                            return;
+                                        }
                                         sortBy.value = _sortBy;
                                         sortDirection.value = _sortDirection;
                                         reset();
                                     }}
-                                    sortBy={sortBy.value}
-                                    sortDirection={sortDirection.value}
+                                    sortBy={activeSortBy.value}
+                                    sortDirection={activeSortDirection.value}
+                                    rowColor={
+                                        isServer.value
+                                            ? (row: T) => theme.value[statusTone(rowToneFor(row as Record<string, unknown>))] ?? theme.value["on-surface-variant"]
+                                            : props.rowColor
+                                    }
                                     refreshAsIs={refreshAsIs}
                                     reset={reset}
                                     skip={skip.value}

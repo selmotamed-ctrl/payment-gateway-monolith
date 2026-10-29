@@ -124,6 +124,10 @@ export type TableHeader<T> = {
     Value?: (props: { row: T }) => JSX.Element; // --
     sortable?: boolean;
     sortKey?: string;
+    /** Column filters are derived from the values unless configured here. */
+    filterable?: boolean;
+    filterType?: "text" | "select" | "boolean";
+    filterOptions?: { title: string; value: string }[];
     onHeaderPress?: () => void | Promise<void>; // --
     onCellPress?: (row: T, props: {
         refresh: RefreshMethodData | RefreshMethodWithNextSkip;
@@ -169,6 +173,9 @@ export type BaseTableProps<T> = {
     tableContainerStyle?: StyleValue; // --
     Row?: (props: { items: T }) => JSX.Element; // --
     headers: TableHeader<T>[]; // --
+    /** When set, the table fetches, filters and sorts on the server. */
+    server?: import("./filters").TableServerConfig;
+    rowTone?: (row: T) => import("@/components/StatusChip").StatusTone;
 };
 
 export type ApiTableProps<T, RawData extends JsonValue = any> = BaseTableProps<T> & {
@@ -206,3 +213,41 @@ export type DataTableProps<T> = BaseTableProps<T> & {
     TopSlot?: (props: { refreshAsIs: () => void; reset: () => void; refresh: RefreshMethodWithNextSkip }) => JSX.Element;
     loading?: boolean;
 };
+
+/**
+ * Sorts rows by the header the user clicked. Values are read through the
+ * column accessor when present, otherwise from the row key. Numeric strings,
+ * dates and text are compared naturally; nullish values sort first.
+ */
+export function sortRowsByHeader<T>(
+    rows: T[],
+    headers: TableHeader<T>[],
+    sortBy: string | null,
+    sortDirection: "asc" | "desc",
+): T[] {
+    if (!sortBy) {
+        return rows;
+    }
+    const header = headers.find((candidate) => (candidate.sortKey ?? candidate.key) === sortBy);
+    if (!header) {
+        return rows;
+    }
+    const valueOf = (row: T): string => {
+        if (header.value !== undefined) {
+            return readCell(header.value, row, 0);
+        }
+        const raw = (row as Record<string, unknown>)[header.key];
+        return raw === null || raw === undefined ? "" : String(raw);
+    };
+    const direction = sortDirection === "asc" ? 1 : -1;
+    return [...rows].sort((left, right) => {
+        const a = valueOf(left);
+        const b = valueOf(right);
+        const an = Number(a);
+        const bn = Number(b);
+        if (a !== "" && b !== "" && !Number.isNaN(an) && !Number.isNaN(bn)) {
+            return (an - bn) * direction;
+        }
+        return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }) * direction;
+    });
+}

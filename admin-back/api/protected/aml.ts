@@ -1,5 +1,6 @@
 import express from "express";
 import { z } from "zod";
+import { zListQuery } from "../../lib/zReady";
 import { requireAuthorities } from "../middleware/authorityGuard";
 import { zAmount, zIdentifier, zJsonObject, zPaginationQuery, zReason } from "../../lib/zReady";
 import {
@@ -130,6 +131,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/aml/rules",
+    querySchema: zListQuery,
   }),
 );
 

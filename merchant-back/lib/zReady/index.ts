@@ -114,3 +114,18 @@ export const assertAllowedUpload = (
   }
   return detected;
 };
+
+export const zListQuery = z
+  .object({
+    search: z.string().max(200).optional(),
+    page: z.coerce.number().int().min(1).max(10000).optional(),
+    pageSize: z.coerce.number().int().min(1).max(200).optional(),
+    sortKey: z.string().max(64).optional(),
+    sortDirection: z.enum(["asc", "desc"]).optional(),
+    from: z.string().max(40).optional(),
+    to: z.string().max(40).optional(),
+    dateFrom: z.string().max(40).optional(),
+    dateTo: z.string().max(40).optional(),
+  })
+  .passthrough();
+

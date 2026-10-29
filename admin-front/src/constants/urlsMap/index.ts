@@ -1,4 +1,5 @@
 export const urlsMap = {
+    options: (kind: string) => `v1/admin/options/${kind}`,
     authLogin: "v1/admin/auth/login",
     authMfa: "v1/admin/auth/mfa",
     profileMe: "v1/admin/auth/me",
@@ -78,6 +79,7 @@ export const urlsMap = {
     gatewaySpecImport: "v1/admin/gateways/spec-import",
 
     railsList: "v1/admin/rails",
+    railDetail: (id: string) => `v1/admin/rails/${id}`,
     railFields: (id: string) => `v1/admin/rails/${id}/fields`,
     routesList: "v1/admin/routes",
     routeState: (id: string) => `v1/admin/routes/${id}/state`,

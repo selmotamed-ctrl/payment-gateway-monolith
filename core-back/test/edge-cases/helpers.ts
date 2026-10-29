@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { Decimal } from "decimal.js";
 import type {
@@ -33,8 +33,15 @@ import {
 export const readShipped = (relativePath: string): string =>
   readFileSync(join(import.meta.dir, "../..", relativePath), "utf8");
 
-export const readMigrationSql = (): string =>
-  readShipped("prisma/migrations/20261027000000_init/migration.sql");
+/** The whole migration history, concatenated (a single baseline today). */
+export const readMigrationSql = (): string => {
+  const directory = join(import.meta.dir, "../..", "prisma/migrations");
+  return readdirSync(directory)
+    .filter((entry) => entry !== "migration_lock.toml" && !entry.startsWith("."))
+    .sort()
+    .map((entry) => readShipped(`prisma/migrations/${entry}/migration.sql`))
+    .join("\n");
+};
 
 export const readSource = (relativePath: string): string => readShipped(relativePath);
 

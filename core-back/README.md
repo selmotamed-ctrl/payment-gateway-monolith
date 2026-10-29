@@ -16,7 +16,7 @@ outbound gateway calls. It is reachable exclusively over Mutual TLS on the priva
 - **Engine:** MySQL 8.0+ / MariaDB 10.6+. The Prisma datasource is `provider = "mysql"`.
 - **Adapter & driver:** `@prisma/adapter-mariadb` on top of the `mariadb` driver package.
 - **Schema:** `prisma/schema.prisma`; the initial migration
-  `prisma/migrations/20261027000000_init/migration.sql` is plain MySQL / MariaDB DDL.
+  `prisma/migrations/20261029203000_init/migration.sql` is plain MySQL / MariaDB DDL.
 - **Type mapping:** `String` → `VARCHAR(191)` (free-form content is declared `@db.Text`),
   `Bytes` → `BLOB` (the webhook body is `@db.LongBlob`), `Json` → `JSON`, money →
   `DECIMAL(18,4)`, Prisma enums → native `ENUM` columns.

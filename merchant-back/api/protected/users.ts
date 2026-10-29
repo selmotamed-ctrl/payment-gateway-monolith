@@ -1,7 +1,7 @@
+import { zEmail, zIdentifier, zListQuery, zPassword, zPhone } from "../../lib/zReady";
 import express, { type Request, type Response } from "express";
 import { z } from "zod";
 import { parseOrThrow } from "../../lib/error";
-import { zEmail, zIdentifier, zPassword, zPhone } from "../../lib/zReady";
 import { callCore } from "../../lib/mtlsClient";
 import {
   coreUserCreateSchema,
@@ -61,6 +61,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/merchant/users",
+    querySchema: zListQuery,
   }),
 );
 

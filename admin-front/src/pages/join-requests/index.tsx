@@ -8,6 +8,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
+import { statusTone } from "@/components/Table/statusTone";
 import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
@@ -161,8 +162,8 @@ const JoinRequestsPage = dc(() => {
 
     const headers: TableHeader<JoinRequest>[] = [
         { key: "merchantName", label: "Merchant Name", value: (row) => row.merchantName },
-        { key: "status", label: "Status", value: (row) => row.status },
-        { key: "riskTier", label: "Risk Class", value: (row) => row.riskTier },
+        { key: "status", label: "Status", Value: ({ row }: { row: any }) => <StatusChip label={row.status} tone={statusTone(row.status)} /> },
+        { key: "riskTier", label: "Risk Class", Value: ({ row }: { row: any }) => <StatusChip label={row.riskTier} tone={statusTone(row.riskTier)} /> },
         { key: "category", label: "Business Category", value: (row) => row.businessCategory },
         { key: "volume", label: "Expected Volume", value: (row) => `${row.expectedMonthlyVolume ?? ""} ${row.currency ?? ""}` },
         { key: "submittedAt", label: "Submitted At", value: (row) => row.submittedAt },
@@ -198,7 +199,7 @@ const JoinRequestsPage = dc(() => {
                 )}
             </ThemedView>
 
-            <VDialog v-model={detailsOpen.value} maxWidth="820px" scrollable>
+            <VDialog modelValue={detailsOpen.value} onUpdate:modelValue={(v: any) => (detailsOpen.value = v)} maxWidth="820px" scrollable>
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                         <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>

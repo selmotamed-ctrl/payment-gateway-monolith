@@ -5,6 +5,7 @@ import { Prisma } from "../../generated/prisma/client";
 import { client } from "../../prisma/client";
 import { invalidationBus } from "../../lib/invalidationBus";
 import { ApiError, parseOrThrow } from "../../lib/error";
+import { buildListQuery, listResponse } from "../../lib/listQuery";
 import { buildMerchantUserInfo } from "../../lib/auth/uiAuthorities";
 import {
   generateAccessToken,
@@ -780,6 +781,64 @@ router.get("/auth/me", (_request: Request, response: Response) => {
 
 router.use(requireAuthentication);
 
+const OPTION_LIMIT = 100;
+
+router.get("/options/:kind", async (request: Request, response: Response) => {
+  const merchantId = merchantIdOf(request);
+  const kind = String(request.params.kind ?? "");
+  const rawSearch = typeof request.query.search === "string" ? request.query.search.trim() : "";
+  const limit = Math.min(OPTION_LIMIT, Math.max(1, Number(request.query.limit ?? 50) || 50));
+  const contains = rawSearch ? { contains: rawSearch } : undefined;
+  let items: Array<{ value: string; title: string; subtitle?: string }> = [];
+
+  switch (kind) {
+    case "applications": {
+      const rows = await client.application.findMany({ where: { merchantId, ...(rawSearch ? { name: contains! } : {}) }, orderBy: { name: "asc" }, take: limit, select: { id: true, name: true, status: true } });
+      items = rows.map((row) => ({ value: row.id, title: row.name, subtitle: row.status }));
+      break;
+    }
+    case "wallets": {
+      const rows = await client.wallet.findMany({ where: { merchantId }, orderBy: { createdAt: "desc" }, take: limit, select: { id: true, currency: true, status: true } });
+      items = rows.map((row) => ({ value: row.id, title: `${row.currency} · ${row.id.slice(0, 8)}`, subtitle: row.status }));
+      break;
+    }
+    case "users": {
+      const rows = await client.user.findMany({ where: { merchantId, ...(rawSearch ? { OR: [{ email: contains! }, { phone: contains! }] } : {}) }, orderBy: { email: "asc" }, take: limit, select: { id: true, email: true, role: true } });
+      items = rows.map((row) => ({ value: row.id, title: row.email, subtitle: row.role }));
+      break;
+    }
+    case "rails": {
+      const rows = await client.paymentAttempt.findMany({ where: { merchantId }, select: { railId: true, rail: { select: { code: true, nameEn: true } } }, distinct: ["railId"], take: 200 });
+      const seen = new Set<string>();
+      for (const row of rows) {
+        const code = row.rail?.code ?? "";
+        if (!code || seen.has(code) || (rawSearch && !code.toLowerCase().includes(rawSearch.toLowerCase()) && !(row.rail?.nameEn ?? "").toLowerCase().includes(rawSearch.toLowerCase()))) continue;
+        seen.add(code);
+        items.push({ value: row.railId, title: `${row.rail?.nameEn ?? code} (${code})` });
+        if (items.length >= limit) break;
+      }
+      break;
+    }
+    case "gateways": {
+      const rows = await client.credentialSet.findMany({ where: { ownerType: "MERCHANT", ownerMerchantId: merchantId }, select: { gatewayId: true, gateway: { select: { code: true, name: true } } }, distinct: ["gatewayId"], take: 100 });
+      items = rows
+        .filter((row) => !rawSearch || (row.gateway?.code ?? "").toLowerCase().includes(rawSearch.toLowerCase()) || (row.gateway?.name ?? "").toLowerCase().includes(rawSearch.toLowerCase()))
+        .slice(0, limit)
+        .map((row) => ({ value: row.gatewayId, title: `${row.gateway?.name ?? ""} (${row.gateway?.code ?? ""})` }));
+      break;
+    }
+    case "credential-sets": {
+      const rows = await client.credentialSet.findMany({ where: { ownerType: "MERCHANT", ownerMerchantId: merchantId }, orderBy: { createdAt: "desc" }, take: limit, select: { id: true, env: true, gateway: { select: { code: true } } } });
+      items = rows.map((row) => ({ value: row.id, title: `${row.gateway.code} · ${row.env}` }));
+      break;
+    }
+    default:
+      throw new ApiError(400, "UNKNOWN_OPTION_KIND", "Unknown option kind");
+  }
+  response.json({ items, total: items.length });
+});
+
+
 router.get("/onboarding/join-request", async (request: Request, response: Response) => {
   const merchantId = merchantIdOf(request);
   const joinRequest = await client.joinRequest.findFirst({
@@ -1007,8 +1066,18 @@ router.post("/onboarding/submit", async (request: Request, response: Response) =
 
 router.get("/wallets", async (request: Request, response: Response) => {
   const merchantId = merchantIdOf(request);
-  const wallets = await client.wallet.findMany({ where: { merchantId }, include: { glAccount: true } });
-  response.json({ wallets });
+  const built = buildListQuery(request.query, {
+    in: { status: "status" }, equals: {currency: "currency"},
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { currency: "currency", status: "status", createdAt: "createdAt" },
+    defaultSort: { createdAt: "desc" },
+  });
+  const where = { merchantId, ...built.where } as never;
+  const [wallets, total] = await Promise.all([
+    client.wallet.findMany({ where, orderBy: built.orderBy as never, include: { glAccount: true }, skip: built.skip, take: built.take }),
+    client.wallet.count({ where }),
+  ]);
+  response.json(listResponse("wallets", wallets, total, built));
 });
 
 router.post("/wallets", async (request: Request, response: Response) => {
@@ -1118,8 +1187,19 @@ router.get("/wallets/:id/statements/:month/export", async (request: Request, res
 
 router.get("/applications", async (request: Request, response: Response) => {
   const merchantId = merchantIdOf(request);
-  const applications = await client.application.findMany({ where: { merchantId }, include: { assignedWallet: true } });
-  response.json({ applications });
+  const built = buildListQuery(request.query, {
+    search: ["name", "businessUseDescription"],
+    in: { status: "status" }, equals: {assignedWalletId: "assignedWalletId"},
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { name: "name", status: "status", createdAt: "createdAt" },
+    defaultSort: { createdAt: "desc" },
+  });
+  const where = { merchantId, ...built.where } as never;
+  const [applications, total] = await Promise.all([
+    client.application.findMany({ where, orderBy: built.orderBy as never, include: { assignedWallet: true }, skip: built.skip, take: built.take }),
+    client.application.count({ where }),
+  ]);
+  response.json(listResponse("applications", applications, total, built));
 });
 
 router.post("/applications", async (request: Request, response: Response) => {
@@ -1306,26 +1386,22 @@ const createLink = async (merchantId: string, body: z.infer<typeof linkCreateSch
 
 router.get("/links", async (request: Request, response: Response) => {
   const merchantId = merchantIdOf(request);
-  const query = z
-    .object({
-      status: z.enum(["ACTIVE", "PAUSED", "EXPIRED", "CANCELLED"]).optional(),
-      page: z.coerce.number().int().min(1).max(10000).optional(),
-      pageSize: z.coerce.number().int().min(1).max(200).optional(),
-    })
-    .parse(request.query ?? {});
-  const take = query.pageSize ?? 50;
-  const skip = ((query.page ?? 1) - 1) * take;
-  const where: Record<string, unknown> = { application: { merchantId } };
-  if (query.status) {
-    where.state = query.status === "ACTIVE" ? "PENDING" : query.status;
-  }
-  const links = await client.paymentLink.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    take,
-    skip,
+  const rawState = typeof request.query.state === "string" ? request.query.state : undefined;
+  const state = rawState === "ACTIVE" ? "PENDING" : rawState;
+  const built = buildListQuery(request.query, {
+    search: ["key", "description"],
+    equals: { applicationId: "applicationId", walletId: "walletId" },
+    ranges: { amount: { path: "amount", kind: "decimal" } },
+    dates: { createdAt: { path: "createdAt" }, expiresAt: { path: "expiresAt", fromKey: "dateFrom", toKey: "dateTo" } },
+    sortable: { linkKey: "key", amount: "amount", useCount: "useCount", status: "state", expiresAt: "expiresAt", createdAt: "createdAt" },
+    defaultSort: { createdAt: "desc" },
   });
-  response.json({ links, page: query.page ?? 1, pageSize: take });
+  const where = { merchantId, application: { merchantId }, ...(state ? { state } : {}), ...built.where } as never;
+  const [links, total] = await Promise.all([
+    client.paymentLink.findMany({ where, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
+    client.paymentLink.count({ where }),
+  ]);
+  response.json(listResponse("links", links, total, built));
 });
 
 router.post("/links", async (request: Request, response: Response) => {
@@ -1384,35 +1460,43 @@ router.get("/links/:id/attempts", async (request: Request, response: Response) =
 
 router.get("/payments", async (request: Request, response: Response) => {
   const merchantId = merchantIdOf(request);
-  const query = z
-    .object({
-      status: z.string().max(32).optional(),
-      page: z.coerce.number().int().min(1).max(10000).optional(),
-      pageSize: z.coerce.number().int().min(1).max(200).optional(),
-    })
-    .parse(request.query ?? {});
-  const take = query.pageSize ?? 50;
-  const skip = ((query.page ?? 1) - 1) * take;
-  const attempts = await client.paymentAttempt.findMany({
-    where: { merchantId, ...(query.status ? { status: query.status as never } : {}) },
-    orderBy: { createdAt: "desc" },
-    take,
-    skip,
+  const built = buildListQuery(request.query, {
+    search: ["reference"],
+    in: { status: "status" }, equals: {railId: "railId", applicationId: "applicationId"},
+    ranges: {
+      amount: { path: "totalChargedAmount", kind: "decimal" },
+      commission: { path: "platformCommissionAmount", kind: "decimal" },
+      net: { path: "netMerchantAmount", kind: "decimal" },
+    },
+    dates: { createdAt: { path: "createdAt" }, confirmedAt: { path: "confirmedAt", fromKey: "dateFrom", toKey: "dateTo" } },
+    sortable: { reference: "reference", amount: "totalChargedAmount", status: "status", createdAt: "createdAt", confirmedAt: "confirmedAt" },
+    defaultSort: { createdAt: "desc" },
   });
-  response.json({ payments: attempts });
+  const where = { merchantId, ...built.where } as never;
+  const [payments, total] = await Promise.all([
+    client.paymentAttempt.findMany({ where, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
+    client.paymentAttempt.count({ where }),
+  ]);
+  response.json(listResponse("payments", payments, total, built));
 });
 
 router.get("/disputes", async (request: Request, response: Response) => {
   const merchantId = merchantIdOf(request);
-  const attempts = await client.paymentAttempt.findMany({
-    where: { merchantId, status: "DISPUTED" },
-    select: { id: true },
+  const attempts = await client.paymentAttempt.findMany({ where: { merchantId, status: "DISPUTED" }, select: { id: true } });
+  const built = buildListQuery(request.query, {
+    search: ["disputeRef", "reasonCode"],
+    in: { status: "status" },
+    ranges: { amount: { path: "amount", kind: "decimal" } },
+    dates: { createdAt: { path: "openedAt" }, evidenceDueAt: { path: "evidenceDueAt", fromKey: "dateFrom", toKey: "dateTo" } },
+    sortable: { disputeRef: "disputeRef", status: "status", amount: "amount", evidenceDueAt: "evidenceDueAt" },
+    defaultSort: { openedAt: "desc" },
   });
-  const disputes = await client.dispute.findMany({
-    where: { attemptId: { in: attempts.map((attempt) => attempt.id) } },
-    orderBy: { openedAt: "desc" },
-  });
-  response.json({ disputes });
+  const where = { attemptId: { in: attempts.map((attempt) => attempt.id) }, ...built.where } as never;
+  const [disputes, total] = await Promise.all([
+    client.dispute.findMany({ where, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
+    client.dispute.count({ where }),
+  ]);
+  response.json(listResponse("disputes", disputes.map((entry) => ({ ...entry, state: entry.status })), total, built));
 });
 
 router.get("/disputes/:id", async (request: Request, response: Response) => {
@@ -1450,11 +1534,20 @@ router.post("/disputes/:id/evidence", async (request: Request, response: Respons
 
 router.get("/cashouts", async (request: Request, response: Response) => {
   const merchantId = merchantIdOf(request);
-  const cashouts = await client.cashoutRequest.findMany({
-    where: { merchantId },
-    orderBy: { createdAt: "desc" },
+  const built = buildListQuery(request.query, {
+    search: ["walletId"],
+    in: { state: "state" }, equals: {walletId: "walletId"},
+    ranges: { amount: { path: "amount", kind: "decimal" } },
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { state: "state", amount: "amount", requestedAt: "createdAt" },
+    defaultSort: { createdAt: "desc" },
   });
-  response.json({ cashouts });
+  const where = { merchantId, ...built.where } as never;
+  const [cashouts, total] = await Promise.all([
+    client.cashoutRequest.findMany({ where, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
+    client.cashoutRequest.count({ where }),
+  ]);
+  response.json(listResponse("cashouts", cashouts.map((entry) => ({ ...entry, requestedAt: entry.createdAt })), total, built));
 });
 
 router.post("/cashouts", async (request: Request, response: Response) => {
@@ -1490,22 +1583,33 @@ router.post("/cashouts", async (request: Request, response: Response) => {
 
 router.get("/tokens", async (request: Request, response: Response) => {
   const merchantId = merchantIdOf(request);
-  const tokens = await client.accessToken.findMany({
-    where: { merchantId },
-    include: { ips: true },
+  const rawRevoked = typeof request.query.revoked === "string" ? request.query.revoked : undefined;
+  const built = buildListQuery(request.query, {
+    search: ["name", "lastFour"],
+    booleans: { ipWhitelistEnabled: "ipWhitelistEnabled" },
+    dates: { createdAt: { path: "createdAt" }, lastUsedAt: { path: "lastUsedAt", fromKey: "dateFrom", toKey: "dateTo" } },
+    sortable: { name: "name", lastUsedAt: "lastUsedAt", createdAt: "createdAt" },
+    defaultSort: { createdAt: "desc" },
   });
-  response.json({
-    tokens: tokens.map((token) => ({
-      id: token.id,
-      name: token.name,
-      lastFour: token.lastFour,
-      scopes: token.scopes,
-      ipWhitelistEnabled: token.ipWhitelistEnabled,
-      revokedAt: token.revokedAt,
-      lastUsedAt: token.lastUsedAt,
-      allowedCidrs: token.ips.map((entry) => entry.cidr),
-    })),
-  });
+  const where = {
+    merchantId,
+    ...built.where,
+    ...(rawRevoked === "true" ? { revokedAt: { not: null } } : rawRevoked === "false" ? { revokedAt: null } : {}),
+  } as never;
+  const [tokens, total] = await Promise.all([
+    client.accessToken.findMany({ where, orderBy: built.orderBy as never, include: { ips: true }, skip: built.skip, take: built.take }),
+    client.accessToken.count({ where }),
+  ]);
+  response.json(listResponse("tokens", tokens.map((token) => ({
+    id: token.id,
+    name: token.name,
+    lastFour: token.lastFour,
+    scopes: token.scopes,
+    ipWhitelistEnabled: token.ipWhitelistEnabled,
+    revokedAt: token.revokedAt,
+    lastUsedAt: token.lastUsedAt,
+    allowedCidrs: token.ips.map((entry) => entry.cidr),
+  })), total, built));
 });
 
 router.post("/tokens", async (request: Request, response: Response) => {
@@ -1599,22 +1703,28 @@ router.delete("/tokens/:id", async (request: Request, response: Response) => {
 
 router.get("/credential-sets", async (request: Request, response: Response) => {
   const merchantId = merchantIdOf(request);
-  const credentialSets = await client.credentialSet.findMany({
-    where: { ownerType: "MERCHANT", ownerMerchantId: merchantId },
-    include: { gateway: true },
+  const built = buildListQuery(request.query, {
+    search: ["externalMerchantId", "gateway.code"],
+    in: { status: "status" }, equals: {gatewayCode: "gateway.code", env: "env", settlementTarget: "settlementTarget",},
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { gatewayCode: "gatewayId", env: "env", status: "status" },
+    defaultSort: { createdAt: "desc" },
   });
-  response.json({
-    credentialSets: credentialSets.map((entry) => ({
-      id: entry.id,
-      gatewayCode: entry.gateway.code,
-      env: entry.env,
-      ownerType: entry.ownerType,
-      settlementTarget: entry.settlementTarget,
-      status: entry.status,
-      lastVerifiedAt: entry.lastVerifiedAt,
-      expiresAt: entry.expiresAt,
-    })),
-  });
+  const where = { ownerType: "MERCHANT", ownerMerchantId: merchantId, ...built.where } as never;
+  const [credentialSets, total] = await Promise.all([
+    client.credentialSet.findMany({ where, orderBy: built.orderBy as never, include: { gateway: true }, skip: built.skip, take: built.take }),
+    client.credentialSet.count({ where }),
+  ]);
+  response.json(listResponse("credentialSets", credentialSets.map((entry) => ({
+    id: entry.id,
+    gatewayCode: entry.gateway.code,
+    env: entry.env,
+    ownerType: entry.ownerType,
+    settlementTarget: entry.settlementTarget,
+    status: entry.status,
+    lastVerifiedAt: entry.lastVerifiedAt,
+    expiresAt: entry.expiresAt,
+  })), total, built));
 });
 
 router.post("/credential-sets", async (request: Request, response: Response) => {
@@ -1786,18 +1896,27 @@ router.post("/credential-sets/:id/verify", async (request: Request, response: Re
 
 router.get("/users", async (request: Request, response: Response) => {
   const merchantId = merchantIdOf(request);
-  const users = await client.user.findMany({ where: { merchantId } });
-  response.json({
-    users: users.map((user) => ({
-      id: user.id,
-      email: user.email,
-      phone: user.phone,
-      role: user.role,
-      authoritiesMap: user.authoritiesMap,
-      status: user.status,
-      mfaRequired: user.mfaRequired,
-    })),
+  const built = buildListQuery(request.query, {
+    search: ["email", "phone"],
+    in: { status: "status" }, equals: {role: "role",},
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { email: "email", role: "role", status: "status", createdAt: "createdAt" },
+    defaultSort: { createdAt: "desc" },
   });
+  const where = { merchantId, ...built.where } as never;
+  const [users, total] = await Promise.all([
+    client.user.findMany({ where, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
+    client.user.count({ where }),
+  ]);
+  response.json(listResponse("users", users.map((user) => ({
+    id: user.id,
+    email: user.email,
+    phone: user.phone,
+    role: user.role,
+    authoritiesMap: user.authoritiesMap,
+    status: user.status,
+    mfaRequired: user.mfaRequired,
+  })), total, built));
 });
 
 router.post("/users", async (request: Request, response: Response) => {
@@ -1891,11 +2010,19 @@ router.patch("/users/:id", async (request: Request, response: Response) => {
 
 router.get("/pos/terminals", async (request: Request, response: Response) => {
   const merchantId = merchantIdOf(request);
-  const terminals = await client.posTerminal.findMany({
-    where: { application: { merchantId } },
-    include: { screens: true },
+  const built = buildListQuery(request.query, {
+    search: ["name", "location"],
+    in: { status: "status" },
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { name: "name", location: "location", status: "status" },
+    defaultSort: { createdAt: "desc" },
   });
-  response.json({ terminals });
+  const where = { application: { merchantId }, ...built.where } as never;
+  const [terminals, total] = await Promise.all([
+    client.posTerminal.findMany({ where, orderBy: built.orderBy as never, include: { screens: true }, skip: built.skip, take: built.take }),
+    client.posTerminal.count({ where }),
+  ]);
+  response.json(listResponse("terminals", terminals, total, built));
 });
 
 router.post("/pos/terminals", async (request: Request, response: Response) => {

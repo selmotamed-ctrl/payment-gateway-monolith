@@ -159,7 +159,7 @@ const AuthoritiesPicker = dc(
 
                     {/* Search Bar */}
                     <VTextField
-                        v-model={searchQuery.value}
+                        modelValue={searchQuery.value} onUpdate:modelValue={(v: any) => (searchQuery.value = v)}
                         placeholder="Search authorities by name or description..."
                         prepend-inner-icon="mdi-magnify"
                         variant="outlined"

@@ -4,6 +4,7 @@ import {
     defaultNumberOfItemsPerPageChoices,
     type RefreshMethodApiWithoutSkip,
     type TableHeader as TableHeaderType,
+    sortRowsByHeader,
 } from "./types";
 import { ThemedView } from "../ThemedView";
 import { ThemedText } from "../ThemedText";
@@ -22,6 +23,18 @@ export const ApiTable = defineComponent(
     <T, RawData extends JsonValue = any>(props: ApiTableProps<T>) => {
         const sortDirection = ref("asc" as "asc" | "desc");
         const sortBy = ref(null as null | string);
+        // A table filters even when the page does not own a search ref.
+        const internalSearch = ref<string | null>(null);
+        const effectiveSearch = computed(() =>
+            props.searchValue !== undefined ? props.searchValue : internalSearch.value,
+        );
+        const setSearchValue = (value: string | null) => {
+            if (props.setSearchValue) {
+                props.setSearchValue(value);
+            } else {
+                internalSearch.value = value;
+            }
+        };
 
         const data = ref<T[]>([]);
         const total = ref(0);
@@ -67,9 +80,13 @@ export const ApiTable = defineComponent(
                     nextSkip,
                     result: result.data,
                 });
-                const _data = props.apiDataExtractor(result.data);
+                const extracted = props.apiDataExtractor(result.data);
+                const search = effectiveSearch.value;
+                const searched = search
+                    ? extracted.filter((row: T) => JSON.stringify(row).toLowerCase().includes(search.toLowerCase()))
+                    : extracted;
                 skip.value = nextSkip;
-                data.value = _data;
+                data.value = sortRowsByHeader(searched, props.headers, sortBy.value, sortDirection.value);
                 total.value = props.apiTotalExtractor(result.data);
                 if (props.apiPageSizeExtractor) {
                     console.log("Setting page size from data", props.apiPageSizeExtractor(result.data));
@@ -127,6 +144,13 @@ export const ApiTable = defineComponent(
             },
             {
                 immediate: true,
+            },
+        );
+
+        watch(
+            () => effectiveSearch.value,
+            () => {
+                reset();
             },
         );
 
@@ -310,8 +334,8 @@ export const ApiTable = defineComponent(
                                   }
                                 : undefined
                         }
-                        searchValue={props.searchValue}
-                        setSearchValue={props.setSearchValue}
+                        searchValue={effectiveSearch.value}
+                        setSearchValue={setSearchValue}
                         title={title.value}
                         refresh={refresh}
                         Icon={props.Icon}

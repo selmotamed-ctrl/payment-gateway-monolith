@@ -8,6 +8,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
+import { statusTone } from "@/components/Table/statusTone";
 import { JsonPatchDiff, type JsonPatchOperation } from "@/components/JsonPatchDiff";
 import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
@@ -116,7 +117,7 @@ const ApprovalsPage = dc(() => {
         { key: "subjectType", label: "Subject Type", value: (row) => row.subjectType },
         { key: "subjectId", label: "Reference", value: (row) => row.subjectId },
         { key: "domain", label: "Domain", value: (row) => row.domain },
-        { key: "state", label: "Status", value: (row) => row.state },
+        { key: "state", label: "Status", Value: ({ row }: { row: any }) => <StatusChip label={row.state} tone={statusTone(row.state)} /> },
         { key: "makerName", label: "Maker", value: (row) => row.makerName },
         { key: "checkerName", label: "Checker", value: (row) => row.checkerName ?? "-" },
         { key: "createdAt", label: "Created At", value: (row) => row.createdAt },
@@ -152,7 +153,7 @@ const ApprovalsPage = dc(() => {
                 )}
             </ThemedView>
 
-            <VDialog v-model={detailsOpen.value} maxWidth="860px" scrollable>
+            <VDialog modelValue={detailsOpen.value} onUpdate:modelValue={(v: any) => (detailsOpen.value = v)} maxWidth="860px" scrollable>
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                         <ThemedView style={{ flexDirection: "row", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>

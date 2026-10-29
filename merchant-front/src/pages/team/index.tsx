@@ -182,7 +182,7 @@ const TeamPage = dc(() => {
                 )}
             </ThemedView>
 
-            <VDialog v-model={dialogOpen.value} maxWidth="640px">
+            <VDialog modelValue={dialogOpen.value} onUpdate:modelValue={(v: any) => (dialogOpen.value = v)} maxWidth="640px">
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                         <ThemedText type="defaultSemiBold">{editing.value ? t("Edit") : t("Invite Member")}</ThemedText>
