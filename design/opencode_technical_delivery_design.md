@@ -1032,3 +1032,47 @@ server-side filtering/sorting with database indexes.
   server-side filter test that asserts the request carries `status=LIVE` and the
   rows are filtered, plus Clear-all resetting the query; Vitest **17**; all three
   SPAs build. No deployment was performed for this change.
+
+## 25. Filter Bar Visual Repair
+
+The first filter-bar layout used a CSS grid whose default `align-items: stretch`
+let the tallest control (the date picker) blow every row up to hundreds of
+pixels, and the `VueDatePicker` range control was unreliable.
+
+* Replaced the grid with a **flex-wrap toolbar**: each control is capped at
+  190–340px, `align-self: flex-start`, and compact density — measured control
+  heights are **40–42px** in the browser (verified by e2e geometry).
+* Replaced the date range picker with **two separate, properly styled date
+  fields** (`From` / `To`, native `type="date"`, calendar icons, clearable),
+  grouped under the filter label (`Created`, `Opened`, `Evidence due`, …).
+  This is predictable, keyboard-friendly and works in both locales/themes.
+* Date/number groups get an uppercase group label; status/boolean options keep
+  their coloured autocompletes; active chips use the matching status tone.
+* The panel is a soft gradient card with a filter badge, result count, coloured
+  summary chips and **Clear all filters**.
+* Applied to admin, merchant and checkout (the shared component is copied).
+* Verification: all three SPAs build; admin e2e **24**, merchant **10**,
+  checkout **4**, Vitest **17**; backend unchanged and green.
+
+## 26. Filter Panel — Final Layout and Date Dialog
+
+The remaining alignment complaint came from segments that carry a group title
+("Created", "Minimum amount") sitting lower than single-field segments. Fixed by
+giving **every** segment the same structure:
+
+* every segment has an uppercase title row, then its control(s); the controls
+  themselves use placeholders instead of floating labels, so the first control in
+  every segment starts at exactly the same y;
+* the grid is responsive: **1 column** on phones, **2** on tablets, **3 on LG**,
+  **4 on XL**, with 22×20px gaps; date/number segments span two columns so they
+  are never crammed;
+* **date segments open a real modal dialog** with Vuetify's `VDatePicker`
+  (translated header, month navigation, scrim, solid card). "From" and "To" are
+  independent fields, each with its own calendar dialog and a clear button;
+* fixed the Vuetify locale adapter to resolve nested `$vuetify.datePicker.*`
+  keys (the date picker was showing raw message keys);
+* active chips keep their status tone, "Clear all filters" and the result count
+  remain in the panel header.
+
+Verified visually in the browser (screenshots): aligned titles/controls, 40px
+fields, correct gaps, and a working calendar dialog. All three SPAs build.

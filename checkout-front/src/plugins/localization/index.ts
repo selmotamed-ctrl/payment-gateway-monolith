@@ -8,6 +8,17 @@ const vuetifyMessages: Record<string, Record<string, string>> = {
     ar: vuetifyAr as unknown as Record<string, string>,
 };
 
+const lookupNested = (source: unknown, path: string): unknown => {
+    let cursor: unknown = source;
+    for (const part of path.split(".")) {
+        if (!cursor || typeof cursor !== "object") {
+            return undefined;
+        }
+        cursor = (cursor as Record<string, unknown>)[part];
+    }
+    return cursor;
+};
+
 const replaceParams = (str: string, params: unknown[]): string => {
     return str.replace(/\{(\w+)\}/g, (match, key: string) => {
         const numeric = Number(key);
@@ -34,7 +45,7 @@ export const adaptedLocale: LocaleInstance = {
             const shortKey = key.slice("$vuetify.".length);
             const current = vuetifyMessages[i18n.global.locale.value] ?? vuetifyMessages.en;
             const fallback = vuetifyMessages.en;
-            const found = current?.[shortKey] ?? fallback?.[shortKey] ?? key;
+            const found = lookupNested(current, shortKey) ?? lookupNested(fallback, shortKey) ?? key;
             return replaceParams(String(found), params);
         }
         const translate = i18n.global.t as unknown as (...args: unknown[]) => string;

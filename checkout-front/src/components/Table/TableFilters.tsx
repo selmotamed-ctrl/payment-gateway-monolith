@@ -1,10 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, onMounted, ref } from "vue";
 import { useDisplay, useLocale, useTheme } from "vuetify";
-import { VAutocomplete, VBtn, VChip, VIcon, VTextField } from "vuetify/components";
-import { VueDatePicker as VueDatePickerComponent } from "@vuepic/vue-datepicker";
-
-const VueDatePicker = VueDatePickerComponent as any;
+import { VAutocomplete, VBtn, VCard, VChip, VDatePicker, VDialog, VIcon, VTextField } from "vuetify/components";
 import type { StatusTone } from "@/components/StatusChip";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import {
@@ -15,10 +12,28 @@ import {
     type TableFilter,
 } from "./filters";
 
+const toIsoDate = (value: Date): string => {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+};
+
 const toneColor = (theme: ReturnType<typeof useTheme>, tone: StatusTone | undefined): string | undefined => {
     if (!tone) return undefined;
     const colors = theme.current.value.colors as Record<string, string>;
     return colors[tone] ?? colors["on-surface-variant"];
+};
+
+const optionTone = (filter: TableFilter, value: unknown): StatusTone | undefined => {
+    if (filter.type === "boolean") {
+        return value === "true" || value === true ? "success" : "error";
+    }
+    if (filter.type === "data-autocomplete") {
+        const first = Array.isArray(value) ? value[0] : value;
+        return filter.options.find((option) => option.value === String(first))?.tone;
+    }
+    return undefined;
 };
 
 const filterSummary = (filter: TableFilter, value: unknown): string => {
@@ -33,14 +48,18 @@ const filterSummary = (filter: TableFilter, value: unknown): string => {
     if (filter.type === "date") {
         const range = value as { from?: string; to?: string };
         if (range.from && range.to) return `${range.from} → ${range.to}`;
-        if (range.from) return `≥ ${range.from}`;
-        if (range.to) return `≤ ${range.to}`;
+        if (range.from) return `from ${range.from}`;
+        if (range.to) return `until ${range.to}`;
         return "";
     }
-    if (Array.isArray(value)) return value.join(", ");
+    if (Array.isArray(value)) {
+        if (filter.type === "data-autocomplete") {
+            return value.map((entry) => filter.options.find((option) => option.value === String(entry))?.title ?? entry).join(", ");
+        }
+        return value.join(", ");
+    }
     if (filter.type === "data-autocomplete") {
-        const option = filter.options.find((entry) => entry.value === String(value));
-        return option?.title ?? String(value);
+        return filter.options.find((option) => option.value === String(value))?.title ?? String(value);
     }
     return String(value ?? "");
 };
@@ -72,10 +91,11 @@ const ApiAutocompleteControl = dc(
         onMounted(() => void load(""));
 
         return () => (
-            <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 }}>
                 <VAutocomplete
-                    label={props.filter.label}
-                    prependInnerIcon={props.filter.icon ?? "mdi-magnify"}
+                    aria-label={props.filter.label}
+                    placeholder={props.filter.placeholder ?? "Any"}
+                    prependInnerIcon={props.filter.icon ?? "mdi-filter-variant"}
                     items={options.value}
                     itemTitle="title"
                     itemValue="value"
@@ -85,8 +105,7 @@ const ApiAutocompleteControl = dc(
                     density="compact"
                     hideDetails
                     loading={loading.value}
-                    placeholder={props.filter.placeholder}
-                    modelValue={props.value ?? (props.filter.multiple ? [] : null)}
+                    modelValue={(props.value ?? (props.filter.multiple ? [] : null)) as any}
                     onUpdate:modelValue={(value: any) => props.onChange(value)}
                     onUpdate:search={(query: string) => {
                         if (timer) clearTimeout(timer);
@@ -110,7 +129,7 @@ const ApiAutocompleteControl = dc(
                 {error.value && (
                     <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "rgb(var(--v-theme-error))", fontSize: "11px" }}>
                         <VIcon icon="mdi-alert-circle-outline" size="14" />
-                        <span style={{ flex: 1 }}>{error.value}</span>
+                        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{error.value}</span>
                         <VBtn size="x-small" variant="text" onClick={() => void load("")}>
                             Retry
                         </VBtn>
@@ -124,7 +143,6 @@ const ApiAutocompleteControl = dc(
 
 const DataAutocompleteControl = dc(
     (props: { filter: Extract<TableFilter, { type: "data-autocomplete" | "boolean" }>; value: unknown; onChange: (value: unknown) => void }) => {
-        const theme = useTheme();
         const items = computed<FilterOption[]>(() => {
             if (props.filter.type === "boolean") {
                 return [
@@ -137,7 +155,8 @@ const DataAutocompleteControl = dc(
         const multiple = props.filter.type === "data-autocomplete" && props.filter.multiple === true;
         return () => (
             <VAutocomplete
-                label={props.filter.label}
+                aria-label={props.filter.label}
+                placeholder="Any"
                 prependInnerIcon={props.filter.icon ?? "mdi-filter-variant"}
                 items={items.value}
                 itemTitle="title"
@@ -147,112 +166,121 @@ const DataAutocompleteControl = dc(
                 clearable
                 density="compact"
                 hideDetails
-                modelValue={props.value ?? (multiple ? [] : null)}
+                modelValue={(props.value ?? (multiple ? [] : null)) as any}
                 onUpdate:modelValue={(value: any) => props.onChange(value)}
-
             />
         );
     },
     { props: ["filter", "value", "onChange"] },
 );
 
-const DateControl = dc(
-    (props: { filter: Extract<TableFilter, { type: "date" }>; value: unknown; onChange: (value: unknown) => void }) => {
-        const { t } = useLocale();
-        const current = computed(() => (props.value ?? {}) as { from?: string; to?: string });
-        const toIso = (date: Date): string => {
-            const year = date.getFullYear();
-            const month = String(date.getMonth() + 1).padStart(2, "0");
-            const day = String(date.getDate()).padStart(2, "0");
-            return `${year}-${month}-${day}`;
-        };
-        const parse = (value?: string): Date | null => (value ? new Date(`${value}T12:00:00`) : null);
-        const setDates = (from?: string, to?: string) =>
-            props.onChange({ ...(from ? { from } : {}), ...(to ? { to } : {}) });
-        const preset = (days: number) => {
-            const end = new Date();
-            end.setDate(end.getDate() + days);
-            const start = new Date();
-            setDates(toIso(start), toIso(end));
-        };
+const DateField = dc(
+    (props: { placeholder: string; value?: string; onChange: (value?: string) => void }) => {
+        const open = ref(false);
+        const selected = computed(() => (props.value ? new Date(`${props.value}T12:00:00`) : null));
 
         return () => (
-            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                    <div style={{ flex: 1 }}>
-                        <VueDatePicker
-                            modelValue={
-                                current.value.from && current.value.to
-                                    ? [parse(current.value.from), parse(current.value.to)]
-                                    : parse(current.value.from ?? current.value.to)
-                            }
+            <>
+                <VTextField
+                    readonly
+                    placeholder={props.placeholder}
+                    aria-label={props.placeholder}
+                    prependInnerIcon="mdi-calendar"
+                    appendInnerIcon={props.value ? "mdi-close" : undefined}
+                    onClick:append-inner={(event: MouseEvent) => {
+                        event.stopPropagation();
+                        props.onChange(undefined);
+                    }}
+                    onClick={() => (open.value = true)}
+                    modelValue={props.value ?? ""}
+                    density="compact"
+                    hideDetails
+                    style={{ cursor: "pointer" }}
+                />
+                <VDialog
+                    modelValue={open.value}
+                    onUpdate:modelValue={(value: any) => (open.value = !!value)}
+                    maxWidth={360}
+                    transition="dialog-transition"
+                >
+                    <VCard elevation={12} style={{ borderRadius: "18px", overflow: "hidden" }}>
+                        <VDatePicker
+                            modelValue={selected.value}
                             onUpdate:modelValue={(value: any) => {
-                                if (Array.isArray(value)) {
-                                    setDates(value[0] ? toIso(value[0]) : undefined, value[1] ? toIso(value[1]) : undefined);
-                                } else if (value instanceof Date) {
-                                    setDates(toIso(value));
-                                } else {
-                                    setDates();
+                                const raw = Array.isArray(value) ? value[0] : value;
+                                const iso = raw instanceof Date ? toIsoDate(raw) : typeof raw === "string" ? raw.slice(0, 10) : "";
+                                if (iso) {
+                                    props.onChange(iso);
+                                    open.value = false;
                                 }
                             }}
-                            range={!!(current.value.from && current.value.to)}
-                            enableTimePicker={false}
-                            autoApply
-                            format="yyyy-MM-dd"
-                            placeholder={props.filter.label}
+                            color="primary"
+                            showAdjacentMonths
+                            hideHeader={false}
                         />
-                    </div>
-                    <VBtn
-                        size="x-small"
-                        variant="text"
-                        icon="mdi-close"
-                        aria-label="Clear date"
-                        onClick={() => props.onChange(undefined)}
-                    />
+                    </VCard>
+                </VDialog>
+            </>
+        );
+    },
+    { props: ["placeholder", "value", "onChange"] },
+);
+
+const DateControl = dc(
+    (props: { value: unknown; onChange: (value: unknown) => void }) => {
+        const range = computed(() => (props.value ?? {}) as { from?: string; to?: string });
+        const update = (key: "from" | "to", value?: string) => {
+            const current = { ...range.value };
+            if (value) {
+                current[key] = value;
+            } else {
+                delete current[key];
+            }
+            props.onChange(Object.keys(current).length ? current : undefined);
+        };
+        return () => (
+            <div style={{ display: "flex", gap: "8px", minWidth: 0 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                    <DateField placeholder="From" value={range.value.from} onChange={(value) => update("from", value)} />
                 </div>
-                <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
-                    <VBtn size="x-small" variant="text" onClick={() => preset(0)}>
-                        {t("Today")}
-                    </VBtn>
-                    <VBtn size="x-small" variant="text" onClick={() => preset(-7)}>
-                        {t("Last 7d")}
-                    </VBtn>
-                    <VBtn size="x-small" variant="text" onClick={() => preset(-30)}>
-                        {t("Last 30d")}
-                    </VBtn>
-                    <VBtn size="x-small" variant="text" onClick={() => preset(30)}>
-                        {t("Next 30d")}
-                    </VBtn>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                    <DateField placeholder="To" value={range.value.to} onChange={(value) => update("to", value)} />
                 </div>
             </div>
         );
     },
-    { props: ["filter", "value", "onChange"] },
+    { props: ["value", "onChange"] },
 );
 
 const NumberRangeControl = dc(
     (props: { filter: Extract<TableFilter, { type: "number-range" }>; value: unknown; onChange: (value: unknown) => void }) => {
         const range = computed(() => (props.value ?? {}) as { min?: string; max?: string });
         return () => (
-            <div style={{ display: "flex", gap: "6px" }}>
-                <VTextField
-                    label={`${props.filter.label} min`}
-                    type="number"
-                    density="compact"
-                    hideDetails
-                    suffix={props.filter.suffix}
-                    modelValue={range.value.min ?? ""}
-                    onUpdate:modelValue={(value: string) => props.onChange({ ...range.value, min: value })}
-                />
-                <VTextField
-                    label={`${props.filter.label} max`}
-                    type="number"
-                    density="compact"
-                    hideDetails
-                    suffix={props.filter.suffix}
-                    modelValue={range.value.max ?? ""}
-                    onUpdate:modelValue={(value: string) => props.onChange({ ...range.value, max: value })}
-                />
+            <div style={{ display: "flex", gap: "8px", minWidth: 0 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                    <VTextField
+                        aria-label={`${props.filter.label} minimum`}
+                        placeholder="Min"
+                        type="number"
+                        density="compact"
+                        hideDetails
+                        suffix={props.filter.suffix}
+                        modelValue={range.value.min ?? ""}
+                        onUpdate:modelValue={(value: string) => props.onChange({ ...range.value, min: value })}
+                    />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                    <VTextField
+                        aria-label={`${props.filter.label} maximum`}
+                        placeholder="Max"
+                        type="number"
+                        density="compact"
+                        hideDetails
+                        suffix={props.filter.suffix}
+                        modelValue={range.value.max ?? ""}
+                        onUpdate:modelValue={(value: string) => props.onChange({ ...range.value, max: value })}
+                    />
+                </div>
             </div>
         );
     },
@@ -274,6 +302,14 @@ const TableFilters = dc(
         const display = useDisplay();
         const open = ref(!display.mobile.value);
 
+        // LG gets three roomy columns, XL four; never cram.
+        const columns = computed(() => {
+            if (display.xl.value) return 4;
+            if (display.lg.value) return 3;
+            if (display.md.value) return 2;
+            return 1;
+        });
+
         return () => {
             const filters = props.filters ?? [];
             if (filters.length === 0) {
@@ -287,14 +323,14 @@ const TableFilters = dc(
                     style={{
                         display: "flex",
                         flexDirection: "column",
-                        gap: "10px",
-                        padding: "12px 14px",
-                        borderRadius: "12px",
+                        gap: "14px",
+                        padding: "18px 20px 20px",
+                        borderRadius: "16px",
                         border: "1px solid var(--fintech-border)",
-                        background: "rgba(var(--v-theme-surface-variant), 0.35)",
+                        background: "linear-gradient(180deg, rgba(var(--v-theme-surface-variant), 0.5), rgba(var(--v-theme-surface), 0.85))",
                     }}
                 >
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
                         <VBtn
                             size="small"
                             variant={count > 0 ? "flat" : "tonal"}
@@ -307,7 +343,7 @@ const TableFilters = dc(
                         </VBtn>
 
                         {props.total !== undefined && (
-                            <span style={{ fontSize: "12px", opacity: 0.6 }}>
+                            <span style={{ fontSize: "12px", fontWeight: 600, opacity: 0.6 }}>
                                 {props.total} {t("results")}
                             </span>
                         )}
@@ -328,6 +364,7 @@ const TableFilters = dc(
                                     key={filter.key}
                                     size="small"
                                     variant="tonal"
+                                    color={toneColor(theme, optionTone(filter, props.values[filter.key]))}
                                     closable
                                     onClick:close={() => props.onChange(filter.key, undefined)}
                                 >
@@ -342,37 +379,59 @@ const TableFilters = dc(
                         <div
                             style={{
                                 display: "grid",
-                                gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-                                gap: "12px",
+                                gridTemplateColumns: `repeat(${columns.value}, minmax(0, 1fr))`,
+                                gap: "22px 20px",
+                                alignItems: "start",
                             }}
                         >
                             {filters.map((filter) => {
                                 const value = props.values[filter.key];
                                 const onChange = (next: unknown) => props.onChange(filter.key, next);
-                                if (filter.type === "api-autocomplete") {
-                                    return <ApiAutocompleteControl key={filter.key} filter={filter} value={value} onChange={onChange} />;
-                                }
-                                if (filter.type === "data-autocomplete" || filter.type === "boolean") {
-                                    return <DataAutocompleteControl key={filter.key} filter={filter} value={value} onChange={onChange} />;
-                                }
-                                if (filter.type === "date") {
-                                    return <DateControl key={filter.key} filter={filter} value={value} onChange={onChange} />;
-                                }
-                                if (filter.type === "number-range") {
-                                    return <NumberRangeControl key={filter.key} filter={filter} value={value} onChange={onChange} />;
-                                }
+                                const wide = filter.type === "date" || filter.type === "number-range";
                                 return (
-                                    <VTextField
+                                    <div
                                         key={filter.key}
-                                        label={filter.label}
-                                        prependInnerIcon={filter.icon ?? "mdi-magnify"}
-                                        density="compact"
-                                        hideDetails
-                                        clearable
-                                        placeholder={filter.placeholder}
-                                        modelValue={value ?? ""}
-                                        onUpdate:modelValue={(next: string) => onChange(next)}
-                                    />
+                                        style={{
+                                            display: "flex",
+                                            flexDirection: "column",
+                                            gap: "6px",
+                                            minWidth: 0,
+                                            gridColumn: wide && columns.value > 1 ? "span 2" : undefined,
+                                        }}
+                                    >
+                                        <span
+                                            style={{
+                                                fontSize: "11px",
+                                                fontWeight: 800,
+                                                letterSpacing: "0.06em",
+                                                textTransform: "uppercase",
+                                                lineHeight: "16px",
+                                                opacity: 0.55,
+                                            }}
+                                        >
+                                            {filter.label}
+                                        </span>
+                                        {filter.type === "api-autocomplete" ? (
+                                            <ApiAutocompleteControl filter={filter} value={value} onChange={onChange} />
+                                        ) : filter.type === "data-autocomplete" || filter.type === "boolean" ? (
+                                            <DataAutocompleteControl filter={filter} value={value} onChange={onChange} />
+                                        ) : filter.type === "date" ? (
+                                            <DateControl value={value} onChange={onChange} />
+                                        ) : filter.type === "number-range" ? (
+                                            <NumberRangeControl filter={filter} value={value} onChange={onChange} />
+                                        ) : (
+                                            <VTextField
+                                                aria-label={filter.label}
+                                                placeholder={filter.placeholder ?? "Any"}
+                                                prependInnerIcon={filter.icon ?? "mdi-magnify"}
+                                                density="compact"
+                                                hideDetails
+                                                clearable
+                                                modelValue={value ?? ""}
+                                                onUpdate:modelValue={(next: string) => onChange(next)}
+                                            />
+                                        )}
+                                    </div>
                                 );
                             })}
                         </div>
