@@ -11,6 +11,32 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOCAL="$ROOT/.local"
 mkdir -p "$LOCAL/fake-rails-data" "$LOCAL/logs"
 
+# The orchestrator (deploy/deploy.ts) keeps its credentials in deploy/deploy.env
+# and the fake-rails nginx vhost proxies to this backend. Read the same values
+# here, otherwise this convenience script restarts the backend with a different
+# tester password/JWT secret and the portal login stops matching the deployed
+# configuration. Explicit environment variables still win.
+DEPLOY_ENV_FILE="${DEPLOY_ENV_FILE:-$ROOT/deploy/deploy.env}"
+read_deploy_value() {
+  local key="$1"
+  [[ -f "$DEPLOY_ENV_FILE" ]] || return 1
+  local line
+  line="$(grep -m1 -E "^[[:space:]]*${key}=" "$DEPLOY_ENV_FILE" || true)"
+  [[ -n "$line" ]] || return 1
+  local value="${line#*=}"
+  value="${value%$'\r'}"
+  value="${value#\"}"
+  value="${value%\"}"
+  value="${value#\'}"
+  value="${value%\'}"
+  printf '%s' "$value"
+}
+deploy_value() {
+  local fallback="$2" value
+  value="$(read_deploy_value "$1" || true)"
+  printf '%s' "${value:-$fallback}"
+}
+
 DB_HOST="${DB_HOST:-127.0.0.1}"
 DB_PORT="${DB_PORT:-3306}"
 DB_USER="${DB_USER:-admin}"
@@ -19,11 +45,21 @@ DB_NAME="${DB_NAME:-payment_gateway_monolith}"
 DATABASE_URL="${DATABASE_URL:-mysql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}}"
 
 KMS_MASTER_KEY="${KMS_MASTER_KEY:-local-payment-gateway-master-key-32chars!}"
-FAKE_RAILS_BASE_URL="${FAKE_RAILS_BASE_URL:-http://127.0.0.1:4104}"
-FAKE_RAILS_ADMIN_USER="${FAKE_RAILS_ADMIN_USER:-tester_admin}"
-FAKE_RAILS_ADMIN_PASSWORD="${FAKE_RAILS_ADMIN_PASSWORD:-Strong-Tester-Pass-2026!}"
-FAKE_RAILS_JWT_SECRET="${FAKE_RAILS_JWT_SECRET:-0123456789abcdef0123456789abcdef}"
-FAKE_RAILS_SEEDER_TOKEN="${FAKE_RAILS_SEEDER_TOKEN:-0123456789abcdef0123456789abcdef}"
+FAKE_RAILS_BASE_URL="${FAKE_RAILS_BASE_URL:-$(deploy_value FAKE_RAILS_PUBLIC_BASE_URL http://127.0.0.1:4104)}"
+FAKE_RAILS_PUBLIC_BASE_URL="${FAKE_RAILS_PUBLIC_BASE_URL:-$FAKE_RAILS_BASE_URL}"
+FAKE_RAILS_BACK_PORT="${FAKE_RAILS_BACK_PORT:-$(deploy_value FAKE_RAILS_BACK_PORT 4104)}"
+FAKE_RAILS_ADMIN_USER="${FAKE_RAILS_ADMIN_USER:-$(deploy_value FAKE_RAILS_ADMIN_USER tester_admin)}"
+FAKE_RAILS_ADMIN_PASSWORD="${FAKE_RAILS_ADMIN_PASSWORD:-$(deploy_value FAKE_RAILS_ADMIN_PASSWORD Strong-Tester-Pass-2026!)}"
+FAKE_RAILS_JWT_SECRET="${FAKE_RAILS_JWT_SECRET:-$(deploy_value FAKE_RAILS_JWT_SECRET 0123456789abcdef0123456789abcdef)}"
+FAKE_RAILS_SEEDER_TOKEN="${FAKE_RAILS_SEEDER_TOKEN:-$(deploy_value FAKE_RAILS_SEEDER_TOKEN 0123456789abcdef0123456789abcdef)}"
+FAKE_RAILS_REMOTE_DIR="${FAKE_RAILS_REMOTE_DIR:-$(deploy_value FAKE_RAILS_REMOTE_DIR /var/www/pg-fake-rails)}"
+if [[ -z "${FAKE_RAILS_DATA_DIR:-}" ]]; then
+  if [[ -d "$FAKE_RAILS_REMOTE_DIR/shared/data" ]]; then
+    FAKE_RAILS_DATA_DIR="$FAKE_RAILS_REMOTE_DIR/shared/data"
+  else
+    FAKE_RAILS_DATA_DIR="$LOCAL/fake-rails-data"
+  fi
+fi
 
 step() { printf '\n\033[1;36m== %s ==\033[0m\n' "$1"; }
 
@@ -123,10 +159,10 @@ module.exports = {
   apps: [
     { name: "pg-core-back", cwd: core, script: "pm2-compatible-start.js", interpreter: "bun", env: commonCore },
     { name: "pg-fake-rails-back", cwd: path.join(root, "fake-rails-back"), script: "pm2-compatible-start.js", interpreter: "bun", env: {
-      NODE_ENV: "production", HOST: "127.0.0.1", PORT: "4104",
+      NODE_ENV: "production", HOST: "127.0.0.1", PORT: "$FAKE_RAILS_BACK_PORT",
       FAKE_RAILS_ENABLED: "true", FAKE_RAILS_ALLOW_IN_PRODUCTION: "true",
-      FAKE_RAILS_PUBLIC_BASE_URL: "$FAKE_RAILS_BASE_URL",
-      FAKE_RAILS_DATA_DIR: path.join(root, ".local/fake-rails-data"),
+      FAKE_RAILS_PUBLIC_BASE_URL: "$FAKE_RAILS_PUBLIC_BASE_URL",
+      FAKE_RAILS_DATA_DIR: "$FAKE_RAILS_DATA_DIR",
       CORE_INBOUND_BASE_URL: "http://127.0.0.1:4103/api/v1/inbound",
       FAKE_RAILS_ADMIN_USER: "$FAKE_RAILS_ADMIN_USER",
       FAKE_RAILS_ADMIN_PASSWORD: "$FAKE_RAILS_ADMIN_PASSWORD",
