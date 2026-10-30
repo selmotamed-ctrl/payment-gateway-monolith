@@ -32,6 +32,8 @@ export interface PkiBundle {
   directory: string;
   ca: CertMaterial;
   server: CertMaterial;
+  /** The Fake Rails Nginx server certificate (CA-signed, SAN-bound). */
+  fakeRails: CertMaterial;
   clients: CertMaterial[];
 }
 
@@ -122,8 +124,20 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
     { name: "checkout-back-client", certPath: join(directory, "checkout-back-client.crt"), keyPath: join(directory, "checkout-back-client.key"), kind: "client", cn: "checkout-back" },
   ];
 
-  const bundle: PkiBundle = { directory, ca: caMaterial, server, clients };
-  const everythingExists = [caCert, caKey, server.certPath, server.keyPath, ...clients.flatMap((client) => [client.certPath, client.keyPath])]
+  const fakeRails: CertMaterial = {
+    name: "fake-rails",
+    certPath: join(directory, "fake-rails.crt"),
+    keyPath: join(directory, "fake-rails.key"),
+    kind: "server",
+    cn: config.FAKE_RAILS_DOMAIN === "_" ? "fakerails.internal" : config.FAKE_RAILS_DOMAIN,
+    sans: [
+      `DNS:${config.FAKE_RAILS_DOMAIN === "_" ? "fakerails.internal" : config.FAKE_RAILS_DOMAIN}`,
+      ...(config.FAKE_RAILS_PRIVATE_IP ? [`IP:${config.FAKE_RAILS_PRIVATE_IP}`] : []),
+      "IP:127.0.0.1",
+    ],
+  };
+  const bundle: PkiBundle = { directory, ca: caMaterial, server, fakeRails, clients };
+  const everythingExists = [caCert, caKey, server.certPath, server.keyPath, fakeRails.certPath, fakeRails.keyPath, ...clients.flatMap((client) => [client.certPath, client.keyPath])]
     .every((path) => existsSync(path));
 
   if (everythingExists && !rotate) {
@@ -166,6 +180,17 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
     sans: serverSans,
     // Also usable as a client so the core host can probe its own /health.
     extendedKeyUsage: "serverAuth,clientAuth",
+    validityDays: config.MTLS_VALIDITY_DAYS,
+  });
+
+  // ---- 2b. The Fake Rails Nginx server certificate -----------------------
+  signLeaf({
+    run,
+    directory,
+    material: fakeRails,
+    ou: "fake-rails",
+    sans: fakeRails.sans ?? [],
+    extendedKeyUsage: "serverAuth",
     validityDays: config.MTLS_VALIDITY_DAYS,
   });
 
@@ -267,7 +292,7 @@ export const inspectCertificate = (certPath: string, name: string, now = new Dat
 
 /** Inspects every certificate of the bundle (used by the audit summary and by the health check). */
 export const verifyPki = (bundle: PkiBundle, now = new Date()): CertVerification[] => {
-  const certificates = [bundle.ca, bundle.server, ...bundle.clients];
+  const certificates = [bundle.ca, bundle.server, bundle.fakeRails, ...bundle.clients];
   return certificates.map((material) => inspectCertificate(material.certPath, material.name, now));
 };
 
@@ -280,7 +305,7 @@ export const verifyPki = (bundle: PkiBundle, now = new Date()): CertVerification
  */
 export const certFilesForHost = (
   bundle: PkiBundle,
-  roles: readonly ("db" | "core" | "admin" | "merchant" | "checkout")[],
+  roles: readonly ("db" | "core" | "admin" | "merchant" | "checkout" | "fake-rails")[],
 ): CertMaterial[] => {
   const files: CertMaterial[] = [bundle.ca];
   for (const role of roles) {
@@ -295,6 +320,9 @@ export const certFilesForHost = (
     }
     if (role === "checkout") {
       files.push(...bundle.clients.filter((client) => client.cn === "checkout-back"));
+    }
+    if (role === "fake-rails") {
+      files.push(bundle.fakeRails);
     }
   }
   // Deduplicate the CA when several roles share a host.

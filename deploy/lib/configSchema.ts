@@ -55,12 +55,13 @@ const booleanish = z
 export const DEPLOY_MODES = ["auto", "fresh", "update"] as const;
 export const DB_ENGINES = ["mysql", "postgresql"] as const;
 export const SSL_MODES = ["certbot", "custom", "self_signed"] as const;
-export const ROLE_NAMES = ["db", "core", "admin", "merchant", "checkout"] as const;
+export const ROLE_NAMES = ["db", "core", "admin", "merchant", "checkout", "fake-rails"] as const;
 export type DeployRole = (typeof ROLE_NAMES)[number];
 
 const base = z.strictObject({
   // 0. Global
   DEPLOY_MODE: z.enum(DEPLOY_MODES).default("auto"),
+  DEPLOY_ENV: z.enum(["development", "staging", "production"]).default("development"),
   KEEP_RELEASES: z.coerce.number().int().min(1).max(100).default(5),
   ROTATE_MTLS_CERTS: booleanish.default(false),
   MTLS_VALIDITY_DAYS: z.coerce.number().int().min(1).max(3650).default(825),
@@ -158,6 +159,37 @@ const base = z.strictObject({
   BASE_CURRENCY: z.string().trim().length(3).default("LYD"),
   GATEWAY_TIMEZONE: z.string().trim().min(1).max(64).default("Africa/Tripoli"),
   REDIS_URL: z.string().trim().max(500).optional(),
+
+  // 7. Standalone Fake Payment Rails service (optional testing / sandbox tier)
+  IS_TEST_SERVER: booleanish.default(false),
+  FAKE_RAILS_ENABLED: booleanish.default(false),
+  FAKE_RAILS_ALLOW_IN_PRODUCTION: booleanish.default(false),
+  FAKE_RAILS_SSH_HOST: ipv4.optional(),
+  FAKE_RAILS_SSH_PORT: port.default(22),
+  FAKE_RAILS_SSH_USER: z.string().trim().min(1).max(64).default("ubuntu"),
+  FAKE_RAILS_SSH_KEY_PATH: sshPath.optional(),
+  FAKE_RAILS_SUDO_PASSWORD: z.string().max(256).default(""),
+  FAKE_RAILS_PRIVATE_IP: ipv4.optional(),
+  FAKE_RAILS_BACK_PORT: port.default(4104),
+  FAKE_RAILS_NGINX_PORT: port.default(8444),
+  FAKE_RAILS_SSL: booleanish.default(false),
+  FAKE_RAILS_SSL_MODE: z.enum(SSL_MODES).default("self_signed"),
+  FAKE_RAILS_DOMAIN: serverName.default("fakerails.internal"),
+  FAKE_RAILS_PUBLIC_BASE_URL: z.string().url().default("http://127.0.0.1:8444"),
+  FAKE_RAILS_REMOTE_DIR: z.string().trim().min(1).max(200).default("/var/www/pg-fake-rails"),
+  FAKE_RAILS_ALLOWED_CIDRS: cidrList.default("127.0.0.1/32,10.0.0.0/8,192.168.0.0/16"),
+  FAKE_RAILS_ALLOWED_HOSTS: z.string().trim().default("127.0.0.1,localhost"),
+  FAKE_RAILS_ADMIN_USER: z.string().trim().min(4).max(128).optional(),
+  FAKE_RAILS_ADMIN_PASSWORD: z.string().min(12).max(512).optional(),
+  FAKE_RAILS_JWT_SECRET: z.string().min(16).max(512).optional(),
+  FAKE_RAILS_SEEDER_TOKEN: z.string().min(16).max(512).optional(),
+  SEED_FAKE_RAILS_BLUEPRINTS: booleanish.default(true),
+
+  // 8. Synthetic operational data seeder (test servers with Fake Rails only)
+  RUN_SYNTHETIC_HISTORY_SEED: booleanish.default(false),
+  SYNTHETIC_SEED_PROFILE: z.enum(["COMPACT", "STANDARD", "STRESS"]).default("COMPACT"),
+  SYNTHETIC_SEED_KEY: z.string().trim().min(1).max(200).default("libya-pg-2023-2026"),
+  SYNTHETIC_YEARS_SPAN: z.coerce.number().min(0.5).max(10).default(3.5),
 });
 
 export type DeployConfig = z.infer<typeof base>;
@@ -241,6 +273,52 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
     problems.push("CORE_PORT must differ from the edge backend ports");
   }
 
+  // --- Fake Rails tier -----------------------------------------------------
+  if (config.FAKE_RAILS_ENABLED) {
+    if (!config.FAKE_RAILS_SSH_HOST) problems.push("FAKE_RAILS_SSH_HOST is required when FAKE_RAILS_ENABLED=true");
+    if (!config.FAKE_RAILS_SSH_KEY_PATH) problems.push("FAKE_RAILS_SSH_KEY_PATH is required when FAKE_RAILS_ENABLED=true");
+    if (!config.FAKE_RAILS_PRIVATE_IP) problems.push("FAKE_RAILS_PRIVATE_IP is required when FAKE_RAILS_ENABLED=true");
+    if (!config.FAKE_RAILS_ADMIN_USER) problems.push("FAKE_RAILS_ADMIN_USER is required when FAKE_RAILS_ENABLED=true");
+    if (!config.FAKE_RAILS_ADMIN_PASSWORD) problems.push("FAKE_RAILS_ADMIN_PASSWORD is required when FAKE_RAILS_ENABLED=true");
+    if (!config.FAKE_RAILS_JWT_SECRET) problems.push("FAKE_RAILS_JWT_SECRET is required when FAKE_RAILS_ENABLED=true");
+    if (!config.FAKE_RAILS_SEEDER_TOKEN) problems.push("FAKE_RAILS_SEEDER_TOKEN is required when FAKE_RAILS_ENABLED=true");
+    if (config.DEPLOY_ENV === "production" && !config.FAKE_RAILS_ALLOW_IN_PRODUCTION) {
+      problems.push(
+        'FAKE_RAILS_PRODUCTION_GUARD_BLOCKED: Set FAKE_RAILS_ALLOW_IN_PRODUCTION="true" to run Fake Rails in production mode',
+      );
+    }
+    if (config.FAKE_RAILS_ADMIN_PASSWORD && config.FAKE_RAILS_ADMIN_PASSWORD.length < 12) {
+      problems.push("FAKE_RAILS_ADMIN_PASSWORD must be at least 12 characters");
+    }
+    if (config.FAKE_RAILS_BACK_PORT === config.FAKE_RAILS_NGINX_PORT) {
+      problems.push("FAKE_RAILS_BACK_PORT and FAKE_RAILS_NGINX_PORT must differ");
+    }
+    const reserved = [
+      ["CORE_PORT", config.CORE_PORT],
+      ["ADMIN_BACK_PORT", config.ADMIN_BACK_PORT],
+      ["MERCHANT_BACK_PORT", config.MERCHANT_BACK_PORT],
+      ["CHECKOUT_BACK_PORT", config.CHECKOUT_BACK_PORT],
+      ["ADMIN_NGINX_LAN_PORT", config.ADMIN_NGINX_LAN_PORT],
+    ] as Array<[string, number]>;
+    for (const [name, port] of reserved) {
+      if (config.FAKE_RAILS_BACK_PORT === port) problems.push(`FAKE_RAILS_BACK_PORT must differ from ${name}`);
+      if (config.FAKE_RAILS_NGINX_PORT === port) problems.push(`FAKE_RAILS_NGINX_PORT must differ from ${name}`);
+    }
+    for (const port of [80, 443]) {
+      if (config.FAKE_RAILS_NGINX_PORT === port) {
+        problems.push(`FAKE_RAILS_NGINX_PORT must not be the public ${port}`);
+      }
+    }
+  }
+
+  if (config.RUN_SYNTHETIC_HISTORY_SEED) {
+    if (!config.IS_TEST_SERVER) problems.push("RUN_SYNTHETIC_HISTORY_SEED requires IS_TEST_SERVER=true");
+    if (!config.FAKE_RAILS_ENABLED) problems.push("RUN_SYNTHETIC_HISTORY_SEED requires FAKE_RAILS_ENABLED=true");
+    if (config.DEPLOY_ENV === "production" && !config.FAKE_RAILS_ALLOW_IN_PRODUCTION) {
+      problems.push("RUN_SYNTHETIC_HISTORY_SEED requires FAKE_RAILS_ALLOW_IN_PRODUCTION=true in production");
+    }
+  }
+
   return problems;
 };
 
@@ -258,14 +336,14 @@ export const parseDeployEnv = (source: string): Record<string, string> => {
     }
     const key = line.slice(0, eq).trim();
     let value = line.slice(eq + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"') && value.length >= 2)
-      || (value.startsWith("'") && value.endsWith("'") && value.length >= 2)
-    ) {
-      value = value.slice(1, -1);
-    }
-    // An inline comment is only stripped outside of quotes.
-    if (!rawLine.includes('"') && !rawLine.includes("'")) {
+    // A quoted value ends at its closing quote; anything after it (an inline
+    // comment such as `# "auto" | "fresh"`) is not part of the value. This
+    // also preserves a `#` that is legitimately inside the quotes.
+    if (value.startsWith('"') || value.startsWith("'")) {
+      const quote = value[0]!;
+      const end = value.indexOf(quote, 1);
+      value = end > 0 ? value.slice(1, end) : value.slice(1);
+    } else {
       const hash = value.indexOf(" #");
       if (hash >= 0) {
         value = value.slice(0, hash).trim();

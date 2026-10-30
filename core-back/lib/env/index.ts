@@ -115,6 +115,23 @@ export const envSchema = z.strictObject({
    * The strict timeout of a single delivery attempt against the aggregator.
    */
   NOTIFICATION_WEBHOOK_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(5000),
+  /**
+   * The standalone Fake Payment Rails emulator (design
+   * `fake_payment_rails_service_architecture.md`).
+   *
+   * `ALLOW_FAKE_RAILS_HOSTS` relaxes the SSRF private-address guard ONLY for
+   * the exact hosts in `FAKE_RAILS_ALLOWED_HOSTS` that are also declared in the
+   * gateway version's `allowed_hosts`. Every other private, loopback and
+   * metadata address stays blocked.
+   */
+  FAKE_RAILS_ENABLED: booleanFromEnvironment.default(false),
+  FAKE_RAILS_ALLOW_IN_PRODUCTION: booleanFromEnvironment.default(false),
+  IS_TEST_SERVER: booleanFromEnvironment.default(false),
+  FAKE_RAILS_PUBLIC_BASE_URL: z.url().optional(),
+  ALLOW_FAKE_RAILS_HOSTS: booleanFromEnvironment.default(false),
+  FAKE_RAILS_ALLOWED_HOSTS: z.string().default(""),
+  FAKE_RAILS_SEEDER_TOKEN: z.string().min(16).optional(),
+  FAKE_RAILS_ALLOWED_CIDRS: z.string().default(""),
 });
 
 export type CoreEnv = z.infer<typeof envSchema>;
@@ -190,6 +207,14 @@ const resolveEnvironment = (): CoreEnv => {
     WORKER_BACKGROUND_JOBS_MAX_QUEUE_AGE_MS: 300_000,
     NOTIFICATION_WEBHOOK_URL: undefined,
     NOTIFICATION_WEBHOOK_TIMEOUT_MS: 5000,
+    FAKE_RAILS_ENABLED: false,
+    FAKE_RAILS_ALLOW_IN_PRODUCTION: false,
+    IS_TEST_SERVER: false,
+    FAKE_RAILS_PUBLIC_BASE_URL: undefined,
+    ALLOW_FAKE_RAILS_HOSTS: false,
+    FAKE_RAILS_ALLOWED_HOSTS: "",
+    FAKE_RAILS_SEEDER_TOKEN: undefined,
+    FAKE_RAILS_ALLOWED_CIDRS: "",
   };
 };
 

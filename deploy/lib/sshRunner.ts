@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { existsSync, mkdirSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { homedir, networkInterfaces } from "node:os";
+import { dirname, resolve } from "node:path";
 import type { SshTarget } from "./hostPlanner";
 
 /**
@@ -32,6 +32,18 @@ export interface RunResult {
 
 const expandHome = (path: string): string =>
   path.startsWith("~/") ? resolve(homedir(), path.slice(2)) : path;
+
+/** True when the SSH target is the machine the orchestrator runs on. */
+export const isLocalTarget = (target: SshTarget): boolean => {
+  const host = target.host.trim().toLowerCase();
+  if (host === "127.0.0.1" || host === "localhost" || host === "::1") return true;
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      if (address.address === host) return true;
+    }
+  }
+  return false;
+};
 
 const shellQuote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`;
 
@@ -72,6 +84,28 @@ export class SshRunner {
     if (this.options.dryRun) {
       this.logger(`[dry-run] ssh ${target.user}@${target.host} :: ${remoteCommand}${options.sudo ? " (sudo)" : ""}`);
       return { code: 0, stdout: "", stderr: "" };
+    }
+    if (isLocalTarget(target)) {
+      if (this.options.verbose) {
+        this.logger(`[local] ${remoteCommand}${options.sudo ? " (sudo)" : ""}`);
+      }
+      const result = options.sudo
+        ? spawnSync("sudo", ["-S", "-p", "", ...(options.sudoUser ? ["-u", options.sudoUser] : []), "bash", "-lc", remoteCommand], {
+            input: `${target.sudoPassword}\n`,
+            encoding: "utf8",
+            timeout: this.options.timeoutMs ?? 15 * 60_000,
+            cwd: options.cwd,
+          })
+        : spawnSync("bash", ["-lc", remoteCommand], {
+            encoding: "utf8",
+            timeout: this.options.timeoutMs ?? 15 * 60_000,
+            cwd: options.cwd,
+          });
+      if (result.error) throw new Error(`Local command failed: ${result.error.message}`);
+      if ((result.status ?? 1) !== 0) {
+        throw new Error(`Local command failed (exit ${result.status}): ${remoteCommand}\n${(result.stderr ?? "").trim().slice(-2000)}`);
+      }
+      return { code: result.status ?? 0, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
     }
     if (this.options.verbose) {
       this.logger(`[ssh] ${target.user}@${target.host} :: ${remoteCommand}${options.sudo ? " (sudo)" : ""}`);
@@ -116,12 +150,17 @@ export class SshRunner {
     for (const exclude of input.excludes ?? ["node_modules", ".git", "dist", ".certs", "certs", "generated", "test"]) {
       args.push(`--exclude=${exclude}`);
     }
-    args.push("-e", sshCommand, `${input.local.replace(/\/$/, "")}/`, `${input.target.user}@${input.target.host}:${input.remote}`);
+    const localMode = isLocalTarget(input.target);
+    if (!localMode) {
+      args.push("-e", sshCommand, `${input.local.replace(/\/$/, "")}/`, `${input.target.user}@${input.target.host}:${input.remote}`);
+    } else {
+      args.push(`${input.local.replace(/\/$/, "")}/`, input.remote);
+    }
     if (this.options.dryRun) {
-      this.logger(`[dry-run] rsync ${input.local} -> ${input.target.user}@${input.target.host}:${input.remote}`);
+      this.logger(`[dry-run] rsync ${input.local} -> ${localMode ? input.remote : `${input.target.user}@${input.target.host}:${input.remote}`}`);
       return;
     }
-    this.logger(`[rsync] ${input.local} -> ${input.target.host}:${input.remote}`);
+    this.logger(`[rsync] ${input.local} -> ${localMode ? input.remote : input.target.host + ":" + input.remote}`);
     const result = spawnSync("rsync", args, {
       encoding: "utf8",
       timeout: this.options.timeoutMs ?? 30 * 60_000,
@@ -156,6 +195,35 @@ export class SshRunner {
       this.logger(`[dry-run] write ${input.target.user}@${input.target.host}:${input.path} (${Buffer.byteLength(input.content)} bytes, mode ${mode.toString(8)})`);
       return;
     }
+    if (isLocalTarget(input.target)) {
+      if (input.sudo) {
+        // Write the content to a local temp file first and install it with
+        // sudo. The sudo password is never mixed with the file bytes: a
+        // cached sudo timestamp would otherwise leave the password line at the
+        // top of the installed file.
+        const temporary = `/tmp/pg-deploy-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        writeFileSync(temporary, input.content, { mode });
+        chmodSync(temporary, mode);
+        try {
+          const args = ["-S", "-p", "", "install", "-D", "-m", mode.toString(8), temporary, input.path];
+          const result = spawnSync("sudo", args, {
+            input: `${input.target.sudoPassword}\n`,
+            encoding: "utf8",
+            timeout: this.options.timeoutMs ?? 5 * 60_000,
+          });
+          if ((result.status ?? 1) !== 0) {
+            throw new Error(`write ${input.path} locally failed (exit ${result.status}): ${(result.stderr ?? "").slice(-1000)}`);
+          }
+        } finally {
+          rmSync(temporary, { force: true });
+        }
+      } else {
+        mkdirSync(dirname(input.path), { recursive: true });
+        writeFileSync(input.path, input.content, { mode });
+        chmodSync(input.path, mode);
+      }
+      return;
+    }
     const args = sshArgs(input.target);
     args.push(wrapped);
     const result = spawnSync("ssh", args, {
@@ -175,6 +243,7 @@ export class SshRunner {
 
   /** Verifies the SSH key exists before a deploy starts. */
   assertKeyExists(target: SshTarget): void {
+    if (isLocalTarget(target)) return;
     const key = expandHome(target.keyPath);
     if (!existsSync(key)) {
       throw new Error(`SSH key '${target.keyPath}' (${key}) does not exist`);

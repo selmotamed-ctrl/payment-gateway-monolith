@@ -10,9 +10,9 @@ import type { DeployConfig, DeployRole } from "./configSchema";
  * and its Nginx vhosts are merged, and its firewall rules are unioned.
  */
 
-export type ServiceName = "pg-core-back" | "pg-admin-back" | "pg-merchant-back" | "pg-checkout-back";
-export type NginxSiteName = "admin-lan" | "merchant-public" | "checkout-public" | "merchant-lan" | "checkout-lan";
-export type CertBundle = "core-server" | "admin-client" | "merchant-client" | "checkout-client";
+export type ServiceName = "pg-core-back" | "pg-admin-back" | "pg-merchant-back" | "pg-checkout-back" | "pg-fake-rails-back";
+export type NginxSiteName = "admin-lan" | "merchant-public" | "checkout-public" | "merchant-lan" | "checkout-lan" | "fake-rails";
+export type CertBundle = "core-server" | "admin-client" | "merchant-client" | "checkout-client" | "fake-rails-server";
 
 export interface SshTarget {
   host: string;
@@ -91,14 +91,16 @@ export interface DeployPlan {
 const ROLE_ORDER: Record<DeployRole, number> = {
   db: 1,
   core: 2,
-  admin: 3,
-  merchant: 4,
-  checkout: 5,
+  "fake-rails": 3,
+  admin: 4,
+  merchant: 5,
+  checkout: 6,
 };
 
 const ROLE_LABEL: Record<DeployRole, string> = {
   db: "database",
   core: "core-back",
+  "fake-rails": "fake-rails-back + fake-rails-front",
   admin: "admin-back + admin-front",
   merchant: "merchant-back + merchant-front",
   checkout: "checkout-back + checkout-front",
@@ -119,6 +121,53 @@ const coreEnv = (config: DeployConfig): Record<string, string> => ({
   LOG_LEVEL: "info",
   WORKER_ENABLED: "true",
   ...(config.REDIS_URL ? { REDIS_URL: config.REDIS_URL } : {}),
+  FAKE_RAILS_ENABLED: config.FAKE_RAILS_ENABLED ? "true" : "false",
+  FAKE_RAILS_ALLOW_IN_PRODUCTION: config.FAKE_RAILS_ALLOW_IN_PRODUCTION ? "true" : "false",
+  IS_TEST_SERVER: config.IS_TEST_SERVER ? "true" : "false",
+  ...(config.FAKE_RAILS_ENABLED
+    ? {
+        FAKE_RAILS_PUBLIC_BASE_URL: config.FAKE_RAILS_PUBLIC_BASE_URL,
+        ALLOW_FAKE_RAILS_HOSTS: "true",
+        FAKE_RAILS_ALLOWED_HOSTS: fakeRailsAllowedHosts(config).join(","),
+        FAKE_RAILS_SEEDER_TOKEN: config.FAKE_RAILS_SEEDER_TOKEN ?? "",
+        ...(config.FAKE_RAILS_SSL
+          ? { NODE_EXTRA_CA_CERTS: "shared/certs/internal-ca.crt" }
+          : {}),
+      }
+    : {}),
+  ...(config.RUN_SYNTHETIC_HISTORY_SEED
+    ? {
+        SYNTHETIC_SEED_PROFILE: config.SYNTHETIC_SEED_PROFILE,
+        SYNTHETIC_SEED_KEY: config.SYNTHETIC_SEED_KEY,
+        SYNTHETIC_YEARS_SPAN: String(config.SYNTHETIC_YEARS_SPAN),
+      }
+    : {}),
+});
+
+const fakeRailsAllowedHosts = (config: DeployConfig): string[] =>
+  [...new Set([
+    config.FAKE_RAILS_DOMAIN,
+    config.FAKE_RAILS_PRIVATE_IP ?? "",
+    "127.0.0.1",
+    "localhost",
+    ...config.FAKE_RAILS_ALLOWED_HOSTS.split(",").map((entry) => entry.trim()),
+  ].filter((entry) => entry.length > 0 && entry !== "_"))];
+
+const fakeRailsEnv = (config: DeployConfig): Record<string, string> => ({
+  NODE_ENV: "production",
+  HOST: "127.0.0.1",
+  PORT: String(config.FAKE_RAILS_BACK_PORT),
+  LOG_LEVEL: "info",
+  FAKE_RAILS_ENABLED: "true",
+  FAKE_RAILS_ALLOW_IN_PRODUCTION: config.FAKE_RAILS_ALLOW_IN_PRODUCTION ? "true" : "false",
+  FAKE_RAILS_PUBLIC_BASE_URL: config.FAKE_RAILS_PUBLIC_BASE_URL,
+  FAKE_RAILS_DATA_DIR: `${config.FAKE_RAILS_REMOTE_DIR}/shared/data`,
+  CORE_INBOUND_BASE_URL: `http://${config.CHECKOUT_PRIVATE_IP}:${config.CHECKOUT_BACK_PORT}/api/v1/inbound`,
+  FAKE_RAILS_ADMIN_USER: config.FAKE_RAILS_ADMIN_USER ?? "",
+  FAKE_RAILS_ADMIN_PASSWORD: config.FAKE_RAILS_ADMIN_PASSWORD ?? "",
+  FAKE_RAILS_JWT_SECRET: config.FAKE_RAILS_JWT_SECRET ?? "",
+  FAKE_RAILS_SEEDER_TOKEN: config.FAKE_RAILS_SEEDER_TOKEN ?? "",
+  FAKE_RAILS_ALLOWED_CIDRS: config.FAKE_RAILS_ALLOWED_CIDRS,
 });
 
 /**
@@ -198,6 +247,16 @@ const buildServices = (config: DeployConfig): ServicePlan[] => [
     port: config.CHECKOUT_BACK_PORT,
     env: edgeEnv(config, "checkout"),
   },
+  ...(config.FAKE_RAILS_ENABLED
+    ? [{
+        name: "pg-fake-rails-back" as const,
+        role: "fake-rails" as const,
+        sourceDir: "fake-rails-back",
+        remoteDir: config.FAKE_RAILS_REMOTE_DIR,
+        port: config.FAKE_RAILS_BACK_PORT,
+        env: fakeRailsEnv(config),
+      }]
+    : []),
 ];
 
 const buildNginx = (config: DeployConfig): NginxPlan[] => [
@@ -269,6 +328,22 @@ const buildNginx = (config: DeployConfig): NginxPlan[] => [
         staticRoot: `${config.CHECKOUT_REMOTE_DIR}/current/checkout-front/dist`,
       }]
     : []),
+  ...(config.FAKE_RAILS_ENABLED
+    ? [{
+        site: "fake-rails" as const,
+        role: "fake-rails" as const,
+        template: "nginx.fakerails.conf.tpl",
+        listenPort: config.FAKE_RAILS_NGINX_PORT,
+        httpPort: config.FAKE_RAILS_NGINX_PORT,
+        httpsPort: config.FAKE_RAILS_NGINX_PORT,
+        ssl: config.FAKE_RAILS_SSL,
+        serverName: config.FAKE_RAILS_DOMAIN,
+        sslMode: config.FAKE_RAILS_SSL_MODE,
+        certPath: `${config.FAKE_RAILS_REMOTE_DIR}/shared/certs/fake-rails.crt`,
+        keyPath: `${config.FAKE_RAILS_REMOTE_DIR}/shared/certs/fake-rails.key`,
+        staticRoot: `${config.FAKE_RAILS_REMOTE_DIR}/current/fake-rails-front/dist`,
+      }]
+    : []),
 ];
 
 const buildCertBundles = (role: DeployRole): CertBundle[] => {
@@ -281,6 +356,8 @@ const buildCertBundles = (role: DeployRole): CertBundle[] => {
       return ["merchant-client"];
     case "checkout":
       return ["checkout-client"];
+    case "fake-rails":
+      return ["fake-rails-server"];
     default:
       return [];
   }
@@ -339,6 +416,20 @@ const buildRoleFirewall = (config: DeployConfig, role: DeployRole): FirewallRule
               comment: "merchant portal on the LAN (no domain)",
             }]
           : []),
+      ];
+    case "fake-rails":
+      return [
+        { port: config.FAKE_RAILS_SSH_PORT, proto: "tcp", comment: "SSH" },
+        {
+          port: config.FAKE_RAILS_NGINX_PORT,
+          proto: "tcp",
+          fromCidrs: [...new Set([
+            ...config.FAKE_RAILS_ALLOWED_CIDRS.split(",").map((entry) => entry.trim()),
+            config.CORE_PRIVATE_IP,
+            config.CHECKOUT_PRIVATE_IP,
+          ])],
+          comment: "Fake Rails portal + hosted pages + gateway APIs",
+        },
       ];
     case "checkout":
       return [
@@ -422,6 +513,18 @@ const roleSshTargets = (config: DeployConfig): RoleSsh[] => {
       },
     },
   );
+  if (config.FAKE_RAILS_ENABLED && config.FAKE_RAILS_SSH_HOST && config.FAKE_RAILS_SSH_KEY_PATH) {
+    targets.push({
+      role: "fake-rails",
+      ssh: {
+        host: config.FAKE_RAILS_SSH_HOST,
+        port: config.FAKE_RAILS_SSH_PORT,
+        user: config.FAKE_RAILS_SSH_USER,
+        keyPath: config.FAKE_RAILS_SSH_KEY_PATH,
+        sudoPassword: config.FAKE_RAILS_SUDO_PASSWORD,
+      },
+    });
+  }
   return targets;
 };
 

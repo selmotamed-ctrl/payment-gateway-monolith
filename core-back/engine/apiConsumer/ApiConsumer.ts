@@ -3,6 +3,7 @@ import { lookup } from "node:dns/promises";
 import ipaddr from "ipaddr.js";
 import { isIP } from "node:net";
 import { compileUrl, assertNoControlCharacters, validateFinalUrl, type QueryValue } from "./compileUrl";
+import { isFakeRailsHostAllowed } from "./fakeRailsAllowlist";
 import { recursiveSelect } from "./recursiveSelect";
 
 export type GatewayAuthMethod =
@@ -488,9 +489,11 @@ export class ApiConsumer {
   }
 
   private async send<T>(request: ApiConsumerRequest): Promise<ApiConsumerResponse<T>> {
+    const candidate = new URL(request.url);
+    const fakeRailsTarget = isFakeRailsHostAllowed(candidate.hostname, this.config.allowedHosts);
     const url = compileUrl(request.url, request.query, {
       allowedHosts: this.config.allowedHosts,
-      requireHttps: true,
+      requireHttps: !fakeRailsTarget,
     });
     const parsed = new URL(url);
     await this.assertDnsAllowed(parsed.hostname);
@@ -513,7 +516,7 @@ export class ApiConsumer {
     const body = this.serializeBody(rawBody, headers);
     this.applyAuthentication(auth, headers, query, body);
     const finalUrl = query.toString();
-    validateFinalUrl(finalUrl, { allowedHosts: this.config.allowedHosts, requireHttps: true });
+    validateFinalUrl(finalUrl, { allowedHosts: this.config.allowedHosts, requireHttps: !fakeRailsTarget });
 
     const controller = new AbortController();
     const removeExternalAbort = combineSignals(controller, request.signal);
@@ -878,6 +881,11 @@ export class ApiConsumer {
 
   private async assertDnsAllowed(hostname: string): Promise<void> {
     const normalized = hostname.toLowerCase().replace(/\.$/, "");
+    // Scoped Fake Rails relaxation: only an explicitly allowlisted host that is
+    // also declared by the gateway version bypasses the private-IP rejection.
+    if (isFakeRailsHostAllowed(normalized, this.config.allowedHosts)) {
+      return;
+    }
     if (normalized === "localhost" || normalized.endsWith(".localhost") || normalized.endsWith(".local")) {
       throw new ApiConsumerError(`Hostname '${hostname}' is not allowed`, { retryable: false });
     }

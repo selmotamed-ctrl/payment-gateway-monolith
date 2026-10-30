@@ -27,7 +27,9 @@
     "prisma:validate": "bunx --bun prisma validate",
     "generate-mtls-certs": "bun ./scripts/generate-mtls-certs.ts",
     "create-admin": "bun ./scripts/create-admin.ts",
-    "create-dev-users": "bun ./scripts/create-dev-users.ts"
+    "create-dev-users": "bun ./scripts/create-dev-users.ts",
+    "seed-fake-rails": "bun ./prisma/seedFakeRails.ts",
+    "seed-synthetic-history": "bun ./prisma/syntheticSeeder/index.ts"
   },
   "peerDependencies": {
     "typescript": "^7"

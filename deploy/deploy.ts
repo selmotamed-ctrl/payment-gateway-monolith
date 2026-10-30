@@ -8,6 +8,7 @@ import { buildPki, certFilesForHost, readMaterial, verifyPki } from "./lib/pkiMa
 import { SshRunner } from "./lib/sshRunner";
 import { applyFirewall, readFirewallStatus } from "./lib/firewallConfigurator";
 import { renderVerification, verifyDeployment } from "./lib/healthVerifier";
+import { bootstrapPackagesCommand, detectHostOs } from "./lib/osDetector";
 
 /**
  * The multi-host deployment orchestrator.
@@ -26,7 +27,7 @@ const REPO_ROOT = resolve(import.meta.dirname, "..");
 
 interface CliOptions {
   envPath: string;
-  only: Set<"db" | "core" | "admin" | "merchant" | "checkout">;
+  only: Set<"db" | "core" | "admin" | "merchant" | "checkout" | "fake-rails">;
   dryRun: boolean;
   fresh: boolean;
   update: boolean;
@@ -61,7 +62,7 @@ const parseArgs = (argv: string[]): CliOptions => {
     else if (raw.startsWith("--only=")) {
       for (const role of raw.slice(7).split(",")) {
         const normalized = role.trim().toLowerCase();
-        if (!["db", "core", "admin", "merchant", "checkout"].includes(normalized)) {
+        if (!["db", "core", "admin", "merchant", "checkout", "fake-rails"].includes(normalized)) {
           throw new Error(`Unknown --only role '${role}'`);
         }
         options.only.add(normalized as never);
@@ -75,7 +76,7 @@ const parseArgs = (argv: string[]): CliOptions => {
 const log = (message = ""): void => console.log(message);
 const step = (index: number, title: string): void => {
   log();
-  log(`\u001b[1m[${index}/12] ${title}\u001b[0m`);
+  log(`\u001b[1m[${index}/14] ${title}\u001b[0m`);
 };
 const warn = (message: string): void => console.warn(`  ! ${message}`);
 
@@ -114,10 +115,11 @@ const pm2Ecosystem = (service: ServicePlan, releaseDir: string): string => {
 `;
 };
 
-const FRONTENDS: Record<"admin" | "merchant" | "checkout", string> = {
+const FRONTENDS: Record<"admin" | "merchant" | "checkout" | "fake-rails", string> = {
   admin: "admin-front",
   merchant: "merchant-front",
   checkout: "checkout-front",
+  "fake-rails": "fake-rails-front",
 };
 
 const nginxTemplatePath = (template: string): string => join(REPO_ROOT, "deploy", "templates", template);
@@ -199,14 +201,16 @@ export const renderNginxTemplate = (input: {
     .replaceAll("{{LAN_ALLOWED_CIDRS}}", input.lanAllowedCidrs);
 };
 
-const renderNginx = (host: HostPlan, config: DeployConfig, runner: SshRunner): void => {
-  for (const site of host.nginx) {
+const renderNginx = (host: HostPlan, config: DeployConfig, runner: SshRunner, role?: string): void => {
+  for (const site of host.nginx.filter((candidate) => !role || candidate.role === role)) {
     const template = readFileSync(nginxTemplatePath(site.template), "utf8");
     // The admin vhost is LAN-only and usually has no operator certificate; it
     // still needs a TLS pair so `nginx -t` accepts the server block, so we mint
     // a self-signed certificate bound to its server name when none is given.
     const tls = !site.ssl
       ? { certPath: "", keyPath: "" }
+      : site.role === "fake-rails" && site.certPath && site.keyPath
+        ? { certPath: site.certPath, keyPath: site.keyPath }
       : site.sslMode === "lan" && site.certPath && site.keyPath
         ? { certPath: site.certPath, keyPath: site.keyPath }
         : site.sslMode === "lan"
@@ -229,7 +233,13 @@ const renderNginx = (host: HostPlan, config: DeployConfig, runner: SshRunner): v
       sslCertPath: tls.certPath,
       sslKeyPath: tls.keyPath,
       staticRoot: site.staticRoot,
-      backendPort: site.role === "admin" ? config.ADMIN_BACK_PORT : site.role === "merchant" ? config.MERCHANT_BACK_PORT : config.CHECKOUT_BACK_PORT,
+      backendPort: site.role === "admin"
+        ? config.ADMIN_BACK_PORT
+        : site.role === "merchant"
+          ? config.MERCHANT_BACK_PORT
+          : site.role === "fake-rails"
+            ? config.FAKE_RAILS_BACK_PORT
+            : config.CHECKOUT_BACK_PORT,
       lanAllowedCidrs: config.LAN_ALLOWED_CIDRS,
     });
     const available = `/etc/nginx/sites-available/pg-${site.site}.conf`;
@@ -260,7 +270,7 @@ const deployService = (input: {
   // The tree lives under /var/www, so creating it needs sudo; everything the
   // application reads afterwards (keys, .env, PM2 files, the release tree) is
   // owned by the SSH user so PM2 — never root — can read it.
-  runner.run(host.ssh, "mkdir -p " + [releaseDir, `${remote}/shared/certs`, `${remote}/shared/backups`, `${remote}/shared/pm2`].join(" ") + ` && chown -R ${owner} ${remote}`, { sudo: true });
+  runner.run(host.ssh, "mkdir -p " + [releaseDir, `${remote}/shared/certs`, `${remote}/shared/backups`, `${remote}/shared/pm2`, `${remote}/shared/data`].join(" ") + ` && chown -R ${owner} ${remote}`, { sudo: true });
 
   // 1. The backend source.
   runner.sync({
@@ -328,8 +338,8 @@ const deployService = (input: {
     { sudo: false },
   );
 
-  // 8. Nginx (only the hosts that own a site).
-  renderNginx(host, config, runner);
+  // 8. Nginx (only the site owned by the service being deployed).
+  renderNginx(host, config, runner, service.role);
 
   // 9. Prune.
   runner.run(
@@ -413,14 +423,16 @@ const backupDatabase = (input: { runner: SshRunner; config: DeployConfig; host: 
   log(`  pre-migration backup -> ${target}`);
 };
 
-const buildFrontends = async (runner: SshRunner): Promise<void> => {
-  for (const frontend of Object.values(FRONTENDS)) {
+const buildFrontends = async (runner: SshRunner, config: DeployConfig): Promise<void> => {
+  const frontends = ["admin-front", "merchant-front", "checkout-front"];
+  if (config.FAKE_RAILS_ENABLED) frontends.push("fake-rails-front");
+  for (const frontend of frontends) {
     await runner.localStreaming("bun run build", join(REPO_ROOT, frontend));
     log(`  built ${frontend}/dist`);
   }
 };
 
-const shouldRun = (options: CliOptions, role: "db" | "core" | "admin" | "merchant" | "checkout"): boolean =>
+const shouldRun = (options: CliOptions, role: "db" | "core" | "admin" | "merchant" | "checkout" | "fake-rails"): boolean =>
   options.only.size === 0 || options.only.has(role);
 
 const main = async (): Promise<void> => {
@@ -451,11 +463,11 @@ const main = async (): Promise<void> => {
   const runner = new SshRunner({ dryRun: options.dryRun, verbose: true });
 
   // ---- Step 2: build the three SPAs locally ------------------------------
-  step(2, "Build the three frontend SPAs");
+  step(2, "Build the frontend SPAs");
   if (options.skipBuild || options.dryRun) {
     log(`  skipped (${options.dryRun ? "--dry-run" : "--skip-build"})`);
   } else {
-    await buildFrontends(runner);
+    await buildFrontends(runner, config);
   }
 
   // ---- Step 3: PKI -------------------------------------------------------
@@ -480,11 +492,14 @@ const main = async (): Promise<void> => {
       }
       runner.run(host.ssh, "true");
       if (fresh) {
-        runner.run(
-          host.ssh,
-          "apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y nginx rsync ufw curl ca-certificates nodejs",
-          { sudo: true },
-        );
+        const os = detectHostOs(runner, host);
+        log(`  ${host.ssh.host}: detected ${os} package manager`);
+        const packages = bootstrapPackagesCommand(os);
+        if (packages) {
+          runner.run(host.ssh, packages, { sudo: true });
+        } else {
+          warn(`unknown OS on ${host.ssh.host}; install nginx/rsync/curl/nodejs manually`);
+        }
         runner.run(host.ssh, "command -v bun >/dev/null 2>&1 || curl -fsSL https://bun.sh/install | bash", { sudo: false });
         // PM2 is a Node program and its shebang is `node`; expose Bun on a
         // stable absolute path so the PM2 interpreter setting always resolves.
@@ -527,11 +542,14 @@ const main = async (): Promise<void> => {
   }
 
   // ---- Steps 6-9: deploy the services in dependency order ---------------
-  const deployTargets: Array<{ index: number; role: "core" | "admin" | "merchant" | "checkout"; title: string }> = [
+  const deployTargets: Array<{ index: number; role: "core" | "admin" | "merchant" | "checkout" | "fake-rails"; title: string }> = [
     { index: 6, role: "core", title: "Deploy core-back to CORE_HOST" },
-    { index: 7, role: "admin", title: "Deploy admin-back + admin-front to ADMIN_HOST" },
-    { index: 8, role: "merchant", title: "Deploy merchant-back + merchant-front to MERCHANT_HOST" },
-    { index: 9, role: "checkout", title: "Deploy checkout-back + checkout-front to CHECKOUT_HOST" },
+    ...(config.FAKE_RAILS_ENABLED
+      ? [{ index: 7, role: "fake-rails" as const, title: "Deploy fake-rails-back + fake-rails-front to FAKE_RAILS_HOST" }]
+      : []),
+    { index: 8, role: "admin", title: "Deploy admin-back + admin-front to ADMIN_HOST" },
+    { index: 9, role: "merchant", title: "Deploy merchant-back + merchant-front to MERCHANT_HOST" },
+    { index: 10, role: "checkout", title: "Deploy checkout-back + checkout-front to CHECKOUT_HOST" },
   ];
   for (const target of deployTargets) {
     step(target.index, target.title);
@@ -556,8 +574,31 @@ const main = async (): Promise<void> => {
     }
   }
 
-  // ---- Step 10: end-to-end verification ---------------------------------
-  step(10, "End-to-end cross-host mTLS and health verification");
+  // ---- Step 11: seed the Fake Rails blueprints and synthetic history ------
+  step(11, "Seed Fake Rails blueprints and synthetic operational history");
+  if (options.dryRun) {
+    log("  skipped (--dry-run)");
+  } else if (!config.FAKE_RAILS_ENABLED) {
+    log("  skipped (FAKE_RAILS_ENABLED=false)");
+  } else if (shouldRun(options, "core")) {
+    const coreRemote = `${config.CORE_REMOTE_DIR}/current/core-back`;
+    const bun = 'PATH="$HOME/.bun/bin:/usr/local/bin:$PATH" bun';
+    if (config.SEED_FAKE_RAILS_BLUEPRINTS) {
+      runner.run(coreHost.ssh, `${bun} run seed-fake-rails`, { cwd: coreRemote, sudo: false });
+      log("  fake rails blueprints seeded in core-back");
+    }
+    if (config.RUN_SYNTHETIC_HISTORY_SEED) {
+      const seeded = runner.run(coreHost.ssh, `${bun} run seed-synthetic-history`, { cwd: coreRemote, sudo: false });
+      const summary = seeded.stdout.trim().split("\n").slice(-4).join("\n");
+      if (summary) log(summary.split("\n").map((line) => `  ${line}`).join("\n"));
+      log(`  synthetic history seeded (${config.SYNTHETIC_SEED_PROFILE})`);
+    }
+  } else {
+    log("  skipped (--only excludes core)");
+  }
+
+  // ---- Step 12: end-to-end verification ---------------------------------
+  step(12, "End-to-end cross-host mTLS and health verification");
   if (options.skipVerify || options.dryRun) {
     log("  skipped");
   } else {
@@ -568,12 +609,12 @@ const main = async (): Promise<void> => {
     }
   }
 
-  // ---- Step 11: prune ----------------------------------------------------
-  step(11, "Prune old releases");
+  // ---- Step 13: prune ----------------------------------------------------
+  step(13, "Prune old releases");
   log(`  kept the last ${options.keepReleases ?? config.KEEP_RELEASES} release(s) per host`);
 
-  // ---- Step 12: audit summary -------------------------------------------
-  step(12, "Deployment audit summary");
+  // ---- Step 14: audit summary -------------------------------------------
+  step(14, "Deployment audit summary");
   let commit = "unknown";
   try {
     commit = execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: REPO_ROOT, encoding: "utf8" }).trim();

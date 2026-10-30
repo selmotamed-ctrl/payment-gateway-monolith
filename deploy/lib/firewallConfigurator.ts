@@ -1,6 +1,7 @@
 import type { DeployConfig } from "./configSchema";
 import type { FirewallRulePlan, HostPlan } from "./hostPlanner";
 import type { SshRunner } from "./sshRunner";
+import { detectHostOs, installPackageCommand } from "./osDetector";
 
 /**
  * Host-aware UFW provisioning.
@@ -63,6 +64,7 @@ export interface ApplyFirewallOptions {
   host: HostPlan;
   config: DeployConfig;
   dryRun?: boolean;
+  logger?: (message: string) => void;
 }
 
 /**
@@ -84,10 +86,25 @@ export const applyFirewall = (options: ApplyFirewallOptions): FirewallPlan => {
     }
     return plan;
   }
-  // ufw may be absent on a minimal image; install it first.
-  options.runner.run(options.host.ssh, "command -v ufw >/dev/null 2>&1 || (apt-get update -y && apt-get install -y ufw)", {
-    sudo: true,
-  });
+  // ufw may be absent on a minimal image; install it with the host's own
+  // package manager (Debian/Ubuntu or Arch Linux).
+  const hasUfw = options.runner.capture(options.host.ssh, "command -v ufw || true").trim().length > 0;
+  if (!hasUfw) {
+    const os = detectHostOs(options.runner, options.host);
+    const install = installPackageCommand(os, "ufw");
+    if (install) {
+      try {
+        options.runner.run(options.host.ssh, install, { sudo: true });
+      } catch (error) {
+        options.logger?.(`  ! unable to install ufw on ${options.host.ssh.host}: ${(error as Error).message}`);
+      }
+    }
+  }
+  const ufwAvailable = options.runner.capture(options.host.ssh, "command -v ufw || true").trim().length > 0;
+  if (!ufwAvailable) {
+    options.logger?.(`  ! ufw is unavailable on ${options.host.ssh.host}; skipping firewall rules (local/dev host)`);
+    return plan;
+  }
   for (const command of plan.commands) {
     options.runner.run(options.host.ssh, `ufw ${command.args.map(quote).join(" ")}`, { sudo: true });
   }

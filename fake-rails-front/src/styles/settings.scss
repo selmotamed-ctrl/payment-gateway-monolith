@@ -1,0 +1,38 @@
+@use "vuetify/settings" with (
+  $color-pack: true
+);
+
+.pg-portal {
+  min-height: 100vh;
+  background: #0b1220;
+  color: #e5edf8;
+}
+
+.pg-portal__title {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.pg-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.pg-hosted {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #0f172a, #1e293b);
+  padding: 24px;
+}
+
+.pg-hosted__card {
+  width: 420px;
+  max-width: 96vw;
+  background: #fff;
+  color: #111827;
+  border-radius: 18px;
+  padding: 24px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+}

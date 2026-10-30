@@ -137,6 +137,48 @@ export const probeEdgeToCore = (
   return results;
 };
 
+/** The Fake Rails service: backend /health and the Nginx vhost. */
+export const probeFakeRails = (
+  runner: SshRunner,
+  host: HostPlan,
+  config: DeployConfig,
+): ProbeResult[] => {
+  const results: ProbeResult[] = [];
+  try {
+    const body = runner.capture(host.ssh, `curl -fsS --max-time 10 http://127.0.0.1:${config.FAKE_RAILS_BACK_PORT}/health`);
+    results.push({
+      host: host.ssh.host,
+      check: "fake-rails-back /health",
+      ok: /"status"\s*:\s*"ok"/.test(body),
+      detail: body.slice(0, 200),
+    });
+  } catch (error) {
+    results.push({ host: host.ssh.host, check: "fake-rails-back /health", ok: false, detail: (error as Error).message });
+  }
+  const scheme = config.FAKE_RAILS_SSL ? "https" : "http";
+  const insecure = config.FAKE_RAILS_SSL ? " -k" : "";
+  try {
+    const body = runner.capture(
+      host.ssh,
+      `curl -fsS --max-time 10${insecure} ${scheme}://127.0.0.1:${config.FAKE_RAILS_NGINX_PORT}/health`,
+    );
+    results.push({
+      host: host.ssh.host,
+      check: `fake-rails vhost ${scheme}:${config.FAKE_RAILS_NGINX_PORT}`,
+      ok: /"status"\s*:\s*"ok"/.test(body),
+      detail: body.slice(0, 200),
+    });
+  } catch (error) {
+    results.push({
+      host: host.ssh.host,
+      check: `fake-rails vhost ${scheme}:${config.FAKE_RAILS_NGINX_PORT}`,
+      ok: false,
+      detail: (error as Error).message,
+    });
+  }
+  return results;
+};
+
 /** The public TLS vhost of an edge host, from the edge host itself. */
 export const probePublicVhost = (
   runner: SshRunner,
@@ -190,7 +232,10 @@ export const verifyDeployment = (
     if (host.roles.includes("core")) {
       results.push(probeCoreHealth(runner, host, config));
     }
-    if (host.roles.some((role) => role !== "core" && role !== "db")) {
+    if (host.roles.includes("fake-rails")) {
+      results.push(...probeFakeRails(runner, host, config));
+    }
+    if (host.roles.some((role) => role !== "core" && role !== "db" && role !== "fake-rails")) {
       results.push(...probeEdgeBackend(runner, host, config));
       results.push(...probeEdgeToCore(runner, host, config));
       results.push(...probePublicVhost(runner, host, config));

@@ -14,6 +14,7 @@ import { compileUrl, assertNoControlCharacters, encodeForDestination, validateFi
 import { recursiveSelect } from "../apiConsumer/recursiveSelect";
 import { recursiveSet } from "../apiConsumer/recursiveSet";
 import { isPublicIpAddress, type ApiConsumer, type ConsumerRetryPolicy, type ConsumerSideEffect } from "../apiConsumer/ApiConsumer";
+import { isFakeRailsHostAllowed } from "../apiConsumer/fakeRailsAllowlist";
 import { TransformPipeline, type TransformContext, type TransformPipe } from "../transforms/TransformPipeline";
 
 export type StepType = "HTTP" | "COMPUTE" | "RENDER" | "WAIT" | "ASSERT" | "BRANCH";
@@ -787,9 +788,16 @@ export class StepExecutor {
       headers["content-type"] = headers["content-type"] ?? "application/json";
     }
 
+    let fakeRailsTarget = false;
+    try {
+      fakeRailsTarget = isFakeRailsHostAllowed(new URL(step.url_template).hostname, this.options.allowedHosts);
+    } catch {
+      // The template may still contain unresolved placeholders; the URL
+      // validation below reports the real problem.
+    }
     const url = compileUrl(step.url_template, query, {
       allowedHosts: this.options.allowedHosts,
-      requireHttps: true,
+      requireHttps: !fakeRailsTarget,
       parameters: pathParameters,
       destination: "URL",
     });
@@ -1022,11 +1030,18 @@ export class StepExecutor {
   }
 
   private async assertUrlAllowed(url: string): Promise<void> {
+    const candidate = new URL(url);
+    const fakeRailsTarget = isFakeRailsHostAllowed(candidate.hostname, this.options.allowedHosts);
     const parsed = validateFinalUrl(url, {
       allowedHosts: this.options.allowedHosts,
-      requireHttps: true,
+      requireHttps: !fakeRailsTarget,
     });
     const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
+    // Scoped Fake Rails relaxation: the exact allowlisted host that the
+    // gateway version also declares bypasses the private-IP rejection.
+    if (fakeRailsTarget) {
+      return;
+    }
     if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) {
       throw executorError("SSRF_PRIVATE_ADDRESS_BLOCKED", `Hostname '${hostname}' is not allowed`);
     }

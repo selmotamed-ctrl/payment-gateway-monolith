@@ -1,0 +1,21 @@
+{
+  "name": "fake-rails-back",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun run index.ts",
+    "dev": "bun --watch index.ts",
+    "test": "bun test",
+    "typecheck": "bunx --bun tsc --noEmit"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/express": "^5.0.6",
+    "typescript": "^7.0.2"
+  }
+}

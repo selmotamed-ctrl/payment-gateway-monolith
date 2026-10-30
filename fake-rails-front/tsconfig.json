@@ -1,0 +1,14 @@
+{
+  "extends": "@vue/tsconfig/tsconfig.dom.json",
+  "include": ["env.d.ts", "src/**/*", "src/**/*.tsx", "src/**/*.vue"],
+  "compilerOptions": {
+    "target": "es2021",
+    "lib": ["es2021", "DOM", "DOM.Iterable"],
+    "jsx": "preserve",
+    "jsxImportSource": "vue",
+    "paths": { "@/*": ["./src/*"] },
+    "types": ["vite/client"],
+    "noEmit": true,
+    "skipLibCheck": true
+  }
+}
