@@ -255,6 +255,11 @@ function redactText(text: string, literalSecrets: readonly string[]): string {
   for (const secret of secrets) {
     redacted = redacted.split(secret).join(REDACTED_VALUE);
   }
+  // A Luhn-valid 12..19 digit card number embedded in a larger log line (JSON,
+  // XML or a free-form message) is just as sensitive as a bare value.
+  redacted = redacted.replace(/\d(?:[ -]?\d){11,18}/g, (candidate) =>
+    looksLikePan(candidate) ? REDACTED_VALUE : candidate,
+  );
   return redacted;
 }
 

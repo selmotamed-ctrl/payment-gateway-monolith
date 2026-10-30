@@ -3,3 +3,5 @@
 **/test-results
 **/node_modules
 **/dist
+# local all-in-one deployment
+.local/

@@ -16,6 +16,13 @@ export interface MariaDbPoolConfig {
   allowPublicKeyRetrieval: boolean;
   connectionLimit?: number;
   acquireTimeout?: number;
+  /**
+   * Prisma persists every DateTime as UTC. Raw SQL comparisons against a
+   * DATETIME column must therefore also bind the Date as UTC; with the driver
+   * default ("local") a parameter such as `available_at <= ?` is shifted by
+   * the host offset and the durable queue never sees a due job.
+   */
+  timezone: string;
 }
 
 export const isMysqlUrl = (databaseUrl: string): boolean => {
@@ -41,6 +48,7 @@ export const buildMariaDbPoolConfig = (databaseUrl: string): MariaDbPoolConfig =
     password: decodeURIComponent(url.password),
     database,
     allowPublicKeyRetrieval: true,
+    timezone: "Z",
     ...(limit ? { connectionLimit: Number(limit) } : {}),
   };
 };

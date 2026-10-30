@@ -149,7 +149,16 @@ const StatementsPage = dc(() => {
                 <PageHeader
                     title={t("Statements")}
                     end={() => (
-                        <ThemedView style={{ flexDirection: "row", gap: "10px", alignItems: "center" }}>
+                        <ThemedView
+                            style={{
+                                display: "flex",
+                                flexDirection: "row",
+                                flexWrap: "wrap",
+                                gap: "10px",
+                                alignItems: "center",
+                                width: "100%",
+                            }}
+                        >
                             <VSelect
                                 items={wallets.value.map((wallet) => ({ title: wallet.name, value: wallet.id }))}
                                 modelValue={walletId.value}
@@ -157,7 +166,7 @@ const StatementsPage = dc(() => {
                                 label={t("Wallets")}
                                 density="compact"
                                 hideDetails
-                                style={{ minWidth: "190px" }}
+                                style={{ minWidth: "140px", flex: "1 1 140px" }}
                             />
                             <VSelect
                                 items={monthOptions()}
@@ -166,7 +175,7 @@ const StatementsPage = dc(() => {
                                 label={t("Statements")}
                                 density="compact"
                                 hideDetails
-                                style={{ minWidth: "150px" }}
+                                style={{ minWidth: "120px", flex: "1 1 120px" }}
                             />
                             <VBtn variant="tonal" onClick={() => void exportStatement()}>
                                 {t("Export")}
