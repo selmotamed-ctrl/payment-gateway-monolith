@@ -1,6 +1,6 @@
 import express from "express";
 import { z } from "zod";
-import { zAmount, zCurrency, zDateRangeQuery, zIdentifier, zPaginationQuery, zReason } from "../../lib/zReady";
+import { zAmount, zCurrency, zIdentifier, zPaginationQuery, zReason } from "../../lib/zReady";
 import {
   toCoreAdjustmentCreate,
   toCoreCashoutProcess,
@@ -13,6 +13,15 @@ import { coreForward } from "../forward";
 const router = express.Router();
 
 const idParamsSchema = z.object({ id: zIdentifier });
+
+const financePeriodQuerySchema = z
+  .object({
+    period: z.enum(["today", "last_7d", "last_30d", "last_90d"]).optional(),
+    from: z.string().max(64).optional(),
+    to: z.string().max(64).optional(),
+    currency: zCurrency.optional(),
+  })
+  .strict();
 
 export const disputeCreateSchema = z
   .object({
@@ -226,7 +235,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/finance/profitability",
-    querySchema: zDateRangeQuery,
+    querySchema: financePeriodQuerySchema,
   }),
 );
 
@@ -235,7 +244,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/finance/liquidity",
-    querySchema: zDateRangeQuery,
+    querySchema: financePeriodQuerySchema,
   }),
 );
 

@@ -4800,11 +4800,39 @@ const loadLedgerBalances = async (): Promise<Map<string, Decimal>> => {
   return balances;
 };
 
+const profitabilityQuerySchema = z
+  .object({
+    period: z.enum(["today", "last_7d", "last_30d", "last_90d"]).optional(),
+    from: z.string().max(64).optional(),
+    to: z.string().max(64).optional(),
+    currency: z.string().length(3).optional(),
+  })
+  .strict();
+
 router.get("/finance/profitability", async (request: Request, response: Response) => {
   requireAuthorities(request, ["finance:read"]);
-  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const query = parseOrThrow(profitabilityQuerySchema, request.query ?? {});
+  const period = query.period ?? "last_30d";
+  const periodDays = { today: 1, last_7d: 7, last_30d: 30, last_90d: 90 }[period];
+  const now = new Date();
+  let since = new Date(now.getTime() - periodDays * 24 * 60 * 60 * 1000);
+  let until: Date | undefined;
+  if (query.from) {
+    const parsed = new Date(query.from);
+    if (!Number.isNaN(parsed.getTime())) since = parsed;
+  }
+  if (query.to) {
+    const parsed = new Date(query.to);
+    if (!Number.isNaN(parsed.getTime())) until = parsed;
+  }
+  const windowEnd = until ?? now;
+  const windowDays = Math.max(
+    1,
+    Math.ceil((windowEnd.getTime() - since.getTime()) / (24 * 60 * 60 * 1000)),
+  );
+
   const attempts = await client.paymentAttempt.findMany({
-    where: { createdAt: { gte: since } },
+    where: { createdAt: until ? { gte: since, lte: until } : { gte: since } },
     select: {
       status: true,
       totalChargedAmount: true,
@@ -4820,14 +4848,19 @@ router.get("/finance/profitability", async (request: Request, response: Response
   const routeGateways = new Map(
     (await client.railRoute.findMany({ select: { id: true, gatewayId: true } })).map((route) => [route.id, route.gatewayId]),
   );
+  const gatewayCodes = new Map(
+    (await client.gateway.findMany({ select: { id: true, code: true } })).map((gateway) => [gateway.id, gateway.code]),
+  );
+
+  type ProfitBucket = { volume: Decimal; gross: Decimal; cost: Decimal };
+  const bucket = (): ProfitBucket => ({ volume: decimal(0), gross: decimal(0), cost: decimal(0) });
 
   let grossVolume = decimal(0);
   let grossCommission = decimal(0);
   let netMerchant = decimal(0);
-  let accruedGatewayCost = decimal(0);
-  const byRail = new Map<string, { volume: Decimal; commission: Decimal }>();
-  const byDay = new Map<string, { volume: Decimal; commission: Decimal }>();
-  const byGateway = new Map<string, { volume: Decimal; commission: Decimal }>();
+  const byRail = new Map<string, ProfitBucket>();
+  const byDay = new Map<string, ProfitBucket>();
+  const byGateway = new Map<string, ProfitBucket>();
 
   for (const attempt of attempts) {
     if (attempt.status !== "SUCCEEDED") {
@@ -4835,28 +4868,32 @@ router.get("/finance/profitability", async (request: Request, response: Response
     }
     const volume = decimal(attempt.totalChargedAmount);
     const commission = decimal(attempt.platformCommissionAmount);
+    const cost = decimal(attempt.gatewayFeeAmount ?? 0);
     grossVolume = grossVolume.plus(volume);
     grossCommission = grossCommission.plus(commission);
     netMerchant = netMerchant.plus(decimal(attempt.netMerchantAmount));
-    accruedGatewayCost = accruedGatewayCost.plus(decimal(attempt.gatewayFeeAmount ?? 0));
 
     const railCode = railCodes.get(attempt.railId) ?? "unknown";
-    const railEntry = byRail.get(railCode) ?? { volume: decimal(0), commission: decimal(0) };
+    const railEntry = byRail.get(railCode) ?? bucket();
     railEntry.volume = railEntry.volume.plus(volume);
-    railEntry.commission = railEntry.commission.plus(commission);
+    railEntry.gross = railEntry.gross.plus(commission);
+    railEntry.cost = railEntry.cost.plus(cost);
     byRail.set(railCode, railEntry);
 
     const day = attempt.createdAt.toISOString().slice(0, 10);
-    const dayEntry = byDay.get(day) ?? { volume: decimal(0), commission: decimal(0) };
+    const dayEntry = byDay.get(day) ?? bucket();
     dayEntry.volume = dayEntry.volume.plus(volume);
-    dayEntry.commission = dayEntry.commission.plus(commission);
+    dayEntry.gross = dayEntry.gross.plus(commission);
+    dayEntry.cost = dayEntry.cost.plus(cost);
     byDay.set(day, dayEntry);
 
     const gatewayId = attempt.routeId ? routeGateways.get(attempt.routeId) ?? "unknown" : "unknown";
-    const gatewayEntry = byGateway.get(gatewayId) ?? { volume: decimal(0), commission: decimal(0) };
+    const gatewayCode = gatewayCodes.get(gatewayId) ?? gatewayId;
+    const gatewayEntry = byGateway.get(gatewayCode) ?? bucket();
     gatewayEntry.volume = gatewayEntry.volume.plus(volume);
-    gatewayEntry.commission = gatewayEntry.commission.plus(commission);
-    byGateway.set(gatewayId, gatewayEntry);
+    gatewayEntry.gross = gatewayEntry.gross.plus(commission);
+    gatewayEntry.cost = gatewayEntry.cost.plus(cost);
+    byGateway.set(gatewayCode, gatewayEntry);
   }
 
   const balances = await loadLedgerBalances();
@@ -4875,19 +4912,24 @@ router.get("/finance/profitability", async (request: Request, response: Response
   const netRevenue = grossCommission.minus(gatewayCostRealized);
   const netContribution = netRevenue.minus(chargebackLosses);
 
-  const toRows = (source: Map<string, { volume: Decimal; commission: Decimal }>, keyName: string) =>
+  const toRows = (source: Map<string, ProfitBucket>, keyName: string) =>
     [...source.entries()]
       .map(([key, value]) => ({
         [keyName]: key,
         volume: value.volume.toFixed(4),
-        commission: value.commission.toFixed(4),
-        net: value.volume.minus(value.commission).toFixed(4),
+        gross: value.gross.toFixed(4),
+        cost: value.cost.toFixed(4),
+        net: value.gross.minus(value.cost).toFixed(4),
+        commission: value.gross.toFixed(4),
       }))
       .sort((left, right) => String(left[keyName]).localeCompare(String(right[keyName])));
 
   response.json({
-    currency: "LYD",
-    windowDays: 30,
+    period,
+    currency: query.currency?.toUpperCase() ?? "LYD",
+    windowDays,
+    windowStart: since.toISOString(),
+    windowEnd: windowEnd.toISOString(),
     succeededAttempts: attempts.filter((attempt) => attempt.status === "SUCCEEDED").length,
     grossVolume: grossVolume.toFixed(4),
     grossCommissionRevenue: grossCommission.toFixed(4),
@@ -4900,7 +4942,7 @@ router.get("/finance/profitability", async (request: Request, response: Response
     commissionReceivable: commissionReceivable.toFixed(4),
     byRail: toRows(byRail, "railCode"),
     byDay: toRows(byDay, "day"),
-    byGateway: toRows(byGateway, "gatewayId"),
+    byGateway: toRows(byGateway, "gatewayCode"),
   });
 });
 

@@ -589,6 +589,23 @@ describe("admin core contract forwarding", () => {
     });
   });
 
+  test("forwards the profitability period to core", async () => {
+    const response = await call("GET", "/api/v1/admin/finance/profitability?period=last_7d", {
+      token: operator,
+    });
+    expect(response.status).toBe(200);
+    expect(core.requests.at(-1)?.url).toBe("/internal/admin/finance/profitability?period=last_7d");
+  });
+
+  test("rejects an unknown profitability period before contacting core", async () => {
+    const before = core.requests.length;
+    const response = await call("GET", "/api/v1/admin/finance/profitability?period=last_year", {
+      token: operator,
+    });
+    expect(response.status).toBe(400);
+    expect(core.requests.length).toBe(before);
+  });
+
   test("rejects a join request decision core cannot express", async () => {
     const response = await call("POST", "/api/v1/admin/join-requests/jr_1/decide", {
       token: compliance,
