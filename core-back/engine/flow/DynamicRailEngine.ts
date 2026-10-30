@@ -18,6 +18,7 @@ export type DynamicAttempt = AdapterAttempt & {
   routeId?: string;
   railId?: string;
   linkId?: string;
+  linkKey?: string;
   credentialSetId?: string;
   commissionProfileId?: string;
   ownershipMode?: "INTERNAL" | "PLATFORM_CLEARING" | "MERCHANT_DIRECT";

@@ -14,6 +14,11 @@ const router = createRouter({
             component: () => import("@/pages/pay/[linkKey]/index"),
         },
         {
+            path: "/pay/fake-provider/:token",
+            name: "FakeProvider",
+            component: () => import("@/pages/pay/fake-provider/[token]"),
+        },
+        {
             path: "/:pathMatch(.*)*",
             name: "NotFound",
             component: () => import("@/pages/public/not-found/index"),

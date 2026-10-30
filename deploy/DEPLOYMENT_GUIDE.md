@@ -432,3 +432,50 @@ Common failures:
   CIDR check still applies).
 - The edge `.env` files contain no `DATABASE_URL`, no `KMS_MASTER_KEY` and no
   other host's certificate.
+
+## 9. Development and test data
+
+### Fake rails
+
+`FAKE_RAILS_ENABLED=true` starts an embedded loopback fake provider inside
+`core-back` and seeds four demo rails (`demo-otp`, `demo-qr`, `demo-push`,
+`demo-redirect`). The provider is never published by Nginx and only the exact
+host in `FAKE_RAILS_ALLOWED_HOSTS` may use the private/HTTP exception.
+
+Required on the current test server:
+
+```dotenv
+FAKE_RAILS_ENABLED=true
+FAKE_RAILS_ALLOW_PRODUCTION=true
+FAKE_RAILS_ALLOW_PRIVATE_NETWORK=true
+FAKE_RAILS_ALLOW_HTTP=true
+FAKE_RAILS_API_KEY="..."
+RUN_FAKE_RAILS_SEED=true
+```
+
+The OTP rail accepts `123456`. The redirect rail opens
+`/pay/fake-provider/<token>` on the checkout frontend.
+
+### Synthetic history
+
+`SYNTHETIC_DATA_ENABLED=true` enables the generator. `RUN_SYNTHETIC_SEED=true`
+runs `seed-synthetic --auto` after the base seed. The default `demo` profile
+creates three years of data. The manifest in `platform_settings` key
+`synthetic.dataset.<namespace>` makes repeated deploys skip a completed
+dataset.
+
+```dotenv
+SYNTHETIC_DATA_ENABLED=true
+SYNTHETIC_DATA_PROFILE=demo
+SYNTHETIC_DATA_ALLOW_PRODUCTION=true
+RUN_SYNTHETIC_SEED=true
+```
+
+Manual commands on the core host:
+
+```bash
+bun run seed-fake-rails
+bun run seed-synthetic --auto
+bun run seed-synthetic --verify
+bun run seed-synthetic --reset
+```

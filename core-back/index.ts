@@ -15,6 +15,7 @@ import { isApiError, toErrorEnvelope } from "./lib/error";
 import { requestLoggerMiddleware } from "./lib/requestLogger";
 import { rawBodyMiddleware } from "./lib/rawBody";
 import { client } from "./prisma/client";
+import { startFakeRailProvider, type FakeRailProviderHandle } from "./engine/fakeRails/provider";
 
 declare global {
   namespace Express {
@@ -202,6 +203,26 @@ export const start = async () => {
     workerEnabled: env.WORKER_ENABLED,
     backgroundJobsEnabled: env.WORKER_BACKGROUND_JOBS_ENABLED,
   });
+  let fakeProvider: FakeRailProviderHandle | undefined;
+  if (env.FAKE_RAILS_ENABLED) {
+    if (env.NODE_ENV === "production" && !env.FAKE_RAILS_ALLOW_PRODUCTION) {
+      throw new Error(
+        "FAKE_RAILS_ENABLED=true in production requires FAKE_RAILS_ALLOW_PRODUCTION=true",
+      );
+    }
+    if (!env.FAKE_RAILS_API_KEY) {
+      throw new Error("FAKE_RAILS_API_KEY is required when FAKE_RAILS_ENABLED=true");
+    }
+    fakeProvider = startFakeRailProvider({
+      host: env.FAKE_RAILS_BIND_HOST,
+      port: env.FAKE_RAILS_PORT,
+      apiKey: env.FAKE_RAILS_API_KEY,
+      hmacSecret: env.FAKE_RAILS_HMAC_SECRET,
+      publicBaseUrl: env.FAKE_RAILS_PUBLIC_BASE_URL,
+      scenarioProfile: env.FAKE_RAILS_SCENARIO_PROFILE,
+    });
+    console.log(`Fake rail provider listening on ${fakeProvider.url}`);
+  }
   const server = createHttpsServer();
   const workers = env.WORKER_ENABLED
     ? createProductionWorkerRuntime({
@@ -233,6 +254,7 @@ export const start = async () => {
   });
 
   const stop = async (): Promise<void> => {
+    fakeProvider?.stop();
     workers?.stop();
     await new Promise<void>((resolve) => {
       server.close(() => resolve());

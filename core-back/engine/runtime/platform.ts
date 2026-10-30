@@ -23,6 +23,7 @@ import { VaultContextCipher } from "./contextCipher";
 import { PrismaOperatorCaseSink } from "../compliance/OperatorCaseSink";
 import { PrismaReportingRuleSource, ReportingRuleEvaluator } from "../compliance/ReportingRuleEvaluator";
 import { invalidationBus } from "../../lib/invalidationBus";
+import { env } from "../../lib/env";
 import { ApiError } from "../../lib/error";
 import { ApiConsumerError } from "../apiConsumer/ApiConsumer";
 import type { DynamicAttempt } from "../flow/DynamicRailEngine";
@@ -70,6 +71,11 @@ export const createPlatformRuntime = (db: PrismaLike): PlatformRuntime => {
   const vault = new Vault();
   const crypto = new CryptoEngine();
   const repositories = new PrismaRepositories(db);
+  const fakeHosts = env.FAKE_RAILS_ENABLED
+    ? env.FAKE_RAILS_ALLOWED_HOSTS.split(",").map((entry) => entry.trim().toLowerCase()).filter(Boolean)
+    : [];
+  const privateNetworkAllowlist = env.FAKE_RAILS_ENABLED && env.FAKE_RAILS_ALLOW_PRIVATE_NETWORK ? fakeHosts : [];
+  const allowHttpHosts = env.FAKE_RAILS_ENABLED && env.FAKE_RAILS_ALLOW_HTTP ? fakeHosts : [];
 
   const consumerRegistry = new ConsumerRegistry({
     loadConfig: async (key) => loadConsumerConfig(db, vault, key),
@@ -78,6 +84,8 @@ export const createPlatformRuntime = (db: PrismaLike): PlatformRuntime => {
   const stepExecutor = new StepExecutor({
     vault,
     computeRegistry: createComputeRegistry({ db, vault, crypto }),
+    privateNetworkAllowlist,
+    allowHttpHosts,
     apiConsumerResolver: async (context) => {
       const attempt = context.attempt as
         | {
@@ -205,6 +213,11 @@ export const loadConsumerConfig = async (
   vault: Vault,
   key: ConsumerConfigKey,
 ): Promise<ApiConsumerConfig> => {
+  const fakeHosts = env.FAKE_RAILS_ENABLED
+    ? env.FAKE_RAILS_ALLOWED_HOSTS.split(",").map((entry) => entry.trim().toLowerCase()).filter(Boolean)
+    : [];
+  const privateNetworkAllowlist = env.FAKE_RAILS_ENABLED && env.FAKE_RAILS_ALLOW_PRIVATE_NETWORK ? fakeHosts : [];
+  const allowHttpHosts = env.FAKE_RAILS_ENABLED && env.FAKE_RAILS_ALLOW_HTTP ? fakeHosts : [];
   const credentialSet = await db.credentialSet.findUnique({
     where: { id: key.credentialSetId },
   });
@@ -253,6 +266,8 @@ export const loadConsumerConfig = async (
     credentialSetId: key.credentialSetId,
     allowedHosts,
     baseUrl,
+    privateNetworkAllowlist,
+    allowHttpHosts,
     timeoutMs: version?.setting?.timeoutMs ?? 15000,
     credentials,
     auth: {

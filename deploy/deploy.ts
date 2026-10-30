@@ -314,6 +314,12 @@ const deployService = (input: {
     if (config.RUN_PRISMA_SEED) {
       runner.run(host.ssh, `${bun} run db-seed`, { cwd: appDir, sudo: false });
     }
+    if (config.RUN_FAKE_RAILS_SEED) {
+      runner.run(host.ssh, `${bun} run seed-fake-rails`, { cwd: appDir, sudo: false });
+    }
+    if (config.RUN_SYNTHETIC_SEED) {
+      runner.run(host.ssh, `${bun} run seed-synthetic --auto`, { cwd: appDir, sudo: false });
+    }
   }
 
   // 6. Atomic symlink switch.

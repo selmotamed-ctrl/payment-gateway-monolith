@@ -158,6 +158,32 @@ const base = z.strictObject({
   BASE_CURRENCY: z.string().trim().length(3).default("LYD"),
   GATEWAY_TIMEZONE: z.string().trim().min(1).max(64).default("Africa/Tripoli"),
   REDIS_URL: z.string().trim().max(500).optional(),
+
+  // 7. Development/test data
+  FAKE_RAILS_ENABLED: booleanish.default(false),
+  FAKE_RAILS_BIND_HOST: z.string().trim().min(1).max(64).default("127.0.0.1"),
+  FAKE_RAILS_PORT: port.default(4300),
+  FAKE_RAILS_BASE_URL: z.string().trim().min(1).max(500).default("http://127.0.0.1:4300"),
+  FAKE_RAILS_ALLOWED_HOSTS: z.string().trim().max(500).default("127.0.0.1"),
+  FAKE_RAILS_ALLOW_PRIVATE_NETWORK: booleanish.default(false),
+  FAKE_RAILS_ALLOW_HTTP: booleanish.default(false),
+  FAKE_RAILS_API_KEY: z.string().max(256).optional(),
+  FAKE_RAILS_HMAC_SECRET: z.string().max(256).optional(),
+  FAKE_RAILS_SCENARIO_PROFILE: z.enum(["happy", "mixed", "chaos"]).default("mixed"),
+  FAKE_RAILS_PUBLIC_BASE_URL: z.string().trim().max(500).optional(),
+  FAKE_RAILS_ALLOW_PRODUCTION: booleanish.default(false),
+  RUN_FAKE_RAILS_SEED: booleanish.default(false),
+
+  SYNTHETIC_DATA_ENABLED: booleanish.default(false),
+  SYNTHETIC_DATA_PROFILE: z.enum(["demo", "staging", "load"]).default("demo"),
+  SYNTHETIC_DATA_NAMESPACE: z.string().trim().min(2).max(32).default("synthv1"),
+  SYNTHETIC_DATA_SEED: z.coerce.number().int().default(20260101),
+  SYNTHETIC_DATA_YEARS: z.coerce.number().int().min(1).max(10).default(3),
+  SYNTHETIC_DATA_END_DATE: z.string().trim().max(32).optional(),
+  SYNTHETIC_DATA_MERCHANTS: z.coerce.number().int().min(1).max(5000).optional(),
+  SYNTHETIC_DATA_ATTEMPTS: z.coerce.number().int().min(1).max(2_000_000).optional(),
+  SYNTHETIC_DATA_ALLOW_PRODUCTION: booleanish.default(false),
+  RUN_SYNTHETIC_SEED: booleanish.default(false),
 });
 
 export type DeployConfig = z.infer<typeof base>;
@@ -233,6 +259,33 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
   }
   if (config.MERCHANT_DOMAIN === config.CHECKOUT_DOMAIN) {
     problems.push("MERCHANT_DOMAIN and CHECKOUT_DOMAIN must differ (two public vhosts on the edge host)");
+  }
+
+  if (config.FAKE_RAILS_ENABLED) {
+    if (!config.FAKE_RAILS_ALLOW_PRODUCTION) {
+      problems.push("FAKE_RAILS_ENABLED=true requires FAKE_RAILS_ALLOW_PRODUCTION=true");
+    }
+    if (!config.FAKE_RAILS_API_KEY) {
+      problems.push("FAKE_RAILS_ENABLED=true requires FAKE_RAILS_API_KEY");
+    }
+    if (!config.FAKE_RAILS_PUBLIC_BASE_URL) {
+      problems.push("FAKE_RAILS_ENABLED=true requires FAKE_RAILS_PUBLIC_BASE_URL for the redirect rail");
+    }
+    if (config.FAKE_RAILS_BASE_URL.startsWith("http://") && !config.FAKE_RAILS_ALLOW_HTTP) {
+      problems.push("FAKE_RAILS_BASE_URL uses http://; set FAKE_RAILS_ALLOW_HTTP=true");
+    }
+    if (config.FAKE_RAILS_ALLOW_PRIVATE_NETWORK !== true) {
+      problems.push("FAKE_RAILS_ENABLED=true requires FAKE_RAILS_ALLOW_PRIVATE_NETWORK=true for the loopback provider");
+    }
+  }
+  if (config.RUN_FAKE_RAILS_SEED && !config.FAKE_RAILS_ENABLED) {
+    problems.push("RUN_FAKE_RAILS_SEED=true requires FAKE_RAILS_ENABLED=true");
+  }
+  if (config.SYNTHETIC_DATA_ENABLED && !config.SYNTHETIC_DATA_ALLOW_PRODUCTION) {
+    problems.push("SYNTHETIC_DATA_ENABLED=true requires SYNTHETIC_DATA_ALLOW_PRODUCTION=true");
+  }
+  if (config.RUN_SYNTHETIC_SEED && !config.SYNTHETIC_DATA_ENABLED) {
+    problems.push("RUN_SYNTHETIC_SEED=true requires SYNTHETIC_DATA_ENABLED=true");
   }
 
   if (config.CORE_PORT === config.ADMIN_BACK_PORT

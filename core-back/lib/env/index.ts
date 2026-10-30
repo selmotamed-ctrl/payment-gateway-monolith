@@ -115,6 +115,19 @@ export const envSchema = z.strictObject({
    * The strict timeout of a single delivery attempt against the aggregator.
    */
   NOTIFICATION_WEBHOOK_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(5000),
+  /** Development-only embedded fake rail provider. */
+  FAKE_RAILS_ENABLED: booleanFromEnvironment.default(false),
+  FAKE_RAILS_BIND_HOST: z.string().min(1).max(64).default("127.0.0.1"),
+  FAKE_RAILS_PORT: z.coerce.number().int().min(1).max(65535).default(4300),
+  FAKE_RAILS_BASE_URL: z.string().min(1).max(500).default("http://127.0.0.1:4300"),
+  FAKE_RAILS_ALLOWED_HOSTS: z.string().max(500).default("127.0.0.1"),
+  FAKE_RAILS_ALLOW_PRIVATE_NETWORK: booleanFromEnvironment.default(false),
+  FAKE_RAILS_ALLOW_HTTP: booleanFromEnvironment.default(false),
+  FAKE_RAILS_API_KEY: z.string().max(256).optional(),
+  FAKE_RAILS_HMAC_SECRET: z.string().max(256).optional(),
+  FAKE_RAILS_SCENARIO_PROFILE: z.enum(["happy", "mixed", "chaos"]).default("mixed"),
+  FAKE_RAILS_PUBLIC_BASE_URL: z.string().max(500).optional(),
+  FAKE_RAILS_ALLOW_PRODUCTION: booleanFromEnvironment.default(false),
 });
 
 export type CoreEnv = z.infer<typeof envSchema>;
@@ -190,6 +203,18 @@ const resolveEnvironment = (): CoreEnv => {
     WORKER_BACKGROUND_JOBS_MAX_QUEUE_AGE_MS: 300_000,
     NOTIFICATION_WEBHOOK_URL: undefined,
     NOTIFICATION_WEBHOOK_TIMEOUT_MS: 5000,
+    FAKE_RAILS_ENABLED: false,
+    FAKE_RAILS_BIND_HOST: "127.0.0.1",
+    FAKE_RAILS_PORT: 4300,
+    FAKE_RAILS_BASE_URL: "http://127.0.0.1:4300",
+    FAKE_RAILS_ALLOWED_HOSTS: "127.0.0.1",
+    FAKE_RAILS_ALLOW_PRIVATE_NETWORK: false,
+    FAKE_RAILS_ALLOW_HTTP: false,
+    FAKE_RAILS_API_KEY: undefined,
+    FAKE_RAILS_HMAC_SECRET: undefined,
+    FAKE_RAILS_SCENARIO_PROFILE: "mixed",
+    FAKE_RAILS_PUBLIC_BASE_URL: undefined,
+    FAKE_RAILS_ALLOW_PRODUCTION: false,
   };
 };
 

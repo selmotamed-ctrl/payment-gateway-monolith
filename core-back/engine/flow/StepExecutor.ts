@@ -214,6 +214,10 @@ export interface StepExecutorOptions {
   allowedHosts?: readonly string[];
   dnsLookup?: (hostname: string) => Promise<string[]>;
   dnsGuard?: (hostname: string) => Promise<void>;
+  /** Exact hostnames allowed to resolve to private/loopback addresses. */
+  privateNetworkAllowlist?: readonly string[];
+  /** Exact hostnames allowed to use plain HTTP. */
+  allowHttpHosts?: readonly string[];
   logger?: StepExecutorLogger;
   vault?: Vault;
   wait?: (definition: WaitStepDefinition, signal?: AbortSignal) => Promise<void>;
@@ -787,9 +791,18 @@ export class StepExecutor {
       headers["content-type"] = headers["content-type"] ?? "application/json";
     }
 
+    let requireHttps = true;
+    try {
+      const templateHost = new URL(step.url_template).hostname.toLowerCase().replace(/\.$/, "");
+      requireHttps = !(this.options.allowHttpHosts ?? [])
+        .map((entry) => entry.trim().toLowerCase())
+        .includes(templateHost);
+    } catch {
+      requireHttps = true;
+    }
     const url = compileUrl(step.url_template, query, {
       allowedHosts: this.options.allowedHosts,
-      requireHttps: true,
+      requireHttps,
       parameters: pathParameters,
       destination: "URL",
     });
@@ -1022,11 +1035,21 @@ export class StepExecutor {
   }
 
   private async assertUrlAllowed(url: string): Promise<void> {
+    const candidate = new URL(url);
+    const hostname = candidate.hostname.toLowerCase().replace(/\.$/, "");
+    const privateAllowed = (this.options.privateNetworkAllowlist ?? [])
+      .map((entry) => entry.trim().toLowerCase())
+      .includes(hostname);
+    const httpAllowed = (this.options.allowHttpHosts ?? [])
+      .map((entry) => entry.trim().toLowerCase())
+      .includes(hostname);
     const parsed = validateFinalUrl(url, {
       allowedHosts: this.options.allowedHosts,
-      requireHttps: true,
+      requireHttps: !httpAllowed,
     });
-    const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
+    if (privateAllowed) {
+      return;
+    }
     if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) {
       throw executorError("SSRF_PRIVATE_ADDRESS_BLOCKED", `Hostname '${hostname}' is not allowed`);
     }

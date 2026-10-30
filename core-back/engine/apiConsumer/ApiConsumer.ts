@@ -87,6 +87,8 @@ export interface ApiConsumerConfig {
   fetch?: typeof fetch;
   dnsLookup?: DnsLookupHook;
   dnsGuard?: (hostname: string) => Promise<void>;
+  privateNetworkAllowlist?: readonly string[];
+  allowHttpHosts?: readonly string[];
   timeoutMs?: number;
   maxResponseBytes?: number;
   maxJsonDepth?: number;
@@ -488,9 +490,13 @@ export class ApiConsumer {
   }
 
   private async send<T>(request: ApiConsumerRequest): Promise<ApiConsumerResponse<T>> {
+    const hostnameOfRequest = new URL(request.url).hostname.toLowerCase().replace(/\.$/, "");
+    const httpAllowed = (this.config.allowHttpHosts ?? [])
+      .map((entry) => entry.trim().toLowerCase())
+      .includes(hostnameOfRequest);
     const url = compileUrl(request.url, request.query, {
       allowedHosts: this.config.allowedHosts,
-      requireHttps: true,
+      requireHttps: !httpAllowed,
     });
     const parsed = new URL(url);
     await this.assertDnsAllowed(parsed.hostname);
@@ -513,7 +519,7 @@ export class ApiConsumer {
     const body = this.serializeBody(rawBody, headers);
     this.applyAuthentication(auth, headers, query, body);
     const finalUrl = query.toString();
-    validateFinalUrl(finalUrl, { allowedHosts: this.config.allowedHosts, requireHttps: true });
+    validateFinalUrl(finalUrl, { allowedHosts: this.config.allowedHosts, requireHttps: !httpAllowed });
 
     const controller = new AbortController();
     const removeExternalAbort = combineSignals(controller, request.signal);
@@ -878,6 +884,12 @@ export class ApiConsumer {
 
   private async assertDnsAllowed(hostname: string): Promise<void> {
     const normalized = hostname.toLowerCase().replace(/\.$/, "");
+    const privateAllowed = (this.config.privateNetworkAllowlist ?? [])
+      .map((entry) => entry.trim().toLowerCase())
+      .includes(normalized);
+    if (privateAllowed) {
+      return;
+    }
     if (normalized === "localhost" || normalized.endsWith(".localhost") || normalized.endsWith(".local")) {
       throw new ApiConsumerError(`Hostname '${hostname}' is not allowed`, { retryable: false });
     }

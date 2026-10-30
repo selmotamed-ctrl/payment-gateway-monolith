@@ -30,6 +30,7 @@ interface AttemptRow {
   ledgerEntryId?: string | null;
   merchantId?: string;
   applicationId?: string;
+  link?: { key?: string } | null;
   railId?: string;
   routeId?: string;
   gatewayVersionId?: string;
@@ -129,6 +130,7 @@ const toAttempt = (row: AttemptRow): DynamicAttempt => {
     ledgerEntryId: row.ledgerEntryId ?? undefined,
     merchantId: row.merchantId,
     applicationId: row.applicationId,
+    linkKey: row.link?.key,
     railId: row.railId,
     routeId: row.routeId,
     gatewayVersionId: row.gatewayVersionId,
@@ -165,6 +167,7 @@ export class PrismaAttemptRepository implements AttemptRepository {
       include: {
         gatewayVersion: { include: { setting: true, gateway: { select: { id: true, kind: true } } } },
         route: { select: { mismatchPolicy: true, costModel: true } },
+        link: { select: { key: true } },
       },
     }) as AttemptRow | null;
     return row ? toAttempt(row) : null;

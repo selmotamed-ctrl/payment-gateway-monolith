@@ -69,6 +69,57 @@ describe("deploy config validation", () => {
     expect(config.REDIS_URL).toBeUndefined();
   });
 
+  test("defaults the development/test data switches to off", () => {
+    const config = requireConfig(base);
+    expect(config.FAKE_RAILS_ENABLED).toBe(false);
+    expect(config.SYNTHETIC_DATA_ENABLED).toBe(false);
+    expect(config.RUN_FAKE_RAILS_SEED).toBe(false);
+    expect(config.RUN_SYNTHETIC_SEED).toBe(false);
+    expect(config.SYNTHETIC_DATA_PROFILE).toBe("demo");
+  });
+
+  test("accepts explicitly enabled fake rails and synthetic data", () => {
+    const config = requireConfig(withOverrides(`
+FAKE_RAILS_ENABLED="true"
+FAKE_RAILS_ALLOW_PRODUCTION="true"
+FAKE_RAILS_ALLOW_PRIVATE_NETWORK="true"
+FAKE_RAILS_ALLOW_HTTP="true"
+FAKE_RAILS_API_KEY="fake-key"
+FAKE_RAILS_BASE_URL="http://127.0.0.1:4300"
+FAKE_RAILS_PUBLIC_BASE_URL="https://pay.example.ly"
+RUN_FAKE_RAILS_SEED="true"
+SYNTHETIC_DATA_ENABLED="true"
+SYNTHETIC_DATA_ALLOW_PRODUCTION="true"
+RUN_SYNTHETIC_SEED="true"
+`));
+    const core = planHosts(config).hosts.find((host) => host.roles.includes("core"));
+    expect(core?.services[0]?.env.FAKE_RAILS_ENABLED).toBe("true");
+    expect(core?.services[0]?.env.FAKE_RAILS_API_KEY).toBe("fake-key");
+    expect(core?.services[0]?.env.SYNTHETIC_DATA_PROFILE).toBe("demo");
+    expect(core?.services[0]?.env.RUN_SYNTHETIC_SEED).toBe("true");
+  });
+
+  test("rejects fake rails without the explicit production/private/http opt-ins", () => {
+    const result = loadDeployConfig(withOverrides(`
+FAKE_RAILS_ENABLED="true"
+FAKE_RAILS_API_KEY="fake-key"
+`));
+    expect(result.ok).toBe(false);
+    expect(result.problems.join(" ")).toContain("FAKE_RAILS_ALLOW_PRODUCTION");
+    expect(result.problems.join(" ")).toContain("FAKE_RAILS_ALLOW_HTTP");
+    expect(result.problems.join(" ")).toContain("FAKE_RAILS_ALLOW_PRIVATE_NETWORK");
+  });
+
+  test("rejects automatic seeds when their feature is disabled", () => {
+    const result = loadDeployConfig(withOverrides(`
+RUN_FAKE_RAILS_SEED="true"
+RUN_SYNTHETIC_SEED="true"
+`));
+    expect(result.ok).toBe(false);
+    expect(result.problems.join(" ")).toContain("RUN_FAKE_RAILS_SEED");
+    expect(result.problems.join(" ")).toContain("RUN_SYNTHETIC_SEED");
+  });
+
   test("rejects a DATABASE_URL that disagrees with DB_ENGINE", () => {
     const result = loadDeployConfig(withOverrides(`DB_ENGINE="postgresql"`));
     expect(result.ok).toBe(false);

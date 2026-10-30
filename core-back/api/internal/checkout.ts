@@ -12,6 +12,7 @@ import { getPlatformRuntime } from "../../engine/runtime";
 import type { DynamicAttempt } from "../../engine/flow/DynamicRailEngine";
 import { fingerprint, principalOf } from "../middleware/authDoubleCheck";
 import { json } from "./json";
+import { env } from "../../lib/env";
 
 const PLATFORM_TTL_CEILINGS: Record<string, number> = {
   OTP_PULL: 1200,
@@ -901,6 +902,17 @@ export const buildCheckoutSupportConfig = (
   };
 };
 
+const fakeRedirectAllowlist = (): string[] => {
+  if (!env.FAKE_RAILS_ENABLED || !env.FAKE_RAILS_PUBLIC_BASE_URL) {
+    return [];
+  }
+  try {
+    return [new URL(env.FAKE_RAILS_PUBLIC_BASE_URL).hostname.toLowerCase()];
+  } catch {
+    return [];
+  }
+};
+
 route.get("/pay/:linkKey", async (request: Request, response: Response) => {
   const { linkKey } = parseOrThrow(linkParamsSchema, request.params);
   const link = await loadLink(linkKey);
@@ -1017,7 +1029,7 @@ route.get("/pay/:linkKey", async (request: Request, response: Response) => {
     expiresAt: link.expiresAt ? link.expiresAt.toISOString() : null,
     status: link.state,
     redirectUrl: null,
-    allowlistedRedirectHosts: [] as string[],
+    allowlistedRedirectHosts: fakeRedirectAllowlist(),
   });
 });
 

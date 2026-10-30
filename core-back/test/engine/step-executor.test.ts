@@ -223,6 +223,44 @@ describe("StepExecutor step types", () => {
     await expect(executor.execute(step)).rejects.toThrow();
   });
 
+  test("allows the exact fake-rail loopback host when explicitly configured", async () => {
+    let called = false;
+    const executor = new StepExecutor({
+      privateNetworkAllowlist: ["127.0.0.1"],
+      allowHttpHosts: ["127.0.0.1"],
+      allowedHosts: ["127.0.0.1"],
+      fetch: (async () => {
+        called = true;
+        return jsonResponse({ status: "SUCCESS" });
+      }) as unknown as typeof fetch,
+    });
+    const step: FlowStep = {
+      id: "http-fake",
+      type: "HTTP",
+      method: "GET",
+      url_template: "http://127.0.0.1:4300/health",
+    };
+    const result = await executor.execute(step);
+    expect(called).toBe(true);
+    expect(result.status).toBe("SUCCEEDED");
+  });
+
+  test("still blocks other private hosts when the fake allowlist is configured", async () => {
+    const executor = new StepExecutor({
+      privateNetworkAllowlist: ["127.0.0.1"],
+      allowHttpHosts: ["127.0.0.1"],
+      allowedHosts: ["127.0.0.1", "192.168.1.10"],
+      fetch: (async () => jsonResponse({})) as unknown as typeof fetch,
+    });
+    const step: FlowStep = {
+      id: "http-private",
+      type: "HTTP",
+      method: "GET",
+      url_template: "http://192.168.1.10:4300/health",
+    };
+    await expect(executor.execute(step)).rejects.toThrow();
+  });
+
   test("wipes PAN customer fields from the context after the step", async () => {
     const executor = new StepExecutor({
       dnsLookup: async () => ["93.184.216.34"],
