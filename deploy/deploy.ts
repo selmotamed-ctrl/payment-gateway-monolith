@@ -415,11 +415,16 @@ const provisionDatabase = (input: {
 const backupDatabase = (input: { runner: SshRunner; config: DeployConfig; host: HostPlan; releaseTimestamp: string }): void => {
   const { runner, config, host, releaseTimestamp } = input;
   const databaseHost = config.DB_PRIVATE_IP ?? config.DB_SSH_HOST ?? "";
-  const target = `${config.CORE_REMOTE_DIR}/shared/backups/pre-migrate-${releaseTimestamp}`;
+  const backupDir = `${config.CORE_REMOTE_DIR}/shared/backups`;
+  const target = `${backupDir}/pre-migrate-${releaseTimestamp}`;
   const command = config.DB_ENGINE === "mysql"
     ? `MYSQL_PWD=${JSON.stringify(config.DB_PASSWORD)} mysqldump -h ${databaseHost} -P ${config.DB_PORT} -u ${config.DB_USER} --single-transaction --routines --events ${config.DB_NAME} | gzip > ${target}.sql.gz`
     : `PGPASSWORD=${JSON.stringify(config.DB_PASSWORD)} pg_dump -h ${databaseHost} -p ${config.DB_PORT} -U ${config.DB_USER} -Fc ${config.DB_NAME} > ${target}.dump`;
-  runner.run(host.ssh, `mkdir -p ${config.CORE_REMOTE_DIR}/shared/backups && ${command}`, { sudo: false });
+  // The tree lives under /var/www and may not exist yet on an update deploy, so
+  // the directory is created as root and handed to the SSH user before the
+  // dump writes into it.
+  runner.run(host.ssh, `mkdir -p ${backupDir} && chown ${host.ssh.user}:${host.ssh.user} ${backupDir}`, { sudo: true });
+  runner.run(host.ssh, command, { sudo: false });
   log(`  pre-migration backup -> ${target}`);
 };
 
