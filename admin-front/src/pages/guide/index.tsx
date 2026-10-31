@@ -1,736 +1,795 @@
 import { dc } from "kt-dc";
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useLocale } from "vuetify";
+import { useRoute } from "vue-router";
 import {
     VAlert,
     VBtn,
     VCard,
     VCardText,
     VChip,
+    VDialog,
     VExpansionPanel,
     VExpansionPanelText,
     VExpansionPanelTitle,
     VExpansionPanels,
     VIcon,
-    VNavigationDrawer,
-    VSelect,
+    VList,
+    VListItem,
+    VListSubheader,
     VTextField,
-    VTextarea,
 } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
+import { GuideMarkdown } from "@/components/guide/GuideMarkdown";
+import { GlobalGuideSearchModal } from "@/components/guide/GlobalGuideSearchModal";
+import { TermTooltip } from "@/components/guide/TermTooltip";
+import { TransformPlayground } from "@/components/guide/parts/TransformPlayground";
+import { CryptoSignatureLab } from "@/components/guide/parts/CryptoSignatureLab";
+import { LedgerTAccountVisualizer } from "@/components/guide/parts/LedgerTAccountVisualizer";
+import { buildGuideSearchIndex } from "@/content/guide/search";
 import {
-    ATTEMPT_STATUS_GLOSSARY,
+    ATTEMPT_STATUS_DEFINITIONS,
+    COLLECTION_MODE_DEFINITIONS,
+    CONFIRMATION_CHANNEL_DEFINITIONS,
+    EDGE_CASE_DEFINITIONS,
     ERROR_CODE_GLOSSARY,
-    GL_ACCOUNT_TYPES,
-    GUIDE_CHAPTERS,
+    GL_ACCOUNT_DEFINITIONS,
+    GLOSSARY_TERMS,
+    GUIDE_BOOKS,
+    RUNBOOK_DEFINITIONS,
+    type GuideBook,
     type GuideChapter,
-} from "@/components/guide/content";
-import {
-    buildLedgerRows,
-    computeJournal,
-    formatLedgerAmount,
-    LEDGER_EVENTS,
-} from "@/components/guide/ledger";
-import { runTransform, TRANSFORM_OPS, type TransformResult } from "@/components/guide/transform";
+    type GuideSearchEntry,
+} from "@/content/guide";
 
-const MONO_STYLE = {
-    margin: 0,
-    whiteSpace: "pre-wrap" as const,
-    wordBreak: "break-word" as const,
-    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-    fontSize: "12px",
-    lineHeight: 1.55,
+type ViewMode = "glossary" | "book" | "simulators" | "checklists";
+
+type DailyChecklist = {
+    id: string;
+    titleEn: string;
+    titleAr: string;
+    steps: string[];
 };
 
-const CANONICAL_MODES = [
-    { title: "SORTED_KEY_VALUE_AMP", value: "SORTED_KEY_VALUE_AMP" },
-    { title: "SORTED_VALUES_HASH", value: "SORTED_VALUES_HASH" },
-    { title: "TIMESTAMP_DOT_RAW_BODY", value: "TIMESTAMP_DOT_RAW_BODY" },
-    { title: "JSON_CANONICAL", value: "JSON_CANONICAL" },
+const DAILY_CHECKLISTS: DailyChecklist[] = [
+    {
+        id: "support",
+        titleEn: "Support specialist — daily checklist",
+        titleAr: "أخصائي الدعم — قائمة يومية",
+        steps: [
+            "Never ask a payer for a card PIN or SMS OTP; support never needs an OTP to check a payment.",
+            "Read the attempt status from the portal, not from a customer screenshot.",
+            "For UNKNOWN or VERIFYING, tell the customer not to pay a second time.",
+            "Never mention AML, sanctions, PEP, or watchlists; use neutral operational wording.",
+            "Escalate any request to change a payout IBAN or commission to the governed approval flow.",
+        ],
+    },
+    {
+        id: "operations",
+        titleEn: "Operations officer — daily checklist",
+        titleAr: "ضابط عمليات — قائمة يومية",
+        steps: [
+            "Open /operator-cases and clear the oldest UNKNOWN cases first using RB-03.",
+            "Check that no terminal attempt still holds active_locked_count above zero.",
+            "Confirm routes in DRAINING are draining only, not receiving new attempts.",
+            "Review the UNKNOWN backlog age before the end of the shift.",
+            "Record the runbook id in every operator case you resolve.",
+        ],
+    },
+    {
+        id: "compliance",
+        titleEn: "Compliance analyst — daily checklist",
+        titleAr: "محلل امتثال — قائمة يومية",
+        steps: [
+            "Disposition every screening candidate with the discriminating evidence.",
+            "Never share AML-CONFIDENTIAL data with Support, Operations, merchants, or payers.",
+            "Check correlated escalation cases first; they carry a 4-hour SLA.",
+            "Verify no merchant notification template mentions AML, screening, or an STR.",
+            "Route every case resolution to the MLRO Checker; never self-approve.",
+        ],
+    },
+    {
+        id: "finance",
+        titleEn: "Finance controller — daily checklist",
+        titleAr: "مراقب مالي — قائمة يومية",
+        steps: [
+            "Confirm /finance/invariant-check reads exactly 0.0000 LYD drift.",
+            "Review clearing ageing buckets before approving large cash-outs.",
+            "Check every chargeback is capped to settled_amount minus executed refunds.",
+            "Verify MERCHANT_DIRECT commission receivable against the ceiling.",
+            "Never edit a statement amount to force a reconciliation match.",
+        ],
+    },
+    {
+        id: "gateway",
+        titleEn: "Gateway architect — daily checklist",
+        titleAr: "مهندس بوابات — قائمة يومية",
+        steps: [
+            "Never edit a LIVE gateway version; create a DRAFT version instead.",
+            "Confirm every MOVES_MONEY step has retry_policy = NEVER unless idempotency is proven.",
+            "Confirm every weak confirmation channel has must_inquire = true.",
+            "Confirm every URL is https and its host is in allowed_hosts.",
+            "Do not promote a version until all twelve go-live gates are green and a Checker approves.",
+        ],
+    },
 ];
 
-const KEY_ENCODINGS = [
-    { title: "UTF-8", value: "UTF-8" },
-    { title: "HEX", value: "HEX" },
-    { title: "BASE64", value: "BASE64" },
-];
+const BOOKMARK_KEY = "admin-guide-bookmarks";
+const CHECKLIST_KEY = "admin-guide-daily-checklists";
 
-type KvRow = {
-    id: number;
-    key: string;
-    value: string;
+const readJson = <T,>(key: string, fallback: T): T => {
+    if (typeof localStorage === "undefined") return fallback;
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return fallback;
+        return JSON.parse(raw) as T;
+    } catch {
+        return fallback;
+    }
 };
 
-const scoreChapter = (chapter: GuideChapter, terms: string[]): number => {
-    const title = `${chapter.titleEn} ${chapter.titleAr}`.toLowerCase();
-    const tags = chapter.tags.join(" ").toLowerCase();
-    const body = `${chapter.bodyEn} ${chapter.bodyAr}`.toLowerCase();
-    let score = 0;
-    for (const term of terms) {
-        const inTitle = title.includes(term);
-        const inTags = tags.includes(term);
-        const inBody = body.includes(term);
-        if (!inTitle && !inTags && !inBody) {
-            return 0;
-        }
-        if (inTitle) {
-            score += 120;
-        }
-        if (inTags) {
-            score += 50;
-        }
-        if (inBody) {
-            score += 10;
-        }
+const writeJson = (key: string, value: unknown) => {
+    if (typeof localStorage === "undefined") return;
+    try {
+        localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+        // A full or disabled localStorage must never break the guide.
     }
-    return score;
 };
 
-const sortKeysDeep = (value: unknown): unknown => {
-    if (Array.isArray(value)) {
-        return value.map((entry) => sortKeysDeep(entry));
-    }
-    if (value !== null && typeof value === "object") {
-        const source = value as Record<string, unknown>;
-        const result: Record<string, unknown> = {};
-        for (const key of Object.keys(source).sort()) {
-            result[key] = sortKeysDeep(source[key]);
-        }
-        return result;
-    }
-    return value;
-};
-
-const GuidePage = dc(() => {
-    const { t, current } = useLocale();
+const AdminGuidePage = dc(() => {
+    const { current } = useLocale();
+    const route = useRoute();
     const isArabic = computed(() => current.value === "ar");
 
-    const query = ref("");
-    const searchRef = ref<any>(null);
-    const drawerOpen = ref(false);
-    const selectedChapter = ref<GuideChapter | null>(null);
+    const view = ref<ViewMode>("book");
+    const selectedBook = ref<GuideBook>(GUIDE_BOOKS[0]!);
+    const searchOpen = ref(false);
+    const searchSelection = ref<GuideSearchEntry | null>(null);
+    const searchDetailOpen = ref(false);
+    const expandedChapters = ref<string[]>([]);
+    const bookmarks = ref<string[]>(readJson<string[]>(BOOKMARK_KEY, []));
+    const checklistState = ref<Record<string, boolean>>(readJson<Record<string, boolean>>(CHECKLIST_KEY, {}));
+    const glossaryFilter = ref("");
 
-    const tokens = computed(() =>
-        query.value
-            .trim()
-            .toLowerCase()
-            .split(/\s+/)
-            .filter((entry) => entry.length > 0),
-    );
+    const bookTitle = (book: GuideBook): string => (isArabic.value ? book.titleAr : book.titleEn);
+    const chapterTitle = (chapter: GuideChapter): string => (isArabic.value ? chapter.titleAr ?? chapter.titleEn : chapter.titleEn);
+    const chapterBody = (chapter: GuideChapter): string => (isArabic.value && chapter.bodyAr ? chapter.bodyAr : chapter.bodyEn);
 
-    const firstTerm = computed(() => tokens.value[0] ?? "");
-
-    const filteredChapters = computed(() => {
-        const terms = tokens.value;
-        if (terms.length === 0) {
-            return GUIDE_CHAPTERS;
-        }
-        return GUIDE_CHAPTERS.map((chapter) => ({ chapter, score: scoreChapter(chapter, terms) }))
-            .filter((entry) => entry.score > 0)
-            .sort((left, right) => right.score - left.score || left.chapter.book - right.chapter.book)
-            .map((entry) => entry.chapter);
-    });
-
-    const chapterTitle = (chapter: GuideChapter): string => (isArabic.value ? chapter.titleAr : chapter.titleEn);
-    const chapterBody = (chapter: GuideChapter): string => (isArabic.value ? chapter.bodyAr : chapter.bodyEn);
-
-    const openChapter = (chapter: GuideChapter) => {
-        selectedChapter.value = chapter;
-        drawerOpen.value = true;
+    const chapterRoutes = (body: string): string[] => {
+        const matches = body.match(/(?<![\w:/])\/[a-zA-Z0-9][a-zA-Z0-9\-/]*/g) ?? [];
+        return [...new Set(matches)]
+            .filter((route) => route.length > 1 && route.length < 60 && !route.startsWith("//"))
+            .slice(0, 8);
     };
 
-    const highlight = (text: string, term: string): (string | JSX.Element)[] => {
-        const needle = term.trim().toLowerCase();
-        if (!needle) {
-            return [text];
+    const openBook = (book: GuideBook, chapterId?: string) => {
+        selectedBook.value = book;
+        view.value = "book";
+        if (chapterId) {
+            expandedChapters.value = [chapterId];
+        } else {
+            expandedChapters.value = book.chapters.slice(0, 1).map((chapter) => chapter.id);
         }
-        const parts: (string | JSX.Element)[] = [];
-        const lower = text.toLowerCase();
-        let cursor = 0;
-        let index = lower.indexOf(needle);
-        let key = 0;
-        while (index >= 0) {
-            if (index > cursor) {
-                parts.push(text.slice(cursor, index));
+        if (typeof window !== "undefined") {
+            window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+    };
+
+    const toggleBookmark = (book: GuideBook) => {
+        const next = bookmarks.value.includes(book.id)
+            ? bookmarks.value.filter((id) => id !== book.id)
+            : [...bookmarks.value, book.id];
+        bookmarks.value = next;
+        writeJson(BOOKMARK_KEY, next);
+    };
+
+    const toggleChecklist = (id: string) => {
+        const next = { ...checklistState.value, [id]: !checklistState.value[id] };
+        checklistState.value = next;
+        writeJson(CHECKLIST_KEY, next);
+    };
+
+    const handleSearchSelect = (entry: GuideSearchEntry) => {
+        searchSelection.value = entry;
+        searchDetailOpen.value = true;
+        if (entry.bookNumber) {
+            const book = GUIDE_BOOKS.find((candidate) => candidate.number === entry.bookNumber);
+            if (book) {
+                openBook(book, entry.chapterId);
             }
-            parts.push(
-                <mark
-                    key={`mark-${key}`}
-                    style={{ background: "rgba(250, 204, 21, 0.45)", color: "inherit", borderRadius: "3px", padding: "0 1px" }}
-                >
-                    {text.slice(index, index + needle.length)}
-                </mark>,
-            );
-            key += 1;
-            cursor = index + needle.length;
-            index = lower.indexOf(needle, cursor);
-        }
-        if (cursor < text.length) {
-            parts.push(text.slice(cursor));
-        }
-        return parts;
-    };
-
-    const previewBody = (chapter: GuideChapter): string => {
-        const body = chapterBody(chapter);
-        const term = firstTerm.value;
-        if (!term) {
-            return body.length > 260 ? `${body.slice(0, 260)}…` : body;
-        }
-        const index = body.toLowerCase().indexOf(term);
-        if (index < 0) {
-            return body.length > 260 ? `${body.slice(0, 260)}…` : body;
-        }
-        const start = Math.max(0, index - 70);
-        const end = Math.min(body.length, start + 280);
-        return `${start > 0 ? "…" : ""}${body.slice(start, end)}${end < body.length ? "…" : ""}`;
-    };
-
-    const focusSearch = () => {
-        searchRef.value?.focus?.();
-    };
-
-    const onKeydown = (event: KeyboardEvent) => {
-        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
-            event.preventDefault();
-            focusSearch();
-            return;
-        }
-        if (event.key === "Escape") {
-            query.value = "";
-            drawerOpen.value = false;
         }
     };
 
     onMounted(() => {
-        window.addEventListener("keydown", onKeydown);
-    });
-
-    onBeforeUnmount(() => {
-        window.removeEventListener("keydown", onKeydown);
-    });
-
-    const transformInput = ref("12500.555");
-    const transformOps = ref<string[]>(["scale", "round"]);
-    const transformArgs = ref("3,3");
-    const transformResult = ref<TransformResult | null>(null);
-
-    const transformItems = TRANSFORM_OPS.map((op) => ({
-        title: `${op.value} — ${op.description}`,
-        value: op.value,
-    }));
-
-    const runTransformSandbox = () => {
-        transformResult.value = runTransform(transformInput.value, transformOps.value, transformArgs.value);
-    };
-
-    let kvSequence = 4;
-    const kvRows = ref<KvRow[]>([
-        { id: 1, key: "amount", value: "1250.500" },
-        { id: 2, key: "currency", value: "LYD" },
-        { id: 3, key: "merchantId", value: "MRC-1042" },
-    ]);
-    const canonicalMode = ref("SORTED_KEY_VALUE_AMP");
-    const timestamp = ref(String(Math.floor(Date.now() / 1000)));
-    const secret = ref("demo-secret");
-    const keyEncoding = ref("UTF-8");
-
-    const updateKv = (id: number, field: "key" | "value", value: string) => {
-        kvRows.value = kvRows.value.map((row) => (row.id === id ? { ...row, [field]: value } : row));
-    };
-
-    const addKvRow = () => {
-        kvRows.value = [...kvRows.value, { id: kvSequence, key: "", value: "" }];
-        kvSequence += 1;
-    };
-
-    const removeKvRow = (id: number) => {
-        kvRows.value = kvRows.value.filter((row) => row.id !== id);
-    };
-
-    const canonicalString = computed(() => {
-        const rows = kvRows.value.filter((row) => row.key.trim().length > 0);
-        const record = rows.reduce<Record<string, string>>((accumulator, row) => {
-            accumulator[row.key] = row.value;
-            return accumulator;
-        }, {});
-
-        switch (canonicalMode.value) {
-            case "SORTED_VALUES_HASH":
-                return rows
-                    .map((row) => row.value)
-                    .sort()
-                    .join("&");
-            case "TIMESTAMP_DOT_RAW_BODY":
-                return `${timestamp.value}.${JSON.stringify(record)}`;
-            case "JSON_CANONICAL":
-                return JSON.stringify(sortKeysDeep(record));
-            case "SORTED_KEY_VALUE_AMP":
-            default:
-                return rows
-                    .slice()
-                    .sort((left, right) => left.key.localeCompare(right.key))
-                    .map((row) => `${row.key}=${row.value}`)
-                    .join("&");
+        const entryId = typeof route.query.entry === "string" ? route.query.entry : "";
+        if (entryId) {
+            const entry = buildGuideSearchIndex().find((candidate) => candidate.id === entryId);
+            if (entry) {
+                handleSearchSelect(entry);
+            }
         }
     });
 
-    const ledgerEventId = ref("1");
-    const ledgerAmount = ref("1250.500");
-    const ledgerCommission = ref("2.5");
+    const filteredGlossary = computed(() => {
+        const needle = glossaryFilter.value.trim().toLowerCase();
+        if (!needle) return GLOSSARY_TERMS;
+        return GLOSSARY_TERMS.filter((term) =>
+            `${term.term} ${term.category} ${term.definitionEn} ${term.analogyEn} ${term.fatalErrorEn}`.toLowerCase().includes(needle),
+        );
+    });
 
-    const ledgerEventItems = computed(() =>
-        LEDGER_EVENTS.map((event) => ({
-            title: isArabic.value ? event.labelAr : event.labelEn,
-            value: event.id,
-        })),
+    const filteredEdgeCases = computed(() => {
+        const needle = glossaryFilter.value.trim().toLowerCase();
+        if (!needle) return EDGE_CASE_DEFINITIONS;
+        return EDGE_CASE_DEFINITIONS.filter((entry) =>
+            `${entry.id} ${entry.titleEn} ${entry.descriptionEn}`.toLowerCase().includes(needle),
+        );
+    });
+
+    const renderGlossary = () => (
+        <ThemedView style={{ gap: "14px" }}>
+            <VCard>
+                <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    <ThemedView style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
+                        <ThemedView style={{ gap: "4px" }}>
+                            <ThemedText type="defaultSemiBold" style={{ fontSize: "20px" }}>
+                                {isArabic.value ? "القاموس التأسيسي بلا افتراضات مسبقة" : "Zero-assumption foundational glossary"}
+                            </ThemedText>
+                            <ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>
+                                {isArabic.value
+                                    ? "كل مصطلح مشروح لشخص لا يعرف شيئاً عن البنوك أو المحاسبة أو البرمجة."
+                                    : "Every term explained for someone with no prior banking, accounting, or software background."}
+                            </ThemedText>
+                        </ThemedView>
+                        <VTextField
+                            modelValue={glossaryFilter.value}
+                            onUpdate:modelValue={(value: string) => (glossaryFilter.value = value ?? "")}
+                            label={isArabic.value ? "ابحث في القاموس" : "Filter glossary"}
+                            prependInnerIcon="mdi-magnify"
+                            clearable
+                            hideDetails
+                            style={{ maxWidth: "320px" }}
+                        />
+                    </ThemedView>
+                </VCardText>
+            </VCard>
+
+            <VExpansionPanels multiple>
+                <VExpansionPanel value="terms">
+                    <VExpansionPanelTitle>
+                        {`${filteredGlossary.value.length} ${isArabic.value ? "مصطلح أساسي" : "core terms"}`}
+                    </VExpansionPanelTitle>
+                    <VExpansionPanelText>
+                        <ThemedView style={{ gap: "14px", paddingTop: "6px" }}>
+                            {filteredGlossary.value.map((term) => (
+                                <VCard key={term.term} variant="outlined">
+                                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                            <TermTooltip term={term.term} label={term.term} tone="primary" size="small" />
+                                            <StatusChip label={term.category} tone="neutral" size="x-small" />
+                                        </ThemedView>
+                                        <ThemedText style={{ fontSize: "13px", lineHeight: 1.7 }}>
+                                            {isArabic.value && term.definitionAr ? term.definitionAr : term.definitionEn}
+                                        </ThemedText>
+                                        <ThemedText style={{ fontSize: "12px", opacity: 0.75 }}>
+                                            {`${isArabic.value ? "تشبيه:" : "Analogy:"} ${isArabic.value && term.analogyAr ? term.analogyAr : term.analogyEn}`}
+                                        </ThemedText>
+                                        <div
+                                            style={{
+                                                fontSize: "12px",
+                                                lineHeight: 1.6,
+                                                padding: "8px 10px",
+                                                borderRadius: "8px",
+                                                background: "rgba(239,68,68,0.08)",
+                                                whiteSpace: "pre-wrap",
+                                            }}
+                                        >
+                                            {`${isArabic.value ? "خطأ قاتل يجب تجنبه:" : "Fatal human error to avoid:"} ${isArabic.value && term.fatalErrorAr ? term.fatalErrorAr : term.fatalErrorEn}`}
+                                        </div>
+                                    </VCardText>
+                                </VCard>
+                            ))}
+                        </ThemedView>
+                    </VExpansionPanelText>
+                </VExpansionPanel>
+
+                <VExpansionPanel value="statuses">
+                    <VExpansionPanelTitle>{isArabic.value ? "حالات المحاولة الأربع عشرة" : "The 14 attempt statuses"}</VExpansionPanelTitle>
+                    <VExpansionPanelText>
+                        <ThemedView style={{ gap: "8px", paddingTop: "6px" }}>
+                            {ATTEMPT_STATUS_DEFINITIONS.map((status) => (
+                                <ThemedView key={status.code} style={{ gap: "4px", padding: "8px 0", borderBottom: "1px solid rgba(100,116,139,0.15)" }}>
+                                    <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                        <TermTooltip term={status.code} tone="info" size="small" />
+                                        <StatusChip label={status.category} tone="neutral" size="x-small" />
+                                        <StatusChip label={status.slotLocked} tone={status.slotLocked.startsWith("YES") ? "error" : "success"} size="x-small" />
+                                    </ThemedView>
+                                    <ThemedText style={{ fontSize: "13px", lineHeight: 1.6 }}>
+                                        {isArabic.value && status.meaningAr ? status.meaningAr : status.meaningEn}
+                                    </ThemedText>
+                                    <ThemedText style={{ fontSize: "12px", opacity: 0.72 }}>{status.operatorAction}</ThemedText>
+                                </ThemedView>
+                            ))}
+                        </ThemedView>
+                    </VExpansionPanelText>
+                </VExpansionPanel>
+
+                <VExpansionPanel value="gl">
+                    <VExpansionPanelTitle>{isArabic.value ? "أنواع حسابات الدفتر العشرة" : "The 10 GL account types"}</VExpansionPanelTitle>
+                    <VExpansionPanelText>
+                        <ThemedView style={{ gap: "8px", paddingTop: "6px" }}>
+                            {GL_ACCOUNT_DEFINITIONS.map((account) => (
+                                <ThemedView key={account.code} style={{ gap: "4px", padding: "8px 0", borderBottom: "1px solid rgba(100,116,139,0.15)" }}>
+                                    <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                        <TermTooltip term={account.code} tone="warning" size="small" />
+                                        <StatusChip label={account.normalBalance} tone="neutral" size="x-small" />
+                                    </ThemedView>
+                                    <ThemedText style={{ fontSize: "13px", lineHeight: 1.6 }}>
+                                        {isArabic.value && account.meaningAr ? account.meaningAr : account.meaningEn}
+                                    </ThemedText>
+                                </ThemedView>
+                            ))}
+                        </ThemedView>
+                    </VExpansionPanelText>
+                </VExpansionPanel>
+
+                <VExpansionPanel value="collections">
+                    <VExpansionPanelTitle>{isArabic.value ? "أنماط التحصيل التسعة" : "The 9 collection modes (Axis A)"}</VExpansionPanelTitle>
+                    <VExpansionPanelText>
+                        <ThemedView style={{ gap: "8px", paddingTop: "6px" }}>
+                            {COLLECTION_MODE_DEFINITIONS.map((mode) => (
+                                <ThemedView key={mode.code} style={{ gap: "4px", padding: "8px 0", borderBottom: "1px solid rgba(100,116,139,0.15)" }}>
+                                    <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                        <TermTooltip term={mode.code} tone="primary" size="small" />
+                                        <StatusChip label={isArabic.value ? mode.titleAr : mode.titleEn} tone="neutral" size="x-small" />
+                                    </ThemedView>
+                                    <ThemedText style={{ fontSize: "13px", lineHeight: 1.6 }}>
+                                        {isArabic.value ? mode.meaningAr : mode.meaningEn}
+                                    </ThemedText>
+                                    <ThemedText style={{ fontSize: "12px", opacity: 0.7 }}>
+                                        {isArabic.value ? mode.customerActionAr : mode.customerActionEn}
+                                    </ThemedText>
+                                </ThemedView>
+                            ))}
+                        </ThemedView>
+                    </VExpansionPanelText>
+                </VExpansionPanel>
+
+                <VExpansionPanel value="channels">
+                    <VExpansionPanelTitle>{isArabic.value ? "قنوات التأكيد السبع" : "The 7 confirmation channels (Axis B)"}</VExpansionPanelTitle>
+                    <VExpansionPanelText>
+                        <ThemedView style={{ gap: "8px", paddingTop: "6px" }}>
+                            {CONFIRMATION_CHANNEL_DEFINITIONS.map((channel) => (
+                                <ThemedView key={channel.code} style={{ gap: "4px", padding: "8px 0", borderBottom: "1px solid rgba(100,116,139,0.15)" }}>
+                                    <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                        <TermTooltip term={channel.code} tone={channel.trustLevel === "ZERO_TRUST" ? "error" : "success"} size="small" />
+                                        <StatusChip label={channel.trustLevel} tone={channel.trustLevel === "ZERO_TRUST" ? "error" : "success"} size="x-small" />
+                                        <StatusChip label={isArabic.value ? channel.titleAr : channel.titleEn} tone="neutral" size="x-small" />
+                                    </ThemedView>
+                                    <ThemedText style={{ fontSize: "13px", lineHeight: 1.6 }}>
+                                        {isArabic.value ? channel.meaningAr : channel.meaningEn}
+                                    </ThemedText>
+                                </ThemedView>
+                            ))}
+                        </ThemedView>
+                    </VExpansionPanelText>
+                </VExpansionPanel>
+
+                <VExpansionPanel value="errors">
+                    <VExpansionPanelTitle>{isArabic.value ? "أكواد الأخطاء القياسية" : "Canonical error codes"}</VExpansionPanelTitle>
+                    <VExpansionPanelText>
+                        <ThemedView style={{ gap: "8px", paddingTop: "6px" }}>
+                            {ERROR_CODE_GLOSSARY.map((entry) => (
+                                <ThemedView key={entry.code} style={{ gap: "4px", padding: "8px 0", borderBottom: "1px solid rgba(100,116,139,0.15)" }}>
+                                    <TermTooltip term={entry.code} tone="error" size="small" />
+                                    <ThemedText style={{ fontSize: "13px", lineHeight: 1.6 }}>
+                                        {isArabic.value && entry.meaningAr ? entry.meaningAr : entry.meaningEn}
+                                    </ThemedText>
+                                </ThemedView>
+                            ))}
+                        </ThemedView>
+                    </VExpansionPanelText>
+                </VExpansionPanel>
+
+                <VExpansionPanel value="runbooks">
+                    <VExpansionPanelTitle>{isArabic.value ? "الأدلة التشغيلية RB-01 إلى RB-05" : "Incident runbooks RB-01 to RB-05"}</VExpansionPanelTitle>
+                    <VExpansionPanelText>
+                        <ThemedView style={{ gap: "12px", paddingTop: "6px" }}>
+                            {RUNBOOK_DEFINITIONS.map((runbook) => (
+                                <VCard key={runbook.id} variant="outlined">
+                                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                            <TermTooltip term={runbook.id} tone="error" size="small" />
+                                            <ThemedText type="defaultSemiBold">{isArabic.value ? runbook.titleAr : runbook.titleEn}</ThemedText>
+                                        </ThemedView>
+                                        <ThemedText style={{ fontSize: "13px", opacity: 0.8 }}>{isArabic.value ? runbook.triggerAr : runbook.triggerEn}</ThemedText>
+                                        <ol style={{ margin: 0, paddingInlineStart: "22px", lineHeight: 1.7, fontSize: "13px" }}>
+                                            {(isArabic.value ? runbook.stepsAr : runbook.stepsEn).map((step, index) => (
+                                                <li key={`${runbook.id}-${index}`}>{step}</li>
+                                            ))}
+                                        </ol>
+                                    </VCardText>
+                                </VCard>
+                            ))}
+                        </ThemedView>
+                    </VExpansionPanelText>
+                </VExpansionPanel>
+
+                <VExpansionPanel value="edge-cases">
+                    <VExpansionPanelTitle>{`${isArabic.value ? "سجل الحالات الطرفية" : "Edge case registry"} (${filteredEdgeCases.value.length} / 140)`}</VExpansionPanelTitle>
+                    <VExpansionPanelText>
+                        <ThemedView style={{ gap: "6px", paddingTop: "6px" }}>
+                            {filteredEdgeCases.value.map((edgeCase) => (
+                                <ThemedView key={edgeCase.id} style={{ gap: "2px", padding: "6px 0", borderBottom: "1px solid rgba(100,116,139,0.12)" }}>
+                                    <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                        <StatusChip label={edgeCase.id} tone="neutral" size="x-small" />
+                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>
+                                            {isArabic.value ? edgeCase.titleAr : edgeCase.titleEn}
+                                        </ThemedText>
+                                    </ThemedView>
+                                    <ThemedText style={{ fontSize: "12px", opacity: 0.72 }}>
+                                        {isArabic.value ? edgeCase.descriptionAr : edgeCase.descriptionEn}
+                                    </ThemedText>
+                                </ThemedView>
+                            ))}
+                        </ThemedView>
+                    </VExpansionPanelText>
+                </VExpansionPanel>
+            </VExpansionPanels>
+        </ThemedView>
     );
 
-    const journal = computed(() => computeJournal(ledgerEventId.value, ledgerAmount.value, ledgerCommission.value));
-    const ledgerRows = computed(() => buildLedgerRows(journal.value.lines));
-    const ledgerEvent = computed(() => LEDGER_EVENTS.find((event) => event.id === ledgerEventId.value) ?? LEDGER_EVENTS[0]!);
+    const renderBook = () => (
+        <ThemedView style={{ gap: "14px" }}>
+            <VCard>
+                <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                        <StatusChip label={`Book ${selectedBook.value.number}`} tone="primary" />
+                        <ThemedText type="defaultSemiBold" style={{ fontSize: "22px", flex: "1 1 320px" }}>
+                            {bookTitle(selectedBook.value)}
+                        </ThemedText>
+                        <VBtn
+                            size="small"
+                            variant={bookmarks.value.includes(selectedBook.value.id) ? "flat" : "tonal"}
+                            color={bookmarks.value.includes(selectedBook.value.id) ? "success" : undefined}
+                            prependIcon="mdi-bookmark-outline"
+                            onClick={() => toggleBookmark(selectedBook.value)}
+                        >
+                            {bookmarks.value.includes(selectedBook.value.id)
+                                ? isArabic.value ? "محفوظ" : "Bookmarked"
+                                : isArabic.value ? "حفظ" : "Bookmark"}
+                        </VBtn>
+                    </ThemedView>
+                    <ThemedText style={{ fontSize: "14px", opacity: 0.8, lineHeight: 1.7 }}>
+                        {isArabic.value && selectedBook.value.summaryAr ? selectedBook.value.summaryAr : selectedBook.value.summaryEn}
+                    </ThemedText>
+                    <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                        {selectedBook.value.tags.slice(0, 12).map((tag) => (
+                            <VChip key={`book-tag-${tag}`} size="x-small" variant="tonal">{tag}</VChip>
+                        ))}
+                    </ThemedView>
+                </VCardText>
+            </VCard>
+
+            {selectedBook.value.humanErrorWarning ? (
+                <VAlert type="error" variant="tonal" border="start">
+                    <ThemedText type="defaultSemiBold" style={{ fontSize: "13px", marginBottom: "4px" }}>
+                        {isArabic.value ? "تحذير خطأ بشري حرج — ما لا يجب فعله أبداً" : "CRITICAL HUMAN ERROR WARNING — What never to do"}
+                    </ThemedText>
+                    <ThemedText style={{ fontSize: "13px", whiteSpace: "pre-wrap", lineHeight: 1.7 }}>
+                        {selectedBook.value.humanErrorWarning}
+                    </ThemedText>
+                </VAlert>
+            ) : null}
+
+            <VCard variant="outlined">
+                <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    <ThemedText type="defaultSemiBold">{isArabic.value ? "قائمة SOP لهذا الكتاب" : "SOP checklist for this book"}</ThemedText>
+                    <ol style={{ margin: 0, paddingInlineStart: "22px", lineHeight: 1.7, fontSize: "13px" }}>
+                        {selectedBook.value.sopChecklist.map((step, index) => (
+                            <li key={`book-sop-${index}`}>{step}</li>
+                        ))}
+                    </ol>
+                </VCardText>
+            </VCard>
+
+            <VExpansionPanels modelValue={expandedChapters.value} onUpdate:modelValue={(value: any) => (expandedChapters.value = value as string[])} multiple>
+                {selectedBook.value.chapters.map((chapter) => (
+                    <VExpansionPanel key={chapter.id} value={chapter.id}>
+                        <VExpansionPanelTitle>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                <StatusChip label={chapter.number} tone="info" size="x-small" />
+                                <span>{chapterTitle(chapter)}</span>
+                            </ThemedView>
+                        </VExpansionPanelTitle>
+                        <VExpansionPanelText>
+                            <ThemedView style={{ gap: "10px", paddingTop: "4px" }}>
+                                {chapterRoutes(chapterBody(chapter)).length > 0 ? (
+                                    <ThemedView style={{ gap: "4px" }}>
+                                        <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>
+                                            {isArabic.value ? "أين تنقر في البوابة" : "Where to click in the portal"}
+                                        </ThemedText>
+                                        <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                                            {chapterRoutes(chapterBody(chapter)).map((route) => (
+                                                <VChip key={`${chapter.id}-route-${route}`} size="x-small" variant="tonal" prependIcon="mdi-map-marker-path">
+                                                    {route}
+                                                </VChip>
+                                            ))}
+                                        </ThemedView>
+                                    </ThemedView>
+                                ) : null}
+                                <GuideMarkdown source={chapterBody(chapter)} />
+                                {selectedBook.value.number === 5 && chapter.number === "5.2" ? (
+                                    <ThemedView style={{ gap: "8px" }}>
+                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "14px" }}>
+                                            {isArabic.value ? "جرّب التحويلات الآن" : "Try the transform pipeline now"}
+                                        </ThemedText>
+                                        <TransformPlayground />
+                                    </ThemedView>
+                                ) : null}
+                                {selectedBook.value.number === 5 && chapter.number === "5.3" ? (
+                                    <ThemedView style={{ gap: "8px" }}>
+                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "14px" }}>
+                                            {isArabic.value ? "جرّب التوقيع التشفيري الآن" : "Try the cryptographic signing now"}
+                                        </ThemedText>
+                                        <CryptoSignatureLab />
+                                    </ThemedView>
+                                ) : null}
+                                {selectedBook.value.number === 8 && chapter.number === "8.2" ? (
+                                    <ThemedView style={{ gap: "8px" }}>
+                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "14px" }}>
+                                            {isArabic.value ? "جرّب قيود الدفتر الآن" : "Try the double-entry journal now"}
+                                        </ThemedText>
+                                        <LedgerTAccountVisualizer />
+                                    </ThemedView>
+                                ) : null}
+                                <VBtn size="small" variant="text" prependIcon="mdi-flask-outline" onClick={() => (view.value = "simulators")}>
+                                    {isArabic.value ? "جرّب هذا في المحاكيات التفاعلية" : "Try this in the interactive simulators"}
+                                </VBtn>
+                            </ThemedView>
+                        </VExpansionPanelText>
+                    </VExpansionPanel>
+                ))}
+            </VExpansionPanels>
+
+            <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
+                <VBtn
+                    variant="tonal"
+                    prependIcon="mdi-arrow-left"
+                    disabled={selectedBook.value.number <= 1}
+                    onClick={() => {
+                        const previous = GUIDE_BOOKS.find((book) => book.number === selectedBook.value.number - 1);
+                        if (previous) openBook(previous);
+                    }}
+                >
+                    {isArabic.value ? "الكتاب السابق" : "Previous book"}
+                </VBtn>
+                <VBtn
+                    variant="tonal"
+                    appendIcon="mdi-arrow-right"
+                    disabled={selectedBook.value.number >= GUIDE_BOOKS.length}
+                    onClick={() => {
+                        const next = GUIDE_BOOKS.find((book) => book.number === selectedBook.value.number + 1);
+                        if (next) openBook(next);
+                    }}
+                >
+                    {isArabic.value ? "الكتاب التالي" : "Next book"}
+                </VBtn>
+            </ThemedView>
+        </ThemedView>
+    );
+
+    const renderSimulators = () => (
+        <ThemedView style={{ gap: "14px" }}>
+            <VCard>
+                <VCardText style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                    <ThemedText type="defaultSemiBold" style={{ fontSize: "20px" }}>
+                        {isArabic.value ? "المحاكيات التفاعلية الثلاثة" : "The three interactive simulators"}
+                    </ThemedText>
+                    <ThemedText style={{ fontSize: "13px", opacity: 0.72 }}>
+                        {isArabic.value
+                            ? "جرّب التحويلات والتوقيع التشفيري والقيود المحاسبية بأمان قبل لمس الإنتاج."
+                            : "Exercise transforms, cryptographic signing, and double-entry journals safely before touching production."}
+                    </ThemedText>
+                </VCardText>
+            </VCard>
+            <VCard>
+                <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    <ThemedText type="defaultSemiBold">{isArabic.value ? "مختبر TransformPipe" : "TransformPipe Playground"}</ThemedText>
+                    <TransformPlayground />
+                </VCardText>
+            </VCard>
+            <VCard>
+                <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    <ThemedText type="defaultSemiBold">{isArabic.value ? "مختبر التوقيع التشفيري" : "Crypto Signature Lab"}</ThemedText>
+                    <CryptoSignatureLab />
+                </VCardText>
+            </VCard>
+            <VCard>
+                <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    <ThemedText type="defaultSemiBold">{isArabic.value ? "مصور حسابات الدفتر" : "Ledger T-Account Visualizer"}</ThemedText>
+                    <LedgerTAccountVisualizer />
+                </VCardText>
+            </VCard>
+        </ThemedView>
+    );
+
+    const renderChecklists = () => (
+        <ThemedView style={{ gap: "14px" }}>
+            <VCard>
+                <VCardText style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                    <ThemedText type="defaultSemiBold" style={{ fontSize: "20px" }}>
+                        {isArabic.value ? "قوائم التحقق اليومية حسب الدور" : "Role-based daily checklists"}
+                    </ThemedText>
+                    <ThemedText style={{ fontSize: "13px", opacity: 0.72 }}>
+                        {isArabic.value
+                            ? "التحقق من هذه البنود كل صباح يحمي المنصة والعملاء من الأخطاء البشرية."
+                            : "Checking these items every morning protects the platform and customers from human error."}
+                    </ThemedText>
+                </VCardText>
+            </VCard>
+            {DAILY_CHECKLISTS.map((checklist) => (
+                <VCard key={checklist.id} variant="outlined">
+                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                            <StatusChip label={checklist.id.toUpperCase()} tone="primary" size="x-small" />
+                            <ThemedText type="defaultSemiBold">{isArabic.value ? checklist.titleAr : checklist.titleEn}</ThemedText>
+                        </ThemedView>
+                        {checklist.steps.map((step, index) => (
+                            <ThemedView
+                                key={`${checklist.id}-${index}`}
+                                onClick={() => toggleChecklist(`${checklist.id}-${index}`)}
+                                style={{
+                                    flexDirection: "row",
+                                    alignItems: "flex-start",
+                                    gap: "8px",
+                                    padding: "8px 10px",
+                                    borderRadius: "8px",
+                                    cursor: "pointer",
+                                    background: checklistState.value[`${checklist.id}-${index}`] ? "rgba(5,150,105,0.10)" : "rgba(100,116,139,0.06)",
+                                }}
+                            >
+                                <VIcon
+                                    icon={checklistState.value[`${checklist.id}-${index}`] ? "mdi-checkbox-marked-circle" : "mdi-checkbox-blank-circle-outline"}
+                                    color={checklistState.value[`${checklist.id}-${index}`] ? "success" : undefined}
+                                    size="18px"
+                                />
+                                <ThemedText style={{ fontSize: "13px", lineHeight: 1.6 }}>{step}</ThemedText>
+                            </ThemedView>
+                        ))}
+                    </VCardText>
+                </VCard>
+            ))}
+        </ThemedView>
+    );
 
     return () => (
         <ScreenContainer>
-            <ThemedView style={{ gap: "18px" }}>
+            <ThemedView style={{ gap: "16px" }}>
                 <PageHeader
-                    title={t("Interactive Guide")}
+                    title={isArabic.value ? "دليل النظام التفاعلي" : "Interactive System Guide"}
                     end={() => (
-                        <VChip color="primary" variant="tonal" size="small">
-                            {t("Knowledge Base")}
-                        </VChip>
+                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                            <VBtn size="small" variant="tonal" prependIcon="mdi-magnify" onClick={() => (searchOpen.value = true)}>
+                                {isArabic.value ? "بحث فوري" : "Instant search"}
+                            </VBtn>
+                            <StatusChip label="Ctrl / Cmd + K" tone="neutral" size="x-small" />
+                        </ThemedView>
                     )}
                 />
 
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <VTextField
-                            ref={searchRef}
-                            modelValue={query.value}
-                            onUpdate:modelValue={(value: string) => (query.value = value ?? "")}
-                            label={t("Search the guide by title, tag, or body")}
-                            prependInnerIcon="mdi-magnify"
-                            clearable
-                            autofocus
-                            onKeydown={(event: KeyboardEvent) => {
-                                if (event.key === "Escape") {
-                                    query.value = "";
-                                }
-                            }}
-                        />
-                        <ThemedView
-                            style={{
-                                flexDirection: "row",
-                                flexWrap: "wrap",
-                                justifyContent: "space-between",
-                                alignItems: "center",
-                                gap: "10px",
-                            }}
-                        >
-                            <ThemedText style={{ fontSize: "13px", opacity: 0.75 }}>
-                                {`${filteredChapters.value.length} / ${GUIDE_CHAPTERS.length} ${t("chapters")}`}
+                <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "16px", alignItems: "flex-start" }}>
+                    <VCard style={{ flex: "1 1 300px", maxWidth: "380px" }}>
+                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>
+                                {isArabic.value ? "شجرة الدليل" : "Guide tree"}
                             </ThemedText>
-                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
-                                <StatusChip label="Ctrl / Cmd + K" tone="neutral" size="x-small" />
-                                <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{t("focuses search")}</ThemedText>
-                                <StatusChip label="Esc" tone="neutral" size="x-small" />
-                                <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{t("clears search")}</ThemedText>
-                            </ThemedView>
-                        </ThemedView>
-                    </VCardText>
-                </VCard>
-
-                {filteredChapters.value.length === 0 ? (
-                    <StateView
-                        empty
-                        emptyTitle={t("No chapters match your search")}
-                        emptyDescription={t("Try a tag such as ledger, UNKNOWN, mTLS, or chargeback.")}
-                    />
-                ) : (
-                    <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "14px" }}>
-                        {filteredChapters.value.map((chapter) => (
-                            <VCard key={chapter.id} style={{ flex: "1 1 320px", maxWidth: "100%" }}>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px", height: "100%" }}>
-                                    <ThemedView style={{ flexDirection: "row", alignItems: "flex-start", gap: "10px" }}>
-                                        <StatusChip label={`B${chapter.book}`} tone="info" size="x-small" />
-                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "15px", flex: 1 }}>
-                                            {highlight(chapterTitle(chapter), firstTerm.value)}
-                                        </ThemedText>
-                                    </ThemedView>
-                                    <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "6px" }}>
-                                        {chapter.tags.slice(0, 6).map((tag) => (
-                                            <VChip key={`${chapter.id}-${tag}`} size="x-small" variant="tonal">
-                                                {tag}
-                                            </VChip>
-                                        ))}
-                                    </ThemedView>
-                                    <ThemedText style={{ fontSize: "13px", opacity: 0.8, whiteSpace: "pre-line" }}>
-                                        {highlight(previewBody(chapter), firstTerm.value)}
+                            <VList density="compact" nav>
+                                <VListSubheader>{isArabic.value ? "القاموس والمحاكيات" : "Glossary & simulators"}</VListSubheader>
+                                <VListItem
+                                    active={view.value === "glossary"}
+                                    prependIcon="mdi-book-alphabet"
+                                    title={isArabic.value ? "القاموس التأسيسي" : "Zero-assumption glossary"}
+                                    onClick={() => (view.value = "glossary")}
+                                />
+                                <VListItem
+                                    active={view.value === "simulators"}
+                                    prependIcon="mdi-flask-outline"
+                                    title={isArabic.value ? "المحاكيات التفاعلية" : "Interactive simulators"}
+                                    onClick={() => (view.value = "simulators")}
+                                />
+                                <VListItem
+                                    active={view.value === "checklists"}
+                                    prependIcon="mdi-checkbox-marked-circle-outline"
+                                    title={isArabic.value ? "قوائم التحقق اليومية" : "Role-based daily checklists"}
+                                    onClick={() => (view.value = "checklists")}
+                                />
+                                <VListSubheader>{isArabic.value ? "الكتب الاثنا عشر" : "The 12 books"}</VListSubheader>
+                                {GUIDE_BOOKS.map((book) => (
+                                    <div key={book.id}>
+                                        <VListItem
+                                            active={view.value === "book" && selectedBook.value.id === book.id}
+                                            prependIcon={bookmarks.value.includes(book.id) ? "mdi-bookmark" : "mdi-book-open-variant"}
+                                            title={`${book.number}. ${bookTitle(book)}`}
+                                            onClick={() => openBook(book)}
+                                        />
+                                        {view.value === "book" && selectedBook.value.id === book.id ? (
+                                            <ThemedView style={{ paddingInlineStart: "28px", paddingBottom: "4px", gap: "2px" }}>
+                                                {book.chapters.map((chapter) => (
+                                                    <VListItem
+                                                        key={chapter.id}
+                                                        active={expandedChapters.value.includes(chapter.id)}
+                                                        title={`${chapter.number} ${chapterTitle(chapter)}`}
+                                                        density="compact"
+                                                        style={{ minHeight: "30px" }}
+                                                        onClick={() => openBook(book, chapter.id)}
+                                                    />
+                                                ))}
+                                            </ThemedView>
+                                        ) : null}
+                                    </div>
+                                ))}
+                            </VList>
+                            {bookmarks.value.length > 0 ? (
+                                <ThemedView style={{ gap: "4px" }}>
+                                    <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
+                                        {isArabic.value ? "الكتب المحفوظة" : "Bookmarked books"}
                                     </ThemedText>
-                                    <ThemedView style={{ flex: 1 }} />
-                                    <VBtn size="small" variant="text" appendIcon="mdi-arrow-right" onClick={() => openChapter(chapter)}>
-                                        {t("Read chapter")}
-                                    </VBtn>
-                                </VCardText>
-                            </VCard>
-                        ))}
+                                    <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                                        {bookmarks.value.map((id) => {
+                                            const book = GUIDE_BOOKS.find((candidate) => candidate.id === id);
+                                            return book ? (
+                                                <VChip key={`bookmark-${id}`} size="x-small" variant="tonal" onClick={() => openBook(book)} style={{ cursor: "pointer" }}>
+                                                    {`Book ${book.number}`}
+                                                </VChip>
+                                            ) : null;
+                                        })}
+                                    </ThemedView>
+                                </ThemedView>
+                            ) : null}
+                        </VCardText>
+                    </VCard>
+
+                    <ThemedView style={{ flex: "3 1 620px", minWidth: "320px" }}>
+                        {view.value === "glossary" ? renderGlossary() : null}
+                        {view.value === "book" ? renderBook() : null}
+                        {view.value === "simulators" ? renderSimulators() : null}
+                        {view.value === "checklists" ? renderChecklists() : null}
                     </ThemedView>
-                )}
-
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
-                            {t("Glossary")}
-                        </ThemedText>
-                        <VExpansionPanels multiple>
-                            <VExpansionPanel value="errors">
-                                <VExpansionPanelTitle>{t("Canonical error codes")}</VExpansionPanelTitle>
-                                <VExpansionPanelText>
-                                    <ThemedView style={{ gap: "12px", paddingTop: "4px" }}>
-                                        {ERROR_CODE_GLOSSARY.map((entry) => (
-                                            <ThemedView key={entry.code} style={{ gap: "4px" }}>
-                                                <StatusChip label={entry.code} tone="error" size="x-small" />
-                                                <ThemedText style={{ fontSize: "13px", opacity: 0.85 }}>
-                                                    {isArabic.value ? entry.meaningAr : entry.meaningEn}
-                                                </ThemedText>
-                                            </ThemedView>
-                                        ))}
-                                    </ThemedView>
-                                </VExpansionPanelText>
-                            </VExpansionPanel>
-                            <VExpansionPanel value="gl-accounts">
-                                <VExpansionPanelTitle>{t("GL account types")}</VExpansionPanelTitle>
-                                <VExpansionPanelText>
-                                    <ThemedView style={{ gap: "12px", paddingTop: "4px" }}>
-                                        {GL_ACCOUNT_TYPES.map((entry) => (
-                                            <ThemedView key={entry.code} style={{ gap: "4px" }}>
-                                                <StatusChip label={entry.code} tone="primary" size="x-small" />
-                                                <ThemedText style={{ fontSize: "13px", opacity: 0.85 }}>
-                                                    {isArabic.value ? entry.meaningAr : entry.meaningEn}
-                                                </ThemedText>
-                                            </ThemedView>
-                                        ))}
-                                    </ThemedView>
-                                </VExpansionPanelText>
-                            </VExpansionPanel>
-                            <VExpansionPanel value="statuses">
-                                <VExpansionPanelTitle>{t("The 13 attempt statuses")}</VExpansionPanelTitle>
-                                <VExpansionPanelText>
-                                    <ThemedView style={{ gap: "12px", paddingTop: "4px" }}>
-                                        {ATTEMPT_STATUS_GLOSSARY.map((entry) => (
-                                            <ThemedView key={entry.code} style={{ gap: "4px" }}>
-                                                <StatusChip label={entry.code} tone="info" size="x-small" />
-                                                <ThemedText style={{ fontSize: "13px", opacity: 0.85 }}>
-                                                    {isArabic.value ? entry.meaningAr : entry.meaningEn}
-                                                </ThemedText>
-                                            </ThemedView>
-                                        ))}
-                                    </ThemedView>
-                                </VExpansionPanelText>
-                            </VExpansionPanel>
-                        </VExpansionPanels>
-                    </VCardText>
-                </VCard>
-
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
-                            {t("Embedded simulators")}
-                        </ThemedText>
-                        <VExpansionPanels multiple>
-                            <VExpansionPanel value="transform">
-                                <VExpansionPanelTitle>{t("Transform Sandbox")}</VExpansionPanelTitle>
-                                <VExpansionPanelText>
-                                    <ThemedView style={{ gap: "12px", paddingTop: "6px" }}>
-                                        <VTextarea
-                                            modelValue={transformInput.value}
-                                            onUpdate:modelValue={(value: string) => (transformInput.value = value ?? "")}
-                                            label={t("Input (JSON, number, or text)")}
-                                            rows={3}
-                                        />
-                                        <VSelect
-                                            multiple
-                                            chips
-                                            closableChips
-                                            modelValue={transformOps.value}
-                                            onUpdate:modelValue={(value: string[] | null) => (transformOps.value = value ?? [])}
-                                            items={transformItems}
-                                            label={t("Operations (applied in order)")}
-                                        />
-                                        <VTextField
-                                            modelValue={transformArgs.value}
-                                            onUpdate:modelValue={(value: string) => (transformArgs.value = value ?? "")}
-                                            label={t("Arguments (comma separated)")}
-                                            hint={t("Example: 3,3 for scale exponent 3 and round 3 places")}
-                                            persistentHint
-                                        />
-                                        <ThemedView style={{ flexDirection: "row", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-                                            <VBtn prependIcon="mdi-play" onClick={runTransformSandbox}>
-                                                {t("Run")}
-                                            </VBtn>
-                                            <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
-                                                {t("No eval: each operation is a typed local function.")}
-                                            </ThemedText>
-                                        </ThemedView>
-                                        {transformResult.value ? (
-                                            <ThemedView style={{ gap: "10px" }}>
-                                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                                    <StatusChip
-                                                        label={transformResult.value.failed ? t("Stopped on error") : t("Completed")}
-                                                        tone={transformResult.value.failed ? "error" : "success"}
-                                                    />
-                                                    <ThemedText style={{ fontSize: "12px", opacity: 0.7 }}>
-                                                        {`${transformResult.value.steps.length} ${t("steps")}`}
-                                                    </ThemedText>
-                                                </ThemedView>
-                                                <ThemedView style={{ gap: "8px" }}>
-                                                    {transformResult.value.steps.map((step, index) => (
-                                                        <VCard key={`${step.op}-${index}`} variant="outlined">
-                                                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                                                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                                                    <StatusChip label={`${index + 1}. ${step.op}`} tone={step.ok ? "primary" : "error"} size="x-small" />
-                                                                    {step.args.length > 0 && (
-                                                                        <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>
-                                                                            {`args: ${step.args.join(", ")}`}
-                                                                        </ThemedText>
-                                                                    )}
-                                                                </ThemedView>
-                                                                <pre style={{ ...MONO_STYLE, padding: "8px", borderRadius: "8px", background: "rgba(100,116,139,0.10)" }}>
-                                                                    {step.output}
-                                                                </pre>
-                                                                {step.note && (
-                                                                    <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>{step.note}</ThemedText>
-                                                                )}
-                                                            </VCardText>
-                                                        </VCard>
-                                                    ))}
-                                                </ThemedView>
-                                                <ThemedView style={{ gap: "4px" }}>
-                                                    <ThemedText type="defaultSemiBold">{t("Final value")}</ThemedText>
-                                                    <pre style={{ ...MONO_STYLE, padding: "10px", borderRadius: "8px", background: "rgba(15,107,255,0.08)" }}>
-                                                        {transformResult.value.final}
-                                                    </pre>
-                                                </ThemedView>
-                                            </ThemedView>
-                                        ) : (
-                                            <ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>
-                                                {t("Choose operations and run to see every intermediate value.")}
-                                            </ThemedText>
-                                        )}
-                                    </ThemedView>
-                                </VExpansionPanelText>
-                            </VExpansionPanel>
-
-                            <VExpansionPanel value="crypto">
-                                <VExpansionPanelTitle>{t("Crypto Signature Lab")}</VExpansionPanelTitle>
-                                <VExpansionPanelText>
-                                    <ThemedView style={{ gap: "12px", paddingTop: "6px" }}>
-                                        <VSelect
-                                            modelValue={canonicalMode.value}
-                                            onUpdate:modelValue={(value: string | null) => (canonicalMode.value = value ?? "SORTED_KEY_VALUE_AMP")}
-                                            items={CANONICAL_MODES}
-                                            label={t("Canonicalization mode")}
-                                        />
-                                        <ThemedView style={{ gap: "8px" }}>
-                                            {kvRows.value.map((row) => (
-                                                <ThemedView key={row.id} style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-                                                    <VTextField
-                                                        modelValue={row.key}
-                                                        onUpdate:modelValue={(value: string) => updateKv(row.id, "key", value ?? "")}
-                                                        label={t("Key")}
-                                                        style={{ flex: "1 1 160px" }}
-                                                    />
-                                                    <VTextField
-                                                        modelValue={row.value}
-                                                        onUpdate:modelValue={(value: string) => updateKv(row.id, "value", value ?? "")}
-                                                        label={t("Value")}
-                                                        style={{ flex: "2 1 220px" }}
-                                                    />
-                                                    <VBtn icon="mdi-delete-outline" variant="text" color="error" onClick={() => removeKvRow(row.id)} />
-                                                </ThemedView>
-                                            ))}
-                                            <VBtn size="small" variant="tonal" prependIcon="mdi-plus" onClick={addKvRow} style={{ alignSelf: "flex-start" }}>
-                                                {t("Add row")}
-                                            </VBtn>
-                                        </ThemedView>
-                                        <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
-                                            <VTextField
-                                                modelValue={timestamp.value}
-                                                onUpdate:modelValue={(value: string) => (timestamp.value = value ?? "")}
-                                                label={t("Timestamp")}
-                                                style={{ flex: "1 1 180px" }}
-                                            />
-                                            <VTextField
-                                                modelValue={secret.value}
-                                                onUpdate:modelValue={(value: string) => (secret.value = value ?? "")}
-                                                label={t("Secret (demo only)")}
-                                                type="password"
-                                                style={{ flex: "1 1 220px" }}
-                                            />
-                                            <VSelect
-                                                modelValue={keyEncoding.value}
-                                                onUpdate:modelValue={(value: string | null) => (keyEncoding.value = value ?? "UTF-8")}
-                                                items={KEY_ENCODINGS}
-                                                label={t("Key encoding")}
-                                                style={{ flex: "1 1 160px" }}
-                                            />
-                                        </ThemedView>
-                                        <ThemedView style={{ gap: "4px" }}>
-                                            <ThemedText type="defaultSemiBold">{t("Exact canonical string")}</ThemedText>
-                                            <pre style={{ ...MONO_STYLE, padding: "10px", borderRadius: "8px", background: "rgba(100,116,139,0.10)" }}>
-                                                {canonicalString.value || t("No key/value rows yet")}
-                                            </pre>
-                                        </ThemedView>
-                                        <VAlert type="info" variant="tonal" density="compact">
-                                            <ThemedText style={{ fontSize: "12px" }}>
-                                                {`${t("Hash placeholder")}: ${keyEncoding.value} · ${t("computed by the server during a real request")}`}
-                                            </ThemedText>
-                                            <pre style={{ ...MONO_STYLE, marginTop: "6px", opacity: 0.7 }}>
-                                                {"<hash computed by the server during a real request>"}
-                                            </pre>
-                                        </VAlert>
-                                    </ThemedView>
-                                </VExpansionPanelText>
-                            </VExpansionPanel>
-
-                            <VExpansionPanel value="ledger">
-                                <VExpansionPanelTitle>{t("Ledger T-Account Explorer")}</VExpansionPanelTitle>
-                                <VExpansionPanelText>
-                                    <ThemedView style={{ gap: "12px", paddingTop: "6px" }}>
-                                        <VSelect
-                                            modelValue={ledgerEventId.value}
-                                            onUpdate:modelValue={(value: string | null) => (ledgerEventId.value = value ?? "1")}
-                                            items={ledgerEventItems.value}
-                                            label={t("Business event")}
-                                        />
-                                        <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
-                                            <VTextField
-                                                modelValue={ledgerAmount.value}
-                                                onUpdate:modelValue={(value: string) => (ledgerAmount.value = value ?? "")}
-                                                label={t("Amount (LYD)")}
-                                                type="number"
-                                                style={{ flex: "1 1 180px" }}
-                                            />
-                                            <VTextField
-                                                modelValue={ledgerCommission.value}
-                                                onUpdate:modelValue={(value: string) => (ledgerCommission.value = value ?? "")}
-                                                label={t("Commission %")}
-                                                type="number"
-                                                style={{ flex: "1 1 160px" }}
-                                            />
-                                        </ThemedView>
-                                        <ThemedText style={{ fontSize: "13px", opacity: 0.75 }}>
-                                            {isArabic.value ? ledgerEvent.value.noteAr : ledgerEvent.value.noteEn}
-                                        </ThemedText>
-                                        <ThemedView style={{ flexDirection: "row", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-                                            <StatusChip
-                                                label={journal.value.balanced ? "balanced ✓" : "DR ≠ CR ✗"}
-                                                tone={journal.value.balanced ? "success" : "error"}
-                                            />
-                                            <ThemedText style={{ fontSize: "12px", opacity: 0.7 }}>
-                                                {`DR ${formatLedgerAmount(journal.value.debitTotal)} · CR ${formatLedgerAmount(journal.value.creditTotal)}`}
-                                            </ThemedText>
-                                        </ThemedView>
-                                        <div style={{ overflowX: "auto" }}>
-                                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
-                                                <thead>
-                                                    <tr style={{ textAlign: "start", opacity: 0.7 }}>
-                                                        <th style={{ textAlign: "start", padding: "8px 6px" }}>{t("Account")}</th>
-                                                        <th style={{ textAlign: "start", padding: "8px 6px" }}>{t("Type")}</th>
-                                                        <th style={{ textAlign: "start", padding: "8px 6px" }}>{t("Side")}</th>
-                                                        <th style={{ textAlign: "end", padding: "8px 6px" }}>{t("Debit")}</th>
-                                                        <th style={{ textAlign: "end", padding: "8px 6px" }}>{t("Credit")}</th>
-                                                        <th style={{ textAlign: "end", padding: "8px 6px" }}>{t("Running balance")}</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {ledgerRows.value.map((row, index) => (
-                                                        <tr key={`${row.account}-${index}`} style={{ borderTop: "1px solid rgba(100,116,139,0.18)" }}>
-                                                            <td style={{ padding: "8px 6px", fontWeight: 600 }}>{row.account}</td>
-                                                            <td style={{ padding: "8px 6px" }}>{row.accountType}</td>
-                                                            <td style={{ padding: "8px 6px" }}>
-                                                                <StatusChip
-                                                                    label={row.side}
-                                                                    tone={row.side === "DEBIT" ? "primary" : "warning"}
-                                                                    size="x-small"
-                                                                />
-                                                            </td>
-                                                            <td style={{ padding: "8px 6px", textAlign: "end" }}>
-                                                                {row.side === "DEBIT" ? formatLedgerAmount(row.amount) : "-"}
-                                                            </td>
-                                                            <td style={{ padding: "8px 6px", textAlign: "end" }}>
-                                                                {row.side === "CREDIT" ? formatLedgerAmount(row.amount) : "-"}
-                                                            </td>
-                                                            <td style={{ padding: "8px 6px", textAlign: "end", fontWeight: 600 }}>
-                                                                {formatLedgerAmount(row.runningBalance)}
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                        <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>
-                                            {t("Running balance uses the normal side of each account type; a partial journal can end non-zero.")}
-                                        </ThemedText>
-                                    </ThemedView>
-                                </VExpansionPanelText>
-                            </VExpansionPanel>
-                        </VExpansionPanels>
-                    </VCardText>
-                </VCard>
+                </ThemedView>
             </ThemedView>
 
-            <VNavigationDrawer
-                modelValue={drawerOpen.value}
-                onUpdate:modelValue={(value: boolean) => (drawerOpen.value = value)}
-                location="end"
-                temporary
-                width={560}
-            >
-                <ThemedView style={{ padding: "20px", gap: "14px", height: "100%", overflowY: "auto" }}>
-                    {selectedChapter.value ? (
-                        <>
-                            <ThemedView style={{ flexDirection: "row", alignItems: "start", gap: "10px" }}>
-                                <VBtn icon="mdi-close" variant="text" onClick={() => (drawerOpen.value = false)} />
-                                <ThemedView style={{ flex: 1, gap: "6px" }}>
-                                    <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                        <StatusChip label={`Book ${selectedChapter.value.book}`} tone="info" size="x-small" />
-                                        <StatusChip label={selectedChapter.value.id} tone="neutral" size="x-small" />
-                                    </ThemedView>
-                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "19px", lineHeight: 1.25 }}>
-                                        {chapterTitle(selectedChapter.value)}
-                                    </ThemedText>
-                                </ThemedView>
-                            </ThemedView>
-                            <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "6px" }}>
-                                {selectedChapter.value.tags.map((tag) => (
-                                    <VChip key={`drawer-${tag}`} size="x-small" variant="tonal">
-                                        {tag}
-                                    </VChip>
-                                ))}
-                            </ThemedView>
-                            <ThemedText style={{ fontSize: "14px", lineHeight: 1.75, whiteSpace: "pre-line" }}>
-                                {chapterBody(selectedChapter.value)}
-                            </ThemedText>
-                            <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center" }}>
-                                <VIcon icon="mdi-lightbulb-on-outline" size="18" color="warning" />
-                                <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
-                                    {t("Search state is preserved while this drawer is open.")}
+            <GlobalGuideSearchModal
+                modelValue={searchOpen.value}
+                onUpdate:modelValue={(value: boolean) => (searchOpen.value = value)}
+                onSelect={handleSearchSelect}
+            />
+
+            <VDialog modelValue={searchDetailOpen.value} onUpdate:modelValue={(value: boolean) => (searchDetailOpen.value = value)} maxWidth="820px" scrollable>
+                <VCard>
+                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <ThemedView style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                <StatusChip label={searchSelection.value?.kind ?? "guide"} tone="primary" size="x-small" />
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
+                                    {searchSelection.value ? (isArabic.value ? searchSelection.value.titleAr : searchSelection.value.titleEn) : ""}
                                 </ThemedText>
                             </ThemedView>
-                        </>
-                    ) : (
-                        <ThemedText style={{ opacity: 0.7 }}>{t("Select a chapter to read it here.")}</ThemedText>
-                    )}
-                </ThemedView>
-            </VNavigationDrawer>
+                            <VBtn icon="mdi-close" variant="text" onClick={() => (searchDetailOpen.value = false)} />
+                        </ThemedView>
+                        {searchSelection.value ? (
+                            <GuideMarkdown source={isArabic.value && searchSelection.value.bodyAr ? searchSelection.value.bodyAr : searchSelection.value.bodyEn} />
+                        ) : null}
+                    </VCardText>
+                </VCard>
+            </VDialog>
         </ScreenContainer>
     );
 });
 
-export default GuidePage;
+export default AdminGuidePage;

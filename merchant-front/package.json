@@ -15,7 +15,9 @@
         "lint:oxlint": "oxlint . --fix -D correctness --ignore-path .gitignore",
         "lint:eslint": "eslint . --fix --cache",
         "lint": "run-s lint:*",
-        "format": "prettier --write src/"
+        "format": "prettier --write src/",
+        "test:unit": "bun test src/content/__tests__",
+        "test:unit:watch": "bun test --watch src/content/__tests__"
     },
     "dependencies": {
         "@fontsource/roboto": "^5.2.8",

@@ -1,6 +1,6 @@
 import { dc } from "kt-dc";
-import { computed, ref, watch } from "vue";
-import { RouterView, useRoute } from "vue-router";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { RouterView, useRoute, useRouter } from "vue-router";
 import {
     VAppBar,
     VAvatar,
@@ -22,6 +22,8 @@ import { logout, user } from "@/state/user";
 import { toggleTheme } from "@/state/app/index";
 import { setLocale } from "@/plugins/localization";
 import { showSnackBar } from "@/utils/snackBar";
+import { GlobalGuideSearchModal } from "@/components/guide/GlobalGuideSearchModal";
+import { ContextualHelpDrawer } from "@/components/guide/ContextualHelpDrawer";
 import { useSections } from "./sections";
 
 const DefaultLayout = dc(() => {
@@ -29,7 +31,10 @@ const DefaultLayout = dc(() => {
     const theme = useTheme();
     const display = useDisplay();
     const route = useRoute();
+    const router = useRouter();
     const sections = useSections();
+    const guideSearchOpen = ref(false);
+    const helpDrawerOpen = ref(false);
     const collapsedSections = ref<number[]>([]);
 
     const isSectionCollapsed = (index: number) => collapsedSections.value.includes(index);
@@ -79,6 +84,19 @@ const DefaultLayout = dc(() => {
     const role = computed(() => user.value?.userInfo?.role || "");
     const initial = computed(() => displayName.value.charAt(0).toUpperCase());
 
+    const onGlobalKeydown = (event: KeyboardEvent) => {
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+            event.preventDefault();
+            guideSearchOpen.value = true;
+        }
+        if (event.key === "Escape") {
+            guideSearchOpen.value = false;
+        }
+    };
+
+    onMounted(() => window.addEventListener("keydown", onGlobalKeydown));
+    onBeforeUnmount(() => window.removeEventListener("keydown", onGlobalKeydown));
+
     return () => (
         <>
             <VAppBar flat height={64} color="surface" class="pg-app-bar">
@@ -97,6 +115,25 @@ const DefaultLayout = dc(() => {
                 </div>
 
                 <div class="pg-spacer" />
+
+                <VBtn
+                    icon
+                    variant="text"
+                    aria-label={t("Instant guide search (Ctrl+K)")}
+                    onClick={() => (guideSearchOpen.value = true)}
+                >
+                    <VIcon icon="mdi-magnify" />
+                </VBtn>
+
+                <VBtn
+                    variant="text"
+                    prependIcon="mdi-help-circle-outline"
+                    class="pg-help-btn"
+                    aria-label={t("Help & SOP")}
+                    onClick={() => (helpDrawerOpen.value = true)}
+                >
+                    {t("Help & SOP (?)")}
+                </VBtn>
 
                 <VTooltip text={isDark.value ? t("Light Mode") : t("Dark Mode")} location="bottom">
                     {{
@@ -238,6 +275,25 @@ const DefaultLayout = dc(() => {
             <VMain class="pg-main">
                 <RouterView />
             </VMain>
+
+            <GlobalGuideSearchModal
+                modelValue={guideSearchOpen.value}
+                onUpdate:modelValue={(value: boolean) => (guideSearchOpen.value = value)}
+                onSelect={(entry: any) => {
+                    guideSearchOpen.value = false;
+                    void router.push({ name: "AdminGuide", query: { entry: entry.id } });
+                }}
+            />
+
+            <ContextualHelpDrawer
+                modelValue={helpDrawerOpen.value}
+                routeName={String(route.name ?? "")}
+                onUpdate:modelValue={(value: boolean) => (helpDrawerOpen.value = value)}
+                onOpenFullGuide={() => {
+                    helpDrawerOpen.value = false;
+                    void router.push({ name: "AdminGuide" });
+                }}
+            />
         </>
     );
 });

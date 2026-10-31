@@ -62,6 +62,11 @@ export const useSections = () => {
                     name: "MerchantGuide",
                     icon: "mdi-book-open-variant",
                 },
+                {
+                    label: t("Developer API Guide"),
+                    name: "MerchantDeveloperGuide",
+                    icon: "mdi-code-braces",
+                },
             ],
         },
         {

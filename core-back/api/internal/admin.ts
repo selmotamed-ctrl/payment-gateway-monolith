@@ -5240,12 +5240,33 @@ router.put("/settings/checkout-support", async (request: Request, response: Resp
  * It is deliberately stored on the user row: management can see whether a new
  * hire completed the curriculum before granting `is_maker` / `is_checker`.
  */
+const academyLabResultSchema = z.strictObject({
+  passed: z.boolean(),
+  attempts: z.number().int().min(0).max(10000),
+  mistakesMade: z.array(z.string().max(240)).max(100),
+  completedAt: z.string().max(60),
+});
+
+const academyQuizResultSchema = z.strictObject({
+  scorePercent: z.number().min(0).max(100),
+  passed: z.boolean(),
+  completedAt: z.string().max(60),
+  answers: z.record(z.string().max(80), z.number().int().min(0).max(20)).optional(),
+});
+
 const academyProgressSchema = z
   .strictObject({
+    // Legacy shape kept so older admin-front builds keep working.
     completedModules: z.array(z.string().max(40)).max(40).default([]),
-    quizScores: z.record(z.string().max(40), z.number().min(0).max(100)).default({}),
     completedLabs: z.array(z.string().max(60)).max(100).default([]),
     badges: z.array(z.string().max(60)).max(20).default([]),
+    // Zero-to-Hero academy shape.
+    completedLessonIds: z.array(z.string().max(80)).max(400).default([]),
+    completedLabIds: z.record(z.string().max(80), academyLabResultSchema).default({}),
+    earnedBadges: z.array(z.string().max(60)).max(20).default([]),
+    quizScores: z
+      .record(z.string().max(80), z.union([z.number().min(0).max(100), academyQuizResultSchema]))
+      .default({}),
     lastModuleId: z.string().max(40).optional(),
     updatedAt: z.string().max(40).optional(),
   });

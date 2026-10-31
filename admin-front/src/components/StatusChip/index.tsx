@@ -1,6 +1,7 @@
 import { dc } from "kt-dc";
 import { VChip } from "vuetify/components";
 import { useTheme } from "vuetify";
+import { lookupTerm } from "@/content/guide";
 
 export type StatusTone = "success" | "error" | "warning" | "info" | "primary" | "neutral";
 
@@ -33,15 +34,21 @@ export const StatusChip = dc(
         const theme = useTheme();
         return () => {
             const color = toneColor(props.tone ?? "neutral", theme);
+            const explanation = lookupTerm(props.label);
             return (
-                <VChip
-                    size={props.size ?? "small"}
-                    variant={props.variant ?? "tonal"}
-                    color={color}
-                    style={{ fontWeight: "700", letterSpacing: "0.2px" }}
+                <span
+                    title={explanation ? `${explanation.title} — ${explanation.meaningEn}` : undefined}
+                    style={{ display: "inline-flex", cursor: explanation ? "help" : undefined }}
                 >
-                    {props.label}
-                </VChip>
+                    <VChip
+                        size={props.size ?? "small"}
+                        variant={props.variant ?? "tonal"}
+                        color={color}
+                        style={{ fontWeight: "700", letterSpacing: "0.2px" }}
+                    >
+                        {props.label}
+                    </VChip>
+                </span>
             );
         };
     },
