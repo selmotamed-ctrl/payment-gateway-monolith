@@ -4,6 +4,12 @@ import { Prng } from "../prisma/syntheticSeeder/prng";
 import { buildTimeline, dayVolumeMultiplier, iterateDays } from "../prisma/syntheticSeeder/timelineClock";
 import { auditInMemory } from "../prisma/syntheticSeeder/verify/postSeedAudit";
 import { postLedger } from "../prisma/syntheticSeeder/builders";
+import {
+  findCompletedSeedRun,
+  recordCompletedSeedRun,
+  seedRunKey,
+  SYNTHETIC_SEED_SCOPE,
+} from "../prisma/syntheticSeeder/seedRunRegistry";
 import type { SeederContext } from "../prisma/syntheticSeeder/context";
 
 const fakeContext = (): SeederContext => {
@@ -106,5 +112,49 @@ describe("ledger templates and the post-seed audit", () => {
     const report = auditInMemory(ctx);
     expect(report.ok).toBe(false);
     expect(report.unbalancedEntries).toBe(1);
+  });
+});
+
+describe("synthetic seed run registry", () => {
+  test("the completion marker is scoped by seed key", () => {
+    expect(seedRunKey("libya-pg-2023-2026")).toBe("synthetic.seed.completed:libya-pg-2023-2026");
+    expect(SYNTHETIC_SEED_SCOPE).toBe("SYNTHETIC_SEED");
+  });
+
+  test("a missing marker means the seed has not completed", async () => {
+    const prisma = {
+      platformSetting: { findFirst: async () => null },
+    } as never;
+    await expect(findCompletedSeedRun(prisma, "fresh-key")).resolves.toBeNull();
+  });
+
+  test("a completed run is recorded and read back for the same key", async () => {
+    let stored: Record<string, unknown> | null = null;
+    const prisma = {
+      platformSetting: {
+        findFirst: async () => stored,
+        upsert: async ({ create }: { create: Record<string, unknown> }) => {
+          stored = create;
+          return create;
+        },
+      },
+    } as never;
+    const config = {
+      seedKey: "libya-pg-2023-2026",
+      namespace: "synthv1",
+      profile: "STANDARD",
+      volumes: { yearsSpan: 3.5 },
+    } as never;
+
+    await recordCompletedSeedRun(prisma, config, { attempts: 120000, journalLines: 351534, ledgerDrift: "0.0000" });
+    const found = await findCompletedSeedRun(prisma, "libya-pg-2023-2026");
+
+    expect(found?.seedKey).toBe("libya-pg-2023-2026");
+    expect(found?.namespace).toBe("synthv1");
+    expect(found?.profile).toBe("STANDARD");
+    expect(found?.attempts).toBe(120000);
+    expect(found?.journalLines).toBe(351534);
+    expect(found?.ledgerDrift).toBe("0.0000");
+    expect(found?.completedAt).toBeString();
   });
 });

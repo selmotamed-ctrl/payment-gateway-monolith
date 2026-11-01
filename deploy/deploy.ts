@@ -599,7 +599,11 @@ const main = async (): Promise<void> => {
       const seeded = runner.run(coreHost.ssh, `${bun} run seed-synthetic-history`, { cwd: coreRemote, sudo: false, timeoutMs: 60 * 60_000 });
       const summary = seeded.stdout.trim().split("\n").slice(-4).join("\n");
       if (summary) log(summary.split("\n").map((line) => `  ${line}`).join("\n"));
-      log(`  synthetic history seeded (${config.SYNTHETIC_SEED_PROFILE})`);
+      if (seeded.stdout.includes("was already seeded successfully")) {
+        log(`  synthetic history already present for seed key '${config.SYNTHETIC_SEED_KEY}'; skipped`);
+      } else {
+        log(`  synthetic history seeded (${config.SYNTHETIC_SEED_PROFILE})`);
+      }
     }
   } else {
     log("  skipped (--only excludes core)");

@@ -14,6 +14,7 @@ import { generateAmlAndGovernanceQueues } from "./generators/08_amlAndGovernance
 import { bulkMysqlWriter } from "./sync/bulkMysqlWriter";
 import { fakeRailsBulkSync } from "./sync/fakeRailsBulkSyncClient";
 import { auditInMemory, postSeedAudit } from "./verify/postSeedAudit";
+import { findCompletedSeedRun, recordCompletedSeedRun } from "./seedRunRegistry";
 
 /**
  * Multi-year synthetic operational data seeder.
@@ -29,6 +30,16 @@ export const runSyntheticSeeder = async (): Promise<void> => {
   console.log(`[synthetic-seeder] profile=${config.profile} seed=${config.seedKey} span=${config.volumes.yearsSpan}y`);
 
   await ensureSchemaVersion();
+
+  const completedRun = await findCompletedSeedRun(client, config.seedKey);
+  if (completedRun) {
+    console.log(
+      `[synthetic-seeder] seed key '${config.seedKey}' was already seeded successfully at ${completedRun.completedAt}; skipping. ` +
+        "Set SYNTHETIC_SEED_KEY to a new value to generate a fresh history.",
+    );
+    return;
+  }
+
   const health = await assertSafeToSeedSyntheticData(client);
   console.log(`[synthetic-seeder] Fake Rails handshake OK (${health.transactionCount ?? 0} existing transactions)`);
 
@@ -75,6 +86,11 @@ export const runSyntheticSeeder = async (): Promise<void> => {
         `succeededWithoutLedger=${audit.succeededWithoutLedger} slotViolations=${audit.slotViolations}`,
     );
   }
+  await recordCompletedSeedRun(client, config, {
+    attempts: audit.attempts,
+    journalLines: audit.counts.journalLines,
+    ledgerDrift: audit.ledgerDrift,
+  });
   console.log(
     `[synthetic-seeder] done in ${((Date.now() - startedAt) / 1000).toFixed(1)}s · ` +
       `${audit.attempts} attempts · ${audit.counts.journalLines} journal lines · drift ${audit.ledgerDrift} LYD`,
