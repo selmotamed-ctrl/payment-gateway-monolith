@@ -1,13 +1,15 @@
 import { dc } from "kt-dc";
 import { Field, type FieldProps } from "../Field";
-import { VCol, VContainer, VDivider, VRow } from "vuetify/components";
+import { VDivider } from "vuetify/components";
 import { useDisplay, useTheme } from "vuetify";
-import { defaultBoxShadow } from "@/constants/styling";
 import { ThemedView } from "../ThemedView";
+import { ThemedText } from "../ThemedText";
 
 const FieldsSections = dc(
     (props: {
         sections: {
+            title?: string;
+            description?: string;
             fields: FieldProps[];
         }[];
         noElevation?: boolean;
@@ -42,7 +44,12 @@ const FieldsSections = dc(
                                 if (!el2) {
                                     rendered.push(
                                         <ThemedView>
-                                            <Fields noElevation={props.noElevation} fields={el1!.fields}></Fields>
+                                            <Fields
+                                                noElevation={props.noElevation}
+                                                title={el1!.title}
+                                                description={el1!.description}
+                                                fields={el1!.fields}
+                                            ></Fields>
                                         </ThemedView>,
                                     );
                                     continue;
@@ -50,10 +57,20 @@ const FieldsSections = dc(
                                 if (mobile) {
                                     rendered.push(
                                         <ThemedView>
-                                            <Fields noElevation={props.noElevation} fields={el1!.fields}></Fields>
+                                            <Fields
+                                                noElevation={props.noElevation}
+                                                title={el1!.title}
+                                                description={el1!.description}
+                                                fields={el1!.fields}
+                                            ></Fields>
                                         </ThemedView>,
                                         <ThemedView>
-                                            <Fields noElevation={props.noElevation} fields={el2!.fields}></Fields>
+                                            <Fields
+                                                noElevation={props.noElevation}
+                                                title={el2!.title}
+                                                description={el2!.description}
+                                                fields={el2!.fields}
+                                            ></Fields>
                                         </ThemedView>,
                                     );
                                     continue;
@@ -72,14 +89,24 @@ const FieldsSections = dc(
                                                 flex: 1,
                                             }}
                                         >
-                                            <Fields noElevation={props.noElevation} fields={el1!.fields}></Fields>
+                                            <Fields
+                                                noElevation={props.noElevation}
+                                                title={el1!.title}
+                                                description={el1!.description}
+                                                fields={el1!.fields}
+                                            ></Fields>
                                         </ThemedView>
                                         <ThemedView
                                             style={{
                                                 flex: 1,
                                             }}
                                         >
-                                            <Fields noElevation={props.noElevation} fields={el2!.fields}></Fields>
+                                            <Fields
+                                                noElevation={props.noElevation}
+                                                title={el2!.title}
+                                                description={el2!.description}
+                                                fields={el2!.fields}
+                                            ></Fields>
                                         </ThemedView>
                                     </ThemedView>,
                                 );
@@ -97,7 +124,7 @@ const FieldsSections = dc(
 );
 
 const Fields = dc(
-    (props: { fields: FieldProps[]; noElevation?: boolean }) => {
+    (props: { fields: FieldProps[]; noElevation?: boolean; title?: string; description?: string }) => {
         const theme = useTheme();
         return () => {
             const cc = theme.current.value.colors;
@@ -117,6 +144,20 @@ const Fields = dc(
                         }}
                         class={`${props.noElevation ? undefined : "fields-section-card"}`}
                     >
+                        {(props.title || props.description) && (
+                            <ThemedView style={{ gap: "4px", marginBottom: "4px" }}>
+                                {props.title && (
+                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>
+                                        {props.title}
+                                    </ThemedText>
+                                )}
+                                {props.description && (
+                                    <ThemedText style={{ fontSize: "12px", opacity: 0.6, lineHeight: 1.5 }}>
+                                        {props.description}
+                                    </ThemedText>
+                                )}
+                            </ThemedView>
+                        )}
                         {props.fields.map((f, i) => {
                             return (
                                 <>
@@ -139,7 +180,7 @@ const Fields = dc(
         };
     },
     {
-        props: ["fields", "noElevation"],
+        props: ["fields", "noElevation", "title", "description"],
     },
 );
 

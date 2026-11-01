@@ -4,13 +4,17 @@ import { ThemedView } from "../ThemedView";
 import { copyToClipboard } from "@/utils/common";
 import { isEmpty } from "@/utils/clientValidationRules";
 import { showSnackBar } from "@/utils/snackBar";
-import { VDivider, VIcon } from "vuetify/components";
+import { VIcon, VTooltip } from "vuetify/components";
 
 export type FieldProps = {
     value?: string | null | number;
     text: string;
     onClick?: () => void | Promise<void>;
     copyOnClick?: boolean;
+    /** Plain-language explanation shown from a help icon beside the label. */
+    hint?: string;
+    /** Exact database source or derivation, e.g. `operator_cases.kind`. */
+    source?: string;
 };
 
 export const Field = dc(
@@ -78,6 +82,29 @@ export const Field = dc(
                                 mdi-content-copy
                             </VIcon>
                         )}
+                        {(props.hint || props.source) && (
+                            <VTooltip
+                                location="top"
+                                maxWidth={420}
+                                text={[
+                                    props.hint,
+                                    props.source ? `${t("Source")}: ${props.source}` : undefined,
+                                ]
+                                    .filter(Boolean)
+                                    .join("\n\n")}
+                            >
+                                {{
+                                    activator: ({ props: activatorProps }: { props: Record<string, unknown> }) => (
+                                        <VIcon
+                                            {...activatorProps}
+                                            icon="mdi-help-circle-outline"
+                                            size="14"
+                                            style={{ color: cc.onSurfaceVariant, opacity: 0.5, cursor: "help" }}
+                                        />
+                                    ),
+                                }}
+                            </VTooltip>
+                        )}
                     </ThemedView>
                     <ThemedView
                         onClick={isInteractive ? handleClick : undefined}
@@ -101,7 +128,7 @@ export const Field = dc(
         };
     },
     {
-        props: ["onClick", "text", "value", "copyOnClick"],
+        props: ["onClick", "text", "value", "copyOnClick", "hint", "source"],
     },
 );
 

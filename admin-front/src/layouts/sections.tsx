@@ -30,6 +30,7 @@ export const routesAuthorities: {
     AmlRules: ["aml.read_confidential"],
     AmlReports: ["aml.read_confidential"],
     OperatorCases: ["case:read", "operator:read"],
+    OperatorCaseDetail: ["case:read", "operator:read"],
     Disputes: ["dispute:read"],
     Adjustments: ["adjustments.propose"],
     CashOuts: ["cashout.process"],

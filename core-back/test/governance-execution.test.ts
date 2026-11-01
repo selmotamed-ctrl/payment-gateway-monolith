@@ -20,6 +20,7 @@ import {
 interface Fixture {
   client: FakePrisma;
   context: GovernanceExecutionContext;
+  slotCalls: { committed: string[]; released: string[] };
 }
 
 const line = (entryId: string): FakeRow[] =>
@@ -183,7 +184,24 @@ const buildFixture = (): Fixture => {
     },
   });
 
-  return { client, context: { ledgerPoster, repositories } };
+  const slotCalls = { committed: [] as string[], released: [] as string[] };
+  return {
+    client,
+    context: {
+      ledgerPoster,
+      repositories,
+      slots: {
+        commitSlot: async (attempt: { id: string }) => {
+          slotCalls.committed.push(attempt.id);
+          return { outcome: "COMMITTED" as const };
+        },
+        releaseSlot: async (attempt: { id: string }, reason: string) => {
+          slotCalls.released.push(`${attempt.id}:${reason}`);
+        },
+      },
+    },
+    slotCalls,
+  };
 };
 
 const approve = async (
@@ -953,6 +971,236 @@ describe("governance execution", () => {
     expect(amountOf(byAccount.get("acc-wallet")!)).toBe("57.0000");
     expect(amountOf(byAccount.get("acc-income")!)).toBe("3.0000");
     expect(amountOf(byAccount.get("acc-chargeback")!)).toBe("60.0000");
+  });
+
+  test("a checker can resolve an UNKNOWN attempt as succeeded and post the confirmation", async () => {
+    fixture.client.paymentAttempt.create({
+      data: {
+        id: "attempt-op-success",
+        reference: "PA-OP-SUCCESS",
+        merchantId: "merchant-1",
+        applicationId: "app-1",
+        railId: "rail-1",
+        routeId: "route-1",
+        credentialSetId: "cred-1",
+        gatewayVersionId: "gv-1",
+        commissionProfileId: "cp-1",
+        currency: "LYD",
+        env: "LIVE",
+        mode: "AUTO",
+        status: "UNKNOWN",
+        requestedAmount: new Decimal(100),
+        surchargeAmount: new Decimal(0),
+        totalChargedAmount: new Decimal(100),
+        platformCommissionAmount: new Decimal(3),
+        netMerchantAmount: new Decimal(97),
+        feeBearer: "MERCHANT_ABSORBS",
+        settlementTarget: "PLATFORM_CLEARING",
+        terminalAt: null,
+      },
+    });
+    fixture.client.operatorCase.create({
+      data: {
+        id: "operator-case-success",
+        attemptId: "attempt-op-success",
+        kind: "UNKNOWN",
+        priority: "P1",
+        state: "PENDING_CHECKER",
+        slaDueAt: new Date(Date.now() + 60_000),
+      },
+    });
+
+    const result = await approve(fixture, {
+      subjectType: "OPERATOR_CASE",
+      subjectId: "operator-case-success",
+      payloadDiffJson: {
+        action: "MARK_SUCCEEDED",
+        reason: "Gateway confirmed the payment",
+        providerReference: "PRV-123",
+      },
+      makerUserId: "user-maker",
+      checkerUserId: "user-finance",
+      checkerRole: "FINANCE",
+    });
+
+    expect(result.status).toBe("EXECUTED");
+    const attempt = rowsOf("paymentAttempt").find((row) => row.id === "attempt-op-success");
+    expect(attempt?.status).toBe("SUCCEEDED");
+    expect(attempt?.providerReference).toBe("PRV-123");
+    expect(attempt?.ledgerEntryId).toBeTruthy();
+    expect(fixture.slotCalls.committed).toContain("attempt-op-success");
+    const entry = entryOf("PAYMENT_ATTEMPT", "attempt-op-success");
+    expect(entry).toBeDefined();
+    const lines = line(String(entry?.id));
+    const byAccount = new Map(lines.map((row) => [String(row.glAccountId), row]));
+    expect(amountOf(byAccount.get("acc-wallet")!)).toBe("97.0000");
+    expect(amountOf(byAccount.get("acc-income")!)).toBe("3.0000");
+    const operatorCase = rowsOf("operatorCase").find((row) => row.id === "operator-case-success");
+    expect(operatorCase?.state).toBe("RESOLVED");
+    const audit = rowsOf("auditLog").find((row) => row.action === "OPERATOR_CASE_RESOLVED");
+    expect(audit?.entityId).toBe("operator-case-success");
+  });
+
+  test("a checker can resolve an UNKNOWN attempt as failed and release its reservation", async () => {
+    fixture.client.paymentAttempt.create({
+      data: {
+        id: "attempt-op-failed",
+        reference: "PA-OP-FAILED",
+        merchantId: "merchant-1",
+        applicationId: "app-1",
+        railId: "rail-1",
+        routeId: "route-1",
+        credentialSetId: "cred-1",
+        gatewayVersionId: "gv-1",
+        commissionProfileId: "cp-1",
+        currency: "LYD",
+        env: "LIVE",
+        mode: "AUTO",
+        status: "UNKNOWN",
+        requestedAmount: new Decimal(100),
+        surchargeAmount: new Decimal(0),
+        totalChargedAmount: new Decimal(100),
+        platformCommissionAmount: new Decimal(3),
+        netMerchantAmount: new Decimal(97),
+        feeBearer: "MERCHANT_ABSORBS",
+        settlementTarget: "PLATFORM_CLEARING",
+        terminalAt: null,
+      },
+    });
+    fixture.client.operatorCase.create({
+      data: {
+        id: "operator-case-failed",
+        attemptId: "attempt-op-failed",
+        kind: "UNKNOWN",
+        priority: "P1",
+        state: "PENDING_CHECKER",
+        slaDueAt: new Date(Date.now() + 60_000),
+      },
+    });
+
+    const result = await approve(fixture, {
+      subjectType: "OPERATOR_CASE",
+      subjectId: "operator-case-failed",
+      payloadDiffJson: {
+        action: "MARK_FAILED",
+        reason: "Gateway confirmed the payment was never taken",
+      },
+      makerUserId: "user-maker",
+      checkerUserId: "user-finance",
+      checkerRole: "FINANCE",
+    });
+
+    expect(result.status).toBe("EXECUTED");
+    const attempt = rowsOf("paymentAttempt").find((row) => row.id === "attempt-op-failed");
+    expect(attempt?.status).toBe("FAILED");
+    expect(fixture.slotCalls.released).toContain("attempt-op-failed:OPERATOR_RESOLVED_FAILED");
+    expect(entryOf("PAYMENT_ATTEMPT", "attempt-op-failed")).toBeUndefined();
+    const operatorCase = rowsOf("operatorCase").find((row) => row.id === "operator-case-failed");
+    expect(operatorCase?.state).toBe("RESOLVED");
+  });
+
+  test("an operator-case success is refused when the attempt already has a ledger entry", async () => {
+    fixture.client.paymentAttempt.update({
+      where: { id: "attempt-1" },
+      data: { status: "UNKNOWN", terminalAt: null },
+    });
+    fixture.client.operatorCase.create({
+      data: {
+        id: "operator-case-conflict",
+        attemptId: "attempt-1",
+        kind: "CONFLICT",
+        priority: "P1",
+        state: "PENDING_CHECKER",
+        slaDueAt: new Date(Date.now() + 60_000),
+      },
+    });
+
+    await expect(
+      approve(fixture, {
+        subjectType: "OPERATOR_CASE",
+        subjectId: "operator-case-conflict",
+        payloadDiffJson: {
+          action: "MARK_SUCCEEDED",
+          reason: "Gateway says paid",
+          providerReference: "PRV-999",
+        },
+        makerUserId: "user-maker",
+        checkerUserId: "user-finance",
+        checkerRole: "FINANCE",
+      }),
+    ).rejects.toThrow("already has a ledger entry");
+  });
+
+  test("a resolved operator case is idempotent", async () => {
+    fixture.client.operatorCase.create({
+      data: {
+        id: "operator-case-resolved",
+        kind: "MANUAL_REVIEW",
+        priority: "P3",
+        state: "RESOLVED",
+        slaDueAt: new Date(Date.now() + 60_000),
+      },
+    });
+
+    const result = await approve(fixture, {
+      subjectType: "OPERATOR_CASE",
+      subjectId: "operator-case-resolved",
+      payloadDiffJson: { action: "CLOSE_CASE", reason: "Already handled" },
+      makerUserId: "user-maker",
+      checkerUserId: "user-finance",
+      checkerRole: "FINANCE",
+    });
+
+    expect(result.status).toBe("SKIPPED");
+  });
+
+  test("a checker can close a case whose attempt is already terminal without moving money", async () => {
+    fixture.client.paymentAttempt.create({
+      data: {
+        id: "attempt-op-close",
+        reference: "PA-OP-CLOSE",
+        merchantId: "merchant-1",
+        applicationId: "app-1",
+        currency: "LYD",
+        env: "LIVE",
+        mode: "AUTO",
+        status: "FAILED",
+        requestedAmount: new Decimal(100),
+        surchargeAmount: new Decimal(0),
+        totalChargedAmount: new Decimal(100),
+        platformCommissionAmount: new Decimal(3),
+        netMerchantAmount: new Decimal(97),
+        feeBearer: "MERCHANT_ABSORBS",
+        settlementTarget: "PLATFORM_CLEARING",
+        terminalAt: new Date("2026-01-01T00:00:00.000Z"),
+      },
+    });
+    fixture.client.operatorCase.create({
+      data: {
+        id: "operator-case-close",
+        attemptId: "attempt-op-close",
+        kind: "LATE_SUCCESS",
+        priority: "P2",
+        state: "PENDING_CHECKER",
+        slaDueAt: new Date(Date.now() + 60_000),
+      },
+    });
+
+    const result = await approve(fixture, {
+      subjectType: "OPERATOR_CASE",
+      subjectId: "operator-case-close",
+      payloadDiffJson: { action: "CLOSE_CASE", reason: "Verified against the statement" },
+      makerUserId: "user-maker",
+      checkerUserId: "user-finance",
+      checkerRole: "FINANCE",
+    });
+
+    expect(result.status).toBe("EXECUTED");
+    const attempt = rowsOf("paymentAttempt").find((row) => row.id === "attempt-op-close");
+    expect(attempt?.status).toBe("FAILED");
+    expect(entryOf("PAYMENT_ATTEMPT", "attempt-op-close")).toBeUndefined();
+    const operatorCase = rowsOf("operatorCase").find((row) => row.id === "operator-case-close");
+    expect(operatorCase?.state).toBe("RESOLVED");
   });
 
 });

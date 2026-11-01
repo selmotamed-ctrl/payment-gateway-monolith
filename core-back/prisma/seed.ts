@@ -136,7 +136,7 @@ const adminUsers = [
   {
     email: "finance@payment-gateway.internal",
     role: "FINANCE",
-    authorities: ["finance:read", "finance:write", "commission:write", "cashout:review", "dispute:read", "dispute:write"],
+    authorities: ["finance:read", "finance:write", "commission:write", "cashout:review", "dispute:read", "dispute:write", "approval:read", "approval:check", "approval:write"],
     isMaker: false,
     isChecker: true,
   },
@@ -157,7 +157,7 @@ const adminUsers = [
   {
     email: "operator@payment-gateway.internal",
     role: "OPERATOR",
-    authorities: ["attempt:read", "attempt:inquire", "case:read"],
+    authorities: ["attempt:read", "attempt:inquire", "case:read", "case:write"],
     isMaker: true,
     isChecker: false,
   },

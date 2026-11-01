@@ -68,9 +68,10 @@ const DefaultLayout = dc(() => {
 
     const isDark = computed(() => theme.current.value.dark);
     const activeLabel = computed(() => {
+        const targetName = route.meta.parentName ?? route.name;
         for (const section of sections.value) {
             for (const item of section.routes) {
-                if (item.name === route.name) {
+                if (item.name === targetName) {
                     return item.label;
                 }
             }
@@ -258,6 +259,7 @@ const DefaultLayout = dc(() => {
                                             title={item.label}
                                             rounded="lg"
                                             activeColor="primary"
+                                            active={route.name === item.name || route.meta.parentName === item.name}
                                         />
                                     ))}
                             </div>
@@ -287,7 +289,7 @@ const DefaultLayout = dc(() => {
 
             <ContextualHelpDrawer
                 modelValue={helpDrawerOpen.value}
-                routeName={String(route.name ?? "")}
+                routeName={String(route.meta.parentName ?? route.name ?? "")}
                 onUpdate:modelValue={(value: boolean) => (helpDrawerOpen.value = value)}
                 onOpenFullGuide={() => {
                     helpDrawerOpen.value = false;

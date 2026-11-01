@@ -916,8 +916,20 @@ describe("admin forwards payloads core accepts", () => {
     },
     {
       method: "POST",
+      path: "/api/v1/admin/operator-cases/bulk-inquire",
+      body: { caseIds: ["oc_1"], reason: "unknown backlog" },
+      contract: "POST /operator-cases/bulk-inquire",
+    },
+    {
+      method: "PATCH",
+      path: "/api/v1/admin/operator-cases/oc_1",
+      body: { assigneeUserId: "user_1", state: "IN_PROGRESS" },
+      contract: "PATCH /operator-cases/:id",
+    },
+    {
+      method: "POST",
       path: "/api/v1/admin/operator-cases/oc_1/resolve",
-      body: { resolution: "RETRY_INQUIRE", reason: "unknown state" },
+      body: { action: "MARK_FAILED", reason: "gateway confirmed unpaid" },
       contract: "POST /operator-cases/:id/resolve",
     },
     {
@@ -1085,7 +1097,9 @@ describe("admin route surface", () => {
     { method: "GET", path: "/api/v1/admin/assets" },
     { method: "POST", path: "/api/v1/admin/assets", body: { kind: "LOGO", name: "logo", contentType: "image/png", storageKey: "assets/logo.png", sizeBytes: 1024, checksumSha256: "a".repeat(64) } },
     { method: "GET", path: "/api/v1/admin/operator-cases" },
-    { method: "POST", path: "/api/v1/admin/operator-cases/oc_1/resolve", body: { resolution: "RETRY_INQUIRE", reason: "unknown state" } },
+    { method: "POST", path: "/api/v1/admin/operator-cases/bulk-inquire", body: { caseIds: ["oc_1"], reason: "unknown backlog" } },
+    { method: "PATCH", path: "/api/v1/admin/operator-cases/oc_1", body: { assigneeUserId: "user_1", state: "IN_PROGRESS" } },
+    { method: "POST", path: "/api/v1/admin/operator-cases/oc_1/resolve", body: { action: "MARK_FAILED", reason: "gateway confirmed unpaid" } },
     { method: "POST", path: "/api/v1/admin/attempts/att_1/inquire", body: { force: true } },
     { method: "GET", path: "/api/v1/admin/reconciliation/sources" },
     { method: "POST", path: "/api/v1/admin/reconciliation/sources", body: { code: "SRC1", name: "source", gatewayId: "gw_1", fileType: "CSV", type: "UPLOAD" } },

@@ -39,6 +39,7 @@ export interface PlatformRuntime {
   crypto: CryptoEngine;
   repositories: PrismaRepositories;
   credentialCheck: CredentialCheckService;
+  slots: PrismaSlotReservationStore;
 }
 
 interface CredentialRow {
@@ -172,6 +173,7 @@ export const createPlatformRuntime = (db: PrismaLike): PlatformRuntime => {
     crypto,
     repositories,
     credentialCheck,
+    slots,
   };
 };
 

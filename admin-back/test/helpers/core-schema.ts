@@ -488,10 +488,25 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
       sha256: z.string().length(64).regex(/^[a-f0-9]{64}$/),
     })
     .strict(),
+  "POST /operator-cases/bulk-inquire": z
+    .object({
+      caseIds: z.array(z.string().min(1).max(64)).min(1).max(200),
+      reason: z.string().max(500).optional(),
+    })
+    .strict(),
+  "PATCH /operator-cases/:id": z
+    .object({
+      assigneeUserId: z.string().min(1).max(64).nullable().optional(),
+      state: z.enum(["OPEN", "IN_PROGRESS"]).optional(),
+    })
+    .strict(),
   "POST /operator-cases/:id/resolve": z
     .object({
-      resolution: z.string().min(2).max(4000),
-      state: z.enum(["RESOLVED", "IN_PROGRESS"]).default("RESOLVED"),
+      action: z.enum(["MARK_SUCCEEDED", "MARK_FAILED", "CLOSE_CASE"]),
+      reason: z.string().min(3).max(500),
+      notes: z.string().max(2000).optional(),
+      providerReference: z.string().min(1).max(191).optional(),
+      settledAmount: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).optional(),
     })
     .strict(),
   "POST /reconciliation/sources": z

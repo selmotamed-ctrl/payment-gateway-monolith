@@ -6,7 +6,7 @@ import { useDisplay, useLocale, useTheme } from "vuetify";
 import Icon from "@/components/Icon/index.vue";
 import { TableRowActions } from "./TableRowActions";
 import { defineComponent } from "vue";
-import { VDivider, VForm, VIcon, VTooltip } from "vuetify/components";
+import { VForm, VIcon, VTooltip } from "vuetify/components";
 import { extractApiError } from "@/utils/errors/extractor";
 import { showConfirm } from "@/utils/confirm";
 import { adaptedLocale } from "@/plugins/localization";
@@ -29,7 +29,11 @@ const HeaderCell = defineComponent(
         return () => {
             const h = props.header;
             if (h.Header) {
-                return <h.Header key={h.key}></h.Header>;
+                return (
+                    <span title={h.headerTooltip ? t(h.headerTooltip) : undefined}>
+                        <h.Header key={h.key}></h.Header>
+                    </span>
+                );
             }
             const sortKey = h.sortKey ?? h.key;
             const isSortSelected = !!props.sortBy && props.sortBy === sortKey;
@@ -65,6 +69,25 @@ const HeaderCell = defineComponent(
                                 {t(h.label)}
                             </ThemedText>
                         </>
+                    )}
+
+                    {h.headerTooltip && (
+                        <VTooltip
+                            text={t(h.headerTooltip)}
+                            location="top"
+                            maxWidth={420}
+                        >
+                            {{
+                                activator: ({ props: activatorProps }: any) => (
+                                    <VIcon
+                                        {...activatorProps}
+                                        icon="mdi-help-circle-outline"
+                                        size={14}
+                                        style={{ opacity: 0.55, cursor: "help", flex: "0 0 auto" }}
+                                    />
+                                ),
+                            }}
+                        </VTooltip>
                     )}
 
                     {h.headerIcon && (

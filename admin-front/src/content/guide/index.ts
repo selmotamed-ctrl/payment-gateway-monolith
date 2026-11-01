@@ -47,6 +47,7 @@ export const GUIDE_ROUTE_HELP: Record<string, { bookNumber: number; chapterNumbe
     AmlRules: { bookNumber: 10, chapterNumber: "10.1", titleEn: "AML rules" },
     AmlReports: { bookNumber: 10, chapterNumber: "10.1", titleEn: "Regulatory reporting" },
     OperatorCases: { bookNumber: 7, chapterNumber: "7.2", titleEn: "Operator cases and runbooks" },
+    OperatorCaseDetail: { bookNumber: 7, chapterNumber: "7.2", titleEn: "Operator cases and runbooks" },
     Disputes: { bookNumber: 11, chapterNumber: "11.1", titleEn: "Dispute and chargeback SOP" },
     Adjustments: { bookNumber: 11, chapterNumber: "11.2", titleEn: "Refund adjustment SOP" },
     CashOuts: { bookNumber: 12, chapterNumber: "12.1", titleEn: "Liquidity before cash-outs" },

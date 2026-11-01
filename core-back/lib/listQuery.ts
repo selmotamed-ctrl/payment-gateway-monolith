@@ -106,6 +106,11 @@ const setPath = (target: Record<string, unknown>, path: string, value: unknown):
 export interface ListSpec {
   /** Dot paths searched with a case-insensitive `contains`, OR-ed together. */
   search?: string[];
+  /**
+   * Query key → dot path(s), each matched with a case-insensitive `contains`.
+   * Several paths for one key are OR-ed together; different keys are AND-ed.
+   */
+  contains?: Record<string, string | string[]>;
   /** Query key → model/relation dot path, exact equality. */
   equals?: Record<string, string>;
   /** Query key → dot path, comma-separated `in` list. */
@@ -138,6 +143,19 @@ export const buildListQuery = (raw: unknown, spec: ListSpec): BuiltListQuery => 
   if (spec.search && query.search) {
     const or = spec.search.map((path) => setPath({}, path, { contains: query.search }));
     if (or.length > 0) {
+      conditions.push({ OR: or });
+    }
+  }
+  for (const [key, definition] of Object.entries(spec.contains ?? {})) {
+    const value = query[key];
+    if (typeof value !== "string" || value === "") {
+      continue;
+    }
+    const paths = Array.isArray(definition) ? definition : [definition];
+    const or = paths.map((path) => setPath({}, path, { contains: value }));
+    if (or.length === 1) {
+      conditions.push(or[0]!);
+    } else if (or.length > 1) {
       conditions.push({ OR: or });
     }
   }

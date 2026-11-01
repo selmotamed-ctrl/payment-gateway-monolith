@@ -3,10 +3,12 @@ import { ApiError } from "../../lib/error";
 import { moneyToString, type Money } from "../db/money";
 import {
   buildLedgerTemplate,
+  buildPaymentConfirmationTemplate,
   decimal,
   LedgerPoster,
   type JournalTemplate,
   type LedgerPostContext,
+  type LedgerOwnershipMode,
 } from "../ledger/LedgerPoster";
 import type { Repositories, Tx } from "../db/ports";
 import { applyJsonPatch, validateJsonPatch, type JsonPatchOperation } from "./ApprovalService";
@@ -15,7 +17,8 @@ import {
   type ChannelVerificationEvidence,
   type GoLiveValidationResult,
 } from "../flow/GoLiveGateValidator";
-import { ATTEMPT_TRANSITION_TOPIC } from "../flow/DynamicRailEngine";
+import { ATTEMPT_TRANSITION_TOPIC, type SlotReservationStore } from "../flow/DynamicRailEngine";
+import { attemptRowToDynamicAttempt, type AttemptRow } from "../runtime/attemptRepository";
 import type { InvalidationBus } from "../../lib/invalidationBus";
 
 /**
@@ -88,6 +91,8 @@ export interface GovernanceExecutionContext {
    * engine transition.
    */
   transitionBus?: Pick<InvalidationBus, "publish">;
+  /** The slot store used by a manual operator-case outcome. */
+  slots?: Pick<SlotReservationStore, "commitSlot" | "releaseSlot">;
 }
 
 export interface ApprovalSubjectLike {
@@ -2385,6 +2390,380 @@ const executeReportingRuleApproval = async (
  * The maker-checker separation is enforced here as well, so that no entry
  * point can ever let the system principal approve its own work.
  */
+/* -------------------------------------------------------- operator-case execution */
+
+export type OperatorCaseResolutionAction = "MARK_SUCCEEDED" | "MARK_FAILED" | "CLOSE_CASE";
+
+const OPERATOR_CASE_SUCCESS_STATUSES = new Set(["UNKNOWN", "VERIFYING", "FAILED", "EXPIRED"]);
+const OPERATOR_CASE_CLOSEABLE_STATUSES = new Set([
+  "SUCCEEDED",
+  "FAILED",
+  "EXPIRED",
+  "CANCELLED",
+  "BLOCKED",
+  "REFUNDED",
+  "PARTIALLY_REFUNDED",
+  "DISPUTED",
+]);
+const OPERATOR_CASE_RELEASE_STATUSES = new Set(["UNKNOWN", "VERIFYING"]);
+
+const operatorCaseResolutionNotes = (input: {
+  action: OperatorCaseResolutionAction;
+  reason: string | null;
+  notes: string | null;
+  providerReference: string | null;
+  checkerUserId: string;
+}): string =>
+  [
+    `Resolution action: ${input.action}`,
+    input.reason ? `Reason: ${input.reason}` : null,
+    input.notes ? `Notes: ${input.notes}` : null,
+    input.providerReference ? `Provider reference: ${input.providerReference}` : null,
+    `Checker: ${input.checkerUserId}`,
+    `Executed at: ${new Date().toISOString()}`,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join("\n");
+
+const resolveOperatorCaseRow = async (
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  input: {
+    operatorCaseId: string;
+    previousState: string;
+    action: OperatorCaseResolutionAction;
+    reason: string | null;
+    notes: string | null;
+    providerReference: string | null;
+    checkerUserId: string;
+    checkerRole: string;
+    approvalRequestId?: string | null;
+    extra?: Record<string, unknown>;
+  },
+): Promise<GovernanceExecutionResult> => {
+  const updated = await modelOf(tx, "operatorCase").update({
+    where: { id: input.operatorCaseId },
+    data: {
+      state: "RESOLVED",
+      resolutionNotes: operatorCaseResolutionNotes(input),
+    },
+  });
+  await writeAudit(ctx, tx, {
+    actorId: input.checkerUserId,
+    role: input.checkerRole,
+    action: "OPERATOR_CASE_RESOLVED",
+    entityType: "OPERATOR_CASE",
+    entityId: input.operatorCaseId,
+    beforeJson: { state: input.previousState },
+    afterJson: {
+      state: "RESOLVED",
+      action: input.action,
+      ...input.extra,
+    },
+    approvalRequestId: input.approvalRequestId ?? null,
+  });
+  return {
+    status: "EXECUTED",
+    entityId: String(updated.id),
+    template: `OPERATOR_CASE_${input.action}`,
+    journalEntryId: input.extra?.journalEntryId
+      ? String(input.extra.journalEntryId)
+      : null,
+  };
+};
+
+export async function executeOperatorCaseResolution(
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  input: {
+    operatorCaseId: string;
+    action: OperatorCaseResolutionAction;
+    reason: string | null;
+    notes: string | null;
+    providerReference: string | null;
+    settledAmount: string | null;
+    checkerUserId: string;
+    checkerRole: string;
+    approvalRequestId?: string | null;
+  },
+): Promise<GovernanceExecutionResult> {
+  const cases = modelOf(tx, "operatorCase");
+  const operatorCase = await cases.findUnique({ where: { id: input.operatorCaseId } });
+  if (!operatorCase) {
+    throw new ApiError(404, "OPERATOR_CASE_NOT_FOUND", "The operator case does not exist");
+  }
+  if (operatorCase.state === "RESOLVED") {
+    return {
+      status: "SKIPPED",
+      reason: "OPERATOR_CASE_ALREADY_RESOLVED",
+      entityId: String(operatorCase.id),
+      idempotent: true,
+    };
+  }
+
+  const attempt = operatorCase.attemptId
+    ? await modelOf(tx, "paymentAttempt").findUnique({
+        where: { id: String(operatorCase.attemptId) },
+        include: {
+          gatewayVersion: {
+            include: { gateway: { select: { id: true, kind: true } } },
+          },
+          route: { select: { costModel: true, mismatchPolicy: true } },
+        },
+      })
+    : null;
+
+  const common = {
+    operatorCaseId: String(operatorCase.id),
+    previousState: String(operatorCase.state),
+    action: input.action,
+    reason: input.reason,
+    notes: input.notes,
+    providerReference: input.providerReference,
+    checkerUserId: input.checkerUserId,
+    checkerRole: input.checkerRole,
+    approvalRequestId: input.approvalRequestId ?? null,
+  };
+
+  if (input.action === "CLOSE_CASE") {
+    if (attempt && !attempt.terminalAt) {
+      throw new ApiError(
+        409,
+        "ATTEMPT_OUTCOME_REQUIRED",
+        "The linked attempt is still open; resolve it as succeeded or failed instead of closing the case",
+      );
+    }
+    return resolveOperatorCaseRow(ctx, tx, common);
+  }
+
+  if (!attempt) {
+    throw new ApiError(409, "CASE_HAS_NO_ATTEMPT", "This action requires a linked payment attempt");
+  }
+
+  const status = String(attempt.status);
+  const existingLedger = await modelOf(tx, "journalEntry").findFirst({
+    where: { refType: "PAYMENT_ATTEMPT", refId: attempt.id },
+  });
+
+  if (input.action === "MARK_SUCCEEDED") {
+    if (status === "SUCCEEDED") {
+      return resolveOperatorCaseRow(ctx, tx, {
+        ...common,
+        extra: { attemptStatus: status, idempotent: true },
+      });
+    }
+    if (!OPERATOR_CASE_SUCCESS_STATUSES.has(status)) {
+      throw new ApiError(
+        409,
+        "ATTEMPT_CANNOT_SUCCEED",
+        `An attempt in '${status}' can not be resolved as succeeded`,
+        { attemptStatus: status },
+      );
+    }
+    if (!input.providerReference) {
+      throw new ApiError(
+        400,
+        "PROVIDER_REFERENCE_REQUIRED",
+        "A provider reference is required to resolve an attempt as succeeded",
+      );
+    }
+    if (existingLedger) {
+      throw new ApiError(
+        409,
+        "ATTEMPT_LEDGER_CONFLICT",
+        "The attempt already has a ledger entry; use reconciliation or the AML case workflow instead",
+        { ledgerEntryId: existingLedger.id },
+      );
+    }
+    if (!ctx.slots || !ctx.ledgerPoster) {
+      throw new ApiError(
+        500,
+        "OPERATOR_CASE_EXECUTION_UNAVAILABLE",
+        "The slot store and ledger poster are required to execute an operator-case success",
+      );
+    }
+    const dynamicAttempt = attemptRowToDynamicAttempt(attempt as AttemptRow);
+    const charged = toDecimal(attempt.totalChargedAmount);
+    if (input.settledAmount) {
+      const settled = toDecimal(input.settledAmount);
+      if (!settled.eq(charged)) {
+        throw new ApiError(
+          409,
+          "MANUAL_SETTLEMENT_AMOUNT_MISMATCH",
+          "The settled amount must equal the charged amount; use the reconciliation adjustment flow for a mismatch",
+          { chargedAmount: charged.toFixed(4), settledAmount: settled.toFixed(4) },
+        );
+      }
+    }
+    const claimed = await modelOf(tx, "paymentAttempt").updateMany({
+      where: {
+        id: attempt.id,
+        status: { in: [...OPERATOR_CASE_SUCCESS_STATUSES] },
+      },
+      data: {
+        status: "SUCCEEDED",
+        substatus: "OPERATOR_RESOLVED_SUCCEEDED",
+        terminalAt: new Date(),
+        nextCheckAt: null,
+        providerReference: input.providerReference,
+        settledAmount: charged,
+      },
+    });
+    if (Number(claimed?.count ?? 0) === 0) {
+      return {
+        status: "SKIPPED",
+        reason: "ATTEMPT_STATE_CHANGED",
+        entityId: String(operatorCase.id),
+        idempotent: true,
+      };
+    }
+
+    const commit = await ctx.slots.commitSlot(dynamicAttempt, tx);
+    let ledgerEntryId: string | null = null;
+    let finalSubstatus = "OPERATOR_RESOLVED_SUCCEEDED";
+    if (commit?.outcome === "SUSPENSE") {
+      ledgerEntryId = commit.journalEntryId ?? null;
+      finalSubstatus = "SUSPENSE_SETTLEMENT";
+    } else {
+      const amount = toDecimal(attempt.requestedAmount ?? attempt.totalChargedAmount);
+      const commission = toDecimal(attempt.platformCommissionAmount);
+      const surcharge = toDecimal(attempt.surchargeAmount ?? 0);
+      const merchantAmount = attempt.netMerchantAmount === null || attempt.netMerchantAmount === undefined
+        ? amount.minus(commission)
+        : toDecimal(attempt.netMerchantAmount);
+      const gatewayFee = toDecimal(attempt.gatewayFeeAmount ?? 0);
+      const template = buildPaymentConfirmationTemplate({
+        ownershipMode: (dynamicAttempt.ownershipMode ?? "PLATFORM_CLEARING") as LedgerOwnershipMode,
+        feeBearer: (attempt.feeBearer ?? "MERCHANT_ABSORBS") as "MERCHANT_ABSORBS" | "PAYER_SURCHARGE" | "SPLIT",
+        feeAccrual: dynamicAttempt.feeAccrual,
+        amount,
+        surchargeAmount: surcharge,
+        commissionAmount: commission,
+        merchantAmount,
+        gatewayFeeAmount: gatewayFee,
+        providerFeeAmount: gatewayFee,
+      });
+      const result = await ctx.ledgerPoster.post(
+        { ...template, refId: String(attempt.id) },
+        {
+          merchantId: String(attempt.merchantId),
+          gatewayId: dynamicAttempt.gatewayId,
+          credentialSetId: attempt.credentialSetId ? String(attempt.credentialSetId) : undefined,
+          env: String(attempt.env),
+          currency: String(attempt.currency),
+        } as LedgerPostContext,
+        tx as never,
+      );
+      ledgerEntryId = result.entry.id;
+    }
+    await modelOf(tx, "paymentAttempt").update({
+      where: { id: attempt.id },
+      data: {
+        status: "SUCCEEDED",
+        substatus: finalSubstatus,
+        terminalAt: new Date(),
+        nextCheckAt: null,
+        ...(ledgerEntryId ? { ledgerEntryId } : {}),
+      },
+    });
+    if (ctx.transitionBus) {
+      await ctx.transitionBus.publish(ATTEMPT_TRANSITION_TOPIC, {
+        attemptId: String(attempt.id),
+        status: "SUCCEEDED",
+        substatus: finalSubstatus,
+      });
+    }
+    return resolveOperatorCaseRow(ctx, tx, {
+      ...common,
+      extra: {
+        attemptId: String(attempt.id),
+        attemptStatus: "SUCCEEDED",
+        providerReference: input.providerReference,
+        ledgerEntryId,
+        substatus: finalSubstatus,
+      },
+    });
+  }
+
+  // MARK_FAILED
+  if (status === "SUCCEEDED" || status === "REFUNDED" || status === "PARTIALLY_REFUNDED" || status === "DISPUTED") {
+    throw new ApiError(
+      409,
+      "ATTEMPT_CANNOT_FAIL",
+      `An attempt in '${status}' can not be resolved as failed`,
+      { attemptStatus: status },
+    );
+  }
+  if (existingLedger) {
+    throw new ApiError(
+      409,
+      "ATTEMPT_LEDGER_CONFLICT",
+      "The attempt already has a ledger entry; resolve it through reconciliation or the AML case workflow",
+      { ledgerEntryId: existingLedger.id },
+    );
+  }
+  if (!OPERATOR_CASE_RELEASE_STATUSES.has(status)) {
+    if (OPERATOR_CASE_CLOSEABLE_STATUSES.has(status)) {
+      return resolveOperatorCaseRow(ctx, tx, {
+        ...common,
+        extra: { attemptStatus: status, idempotent: true },
+      });
+    }
+    throw new ApiError(
+      409,
+      "ATTEMPT_CANNOT_FAIL",
+      `An attempt in '${status}' can not be resolved as failed`,
+      { attemptStatus: status },
+    );
+  }
+  if (!ctx.slots) {
+    throw new ApiError(
+      500,
+      "OPERATOR_CASE_EXECUTION_UNAVAILABLE",
+      "The slot store is required to release the reservation of a failed attempt",
+    );
+  }
+  const dynamicAttempt = attemptRowToDynamicAttempt(attempt as AttemptRow);
+  const claimed = await modelOf(tx, "paymentAttempt").updateMany({
+    where: {
+      id: attempt.id,
+      terminalAt: null,
+      status: { in: [...OPERATOR_CASE_RELEASE_STATUSES] },
+    },
+    data: {
+      status: "FAILED",
+      substatus: "OPERATOR_RESOLVED_FAILED",
+      terminalAt: new Date(),
+      nextCheckAt: null,
+    },
+  });
+  if (Number(claimed?.count ?? 0) === 0) {
+    return {
+      status: "SKIPPED",
+      reason: "ATTEMPT_STATE_CHANGED",
+      entityId: String(operatorCase.id),
+      idempotent: true,
+    };
+  }
+  await ctx.slots.releaseSlot(dynamicAttempt, "OPERATOR_RESOLVED_FAILED", tx);
+  if (ctx.transitionBus) {
+    await ctx.transitionBus.publish(ATTEMPT_TRANSITION_TOPIC, {
+      attemptId: String(attempt.id),
+      status: "FAILED",
+      substatus: "OPERATOR_RESOLVED_FAILED",
+    });
+  }
+  return resolveOperatorCaseRow(ctx, tx, {
+    ...common,
+    extra: {
+      attemptId: String(attempt.id),
+      attemptStatus: "FAILED",
+      reservationReleased: true,
+    },
+  });
+}
+
+
 export async function executeApprovalSubject(
   ctx: GovernanceExecutionContext,
   tx: Tx,
@@ -2414,6 +2793,34 @@ export async function executeApprovalSubject(
       checkerUserId: input.checkerUserId,
       checkerRole: input.checkerRole,
       notes: input.notes ?? null,
+      approvalRequestId: input.approval.id,
+    });
+  }
+  if (subjectType === "OPERATOR_CASE") {
+    const payload = asRecord(input.approval.payloadDiffJson);
+    const action = String(payload.action ?? "").toUpperCase();
+    if (action !== "MARK_SUCCEEDED" && action !== "MARK_FAILED" && action !== "CLOSE_CASE") {
+      throw new ApiError(
+        400,
+        "INVALID_OPERATOR_CASE_ACTION",
+        `The operator-case approval carries an unknown action '${action}'`,
+      );
+    }
+    return executeOperatorCaseResolution(ctx, tx, {
+      operatorCaseId: input.approval.subjectId,
+      action: action as OperatorCaseResolutionAction,
+      reason: payload.reason === undefined || payload.reason === null ? null : String(payload.reason),
+      notes: payload.notes === undefined || payload.notes === null ? null : String(payload.notes),
+      providerReference:
+        payload.providerReference === undefined || payload.providerReference === null
+          ? null
+          : String(payload.providerReference),
+      settledAmount:
+        payload.settledAmount === undefined || payload.settledAmount === null
+          ? null
+          : String(payload.settledAmount),
+      checkerUserId: input.checkerUserId,
+      checkerRole: input.checkerRole,
       approvalRequestId: input.approval.id,
     });
   }

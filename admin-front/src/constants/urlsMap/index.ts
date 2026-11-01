@@ -36,7 +36,10 @@ export const urlsMap = {
     amlReports: "v1/admin/aml/reports",
 
     operatorCases: "v1/admin/operator-cases",
+    operatorCaseDetail: (id: string) => `v1/admin/operator-cases/${id}`,
+    operatorCaseUpdate: (id: string) => `v1/admin/operator-cases/${id}`,
     operatorCaseResolve: (id: string) => `v1/admin/operator-cases/${id}/resolve`,
+    operatorCasesBulkInquire: "v1/admin/operator-cases/bulk-inquire",
     attemptInquire: (id: string) => `v1/admin/attempts/${id}/inquire`,
 
     reconciliationSources: "v1/admin/reconciliation/sources",

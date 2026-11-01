@@ -65,6 +65,12 @@ const router = createRouter({
                     component: () => import("@/pages/operator-cases/index"),
                 },
                 {
+                    path: "operator-cases/:id",
+                    name: "OperatorCaseDetail",
+                    component: () => import("@/pages/operator-cases/[id]"),
+                    meta: { parentName: "OperatorCases" },
+                },
+                {
                     path: "disputes",
                     name: "Disputes",
                     component: () => import("@/pages/disputes/index"),

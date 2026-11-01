@@ -5,5 +5,7 @@ declare module "vue-router" {
         requiresAuth?: boolean;
         requiresVisitor?: boolean;
         requiresCore?: boolean;
+        /** The sidebar route that owns a nested detail page. */
+        parentName?: string;
     }
 }

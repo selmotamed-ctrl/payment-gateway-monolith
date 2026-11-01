@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VCard, VCardText, VDialog, VSelect, VTextField, VTextarea } from "vuetify/components";
+import { VBtn, VCard, VCardText, VDialog, VSelect, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -30,7 +30,7 @@ type Approval = {
     reason: string;
     createdAt: string;
     expiresAt: string | null;
-    payloadDiff: JsonPatchOperation[];
+    payloadDiff: unknown;
     baseVersion: number | null;
     entityType: string;
 };
@@ -91,7 +91,8 @@ const ApprovalsPage = dc(() => {
         if (!selected.value) {
             return;
         }
-        if (!approve && !decisionReason.value) {
+        const reason = decisionReason.value.trim() || (approve ? t("Reviewed and approved") : "");
+        if (!approve && reason.length < 3) {
             showSnackBar({ type: "warning", message: t("Decision Reason") });
             return;
         }
@@ -99,7 +100,7 @@ const ApprovalsPage = dc(() => {
         try {
             await api.post(approve ? urlsMap.approvalApprove(selected.value.id) : urlsMap.approvalReject(selected.value.id), {
                 ...(approve && outcome.value ? { outcome: outcome.value } : {}),
-                reason: decisionReason.value,
+                reason,
             });
             detailsOpen.value = false;
             showSnackBar({ type: "success", message: approve ? t("Approved") : t("Rejected") });
@@ -117,7 +118,7 @@ const ApprovalsPage = dc(() => {
         { key: "subjectType", label: "Subject Type", value: (row) => row.subjectType },
         { key: "subjectId", label: "Reference", value: (row) => row.subjectId },
         { key: "domain", label: "Domain", value: (row) => row.domain },
-        { key: "state", label: "Status", Value: ({ row }: { row: any }) => <StatusChip label={row.state} tone={statusTone(row.state)} /> },
+        { key: "state", label: "Status", Value: ({ row }: { row: Approval }) => <StatusChip label={row.state} tone={statusTone(row.state)} /> },
         { key: "makerName", label: "Maker", value: (row) => row.makerName },
         { key: "checkerName", label: "Checker", value: (row) => row.checkerName ?? "-" },
         { key: "createdAt", label: "Created At", value: (row) => row.createdAt },
@@ -153,7 +154,7 @@ const ApprovalsPage = dc(() => {
                 )}
             </ThemedView>
 
-            <VDialog modelValue={detailsOpen.value} onUpdate:modelValue={(v: any) => (detailsOpen.value = v)} maxWidth="860px" scrollable>
+            <VDialog modelValue={detailsOpen.value} onUpdate:modelValue={(v: boolean | null) => (detailsOpen.value = Boolean(v))} maxWidth="860px" scrollable>
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                         <ThemedView style={{ flexDirection: "row", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
@@ -183,7 +184,28 @@ const ApprovalsPage = dc(() => {
 
                         <ThemedView style={{ gap: "8px" }}>
                             <ThemedText type="defaultSemiBold">{t("Details")}</ThemedText>
-                            <JsonPatchDiff operations={selected.value?.payloadDiff ?? []} />
+                            {Array.isArray(selected.value?.payloadDiff) ? (
+                                <JsonPatchDiff operations={selected.value?.payloadDiff as JsonPatchOperation[]} />
+                            ) : (
+                                <pre
+                                    style={{
+                                        margin: 0,
+                                        padding: "10px 12px",
+                                        borderRadius: "8px",
+                                        background: "rgba(15,23,42,0.06)",
+                                        fontSize: "11px",
+                                        lineHeight: 1.5,
+                                        whiteSpace: "pre-wrap",
+                                        wordBreak: "break-word",
+                                        direction: "ltr",
+                                        unicodeBidi: "isolate",
+                                        maxHeight: "320px",
+                                        overflow: "auto",
+                                    }}
+                                >
+                                    {JSON.stringify(selected.value?.payloadDiff ?? {}, null, 2)}
+                                </pre>
+                            )}
                         </ThemedView>
 
                         <VSelect

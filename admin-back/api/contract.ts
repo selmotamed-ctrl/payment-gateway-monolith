@@ -1224,14 +1224,19 @@ export const toCoreAssetCreate = (body: unknown): JsonRecord => {
 
 export const toCoreOperatorCaseResolve = (body: unknown): JsonRecord => {
   const source = asRecord(body);
-  const notes = asString(source.notes) ?? asString(source.operatorNote) ?? asString(source.reason);
-  const resolution = clamp((notes ?? "").trim(), 4000);
-  if (resolution.length < 2) missingCanonical("resolution");
-  const action = asString(source.resolution)?.trim().toUpperCase() ?? "";
-  return {
-    resolution,
-    state: action === "ESCALATE" ? "IN_PROGRESS" : "RESOLVED",
+  const action = pickEnum(source.action, ["MARK_SUCCEEDED", "MARK_FAILED", "CLOSE_CASE"] as const);
+  if (!action) missingCanonical("action");
+  const result: JsonRecord = {
+    action,
+    reason: requireCanonical(asString(source.reason), "reason", 3),
   };
+  const notes = asString(source.notes);
+  if (notes) result.notes = clamp(notes, 2000);
+  const providerReference = asString(source.providerReference);
+  if (providerReference) result.providerReference = clamp(providerReference, 191);
+  const settledAmount = asString(source.settledAmount);
+  if (settledAmount) result.settledAmount = settledAmount;
+  return result;
 };
 
 /* -------------------------------------------------------------------------- reconciliation */

@@ -48,4 +48,33 @@ describe("shared list query", () => {
     expect(built).toMatchObject({ page: 1, pageSize: 25, skip: 0, take: 25 });
     expect(csv(" A , ,B ")).toEqual(["A", "B"]);
   });
+
+  test("contains filters OR several paths and AND different keys", () => {
+    const built = buildListQuery(
+      { caseRef: "PA-1", merchantName: "Acme" },
+      {
+        contains: {
+          caseRef: ["attempt.reference", "reconciliationItem.ourReference"],
+          merchantName: ["attempt.merchant.tradeName", "attempt.merchant.legalName"],
+        },
+        defaultSort: { createdAt: "desc" },
+      },
+    );
+    expect(built.where).toEqual({
+      AND: [
+        {
+          OR: [
+            { attempt: { reference: { contains: "PA-1" } } },
+            { reconciliationItem: { ourReference: { contains: "PA-1" } } },
+          ],
+        },
+        {
+          OR: [
+            { attempt: { merchant: { tradeName: { contains: "Acme" } } } },
+            { attempt: { merchant: { legalName: { contains: "Acme" } } } },
+          ],
+        },
+      ],
+    });
+  });
 });

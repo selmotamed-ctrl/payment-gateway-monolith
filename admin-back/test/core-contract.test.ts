@@ -666,13 +666,13 @@ const cases: ContractCase[] = [
     mapper: toCoreOperatorCaseResolve,
     publicSchema: resolveSchema,
     legacyPayload: {
-      resolution: "RETRY_INQUIRE",
+      action: "MARK_FAILED",
       reason: "unknown state",
-      notes: "retried the inquiry",
-      operatorNote: "operator took over",
+      notes: "gateway confirmed unpaid",
+      providerReference: "PRV-1",
     },
-    allowedKeys: ["resolution", "state"],
-    requiredKeys: ["resolution"],
+    allowedKeys: ["action", "reason", "notes", "providerReference", "settledAmount"],
+    requiredKeys: ["action", "reason"],
   },
   {
     route: "POST /reconciliation/sources",
@@ -1269,21 +1269,29 @@ describe("core contract field mapping", () => {
     expect(mapped.metadata).toBeUndefined();
   });
 
-  test("operator case resolve carries the operator notes as the core resolution", () => {
+  test("operator case resolve maps a Maker-Checker proposal to the canonical action", () => {
     const mapped = toCoreOperatorCaseResolve({
-      resolution: "RETRY_INQUIRE",
-      reason: "unknown state",
-      notes: "retried the inquiry",
+      action: "MARK_FAILED",
+      reason: "gateway confirmed unpaid",
+      notes: "checked with the partner desk",
+      providerReference: "PRV-1",
     });
-    expect(mapped).toEqual({ resolution: "retried the inquiry", state: "RESOLVED" });
+    expect(mapped).toEqual({
+      action: "MARK_FAILED",
+      reason: "gateway confirmed unpaid",
+      notes: "checked with the partner desk",
+      providerReference: "PRV-1",
+    });
   });
 
-  test("operator case resolve keeps an escalated case in progress", () => {
-    const mapped = toCoreOperatorCaseResolve({
-      resolution: "ESCALATE",
-      reason: "needs the risk team",
-    });
-    expect(mapped).toEqual({ resolution: "needs the risk team", state: "IN_PROGRESS" });
+  test("operator case success keeps the provider reference when supplied", () => {
+    expect(
+      toCoreOperatorCaseResolve({
+        action: "MARK_SUCCEEDED",
+        reason: "gateway says paid",
+        providerReference: "PRV-2",
+      }),
+    ).toEqual({ action: "MARK_SUCCEEDED", reason: "gateway says paid", providerReference: "PRV-2" });
   });
 
   test("reconciliation source carries the public parser description as the parser config", () => {

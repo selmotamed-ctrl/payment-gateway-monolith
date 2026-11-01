@@ -10,10 +10,25 @@ const idParamsSchema = z.object({ id: zIdentifier });
 
 export const resolveSchema = z
   .object({
-    resolution: z.enum(["RETRY_INQUIRE", "MARK_SUCCEEDED", "MARK_FAILED", "ESCALATE", "RELEASE_RESERVATION"]),
+    action: z.enum(["MARK_SUCCEEDED", "MARK_FAILED", "CLOSE_CASE"]),
     reason: zReason,
     notes: z.string().max(2000).optional(),
-    operatorNote: z.string().max(2000).optional(),
+    providerReference: z.string().min(1).max(191).optional(),
+    settledAmount: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).optional(),
+  })
+  .strict();
+
+export const bulkInquireSchema = z
+  .object({
+    caseIds: z.array(zIdentifier).min(1).max(200),
+    reason: z.string().max(500).optional(),
+  })
+  .strict();
+
+export const operatorCasePatchSchema = z
+  .object({
+    assigneeUserId: zIdentifier.nullable().optional(),
+    state: z.enum(["OPEN", "IN_PROGRESS"]).optional(),
   })
   .strict();
 
@@ -35,6 +50,25 @@ router.get(
 );
 
 router.post(
+  "/operator-cases/bulk-inquire",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/admin/operator-cases/bulk-inquire",
+    schema: bulkInquireSchema,
+  }),
+);
+
+router.patch(
+  "/operator-cases/:id",
+  coreForward({
+    method: "PATCH",
+    path: (context) => `/internal/admin/operator-cases/${encodeURIComponent(context.params.id ?? "")}`,
+    paramsSchema: idParamsSchema,
+    schema: operatorCasePatchSchema,
+  }),
+);
+
+router.post(
   "/operator-cases/:id/resolve",
   coreForward({
     method: "POST",
@@ -43,6 +77,7 @@ router.post(
     paramsSchema: idParamsSchema,
     schema: resolveSchema,
     bodyFrom: (_req, body) => toCoreOperatorCaseResolve(body),
+    relayStatus: true,
   }),
 );
 

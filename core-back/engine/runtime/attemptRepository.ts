@@ -2,7 +2,7 @@ import { decimal } from "../ledger/LedgerPoster";
 import type { AttemptRepository, DynamicAttempt, DynamicAttemptPatch } from "../flow/DynamicRailEngine";
 import type { PrismaLike } from "../db/ports";
 
-interface AttemptRow {
+export interface AttemptRow {
   id: string;
   reference: string;
   gatewayReference: string | null;
@@ -151,6 +151,8 @@ const toAttempt = (row: AttemptRow): DynamicAttempt => {
     feeAccrual: feeAccrualOf(row),
   };
 };
+
+export const attemptRowToDynamicAttempt = (row: AttemptRow): DynamicAttempt => toAttempt(row);
 
 export class PrismaAttemptRepository implements AttemptRepository {
   private readonly client: PrismaLike;

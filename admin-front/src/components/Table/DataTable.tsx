@@ -334,6 +334,7 @@ export const DataTable = defineComponent(
                         key: "__no",
                         label: "No.",
                         minWidth: true,
+                        sortable: false,
                     });
                 } else {
                     props.headers[0] = {
@@ -341,6 +342,7 @@ export const DataTable = defineComponent(
                         key: "__no",
                         label: "No",
                         minWidth: true,
+                        sortable: false,
                     };
                 }
             }

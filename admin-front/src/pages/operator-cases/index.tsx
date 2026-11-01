@@ -1,211 +1,505 @@
 import { dc } from "kt-dc";
-import { ref } from "vue";
-import { useLocale } from "vuetify";
-import { VBtn, VCard, VCardText, VCheckbox, VDialog, VSelect, VTextarea } from "vuetify/components";
+import { computed, ref } from "vue";
+import { useLocale, useTheme } from "vuetify";
+import {
+    VBtn,
+    VCard,
+    VCardText,
+    VCheckbox,
+    VDialog,
+    VDivider,
+} from "vuetify/components";
+import { useRouter } from "vue-router";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
+import { MoneyText } from "@/components/MoneyText";
+import { ApiTable } from "@/components/Table/ApiTable";
+import TableFilters from "@/components/Table/TableFilters";
+import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
+import { tableRegistry } from "@/components/Table/tableRegistry";
 import { statusTone } from "@/components/Table/statusTone";
-import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
+import { hasOneOfAuthorities } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
-import { formatPlainNumber } from "@/utils/money";
+import {
+    COLUMN_HELP,
+    caseHelp,
+    caseStateHelp,
+    formatDateTime,
+    priorityHelp,
+    slaInfo,
+} from "./operatorCaseHelp";
+import type { BulkInquiryResult, OperatorCaseSummary } from "./types";
 
-type OperatorCase = {
-    id: string;
-    caseRef: string;
-    caseType: string;
-    priority: string;
-    state: string;
-    attemptId: string | null;
-    merchantName: string;
-    railCode: string;
-    amount: string;
-    currency: string;
-    openedAt: string;
-    slaDueAt: string;
-    summary: string;
-    resolution: string | null;
+const filterDefinitions = tableRegistry.OperatorCases?.filters ?? [];
+
+const reasonText = (reason: string | undefined): string => {
+    if (!reason) return "";
+    return reason.replaceAll("_", " ").toLowerCase();
 };
-
-const CASE_TYPES = ["UNKNOWN", "CONFLICT", "MISMATCH", "LATE_SUCCESS", "HELD", "UNMATCHED_STATEMENT"];
 
 const OperatorCasesPage = dc(() => {
     const { t } = useLocale();
-    const rows = ref<OperatorCase[]>([]);
-    const loading = ref(true);
-    const error = ref<string | null>(null);
+    const theme = useTheme();
+    const router = useRouter();
+
     const search = ref<string | null>(null);
-    const typeFilter = ref<string | null>(null);
-
-    const dialogOpen = ref(false);
-    const selected = ref<OperatorCase | null>(null);
-    const resolutionChoice = ref<string>("RETRY_INQUIRE");
-    const resolutionReason = ref<string>("");
-    const actionLoading = ref(false);
-
-    const bulkIds = ref<string[]>([]);
+    const filters = ref<FilterValues>({});
+    const rows = ref<OperatorCaseSummary[]>([]);
+    const total = ref(0);
+    const pageSize = ref(20);
+    const selected = ref<Record<string, OperatorCaseSummary>>({});
     const bulkLoading = ref(false);
+    const inquiringId = ref<string | null>(null);
+    const bulkResult = ref<BulkInquiryResult | null>(null);
+    const resultOpen = ref(false);
+    let filterTimer: ReturnType<typeof setTimeout> | undefined;
+    const refreshHook = ref<{
+        reset: () => void;
+        refresh: (props: { queryParams?: Record<string, unknown>; nextSkip?: number }) => Promise<void>;
+        refreshAsIs: () => void;
+    } | null>(null);
 
-    const load = async () => {
-        loading.value = true;
-        error.value = null;
-        try {
-            const response = await api.get(urlsMap.operatorCases, {
-                params: { search: search.value || undefined, caseType: typeFilter.value || undefined },
-            });
-            const payload = response.data?.data ?? response.data ?? {};
-            rows.value = payload.cases ?? payload.rows ?? payload.items ?? [];
-        } catch (e) {
-            error.value = extractApiErrorMessage(e);
-            rows.value = [];
-        } finally {
-            loading.value = false;
+    const canInquire = computed(() => hasOneOfAuthorities(["attempt:inquire", "case:write"]));
+    const selectedList = computed(() => Object.values(selected.value));
+    const selectedCount = computed(() => selectedList.value.length);
+    const eligibleSelected = computed(() =>
+        selectedList.value.filter((row) => row.inquiryEligibility?.eligible === true),
+    );
+    const skippedSelected = computed(() =>
+        selectedList.value.filter((row) => row.inquiryEligibility?.eligible !== true),
+    );
+    const allVisibleSelected = computed(
+        () => rows.value.length > 0 && rows.value.every((row) => Boolean(selected.value[row.id])),
+    );
+    const someVisibleSelected = computed(
+        () => rows.value.some((row) => Boolean(selected.value[row.id])) && !allVisibleSelected.value,
+    );
+
+    const clearSelection = () => {
+        selected.value = {};
+    };
+
+    const toggleRow = (row: OperatorCaseSummary, value: boolean | null) => {
+        if (value) {
+            selected.value = { ...selected.value, [row.id]: row };
+        } else {
+            const next = { ...selected.value };
+            delete next[row.id];
+            selected.value = next;
         }
     };
 
-    void load();
-
-    const resolve = async () => {
-        if (!selected.value || resolutionReason.value.trim().length < 3) {
+    const toggleVisible = (value: boolean | null) => {
+        if (!value) {
+            const next = { ...selected.value };
+            for (const row of rows.value) delete next[row.id];
+            selected.value = next;
             return;
         }
-        actionLoading.value = true;
-        try {
-            await api.post(urlsMap.operatorCaseResolve(selected.value.id), {
-                resolution: resolutionChoice.value,
-                reason: resolutionReason.value.trim(),
-            });
-            dialogOpen.value = false;
-            showSnackBar({ type: "success", message: t("Resolve") });
-            await load();
-        } catch (e) {
-            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
-        } finally {
-            actionLoading.value = false;
-        }
+        const next = { ...selected.value };
+        for (const row of rows.value) next[row.id] = row;
+        selected.value = next;
     };
 
-    const runBulkInquiry = async () => {
-        if (!bulkIds.value.length) {
-            return;
+    const onFiltersChanged = (key: string, value: unknown) => {
+        filters.value = { ...filters.value, [key]: value };
+        clearSelection();
+        if (filterTimer) clearTimeout(filterTimer);
+        filterTimer = setTimeout(() => refreshHook.value?.reset(), 300);
+    };
+
+    const onFiltersCleared = () => {
+        filters.value = {};
+        clearSelection();
+        refreshHook.value?.reset();
+    };
+
+    const onSearchChanged = (value: string | null) => {
+        search.value = value;
+        clearSelection();
+    };
+
+    const toneColor = (tone: ReturnType<typeof statusTone>): string => {
+        const colors = theme.current.value.colors as Record<string, string>;
+        return colors[tone] ?? colors["on-surface-variant"] ?? "#64748b";
+    };
+
+    const rowColor = (row: OperatorCaseSummary): string | undefined => {
+        if (row.priority === "P1" || slaInfo(row.slaDueAt).tone === "error") {
+            return toneColor("error");
         }
+        if (row.priority === "P2" || row.state === "PENDING_CHECKER") {
+            return toneColor("warning");
+        }
+        if (row.priority === "P3") {
+            return toneColor("info");
+        }
+        return undefined;
+    };
+
+    const openCase = (row: OperatorCaseSummary) => {
+        void router.push({ name: "OperatorCaseDetail", params: { id: row.id } });
+    };
+
+    const runBulkInquiry = async (caseIds: string[]) => {
+        if (caseIds.length === 0) return;
         bulkLoading.value = true;
-        let ok = 0;
-        let failed = 0;
         try {
-            for (const attemptId of bulkIds.value) {
-                try {
-                    await api.post(urlsMap.attemptInquire(attemptId), {});
-                    ok += 1;
-                } catch {
-                    failed += 1;
-                }
-            }
+            const response = await api.post(urlsMap.operatorCasesBulkInquire, { caseIds });
+            const payload = (response.data?.data ?? response.data ?? {}) as BulkInquiryResult;
+            bulkResult.value = payload;
+            resultOpen.value = true;
+            clearSelection();
+            refreshHook.value?.refreshAsIs();
             showSnackBar({
-                type: failed ? "warning" : "success",
-                message: `${t("Inquire")}: ${ok} ${t("Approved")} / ${failed} ${t("Failed")}`,
+                type: payload.scheduled > 0 ? "success" : "warning",
+                message: `${t("Inquiry scheduled")}: ${payload.scheduled} / ${payload.requested}`,
             });
-            bulkIds.value = [];
-            await load();
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
         } finally {
             bulkLoading.value = false;
         }
     };
 
-    const toneFor = (type: string) => {
-        switch (type) {
-            case "CONFLICT":
-            case "LATE_SUCCESS":
-                return "error" as const;
-            case "UNKNOWN":
-            case "MISMATCH":
-                return "warning" as const;
-            default:
-                return "info" as const;
+    const inquireOne = async (row: OperatorCaseSummary) => {
+        inquiringId.value = row.id;
+        try {
+            await runBulkInquiry([row.id]);
+        } finally {
+            inquiringId.value = null;
         }
     };
 
-    const headers: TableHeader<OperatorCase>[] = [
-        { key: "caseRef", label: "Reference", value: (row) => row.caseRef },
+    const headers: TableHeader<OperatorCaseSummary>[] = [
         {
-            key: "caseType",
-            label: "Case Type",
-            Value: ({ row }: { row: OperatorCase }) => <StatusChip label={row.caseType} tone={toneFor(row.caseType)} />,
-        },
-        { key: "priority", label: "Priority", value: (row) => row.priority },
-        { key: "state", label: "Status", Value: ({ row }: { row: OperatorCase }) => <StatusChip label={row.state} tone={statusTone(row.state)} /> },
-        { key: "merchantName", label: "Merchant Name", value: (row) => row.merchantName },
-        { key: "railCode", label: "Rail Code", value: (row) => row.railCode },
-        { key: "amount", label: "Amount", value: (row) => `${row.amount ?? ""} ${row.currency ?? ""}` },
-        { key: "openedAt", label: "Opened At", value: (row) => row.openedAt },
-        { key: "slaDueAt", label: "Due At", value: (row) => row.slaDueAt },
-        {
-            key: "attempt",
-            label: "Attempts",
-            Value: ({ row }: { row: OperatorCase }) =>
-                row.attemptId ? (
+            key: "select",
+            label: "",
+            sortable: false,
+            headerTooltip: "Select cases for a bulk gateway inquiry. Only inquiry-eligible cases are scheduled.",
+            headerCellStyle: { justifyContent: "center" },
+            Header: () => (
+                <span
+                    style={{
+                        width: "28px",
+                        height: "40px",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                    }}
+                >
                     <VCheckbox
-                        modelValue={bulkIds.value.includes(row.attemptId)}
-                        onUpdate:modelValue={(value: boolean | null) => {
-                            if (!row.attemptId) {
-                                return;
-                            }
-                            bulkIds.value = value
-                                ? [...bulkIds.value, row.attemptId]
-                                : bulkIds.value.filter((id) => id !== row.attemptId);
-                        }}
+                        modelValue={allVisibleSelected.value}
+                        indeterminate={someVisibleSelected.value}
+                        onUpdate:modelValue={(value: boolean | null) => toggleVisible(value)}
                         density="compact"
                         hideDetails
+                        aria-label="Select all cases on this page"
+                        style={{ flex: "0 0 auto" }}
                     />
-                ) : (
-                    <span>-</span>
-                ),
-        },
-        {
-            key: "actions",
-            label: "Actions Column",
-            Value: ({ row }: { row: OperatorCase }) => (
-                <ThemedView style={{ flexDirection: "row", gap: "6px" }}>
-                    <VBtn
-                        size="small"
-                        variant="tonal"
-                        disabled={!row.attemptId}
-                        onClick={async () => {
-                            try {
-                                await api.post(urlsMap.attemptInquire(row.attemptId!), {});
-                                showSnackBar({ type: "success", message: t("Inquire") });
-                                await load();
-                            } catch (e) {
-                                showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
-                            }
-                        }}
-                    >
-                        {t("Inquire")}
-                    </VBtn>
-                    <VBtn
-                        size="small"
-                        variant="tonal"
-                        color="primary"
-                        onClick={() => {
-                            selected.value = row;
-                            resolutionChoice.value = "RETRY_INQUIRE";
-                            resolutionReason.value = "";
-                            dialogOpen.value = true;
-                        }}
-                    >
-                        {t("Resolve")}
-                    </VBtn>
+                </span>
+            ),
+            Value: ({ row }: { row: OperatorCaseSummary }) => (
+                <ThemedView
+                    style={{
+                        width: "28px",
+                        height: "40px",
+                        alignItems: "center",
+                        justifyContent: "center",
+                    }}
+                >
+                    <VCheckbox
+                        modelValue={Boolean(selected.value[row.id])}
+                        onUpdate:modelValue={(value: boolean | null) => toggleRow(row, value)}
+                        density="compact"
+                        hideDetails
+                        aria-label={`Select case ${row.caseRef}`}
+                        style={{ flex: "0 0 auto" }}
+                    />
                 </ThemedView>
             ),
         },
+        {
+            key: "caseRef",
+            label: "Case reference",
+            sortKey: "caseRef",
+            headerTooltip: COLUMN_HELP.caseRef,
+            value: (row) => row.caseRef,
+            Value: ({ row }: { row: OperatorCaseSummary }) => (
+                <VBtn
+                    variant="text"
+                    color="primary"
+                    size="small"
+                    aria-label={`Open case ${row.caseRef}`}
+                    onClick={() => openCase(row)}
+                    style={{
+                        minWidth: 0,
+                        height: "auto",
+                        padding: "2px 4px",
+                        textTransform: "none",
+                        fontWeight: 700,
+                        letterSpacing: 0,
+                    }}
+                >
+                    {row.caseRef}
+                </VBtn>
+            ),
+        },
+        {
+            key: "caseType",
+            label: "Type",
+            sortKey: "kind",
+            headerTooltip: COLUMN_HELP.caseType,
+            value: (row) => row.caseType,
+            Value: ({ row }: { row: OperatorCaseSummary }) => {
+                const help = caseHelp(row.caseType);
+                return (
+                    <StatusChip
+                        label={help.label}
+                        tone={
+                            row.caseType === "CONFLICT" || row.caseType === "LATE_SUCCESS"
+                                ? "error"
+                                : row.caseType === "UNKNOWN" || row.caseType === "MISMATCH"
+                                  ? "warning"
+                                  : "info"
+                        }
+                    />
+                );
+            },
+        },
+        {
+            key: "priority",
+            label: "Priority",
+            sortKey: "priority",
+            headerTooltip: COLUMN_HELP.priority,
+            value: (row) => row.priority,
+            Value: ({ row }: { row: OperatorCaseSummary }) => (
+                <span title={priorityHelp(row.priority).meaning}>
+                    <StatusChip label={row.priority} tone={statusTone(row.priority)} />
+                </span>
+            ),
+        },
+        {
+            key: "state",
+            label: "State",
+            sortKey: "state",
+            headerTooltip: COLUMN_HELP.state,
+            value: (row) => row.state,
+            Value: ({ row }: { row: OperatorCaseSummary }) => (
+                <span title={caseStateHelp(row.state).meaning}>
+                    <StatusChip label={row.state} tone={statusTone(row.state)} />
+                </span>
+            ),
+        },
+        {
+            key: "merchantName",
+            label: "Merchant",
+            sortKey: "merchantName",
+            headerTooltip: COLUMN_HELP.merchant,
+            value: (row) => row.merchantTradeName || row.merchantLegalName || "—",
+            Value: ({ row }: { row: OperatorCaseSummary }) => (
+                <ThemedView style={{ gap: "2px" }}>
+                    <ThemedText style={{ fontSize: "13px", fontWeight: 600 }}>
+                        {row.merchantTradeName || row.merchantLegalName || "—"}
+                    </ThemedText>
+                    {row.merchantLegalName && row.merchantLegalName !== row.merchantTradeName && (
+                        <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{row.merchantLegalName}</ThemedText>
+                    )}
+                </ThemedView>
+            ),
+        },
+        {
+            key: "route",
+            label: "Rail / Gateway",
+            headerTooltip: COLUMN_HELP.route,
+            value: (row) => `${row.railCode ?? ""} ${row.gatewayCode ?? ""}`.trim(),
+            Value: ({ row }: { row: OperatorCaseSummary }) => (
+                <ThemedView style={{ gap: "2px" }}>
+                    <ThemedText style={{ fontSize: "13px", fontWeight: 600 }}>{row.railCode || "—"}</ThemedText>
+                    <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>
+                        {row.gatewayCode || row.gatewayName || "—"}
+                    </ThemedText>
+                </ThemedView>
+            ),
+        },
+        {
+            key: "amount",
+            label: "Amount",
+            headerTooltip: COLUMN_HELP.amount,
+            value: (row) => String(row.chargedAmount ?? row.statementAmount ?? ""),
+            Value: ({ row }: { row: OperatorCaseSummary }) => {
+                const amount = row.chargedAmount ?? row.statementAmount;
+                const source = row.chargedAmount ? "Charged" : row.statementAmount ? "Statement" : "";
+                if (amount === null || amount === undefined) {
+                    return <ThemedText style={{ opacity: 0.55 }}>—</ThemedText>;
+                }
+                return (
+                    <ThemedView style={{ gap: "2px" }}>
+                        <MoneyText value={amount} currency={row.currency} showCurrency={Boolean(row.currency)} bold />
+                        <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{source}</ThemedText>
+                    </ThemedView>
+                );
+            },
+        },
+        {
+            key: "attempt",
+            label: "Attempt",
+            headerTooltip: COLUMN_HELP.attempt,
+            value: (row) => row.attemptReference ?? "",
+            Value: ({ row }: { row: OperatorCaseSummary }) => (
+                <ThemedView style={{ gap: "3px" }}>
+                    <ThemedText style={{ fontSize: "12px", fontWeight: 600, direction: "ltr", unicodeBidi: "isolate" }}>
+                        {row.attemptReference || "—"}
+                    </ThemedText>
+                    {row.attemptStatus ? (
+                        <StatusChip label={row.attemptStatus} tone={statusTone(row.attemptStatus)} size="x-small" />
+                    ) : (
+                        <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>No attempt</ThemedText>
+                    )}
+                    {row.attemptSubstatus && (
+                        <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{row.attemptSubstatus}</ThemedText>
+                    )}
+                </ThemedView>
+            ),
+        },
+        {
+            key: "slot",
+            label: "Link slot",
+            headerTooltip: COLUMN_HELP.slot,
+            value: (row) =>
+                row.linkSlot ? `${row.linkSlot.confirmedCount ?? 0}/${row.linkSlot.useCount ?? 0}` : "",
+            Value: ({ row }: { row: OperatorCaseSummary }) =>
+                row.linkSlot ? (
+                    <ThemedView style={{ gap: "3px" }}>
+                        <ThemedText style={{ fontSize: "12px", fontWeight: 600 }}>
+                            {row.linkSlot.confirmedCount ?? 0}/{row.linkSlot.useCount ?? 0} used
+                        </ThemedText>
+                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>
+                            {row.linkSlot.activeLockedCount ?? 0} locked
+                        </ThemedText>
+                    </ThemedView>
+                ) : (
+                    <ThemedText style={{ opacity: 0.55 }}>—</ThemedText>
+                ),
+        },
+        {
+            key: "providerReference",
+            label: "Provider reference",
+            headerTooltip: COLUMN_HELP.providerReference,
+            value: (row) => row.providerReference ?? "",
+        },
+        {
+            key: "reconciliation",
+            label: "Reconciliation",
+            headerTooltip: COLUMN_HELP.reconciliation,
+            value: (row) => row.reconciliationResult ?? "",
+            Value: ({ row }: { row: OperatorCaseSummary }) =>
+                row.reconciliationResult ? (
+                    <StatusChip
+                        label={row.reconciliationResult}
+                        tone={statusTone(row.reconciliationResult)}
+                        size="x-small"
+                    />
+                ) : (
+                    <ThemedText style={{ opacity: 0.55 }}>—</ThemedText>
+                ),
+        },
+        {
+            key: "approval",
+            label: "Approval",
+            headerTooltip: COLUMN_HELP.approval,
+            value: (row) => row.approvalState ?? "",
+            Value: ({ row }: { row: OperatorCaseSummary }) =>
+                row.approvalState ? (
+                    <StatusChip label={row.approvalState} tone={statusTone(row.approvalState)} size="x-small" />
+                ) : (
+                    <ThemedText style={{ opacity: 0.55 }}>—</ThemedText>
+                ),
+        },
+        {
+            key: "openedAt",
+            label: "Opened",
+            sortKey: "openedAt",
+            headerTooltip: COLUMN_HELP.openedAt,
+            value: (row) => row.openedAt,
+            Value: ({ row }: { row: OperatorCaseSummary }) => (
+                <ThemedText style={{ fontSize: "12px" }}>{formatDateTime(row.openedAt)}</ThemedText>
+            ),
+        },
+        {
+            key: "slaDueAt",
+            label: "SLA due",
+            sortKey: "slaDueAt",
+            headerTooltip: COLUMN_HELP.slaDueAt,
+            value: (row) => row.slaDueAt,
+            Value: ({ row }: { row: OperatorCaseSummary }) => {
+                const sla = slaInfo(row.slaDueAt);
+                return (
+                    <ThemedView style={{ gap: "3px" }}>
+                        <StatusChip label={sla.label} tone={sla.tone} size="x-small" />
+                        <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>
+                            {formatDateTime(row.slaDueAt)}
+                        </ThemedText>
+                    </ThemedView>
+                );
+            },
+        },
+        {
+            key: "assignee",
+            label: "Assignee",
+            headerTooltip: COLUMN_HELP.assignee,
+            value: (row) => row.assigneeEmail ?? "",
+            Value: ({ row }: { row: OperatorCaseSummary }) => (
+                <ThemedText style={{ fontSize: "12px", opacity: row.assigneeEmail ? 1 : 0.55 }}>
+                    {row.assigneeEmail || t("Unassigned")}
+                </ThemedText>
+            ),
+        },
+        {
+            key: "actions",
+            label: "Actions",
+            sortable: false,
+            headerTooltip: COLUMN_HELP.actions,
+            Value: ({ row }: { row: OperatorCaseSummary }) => {
+                const eligibility = row.inquiryEligibility;
+                return (
+                    <ThemedView style={{ flexDirection: "row", gap: "6px", alignItems: "center" }}>
+                        <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => openCase(row)}>
+                            {t("Open")}
+                        </VBtn>
+                        <span
+                            title={
+                                eligibility?.eligible
+                                    ? t("Schedule a gateway status inquiry")
+                                    : reasonText(eligibility?.reason) || t("Inquiry is not available")
+                            }
+                        >
+                            <VBtn
+                                size="small"
+                                variant="tonal"
+                                color="primary"
+                                loading={inquiringId.value === row.id}
+                                disabled={!eligibility?.eligible || bulkLoading.value || !canInquire.value}
+                                onClick={() => void inquireOne(row)}
+                            >
+                                {t("Inquire")}
+                            </VBtn>
+                        </span>
+                    </ThemedView>
+                );
+            },
+        },
     ];
+
+    const selectedEligibleCount = computed(() => eligibleSelected.value.length);
+    const selectedSkippedCount = computed(() => skippedSelected.value.length);
 
     return () => (
         <ScreenContainer>
@@ -213,75 +507,185 @@ const OperatorCasesPage = dc(() => {
                 <PageHeader
                     title={t("Operator Cases")}
                     end={() => (
-                        <ThemedView style={{ flexDirection: "row", gap: "10px", alignItems: "center" }}>
-                            <VSelect
-                                items={CASE_TYPES.map((value) => ({ title: value, value }))}
-                                modelValue={typeFilter.value}
-                                onUpdate:modelValue={(v: string | null) => (typeFilter.value = v)}
-                                label={t("Case Type")}
-                                clearable
-                                hideDetails
-                                density="compact"
-                                style={{ minWidth: "200px" }}
+                        <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
+                            <StatusChip
+                                label={`${total.value} ${t("cases")}`}
+                                tone="info"
+                                size="small"
                             />
-                            <VBtn
-                                variant="tonal"
-                                loading={bulkLoading.value}
-                                disabled={!bulkIds.value.length}
-                                onClick={() => void runBulkInquiry()}
-                            >
-                                {t("Bulk Inquiry")} ({formatPlainNumber(bulkIds.value.length)})
-                            </VBtn>
+                            <StatusChip
+                                label={`${selectedCount.value} ${t("selected")}`}
+                                tone={selectedCount.value > 0 ? "primary" : "neutral"}
+                                size="small"
+                            />
                         </ThemedView>
                     )}
                 />
 
-                {error.value ? (
-                    <StateView error={error.value} onRetry={() => void load()} />
-                ) : (
-                    <DataTable
-                        title={t("Operator Cases")}
-                        data={rows.value}
-                        headers={headers}
-                        loading={loading.value}
-                        showNumber={true}
-                        xlsx={false}
-                        searchValue={search.value}
-                        setSearchValue={(value) => (search.value = value)}
-                    />
-                )}
+                <ApiTable<OperatorCaseSummary>
+                    title={t("Operator Cases")}
+                    url={urlsMap.operatorCases}
+                    showNumber={true}
+                    xlsx={true}
+                    localSearch={false}
+                    numberOfItemsPerPage={pageSize.value}
+                    setNumberOfItemsPerPage={(value) => (pageSize.value = value)}
+                    searchValue={search.value}
+                    setSearchValue={onSearchChanged}
+                    headers={headers}
+                    rowColor={rowColor}
+                    apiDataExtractor={(data) => {
+                        const payload = data as { cases?: OperatorCaseSummary[]; rows?: OperatorCaseSummary[]; items?: OperatorCaseSummary[] };
+                        return payload.cases ?? payload.rows ?? payload.items ?? [];
+                    }}
+                    apiTotalExtractor={(data) => {
+                        const payload = data as { total?: number; cases?: OperatorCaseSummary[] };
+                        return Number(payload.total ?? payload.cases?.length ?? 0);
+                    }}
+                    onData={(nextRows, nextTotal) => {
+                        rows.value = nextRows;
+                        total.value = nextTotal;
+                    }}
+                    setRefreshHook={(hook) => {
+                        refreshHook.value = hook as typeof refreshHook.value;
+                    }}
+                    clearRefreshHook={() => {
+                        refreshHook.value = null;
+                    }}
+                    onRefresh={(props, refresh) => {
+                        void refresh({
+                            queryParams: {
+                                page: props.page,
+                                pageSize: pageSize.value,
+                                ...(search.value ? { search: search.value } : {}),
+                                ...buildFilterQuery(filterDefinitions, filters.value),
+                                ...(props.sortKey
+                                    ? { sortKey: props.sortKey, sortDirection: props.sortDirection }
+                                    : {}),
+                            },
+                        });
+                    }}
+                    TopSlot={() => (
+                        <ThemedView style={{ gap: "14px" }}>
+                            <TableFilters
+                                filters={filterDefinitions}
+                                values={filters.value}
+                                total={total.value}
+                                onChange={onFiltersChanged}
+                                onClear={onFiltersCleared}
+                            />
+                            <ThemedView
+                                style={{
+                                    flexDirection: "row",
+                                    gap: "12px",
+                                    alignItems: "center",
+                                    flexWrap: "wrap",
+                                    padding: "12px 14px",
+                                    borderRadius: "12px",
+                                    border: "1px solid rgba(100,116,139,0.25)",
+                                    background: "rgba(100,116,139,0.06)",
+                                }}
+                            >
+                                <ThemedText style={{ fontSize: "13px", fontWeight: 700 }}>
+                                    {selectedCount.value} {t("selected")}
+                                </ThemedText>
+                                <StatusChip
+                                    label={`${selectedEligibleCount.value} ${t("inquiry-ready")}`}
+                                    tone="success"
+                                    size="x-small"
+                                />
+                                <StatusChip
+                                    label={`${selectedSkippedCount.value} ${t("will be skipped")}`}
+                                    tone={selectedSkippedCount.value > 0 ? "warning" : "neutral"}
+                                    size="x-small"
+                                />
+                                <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>
+                                    {t(
+                                        "Only UNKNOWN or VERIFYING attempts on gateways with status inquiry are scheduled.",
+                                    )}
+                                </ThemedText>
+                                <div style={{ flex: 1 }} />
+                                <VBtn
+                                    size="small"
+                                    variant="text"
+                                    disabled={selectedCount.value === 0 || bulkLoading.value}
+                                    onClick={clearSelection}
+                                >
+                                    {t("Clear selection")}
+                                </VBtn>
+                                <VBtn
+                                    size="small"
+                                    color="primary"
+                                    variant="flat"
+                                    prependIcon="mdi-radar"
+                                    loading={bulkLoading.value}
+                                    disabled={selectedCount.value === 0 || !canInquire.value}
+                                    onClick={() => void runBulkInquiry(Object.keys(selected.value))}
+                                >
+                                    {t("Inquire selected")} ({selectedCount.value})
+                                </VBtn>
+                            </ThemedView>
+                            <VDivider />
+                        </ThemedView>
+                    )}
+                />
             </ThemedView>
 
-            <VDialog modelValue={dialogOpen.value} onUpdate:modelValue={(v: any) => (dialogOpen.value = v)} maxWidth="560px">
+            <VDialog
+                modelValue={resultOpen.value}
+                onUpdate:modelValue={(value: boolean | null) => (resultOpen.value = Boolean(value))}
+                maxWidth="820px"
+                scrollable
+            >
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedText type="defaultSemiBold">{selected.value?.caseRef}</ThemedText>
-                        <ThemedText style={{ fontSize: "13px", opacity: 0.75 }}>{selected.value?.summary}</ThemedText>
-                        <VSelect
-                            items={[
-                                { title: t("Retry inquiry"), value: "RETRY_INQUIRE" },
-                                { title: t("Mark succeeded"), value: "MARK_SUCCEEDED" },
-                                { title: t("Mark failed"), value: "MARK_FAILED" },
-                                { title: t("Escalate"), value: "ESCALATE" },
-                                { title: t("Release reservation"), value: "RELEASE_RESERVATION" },
-                            ]}
-                            modelValue={resolutionChoice.value}
-                            onUpdate:modelValue={(v: string) => (resolutionChoice.value = v)}
-                            label={t("Resolution")}
-                        />
-                        <VTextarea
-                            modelValue={resolutionReason.value}
-                            onUpdate:modelValue={(v: string) => (resolutionReason.value = v)}
-                            label={t("Reason")}
-                            rows={3}
-                        />
-                        <VBtn
-                            color="primary"
-                            disabled={resolutionReason.value.trim().length < 3}
-                            loading={actionLoading.value}
-                            onClick={() => void resolve()}
-                        >
-                            {t("Resolve")}
+                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
+                            {t("Bulk inquiry result")}
+                        </ThemedText>
+                        <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
+                            <StatusChip
+                                label={`${bulkResult.value?.scheduled ?? 0} ${t("scheduled")}`}
+                                tone="success"
+                            />
+                            <StatusChip
+                                label={`${bulkResult.value?.skipped ?? 0} ${t("skipped")}`}
+                                tone={(bulkResult.value?.skipped ?? 0) > 0 ? "warning" : "neutral"}
+                            />
+                        </ThemedView>
+                        <ThemedView style={{ flexDirection: "column", gap: "8px" }}>
+                            {(bulkResult.value?.results ?? []).map((result) => (
+                                <ThemedView
+                                    key={result.caseId}
+                                    style={{
+                                        flexDirection: "row",
+                                        alignItems: "center",
+                                        gap: "10px",
+                                        padding: "10px 12px",
+                                        borderRadius: "10px",
+                                        border: "1px solid rgba(100,116,139,0.2)",
+                                    }}
+                                >
+                                    <StatusChip
+                                        label={result.status}
+                                        tone={result.status === "SCHEDULED" ? "success" : "warning"}
+                                        size="x-small"
+                                    />
+                                    <ThemedView style={{ flex: 1, gap: "2px" }}>
+                                        <ThemedText style={{ fontSize: "13px", fontWeight: 600 }}>
+                                            {result.caseRef ?? result.caseId}
+                                        </ThemedText>
+                                        <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>
+                                            {result.attemptReference ?? result.attemptId ?? "—"} · {t(result.message)}
+                                        </ThemedText>
+                                    </ThemedView>
+                                    <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>
+                                        {reasonText(result.reason)}
+                                    </ThemedText>
+                                </ThemedView>
+                            ))}
+                        </ThemedView>
+                        <VBtn variant="tonal" onClick={() => (resultOpen.value = false)}>
+                            {t("Close")}
                         </VBtn>
                     </VCardText>
                 </VCard>

@@ -11,6 +11,12 @@ import { moneyToString } from "../../engine/db/money";
 import { ApiError, parseOrThrow } from "../../lib/error";
 import { buildListQuery, listResponse } from "../../lib/listQuery";
 import {
+  OPERATOR_CASE_ACTIONS,
+  operatorCaseInquiryEligibility,
+  operatorCaseInquirySkipMessage,
+  type OperatorCaseAction,
+} from "../../lib/operatorCases";
+import {
   generateMfaCode,
   hashMfaCode,
   hashPassword,
@@ -81,6 +87,7 @@ const governanceContext = (platform: ReturnType<typeof getPlatformRuntime>): Gov
   repositories: platform.repositories,
   engine: platform.engine,
   transitionBus: invalidationBus,
+  slots: platform.slots,
 });
 
 /**
@@ -1382,9 +1389,33 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
     throw new ApiError(404, "APPROVAL_REQUEST_NOT_FOUND", "The approval request does not exist");
   }
   assertCheckerIsNotMaker(approval.makerUserId, actor.userId);
-  const updated = await client.approvalRequest.update({
-    where: { id },
-    data: { checkerUserId: actor.userId, state: "REJECTED", rejectionReason: body.reason },
+  const updated = await client.$transaction(async (tx) => {
+    const row = await tx.approvalRequest.update({
+      where: { id },
+      data: { checkerUserId: actor.userId, state: "REJECTED", rejectionReason: body.reason },
+    });
+    if (row.subjectType === "OPERATOR_CASE") {
+      const operatorCase = await tx.operatorCase.findUnique({ where: { id: row.subjectId } });
+      if (operatorCase) {
+        await tx.operatorCase.updateMany({
+          where: { id: row.subjectId, state: "PENDING_CHECKER" },
+          data: { state: "IN_PROGRESS" },
+        });
+        await tx.auditLog.create({
+          data: {
+            actorId: actor.userId,
+            role: actor.role,
+            action: "OPERATOR_CASE_RESOLUTION_REJECTED",
+            entityType: "OPERATOR_CASE",
+            entityId: row.subjectId,
+            beforeJson: { state: "PENDING_CHECKER" },
+            afterJson: { state: "IN_PROGRESS", rejectionReason: body.reason },
+            approvalRequestId: row.id,
+          },
+        });
+      }
+    }
+    return row;
   });
   response.json({ id: updated.id, state: updated.state });
 });
@@ -1711,56 +1742,817 @@ router.post("/aml/reports/:id/acknowledge", async (request: Request, response: R
   response.json(report);
 });
 
+/* --------------------------------------------------------------- operator cases */
+
+const operatorCaseListInclude = {
+  attempt: {
+    select: {
+      id: true,
+      reference: true,
+      status: true,
+      substatus: true,
+      requestedAmount: true,
+      totalChargedAmount: true,
+      settledAmount: true,
+      currency: true,
+      providerReference: true,
+      gatewayReference: true,
+      createdAt: true,
+      terminalAt: true,
+      merchant: {
+        select: {
+          id: true,
+          tradeName: true,
+          legalName: true,
+          status: true,
+          riskTier: true,
+        },
+      },
+      rail: { select: { id: true, code: true, nameEn: true } },
+      route: {
+        select: {
+          id: true,
+          gateway: { select: { id: true, code: true, name: true } },
+        },
+      },
+      gatewayVersion: {
+        select: {
+          id: true,
+          versionNumber: true,
+          state: true,
+          setting: { select: { supportsStatusCheck: true } },
+        },
+      },
+      link: {
+        select: {
+          id: true,
+          key: true,
+          state: true,
+          useCount: true,
+          confirmedCount: true,
+          activeLockedCount: true,
+          infiniteUse: true,
+        },
+      },
+    },
+  },
+  assignee: { select: { id: true, email: true, role: true } },
+  approvalRequest: { select: { id: true, state: true, subjectType: true, createdAt: true } },
+  reconciliationItem: {
+    select: {
+      id: true,
+      result: true,
+      ourReference: true,
+      providerReference: true,
+      statementAmount: true,
+      statementFee: true,
+      runId: true,
+    },
+  },
+} as const;
+
+const operatorCaseDetailInclude = {
+  ...operatorCaseListInclude,
+  approvalRequest: {
+    include: {
+      maker: { select: { id: true, email: true, role: true } },
+      checker: { select: { id: true, email: true, role: true } },
+    },
+  },
+  reconciliationItem: {
+    include: {
+      run: {
+        include: {
+          statementSource: {
+            include: {
+              gateway: { select: { id: true, code: true, name: true } },
+            },
+          },
+        },
+      },
+    },
+  },
+  attempt: {
+    select: {
+      id: true,
+      reference: true,
+      createdAt: true,
+      updatedAt: true,
+      linkId: true,
+      attemptGroupId: true,
+      applicationId: true,
+      merchantId: true,
+      railId: true,
+      routeId: true,
+      credentialSetId: true,
+      gatewayVersionId: true,
+      commissionProfileId: true,
+      env: true,
+      mode: true,
+      subMode: true,
+      status: true,
+      substatus: true,
+      gatewayReference: true,
+      providerReference: true,
+      networkReference: true,
+      requestedAmount: true,
+      surchargeAmount: true,
+      totalChargedAmount: true,
+      settledAmount: true,
+      gatewayFeeAmount: true,
+      platformCommissionAmount: true,
+      netMerchantAmount: true,
+      feeBearer: true,
+      settlementTarget: true,
+      currency: true,
+      pointOfNoReturn: true,
+      expiresAt: true,
+      graceExpiresAt: true,
+      nextCheckAt: true,
+      ledgerEntryId: true,
+      terminalAt: true,
+      merchant: {
+        select: {
+          id: true,
+          tradeName: true,
+          legalName: true,
+          status: true,
+          kybStatus: true,
+          riskTier: true,
+          contactEmail: true,
+          contactPhone: true,
+          country: true,
+        },
+      },
+      application: {
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          assignedWalletId: true,
+          expectedMonthlyVolume: true,
+        },
+      },
+      rail: {
+        select: {
+          id: true,
+          code: true,
+          nameEn: true,
+          nameAr: true,
+          collectionMode: true,
+          currency: true,
+        },
+      },
+      route: {
+        select: {
+          id: true,
+          status: true,
+          healthState: true,
+          gateway: {
+            select: { id: true, code: true, name: true, kind: true, status: true },
+          },
+        },
+      },
+      gatewayVersion: {
+        select: {
+          id: true,
+          versionNumber: true,
+          state: true,
+          gatewayId: true,
+          setting: {
+            select: {
+              id: true,
+              supportsStatusCheck: true,
+              timeoutMs: true,
+              statusCheckMinAgeSeconds: true,
+            },
+          },
+        },
+      },
+      link: {
+        select: {
+          id: true,
+          key: true,
+          applicationId: true,
+          walletId: true,
+          amount: true,
+          currency: true,
+          feeBearer: true,
+          infiniteUse: true,
+          useCount: true,
+          confirmedCount: true,
+          activeLockedCount: true,
+          state: true,
+          expiresAt: true,
+          createdAt: true,
+        },
+      },
+      stepLogs: {
+        orderBy: { createdAt: "asc" as const },
+        take: 200,
+        select: {
+          id: true,
+          createdAt: true,
+          gatewayVersionId: true,
+          phase: true,
+          stepId: true,
+          stepOrder: true,
+          redactedRequestJson: true,
+          redactedResponseText: true,
+          httpStatus: true,
+          durationMs: true,
+          outcome: true,
+        },
+      },
+      inboundEvents: {
+        orderBy: { receivedAt: "desc" as const },
+        take: 100,
+        select: {
+          id: true,
+          channelId: true,
+          gatewayId: true,
+          env: true,
+          rawBodyBytes: true,
+          redactedHeadersJson: true,
+          sourceIp: true,
+          verified: true,
+          verificationError: true,
+          dedupeKey: true,
+          attemptId: true,
+          receivedAt: true,
+          processedAt: true,
+          processingResult: true,
+        },
+      },
+      adjustments: {
+        orderBy: { createdAt: "desc" as const },
+        select: {
+          id: true,
+          createdAt: true,
+          type: true,
+          targetGlAccountId: true,
+          sourceAttemptId: true,
+          disputeId: true,
+          draftedBySystem: true,
+          amount: true,
+          reverseCommission: true,
+          reason: true,
+          externalDisputeRef: true,
+          providerRefundRef: true,
+          state: true,
+          journalEntryId: true,
+        },
+      },
+      disputes: {
+        orderBy: { openedAt: "desc" as const },
+        select: {
+          id: true,
+          attemptId: true,
+          gatewayId: true,
+          railId: true,
+          externalDisputeRef: true,
+          source: true,
+          reasonCode: true,
+          amount: true,
+          currency: true,
+          status: true,
+          openedAt: true,
+          evidenceDueAt: true,
+          outcomeAt: true,
+          adjustmentId: true,
+        },
+      },
+      reconciliationItems: {
+        orderBy: { createdAt: "desc" as const },
+        take: 50,
+        select: {
+          id: true,
+          runId: true,
+          attemptId: true,
+          ourReference: true,
+          providerReference: true,
+          batchReference: true,
+          statementAmount: true,
+          statementFee: true,
+          result: true,
+          operatorCaseId: true,
+          createdAt: true,
+        },
+      },
+    },
+  },
+} as const;
+
+const operatorCaseReference = (entry: {
+  id: string;
+  attempt?: { reference?: string | null } | null;
+  reconciliationItem?: { ourReference?: string | null; providerReference?: string | null } | null;
+}): { value: string; source: string } => {
+  if (entry.attempt?.reference) {
+    return { value: entry.attempt.reference, source: "ATTEMPT_REFERENCE" };
+  }
+  if (entry.reconciliationItem?.ourReference) {
+    return { value: entry.reconciliationItem.ourReference, source: "RECONCILIATION_OUR_REFERENCE" };
+  }
+  if (entry.reconciliationItem?.providerReference) {
+    return { value: entry.reconciliationItem.providerReference, source: "RECONCILIATION_PROVIDER_REFERENCE" };
+  }
+  return { value: entry.id, source: "CASE_ID" };
+};
+
+const bytesPreview = (value: unknown, limit = 64 * 1024): string => {
+  if (!value) return "";
+  if (value instanceof Uint8Array) {
+    return Buffer.from(value).toString("utf8").slice(0, limit);
+  }
+  if (Buffer.isBuffer(value)) {
+    return value.toString("utf8").slice(0, limit);
+  }
+  if (Array.isArray(value)) {
+    return Buffer.from(Uint8Array.from(value as number[])).toString("utf8").slice(0, limit);
+  }
+  return String(value).slice(0, limit);
+};
+
+const flattenOperatorCase = (entry: any): Record<string, unknown> => {
+  const attempt = entry?.attempt ?? null;
+  const item = entry?.reconciliationItem ?? null;
+  const reference = operatorCaseReference(entry);
+  const supportsStatusCheck = attempt?.gatewayVersion?.setting?.supportsStatusCheck === true;
+  const eligibility = operatorCaseInquiryEligibility({
+    caseState: entry?.state,
+    attemptStatus: attempt?.status,
+    terminalAt: attempt?.terminalAt,
+    supportsStatusCheck,
+  });
+  const link = attempt?.link ?? null;
+  return {
+    ...entry,
+    caseId: entry.id,
+    caseRef: reference.value,
+    caseReferenceSource: reference.source,
+    caseType: entry.kind,
+    openedAt: entry.createdAt,
+    merchantId: attempt?.merchant?.id ?? null,
+    merchantTradeName: attempt?.merchant?.tradeName ?? "",
+    merchantLegalName: attempt?.merchant?.legalName ?? "",
+    merchantName: attempt?.merchant?.tradeName || attempt?.merchant?.legalName || "",
+    merchantStatus: attempt?.merchant?.status ?? null,
+    merchantRiskTier: attempt?.merchant?.riskTier ?? null,
+    applicationId: attempt?.applicationId ?? null,
+    railId: attempt?.rail?.id ?? null,
+    railCode: attempt?.rail?.code ?? "",
+    railNameEn: attempt?.rail?.nameEn ?? "",
+    gatewayId: attempt?.route?.gateway?.id ?? null,
+    gatewayCode: attempt?.route?.gateway?.code ?? "",
+    gatewayName: attempt?.route?.gateway?.name ?? "",
+    routeId: attempt?.route?.id ?? null,
+    attemptId: entry.attemptId,
+    attemptReference: attempt?.reference ?? null,
+    attemptStatus: attempt?.status ?? null,
+    attemptSubstatus: attempt?.substatus ?? null,
+    requestedAmount: attempt?.requestedAmount ?? null,
+    chargedAmount: attempt?.totalChargedAmount ?? null,
+    settledAmount: attempt?.settledAmount ?? null,
+    statementAmount: item?.statementAmount ?? null,
+    statementFee: item?.statementFee ?? null,
+    currency: attempt?.currency ?? null,
+    providerReference: attempt?.providerReference ?? item?.providerReference ?? null,
+    gatewayReference: attempt?.gatewayReference ?? null,
+    linkSlot: link
+      ? {
+          id: link.id,
+          key: link.key,
+          state: link.state,
+          useCount: link.useCount,
+          confirmedCount: link.confirmedCount,
+          activeLockedCount: link.activeLockedCount,
+          infiniteUse: link.infiniteUse,
+        }
+      : null,
+    reconciliationItemId: entry.reconciliationItemId,
+    reconciliationResult: item?.result ?? null,
+    approvalRequestId: entry.approvalRequestId,
+    approvalState: entry.approvalRequest?.state ?? null,
+    assigneeUserId: entry.assigneeUserId,
+    assigneeEmail: entry.assignee?.email ?? null,
+    gatewaySupportsStatusCheck: supportsStatusCheck,
+    inquiryEligibility: eligibility,
+  };
+};
+
+const scheduleOperatorCaseInquiry = async (
+  target: typeof client,
+  operatorCase: any,
+  actor: { userId: string; role: string | null },
+): Promise<{ status: "SCHEDULED" | "SKIPPED"; reason?: string }> => {
+  const attempt = operatorCase.attempt;
+  const supportsStatusCheck = attempt?.gatewayVersion?.setting?.supportsStatusCheck === true;
+  const eligibility = operatorCaseInquiryEligibility({
+    caseState: operatorCase.state,
+    attemptStatus: attempt?.status,
+    terminalAt: attempt?.terminalAt,
+    supportsStatusCheck,
+  });
+  if (!eligibility.eligible) {
+    return { status: "SKIPPED", reason: eligibility.reason };
+  }
+  const nextCheckAt = new Date(Date.now() + 1000);
+  await target.$transaction(async (tx) => {
+    const updated = await tx.paymentAttempt.updateMany({
+      where: {
+        id: operatorCase.attemptId,
+        terminalAt: null,
+        status: { in: ["UNKNOWN", "VERIFYING"] },
+      },
+      data: { status: "VERIFYING", nextCheckAt },
+    });
+    if (updated.count === 0) {
+      throw new ApiError(
+        409,
+        "ATTEMPT_NOT_INQUIRABLE",
+        "The payment attempt changed state before the inquiry could be scheduled",
+      );
+    }
+    await tx.operatorCase.updateMany({
+      where: { id: operatorCase.id, state: { in: ["OPEN", "IN_PROGRESS"] } },
+      data: { state: "IN_PROGRESS" },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "OPERATOR",
+        action: "OPERATOR_CASE_INQUIRY_SCHEDULED",
+        entityType: "OPERATOR_CASE",
+        entityId: operatorCase.id,
+        beforeJson: { state: operatorCase.state },
+        afterJson: {
+          state: "IN_PROGRESS",
+          attemptId: operatorCase.attemptId,
+          nextCheckAt: nextCheckAt.toISOString(),
+        },
+      },
+    });
+  });
+  return { status: "SCHEDULED" };
+};
+
 router.get("/operator-cases", async (request: Request, response: Response) => {
   requireAuthorities(request, ["case:read", "operator:read"]);
   const built = buildListQuery(request.query, {
-    search: ["attempt.reference"],
-    in: { state: "state" }, equals: {kind: "kind", priority: "priority", assigneeUserId: "assigneeUserId"},
-    dates: { createdAt: { path: "createdAt" }, slaDueAt: { path: "slaDueAt", fromKey: "dateFrom", toKey: "dateTo" } },
-    sortable: { priority: "priority", state: "state", openedAt: "createdAt", slaDueAt: "slaDueAt" },
+    search: [
+      "id",
+      "attempt.reference",
+      "attempt.providerReference",
+      "attempt.merchant.tradeName",
+      "attempt.merchant.legalName",
+      "reconciliationItem.ourReference",
+      "reconciliationItem.providerReference",
+    ],
+    contains: {
+      caseRef: ["id", "attempt.reference", "reconciliationItem.ourReference", "reconciliationItem.providerReference"],
+      merchantName: ["attempt.merchant.tradeName", "attempt.merchant.legalName"],
+      providerReference: ["attempt.providerReference", "reconciliationItem.providerReference"],
+    },
+    in: { state: "state", kind: "kind", priority: "priority" },
+    equals: { assigneeUserId: "assigneeUserId" },
+    dates: {
+      createdAt: { path: "createdAt" },
+      slaDueAt: { path: "slaDueAt", fromKey: "dateFrom", toKey: "dateTo" },
+    },
+    sortable: {
+      priority: "priority",
+      state: "state",
+      kind: "kind",
+      openedAt: "createdAt",
+      slaDueAt: "slaDueAt",
+      caseRef: "attempt.reference",
+      merchantName: "attempt.merchant.tradeName",
+    },
     defaultSort: [{ priority: "asc" }, { createdAt: "desc" }],
   });
   const [cases, total] = await Promise.all([
-    client.operatorCase.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { attempt: { select: { reference: true, totalChargedAmount: true, merchant: { select: { tradeName: true } }, rail: { select: { code: true } } } } }, skip: built.skip, take: built.take }),
+    client.operatorCase.findMany({
+      where: built.where as never,
+      orderBy: built.orderBy as never,
+      include: operatorCaseListInclude,
+      skip: built.skip,
+      take: built.take,
+    }),
     client.operatorCase.count({ where: built.where as never }),
   ]);
-  response.json(listResponse("cases", cases.map((entry) => ({
-    ...entry,
-    caseRef: entry.attempt?.reference ?? entry.id,
-    caseType: entry.kind,
-    openedAt: entry.createdAt,
-    merchantName: entry.attempt?.merchant?.tradeName ?? "",
-    railCode: entry.attempt?.rail?.code ?? "",
-    amount: entry.attempt?.totalChargedAmount ?? null,
-  })), total, built));
+  response.json(listResponse("cases", cases.map(flattenOperatorCase), total, built));
 });
 
 router.get("/operator-cases/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["case:read", "operator:read"]);
   const { id } = parseOrThrow(idSchema, request.params);
-  const operatorCase = await client.operatorCase.findUnique({ where: { id } });
+  const operatorCase = await client.operatorCase.findUnique({
+    where: { id },
+    include: operatorCaseDetailInclude,
+  });
   if (!operatorCase) {
     throw new ApiError(404, "OPERATOR_CASE_NOT_FOUND", "The operator case does not exist");
   }
-  response.json({ operatorCase });
+  const auditTrail = await client.auditLog.findMany({
+    where: { entityType: "OPERATOR_CASE", entityId: id },
+    orderBy: { createdAt: "desc" },
+    take: 200,
+    include: { actor: { select: { id: true, email: true, role: true } } },
+  });
+  const flattened = flattenOperatorCase(operatorCase) as Record<string, any>;
+  const attempt = flattened.attempt
+    ? {
+        ...flattened.attempt,
+        inboundEvents: (flattened.attempt.inboundEvents ?? []).map((event: any) => {
+          const { rawBodyBytes, ...rest } = event;
+          return { ...rest, rawBodyPreview: bytesPreview(rawBodyBytes) };
+        }),
+      }
+    : null;
+  response.json({
+    operatorCase: {
+      ...flattened,
+      attempt,
+      auditTrail,
+    },
+  });
 });
 
-router.post("/operator-cases/:id/resolve", async (request: Request, response: Response) => {
+router.post("/operator-cases/bulk-inquire", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["attempt:inquire", "case:write", "operator:write"]);
+  const body = parseOrThrow(
+    z
+      .object({
+        caseIds: z.array(z.string().min(1).max(64)).min(1).max(200),
+        reason: z.string().max(500).optional(),
+      })
+      .strict(),
+    request.body ?? {},
+  );
+  const actor = actorFromRequest(request);
+  const requestedIds = [...new Set(body.caseIds)];
+  const cases = await client.operatorCase.findMany({
+    where: { id: { in: requestedIds } },
+    include: {
+      attempt: {
+        select: {
+          id: true,
+          reference: true,
+          status: true,
+          terminalAt: true,
+          gatewayVersion: {
+            select: { setting: { select: { supportsStatusCheck: true } } },
+          },
+        },
+      },
+      reconciliationItem: {
+        select: { ourReference: true, providerReference: true },
+      },
+    },
+  });
+  const byId = new Map(cases.map((entry) => [entry.id, entry]));
+  const results: Array<Record<string, unknown>> = [];
+  let scheduled = 0;
+  let skipped = 0;
+  for (const caseId of requestedIds) {
+    const entry = byId.get(caseId);
+    if (!entry) {
+      skipped += 1;
+      results.push({
+        caseId,
+        status: "SKIPPED",
+        reason: "CASE_NOT_FOUND",
+        message: operatorCaseInquirySkipMessage("CASE_NOT_FOUND"),
+      });
+      continue;
+    }
+    const ref = operatorCaseReference(entry);
+    try {
+      const eligibility = operatorCaseInquiryEligibility({
+        caseState: entry.state,
+        attemptStatus: entry.attempt?.status,
+        terminalAt: entry.attempt?.terminalAt,
+        supportsStatusCheck: entry.attempt?.gatewayVersion?.setting?.supportsStatusCheck === true,
+      });
+      if (!eligibility.eligible) {
+        skipped += 1;
+        results.push({
+          caseId,
+          caseRef: ref.value,
+          attemptId: entry.attemptId,
+          attemptReference: entry.attempt?.reference ?? null,
+          status: "SKIPPED",
+          reason: eligibility.reason,
+          message: operatorCaseInquirySkipMessage(eligibility.reason),
+        });
+        continue;
+      }
+      await scheduleOperatorCaseInquiry(client, entry, actor);
+      scheduled += 1;
+      results.push({
+        caseId,
+        caseRef: ref.value,
+        attemptId: entry.attemptId,
+        attemptReference: entry.attempt?.reference ?? null,
+        status: "SCHEDULED",
+        reason: "ELIGIBLE",
+        message: "Gateway inquiry scheduled",
+      });
+    } catch (error) {
+      skipped += 1;
+      results.push({
+        caseId,
+        caseRef: ref.value,
+        attemptId: entry.attemptId,
+        attemptReference: entry.attempt?.reference ?? null,
+        status: "SKIPPED",
+        reason: error instanceof ApiError ? error.code : "INQUIRY_SCHEDULE_FAILED",
+        message: error instanceof Error ? error.message : "The inquiry could not be scheduled",
+      });
+    }
+  }
+  response.json({
+    requested: requestedIds.length,
+    scheduled,
+    skipped,
+    results,
+  });
+});
+
+router.patch("/operator-cases/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["case:write", "operator:write"]);
   const { id } = parseOrThrow(idSchema, request.params);
   const body = parseOrThrow(
-    z.object({ resolution: z.string().min(2).max(4000), state: z.enum(["RESOLVED", "IN_PROGRESS"]).default("RESOLVED") }).strict(),
-    request.body,
+    z
+      .object({
+        assigneeUserId: z.string().min(1).max(64).nullable().optional(),
+        state: z.enum(["OPEN", "IN_PROGRESS"]).optional(),
+      })
+      .strict(),
+    request.body ?? {},
   );
-  const operatorCase = await client.operatorCase.findUnique({ where: { id } });
+  if (body.assigneeUserId === undefined && body.state === undefined) {
+    throw new ApiError(400, "NO_CHANGES", "At least one of assigneeUserId or state is required");
+  }
+  const current = await client.operatorCase.findUnique({ where: { id } });
+  if (!current) {
+    throw new ApiError(404, "OPERATOR_CASE_NOT_FOUND", "The operator case does not exist");
+  }
+  if (current.state === "RESOLVED" || current.state === "PENDING_CHECKER") {
+    throw new ApiError(
+      409,
+      "OPERATOR_CASE_NOT_EDITABLE",
+      `The case is '${current.state}' and cannot be reassigned or moved`,
+    );
+  }
+  if (body.assigneeUserId !== undefined && body.assigneeUserId !== null) {
+    const user = await client.user.findUnique({
+      where: { id: body.assigneeUserId },
+      select: { id: true, status: true, merchantId: true },
+    });
+    if (!user || user.status !== "ACTIVE" || user.merchantId) {
+      throw new ApiError(400, "INVALID_ASSIGNEE", "The assignee must be an active platform user");
+    }
+  }
+  const actor = actorFromRequest(request);
+  const nextState =
+    body.state ?? (body.assigneeUserId && current.state === "OPEN" ? "IN_PROGRESS" : current.state);
+  const updated = await client.$transaction(async (tx) => {
+    const row = await tx.operatorCase.update({
+      where: { id },
+      data: {
+        ...(body.assigneeUserId !== undefined ? { assigneeUserId: body.assigneeUserId } : {}),
+        ...(body.state !== undefined || nextState !== current.state ? { state: nextState } : {}),
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "OPERATOR",
+        action: body.assigneeUserId !== undefined ? "OPERATOR_CASE_ASSIGNED" : "OPERATOR_CASE_STATE_CHANGED",
+        entityType: "OPERATOR_CASE",
+        entityId: id,
+        beforeJson: { state: current.state, assigneeUserId: current.assigneeUserId },
+        afterJson: { state: row.state, assigneeUserId: row.assigneeUserId },
+      },
+    });
+    return row;
+  });
+  response.json({
+    id: updated.id,
+    state: updated.state,
+    assigneeUserId: updated.assigneeUserId,
+  });
+});
+
+router.post("/operator-cases/:id/resolve", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["case:write", "operator:write", "attempt:inquire"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z
+      .object({
+        action: z.enum(OPERATOR_CASE_ACTIONS),
+        reason: z.string().min(3).max(500),
+        notes: z.string().max(2000).optional(),
+        providerReference: z.string().min(1).max(191).optional(),
+        settledAmount: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).optional(),
+      })
+      .strict(),
+    request.body ?? {},
+  );
+  const actor = actorFromRequest(request);
+  const operatorCase = await client.operatorCase.findUnique({
+    where: { id },
+    include: {
+      attempt: { select: { id: true, reference: true, status: true, terminalAt: true } },
+      reconciliationItem: { select: { ourReference: true, providerReference: true } },
+    },
+  });
   if (!operatorCase) {
     throw new ApiError(404, "OPERATOR_CASE_NOT_FOUND", "The operator case does not exist");
   }
-  const updated = await client.operatorCase.update({
-    where: { id },
-    data: { state: body.state, resolutionNotes: body.resolution },
+  if (operatorCase.state === "RESOLVED") {
+    throw new ApiError(409, "OPERATOR_CASE_ALREADY_RESOLVED", "The operator case is already resolved");
+  }
+  const pending = await client.approvalRequest.findFirst({
+    where: { subjectType: "OPERATOR_CASE", subjectId: id, state: "PENDING_REVIEW" },
+    select: { id: true },
   });
-  response.json({ id: updated.id, state: updated.state });
+  if (pending) {
+    throw new ApiError(
+      409,
+      "OPERATOR_CASE_APPROVAL_PENDING",
+      "A resolution for this case is already waiting for a checker",
+      { approvalRequestId: pending.id },
+    );
+  }
+  const action = body.action as OperatorCaseAction;
+  if (action !== "CLOSE_CASE" && !operatorCase.attempt) {
+    throw new ApiError(409, "CASE_HAS_NO_ATTEMPT", "This action requires a linked payment attempt");
+  }
+  if (action === "MARK_SUCCEEDED" && !body.providerReference) {
+    throw new ApiError(
+      400,
+      "PROVIDER_REFERENCE_REQUIRED",
+      "A provider reference is required to resolve a case as succeeded",
+    );
+  }
+  if (action === "CLOSE_CASE" && operatorCase.attempt && !operatorCase.attempt.terminalAt) {
+    throw new ApiError(
+      409,
+      "ATTEMPT_OUTCOME_REQUIRED",
+      "The linked attempt is still open; resolve it as succeeded or failed instead of closing the case",
+    );
+  }
+  const reference = operatorCaseReference(operatorCase as never);
+  const payload = {
+    action,
+    reason: body.reason,
+    notes: body.notes ?? null,
+    providerReference: body.providerReference ?? null,
+    settledAmount: body.settledAmount ?? null,
+    caseId: operatorCase.id,
+    caseRef: reference.value,
+    attemptId: operatorCase.attemptId,
+    attemptReference: operatorCase.attempt?.reference ?? null,
+    proposedAt: new Date().toISOString(),
+  };
+  const approval = await client.$transaction(async (tx) => {
+    const created = await tx.approvalRequest.create({
+      data: {
+        subjectType: "OPERATOR_CASE",
+        subjectId: operatorCase.id,
+        payloadDiffJson: json(payload),
+        mode: "STANDARD",
+        makerUserId: actor.userId,
+        state: "PENDING_REVIEW",
+        expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+      },
+    });
+    await tx.operatorCase.update({
+      where: { id: operatorCase.id },
+      data: { state: "PENDING_CHECKER", approvalRequestId: created.id },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "OPERATOR",
+        action: "OPERATOR_CASE_RESOLUTION_PROPOSED",
+        entityType: "OPERATOR_CASE",
+        entityId: operatorCase.id,
+        beforeJson: { state: operatorCase.state },
+        afterJson: { state: "PENDING_CHECKER", approvalRequestId: created.id, action },
+        approvalRequestId: created.id,
+      },
+    });
+    return created;
+  });
+  response.status(202).json({
+    status: "PENDING_CHECKER",
+    caseId: operatorCase.id,
+    approvalRequestId: approval.id,
+  });
 });
 
 router.get("/attempts/:id", async (request: Request, response: Response) => {
@@ -1776,16 +2568,64 @@ router.get("/attempts/:id", async (request: Request, response: Response) => {
 router.post("/attempts/:id/inquire", async (request: Request, response: Response) => {
   requireAuthorities(request, ["attempt:inquire"]);
   const { id } = parseOrThrow(idSchema, request.params);
-  const attempt = await client.paymentAttempt.findUnique({ where: { id } });
+  const attempt = await client.paymentAttempt.findUnique({
+    where: { id },
+    include: {
+      gatewayVersion: { select: { setting: { select: { supportsStatusCheck: true } } } },
+    },
+  });
   if (!attempt) {
     throw new ApiError(404, "PAYMENT_ATTEMPT_NOT_FOUND", "The payment attempt does not exist");
   }
-  const updated = await client.paymentAttempt.update({
-    where: { id },
-    data: { status: "VERIFYING", nextCheckAt: new Date(Date.now() + 1000) },
+  const eligibility = operatorCaseInquiryEligibility({
+    caseState: null,
+    attemptStatus: attempt.status,
+    terminalAt: attempt.terminalAt,
+    supportsStatusCheck: attempt.gatewayVersion?.setting?.supportsStatusCheck === true,
   });
-  response.json({ id: updated.id, status: updated.status, inquiryScheduled: true });
+  if (!eligibility.eligible) {
+    throw new ApiError(
+      409,
+      "ATTEMPT_NOT_INQUIRABLE",
+      operatorCaseInquirySkipMessage(eligibility.reason),
+      { reason: eligibility.reason },
+    );
+  }
+  const actor = actorFromRequest(request);
+  const nextCheckAt = new Date(Date.now() + 1000);
+  const updated = await client.$transaction(async (tx) => {
+    const changed = await tx.paymentAttempt.updateMany({
+      where: { id, terminalAt: null, status: { in: ["UNKNOWN", "VERIFYING"] } },
+      data: { status: "VERIFYING", nextCheckAt },
+    });
+    if (changed.count === 0) {
+      throw new ApiError(
+        409,
+        "ATTEMPT_NOT_INQUIRABLE",
+        "The payment attempt changed state before the inquiry could be scheduled",
+      );
+    }
+    await tx.operatorCase.updateMany({
+      where: { attemptId: id, state: { in: ["OPEN", "IN_PROGRESS"] } },
+      data: { state: "IN_PROGRESS" },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "OPERATOR",
+        action: "ATTEMPT_INQUIRY_SCHEDULED",
+        entityType: "PAYMENT_ATTEMPT",
+        entityId: id,
+        beforeJson: { status: attempt.status },
+        afterJson: { status: "VERIFYING", nextCheckAt: nextCheckAt.toISOString() },
+      },
+    });
+    return tx.paymentAttempt.findUnique({ where: { id }, select: { id: true, status: true } });
+  });
+  response.json({ id: updated?.id ?? id, status: updated?.status ?? "VERIFYING", inquiryScheduled: true });
 });
+
+
 
 /**
  * The Smart AI-Assisted Provider Onboarding kit.

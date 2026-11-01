@@ -21,10 +21,10 @@ export type AdminRole = (typeof ADMIN_ROLES)[number];
 export const ROLE_AUTHORITIES: Record<AdminRole, readonly string[]> = {
   GATEWAY_ADMIN: ["gateway:read", "gateway:write", "gateway:test", "settings:read", "settings:write"],
   SECURITY_ADMIN: ["security:read", "security:write", "credential:write"],
-  FINANCE: ["finance:read", "finance:write", "commission:write", "cashout:review"],
+  FINANCE: ["finance:read", "finance:write", "commission:write", "cashout:review", "approval:read", "approval:check", "approval:write"],
   COMPLIANCE: ["compliance:read", "compliance:write", "aml:review", "report:review"],
   MLRO: ["aml:read", "aml:write", "aml:release", "report:approve"],
-  OPERATOR: ["attempt:read", "attempt:inquire", "case:read"],
+  OPERATOR: ["attempt:read", "attempt:inquire", "case:read", "case:write"],
   SUPPORT: ["merchant:read", "attempt:read", "case:read"],
 };
 
