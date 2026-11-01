@@ -1965,6 +1965,7 @@ model PaymentAttempt {
   // attempts by route, so the pair is indexed.
   @@index([routeId, status])
   @@index([merchantId, createdAt])
+  @@index([merchantId, status, createdAt])
   @@index([status, createdAt])
   @@index([railId, createdAt])
   @@index([applicationId, createdAt])
@@ -2046,6 +2047,7 @@ model OperatorCase {
   @@index([kind])
   @@index([slaDueAt])
   @@index([assigneeUserId])
+  @@index([attemptId])
   @@map("operator_cases")
 }
 
@@ -2191,6 +2193,7 @@ model AuditLog {
   approvalRequest ApprovalRequest? @relation("AuditLogApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
 
   @@index([entityType, entityId])
+  @@index([entityType, entityId, createdAt])
   @@map("audit_log")
 }
 
@@ -2522,7 +2525,7 @@ model Dispute {
   @@unique([gatewayId, externalDisputeRef])
   @@index([attemptId])
   @@index([status, openedAt])
-  @@index([evidenceDueAt])
+  @@index([status, evidenceDueAt])
   @@map("disputes")
 }
 
@@ -2566,6 +2569,7 @@ model Notification {
   recipientMerchant Merchant? @relation("MerchantNotifications", fields: [recipientMerchantId], references: [id], onDelete: SetNull)
 
   @@index([status, nextAttemptAt])
+  @@index([recipientMerchantId, createdAt])
   @@map("notifications")
 }
 

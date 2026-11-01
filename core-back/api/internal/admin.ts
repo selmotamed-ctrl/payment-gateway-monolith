@@ -3110,6 +3110,23 @@ const redactDetailChange = (
   };
 };
 
+const maskBankAccount = (value: unknown): string => {
+  const text = String(value ?? "");
+  if (text.length <= 4) return text ? "****" : "";
+  return `****${text.slice(-4)}`;
+};
+
+const merchantStatsSince = (period: unknown): Date => {
+  const normalized = String(period ?? "30d").toLowerCase();
+  const days = normalized === "24h" ? 1 : normalized === "7d" ? 7 : normalized === "90d" ? 90 : 30;
+  return new Date(Date.now() - days * 86_400_000);
+};
+
+const merchantPeriodLabel = (period: unknown): string => {
+  const normalized = String(period ?? "30d").toLowerCase();
+  return ["24h", "7d", "30d", "90d"].includes(normalized) ? normalized : "30d";
+};
+
 const merchantApprovalKind = (payload: unknown): string => {
   if (Array.isArray(payload)) return "EDIT";
   if (payload && typeof payload === "object") {
@@ -3394,6 +3411,626 @@ router.get("/merchants/:id", async (request: Request, response: Response) => {
           }
         : {}),
     },
+  });
+});
+
+const merchantScopedWhere = (merchantId: string, builtWhere: Record<string, unknown>): Record<string, unknown> => {
+  const conditions = Array.isArray(builtWhere.AND) ? builtWhere.AND : [];
+  return { AND: [{ merchantId }, ...conditions] };
+};
+
+const merchantMoney = (value: unknown): string => {
+  if (value === null || value === undefined) return "0.0000";
+  try {
+    return decimal(value as never).toFixed(4);
+  } catch {
+    return String(value);
+  }
+};
+
+const merchantMaskedJson = (value: unknown): Record<string, unknown> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const source = value as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(source)) {
+    if (/account|iban|number|phone|email/i.test(key)) {
+      result[key] = maskBankAccount(entry);
+    } else if (typeof entry === "string" || typeof entry === "number" || typeof entry === "boolean" || entry === null) {
+      result[key] = entry;
+    }
+  }
+  return result;
+};
+
+const merchantSuccessStatuses = ["SUCCEEDED", "PARTIALLY_REFUNDED", "REFUNDED", "DISPUTED"] as const;
+
+router.get("/merchants/:id/transactions", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["merchant:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const merchant = await client.merchant.findUnique({ where: { id }, select: { id: true } });
+  if (!merchant) throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
+  const flags = merchantOperationalFlags(principalOf(request));
+  const built = buildListQuery(request.query, {
+    search: flags.support ? ["reference"] : ["reference", "providerReference", "networkReference", "gatewayReference"],
+    in: { status: "status", env: "env", applicationId: "applicationId", railId: "railId" },
+    dates: {
+      createdAt: { path: "createdAt" },
+      terminalAt: { path: "terminalAt", fromKey: "terminalFrom", toKey: "terminalTo" },
+    },
+    ranges: { amount: { path: "totalChargedAmount", kind: "decimal" } },
+    sortable: { reference: "reference", status: "status", createdAt: "createdAt", terminalAt: "terminalAt", totalChargedAmount: "totalChargedAmount" },
+    defaultSort: { createdAt: "desc" },
+    defaultPageSize: 10,
+  });
+  const where = merchantScopedWhere(id, built.where);
+  const [attempts, total] = await Promise.all([
+    client.paymentAttempt.findMany({
+      where: where as never,
+      orderBy: built.orderBy as never,
+      skip: built.skip,
+      take: built.take,
+      select: {
+        id: true,
+        reference: true,
+        createdAt: true,
+        updatedAt: true,
+        terminalAt: true,
+        status: true,
+        substatus: true,
+        env: true,
+        mode: true,
+        subMode: true,
+        currency: true,
+        requestedAmount: true,
+        surchargeAmount: true,
+        totalChargedAmount: true,
+        settledAmount: true,
+        gatewayFeeAmount: true,
+        platformCommissionAmount: true,
+        netMerchantAmount: true,
+        providerReference: true,
+        networkReference: true,
+        gatewayReference: true,
+        application: { select: { id: true, name: true } },
+        rail: { select: { id: true, code: true, nameEn: true } },
+        route: { select: { id: true, gateway: { select: { id: true, code: true, name: true } } } },
+        gatewayVersion: { select: { setting: { select: { supportsStatusCheck: true } } } },
+        link: { select: { id: true, key: true } },
+        ledgerEntry: { select: { id: true } },
+        operatorCases: { select: { id: true, kind: true, state: true, priority: true, slaDueAt: true }, orderBy: { createdAt: "desc" }, take: 3 },
+      },
+    }),
+    client.paymentAttempt.count({ where: where as never }),
+  ]);
+  response.json({
+    ...listResponse(
+      "transactions",
+      attempts.map((attempt) => {
+        const redacted = flags.support;
+        const inquiry = operatorCaseInquiryEligibility({
+          caseState: null,
+          attemptStatus: attempt.status,
+          terminalAt: attempt.terminalAt,
+          supportsStatusCheck: attempt.gatewayVersion?.setting?.supportsStatusCheck === true,
+        });
+        return {
+          id: attempt.id,
+          reference: attempt.reference,
+          createdAt: attempt.createdAt,
+          updatedAt: attempt.updatedAt,
+          terminalAt: attempt.terminalAt,
+          status: attempt.status,
+          substatus: attempt.substatus,
+          env: attempt.env,
+          mode: attempt.mode,
+          subMode: attempt.subMode,
+          currency: attempt.currency,
+          application: attempt.application,
+          rail: attempt.rail,
+          gateway: attempt.route.gateway,
+          link: redacted ? null : attempt.link,
+          ledgerEntryId: redacted ? null : attempt.ledgerEntry?.id ?? null,
+          providerReference: redacted ? null : attempt.providerReference,
+          networkReference: redacted ? null : attempt.networkReference,
+          gatewayReference: redacted ? null : attempt.gatewayReference,
+          requestedAmount: redacted ? null : merchantMoney(attempt.requestedAmount),
+          surchargeAmount: redacted ? null : merchantMoney(attempt.surchargeAmount),
+          totalChargedAmount: redacted ? null : merchantMoney(attempt.totalChargedAmount),
+          settledAmount: redacted || !flags.canFinancial ? null : merchantMoney(attempt.settledAmount),
+          gatewayFeeAmount: redacted || !flags.canFinancial ? null : merchantMoney(attempt.gatewayFeeAmount),
+          platformCommissionAmount: redacted || !flags.canFinancial ? null : merchantMoney(attempt.platformCommissionAmount),
+          netMerchantAmount: redacted || !flags.canFinancial ? null : merchantMoney(attempt.netMerchantAmount),
+          operatorCases: attempt.operatorCases,
+          inquiryEligible: inquiry.eligible,
+          inquiryEligibilityReason: inquiry.reason,
+          redactedFields: redacted
+            ? ["amounts", "fees", "net", "providerReference", "networkReference", "gatewayReference", "link", "ledgerEntryId"]
+            : flags.canFinancial
+              ? []
+              : ["settledAmount", "gatewayFeeAmount", "platformCommissionAmount", "netMerchantAmount"],
+        };
+      }),
+      total,
+      built,
+    ),
+    redactedFields: flags.support ? ["financialFields", "providerReferences"] : [],
+  });
+});
+
+router.get("/merchants/:id/applications", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["merchant:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const merchant = await client.merchant.findUnique({ where: { id }, select: { id: true } });
+  if (!merchant) throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
+  const flags = merchantOperationalFlags(principalOf(request));
+  const built = buildListQuery(request.query, {
+    search: ["name", "id"],
+    in: { status: "status" },
+    equals: { walletId: "assignedWalletId" },
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { name: "name", status: "status", createdAt: "createdAt", expectedMonthlyVolume: "expectedMonthlyVolume" },
+    defaultSort: { createdAt: "desc" },
+    defaultPageSize: 10,
+  });
+  const where = merchantScopedWhere(id, built.where);
+  const [applications, total] = await Promise.all([
+    client.application.findMany({
+      where: where as never,
+      orderBy: built.orderBy as never,
+      skip: built.skip,
+      take: built.take,
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        expectedMonthlyVolume: true,
+        railWhitelist: true,
+        redirectDomainAllowlist: true,
+        createdAt: true,
+        assignedWallet: { select: { id: true, currency: true, status: true } },
+        _count: { select: { accessTokens: true, paymentLinks: true, posTerminals: true } },
+      },
+    }),
+    client.application.count({ where: where as never }),
+  ]);
+  response.json(listResponse(
+    "applications",
+    applications.map((application) => {
+      const railWhitelist = Array.isArray(application.railWhitelist) ? application.railWhitelist : null;
+      const redirectDomains = Array.isArray(application.redirectDomainAllowlist) ? application.redirectDomainAllowlist : [];
+      return {
+        id: application.id,
+        name: application.name,
+        status: application.status,
+        expectedMonthlyVolume: flags.support ? null : merchantMoney(application.expectedMonthlyVolume),
+        assignedWallet: application.assignedWallet,
+        accessTokenCount: application._count.accessTokens,
+        paymentLinkCount: application._count.paymentLinks,
+        posTerminalCount: application._count.posTerminals,
+        railWhitelistMode: railWhitelist === null ? "ALL" : railWhitelist.length === 0 ? "NONE" : "LIST",
+        railWhitelistCount: railWhitelist?.length ?? 0,
+        redirectDomainCount: redirectDomains.length,
+        redirectDomains: flags.canSensitive ? redirectDomains : [],
+        createdAt: application.createdAt,
+        redactedFields: flags.support ? ["expectedMonthlyVolume"] : [],
+      };
+    }),
+    total,
+    built,
+  ));
+});
+
+router.get("/merchants/:id/wallets", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["merchant:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const merchant = await client.merchant.findUnique({ where: { id }, select: { id: true } });
+  if (!merchant) throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
+  const flags = merchantOperationalFlags(principalOf(request));
+  const built = buildListQuery(request.query, {
+    search: ["id", "glAccountId"],
+    in: { status: "status", currency: "currency" },
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { currency: "currency", status: "status", createdAt: "createdAt" },
+    defaultSort: { createdAt: "asc" },
+    defaultPageSize: 10,
+  });
+  const where = merchantScopedWhere(id, built.where);
+  const [wallets, total, balances] = await Promise.all([
+    client.wallet.findMany({
+      where: where as never,
+      orderBy: built.orderBy as never,
+      skip: built.skip,
+      take: built.take,
+      select: {
+        id: true,
+        currency: true,
+        status: true,
+        glAccountId: true,
+        createdAt: true,
+        _count: { select: { applications: true, paymentLinks: true, cashoutRequests: true } },
+        glAccount: { select: { checkpointBalance: true } },
+      },
+    }),
+    client.wallet.count({ where: where as never }),
+    flags.canFinancial ? merchantWalletBalance(client, id) : Promise.resolve(null),
+  ]);
+  const balanceMap = new Map((balances?.wallets ?? []).map((wallet) => [wallet.id, wallet.balance]));
+  const pendingByWallet = new Map<string, number>();
+  if (flags.canFinancial && wallets.length > 0) {
+    const pending = await client.cashoutRequest.groupBy({
+      by: ["walletId"],
+      where: { walletId: { in: wallets.map((wallet) => wallet.id) }, state: { in: ["PENDING", "PROCESSING"] } },
+      _count: { _all: true },
+    });
+    for (const row of pending) pendingByWallet.set(row.walletId, row._count._all);
+  }
+  response.json(listResponse(
+    "wallets",
+    wallets.map((wallet) => ({
+      id: wallet.id,
+      currency: wallet.currency,
+      status: wallet.status,
+      glAccountId: wallet.glAccountId,
+      balance: flags.canFinancial ? balanceMap.get(wallet.id) ?? "0.0000" : null,
+      checkpointBalance: flags.canFinancial ? merchantMoney(wallet.glAccount.checkpointBalance) : null,
+      applicationCount: wallet._count.applications,
+      paymentLinkCount: wallet._count.paymentLinks,
+      cashoutCount: wallet._count.cashoutRequests,
+      pendingCashoutCount: pendingByWallet.get(wallet.id) ?? 0,
+      createdAt: wallet.createdAt,
+      redactedFields: flags.canFinancial ? [] : ["balance", "checkpointBalance"],
+    })),
+    total,
+    built,
+  ));
+});
+
+router.get("/merchants/:id/cashouts", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["merchant:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const merchant = await client.merchant.findUnique({ where: { id }, select: { id: true } });
+  if (!merchant) throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
+  const flags = merchantOperationalFlags(principalOf(request));
+  if (!flags.canFinancial) throw new ApiError(403, "MERCHANT_FINANCIAL_ACCESS_REQUIRED", "Financial access is required to view cash-outs");
+  const built = buildListQuery(request.query, {
+    search: ["id", "adjustmentId"],
+    in: { state: "state", walletId: "walletId" },
+    dates: { createdAt: { path: "createdAt" } },
+    ranges: { amount: { path: "amount", kind: "decimal" } },
+    sortable: { amount: "amount", state: "state", createdAt: "createdAt" },
+    defaultSort: { createdAt: "desc" },
+    defaultPageSize: 10,
+  });
+  const where = merchantScopedWhere(id, built.where);
+  const [cashouts, total] = await Promise.all([
+    client.cashoutRequest.findMany({
+      where: where as never,
+      orderBy: built.orderBy as never,
+      skip: built.skip,
+      take: built.take,
+      select: {
+        id: true,
+        amount: true,
+        state: true,
+        destinationBankJson: true,
+        adjustmentId: true,
+        createdAt: true,
+        wallet: { select: { id: true, currency: true, status: true } },
+        adjustment: { select: { id: true, state: true, journalEntryId: true } },
+      },
+    }),
+    client.cashoutRequest.count({ where: where as never }),
+  ]);
+  response.json(listResponse(
+    "cashouts",
+    cashouts.map((cashout) => ({
+      id: cashout.id,
+      amount: merchantMoney(cashout.amount),
+      currency: cashout.wallet.currency,
+      state: cashout.state,
+      wallet: cashout.wallet,
+      destination: merchantMaskedJson(cashout.destinationBankJson),
+      adjustmentId: cashout.adjustmentId,
+      adjustment: cashout.adjustment,
+      createdAt: cashout.createdAt,
+    })),
+    total,
+    built,
+  ));
+});
+
+router.get("/merchants/:id/disputes", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["merchant:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const merchant = await client.merchant.findUnique({ where: { id }, select: { id: true } });
+  if (!merchant) throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
+  const flags = merchantOperationalFlags(principalOf(request));
+  if (!flags.canFinancial) throw new ApiError(403, "MERCHANT_FINANCIAL_ACCESS_REQUIRED", "Financial access is required to view disputes");
+  const built = buildListQuery(request.query, {
+    search: ["id", "externalDisputeRef", "attempt.reference"],
+    in: { status: "status", railId: "railId" },
+    dates: {
+      openedAt: { path: "openedAt", fromKey: "openedFrom", toKey: "openedTo" },
+      evidenceDueAt: { path: "evidenceDueAt", fromKey: "dueFrom", toKey: "dueTo" },
+    },
+    ranges: { amount: { path: "amount", kind: "decimal" } },
+    sortable: { amount: "amount", status: "status", openedAt: "openedAt", evidenceDueAt: "evidenceDueAt" },
+    defaultSort: { openedAt: "desc" },
+    defaultPageSize: 10,
+  });
+  const conditions = Array.isArray(built.where.AND) ? built.where.AND : [];
+  const where = { AND: [{ attempt: { merchantId: id } }, ...conditions] };
+  const [disputes, total] = await Promise.all([
+    client.dispute.findMany({
+      where: where as never,
+      orderBy: built.orderBy as never,
+      skip: built.skip,
+      take: built.take,
+      select: {
+        id: true,
+        externalDisputeRef: true,
+        source: true,
+        reasonCode: true,
+        amount: true,
+        currency: true,
+        status: true,
+        openedAt: true,
+        evidenceDueAt: true,
+        outcomeAt: true,
+        adjustmentId: true,
+        attempt: { select: { id: true, reference: true, status: true } },
+        gateway: { select: { id: true, code: true, name: true } },
+        rail: { select: { id: true, code: true, nameEn: true } },
+        adjustment: { select: { id: true, state: true, journalEntryId: true } },
+      },
+    }),
+    client.dispute.count({ where: where as never }),
+  ]);
+  response.json(listResponse(
+    "disputes",
+    disputes.map((dispute) => ({
+      ...dispute,
+      amount: merchantMoney(dispute.amount),
+    })),
+    total,
+    built,
+  ));
+});
+
+router.get("/merchants/:id/adjustments", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["merchant:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const merchant = await client.merchant.findUnique({ where: { id }, select: { id: true } });
+  if (!merchant) throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
+  const flags = merchantOperationalFlags(principalOf(request));
+  if (!flags.canFinancial) throw new ApiError(403, "MERCHANT_FINANCIAL_ACCESS_REQUIRED", "Financial access is required to view adjustments");
+  const built = buildListQuery(request.query, {
+    search: ["id", "reason", "externalDisputeRef", "providerRefundRef", "sourceAttempt.reference"],
+    in: { type: "type", state: "state" },
+    dates: { createdAt: { path: "createdAt" } },
+    ranges: { amount: { path: "amount", kind: "decimal" } },
+    sortable: { amount: "amount", type: "type", state: "state", createdAt: "createdAt" },
+    defaultSort: { createdAt: "desc" },
+    defaultPageSize: 10,
+  });
+  const conditions = Array.isArray(built.where.AND) ? built.where.AND : [];
+  const where = {
+    AND: [
+      { OR: [{ sourceAttempt: { merchantId: id } }, { targetGlAccount: { ownerId: id } }] },
+      ...conditions,
+    ],
+  };
+  const [adjustments, total] = await Promise.all([
+    client.adjustment.findMany({
+      where: where as never,
+      orderBy: built.orderBy as never,
+      skip: built.skip,
+      take: built.take,
+      select: {
+        id: true,
+        type: true,
+        amount: true,
+        reverseCommission: true,
+        reason: true,
+        externalDisputeRef: true,
+        providerRefundRef: true,
+        state: true,
+        journalEntryId: true,
+        createdAt: true,
+        targetGlAccount: { select: { id: true, accountType: true, currency: true, ownerId: true } },
+        sourceAttempt: { select: { id: true, reference: true, status: true, currency: true } },
+        dispute: { select: { id: true, externalDisputeRef: true, status: true } },
+      },
+    }),
+    client.adjustment.count({ where: where as never }),
+  ]);
+  response.json(listResponse(
+    "adjustments",
+    adjustments.map((adjustment) => ({
+      ...adjustment,
+      amount: merchantMoney(adjustment.amount),
+      currency: adjustment.sourceAttempt?.currency ?? adjustment.targetGlAccount.currency,
+    })),
+    total,
+    built,
+  ));
+});
+
+router.get("/merchants/:id/notifications", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["merchant:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const merchant = await client.merchant.findUnique({ where: { id }, select: { id: true } });
+  if (!merchant) throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
+  const built = buildListQuery(request.query, {
+    search: ["templateCode", "addressMasked"],
+    in: { status: "status", channel: "channel", lang: "lang", templateCode: "templateCode" },
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { templateCode: "templateCode", status: "status", channel: "channel", attempts: "attempts", createdAt: "createdAt" },
+    defaultSort: { createdAt: "desc" },
+    defaultPageSize: 10,
+  });
+  const notificationWhere = { AND: [{ recipientMerchantId: id }, ...(Array.isArray(built.where.AND) ? built.where.AND : [])] };
+  const [notifications, total] = await Promise.all([
+    client.notification.findMany({
+      where: notificationWhere as never,
+      orderBy: built.orderBy as never,
+      skip: built.skip,
+      take: built.take,
+      select: {
+        id: true,
+        templateCode: true,
+        channel: true,
+        lang: true,
+        status: true,
+        attempts: true,
+        addressMasked: true,
+        nextAttemptAt: true,
+        createdAt: true,
+      },
+    }),
+    client.notification.count({ where: notificationWhere as never }),
+  ]);
+  response.json(listResponse("notifications", notifications, total, built));
+});
+
+router.get("/merchants/:id/audit-events", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["merchant:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const merchant = await client.merchant.findUnique({ where: { id }, select: { id: true } });
+  if (!merchant) throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
+  const flags = merchantOperationalFlags(principalOf(request));
+  const built = buildListQuery(request.query, {
+    search: ["action", "role", "actor.email"],
+    in: { action: "action", role: "role" },
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { action: "action", role: "role", createdAt: "createdAt" },
+    defaultSort: { createdAt: "desc" },
+    defaultPageSize: 10,
+  });
+  const conditions = Array.isArray(built.where.AND) ? built.where.AND : [];
+  const where = { AND: [{ entityType: "MERCHANT", entityId: id }, ...conditions] };
+  const [events, total] = await Promise.all([
+    client.auditLog.findMany({
+      where: where as never,
+      orderBy: built.orderBy as never,
+      skip: built.skip,
+      take: built.take,
+      select: {
+        id: true,
+        action: true,
+        role: true,
+        entityType: true,
+        entityId: true,
+        beforeJson: true,
+        afterJson: true,
+        approvalRequestId: true,
+        createdAt: true,
+        actor: { select: { email: true } },
+      },
+    }),
+    client.auditLog.count({ where: where as never }),
+  ]);
+  response.json(listResponse(
+    "auditEvents",
+    events.map((event) => ({
+      id: event.id,
+      action: event.action,
+      role: event.role,
+      entityType: event.entityType,
+      entityId: event.entityId,
+      actorEmail: event.actor.email,
+      approvalRequestId: event.approvalRequestId,
+      before: flags.canSensitive ? event.beforeJson : null,
+      after: flags.canSensitive ? event.afterJson : null,
+      createdAt: event.createdAt,
+      redacted: !flags.canSensitive,
+    })),
+    total,
+    built,
+  ));
+});
+
+router.get("/merchants/:id/stats", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["merchant:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const merchant = await client.merchant.findUnique({
+    where: { id },
+    select: { id: true, nextKybReviewAt: true, negativeBalanceCeiling: true },
+  });
+  if (!merchant) throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
+  const flags = merchantOperationalFlags(principalOf(request));
+  if (!flags.canFinancial) throw new ApiError(403, "MERCHANT_FINANCIAL_ACCESS_REQUIRED", "Financial access is required to view merchant statistics");
+  const period = merchantPeriodLabel(request.query.period);
+  const since = merchantStatsSince(period);
+  const statusRows = await client.paymentAttempt.groupBy({
+    by: ["status"],
+    where: { merchantId: id, createdAt: { gte: since } },
+    _count: { _all: true },
+    _sum: { totalChargedAmount: true, netMerchantAmount: true, platformCommissionAmount: true },
+  });
+  const success = new Set<string>(merchantSuccessStatuses);
+  let attemptCount = 0;
+  let successfulCount = 0;
+  let grossVolume = decimal(0);
+  let netCredited = decimal(0);
+  let commission = decimal(0);
+  let failedCount = 0;
+  let expiredCount = 0;
+  let blockedCount = 0;
+  let unknownCount = 0;
+  for (const row of statusRows) {
+    const count = row._count._all;
+    attemptCount += count;
+    if (success.has(row.status)) {
+      successfulCount += count;
+      grossVolume = grossVolume.plus(decimal(row._sum.totalChargedAmount ?? 0));
+      netCredited = netCredited.plus(decimal(row._sum.netMerchantAmount ?? 0));
+      commission = commission.plus(decimal(row._sum.platformCommissionAmount ?? 0));
+    }
+    if (row.status === "FAILED") failedCount += count;
+    if (row.status === "EXPIRED") expiredCount += count;
+    if (row.status === "BLOCKED") blockedCount += count;
+    if (row.status === "UNKNOWN") unknownCount += count;
+  }
+  const [balance, pendingCashouts, openDisputes, pendingApprovals] = await Promise.all([
+    merchantWalletBalance(client, id),
+    client.cashoutRequest.aggregate({
+      where: { merchantId: id, state: { in: ["PENDING", "PROCESSING"] } },
+      _count: { _all: true },
+      _sum: { amount: true },
+    }),
+    client.dispute.count({
+      where: { attempt: { merchantId: id }, status: { in: ["OPENED", "EVIDENCE_REQUESTED", "EVIDENCE_SUBMITTED"] } },
+    }),
+    client.approvalRequest.count({ where: { subjectType: "MERCHANT", subjectId: id, state: "PENDING_REVIEW" } }),
+  ]);
+  response.json({
+    period,
+    since,
+    totals: {
+      attemptCount,
+      successfulCount,
+      successRate: attemptCount === 0 ? 0 : Number(((successfulCount / attemptCount) * 100).toFixed(2)),
+      grossVolume: grossVolume.toFixed(4),
+      netCredited: netCredited.toFixed(4),
+      commission: commission.toFixed(4),
+      averageTicket: successfulCount === 0 ? "0.0000" : grossVolume.dividedBy(successfulCount).toFixed(4),
+      failedCount,
+      expiredCount,
+      blockedCount,
+      unknownCount,
+    },
+    statuses: statusRows.map((row) => ({
+      status: row.status,
+      count: row._count._all,
+      chargedAmount: merchantMoney(row._sum.totalChargedAmount),
+    })),
+    walletBalance: balance,
+    negativeBalanceCeiling: merchantMoney(merchant.negativeBalanceCeiling),
+    pendingCashouts: { count: pendingCashouts._count._all, amount: merchantMoney(pendingCashouts._sum.amount) },
+    openDisputes,
+    pendingApprovals,
+    nextKybReviewAt: merchant.nextKybReviewAt,
   });
 });
 

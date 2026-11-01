@@ -15,6 +15,29 @@ export const COLUMN_HELP = {
     lifecycleAt: "Activation, suspension or closure timestamp.",
     pending: "Sensitive maker-checker changes waiting for an independent checker.",
     actions: "Open the merchant 360, start a lifecycle action, or propose an edit.",
+    transactionReference: "Payment attempt reference. Open it for the full masked transaction context and linked operator cases.",
+    transactionCreated: "Time the payment attempt was created.",
+    transactionStatus: "Attempt lifecycle status. UNKNOWN and VERIFYING attempts may still be inquired if the pinned gateway supports status checks.",
+    transactionApplication: "Merchant application that created the payment attempt.",
+    transactionRail: "Rail and gateway selected for the attempt.",
+    transactionAmount: "Total charged amount. Hidden for support and restricted roles.",
+    transactionNet: "Net merchant amount, gateway fee and platform commission. Visible to financial roles only.",
+    transactionProvider: "Provider or network reference returned by the gateway. Hidden for support.",
+    transactionCase: "Operator case linked to the attempt. Open the case from the transaction detail dialog.",
+    applicationName: "Merchant application and stable application ID.",
+    applicationStatus: "Application lifecycle state. Suspended or closed applications cannot start new payments.",
+    applicationLinks: "Number of payment links and access tokens under the application.",
+    applicationRails: "Rail whitelist mode. ALL means every rail, NONE means no rail, LIST shows the configured count.",
+    applicationDomains: "Number of redirect domains allowed for this application.",
+    applicationVolume: "Merchant-declared expected monthly volume. Hidden for support.",
+    walletId: "Stable wallet identifier and its ledger account.",
+    walletBalance: "Balance derived from checkpoint plus posted journal lines. Hidden without financial access.",
+    walletCheckpoint: "Last ledger checkpoint balance before posted lines are applied.",
+    walletCashouts: "Pending cash-outs / total cash-outs for the wallet.",
+    cashoutDestination: "Masked destination bank details. Full payment details stay in the finance cash-out queue.",
+    disputeReason: "Gateway reason code for the dispute.",
+    adjustmentReason: "Maker reason recorded on the adjustment.",
+    notificationRecipient: "Masked recipient address. Message payloads are never shown on the merchant page.",
 };
 
 export const MERCHANT_STATUS_HELP: Record<string, { label: string; meaning: string; tone: StatusTone }> = {
@@ -121,5 +144,21 @@ export const MERCHANT_HELP_SECTIONS = [
     {
         title: "History, pending changes and versions",
         body: "Every edit is recorded in detail_change_logs. Sensitive changes carry a base version so a stale proposal cannot overwrite a newer edit. The maker may withdraw a pending change before a checker acts.",
+    },
+    {
+        title: "Transactions, applications and wallets",
+        body: "Recent transactions are server-paginated attempts. Open a reference to see masked amounts, provider references, ledger entry and linked operator cases. Inquiries are only offered for UNKNOWN or VERIFYING attempts when the pinned gateway supports status checks. Applications show assigned wallets, links, tokens, POS terminals, rail whitelists and redirect domains. Wallet balances are derived from the ledger checkpoint plus posted journal lines; the merchant page never moves money.",
+    },
+    {
+        title: "Cash-outs, disputes and adjustments",
+        body: "Cash-outs, disputes and adjustments are read-only merchant views with filters and links to the finance queues. Cash-out destination details are masked. Disputes show evidence due dates and adjustment state. Adjustments show the source attempt, dispute reference, journal entry and state. Financial access is required.",
+    },
+    {
+        title: "Notifications and audit trail",
+        body: "Notification rows show delivery status, channel, language, attempt count and a masked recipient. Message payloads are never shown. The merchant audit trail lists lifecycle and governance events; Support sees the event and actor context, while raw before/after values are available only to sensitive-access roles.",
+    },
+    {
+        title: "Collapsible merchant 360",
+        body: "Merchant profile fields and operational sections are collapsible. The page remembers open sections for the current session. Expand all / Collapse all changes only the display, never merchant data. Collapsed tables do not load until opened.",
     },
 ];

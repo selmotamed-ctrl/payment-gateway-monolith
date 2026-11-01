@@ -107,6 +107,28 @@ router.get(
   }),
 );
 
+for (const resource of ["transactions", "applications", "wallets", "cashouts", "disputes", "adjustments", "notifications", "audit-events"] as const) {
+  router.get(
+    `/:id/${resource}`,
+    coreForward({
+      method: "GET",
+      path: (context) => `/internal/admin/merchants/${encodeURIComponent(context.params.id ?? "")}/${resource}`,
+      paramsSchema: idParamsSchema,
+      querySchema: zPaginationQuery,
+    }),
+  );
+}
+
+router.get(
+  "/:id/stats",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/merchants/${encodeURIComponent(context.params.id ?? "")}/stats`,
+    paramsSchema: idParamsSchema,
+    querySchema: zPaginationQuery,
+  }),
+);
+
 router.patch(
   "/:id/descriptive",
   coreForward({

@@ -219,3 +219,174 @@ export type MerchantDetail = MerchantSummary & {
     openDisputes?: number;
     pendingCashouts?: number;
 };
+
+export type MerchantOperatorCaseRef = {
+    id: string;
+    kind: string;
+    state: string;
+    priority: string;
+    slaDueAt: string;
+};
+
+export type MerchantTransaction = {
+    id: string;
+    reference: string;
+    createdAt: string;
+    updatedAt: string;
+    terminalAt: string | null;
+    status: string;
+    substatus: string | null;
+    env: string;
+    mode: string;
+    subMode: string | null;
+    currency: string;
+    application: { id: string; name: string };
+    rail: { id: string; code: string; nameEn: string };
+    gateway: { id: string; code: string; name: string };
+    link: { id: string; key: string } | null;
+    ledgerEntryId: string | null;
+    providerReference: string | null;
+    networkReference: string | null;
+    gatewayReference: string | null;
+    requestedAmount: string | null;
+    surchargeAmount: string | null;
+    totalChargedAmount: string | null;
+    settledAmount: string | null;
+    gatewayFeeAmount: string | null;
+    platformCommissionAmount: string | null;
+    netMerchantAmount: string | null;
+    operatorCases: MerchantOperatorCaseRef[];
+    inquiryEligible: boolean;
+    inquiryEligibilityReason: string;
+    redactedFields: string[];
+};
+
+export type MerchantApplicationRow = {
+    id: string;
+    name: string;
+    status: string;
+    expectedMonthlyVolume: string | null;
+    assignedWallet: { id: string; currency: string; status: string };
+    accessTokenCount: number;
+    paymentLinkCount: number;
+    posTerminalCount: number;
+    railWhitelistMode: string;
+    railWhitelistCount: number;
+    redirectDomainCount: number;
+    redirectDomains: string[];
+    createdAt: string;
+    redactedFields: string[];
+};
+
+export type MerchantWalletRow = {
+    id: string;
+    currency: string;
+    status: string;
+    glAccountId: string;
+    balance: string | null;
+    checkpointBalance: string | null;
+    applicationCount: number;
+    paymentLinkCount: number;
+    cashoutCount: number;
+    pendingCashoutCount: number;
+    createdAt: string;
+    redactedFields: string[];
+};
+
+export type MerchantCashout = {
+    id: string;
+    amount: string;
+    currency: string;
+    state: string;
+    wallet: { id: string; currency: string; status: string };
+    destination: Record<string, unknown>;
+    adjustmentId: string | null;
+    adjustment: { id: string; state: string; journalEntryId: string | null } | null;
+    createdAt: string;
+};
+
+export type MerchantDispute = {
+    id: string;
+    externalDisputeRef: string;
+    source: string;
+    reasonCode: string | null;
+    amount: string;
+    currency: string;
+    status: string;
+    openedAt: string;
+    evidenceDueAt: string | null;
+    outcomeAt: string | null;
+    adjustmentId: string | null;
+    attempt: { id: string; reference: string; status: string };
+    gateway: { id: string; code: string; name: string };
+    rail: { id: string; code: string; nameEn: string };
+    adjustment: { id: string; state: string; journalEntryId: string | null } | null;
+};
+
+export type MerchantAdjustment = {
+    id: string;
+    type: string;
+    amount: string;
+    currency: string;
+    reverseCommission: boolean;
+    reason: string;
+    externalDisputeRef: string | null;
+    providerRefundRef: string | null;
+    state: string;
+    journalEntryId: string | null;
+    createdAt: string;
+    targetGlAccount: { id: string; accountType: string; currency: string; ownerId: string | null };
+    sourceAttempt: { id: string; reference: string; status: string; currency: string } | null;
+    dispute: { id: string; externalDisputeRef: string; status: string } | null;
+};
+
+export type MerchantNotification = {
+    id: string;
+    templateCode: string;
+    channel: string;
+    lang: string;
+    status: string;
+    attempts: number;
+    addressMasked: string;
+    nextAttemptAt: string | null;
+    createdAt: string;
+};
+
+export type MerchantAuditEvent = {
+    id: string;
+    action: string;
+    role: string;
+    entityType: string;
+    entityId: string;
+    actorEmail: string;
+    approvalRequestId: string | null;
+    before: unknown;
+    after: unknown;
+    createdAt: string;
+    redacted: boolean;
+};
+
+export type MerchantStats = {
+    period: string;
+    since: string;
+    totals: {
+        attemptCount: number;
+        successfulCount: number;
+        successRate: number;
+        grossVolume: string;
+        netCredited: string;
+        commission: string;
+        averageTicket: string;
+        failedCount: number;
+        expiredCount: number;
+        blockedCount: number;
+        unknownCount: number;
+    };
+    statuses: Array<{ status: string; count: number; chargedAmount: string }>;
+    walletBalance: { balance: string; wallets: Array<{ id: string; walletId: string; currency: string; status: string; balance: string }> };
+    negativeBalanceCeiling: string;
+    pendingCashouts: { count: number; amount: string };
+    openDisputes: number;
+    pendingApprovals: number;
+    nextKybReviewAt: string | null;
+};
