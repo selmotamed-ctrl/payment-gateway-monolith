@@ -158,7 +158,7 @@ export const MERCHANT_HELP_SECTIONS = [
         body: "Notification rows show delivery status, channel, language, attempt count and a masked recipient. Message payloads are never shown. The merchant audit trail lists lifecycle and governance events; Support sees the event and actor context, while raw before/after values are available only to sensitive-access roles.",
     },
     {
-        title: "Collapsible merchant 360",
-        body: "Merchant profile fields and operational sections are collapsible. The page remembers open sections for the current session. Expand all / Collapse all changes only the display, never merchant data. Collapsed tables do not load until opened.",
+        title: "Tabs and collapsible merchant 360",
+        body: "The merchant page opens on All, which shows every section in one long operational view. Use the Details, Transactions, Wallets, Applications, Finance, Compliance and Access & activity tabs to see only one area. In All, merchant profile fields and operational sections are collapsible; the page remembers open sections for the current session. Expand all / Collapse all changes only the display, never merchant data. Collapsed tables do not load until opened.",
     },
 ];

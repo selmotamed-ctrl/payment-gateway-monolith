@@ -8,6 +8,8 @@ import {
     VCard,
     VCardText,
     VDialog,
+    VTab,
+    VTabs,
     VTextField,
     VTextarea,
 } from "vuetify/components";
@@ -90,6 +92,8 @@ const jsonText = (value: unknown): string => {
     }
 };
 
+type MerchantDetailTab = "all" | "details" | "transactions" | "wallets" | "applications" | "finance" | "compliance" | "access";
+
 const MerchantDetailPage = dc(() => {
     const { t } = useLocale();
     const route = useRoute();
@@ -117,6 +121,7 @@ const MerchantDetailPage = dc(() => {
     const transactionRefresh = ref<(() => void) | null>(null);
     const sectionCommand = ref<SectionCommand | null>(null);
     const sectionCommandSeq = ref(0);
+    const activeTab = ref<MerchantDetailTab>("all");
 
     const merchantId = computed(() => String(route.params.id ?? ""));
     const currentUserId = computed(() => user.value?.userInfo?.id ?? null);
@@ -492,6 +497,8 @@ const MerchantDetailPage = dc(() => {
         { key: "createdAt", label: "Created", sortKey: "createdAt", value: (row) => row.createdAt, Value: ({ row }) => <ThemedText style={{ fontSize: "11px" }}>{formatDateTime(row.createdAt)}</ThemedText> },
     ];
 
+    const show = (tab: MerchantDetailTab) => activeTab.value === "all" || activeTab.value === tab;
+
     return () => {
         if (loading.value) {
             return <ScreenContainer><StateView loading onRetry={() => void load()} /></ScreenContainer>;
@@ -508,8 +515,12 @@ const MerchantDetailPage = dc(() => {
                         end={() => (
                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                                 <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "Merchants" })}>{t("Queue")}</VBtn>
-                                <VBtn variant="text" prependIcon="mdi-unfold-more-horizontal" onClick={() => setAllSections(true)}>{t("Expand all")}</VBtn>
-                                <VBtn variant="text" prependIcon="mdi-unfold-less-horizontal" onClick={() => setAllSections(false)}>{t("Collapse all")}</VBtn>
+                                {activeTab.value === "all" && (
+                                    <>
+                                        <VBtn variant="text" prependIcon="mdi-unfold-more-horizontal" onClick={() => setAllSections(true)}>{t("Expand all")}</VBtn>
+                                        <VBtn variant="text" prependIcon="mdi-unfold-less-horizontal" onClick={() => setAllSections(false)}>{t("Collapse all")}</VBtn>
+                                    </>
+                                )}
                                 <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</VBtn>
                                 {canWrite.value && (
                                     <>
@@ -550,18 +561,36 @@ const MerchantDetailPage = dc(() => {
                         </VAlert>
                     )}
 
-                    <VCard><VCardText><MerchantHelpPanel /></VCardText></VCard>
+                    <VCard variant="flat" style={{ borderRadius: "14px", overflow: "hidden" }}>
+                        <VTabs v-model={activeTab.value} color="primary" density="comfortable" showArrows>
+                            <VTab value="all" prependIcon="mdi-view-dashboard-outline">{t("All")}</VTab>
+                            <VTab value="details" prependIcon="mdi-account-details-outline">{t("Details")}</VTab>
+                            <VTab value="transactions" prependIcon="mdi-swap-horizontal">{t("Transactions")}</VTab>
+                            {canFinancial.value && <VTab value="wallets" prependIcon="mdi-wallet-outline">{t("Wallets")}</VTab>}
+                            <VTab value="applications" prependIcon="mdi-apps">{t("Applications")}</VTab>
+                            {canFinancial.value && <VTab value="finance" prependIcon="mdi-bank-outline">{t("Finance")}</VTab>}
+                            {!isSupport.value && <VTab value="compliance" prependIcon="mdi-shield-check-outline">{t("Compliance")}</VTab>}
+                            <VTab value="access" prependIcon="mdi-account-key-outline">{t("Access & activity")}</VTab>
+                        </VTabs>
+                    </VCard>
 
-                    <FieldsSections
-                        sections={sections.value}
-                        collapsible={true}
-                        storageKeyPrefix={`merchant:${merchantId.value}:fields`}
-                        defaultExpanded={false}
-                        command={sectionCommand.value}
-                    />
+                    {activeTab.value === "all" && <VCard><VCardText><MerchantHelpPanel /></VCardText></VCard>}
 
+                    {show("details") && (
+                        <FieldsSections
+                            sections={sections.value}
+                            collapsible={activeTab.value === "all"}
+                            storageKeyPrefix={`merchant:${merchantId.value}:fields`}
+                            defaultExpanded={activeTab.value === "all" ? false : true}
+                            command={sectionCommand.value}
+                        />
+                    )}
+
+                    {show("transactions") && (
+                        <>
                     <CollapsibleSection
                         command={sectionCommand.value}
+                        alwaysOpen={activeTab.value !== "all"}
                         title={t("Merchant health summary")}
                         subtitle={t("Volume, quality, cash and risk indicators for the last 30 days. Amounts are derived from attempts and posted ledger lines.")}
                         defaultOpen={true}
@@ -590,6 +619,7 @@ const MerchantDetailPage = dc(() => {
 
                     <CollapsibleSection
                         command={sectionCommand.value}
+                        alwaysOpen={activeTab.value !== "all"}
                         title={t("Recent transactions")}
                         subtitle={t("Payment attempts for this merchant. Open a reference for the full masked transaction context; inquiries are limited to eligible UNKNOWN or VERIFYING attempts.")}
                         defaultOpen={true}
@@ -608,10 +638,13 @@ const MerchantDetailPage = dc(() => {
                             onRefreshReady={(refresh) => (transactionRefresh.value = refresh)}
                         />
                     </CollapsibleSection>
+                        </>
+                    )}
 
-                    {canFinancial.value && (
+                    {show("wallets") && canFinancial.value && (
                         <CollapsibleSection
-                        command={sectionCommand.value}
+                            command={sectionCommand.value}
+                            alwaysOpen={activeTab.value !== "all"}
                             title={t("Wallets and balances")}
                             subtitle={t("Wallet balances are derived from posted journal lines and checkpoint balances. Pending cash-outs are shown per wallet.")}
                             defaultOpen={true}
@@ -629,29 +662,33 @@ const MerchantDetailPage = dc(() => {
                         </CollapsibleSection>
                     )}
 
-                    <CollapsibleSection
-                        command={sectionCommand.value}
-                        title={t("Applications")}
-                        subtitle={t("Applications, assigned wallets, link/token/POS counts, rail whitelists and redirect domains.")}
-                        defaultOpen={false}
-                        storageKey={`merchant:${merchantId.value}:applications`}
-                        count={entry.applicationCount}
-                    >
-                        <MerchantResourceTable<MerchantApplicationRow>
+                    {show("applications") && (
+                        <CollapsibleSection
+                            command={sectionCommand.value}
+                            alwaysOpen={activeTab.value !== "all"}
                             title={t("Applications")}
-                            url={urlsMap.merchantApplications(merchantId.value)}
-                            listKey="applications"
-                            headers={applicationHeaders.value}
-                            filters={applicationFilters(entry.wallets ?? [])}
-                            pageSize={10}
-                            noElevation={true}
-                        />
-                    </CollapsibleSection>
+                            subtitle={t("Applications, assigned wallets, link/token/POS counts, rail whitelists and redirect domains.")}
+                            defaultOpen={false}
+                            storageKey={`merchant:${merchantId.value}:applications`}
+                            count={entry.applicationCount}
+                        >
+                            <MerchantResourceTable<MerchantApplicationRow>
+                                title={t("Applications")}
+                                url={urlsMap.merchantApplications(merchantId.value)}
+                                listKey="applications"
+                                headers={applicationHeaders.value}
+                                filters={applicationFilters(entry.wallets ?? [])}
+                                pageSize={10}
+                                noElevation={true}
+                            />
+                        </CollapsibleSection>
+                    )}
 
-                    {canFinancial.value && (
+                    {show("finance") && canFinancial.value && (
                         <>
                             <CollapsibleSection
-                        command={sectionCommand.value}
+                                command={sectionCommand.value}
+                                alwaysOpen={activeTab.value !== "all"}
                                 title={t("Cash-outs")}
                                 subtitle={t("Cash-out requests and their adjustment state. This page is read-only; money movement remains in the finance queue.")}
                                 defaultOpen={false}
@@ -669,7 +706,8 @@ const MerchantDetailPage = dc(() => {
                             </CollapsibleSection>
 
                             <CollapsibleSection
-                        command={sectionCommand.value}
+                                command={sectionCommand.value}
+                                alwaysOpen={activeTab.value !== "all"}
                                 title={t("Disputes")}
                                 subtitle={t("Disputes linked to this merchant's payment attempts, including evidence due dates and adjustment state.")}
                                 defaultOpen={false}
@@ -687,7 +725,8 @@ const MerchantDetailPage = dc(() => {
                             </CollapsibleSection>
 
                             <CollapsibleSection
-                        command={sectionCommand.value}
+                                command={sectionCommand.value}
+                                alwaysOpen={activeTab.value !== "all"}
                                 title={t("Adjustments")}
                                 subtitle={t("Refunds, chargebacks, manual credits and debits linked to the merchant wallet or its attempts.")}
                                 defaultOpen={false}
@@ -706,7 +745,7 @@ const MerchantDetailPage = dc(() => {
                         </>
                     )}
 
-                    {entry.pendingChanges && entry.pendingChanges.length > 0 && (
+                    {show("details") && entry.pendingChanges && entry.pendingChanges.length > 0 && (
                         <VCard>
                             <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Pending changes")}</ThemedText>
@@ -730,7 +769,7 @@ const MerchantDetailPage = dc(() => {
                         </VCard>
                     )}
 
-                    {entry.amlCases && entry.amlCases.length > 0 && canAml.value && (
+                    {show("compliance") && entry.amlCases && entry.amlCases.length > 0 && canAml.value && (
                         <VCard variant="tonal" color="error">
                             <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("AML cases")}</ThemedText>
@@ -746,7 +785,7 @@ const MerchantDetailPage = dc(() => {
                         </VCard>
                     )}
 
-                    {entry.joinRequests && entry.joinRequests.length > 0 && (
+                    {show("compliance") && entry.joinRequests && entry.joinRequests.length > 0 && (
                         <VCard>
                             <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
@@ -767,7 +806,7 @@ const MerchantDetailPage = dc(() => {
                         </VCard>
                     )}
 
-                    {entry.kybDocuments && entry.kybDocuments.length > 0 && (
+                    {show("compliance") && entry.kybDocuments && entry.kybDocuments.length > 0 && (
                         <VCard>
                             <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                 <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
@@ -786,7 +825,7 @@ const MerchantDetailPage = dc(() => {
                         </VCard>
                     )}
 
-                    {entry.beneficialOwners && entry.beneficialOwners.length > 0 && (
+                    {show("compliance") && entry.beneficialOwners && entry.beneficialOwners.length > 0 && (
                         <VCard>
                             <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Beneficial owners")}</ThemedText>
@@ -801,7 +840,7 @@ const MerchantDetailPage = dc(() => {
                         </VCard>
                     )}
 
-                    {entry.users && entry.users.length > 0 && canWrite.value && (
+                    {show("access") && entry.users && entry.users.length > 0 && canWrite.value && (
                         <VCard>
                             <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Merchant users and access")}</ThemedText>
@@ -824,8 +863,11 @@ const MerchantDetailPage = dc(() => {
                         </VCard>
                     )}
 
+                    {show("access") && (
+                    <>
                     <CollapsibleSection
                         command={sectionCommand.value}
+                        alwaysOpen={activeTab.value !== "all"}
                         title={t("Notifications")}
                         subtitle={t("Notification delivery status for this merchant. Recipient addresses are masked and message payloads are never shown.")}
                         defaultOpen={false}
@@ -844,6 +886,7 @@ const MerchantDetailPage = dc(() => {
 
                     <CollapsibleSection
                         command={sectionCommand.value}
+                        alwaysOpen={activeTab.value !== "all"}
                         title={t("Merchant audit trail")}
                         subtitle={t("Lifecycle and governance events recorded against this merchant. Support sees the event and actor context without raw before/after values.")}
                         defaultOpen={false}
@@ -859,7 +902,10 @@ const MerchantDetailPage = dc(() => {
                             noElevation={true}
                         />
                     </CollapsibleSection>
+                    </>
+                    )}
 
+                    {show("access") && (
                     <VCard>
                         <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                             <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
@@ -880,6 +926,7 @@ const MerchantDetailPage = dc(() => {
                             ))}
                         </VCardText>
                     </VCard>
+                    )}
                 </ThemedView>
 
                 <MerchantActionDialog

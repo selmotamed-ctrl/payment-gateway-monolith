@@ -29,6 +29,7 @@ const CollapsibleSection = defineComponent({
         count: { type: [Number, String], default: null },
         tone: { type: String as () => StatusTone | null, default: null },
         command: { type: Object as PropType<SectionCommand | null>, default: null },
+        alwaysOpen: { type: Boolean, default: false },
     },
     setup(props, { slots }) {
         const { t } = useLocale();
@@ -58,6 +59,14 @@ const CollapsibleSection = defineComponent({
             },
         );
 
+        watch(
+            () => props.alwaysOpen,
+            (value) => {
+                if (value) open.value = true;
+            },
+            { immediate: true },
+        );
+
         return () => {
             const colors = theme.current.value.colors;
             return (
@@ -73,7 +82,9 @@ const CollapsibleSection = defineComponent({
                         <button
                             type="button"
                             aria-expanded={open.value ? "true" : "false"}
-                            onClick={() => (open.value = !open.value)}
+                            onClick={() => {
+                                if (!props.alwaysOpen) open.value = !open.value;
+                            }}
                             style={{
                                 width: "100%",
                                 display: "flex",
@@ -83,13 +94,15 @@ const CollapsibleSection = defineComponent({
                                 padding: display.mobile.value ? "16px" : "18px 22px",
                                 background: "transparent",
                                 border: "0",
-                                cursor: "pointer",
+                                cursor: props.alwaysOpen ? "default" : "pointer",
                                 textAlign: "left",
                                 color: "inherit",
                             }}
                         >
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flex: "1", minWidth: "0" }}>
-                                <VIcon icon={open.value ? "mdi-chevron-down" : "mdi-chevron-right"} size="20" style={{ opacity: 0.65, flex: "0 0 auto" }} />
+                                {!props.alwaysOpen && (
+                                    <VIcon icon={open.value ? "mdi-chevron-down" : "mdi-chevron-right"} size="20" style={{ opacity: 0.65, flex: "0 0 auto" }} />
+                                )}
                                 <ThemedView style={{ gap: "3px", minWidth: "0" }}>
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t(props.title)}</ThemedText>
                                     {props.subtitle && (

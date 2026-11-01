@@ -15,7 +15,7 @@ type MerchantResourceTableProps<T> = {
     searchPlaceholder?: string;
     noElevation?: boolean;
     onRows?: (rows: T[], total: number) => void;
-    onRefreshReady?: (refresh: () => void) => void;
+    onRefreshReady?: (refresh: (() => void) | null) => void;
 };
 
 const MerchantResourceTable = defineComponent(
@@ -76,6 +76,7 @@ const MerchantResourceTable = defineComponent(
                 }}
                 clearRefreshHook={() => {
                     hook.value = null;
+                    props.onRefreshReady?.(null);
                 }}
                 onRefresh={(table, refresh) => {
                     void refresh({
