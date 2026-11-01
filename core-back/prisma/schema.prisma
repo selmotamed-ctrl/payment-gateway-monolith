@@ -802,10 +802,15 @@ enum NotificationStatus {
 
 model Merchant {
   id                          String         @id @default(uuid(7))
+  version                     Int            @default(1)
   createdAt                   DateTime       @default(now()) @map("created_at")
   updatedAt                   DateTime       @updatedAt @map("updated_at")
   legalName                   String         @db.Text
   tradeName                   String         @db.Text
+  displayName                 String?        @map("display_name") @db.Text
+  logoUrl                     String?        @map("logo_url") @db.Text
+  supportEmail                String?        @map("support_email")
+  supportPhone                String?        @map("support_phone")
   taxId                       String?        @db.Text
   registrationNo              String?        @db.Text
   businessCategory            String?        @db.Text
@@ -819,7 +824,10 @@ model Merchant {
   activatedAt                 DateTime?
   suspendedAt                 DateTime?
   suspensionReasonCode        String?
+  suspensionNotes             String?        @map("suspension_notes") @db.Text
   closedAt                    DateTime?
+  closedReasonCode            String?        @map("closed_reason_code") @db.Text
+  closedNotes                 String?        @map("closed_notes") @db.Text
   commissionReceivableCeiling Decimal?       @db.Decimal(18, 4)
   negativeBalanceCeiling      Decimal        @default(0) @db.Decimal(18, 4)
   payoutBankDetailsJson       Json?
@@ -1265,6 +1273,7 @@ model ApprovalRequest {
   subjectType        String        @map("subject_type")
   subjectId          String        @map("subject_id")
   payloadDiffJson    Json          @map("payload_diff_json")
+  makerReason        String?       @map("maker_reason") @db.Text
   mode               ApprovalMode  @default(STANDARD)
   baseVersion        Int?          @map("base_version")
   expiresAt          DateTime?     @map("expires_at")
@@ -2161,6 +2170,7 @@ model DetailChangeLog {
   approvalRequest ApprovalRequest? @relation("DetailChangeLogApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
 
   @@index([entityType, entityId])
+  @@index([merchantId, createdAt])
   @@map("detail_change_logs")
 }
 

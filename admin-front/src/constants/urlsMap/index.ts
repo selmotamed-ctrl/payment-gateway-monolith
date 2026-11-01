@@ -32,9 +32,13 @@ export const urlsMap = {
 
     merchantsList: "v1/admin/merchants",
     merchantDetail: (id: string) => `v1/admin/merchants/${id}`,
+    merchantDescriptive: (id: string) => `v1/admin/merchants/${id}/descriptive`,
     merchantSuspend: (id: string) => `v1/admin/merchants/${id}/suspend`,
     merchantReinstate: (id: string) => `v1/admin/merchants/${id}/reinstate`,
+    merchantClose: (id: string) => `v1/admin/merchants/${id}/close`,
     merchantProposeEdit: (id: string) => `v1/admin/merchants/${id}/propose-edit`,
+    merchantPendingChanges: (id: string) => `v1/admin/merchants/${id}/pending-changes`,
+    merchantWithdrawChange: (id: string, approvalId: string) => `v1/admin/merchants/${id}/pending-changes/${approvalId}/withdraw`,
     merchantDetailChanges: (id: string) => `v1/admin/merchants/${id}/detail-changes`,
 
     approvalsList: "v1/admin/approvals",

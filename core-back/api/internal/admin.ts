@@ -46,6 +46,24 @@ import {
   secondsBetween,
 } from "../../lib/kybReview";
 import { queueKybNotification } from "../../lib/kybNotifications";
+import {
+  MERCHANT_CLOSE_REASON_CODES,
+  MERCHANT_DESCRIPTIVE_FIELDS,
+  MERCHANT_SENSITIVE_FIELD_SET,
+  MERCHANT_SUSPENSION_REASON_CODES,
+  assertMerchantClosable,
+  assertMerchantPatchFields,
+  assertMerchantReinstatable,
+  assertMerchantSuspendable,
+  assertMerchantVersion,
+  hasMerchantAmlAccess,
+  hasMerchantFinancialAccess,
+  hasSensitiveMerchantAccess,
+  merchantPatchOperations,
+  merchantVersion,
+  merchantWalletBalance,
+  queueMerchantLifecycleNotification,
+} from "../../lib/merchantOps";
 import { scanKybBytes } from "../../lib/kybScan";
 import { mysqlPlaceholders } from "../../engine/db/rawRows";
 import {
@@ -2378,6 +2396,7 @@ router.post("/join-requests/:id/decide", async (request: Request, response: Resp
         data: {
           status: "REJECTED",
           kybStatus: ["PENDING", "UNVERIFIED"].includes(merchant.kybStatus) ? "REJECTED" : merchant.kybStatus,
+          version: merchantVersion(merchant) + 1,
         },
       });
     }
@@ -2914,118 +2933,861 @@ router.post("/kyb-documents/:id/request-revalidation", async (request: Request, 
   response.status(201).json({ id: revalidation.id, status: revalidation.status, dueAt: revalidation.dueAt });
 });
 
+const MERCHANT_OPEN_JOIN_STATUSES = ["DRAFT", "SUBMITTED", "IN_REVIEW", "INFO_REQUESTED", "PENDING_CHECKER"] as const;
+const MERCHANT_OPEN_AML_STATUSES = ["OPEN", "IN_REVIEW", "PENDING_CHECKER", "FROZEN", "ESCALATED_STR"] as const;
+
+const merchantListSelect = {
+  id: true,
+  version: true,
+  createdAt: true,
+  updatedAt: true,
+  legalName: true,
+  tradeName: true,
+  displayName: true,
+  logoUrl: true,
+  supportEmail: true,
+  supportPhone: true,
+  country: true,
+  status: true,
+  onboardingChannel: true,
+  contactEmail: true,
+  contactPhone: true,
+  activatedAt: true,
+  suspendedAt: true,
+  closedAt: true,
+  nextKybReviewAt: true,
+  taxId: true,
+  registrationNo: true,
+  businessCategory: true,
+  riskTier: true,
+  kybStatus: true,
+  payoutBankDetailsJson: true,
+  commissionReceivableCeiling: true,
+  negativeBalanceCeiling: true,
+  suspensionReasonCode: true,
+  suspensionNotes: true,
+  closedReasonCode: true,
+  closedNotes: true,
+  _count: {
+    select: {
+      wallets: true,
+      applications: true,
+      users: true,
+      accessTokens: true,
+      joinRequests: true,
+      kybDocuments: true,
+    },
+  },
+  joinRequests: {
+    select: { id: true, status: true, submittedAt: true, proposedRiskTier: true, createdAt: true },
+    orderBy: { createdAt: "desc" },
+    take: 1,
+  },
+} as const;
+
+const merchantOperationalFlags = (principal: { role: string | null; authorities: string[] }) => {
+  const support = principal.role === "SUPPORT";
+  return {
+    support,
+    canSensitive: !support && hasSensitiveMerchantAccess(principal.authorities),
+    canAml: !support && hasMerchantAmlAccess(principal.authorities),
+    canFinancial: !support && hasMerchantFinancialAccess(principal.authorities),
+  };
+};
+
+const merchantStatusReasonVisible = (
+  reasonCode: string | null | undefined,
+  flags: ReturnType<typeof merchantOperationalFlags>,
+): boolean => Boolean(reasonCode) && flags.canSensitive && (flags.canAml || reasonCode !== "AML");
+
+const serializeMerchantSummary = (
+  merchant: Record<string, any>,
+  flags: ReturnType<typeof merchantOperationalFlags>,
+  pendingApprovalCount = 0,
+) => {
+  const latestJoinRequest = merchant.joinRequests?.[0] ?? null;
+  return {
+    id: merchant.id,
+    version: merchant.version,
+    createdAt: merchant.createdAt,
+    updatedAt: merchant.updatedAt,
+    legalName: merchant.legalName,
+    tradeName: merchant.tradeName,
+    displayName: merchant.displayName ?? merchant.tradeName,
+    logoUrl: merchant.logoUrl,
+    supportEmail: merchant.supportEmail,
+    supportPhone: merchant.supportPhone,
+    country: merchant.country,
+    status: merchant.status,
+    onboardingChannel: merchant.onboardingChannel,
+    contactEmail: merchant.contactEmail,
+    contactPhone: merchant.contactPhone,
+    activatedAt: merchant.activatedAt,
+    suspendedAt: merchant.suspendedAt,
+    closedAt: merchant.closedAt,
+    suspensionReasonCode: merchantStatusReasonVisible(merchant.suspensionReasonCode, flags)
+      ? merchant.suspensionReasonCode
+      : null,
+    suspensionReasonRedacted: Boolean(merchant.suspensionReasonCode) && !merchantStatusReasonVisible(merchant.suspensionReasonCode, flags),
+    closedReasonCode: flags.canSensitive ? merchant.closedReasonCode : null,
+    ...(flags.canSensitive
+      ? {
+          taxId: merchant.taxId,
+          registrationNo: merchant.registrationNo,
+          businessCategory: merchant.businessCategory,
+          riskTier: merchant.riskTier,
+          kybStatus: merchant.kybStatus,
+          nextKybReviewAt: merchant.nextKybReviewAt,
+          suspensionNotes: merchant.suspensionNotes,
+          closedNotes: merchant.closedNotes,
+        }
+      : {}),
+    ...(flags.canFinancial
+      ? {
+          payoutBankDetailsJson: merchant.payoutBankDetailsJson,
+          commissionReceivableCeiling: merchant.commissionReceivableCeiling,
+          negativeBalanceCeiling: merchant.negativeBalanceCeiling,
+        }
+      : {}),
+    walletCount: merchant._count?.wallets ?? merchant.wallets?.length ?? 0,
+    applicationCount: merchant._count?.applications ?? merchant.applications?.length ?? 0,
+    userCount: merchant._count?.users ?? merchant.users?.length ?? 0,
+    tokenCount: merchant._count?.accessTokens ?? merchant.accessTokens?.length ?? 0,
+    joinRequestCount: merchant._count?.joinRequests ?? merchant.joinRequests?.length ?? 0,
+    kybDocumentCount: merchant._count?.kybDocuments ?? merchant.kybDocuments?.length ?? 0,
+    latestJoinRequest,
+    pendingApprovalCount,
+    redactedFields: [
+      ...(flags.canSensitive ? [] : ["taxId", "registrationNo", "businessCategory", "riskTier", "kybStatus", "nextKybReviewAt", "suspensionNotes", "closedReasonCode", "closedNotes"]),
+      ...(flags.canFinancial ? [] : ["payoutBankDetailsJson", "commissionReceivableCeiling", "negativeBalanceCeiling"]),
+      ...(merchant.suspensionReasonCode && !merchantStatusReasonVisible(merchant.suspensionReasonCode, flags) ? ["suspensionReasonCode"] : []),
+    ],
+  };
+};
+
+const stringifyChangeValue = (value: unknown): string | null => {
+  if (value === undefined) return null;
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+};
+
+const merchantSensitiveHistoryFields = new Set([
+  "legalName",
+  "taxId",
+  "registrationNo",
+  "businessCategory",
+  "riskTier",
+  "kybStatus",
+  "payoutBankDetailsJson",
+  "commissionReceivableCeiling",
+  "negativeBalanceCeiling",
+  "contactEmail",
+  "contactPhone",
+  "suspensionReasonCode",
+  "suspensionNotes",
+  "closedReasonCode",
+  "closedNotes",
+]);
+
+const redactDetailChange = (
+  entry: Record<string, any>,
+  flags: ReturnType<typeof merchantOperationalFlags>,
+): Record<string, unknown> => {
+  const field = String(entry.fieldName ?? "").replace(/^\//, "").split("/")[0] ?? "";
+  const sensitive = merchantSensitiveHistoryFields.has(field);
+  const amlReason = field === "suspensionReasonCode" && String(entry.newValue ?? "") === "AML";
+  const redact = (!flags.canSensitive && sensitive) || (amlReason && !flags.canAml);
+  return {
+    ...entry,
+    actorEmail: entry.actor?.email ?? null,
+    oldValue: redact ? "[REDACTED]" : entry.oldValue,
+    newValue: redact ? "[REDACTED]" : entry.newValue,
+    redacted: redact,
+  };
+};
+
+const merchantApprovalKind = (payload: unknown): string => {
+  if (Array.isArray(payload)) return "EDIT";
+  if (payload && typeof payload === "object") {
+    const kind = (payload as Record<string, unknown>).kind;
+    if (typeof kind === "string") return kind.toUpperCase();
+  }
+  return "EDIT";
+};
+
+const merchantApprovalCheckerAllowed = (
+  role: string | null,
+  payload: unknown,
+): boolean => {
+  const kind = merchantApprovalKind(payload);
+  if (["SUSPEND", "SUSPEND_EMERGENCY", "REINSTATE", "CLOSE"].includes(kind)) {
+    return role === "COMPLIANCE" || role === "MLRO";
+  }
+  if (kind === "EDIT" && payload && typeof payload === "object" && !Array.isArray(payload)) {
+    const patch = (payload as Record<string, unknown>).patch;
+    if (Array.isArray(patch)) {
+      const fields = patch
+        .map((entry) => (entry && typeof entry === "object" ? String((entry as Record<string, unknown>).path ?? "") : ""))
+        .map((path) => path.replace(/^\//, "").split("/")[0] ?? "");
+      const financial = fields.some((field) => ["commissionReceivableCeiling", "negativeBalanceCeiling"].includes(field));
+      const compliance = fields.some((field) =>
+        ["legalName", "taxId", "registrationNo", "businessCategory", "payoutBankDetailsJson", "riskTier", "kybStatus", "contactEmail", "contactPhone"].includes(field),
+      );
+      if (financial && !compliance) return role === "FINANCE" || role === "COMPLIANCE" || role === "MLRO";
+      if (compliance) return role === "COMPLIANCE" || role === "MLRO";
+    }
+  }
+  return role !== "SUPPORT";
+};
+
 router.get("/merchants", async (request: Request, response: Response) => {
   requireAuthorities(request, ["merchant:read"]);
+  const principal = principalOf(request);
+  const flags = merchantOperationalFlags(principal);
   const built = buildListQuery(request.query, {
-    search: ["legalName", "tradeName", "email", "phone"],
-    in: { status: "status" }, equals: {kybStatus: "kybStatus", riskTier: "riskTier"},
-    dates: { createdAt: { path: "createdAt" } },
-    sortable: { legalName: "legalName", tradeName: "tradeName", status: "status", riskTier: "riskTier", kybStatus: "kybStatus", createdAt: "createdAt" },
+    search: flags.canSensitive
+      ? ["legalName", "tradeName", "contactEmail", "contactPhone", "taxId", "registrationNo"]
+      : ["legalName", "tradeName", "contactEmail", "contactPhone"],
+    contains: {
+      merchantName: ["displayName", "tradeName"],
+      businessName: "legalName",
+    },
+    in: { status: "status", kybStatus: "kybStatus", riskTier: "riskTier", onboardingChannel: "onboardingChannel" },
+    equals: { country: "country" },
+    dates: {
+      createdAt: { path: "createdAt" },
+      activatedAt: { path: "activatedAt", fromKey: "activatedFrom", toKey: "activatedTo" },
+      nextKybReviewAt: { path: "nextKybReviewAt", fromKey: "reviewFrom", toKey: "reviewTo" },
+    },
+    sortable: {
+      legalName: "legalName",
+      tradeName: "tradeName",
+      status: "status",
+      riskTier: "riskTier",
+      kybStatus: "kybStatus",
+      createdAt: "createdAt",
+      activatedAt: "activatedAt",
+      nextKybReviewAt: "nextKybReviewAt",
+    },
     defaultSort: { createdAt: "desc" },
   });
+  const query = (request.query ?? {}) as Record<string, unknown>;
+  const and = [...(((built.where as Record<string, unknown>).AND as Record<string, unknown>[] | undefined) ?? [])];
+  const requestRef = typeof query.requestRef === "string" ? query.requestRef.trim() : "";
+  if (requestRef) {
+    and.push({ joinRequests: { some: { id: { contains: requestRef } } } });
+  }
+  if (query.hasOpenJoinRequest === "true") {
+    and.push({ joinRequests: { some: { status: { in: [...MERCHANT_OPEN_JOIN_STATUSES] } } } });
+  }
+  if (query.hasOpenAmlCase === "true") {
+    if (!flags.canAml) {
+      response.json(listResponse("merchants", [], 0, built));
+      return;
+    }
+    const cases = await client.amlCase.findMany({
+      where: { subjectType: "MERCHANT", status: { in: [...MERCHANT_OPEN_AML_STATUSES] } },
+      select: { subjectId: true },
+      distinct: ["subjectId"],
+    });
+    if (cases.length === 0) {
+      response.json(listResponse("merchants", [], 0, built));
+      return;
+    }
+    and.push({ id: { in: cases.map((row) => row.subjectId) } });
+  }
+  const where = { AND: and };
   const [merchants, total] = await Promise.all([
-    client.merchant.findMany({ where: built.where as never, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
-    client.merchant.count({ where: built.where as never }),
+    client.merchant.findMany({
+      where: where as never,
+      orderBy: built.orderBy as never,
+      skip: built.skip,
+      take: built.take,
+      select: merchantListSelect,
+    }),
+    client.merchant.count({ where: where as never }),
   ]);
-  response.json(listResponse("merchants", merchants, total, built));
+  const ids = merchants.map((merchant) => merchant.id);
+  const pendingApprovals = ids.length === 0
+    ? []
+    : await client.approvalRequest.findMany({
+        where: { subjectType: "MERCHANT", subjectId: { in: ids }, state: "PENDING_REVIEW" },
+        select: { subjectId: true },
+      });
+  const pendingCount = new Map<string, number>();
+  for (const approval of pendingApprovals) {
+    pendingCount.set(approval.subjectId, (pendingCount.get(approval.subjectId) ?? 0) + 1);
+  }
+  response.json(listResponse(
+    "merchants",
+    merchants.map((merchant) => serializeMerchantSummary(merchant as never, flags, pendingCount.get(merchant.id) ?? 0)),
+    total,
+    built,
+  ));
 });
 
 router.get("/merchants/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["merchant:read"]);
   const { id } = parseOrThrow(idSchema, request.params);
+  const principal = principalOf(request);
+  const flags = merchantOperationalFlags(principal);
   const merchant = await client.merchant.findUnique({
     where: { id },
-    include: { wallets: true, applications: true },
+    select: {
+      ...merchantListSelect,
+      joinRequests: {
+        select: {
+          id: true,
+          status: true,
+          onboardingChannel: true,
+          proposedRiskTier: true,
+          submittedAt: true,
+          slaDueAt: true,
+          slaPausedAt: true,
+          createdAt: true,
+          decision: true,
+          decisionReasonCode: true,
+          fourEyesRequired: true,
+        },
+        orderBy: { createdAt: "desc" },
+        take: 10,
+      },
+      wallets: { select: { id: true, currency: true, status: true, createdAt: true } },
+      applications: {
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          expectedMonthlyVolume: true,
+          assignedWalletId: true,
+          createdAt: true,
+        },
+      },
+      users: {
+        select: { id: true, email: true, phone: true, role: true, status: true, isMaker: true, isChecker: true, mfaRequired: true, createdAt: true },
+      },
+      accessTokens: {
+        select: { id: true, applicationId: true, name: true, lastFour: true, scopes: true, ipWhitelistEnabled: true, revokedAt: true, lastUsedAt: true, createdAt: true },
+      },
+      credentialSets: {
+        select: { id: true, gatewayId: true, env: true, ownerType: true, settlementTarget: true, status: true, lastVerifiedAt: true, expiresAt: true },
+      },
+      kybDocuments: {
+        select: { id: true, docType: true, status: true, avStatus: true, originalFileName: true, expiresOn: true, reviewedAt: true, createdAt: true },
+        orderBy: { createdAt: "desc" },
+        take: 30,
+      },
+    },
   });
   if (!merchant) {
     throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
   }
-  response.json({ merchant });
+  const [pendingApprovals, recentChanges, owners, revalidations, amlCases, balance, metrics, openDisputes, pendingCashouts] = await Promise.all([
+    flags.canSensitive
+      ? client.approvalRequest.findMany({
+          where: { subjectType: "MERCHANT", subjectId: id, state: { in: ["DRAFT", "PENDING_REVIEW", "APPROVED"] } },
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            state: true,
+            mode: true,
+            baseVersion: true,
+            makerUserId: true,
+            makerReason: true,
+            payloadDiffJson: true,
+            createdAt: true,
+            expiresAt: true,
+            maker: { select: { email: true } },
+          },
+        })
+      : Promise.resolve([]),
+    client.detailChangeLog.findMany({
+      where: { merchantId: id },
+      orderBy: { createdAt: "desc" },
+      take: 25,
+      include: { actor: { select: { email: true } } },
+    }),
+    flags.canSensitive
+      ? client.beneficialOwner.findMany({
+          where: { merchantId: id },
+          orderBy: [{ active: "desc" }, { createdAt: "asc" }],
+          select: { id: true, fullNameAr: true, fullNameEn: true, nationality: true, ownershipPercent: true, role: true, pepDeclared: true, screeningStatus: true, active: true },
+        })
+      : Promise.resolve([]),
+    flags.canSensitive
+      ? client.kybRevalidationRequest.findMany({
+          where: { merchantId: id, status: { in: ["OPEN", "EXPIRED"] } },
+          orderBy: { requestedAt: "desc" },
+        })
+      : Promise.resolve([]),
+    flags.canAml
+      ? client.amlCase.findMany({
+          where: { subjectType: "MERCHANT", subjectId: id },
+          orderBy: { createdAt: "desc" },
+          take: 20,
+          select: { id: true, triggerReason: true, severity: true, status: true, slaDueAt: true, createdAt: true, confidential: true },
+        })
+      : Promise.resolve([]),
+    flags.canFinancial ? merchantWalletBalance(client, id) : Promise.resolve(null),
+    flags.canFinancial
+      ? client.paymentAttempt.groupBy({
+          by: ["status"],
+          where: { merchantId: id, createdAt: { gte: new Date(Date.now() - 30 * 86_400_000) } },
+          _count: { _all: true },
+          _sum: { totalChargedAmount: true },
+        })
+      : Promise.resolve([]),
+    flags.canFinancial
+      ? client.dispute.count({
+          where: {
+            attempt: { merchantId: id },
+            status: { in: ["OPENED", "EVIDENCE_REQUESTED", "EVIDENCE_SUBMITTED"] },
+          },
+        })
+      : Promise.resolve(0),
+    flags.canFinancial
+      ? client.cashoutRequest.count({ where: { merchantId: id, state: { in: ["PENDING", "PROCESSING"] } } })
+      : Promise.resolve(0),
+  ]);
+  const summary = serializeMerchantSummary(merchant as never, flags, pendingApprovals.length);
+  response.json({
+    merchant: {
+      ...summary,
+      ...(flags.canSensitive
+        ? {
+            joinRequests: merchant.joinRequests,
+            kybDocuments: merchant.kybDocuments,
+            beneficialOwners: owners,
+            revalidations,
+            amlCases,
+            pendingChanges: pendingApprovals,
+          }
+        : {}),
+      ...(flags.canSensitive || flags.canFinancial
+        ? {
+            wallets: merchant.wallets,
+            applications: merchant.applications,
+          }
+        : {}),
+      ...(flags.canSensitive
+        ? {
+            users: merchant.users,
+            accessTokens: merchant.accessTokens,
+            credentialSets: merchant.credentialSets,
+          }
+        : {}),
+      fieldHistory: recentChanges.map((entry) => redactDetailChange(entry, flags)),
+      ...(balance ? { walletBalance: balance } : {}),
+      ...(flags.canFinancial
+        ? {
+            metrics: metrics.map((row) => ({
+              status: row.status,
+              count: row._count._all,
+              chargedAmount: row._sum.totalChargedAmount ?? "0.0000",
+            })),
+            openDisputes,
+            pendingCashouts,
+          }
+        : {}),
+    },
+  });
 });
 
-router.post("/merchants/:id/suspend", async (request: Request, response: Response) => {
+router.patch("/merchants/:id/descriptive", async (request: Request, response: Response) => {
   requireAuthorities(request, ["merchant:write"]);
   const { id } = parseOrThrow(idSchema, request.params);
   const body = parseOrThrow(
-    z.object({ reasonCode: z.string().min(2).max(64), notes: z.string().max(2000).optional() }).strict(),
+    z.object({
+      tradeName: z.string().min(2).max(200).optional(),
+      displayName: z.string().max(200).optional(),
+      logoUrl: z.string().url().max(500).optional(),
+      supportEmail: z.string().email().max(160).optional(),
+      supportPhone: z.string().min(6).max(40).optional(),
+      baseVersion: z.number().int().min(1).optional(),
+      reason: z.string().max(2000).optional(),
+    }).strict(),
     request.body,
   );
   const actor = actorFromRequest(request);
   const merchant = await client.merchant.findUnique({ where: { id } });
-  if (!merchant) {
-    throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
-  }
-  const updated = await client.merchant.update({
-    where: { id },
-    data: {
-      status: "SUSPENDED",
-      suspendedAt: new Date(),
-      suspensionReasonCode: body.reasonCode,
-    },
+  if (!merchant) throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
+  assertMerchantVersion(merchant, body.baseVersion);
+  const fields = MERCHANT_DESCRIPTIVE_FIELDS.filter((field) => body[field] !== undefined);
+  if (fields.length === 0) throw new ApiError(400, "MERCHANT_EDIT_EMPTY", "At least one descriptive field is required");
+  const updated = await client.$transaction(async (tx) => {
+    const data: Record<string, unknown> = { version: merchantVersion(merchant) + 1 };
+    for (const field of fields) data[field] = body[field];
+    const row = await tx.merchant.update({ where: { id }, data });
+    for (const field of fields) {
+      await tx.detailChangeLog.create({
+        data: {
+          actorId: actor.userId,
+          merchantId: id,
+          entityType: "MERCHANT",
+          entityId: id,
+          fieldName: `/${field}`,
+          oldValue: stringifyChangeValue((merchant as Record<string, unknown>)[field]),
+          newValue: stringifyChangeValue(body[field]),
+          source: "ADMIN",
+          requestId: request.headers["x-request-id"]?.toString() ?? randomBytes(8).toString("hex"),
+          clientIp: request.ip,
+        },
+      });
+    }
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "SYSTEM",
+        action: "MERCHANT_DESCRIPTIVE_UPDATED",
+        entityType: "MERCHANT",
+        entityId: id,
+        beforeJson: Object.fromEntries(fields.map((field) => [field, (merchant as Record<string, unknown>)[field] ?? null])),
+        afterJson: Object.fromEntries(fields.map((field) => [field, body[field] ?? null])),
+      },
+    });
+    return row;
   });
-  await client.auditLog.create({
-    data: {
-      actorId: actor.userId,
-      role: actor.role,
-      action: "MERCHANT_SUSPENDED",
-      entityType: "MERCHANT",
-      entityId: id,
-      beforeJson: { status: merchant.status },
-      afterJson: { status: updated.status, reasonCode: body.reasonCode },
-    },
-  });
-  response.json({ id: updated.id, status: updated.status });
-});
-
-router.post("/merchants/:id/reinstate", async (request: Request, response: Response) => {
-  requireAuthorities(request, ["merchant:write"]);
-  const { id } = parseOrThrow(idSchema, request.params);
-  const merchant = await client.merchant.findUnique({ where: { id } });
-  if (!merchant) {
-    throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
-  }
-  const updated = await client.merchant.update({
-    where: { id },
-    data: { status: "ACTIVE", suspendedAt: null, suspensionReasonCode: null },
-  });
-  response.json({ id: updated.id, status: updated.status });
+  response.json({ merchant: serializeMerchantSummary(updated as never, merchantOperationalFlags(principalOf(request))) });
 });
 
 router.post("/merchants/:id/propose-edit", async (request: Request, response: Response) => {
   requireAuthorities(request, ["merchant:write"]);
   const { id } = parseOrThrow(idSchema, request.params);
   const body = parseOrThrow(
-    z.object({ patch: z.array(z.record(z.string().max(64), z.unknown())).min(1) }).strict(),
+    z.object({
+      reason: z.string().min(3).max(2000),
+      baseVersion: z.number().int().min(1).optional(),
+      patch: z.array(z.record(z.string().max(64), z.unknown())).min(1).max(200),
+    }).strict(),
     request.body,
   );
   const actor = actorFromRequest(request);
   const merchant = await client.merchant.findUnique({ where: { id } });
-  if (!merchant) {
-    throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
-  }
+  if (!merchant) throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
+  const baseVersion = body.baseVersion ?? merchantVersion(merchant);
+  assertMerchantVersion(merchant, baseVersion);
+  const operations = merchantPatchOperations(body.patch);
+  assertMerchantPatchFields(operations, MERCHANT_SENSITIVE_FIELD_SET);
   const approval = await client.approvalRequest.create({
     data: {
       subjectType: "MERCHANT",
       subjectId: merchant.id,
-      payloadDiffJson: json(body.patch),
+      payloadDiffJson: {
+        kind: "EDIT",
+        patch: body.patch,
+        reason: body.reason,
+        baseVersion,
+      } as Prisma.InputJsonValue,
+      makerReason: body.reason,
       mode: "STANDARD",
+      baseVersion,
       makerUserId: actor.userId,
       state: "PENDING_REVIEW",
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      expiresAt: new Date(Date.now() + 7 * 86_400_000),
+    },
+  });
+  response.status(202).json({ status: "PENDING_REVIEW", approvalRequestId: approval.id, baseVersion });
+});
+
+router.post("/merchants/:id/suspend", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["merchant:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z.object({
+      reasonCode: z.enum(MERCHANT_SUSPENSION_REASON_CODES),
+      notes: z.string().max(2000).optional(),
+      emergency: z.boolean().optional(),
+      ratifyWithinHours: z.number().int().min(1).max(168).optional(),
+      baseVersion: z.number().int().min(1).optional(),
+    }).strict(),
+    request.body,
+  );
+  const actor = actorFromRequest(request);
+  const merchant = await client.merchant.findUnique({ where: { id } });
+  if (!merchant) throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
+  assertMerchantSuspendable(merchant.status);
+  const baseVersion = body.baseVersion ?? merchantVersion(merchant);
+  assertMerchantVersion(merchant, baseVersion);
+  if (body.emergency) {
+    const now = new Date();
+    const ratifyDueAt = new Date(now.getTime() + (body.ratifyWithinHours ?? 24) * 3_600_000);
+    const result = await client.$transaction(async (tx) => {
+      const updated = await tx.merchant.update({
+        where: { id },
+        data: {
+          status: "SUSPENDED",
+          suspendedAt: now,
+          suspensionReasonCode: body.reasonCode,
+          suspensionNotes: body.notes,
+          version: merchantVersion(merchant) + 1,
+        },
+      });
+      const approval = await tx.approvalRequest.create({
+        data: {
+          subjectType: "MERCHANT",
+          subjectId: id,
+          payloadDiffJson: {
+            kind: "SUSPEND_EMERGENCY",
+            reasonCode: body.reasonCode,
+            notes: body.notes ?? null,
+            baseVersion,
+          } as Prisma.InputJsonValue,
+          makerReason: body.notes ?? `Emergency suspension: ${body.reasonCode}`,
+          mode: "EMERGENCY_RATIFICATION",
+          baseVersion,
+          makerUserId: actor.userId,
+          state: "PENDING_REVIEW",
+          ratifyDueAt,
+          expiresAt: ratifyDueAt,
+        },
+      });
+      for (const [field, oldValue] of [
+        ["status", merchant.status],
+        ["suspendedAt", merchant.suspendedAt],
+        ["suspensionReasonCode", merchant.suspensionReasonCode],
+        ["suspensionNotes", merchant.suspensionNotes],
+      ] as const) {
+        await tx.detailChangeLog.create({
+          data: {
+            actorId: actor.userId,
+            merchantId: id,
+            entityType: "MERCHANT",
+            entityId: id,
+            fieldName: `/${field}`,
+            oldValue: stringifyChangeValue(oldValue),
+            newValue: stringifyChangeValue((updated as Record<string, unknown>)[field]),
+            approvalRequestId: approval.id,
+            source: "ADMIN",
+            requestId: request.headers["x-request-id"]?.toString() ?? randomBytes(8).toString("hex"),
+            clientIp: request.ip,
+          },
+        });
+      }
+      await tx.auditLog.create({
+        data: {
+          actorId: actor.userId,
+          role: actor.role ?? "SYSTEM",
+          action: "MERCHANT_EMERGENCY_SUSPENDED",
+          entityType: "MERCHANT",
+          entityId: id,
+          beforeJson: { status: merchant.status },
+          afterJson: { status: "SUSPENDED", reasonCode: body.reasonCode, approvalRequestId: approval.id },
+          approvalRequestId: approval.id,
+        },
+      });
+      return { approval, updated };
+    });
+    await queueMerchantLifecycleNotification(client, {
+      merchantId: id,
+      code: "MERCHANT_SUSPENDED",
+      payload: { merchantId: id, reasonCode: body.reasonCode },
+      eventKey: `approval:${result.approval.id}`,
+    });
+    response.status(202).json({
+      status: "SUSPENDED",
+      merchantStatus: "SUSPENDED",
+      approvalRequestId: result.approval.id,
+      emergency: true,
+      ratifyDueAt,
+    });
+    return;
+  }
+  const approval = await client.approvalRequest.create({
+    data: {
+      subjectType: "MERCHANT",
+      subjectId: id,
+      payloadDiffJson: {
+        kind: "SUSPEND",
+        reasonCode: body.reasonCode,
+        notes: body.notes ?? null,
+        baseVersion: body.baseVersion ?? merchantVersion(merchant),
+      } as Prisma.InputJsonValue,
+      makerReason: body.notes ?? `Suspend merchant: ${body.reasonCode}`,
+      mode: "STANDARD",
+      baseVersion: body.baseVersion ?? merchantVersion(merchant),
+      makerUserId: actor.userId,
+      state: "PENDING_REVIEW",
+      expiresAt: new Date(Date.now() + 7 * 86_400_000),
     },
   });
   response.status(202).json({ status: "PENDING_REVIEW", approvalRequestId: approval.id });
 });
 
+router.post("/merchants/:id/reinstate", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["merchant:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z.object({ reason: z.string().min(3).max(2000), baseVersion: z.number().int().min(1).optional() }).strict(),
+    request.body,
+  );
+  const actor = actorFromRequest(request);
+  const merchant = await client.merchant.findUnique({ where: { id } });
+  if (!merchant) throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
+  assertMerchantReinstatable(merchant.status);
+  const baseVersion = body.baseVersion ?? merchantVersion(merchant);
+  assertMerchantVersion(merchant, baseVersion);
+  const approval = await client.approvalRequest.create({
+    data: {
+      subjectType: "MERCHANT",
+      subjectId: id,
+      payloadDiffJson: {
+        kind: "REINSTATE",
+        reasonCode: "REINSTATEMENT",
+        notes: body.reason,
+        baseVersion,
+      } as Prisma.InputJsonValue,
+      makerReason: body.reason,
+      mode: "STANDARD",
+      baseVersion,
+      makerUserId: actor.userId,
+      state: "PENDING_REVIEW",
+      expiresAt: new Date(Date.now() + 7 * 86_400_000),
+    },
+  });
+  response.status(202).json({ status: "PENDING_REVIEW", approvalRequestId: approval.id });
+});
+
+router.post("/merchants/:id/close", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["merchant:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z.object({
+      reasonCode: z.enum(MERCHANT_CLOSE_REASON_CODES),
+      notes: z.string().max(2000).optional(),
+      baseVersion: z.number().int().min(1).optional(),
+    }).strict(),
+    request.body,
+  );
+  const actor = actorFromRequest(request);
+  const merchant = await client.merchant.findUnique({ where: { id } });
+  if (!merchant) throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
+  assertMerchantClosable(merchant.status);
+  const baseVersion = body.baseVersion ?? merchantVersion(merchant);
+  assertMerchantVersion(merchant, baseVersion);
+  const [balance, openDisputes, openCashouts] = await Promise.all([
+    merchantWalletBalance(client, id),
+    client.dispute.count({
+      where: { attempt: { merchantId: id }, status: { in: ["OPENED", "EVIDENCE_REQUESTED", "EVIDENCE_SUBMITTED"] } },
+    }),
+    client.cashoutRequest.count({ where: { merchantId: id, state: { in: ["PENDING", "PROCESSING"] } } }),
+  ]);
+  if (!decimal(balance.balance).isZero()) {
+    throw new ApiError(409, "MERCHANT_BALANCE_NOT_ZERO", "The merchant wallet balance must be zero before closing", {
+      balance: balance.balance,
+    });
+  }
+  if (openDisputes > 0) {
+    throw new ApiError(409, "MERCHANT_OPEN_DISPUTES", "The merchant has open disputes", { openDisputes });
+  }
+  if (openCashouts > 0) {
+    throw new ApiError(409, "MERCHANT_OPEN_CASHOUTS", "The merchant has open cash-out requests", { openCashouts });
+  }
+  const approval = await client.approvalRequest.create({
+    data: {
+      subjectType: "MERCHANT",
+      subjectId: id,
+      payloadDiffJson: {
+        kind: "CLOSE",
+        reasonCode: body.reasonCode,
+        notes: body.notes ?? null,
+        baseVersion,
+      } as Prisma.InputJsonValue,
+      makerReason: body.notes ?? `Close merchant: ${body.reasonCode}`,
+      mode: "STANDARD",
+      baseVersion,
+      makerUserId: actor.userId,
+      state: "PENDING_REVIEW",
+      expiresAt: new Date(Date.now() + 7 * 86_400_000),
+    },
+  });
+  response.status(202).json({ status: "PENDING_REVIEW", approvalRequestId: approval.id });
+});
+
+router.get("/merchants/:id/pending-changes", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["merchant:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const principal = principalOf(request);
+  const flags = merchantOperationalFlags(principal);
+  const changes = await client.approvalRequest.findMany({
+    where: { subjectType: "MERCHANT", subjectId: id, state: { in: ["DRAFT", "PENDING_REVIEW", "APPROVED"] } },
+    orderBy: { createdAt: "desc" },
+    include: { maker: { select: { email: true } }, checker: { select: { email: true } } },
+  });
+  response.json({
+    pendingChanges: changes.map((approval) => ({
+      id: approval.id,
+      state: approval.state,
+      mode: approval.mode,
+      baseVersion: approval.baseVersion,
+      makerReason: flags.canSensitive ? approval.makerReason : null,
+      maker: approval.maker.email,
+      checker: approval.checker?.email ?? null,
+      createdAt: approval.createdAt,
+      expiresAt: approval.expiresAt,
+      payload: flags.canSensitive ? approval.payloadDiffJson : null,
+    })),
+  });
+});
+
+router.post("/merchants/:id/pending-changes/:approvalId/withdraw", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["merchant:write"]);
+  const params = parseOrThrow(
+    z.object({ id: z.string().min(1).max(64), approvalId: z.string().min(1).max(64) }).strict(),
+    request.params,
+  );
+  const body = parseOrThrow(z.object({ reason: z.string().min(3).max(2000).optional() }).strict(), request.body ?? {});
+  const actor = actorFromRequest(request);
+  const approval = await client.approvalRequest.findFirst({
+    where: { id: params.approvalId, subjectType: "MERCHANT", subjectId: params.id, state: { in: ["DRAFT", "PENDING_REVIEW"] } },
+  });
+  if (!approval) throw new ApiError(404, "APPROVAL_REQUEST_NOT_FOUND", "The pending merchant change does not exist");
+  if (approval.makerUserId !== actor.userId) {
+    throw new ApiError(403, "APPROVAL_WITHDRAW_FORBIDDEN", "Only the maker can withdraw this change");
+  }
+  const updated = await client.approvalRequest.update({
+    where: { id: approval.id },
+    data: { state: "REJECTED", rejectionReason: body.reason ? `WITHDRAWN_BY_MAKER: ${body.reason}` : "WITHDRAWN_BY_MAKER" },
+  });
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "SYSTEM",
+      action: "MERCHANT_CHANGE_WITHDRAWN",
+      entityType: "MERCHANT",
+      entityId: params.id,
+      beforeJson: { approvalRequestId: approval.id, state: approval.state },
+      afterJson: { approvalRequestId: approval.id, state: "REJECTED", reason: body.reason ?? null },
+      approvalRequestId: approval.id,
+    },
+  });
+  response.json({ id: updated.id, state: updated.state });
+});
+
 router.get("/merchants/:id/detail-changes", async (request: Request, response: Response) => {
   requireAuthorities(request, ["merchant:read"]);
   const { id } = parseOrThrow(idSchema, request.params);
-  const logs = await client.detailChangeLog.findMany({
-    where: { merchantId: id },
-    orderBy: { createdAt: "desc" },
-    take: 200,
+  const principal = principalOf(request);
+  const flags = merchantOperationalFlags(principal);
+  const built = buildListQuery(request.query, {
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { createdAt: "createdAt" },
+    defaultSort: { createdAt: "desc" },
   });
-  response.json({ detailChanges: logs });
+  const [logs, total] = await Promise.all([
+    client.detailChangeLog.findMany({
+      where: { merchantId: id, ...(built.where as object) } as never,
+      orderBy: built.orderBy as never,
+      skip: built.skip,
+      take: built.take,
+      include: { actor: { select: { email: true } } },
+    }),
+    client.detailChangeLog.count({ where: { merchantId: id, ...(built.where as object) } as never }),
+  ]);
+  response.json(listResponse("detailChanges", logs.map((entry) => redactDetailChange(entry, flags)), total, built));
 });
 
 router.get("/approvals", async (request: Request, response: Response) => {
@@ -3090,6 +3852,13 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
         "The operator who prepared an admin-assisted onboarding cannot check its approval",
       );
     }
+  }
+  if (approval.subjectType === "MERCHANT" && !merchantApprovalCheckerAllowed(actor.role ?? null, approval.payloadDiffJson)) {
+    throw new ApiError(
+      403,
+      "MERCHANT_CHECKER_DOMAIN_FORBIDDEN",
+      "The principal's role cannot check this merchant change",
+    );
   }
   const platform = getPlatformRuntime(client as never);
   if (approval.subjectType === "ADJUSTMENT") {
@@ -3221,6 +3990,13 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
       );
     }
   }
+  if (approval.subjectType === "MERCHANT" && !merchantApprovalCheckerAllowed(actor.role ?? null, approval.payloadDiffJson)) {
+    throw new ApiError(
+      403,
+      "MERCHANT_CHECKER_DOMAIN_FORBIDDEN",
+      "The principal's role cannot check this merchant change",
+    );
+  }
   const updated = await client.$transaction(async (tx) => {
     const row = await tx.approvalRequest.update({
       where: { id },
@@ -3267,6 +4043,23 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
           },
         });
       }
+    }
+    if (row.subjectType === "MERCHANT") {
+      const kind = merchantApprovalKind(row.payloadDiffJson);
+      await tx.auditLog.create({
+        data: {
+          actorId: actor.userId,
+          role: actor.role,
+          action: kind === "SUSPEND_EMERGENCY"
+            ? "MERCHANT_EMERGENCY_SUSPENSION_NOT_RATIFIED"
+            : "MERCHANT_CHANGE_REJECTED",
+          entityType: "MERCHANT",
+          entityId: row.subjectId,
+          beforeJson: { state: "PENDING_REVIEW", kind },
+          afterJson: { state: "REJECTED", rejectionReason: body.reason },
+          approvalRequestId: row.id,
+        },
+      });
     }
     return row;
   });

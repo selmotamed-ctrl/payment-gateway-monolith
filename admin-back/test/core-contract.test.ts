@@ -34,9 +34,12 @@ import {
   toCoreKybDocumentReplacement,
   toCoreKybDocumentRevalidation,
   toCoreKybDocumentReview,
+  toCoreMerchantClose,
+  toCoreMerchantDescriptive,
   toCoreMerchantProposeEdit,
   toCoreMerchantReinstate,
   toCoreMerchantSuspend,
+  toCoreMerchantWithdraw,
   toCoreOperatorCaseResolve,
   toCoreRailCreate,
   toCoreRailFields,
@@ -84,9 +87,12 @@ import {
 } from "../api/protected/joinRequests";
 import { kybReplacementSchema, kybRevalidationSchema, kybReviewSchema } from "../api/protected/kybReview";
 import {
+  closeSchema,
+  descriptiveEditSchema,
   proposeEditSchema,
   reinstateSchema,
   suspendSchema,
+  withdrawSchema,
 } from "../api/protected/merchants";
 import {
   userBulkPatchSchema,
@@ -401,16 +407,40 @@ const cases: ContractCase[] = [
     mapper: toCoreMerchantSuspend,
     publicSchema: suspendSchema,
     legacyPayload: { reason: "suspected fraud", emergency: true, ratifyWithinHours: 24 },
-    allowedKeys: ["reasonCode", "notes"],
+    allowedKeys: ["reasonCode", "notes", "emergency", "ratifyWithinHours", "baseVersion"],
     requiredKeys: ["reasonCode"],
+  },
+  {
+    route: "PATCH /merchants/:id/descriptive",
+    mapper: toCoreMerchantDescriptive,
+    publicSchema: descriptiveEditSchema,
+    legacyPayload: { tradeName: "Acme Two", displayName: "Acme", supportEmail: "support@acme.ly", reason: "rebrand", baseVersion: 2 },
+    allowedKeys: ["tradeName", "displayName", "logoUrl", "supportEmail", "supportPhone", "reason", "baseVersion"],
+    requiredKeys: [],
+  },
+  {
+    route: "POST /merchants/:id/close",
+    mapper: toCoreMerchantClose,
+    publicSchema: closeSchema,
+    legacyPayload: { reasonCode: "MERCHANT_REQUEST", notes: "business closed", baseVersion: 3 },
+    allowedKeys: ["reasonCode", "notes", "baseVersion"],
+    requiredKeys: ["reasonCode"],
+  },
+  {
+    route: "POST /merchants/:id/pending-changes/:approvalId/withdraw",
+    mapper: toCoreMerchantWithdraw,
+    publicSchema: withdrawSchema,
+    legacyPayload: { reason: "no longer needed" },
+    allowedKeys: ["reason"],
+    requiredKeys: [],
   },
   {
     route: "POST /merchants/:id/reinstate",
     mapper: toCoreMerchantReinstate,
     publicSchema: reinstateSchema,
     legacyPayload: { reason: "case cleared", baseVersion: 4 },
-    allowedKeys: [],
-    requiredKeys: [],
+    allowedKeys: ["reason", "baseVersion"],
+    requiredKeys: ["reason"],
   },
   {
     route: "POST /merchants/:id/propose-edit",
@@ -421,8 +451,8 @@ const cases: ContractCase[] = [
       patch: [{ op: "replace", path: "/name", value: "Acme Ltd" }],
       baseVersion: 1,
     },
-    allowedKeys: ["patch"],
-    requiredKeys: ["patch"],
+    allowedKeys: ["patch", "reason", "baseVersion"],
+    requiredKeys: ["patch", "reason", "baseVersion"],
   },
   {
     route: "POST /approvals/:id/approve",
@@ -1105,19 +1135,27 @@ describe("core contract field mapping", () => {
     expect(mapped.reasonCode).toBe("document is fine");
   });
 
-  test("merchant suspend keeps the operator reason in the core notes", () => {
+  test("merchant suspend keeps an unknown operator reason in the core notes", () => {
     const mapped = toCoreMerchantSuspend({ reason: "suspected fraud", emergency: true });
-    expect(mapped.reasonCode).toBe("suspected fraud");
+    expect(mapped.reasonCode).toBe("OTHER");
     expect(mapped.notes).toBe("suspected fraud");
+    expect(mapped.emergency).toBe(true);
   });
 
-  test("merchant reinstate forwards an empty core body", () => {
-    expect(toCoreMerchantReinstate({ reason: "cleared" })).toEqual({});
+  test("merchant reinstate forwards the reason and base version", () => {
+    expect(toCoreMerchantReinstate({ reason: "cleared", baseVersion: 4 })).toEqual({
+      reason: "cleared",
+      baseVersion: 4,
+    });
   });
 
-  test("merchant propose edit forwards the json patch untouched", () => {
+  test("merchant propose edit forwards the patch, reason and base version", () => {
     const patch = [{ op: "replace", path: "/name", value: "Acme Ltd" }];
-    expect(toCoreMerchantProposeEdit({ reason: "typo", patch, baseVersion: 1 })).toEqual({ patch });
+    expect(toCoreMerchantProposeEdit({ reason: "typo", patch, baseVersion: 1 })).toEqual({
+      patch,
+      reason: "typo",
+      baseVersion: 1,
+    });
   });
 
   test("approval approve maps the reason onto the core notes", () => {

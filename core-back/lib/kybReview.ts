@@ -213,7 +213,10 @@ export const recomputeMerchantKybStatus = async (
     );
   const nextStatus = documentsReady && ownersReady ? "VERIFIED" : "PENDING";
   if (merchant.kybStatus !== nextStatus) {
-    await db.merchant.update({ where: { id: merchantId }, data: { kybStatus: nextStatus } });
+    await db.merchant.update({
+      where: { id: merchantId },
+      data: { kybStatus: nextStatus, version: { increment: 1 } },
+    });
   }
   return nextStatus;
 };

@@ -183,6 +183,7 @@ export class KybExpiryWorker extends BaseWorker {
             kybStatus: "PENDING",
             suspendedAt: now,
             suspensionReasonCode: "KYB_EXPIRED",
+            version: { increment: 1 },
           },
         });
         if (updated.count === 0) return false;
@@ -287,6 +288,7 @@ export class KybExpiryWorker extends BaseWorker {
           data: {
             ...(created.length > 0 ? { kybStatus: "PENDING" } : {}),
             nextKybReviewAt: nextKybReviewAt(merchant.riskTier, now, policy),
+            version: { increment: 1 },
           },
         });
       });

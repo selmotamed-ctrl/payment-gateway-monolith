@@ -1,5 +1,5 @@
 import type { SeederContext } from "../context";
-import { addDays, addMinutes, chance, sha256Like } from "../builders";
+import { addDays, addMinutes, chance, randomPhone, sha256Like } from "../builders";
 
 /**
  * The 7-layer AML history and the live back-office queues: screenings, matches,
@@ -206,13 +206,21 @@ export const generateAmlAndGovernanceQueues = (ctx: SeederContext): void => {
       updatedAt: decidedAt > ctx.timeline.end ? ctx.timeline.end : decidedAt,
       subjectType,
       subjectId: subject.id,
-      payloadDiffJson: {
-        subjectType,
-        subjectId: subject.id,
-        field: "status",
-        from: "PENDING",
-        to: "ACTIVE",
-      },
+      payloadDiffJson: subjectType === "MERCHANT"
+        ? {
+            kind: "EDIT",
+            patch: [{ op: "replace", path: "/contactPhone", value: randomPhone(ctx) }],
+            reason: "Synthetic merchant contact verification.",
+            baseVersion: 1,
+          }
+        : {
+            subjectType,
+            subjectId: subject.id,
+            field: "status",
+            from: "PENDING",
+            to: "ACTIVE",
+          },
+      makerReason: "Synthetic governance evidence for maker-checker testing.",
       mode,
       baseVersion: 1,
       expiresAt: addDays(createdAt, 7),

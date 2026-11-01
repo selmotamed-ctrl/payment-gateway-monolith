@@ -23,6 +23,8 @@ const JOIN_STATUS = ["DRAFT", "SUBMITTED", "IN_REVIEW", "INFO_REQUESTED", "PENDI
 const KYB_DOCUMENT_STATUS = ["UPLOADED", "ACCEPTED", "REJECTED", "EXPIRED"];
 const KYB_AV_STATUS = ["PENDING", "CLEAN", "INFECTED"];
 const KYB_SUBJECT_TYPE = ["MERCHANT", "BENEFICIAL_OWNER"];
+const ONBOARDING_CHANNEL = ["SELF_SERVICE", "ADMIN_ASSISTED"];
+const COUNTRIES = ["LY", "EG", "TN", "TR", "AE", "GB", "US"];
 const KYB_DOCUMENT_TYPE = [
     "COMMERCIAL_REGISTRY",
     "TAX_CERTIFICATE",
@@ -95,10 +97,19 @@ export const tableRegistry: Record<string, TableServerConfig> = {
         url: urlsMap.merchantsList,
         listKey: "merchants",
         filters: [
+            { key: "requestRef", label: "Join request reference", type: "text", placeholder: "Join request ID" },
+            { key: "merchantName", label: "Merchant name", type: "text", placeholder: "Display or trade name" },
+            { key: "businessName", label: "Business name", type: "text", placeholder: "Legal entity name" },
             { key: "status", label: "Status", type: "data-autocomplete", options: options(MERCHANT_STATUS), multiple: true },
-            { key: "kybStatus", label: "KYB", type: "data-autocomplete", options: options(KYB_STATUS) },
-            { key: "riskTier", label: "Risk tier", type: "data-autocomplete", options: options(RISK_TIER) },
-            { key: "from", label: "Created", type: "date", queryFrom: "from", queryTo: "to" },
+            { key: "kybStatus", label: "KYB", type: "data-autocomplete", options: options(KYB_STATUS), multiple: true },
+            { key: "riskTier", label: "Risk tier", type: "data-autocomplete", options: options(RISK_TIER), multiple: true },
+            { key: "country", label: "Country", type: "data-autocomplete", options: options(COUNTRIES) },
+            { key: "onboardingChannel", label: "Channel", type: "data-autocomplete", options: options(ONBOARDING_CHANNEL) },
+            { key: "created", label: "Created", type: "date", queryFrom: "from", queryTo: "to" },
+            { key: "activated", label: "Activated", type: "date", queryFrom: "activatedFrom", queryTo: "activatedTo" },
+            { key: "review", label: "Next KYB review", type: "date", queryFrom: "reviewFrom", queryTo: "reviewTo" },
+            { key: "hasOpenJoinRequest", label: "Open join request", type: "boolean", trueLabel: "Open", falseLabel: "All" },
+            { key: "hasOpenAmlCase", label: "Open AML case", type: "boolean", trueLabel: "Open", falseLabel: "All" },
         ],
         defaultSort: { key: "createdAt", direction: "desc" },
     },

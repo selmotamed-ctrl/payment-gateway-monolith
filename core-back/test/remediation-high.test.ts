@@ -356,6 +356,38 @@ describe("F4: actionable approval subjects", () => {
     expect(governanceTable("auditLog").some((row) => row.action === "MERCHANT_EDIT_APPLIED")).toBe(true);
   });
 
+  test("MERCHANT structured edit enforces the base version and increments it", async () => {
+    await fixture.client.merchant.update({ where: { id: "merchant-1" }, data: { version: 4 } });
+    const result = await runApproval(fixture, {
+      subjectType: "MERCHANT",
+      subjectId: "merchant-1",
+      payloadDiffJson: {
+        kind: "EDIT",
+        patch: [{ op: "replace", path: "/tradeName", value: "Merchant Two" }],
+        reason: "correct tax id",
+        baseVersion: 4,
+      },
+    });
+    expect(result.status).toBe("EXECUTED");
+    const merchant = governanceTable("merchant").find((row) => row.id === "merchant-1");
+    expect(merchant?.tradeName).toBe("Merchant Two");
+    expect(merchant?.version).toBe(5);
+  });
+
+  test("MERCHANT structured edit rejects a stale base version", async () => {
+    await fixture.client.merchant.update({ where: { id: "merchant-1" }, data: { version: 5 } });
+    await expect(runApproval(fixture, {
+      subjectType: "MERCHANT",
+      subjectId: "merchant-1",
+      payloadDiffJson: {
+        kind: "EDIT",
+        patch: [{ op: "replace", path: "/tradeName", value: "Merchant Three" }],
+        reason: "stale edit",
+        baseVersion: 4,
+      },
+    })).rejects.toMatchObject({ code: "MERCHANT_VERSION_CONFLICT" });
+  });
+
   test("USER applies the pending authorities and role change", async () => {
     await fixture.client.user.create({
       data: {

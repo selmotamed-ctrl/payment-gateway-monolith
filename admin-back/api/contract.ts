@@ -849,16 +849,38 @@ export const toCoreKybDocumentRevalidation = (body: unknown): JsonRecord => {
 
 /* ------------------------------------------------------------------------ merchants */
 
+const MERCHANT_SUSPENSION_REASON_CODES = new Set([
+  "AML",
+  "FRAUD",
+  "KYB_EXPIRED",
+  "COMMISSION_CEILING",
+  "MERCHANT_REQUEST",
+  "OTHER",
+]);
+
 export const toCoreMerchantSuspend = (body: unknown): JsonRecord => {
   const source = asRecord(body);
-  const reason = asString(source.reason) ?? "";
-  return {
-    reasonCode: clamp(reason, 64),
-    notes: clamp(reason, 2000),
+  const rawReason = asString(source.reasonCode) ?? asString(source.reason) ?? "";
+  const reasonCode = rawReason.trim().toUpperCase();
+  const result: JsonRecord = {
+    reasonCode: MERCHANT_SUSPENSION_REASON_CODES.has(reasonCode) ? reasonCode : "OTHER",
+    notes: clamp(asString(source.notes) ?? (MERCHANT_SUSPENSION_REASON_CODES.has(reasonCode) ? "" : rawReason), 2000),
   };
+  if (asBoolean(source.emergency) !== undefined) result.emergency = asBoolean(source.emergency);
+  const ratifyWithinHours = Number(source.ratifyWithinHours);
+  if (Number.isInteger(ratifyWithinHours) && ratifyWithinHours > 0) result.ratifyWithinHours = ratifyWithinHours;
+  const baseVersion = Number(source.baseVersion);
+  if (Number.isInteger(baseVersion) && baseVersion > 0) result.baseVersion = baseVersion;
+  return result;
 };
 
-export const toCoreMerchantReinstate = (_body: unknown): JsonRecord => ({});
+export const toCoreMerchantReinstate = (body: unknown): JsonRecord => {
+  const source = asRecord(body);
+  const result: JsonRecord = { reason: clamp(asString(source.reason) ?? "", 2000) };
+  const baseVersion = Number(source.baseVersion);
+  if (Number.isInteger(baseVersion) && baseVersion > 0) result.baseVersion = baseVersion;
+  return result;
+};
 
 export const toCoreMerchantProposeEdit = (body: unknown): JsonRecord => {
   const source = asRecord(body);
@@ -866,7 +888,42 @@ export const toCoreMerchantProposeEdit = (body: unknown): JsonRecord => {
     .filter(isRecord)
     .slice(0, 200)
     .map((entry) => ({ ...entry }));
-  return { patch };
+  const result: JsonRecord = { patch };
+  const reason = asString(source.reason);
+  if (reason) result.reason = clamp(reason, 2000);
+  const baseVersion = Number(source.baseVersion);
+  if (Number.isInteger(baseVersion) && baseVersion > 0) result.baseVersion = baseVersion;
+  return result;
+};
+
+export const toCoreMerchantDescriptive = (body: unknown): JsonRecord => {
+  const source = asRecord(body);
+  const result: JsonRecord = {};
+  for (const field of ["tradeName", "displayName", "logoUrl", "supportEmail", "supportPhone"]) {
+    const value = asString(source[field]);
+    if (value !== undefined && value.length > 0) result[field] = value;
+  }
+  const reason = asString(source.reason);
+  if (reason) result.reason = clamp(reason, 2000);
+  const baseVersion = Number(source.baseVersion);
+  if (Number.isInteger(baseVersion) && baseVersion > 0) result.baseVersion = baseVersion;
+  return result;
+};
+
+export const toCoreMerchantClose = (body: unknown): JsonRecord => {
+  const source = asRecord(body);
+  const result: JsonRecord = { reasonCode: clamp(asString(source.reasonCode) ?? "OTHER", 64) };
+  const notes = asString(source.notes);
+  if (notes) result.notes = clamp(notes, 2000);
+  const baseVersion = Number(source.baseVersion);
+  if (Number.isInteger(baseVersion) && baseVersion > 0) result.baseVersion = baseVersion;
+  return result;
+};
+
+export const toCoreMerchantWithdraw = (body: unknown): JsonRecord => {
+  const source = asRecord(body);
+  const reason = asString(source.reason);
+  return reason ? { reason: clamp(reason, 2000) } : {};
 };
 
 /* ------------------------------------------------------------------------ approvals */

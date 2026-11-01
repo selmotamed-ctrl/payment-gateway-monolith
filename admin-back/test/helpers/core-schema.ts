@@ -314,12 +314,44 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
     })
     .strict(),
   "POST /merchants/:id/suspend": z
-    .object({ reasonCode: z.string().min(2).max(64), notes: z.string().max(2000).optional() })
+    .object({
+      reasonCode: z.string().min(2).max(64),
+      notes: z.string().max(2000).optional(),
+      emergency: z.boolean().optional(),
+      ratifyWithinHours: z.number().int().min(1).max(168).optional(),
+      baseVersion: z.number().int().min(1).optional(),
+    })
     .strict(),
-  // core does not read a body on the reinstate route.
-  "POST /merchants/:id/reinstate": z.unknown(),
+  "POST /merchants/:id/reinstate": z
+    .object({ reason: z.string().min(3).max(2000), baseVersion: z.number().int().min(1).optional() })
+    .strict(),
+  "POST /merchants/:id/close": z
+    .object({
+      reasonCode: z.string().min(2).max(64),
+      notes: z.string().max(2000).optional(),
+      baseVersion: z.number().int().min(1).optional(),
+    })
+    .strict(),
+  "PATCH /merchants/:id/descriptive": z
+    .object({
+      tradeName: z.string().max(200).optional(),
+      displayName: z.string().max(200).optional(),
+      logoUrl: z.string().max(500).optional(),
+      supportEmail: z.string().max(160).optional(),
+      supportPhone: z.string().max(40).optional(),
+      baseVersion: z.number().int().min(1).optional(),
+      reason: z.string().max(2000).optional(),
+    })
+    .strict(),
+  "POST /merchants/:id/pending-changes/:approvalId/withdraw": z
+    .object({ reason: z.string().max(2000).optional() })
+    .strict(),
   "POST /merchants/:id/propose-edit": z
-    .object({ patch: z.array(z.record(z.string().max(64), z.unknown())).min(1) })
+    .object({
+      patch: z.array(z.record(z.string().max(64), z.unknown())).min(1),
+      reason: z.string().min(3).max(2000),
+      baseVersion: z.number().int().min(1),
+    })
     .strict(),
   "POST /approvals/:id/approve": z
     .object({

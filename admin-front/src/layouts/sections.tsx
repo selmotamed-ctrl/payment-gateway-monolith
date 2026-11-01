@@ -27,6 +27,7 @@ export const routesAuthorities: {
     KybReview: ["kyb.review"],
     KybReviewDetail: ["kyb.review"],
     Merchants: ["merchants.read", "support.read_merchant"],
+    MerchantDetail: ["merchants.read", "support.read_merchant"],
     Approvals: ["approvals.approve", "approvals.reject"],
     AmlCases: ["aml.read_confidential"],
     AmlScreenings: ["aml.read_confidential"],

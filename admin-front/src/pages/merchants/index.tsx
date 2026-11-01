@@ -1,448 +1,372 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
-import { useLocale } from "vuetify";
-import { VAlert, VBtn, VCard, VCardText, VDialog, VSelect, VTextField } from "vuetify/components";
+import { useLocale, useTheme } from "vuetify";
+import { VBtn, VCard, VCardText } from "vuetify/components";
+import { useRouter } from "vue-router";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
-import { StateView } from "@/components/StateView";
+import { ThemedText } from "@/components/ThemedText";
 import { StatusChip } from "@/components/StatusChip";
+import { ApiTable } from "@/components/Table/ApiTable";
+import TableFilters from "@/components/Table/TableFilters";
+import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
+import { tableRegistry } from "@/components/Table/tableRegistry";
 import { statusTone } from "@/components/Table/statusTone";
-import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
+import { hasOneOfAuthorities, user } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
-import { extractApiErrorMessage } from "@/utils/errors/extractor";
-import { showSnackBar } from "@/utils/snackBar";
-
-type Merchant = {
-    id: string;
-    legalName: string;
-    tradeName: string;
-    taxId: string | null;
-    registrationNo: string | null;
-    businessCategory: string | null;
-    status: string;
-    kybStatus: string;
-    riskTier: string;
-    onboardingChannel: string;
-    country: string;
-    contactEmail: string | null;
-    contactPhone: string | null;
-    negativeBalanceCeiling: string | number | null;
-    commissionReceivableCeiling: string | number | null;
-    createdAt: string;
-    suspendedAt: string | null;
-};
-
-type MerchantEditForm = {
-    legalName: string;
-    tradeName: string;
-    taxId: string;
-    registrationNo: string;
-    businessCategory: string;
-    country: string;
-    contactEmail: string;
-    contactPhone: string;
-    riskTier: string;
-    negativeBalanceCeiling: string;
-    commissionReceivableCeiling: string;
-};
-
-type ActionMode = "SUSPEND" | "REINSTATE" | "PROPOSE_EDIT";
-
-const RISK_TIERS = ["LOW", "STANDARD", "HIGH"];
-const DECIMAL_PATTERN = /^\d{1,14}(\.\d{1,4})?$/;
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-const asText = (value: unknown): string => (value === null || value === undefined ? "" : String(value));
-
-const emptyEditForm = (): MerchantEditForm => ({
-    legalName: "",
-    tradeName: "",
-    taxId: "",
-    registrationNo: "",
-    businessCategory: "",
-    country: "LY",
-    contactEmail: "",
-    contactPhone: "",
-    riskTier: "STANDARD",
-    negativeBalanceCeiling: "0",
-    commissionReceivableCeiling: "",
-});
-
-const editFormFromMerchant = (merchant: Partial<Merchant>): MerchantEditForm => ({
-    legalName: asText(merchant.legalName),
-    tradeName: asText(merchant.tradeName),
-    taxId: asText(merchant.taxId),
-    registrationNo: asText(merchant.registrationNo),
-    businessCategory: asText(merchant.businessCategory),
-    country: asText(merchant.country || "LY").toUpperCase(),
-    contactEmail: asText(merchant.contactEmail),
-    contactPhone: asText(merchant.contactPhone),
-    riskTier: asText(merchant.riskTier || "STANDARD").toUpperCase(),
-    negativeBalanceCeiling: asText(merchant.negativeBalanceCeiling ?? "0"),
-    commissionReceivableCeiling: asText(merchant.commissionReceivableCeiling),
-});
-
-const validateEditForm = (form: MerchantEditForm): string | null => {
-    if (!form.legalName.trim()) return "Legal name is required";
-    if (!form.tradeName.trim()) return "Trade name is required";
-    if (!/^[A-Za-z]{2}$/.test(form.country.trim())) return "Country must be a two-letter ISO code";
-    if (!RISK_TIERS.includes(form.riskTier)) return "Risk tier is invalid";
-    if (form.contactEmail.trim() && !EMAIL_PATTERN.test(form.contactEmail.trim())) {
-        return "Contact email is invalid";
-    }
-    if (!DECIMAL_PATTERN.test(form.negativeBalanceCeiling.trim() || "0")) {
-        return "Negative balance ceiling must be a decimal with up to four places";
-    }
-    if (form.commissionReceivableCeiling.trim() && !DECIMAL_PATTERN.test(form.commissionReceivableCeiling.trim())) {
-        return "Commission receivable ceiling must be a decimal with up to four places";
-    }
-    return null;
-};
-
-const buildPatch = (original: Partial<Merchant>, form: MerchantEditForm) => {
-    const operations: { op: "replace"; path: string; value: unknown }[] = [];
-    const add = (field: keyof MerchantEditForm, value: unknown) => {
-        const before = original[field] ?? null;
-        const after = value ?? null;
-        if (asText(before) !== asText(after)) {
-            operations.push({ op: "replace", path: `/${field}`, value: after });
-        }
-    };
-
-    add("legalName", form.legalName.trim());
-    add("tradeName", form.tradeName.trim());
-    add("taxId", form.taxId.trim() || null);
-    add("registrationNo", form.registrationNo.trim() || null);
-    add("businessCategory", form.businessCategory.trim() || null);
-    add("country", form.country.trim().toUpperCase());
-    add("contactEmail", form.contactEmail.trim() || null);
-    add("contactPhone", form.contactPhone.trim() || null);
-    add("riskTier", form.riskTier);
-    add("negativeBalanceCeiling", form.negativeBalanceCeiling.trim() || "0");
-    add("commissionReceivableCeiling", form.commissionReceivableCeiling.trim() || null);
-
-    return operations;
-};
+import {
+    COLUMN_HELP,
+    formatDateTime,
+    kybStatusHelp,
+    merchantStatusHelp,
+    riskHelp,
+} from "./merchantHelp";
+import type { MerchantSummary } from "./types";
+import MerchantHelpPanel from "./components/MerchantHelpPanel";
+import MerchantActionDialog, { type MerchantActionMode } from "./components/MerchantActionDialog";
 
 const MerchantsPage = dc(() => {
     const { t } = useLocale();
-    const rows = ref<Merchant[]>([]);
-    const loading = ref(true);
-    const error = ref<string | null>(null);
+    const theme = useTheme();
+    const router = useRouter();
     const search = ref<string | null>(null);
+    const filters = ref<FilterValues>({});
+    const rows = ref<MerchantSummary[]>([]);
+    const total = ref(0);
+    const pageSize = ref(20);
+    let filterTimer: ReturnType<typeof setTimeout> | undefined;
+    const refreshHook = ref<{
+        reset: () => void;
+        refresh: (props: { queryParams?: Record<string, unknown>; nextSkip?: number }) => Promise<void>;
+        refreshAsIs: () => void;
+    } | null>(null);
+    const actionOpen = ref(false);
+    const actionMode = ref<MerchantActionMode>("SUSPEND");
+    const actionMerchant = ref<MerchantSummary | null>(null);
 
-    const dialogOpen = ref(false);
-    const selected = ref<Merchant | null>(null);
-    const actionMode = ref<ActionMode>("SUSPEND");
-    const reason = ref<string>("");
-    const editForm = ref<MerchantEditForm>(emptyEditForm());
-    const editOriginal = ref<Partial<Merchant>>({});
-    const editError = ref<string | null>(null);
-    const editLoading = ref(false);
-    const actionLoading = ref(false);
+    const canWrite = computed(() =>
+        hasOneOfAuthorities(["merchant:write", "merchants.edit_descriptive", "merchants.propose_sensitive", "merchants.suspend", "merchants.reinstate"]),
+    );
+    const canAml = computed(() =>
+        user.value?.userInfo.role !== "SUPPORT"
+        && hasOneOfAuthorities(["aml.read_confidential", "aml.review", "aml:read", "compliance:read"]),
+    );
 
-    const dialogTitle = computed(() => {
-        switch (actionMode.value) {
-            case "SUSPEND":
-                return t("Suspend Merchant");
-            case "REINSTATE":
-                return t("Reinstate Merchant");
-            default:
-                return t("Edit Merchant");
-        }
-    });
+    const filterDefinitions = computed(() =>
+        (tableRegistry.Merchants?.filters ?? []).filter((filter) => filter.key !== "hasOpenAmlCase" || canAml.value),
+    );
 
-    const load = async () => {
-        loading.value = true;
-        error.value = null;
-        try {
-            const response = await api.get(urlsMap.merchantsList, {
-                params: { search: search.value || undefined },
-            });
-            const payload = response.data?.data ?? response.data ?? {};
-            rows.value = payload.merchants ?? payload.rows ?? payload.items ?? [];
-        } catch (e) {
-            error.value = extractApiErrorMessage(e);
-            rows.value = [];
-        } finally {
-            loading.value = false;
-        }
+    const onFiltersChanged = (key: string, value: unknown) => {
+        filters.value = { ...filters.value, [key]: value };
+        if (filterTimer) clearTimeout(filterTimer);
+        filterTimer = setTimeout(() => refreshHook.value?.reset(), 300);
     };
 
-    void load();
+    const onFiltersCleared = () => {
+        filters.value = {};
+        refreshHook.value?.reset();
+    };
 
-    const openAction = async (row: Merchant, mode: ActionMode) => {
-        selected.value = row;
+    const openDetail = (row: MerchantSummary) => {
+        void router.push({ name: "MerchantDetail", params: { id: row.id } });
+    };
+
+    const openAction = (row: MerchantSummary, mode: MerchantActionMode) => {
+        actionMerchant.value = row;
         actionMode.value = mode;
-        reason.value = "";
-        editError.value = null;
-        editForm.value = editFormFromMerchant(row);
-        editOriginal.value = { ...row };
-        dialogOpen.value = true;
-
-        if (mode !== "PROPOSE_EDIT") {
-            return;
-        }
-
-        editLoading.value = true;
-        try {
-            const response = await api.get(urlsMap.merchantDetail(row.id));
-            const payload = response.data?.data ?? response.data ?? {};
-            const merchant: Partial<Merchant> = payload.merchant ?? payload;
-            editOriginal.value = merchant;
-            editForm.value = editFormFromMerchant(merchant);
-        } catch (e) {
-            editError.value = extractApiErrorMessage(e);
-        } finally {
-            editLoading.value = false;
-        }
+        actionOpen.value = true;
     };
 
-    const submit = async () => {
-        if (!selected.value) {
-            return;
-        }
-        actionLoading.value = true;
-        editError.value = null;
-        try {
-            if (actionMode.value === "SUSPEND") {
-                await api.post(urlsMap.merchantSuspend(selected.value.id), { reason: reason.value });
-            } else if (actionMode.value === "REINSTATE") {
-                await api.post(urlsMap.merchantReinstate(selected.value.id), { reason: reason.value });
-            } else {
-                const validationError = validateEditForm(editForm.value);
-                if (validationError) {
-                    editError.value = validationError;
-                    return;
-                }
-                const operations = buildPatch(editOriginal.value, editForm.value);
-                if (operations.length === 0) {
-                    editError.value = t("No changes to submit");
-                    return;
-                }
-                await api.post(urlsMap.merchantProposeEdit(selected.value.id), { patch: operations });
-            }
-            dialogOpen.value = false;
-            showSnackBar({
-                type: "success",
-                message:
-                    actionMode.value === "PROPOSE_EDIT"
-                        ? t("Change submitted for approval")
-                        : t("Saved"),
-            });
-            await load();
-        } catch (e) {
-            const message = extractApiErrorMessage(e);
-            if (actionMode.value === "PROPOSE_EDIT") {
-                editError.value = message;
-            }
-            showSnackBar({ type: "error", message });
-        } finally {
-            actionLoading.value = false;
-        }
+    const toneColor = (tone: ReturnType<typeof statusTone>): string => {
+        const colors = theme.current.value.colors as Record<string, string>;
+        return colors[tone] ?? colors["on-surface-variant"] ?? "#64748b";
     };
 
-    const headers: TableHeader<Merchant>[] = [
-        { key: "legalName", label: "Legal Name", value: (row) => row.legalName },
-        { key: "tradeName", label: "Trade Name", value: (row) => row.tradeName },
+    const rowColor = (row: MerchantSummary): string | undefined => {
+        if (row.status === "SUSPENDED" || row.status === "REJECTED") return toneColor("error");
+        if (row.status === "PENDING" || row.pendingApprovalCount > 0) return toneColor("warning");
+        return undefined;
+    };
+
+    const restricted = (value: unknown): string => (value === null || value === undefined || value === "" ? t("Restricted") : String(value));
+
+    const headers: TableHeader<MerchantSummary>[] = [
+        {
+            key: "merchant",
+            label: "Merchant",
+            sortKey: "tradeName",
+            headerTooltip: COLUMN_HELP.merchant,
+            value: (row) => `${row.tradeName} ${row.legalName}`,
+            Value: ({ row }: { row: MerchantSummary }) => (
+                <ThemedView style={{ gap: "3px" }}>
+                    <ThemedText style={{ fontSize: "13px", fontWeight: 700 }}>
+                        {row.displayName || row.tradeName || "—"}
+                    </ThemedText>
+                    <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{row.legalName}</ThemedText>
+                    <ThemedText style={{ fontSize: "10px", opacity: 0.5, direction: "ltr" }}>{row.id}</ThemedText>
+                </ThemedView>
+            ),
+        },
         {
             key: "status",
             label: "Status",
-            Value: ({ row }: { row: Merchant }) => (
-                <StatusChip label={row.status} tone={row.status === "ACTIVE" ? "success" : "warning"} />
-            ),
+            sortKey: "status",
+            headerTooltip: COLUMN_HELP.status,
+            value: (row) => row.status,
+            Value: ({ row }: { row: MerchantSummary }) => {
+                const help = merchantStatusHelp(row.status);
+                return <span title={help.meaning}><StatusChip label={help.label} tone={help.tone} size="small" /></span>;
+            },
         },
-        { key: "kybStatus", label: "Verified Docs", value: (row) => row.kybStatus },
         {
-            key: "riskTier",
-            label: "Risk Class",
-            Value: ({ row }: { row: Merchant }) => (
-                <StatusChip label={row.riskTier} tone={statusTone(row.riskTier)} />
+            key: "kyb",
+            label: "KYB",
+            sortKey: "kybStatus",
+            headerTooltip: COLUMN_HELP.kyb,
+            value: (row) => row.kybStatus ?? "",
+            Value: ({ row }: { row: MerchantSummary }) => {
+                if (!row.kybStatus) return <ThemedText style={{ opacity: 0.55 }}>{t("Restricted")}</ThemedText>;
+                const help = kybStatusHelp(row.kybStatus);
+                return <span title={help.meaning}><StatusChip label={help.label} tone={help.tone} size="small" /></span>;
+            },
+        },
+        {
+            key: "risk",
+            label: "Risk",
+            sortKey: "riskTier",
+            headerTooltip: COLUMN_HELP.risk,
+            value: (row) => row.riskTier ?? "",
+            Value: ({ row }: { row: MerchantSummary }) => {
+                if (!row.riskTier) return <ThemedText style={{ opacity: 0.55 }}>{t("Restricted")}</ThemedText>;
+                const help = riskHelp(row.riskTier);
+                return <span title={help.meaning}><StatusChip label={help.label} tone={help.tone} size="small" /></span>;
+            },
+        },
+        {
+            key: "category",
+            label: "Category",
+            headerTooltip: COLUMN_HELP.category,
+            value: (row) => row.businessCategory ?? "",
+            Value: ({ row }: { row: MerchantSummary }) => (
+                <ThemedText style={{ fontSize: "12px", opacity: row.businessCategory ? 1 : 0.55 }}>
+                    {restricted(row.businessCategory)}
+                </ThemedText>
             ),
         },
-        { key: "contactEmail", label: "Email", value: (row) => row.contactEmail ?? "" },
-        { key: "contactPhone", label: "Phone", value: (row) => row.contactPhone ?? "" },
-        { key: "createdAt", label: "Created At", value: (row) => row.createdAt },
+        {
+            key: "country",
+            label: "Country",
+            headerTooltip: COLUMN_HELP.country,
+            value: (row) => row.country,
+        },
+        {
+            key: "channel",
+            label: "Channel",
+            headerTooltip: COLUMN_HELP.channel,
+            value: (row) => row.onboardingChannel,
+            Value: ({ row }: { row: MerchantSummary }) => (
+                <StatusChip
+                    label={row.onboardingChannel === "ADMIN_ASSISTED" ? t("Admin assisted") : t("Self service")}
+                    tone={row.onboardingChannel === "ADMIN_ASSISTED" ? "info" : "neutral"}
+                    size="x-small"
+                />
+            ),
+        },
+        {
+            key: "contact",
+            label: "Contact",
+            headerTooltip: COLUMN_HELP.contact,
+            value: (row) => `${row.contactEmail ?? ""} ${row.contactPhone ?? ""}`,
+            Value: ({ row }: { row: MerchantSummary }) => (
+                <ThemedView style={{ gap: "2px" }}>
+                    <ThemedText style={{ fontSize: "11px" }}>{row.contactEmail || "—"}</ThemedText>
+                    <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{row.contactPhone || "—"}</ThemedText>
+                </ThemedView>
+            ),
+        },
+        {
+            key: "counts",
+            label: "Wallets / apps",
+            headerTooltip: COLUMN_HELP.counts,
+            value: (row) => `${row.walletCount}/${row.applicationCount}`,
+            Value: ({ row }: { row: MerchantSummary }) => (
+                <ThemedView style={{ gap: "2px" }}>
+                    <ThemedText style={{ fontSize: "12px", fontWeight: 600 }}>{row.walletCount} / {row.applicationCount}</ThemedText>
+                    <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{row.userCount} users · {row.tokenCount} tokens</ThemedText>
+                </ThemedView>
+            ),
+        },
+        {
+            key: "request",
+            label: "Latest request",
+            headerTooltip: COLUMN_HELP.request,
+            value: (row) => row.latestJoinRequest?.status ?? "",
+            Value: ({ row }: { row: MerchantSummary }) =>
+                row.latestJoinRequest ? (
+                    <ThemedView style={{ gap: "3px" }}>
+                        <StatusChip label={row.latestJoinRequest.status} tone={statusTone(row.latestJoinRequest.status)} size="x-small" />
+                        <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{formatDateTime(row.latestJoinRequest.createdAt)}</ThemedText>
+                    </ThemedView>
+                ) : (
+                    <ThemedText style={{ opacity: 0.55 }}>—</ThemedText>
+                ),
+        },
+        {
+            key: "nextReview",
+            label: "Next KYB review",
+            sortKey: "nextKybReviewAt",
+            headerTooltip: COLUMN_HELP.review,
+            value: (row) => row.nextKybReviewAt ?? "",
+            Value: ({ row }: { row: MerchantSummary }) => (
+                <ThemedText style={{ fontSize: "11px", opacity: row.nextKybReviewAt ? 1 : 0.55 }}>
+                    {row.nextKybReviewAt ? formatDateTime(row.nextKybReviewAt) : t("Restricted")}
+                </ThemedText>
+            ),
+        },
+        {
+            key: "lifecycle",
+            label: "Activated / suspended",
+            headerTooltip: COLUMN_HELP.lifecycleAt,
+            value: (row) => row.activatedAt ?? row.suspendedAt ?? row.closedAt ?? "",
+            Value: ({ row }: { row: MerchantSummary }) => (
+                <ThemedView style={{ gap: "2px" }}>
+                    <ThemedText style={{ fontSize: "10px", opacity: 0.7 }}>{t("Activated")}: {formatDateTime(row.activatedAt)}</ThemedText>
+                    <ThemedText style={{ fontSize: "10px", opacity: 0.7 }}>{t("Suspended")}: {formatDateTime(row.suspendedAt)}</ThemedText>
+                    {row.suspensionReasonCode && (
+                        <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>
+                            {row.suspensionReasonCode}
+                        </ThemedText>
+                    )}
+                </ThemedView>
+            ),
+        },
+        {
+            key: "pending",
+            label: "Pending changes",
+            headerTooltip: COLUMN_HELP.pending,
+            value: (row) => String(row.pendingApprovalCount),
+            Value: ({ row }: { row: MerchantSummary }) =>
+                row.pendingApprovalCount > 0 ? (
+                    <StatusChip label={`${row.pendingApprovalCount}`} tone="warning" size="x-small" />
+                ) : (
+                    <ThemedText style={{ opacity: 0.55 }}>—</ThemedText>
+                ),
+        },
         {
             key: "actions",
-            label: "Actions Column",
-            Value: ({ row }: { row: Merchant }) => (
-                <ThemedView style={{ flexDirection: "row", gap: "6px" }}>
-                    <VBtn size="small" variant="tonal" color="error" onClick={() => void openAction(row, "SUSPEND")}>
-                        {t("Suspended")}
+            label: "Actions",
+            sortable: false,
+            headerTooltip: COLUMN_HELP.actions,
+            Value: ({ row }: { row: MerchantSummary }) => (
+                <ThemedView style={{ flexDirection: "row", gap: "4px", flexWrap: "wrap" }}>
+                    <VBtn size="x-small" variant="text" prependIcon="mdi-open-in-new" onClick={() => openDetail(row)}>
+                        {t("Open")}
                     </VBtn>
-                    <VBtn size="small" variant="tonal" color="success" onClick={() => void openAction(row, "REINSTATE")}>
-                        {t("Active")}
-                    </VBtn>
-                    <VBtn size="small" variant="tonal" onClick={() => void openAction(row, "PROPOSE_EDIT")}>
-                        {t("Edit")}
-                    </VBtn>
+                    {canWrite.value && row.status === "ACTIVE" && (
+                        <VBtn size="x-small" variant="text" color="error" onClick={() => openAction(row, "SUSPEND")}>
+                            {t("Suspend")}
+                        </VBtn>
+                    )}
+                    {canWrite.value && row.status === "SUSPENDED" && (
+                        <VBtn size="x-small" variant="text" color="success" onClick={() => openAction(row, "REINSTATE")}>
+                            {t("Reinstate")}
+                        </VBtn>
+                    )}
+                    {canWrite.value && ["ACTIVE", "SUSPENDED"].includes(row.status) && (
+                        <VBtn size="x-small" variant="text" color="error" onClick={() => openAction(row, "CLOSE")}>
+                            {t("Close")}
+                        </VBtn>
+                    )}
                 </ThemedView>
             ),
         },
     ];
 
-    const renderEditForm = () => {
-        if (editLoading.value) {
-            return <StateView loading={true} minHeight="220px" />;
-        }
-        if (editError.value) {
-            return (
-                <VAlert type="error" variant="tonal" density="compact">
-                    {editError.value}
-                </VAlert>
-            );
-        }
-        return (
-            <>
-                <VAlert type="info" variant="tonal" density="compact">
-                    {t("This change is submitted for checker approval before it is applied.")}
-                </VAlert>
-                <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
-                    <VTextField
-                        label={t("Legal Name")}
-                        modelValue={editForm.value.legalName}
-                        onUpdate:modelValue={(v: string) => (editForm.value.legalName = v)}
-                        style={{ minWidth: "280px", flex: "1 1 280px" }}
-                    />
-                    <VTextField
-                        label={t("Trade Name")}
-                        modelValue={editForm.value.tradeName}
-                        onUpdate:modelValue={(v: string) => (editForm.value.tradeName = v)}
-                        style={{ minWidth: "280px", flex: "1 1 280px" }}
-                    />
-                    <VTextField
-                        label={t("Tax ID")}
-                        modelValue={editForm.value.taxId}
-                        onUpdate:modelValue={(v: string) => (editForm.value.taxId = v)}
-                        style={{ minWidth: "220px", flex: "1 1 220px" }}
-                    />
-                    <VTextField
-                        label={t("Registration No")}
-                        modelValue={editForm.value.registrationNo}
-                        onUpdate:modelValue={(v: string) => (editForm.value.registrationNo = v)}
-                        style={{ minWidth: "220px", flex: "1 1 220px" }}
-                    />
-                    <VTextField
-                        label={t("Business Category")}
-                        modelValue={editForm.value.businessCategory}
-                        onUpdate:modelValue={(v: string) => (editForm.value.businessCategory = v)}
-                        style={{ minWidth: "240px", flex: "1 1 240px" }}
-                    />
-                    <VTextField
-                        label={t("Country")}
-                        modelValue={editForm.value.country}
-                        onUpdate:modelValue={(v: string) => (editForm.value.country = v.toUpperCase().slice(0, 2))}
-                        style={{ minWidth: "140px", flex: "0 1 140px" }}
-                    />
-                    <VTextField
-                        label={t("Contact Email")}
-                        modelValue={editForm.value.contactEmail}
-                        onUpdate:modelValue={(v: string) => (editForm.value.contactEmail = v)}
-                        style={{ minWidth: "260px", flex: "1 1 260px" }}
-                    />
-                    <VTextField
-                        label={t("Contact Phone")}
-                        modelValue={editForm.value.contactPhone}
-                        onUpdate:modelValue={(v: string) => (editForm.value.contactPhone = v)}
-                        style={{ minWidth: "220px", flex: "1 1 220px" }}
-                    />
-                    <VSelect
-                        label={t("Risk Class")}
-                        items={RISK_TIERS}
-                        modelValue={editForm.value.riskTier}
-                        onUpdate:modelValue={(v: string) => (editForm.value.riskTier = v)}
-                        style={{ minWidth: "200px", flex: "0 1 200px" }}
-                    />
-                    <VTextField
-                        label={t("Negative Balance Ceiling")}
-                        modelValue={editForm.value.negativeBalanceCeiling}
-                        onUpdate:modelValue={(v: string) => (editForm.value.negativeBalanceCeiling = v)}
-                        hint="Decimal, up to 4 places"
-                        persistentHint
-                        style={{ minWidth: "240px", flex: "1 1 240px" }}
-                    />
-                    <VTextField
-                        label={t("Commission Receivable Ceiling")}
-                        modelValue={editForm.value.commissionReceivableCeiling}
-                        onUpdate:modelValue={(v: string) => (editForm.value.commissionReceivableCeiling = v)}
-                        hint={t("Optional decimal, up to 4 places")}
-                        persistentHint
-                        style={{ minWidth: "260px", flex: "1 1 260px" }}
-                    />
-                </ThemedView>
-            </>
-        );
-    };
+    const suspendedCount = computed(() => rows.value.filter((row) => row.status === "SUSPENDED").length);
+    const pendingCount = computed(() => rows.value.reduce((sum, row) => sum + row.pendingApprovalCount, 0));
 
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Merchants")} />
-
-                {error.value ? (
-                    <StateView error={error.value} onRetry={() => void load()} />
-                ) : (
-                    <DataTable
-                        title={t("Merchants")}
-                        data={rows.value}
-                        headers={headers}
-                        loading={loading.value}
-                        showNumber={true}
-                        xlsx={false}
-                        searchValue={search.value}
-                        setSearchValue={(value) => (search.value = value)}
-                    />
-                )}
-            </ThemedView>
-
-            <VDialog
-                modelValue={dialogOpen.value}
-                onUpdate:modelValue={(v: any) => (dialogOpen.value = v)}
-                maxWidth="860px"
-            >
+                <PageHeader
+                    title={t("Merchants")}
+                    end={() => (
+                        <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                            <StatusChip label={`${total.value} ${t("merchants")}`} tone="info" size="small" />
+                            <StatusChip label={`${suspendedCount.value} ${t("suspended")}`} tone={suspendedCount.value ? "error" : "neutral"} size="small" />
+                            <StatusChip label={`${pendingCount.value} ${t("pending changes")}`} tone={pendingCount.value ? "warning" : "neutral"} size="small" />
+                        </ThemedView>
+                    )}
+                />
                 <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedView style={{ gap: "4px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                                {dialogTitle.value}
-                            </ThemedText>
-                            <ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>
-                                {selected.value?.tradeName}
-                            </ThemedText>
-                        </ThemedView>
-
-                        {actionMode.value === "PROPOSE_EDIT" ? (
-                            renderEditForm()
-                        ) : (
-                            <VTextField
-                                modelValue={reason.value}
-                                onUpdate:modelValue={(v: string) => (reason.value = v)}
-                                label={t("Reason")}
-                            />
-                        )}
-
-                        <ThemedView
-                            style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}
-                        >
-                            <VBtn variant="text" onClick={() => (dialogOpen.value = false)}>
-                                {t("Cancel")}
-                            </VBtn>
-                            <VBtn
-                                color="primary"
-                                loading={actionLoading.value}
-                                disabled={editLoading.value || (actionMode.value === "PROPOSE_EDIT" && !!editError.value)}
-                                onClick={() => void submit()}
-                            >
-                                {actionMode.value === "PROPOSE_EDIT" ? t("Submit For Approval") : t("Submit")}
-                            </VBtn>
-                        </ThemedView>
+                    <VCardText>
+                        <MerchantHelpPanel />
                     </VCardText>
                 </VCard>
-            </VDialog>
+                <ApiTable<MerchantSummary>
+                    title={t("Merchants")}
+                    url={urlsMap.merchantsList}
+                    showNumber={true}
+                    xlsx={false}
+                    localSearch={false}
+                    numberOfItemsPerPage={pageSize.value}
+                    setNumberOfItemsPerPage={(value) => (pageSize.value = value)}
+                    searchValue={search.value}
+                    setSearchValue={(value) => (search.value = value)}
+                    headers={headers}
+                    rowColor={rowColor}
+                    apiDataExtractor={(data) => {
+                        const payload = data as { merchants?: MerchantSummary[]; rows?: MerchantSummary[] };
+                        return payload.merchants ?? payload.rows ?? [];
+                    }}
+                    apiTotalExtractor={(data) => {
+                        const payload = data as { total?: number; merchants?: MerchantSummary[] };
+                        return Number(payload.total ?? payload.merchants?.length ?? 0);
+                    }}
+                    onData={(nextRows, nextTotal) => {
+                        rows.value = nextRows;
+                        total.value = nextTotal;
+                    }}
+                    setRefreshHook={(hook) => {
+                        refreshHook.value = hook as typeof refreshHook.value;
+                    }}
+                    clearRefreshHook={() => {
+                        refreshHook.value = null;
+                    }}
+                    onRefresh={(props, refresh) => {
+                        void refresh({
+                            queryParams: {
+                                page: props.page,
+                                pageSize: pageSize.value,
+                                ...(search.value ? { search: search.value } : {}),
+                                ...buildFilterQuery(filterDefinitions.value, filters.value),
+                                ...(props.sortKey
+                                    ? { sortKey: props.sortKey, sortDirection: props.sortDirection }
+                                    : {}),
+                            },
+                        });
+                    }}
+                    TopSlot={() => (
+                        <TableFilters
+                            filters={filterDefinitions.value}
+                            values={filters.value}
+                            total={total.value}
+                            onChange={onFiltersChanged}
+                            onClear={onFiltersCleared}
+                        />
+                    )}
+                />
+            </ThemedView>
+            <MerchantActionDialog
+                open={actionOpen.value}
+                mode={actionMode.value}
+                merchant={actionMerchant.value}
+                onUpdate={(value) => (actionOpen.value = value)}
+                onDone={() => refreshHook.value?.refreshAsIs()}
+            />
         </ScreenContainer>
     );
 });

@@ -52,7 +52,25 @@ export const BOOKS_PART_2: GuideBook[] = [
                     "step",
                     "open"
                 ]
-            }
+            },
+            {
+                "id": "book-9-chapter-9.4",
+                "number": "9.4",
+                "titleEn": "Merchant Lifecycle, Sensitive Edits & Support Operations (`/merchants`)",
+                "titleAr": "دورة حياة التاجر والتعديلات الحساسة وعمليات الدعم (/merchants)",
+                "bodyEn": "The `/merchants` workspace is the operational merchant register. It is not a finance action screen: lifecycle changes and sensitive edits are governed, audited and, where policy requires, checked by a second person.\n\n**Lifecycle.** `PENDING` merchants are still onboarding. `ACTIVE` merchants may transact subject to the risk guards. `SUSPENDED` merchants cannot start new live payments. `REJECTED` applicants may submit a new join request. `CLOSED` merchants are read-only. Suspension, reinstatement and closure are sensitive actions.\n\n**Standard suspension and emergency suspension.** A standard suspension creates a checker request and only takes effect after approval. An emergency suspension takes effect immediately and must be ratified by a compliance or MLRO checker within 24 hours. If ratification is rejected, the suspension remains in force; it can only be reversed by a separate reinstatement approval. This is fail-safe, not fail-open.\n\n**Descriptive vs sensitive fields.** Trade name, display name, logo URL and support contacts are descriptive. Legal name, tax ID, registration number, business category, payout bank details, risk tier, KYB status override and financial ceilings are sensitive. Sensitive edits use maker-checker and a base version; the current value remains in force until the checker executes the change.\n\n**Support role.** Support sees descriptive merchant data and history only. Tax, registration, payout, ceiling, risk and AML details are redacted. Support never sees an AML suspension reason or AML case details.\n\n**Financials.** Wallet balances are derived from posted journal lines, not a mutable balance column. Open disputes, pending cash-outs and 30-day payment metrics link back to their own queues. This page never moves money and does not replace reconciliation or finance approvals.\n\n**History and pending changes.** Every field change is written to `detail_change_logs`. Sensitive edits carry a base version to prevent a stale proposal from overwriting a newer change. A maker may withdraw a pending change before a checker acts. A pending change is visible while the current value stays active.",
+                "bodyAr": "مساحة `/merchants` هي سجل التشغيل للتجار. ليست شاشة لتحريك الأموال: تغييرات دورة الحياة والتعديلات الحساسة محكومة ومسجلة، وعندما تتطلب السياسة تُراجع من شخص ثانٍ.\n\n**دورة الحياة.** التاجر `PENDING` ما زال في مرحلة التأهيل. التاجر `ACTIVE` يمكنه التحصيل وفق ضوابط المخاطر. التاجر `SUSPENDED` لا يبدأ مدفوعات حية جديدة. التاجر `REJECTED` يمكنه تقديم طلب انضمام جديد. التاجر `CLOSED` للقراءة فقط. التعليق وإعادة التفعيل والإغلاق إجراءات حساسة.\n\n**التعليق العادي والطارئ.** التعليق العادي ينشئ طلب مراجعة ولا يسري إلا بعد الموافقة. التعليق الطارئ يسري فوراً ويجب أن يصادق عليه مدقق امتثال أو MLRO خلال 24 ساعة. إذا رُفضت المصادقة يبقى التعليق سارياً، ولا يُرفع إلا بموافقة إعادة تفعيل منفصلة. هذا تصميم آمن عند الفشل وليس فتحاً للوصول.\n\n**الحقول الوصفية والحساسة.** الاسم التجاري والاسم المعروض وشعار الموقع وجهات دعم التاجر وصفية. الاسم القانوني والرقم الضريبي ورقم التسجيل وفئة النشاط وبيانات الحساب البنكي ومستوى المخاطر وتجاوز حالة KYB والسقوف المالية حساسة. التعديل الحساس يستخدم منشئاً ومدققاً وإصداراً أساسياً، وتبقى القيمة الحالية سارية حتى ينفذ المدقق التغيير.\n\n**دور الدعم.** يرى الدعم بيانات التاجر الوصفية والسجل فقط. تُحجب بيانات الضريبة والتسجيل والحساب البنكي والسقوف والمخاطر وAML. لا يرى الدعم سبب تعليق AML ولا تفاصيل حالات AML.\n\n**المالية.** أرصدة المحافظ تُشتق من قيود اليومية وليس من عمود رصيد قابل للتعديل. النزاعات المفتوحة وطلبات السحب المعلقة ومؤشرات آخر 30 يوماً ترتبط بقوائمها الخاصة. هذه الصفحة لا تحرك الأموال ولا تستبدل التسويات أو موافقات المالية.\n\n**السجل والتغييرات المعلقة.** كل تغيير حقل يُسجل في `detail_change_logs`. التعديلات الحساسة تحمل إصداراً أساسياً لمنع الكتابة فوق تغيير أحدث. يمكن للمنشئ سحب تغيير معلق قبل أن يتصرف المدقق. يظل التغيير المعلق ظاهراً بينما القيمة الحالية سارية.",
+                "humanErrorWarning": "NEVER use a quick status button as a substitute for an audited lifecycle action. NEVER reveal AML reasons or AML cases to Support. NEVER let a stale base version overwrite a newer merchant edit. NEVER close a merchant with a non-zero wallet balance or an open dispute.",
+                "sopChecklist": [
+                    "Confirm the merchant status and the requested lifecycle action.",
+                    "Use standard suspension for planned actions; reserve emergency suspension for immediate risk.",
+                    "For sensitive edits, record the maker reason and verify the base version.",
+                    "For closure, confirm zero balance and no open disputes or cash-outs.",
+                    "Check field history and pending changes before acting.",
+                    "For Support, never expose tax, registration, payout, ceiling, risk or AML details."
+                ],
+                "tags": ["merchant", "lifecycle", "suspend", "reinstate", "close", "sensitive", "maker-checker", "support", "field-history", "kyb"]
+            },
         ],
         "sopChecklist": [
             "Open /operator-cases and inspect attempt_step_logs for the exact HTTP status, timeout, and raw response.",
@@ -253,7 +271,7 @@ export const BOOKS_PART_2: GuideBook[] = [
             "join",
             "requests",
             "7-point",
-            "reviewer"
+            "reviewer",
         ]
     },
     {

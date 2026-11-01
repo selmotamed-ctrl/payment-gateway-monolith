@@ -1,6 +1,19 @@
 import { Decimal } from "decimal.js";
 import { ApiError } from "../../lib/error";
 import { nextKybReviewAt, parseKybRefreshPolicy } from "../../lib/kybReview";
+import {
+  MERCHANT_CLOSE_REASON_CODES,
+  MERCHANT_PATCH_FIELD_SET,
+  MERCHANT_SUSPENSION_REASON_CODES,
+  assertMerchantClosable,
+  assertMerchantPatchFields,
+  assertMerchantReinstatable,
+  assertMerchantSuspendable,
+  assertMerchantVersion,
+  merchantPatchOperations,
+  merchantVersion,
+  queueMerchantLifecycleNotification,
+} from "../../lib/merchantOps";
 import { moneyToString, type Money } from "../db/money";
 import {
   buildLedgerTemplate,
@@ -12,7 +25,7 @@ import {
   type LedgerOwnershipMode,
 } from "../ledger/LedgerPoster";
 import type { Repositories, Tx } from "../db/ports";
-import { applyJsonPatch, validateJsonPatch, type JsonPatchOperation } from "./ApprovalService";
+import { applyJsonPatch, type JsonPatchOperation } from "./ApprovalService";
 import {
   GoLiveGateValidator,
   type ChannelVerificationEvidence,
@@ -597,6 +610,7 @@ export async function activateApprovedJoinRequest(
       riskTier,
       activatedAt,
       nextKybReviewAt: nextReviewAt,
+      version: merchantVersion(merchant) + 1,
     },
   });
 
@@ -708,6 +722,163 @@ const MERCHANT_DATE_FIELDS = new Set(["activatedAt", "suspendedAt", "closedAt"])
  * in `detail_change_logs` and the whole change is audited. The patch and the
  * audit share the approval transaction.
  */
+const merchantApprovalPayload = (payload: unknown): {
+  kind: string;
+  reasonCode: string | null;
+  notes: string | null;
+  baseVersion: number | null;
+  patch: unknown;
+} => {
+  const record = asRecord(payload);
+  return {
+    kind: String(record.kind ?? "EDIT").toUpperCase(),
+    reasonCode: record.reasonCode === undefined || record.reasonCode === null
+      ? record.reason === undefined || record.reason === null ? null : String(record.reason)
+      : String(record.reasonCode),
+    notes: record.notes === undefined || record.notes === null ? null : String(record.notes),
+    baseVersion: record.baseVersion === undefined || record.baseVersion === null
+      ? null
+      : Number(record.baseVersion),
+    patch: Array.isArray(payload) ? payload : record.patch,
+  };
+};
+
+const merchantLifecycleReason = (
+  kind: string,
+  reasonCode: string | null,
+): string => {
+  if (kind === "SUSPEND" || kind === "SUSPEND_EMERGENCY") {
+    if (!reasonCode || !MERCHANT_SUSPENSION_REASON_CODES.includes(reasonCode as never)) {
+      throw new ApiError(400, "MERCHANT_SUSPENSION_REASON_REQUIRED", "A valid suspension reason code is required");
+    }
+    return reasonCode;
+  }
+  if (kind === "CLOSE") {
+    if (!reasonCode || !MERCHANT_CLOSE_REASON_CODES.includes(reasonCode as never)) {
+      throw new ApiError(400, "MERCHANT_CLOSE_REASON_REQUIRED", "A valid close reason code is required");
+    }
+    return reasonCode;
+  }
+  return reasonCode ?? "REINSTATEMENT";
+};
+
+const executeMerchantLifecycle = async (
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  input: {
+    approvalId: string;
+    merchantId: string;
+    checkerUserId: string;
+    checkerRole: string;
+  },
+  payload: ReturnType<typeof merchantApprovalPayload>,
+  merchant: Record<string, unknown>,
+): Promise<GovernanceExecutionResult> => {
+  const kind = payload.kind;
+  const status = String(merchant.status ?? "");
+  if (kind === "SUSPEND") assertMerchantSuspendable(status);
+  if (kind === "SUSPEND_EMERGENCY" && !["ACTIVE", "SUSPENDED"].includes(status)) {
+    throw new ApiError(409, "MERCHANT_NOT_SUSPENDABLE", "Only an active merchant can be suspended");
+  }
+  if (kind === "REINSTATE") assertMerchantReinstatable(status);
+  if (kind === "CLOSE") assertMerchantClosable(status);
+  if (kind !== "SUSPEND_EMERGENCY") {
+    assertMerchantVersion(merchant, payload.baseVersion);
+  }
+  const reasonCode = merchantLifecycleReason(kind, payload.reasonCode);
+  const now = new Date();
+  const data: Record<string, unknown> = {
+    version: merchantVersion(merchant) + 1,
+  };
+  if (kind === "SUSPEND" || kind === "SUSPEND_EMERGENCY") {
+    data.status = "SUSPENDED";
+    data.suspendedAt = now;
+    data.suspensionReasonCode = reasonCode;
+    data.suspensionNotes = payload.notes;
+  } else if (kind === "REINSTATE") {
+    data.status = "ACTIVE";
+    data.suspendedAt = null;
+    data.suspensionReasonCode = null;
+    data.suspensionNotes = null;
+  } else if (kind === "CLOSE") {
+    data.status = "CLOSED";
+    data.closedAt = now;
+    data.closedReasonCode = reasonCode;
+    data.closedNotes = payload.notes;
+  } else {
+    throw new ApiError(409, "MERCHANT_LIFECYCLE_KIND_INVALID", `Unknown merchant lifecycle action '${kind}'`);
+  }
+  const updated = await modelOf(tx, "merchant").update({
+    where: { id: input.merchantId },
+    data,
+  });
+  const detailLogs = modelOf(tx, "detailChangeLog");
+  const auditAction = kind === "REINSTATE"
+    ? "MERCHANT_REINSTATED"
+    : kind === "CLOSE"
+      ? "MERCHANT_CLOSED"
+      : "MERCHANT_SUSPENDED";
+  for (const [field, beforeValue] of [
+    ["status", merchant.status],
+    ["suspendedAt", merchant.suspendedAt],
+    ["suspensionReasonCode", merchant.suspensionReasonCode],
+    ["suspensionNotes", merchant.suspensionNotes],
+    ["closedAt", merchant.closedAt],
+    ["closedReasonCode", merchant.closedReasonCode],
+    ["closedNotes", merchant.closedNotes],
+  ] as const) {
+    if ((updated as Record<string, unknown>)[field] === beforeValue) continue;
+    await detailLogs.create({
+      data: {
+        actorId: input.checkerUserId,
+        merchantId: input.merchantId,
+        entityType: "MERCHANT",
+        entityId: input.merchantId,
+        fieldName: field,
+        oldValue: stringifyChangeValue(beforeValue),
+        newValue: stringifyChangeValue((updated as Record<string, unknown>)[field]),
+        approvalRequestId: input.approvalId,
+        source: "ADMIN",
+        requestId: input.approvalId,
+      },
+    });
+  }
+  await writeAudit(ctx, tx, {
+    actorId: input.checkerUserId,
+    role: input.checkerRole,
+    action: auditAction,
+    entityType: "MERCHANT",
+    entityId: input.merchantId,
+    beforeJson: { status: merchant.status, suspensionReasonCode: merchant.suspensionReasonCode },
+    afterJson: {
+      status: (updated as Record<string, unknown>).status,
+      reasonCode,
+      notes: payload.notes,
+      emergency: kind === "SUSPEND_EMERGENCY",
+    },
+    approvalRequestId: input.approvalId,
+  });
+  await queueMerchantLifecycleNotification(tx as never, {
+    merchantId: input.merchantId,
+    code: kind === "REINSTATE" ? "MERCHANT_REINSTATED" : kind === "CLOSE" ? "MERCHANT_CLOSED" : "MERCHANT_SUSPENDED",
+    payload: { merchantId: input.merchantId, reasonCode, notes: payload.notes },
+    eventKey: `approval:${input.approvalId}`,
+  });
+  return {
+    status: "EXECUTED",
+    entityId: input.merchantId,
+    idempotent: false,
+  };
+};
+
+/**
+ * Applies an approved merchant edit or lifecycle change.
+ *
+ * A legacy approval may still carry a bare JSON-Patch array. New approvals
+ * carry `{ kind, patch, reasonCode, notes, baseVersion }`; lifecycle actions
+ * are executed by the same handler so a checker cannot bypass the version and
+ * status checks by submitting the patch directly.
+ */
 export async function executeMerchantPatch(
   ctx: GovernanceExecutionContext,
   tx: Tx,
@@ -719,20 +890,23 @@ export async function executeMerchantPatch(
     checkerRole: string;
   },
 ): Promise<GovernanceExecutionResult> {
-  const operations = validateJsonPatch(input.patch);
+  const payload = merchantApprovalPayload(input.patch);
   const merchants = modelOf(tx, "merchant");
   const merchant = await merchants.findUnique({ where: { id: input.merchantId } });
   if (!merchant) {
     throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
   }
+  if (["SUSPEND", "SUSPEND_EMERGENCY", "REINSTATE", "CLOSE"].includes(payload.kind)) {
+    return executeMerchantLifecycle(ctx, tx, input, payload, merchant as Record<string, unknown>);
+  }
+  const operations = merchantPatchOperations(input.patch);
+  assertMerchantPatchFields(operations, MERCHANT_PATCH_FIELD_SET);
+  assertMerchantVersion(merchant, payload.baseVersion);
 
   // A Prisma Decimal is not structured-cloneable, so the patch document is
-  // built from clone-safe values. Decimal fields touched by the patch are
+  // built from a JSON-safe snapshot. Decimal fields touched by the patch are
   // converted back to an exact Decimal before the update.
-  const before: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(merchant as Record<string, unknown>)) {
-    before[key] = value instanceof Decimal ? value.toString() : value;
-  }
+  const before = JSON.parse(JSON.stringify(merchant)) as Record<string, unknown>;
   const after = applyJsonPatch(before, operations as JsonPatchOperation[]);
   const touched = new Set(
     operations
@@ -741,7 +915,7 @@ export async function executeMerchantPatch(
   );
   const data: Record<string, unknown> = {};
   for (const field of touched) {
-    if (field === "id" || field === "createdAt" || field === "updatedAt") {
+    if (field === "id" || field === "createdAt" || field === "updatedAt" || field === "version") {
       continue;
     }
     const value = (after as Record<string, unknown>)[field];
@@ -761,7 +935,8 @@ export async function executeMerchantPatch(
       idempotent: true,
     };
   }
-  const updated = await merchants.update({ where: { id: input.merchantId }, data });
+  data.version = merchantVersion(merchant) + 1;
+  await merchants.update({ where: { id: input.merchantId }, data });
 
   const detailLogs = modelOf(tx, "detailChangeLog");
   for (const operation of operations) {
@@ -788,7 +963,7 @@ export async function executeMerchantPatch(
     entityType: "MERCHANT",
     entityId: input.merchantId,
     beforeJson: before,
-    afterJson: updated,
+    afterJson: after,
     approvalRequestId: input.approvalId,
   });
 
@@ -2895,6 +3070,7 @@ export async function executeApprovalSubject(
           kybStatus: ["PENDING", "UNVERIFIED"].includes(String(merchant.kybStatus))
             ? "REJECTED"
             : merchant.kybStatus,
+          version: merchantVersion(merchant) + 1,
         },
       });
       await writeAudit(ctx, tx, {
