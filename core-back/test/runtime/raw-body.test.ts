@@ -12,6 +12,12 @@ app.post("/internal/checkout/inbound/:gateway/:env/:pathToken", (request: Reques
     hex: Buffer.isBuffer(request.body) ? request.body.toString("hex") : "",
   });
 });
+app.post("/internal/admin/join-requests/:id/kyb-documents", (request: Request, response: Response) => {
+  response.json({
+    isBuffer: Buffer.isBuffer(request.body),
+    length: Buffer.isBuffer(request.body) ? request.body.byteLength : 0,
+  });
+});
 app.post("/internal/other", (request: Request, response: Response) => {
   response.json({ isBuffer: Buffer.isBuffer(request.body), body: request.body });
 });
@@ -54,6 +60,18 @@ describe("core raw body capture", () => {
     const body = (await response.json()) as { isBuffer: boolean; hex: string };
     expect(body.isBuffer).toBe(true);
     expect(Buffer.from(body.hex, "hex").toString("utf8")).toBe(payload);
+  });
+
+  test("preserves an admin-assisted KYB upload", async () => {
+    const payload = Buffer.from("%PDF-1.4\nverification\n", "utf8");
+    const response = await fetch(`${baseUrl}/internal/admin/join-requests/jr-1/kyb-documents`, {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: payload,
+    });
+    const body = (await response.json()) as { isBuffer: boolean; length: number };
+    expect(body.isBuffer).toBe(true);
+    expect(body.length).toBe(payload.byteLength);
   });
 
   test("still parses ordinary JSON routes", async () => {

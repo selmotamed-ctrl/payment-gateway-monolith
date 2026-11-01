@@ -22,6 +22,8 @@ export const routesAuthorities: {
 } = {
     Dashboard: [],
     JoinRequests: ["joinrequests.review"],
+    JoinRequestNew: ["joinrequests.review"],
+    JoinRequestDetail: ["joinrequests.review"],
     KybReview: ["kyb.review"],
     Merchants: ["merchants.read", "support.read_merchant"],
     Approvals: ["approvals.approve", "approvals.reject"],

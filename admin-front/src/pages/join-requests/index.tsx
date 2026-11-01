@@ -1,355 +1,296 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
-import { useLocale } from "vuetify";
-import { VBtn, VCard, VCardText, VCheckbox, VDialog, VSelect, VTextField, VTextarea } from "vuetify/components";
+import { useLocale, useTheme } from "vuetify";
+import { VBtn } from "vuetify/components";
+import { useRouter } from "vue-router";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
+import { ApiTable } from "@/components/Table/ApiTable";
+import TableFilters from "@/components/Table/TableFilters";
+import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
+import { tableRegistry } from "@/components/Table/tableRegistry";
 import { statusTone } from "@/components/Table/statusTone";
-import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
-import { user } from "@/state/user";
+import { hasOneOfAuthorities } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
-import { extractApiErrorMessage } from "@/utils/errors/extractor";
-import { showSnackBar } from "@/utils/snackBar";
+import {
+    COLUMN_HELP,
+    channelLabel,
+    formatDateTime,
+    joinStatusHelp,
+    slaInfo,
+} from "./joinRequestHelp";
+import type { JoinRequestSummary } from "./types";
 
-type JoinRequest = {
-    id: string;
-    merchantId: string;
-    merchantName: string;
-    status: string;
-    riskTier: string;
-    businessCategory: string;
-    expectedMonthlyVolume: string;
-    currency: string;
-    submittedAt: string;
-    slaDueAt: string;
-    reviewerName: string | null;
-    fourEyesReasons: string[];
-    screeningResult: string;
-    beneficialOwners: { fullName: string; ownershipPercent: string; isPep: boolean }[];
-    documents: { id: string; docType: string; status: string; expiresOn: string | null }[];
-    requestedInfo: string | null;
-};
+const filterDefinitions = tableRegistry.JoinRequests?.filters ?? [];
 
-const CHECKLIST_KEYS = [
-    "Identity Verified",
-    "Business Existence Verified",
-    "Beneficial Owners Identified",
-    "Screening Result Reviewed",
-    "Category And Volume Consistent",
-    "Payout Account Ownership Verified",
-    "Risk Tier Assigned",
-];
-
-const REASON_CODES = [
-    { title: "Incomplete Documents", value: "INCOMPLETE_DOCUMENTS" },
-    { title: "Unverifiable Business", value: "UNVERIFIABLE_BUSINESS" },
-    { title: "Prohibited Activity", value: "PROHIBITED_ACTIVITY" },
-    { title: "Policy", value: "POLICY" },
-];
+const textValue = (value: unknown): string => (value === null || value === undefined ? "" : String(value));
 
 const JoinRequestsPage = dc(() => {
     const { t } = useLocale();
-    const rows = ref<JoinRequest[]>([]);
-    const loading = ref(true);
-    const error = ref<string | null>(null);
+    const theme = useTheme();
+    const router = useRouter();
+
     const search = ref<string | null>(null);
+    const filters = ref<FilterValues>({});
+    const rows = ref<JoinRequestSummary[]>([]);
+    const total = ref(0);
+    const pageSize = ref(20);
+    let filterTimer: ReturnType<typeof setTimeout> | undefined;
+    const refreshHook = ref<{
+        reset: () => void;
+        refresh: (props: { queryParams?: Record<string, unknown>; nextSkip?: number }) => Promise<void>;
+        refreshAsIs: () => void;
+    } | null>(null);
 
-    const detailsOpen = ref(false);
-    const selected = ref<JoinRequest | null>(null);
-    const checklist = ref<Record<string, boolean>>({});
-    const decision = ref<"APPROVE" | "REJECT">("APPROVE");
-    const reasonCode = ref<string>("POLICY");
-    const notes = ref<string>("");
-    const infoRequest = ref<string>("");
-    const requestedItems = ref<string>("");
-    const actionLoading = ref(false);
+    const canWrite = computed(() => hasOneOfAuthorities(["joinrequests.review", "kyb.review"]));
 
-    const load = async () => {
-        loading.value = true;
-        error.value = null;
-        try {
-            const response = await api.get(urlsMap.joinRequestsList, {
-                params: { search: search.value || undefined },
-            });
-            const payload = response.data?.data ?? response.data ?? {};
-            rows.value = payload.joinRequests ?? payload.rows ?? payload.items ?? [];
-        } catch (e) {
-            error.value = extractApiErrorMessage(e);
-            rows.value = [];
-        } finally {
-            loading.value = false;
-        }
+    const onFiltersChanged = (key: string, value: unknown) => {
+        filters.value = { ...filters.value, [key]: value };
+        if (filterTimer) clearTimeout(filterTimer);
+        filterTimer = setTimeout(() => refreshHook.value?.reset(), 300);
     };
 
-    void load();
-
-    const openDetails = async (row: JoinRequest) => {
-        selected.value = row;
-        checklist.value = {};
-        decision.value = "APPROVE";
-        reasonCode.value = "POLICY";
-        notes.value = "";
-        infoRequest.value = "";
-        requestedItems.value = "";
-        detailsOpen.value = true;
-        try {
-            const response = await api.get(urlsMap.joinRequestDetail(row.id));
-            const payload = response.data?.data ?? response.data ?? {};
-            selected.value = { ...row, ...payload } as JoinRequest;
-            const stored = (payload.checklist ?? {}) as Record<string, boolean>;
-            checklist.value = Object.fromEntries(CHECKLIST_KEYS.map((key) => [key, !!stored[key]]));
-        } catch (e) {
-            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
-        }
+    const onFiltersCleared = () => {
+        filters.value = {};
+        refreshHook.value?.reset();
     };
 
-    const runAction = async (fn: () => Promise<void>) => {
-        actionLoading.value = true;
-        try {
-            await fn();
-            await load();
-        } catch (e) {
-            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
-        } finally {
-            actionLoading.value = false;
-        }
+    const openRequest = (row: JoinRequestSummary) => {
+        void router.push({ name: "JoinRequestDetail", params: { id: row.id } });
     };
 
-    const assignToMe = () =>
-        runAction(async () => {
-            const assigneeUserId = user.value?.userInfo?.id;
-            if (!assigneeUserId) {
-                throw new Error(t("Your session does not carry a user id"));
-            }
-            await api.post(urlsMap.joinRequestAssign(selected.value!.id), { assigneeUserId });
-            showSnackBar({ type: "success", message: t("Assigned") });
-        });
-
-    const requestInfo = () =>
-        runAction(async () => {
-            const items = requestedItems.value
-                .split(/[,\n]/)
-                .map((item) => item.trim())
-                .filter(Boolean);
-            if (items.length === 0 || infoRequest.value.trim().length < 3) {
-                throw new Error(t("Add at least one requested item and a message"));
-            }
-            await api.post(urlsMap.joinRequestRequestInfo(selected.value!.id), {
-                requestedItems: items,
-                message: infoRequest.value.trim(),
-            });
-            detailsOpen.value = false;
-            showSnackBar({ type: "success", message: t("Request Info") });
-        });
-
-    const decide = () =>
-        runAction(async () => {
-            await api.post(urlsMap.joinRequestDecide(selected.value!.id), {
-                decision: decision.value,
-                reasonCode: reasonCode.value,
-                notes: notes.value,
-                checklist: checklist.value,
-            });
-            detailsOpen.value = false;
-            showSnackBar({ type: "success", message: t("Decision") });
-        });
-
-    const checklistComplete = computed(() => CHECKLIST_KEYS.every((key) => !!checklist.value[key]));
-
-    const slaState = (row: JoinRequest) => {
-        if (!row.slaDueAt) {
-            return { tone: "neutral" as const, label: "-" };
-        }
-        const due = new Date(row.slaDueAt).getTime();
-        const diff = due - Date.now();
-        if (diff < 0) {
-            return { tone: "error" as const, label: t("Overdue") };
-        }
-        if (diff < 24 * 3600 * 1000) {
-            return { tone: "warning" as const, label: `${Math.round(diff / 3600000)}h` };
-        }
-        return { tone: "success" as const, label: `${Math.round(diff / 86400000)}d` };
+    const toneColor = (tone: ReturnType<typeof statusTone>): string => {
+        const colors = theme.current.value.colors as Record<string, string>;
+        return colors[tone] ?? colors["on-surface-variant"] ?? "#64748b";
     };
 
-    const headers: TableHeader<JoinRequest>[] = [
-        { key: "merchantName", label: "Merchant Name", value: (row) => row.merchantName },
-        { key: "status", label: "Status", Value: ({ row }: { row: any }) => <StatusChip label={row.status} tone={statusTone(row.status)} /> },
-        { key: "riskTier", label: "Risk Class", Value: ({ row }: { row: any }) => <StatusChip label={row.riskTier} tone={statusTone(row.riskTier)} /> },
-        { key: "category", label: "Business Category", value: (row) => row.businessCategory },
-        { key: "volume", label: "Expected Volume", value: (row) => `${row.expectedMonthlyVolume ?? ""} ${row.currency ?? ""}` },
-        { key: "submittedAt", label: "Submitted At", value: (row) => row.submittedAt },
+    const rowColor = (row: JoinRequestSummary): string | undefined => {
+        const sla = slaInfo(row);
+        if (sla.tone === "error" || row.status === "REJECTED") return toneColor("error");
+        if (sla.tone === "warning" || row.status === "PENDING_CHECKER" || row.status === "INFO_REQUESTED") {
+            return toneColor("warning");
+        }
+        return undefined;
+    };
+
+    const headers: TableHeader<JoinRequestSummary>[] = [
+        {
+            key: "merchantName",
+            label: "Merchant",
+            sortKey: "merchantName",
+            headerTooltip: COLUMN_HELP.merchant,
+            value: (row) => row.merchantName || row.merchant?.tradeName || row.merchant?.legalName || "",
+            Value: ({ row }: { row: JoinRequestSummary }) => (
+                <ThemedView style={{ gap: "3px" }}>
+                    <ThemedText style={{ fontSize: "13px", fontWeight: 700 }}>
+                        {row.merchant?.tradeName || row.merchantName || "—"}
+                    </ThemedText>
+                    <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>
+                        {row.merchant?.legalName || row.merchantId}
+                    </ThemedText>
+                </ThemedView>
+            ),
+        },
+        {
+            key: "status",
+            label: "Status",
+            sortKey: "status",
+            headerTooltip: COLUMN_HELP.status,
+            value: (row) => row.status,
+            Value: ({ row }: { row: JoinRequestSummary }) => {
+                const help = joinStatusHelp(row.status);
+                return (
+                    <span title={help.meaning}>
+                        <StatusChip label={help.label} tone={help.tone} size="small" />
+                    </span>
+                );
+            },
+        },
+        {
+            key: "channel",
+            label: "Channel",
+            headerTooltip: COLUMN_HELP.channel,
+            value: (row) => channelLabel(row.onboardingChannel),
+            Value: ({ row }: { row: JoinRequestSummary }) => (
+                <StatusChip
+                    label={channelLabel(row.onboardingChannel)}
+                    tone={row.onboardingChannel === "ADMIN_ASSISTED" ? "info" : "neutral"}
+                    size="x-small"
+                />
+            ),
+        },
+        {
+            key: "riskTier",
+            label: "Risk tier",
+            sortKey: "riskTier",
+            headerTooltip: COLUMN_HELP.riskTier,
+            value: (row) => row.proposedRiskTier || row.riskTier,
+            Value: ({ row }: { row: JoinRequestSummary }) => (
+                <StatusChip
+                    label={row.proposedRiskTier || row.riskTier || "—"}
+                    tone={statusTone(row.proposedRiskTier || row.riskTier)}
+                    size="small"
+                />
+            ),
+        },
+        {
+            key: "category",
+            label: "Business category",
+            headerTooltip: COLUMN_HELP.category,
+            value: (row) => row.merchant?.businessCategory ?? textValue(row.profileJson?.businessCategory),
+        },
+        {
+            key: "volume",
+            label: "Expected volume",
+            headerTooltip: COLUMN_HELP.volume,
+            value: (row) =>
+                [row.profileJson?.expectedMonthlyVolume, row.profileJson?.currency].filter(Boolean).join(" "),
+            Value: ({ row }: { row: JoinRequestSummary }) => {
+                const amount = textValue(row.profileJson?.expectedMonthlyVolume);
+                const currency = textValue(row.profileJson?.currency);
+                return (
+                    <ThemedView style={{ gap: "2px" }}>
+                        <ThemedText style={{ fontSize: "13px", fontWeight: 600 }}>
+                            {amount ? `${amount} ${currency}`.trim() : "—"}
+                        </ThemedText>
+                        <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>
+                            {row.merchant?.country || ""}
+                        </ThemedText>
+                    </ThemedView>
+                );
+            },
+        },
+        {
+            key: "submittedAt",
+            label: "Submitted",
+            sortKey: "submittedAt",
+            headerTooltip: COLUMN_HELP.submitted,
+            value: (row) => row.submittedAt ?? row.createdAt,
+            Value: ({ row }: { row: JoinRequestSummary }) => (
+                <ThemedText style={{ fontSize: "12px" }}>{formatDateTime(row.submittedAt ?? row.createdAt)}</ThemedText>
+            ),
+        },
         {
             key: "sla",
             label: "SLA",
-            Value: ({ row }: { row: JoinRequest }) => {
-                const sla = slaState(row);
-                return <StatusChip label={sla.label} tone={sla.tone} />;
+            sortKey: "slaDueAt",
+            headerTooltip: COLUMN_HELP.sla,
+            value: (row) => row.slaDueAt,
+            Value: ({ row }: { row: JoinRequestSummary }) => {
+                const sla = slaInfo(row);
+                return (
+                    <ThemedView style={{ gap: "3px" }}>
+                        <StatusChip label={sla.label} tone={sla.tone} size="x-small" />
+                        <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>
+                            {formatDateTime(row.slaDueAt)}
+                        </ThemedText>
+                    </ThemedView>
+                );
             },
         },
-        { key: "reviewer", label: "Assignee", value: (row) => row.reviewerName ?? "-" },
+        {
+            key: "reviewer",
+            label: "Assignee",
+            headerTooltip: COLUMN_HELP.reviewer,
+            value: (row) => row.reviewer ?? "",
+            Value: ({ row }: { row: JoinRequestSummary }) => (
+                <ThemedText style={{ fontSize: "12px", opacity: row.reviewer ? 1 : 0.55 }}>
+                    {row.reviewer || t("Unassigned")}
+                </ThemedText>
+            ),
+        },
+        {
+            key: "actions",
+            label: "Actions",
+            sortable: false,
+            Value: ({ row }: { row: JoinRequestSummary }) => (
+                <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => openRequest(row)}>
+                    {t("Open")}
+                </VBtn>
+            ),
+        },
     ];
 
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Join Requests")} />
+                <PageHeader
+                    title={t("Join Requests")}
+                    end={() => (
+                        <ThemedView style={{ flexDirection: "row", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                            <StatusChip label={`${total.value} ${t("requests")}`} tone="info" size="small" />
+                            {canWrite.value && (
+                                <VBtn
+                                    color="primary"
+                                    prependIcon="mdi-account-plus-outline"
+                                    onClick={() => void router.push({ name: "JoinRequestNew" })}
+                                >
+                                    {t("New admin-assisted request")}
+                                </VBtn>
+                            )}
+                        </ThemedView>
+                    )}
+                />
 
-                {error.value ? (
-                    <StateView error={error.value} onRetry={() => void load()} />
-                ) : (
-                    <DataTable
-                        title={t("Join Requests")}
-                        data={rows.value}
-                        headers={headers}
-                        loading={loading.value}
-                        showNumber={true}
-                        xlsx={false}
-                        searchValue={search.value}
-                        setSearchValue={(value) => (search.value = value)}
-                    />
-                )}
+                <ApiTable<JoinRequestSummary>
+                    title={t("Join Requests")}
+                    url={urlsMap.joinRequestsList}
+                    showNumber={true}
+                    xlsx={true}
+                    localSearch={false}
+                    numberOfItemsPerPage={pageSize.value}
+                    setNumberOfItemsPerPage={(value) => (pageSize.value = value)}
+                    searchValue={search.value}
+                    setSearchValue={(value) => (search.value = value)}
+                    headers={headers}
+                    rowColor={rowColor}
+                    apiDataExtractor={(data) => {
+                        const payload = data as { joinRequests?: JoinRequestSummary[]; rows?: JoinRequestSummary[] };
+                        return payload.joinRequests ?? payload.rows ?? [];
+                    }}
+                    apiTotalExtractor={(data) => {
+                        const payload = data as { total?: number; joinRequests?: JoinRequestSummary[] };
+                        return Number(payload.total ?? payload.joinRequests?.length ?? 0);
+                    }}
+                    onData={(nextRows, nextTotal) => {
+                        rows.value = nextRows;
+                        total.value = nextTotal;
+                    }}
+                    setRefreshHook={(hook) => {
+                        refreshHook.value = hook as typeof refreshHook.value;
+                    }}
+                    clearRefreshHook={() => {
+                        refreshHook.value = null;
+                    }}
+                    onRefresh={(props, refresh) => {
+                        void refresh({
+                            queryParams: {
+                                page: props.page,
+                                pageSize: pageSize.value,
+                                ...(search.value ? { search: search.value } : {}),
+                                ...buildFilterQuery(filterDefinitions, filters.value),
+                                ...(props.sortKey
+                                    ? { sortKey: props.sortKey, sortDirection: props.sortDirection }
+                                    : {}),
+                            },
+                        });
+                    }}
+                    TopSlot={() => (
+                        <TableFilters
+                            filters={filterDefinitions}
+                            values={filters.value}
+                            total={total.value}
+                            onChange={onFiltersChanged}
+                            onClear={onFiltersCleared}
+                        />
+                    )}
+                />
             </ThemedView>
-
-            <VDialog modelValue={detailsOpen.value} onUpdate:modelValue={(v: any) => (detailsOpen.value = v)} maxWidth="820px" scrollable>
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
-                            {selected.value?.merchantName}
-                        </ThemedText>
-
-                        <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
-                            <StatusChip label={selected.value?.status ?? "-"} tone="info" />
-                            <StatusChip label={selected.value?.riskTier ?? "-"} tone="warning" />
-                            <StatusChip label={selected.value?.screeningResult ?? "-"} tone="neutral" />
-                        </ThemedView>
-
-                        {!!selected.value?.fourEyesReasons?.length && (
-                            <VCard variant="tonal" color="warning">
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                                    <ThemedText type="defaultSemiBold">{t("Four Eyes Required")}</ThemedText>
-                                    {selected.value.fourEyesReasons.map((reason) => (
-                                        <ThemedText key={reason} style={{ fontSize: "13px" }}>
-                                            • {reason}
-                                        </ThemedText>
-                                    ))}
-                                </VCardText>
-                            </VCard>
-                        )}
-
-                        <ThemedView style={{ flexDirection: "column", gap: "8px" }}>
-                            <ThemedText type="defaultSemiBold">{t("Checklist")}</ThemedText>
-                            {CHECKLIST_KEYS.map((key) => (
-                                <VCheckbox
-                                    key={key}
-                                    label={t(key)}
-                                    modelValue={!!checklist.value[key]}
-                                    onUpdate:modelValue={(value: boolean | null) => (checklist.value[key] = !!value)}
-                                    density="compact"
-                                    hideDetails
-                                />
-                            ))}
-                        </ThemedView>
-
-                        <ThemedView style={{ flexDirection: "column", gap: "8px" }}>
-                            <ThemedText type="defaultSemiBold">{t("Beneficial Owners")}</ThemedText>
-                            {selected.value?.beneficialOwners?.length ? (
-                                selected.value.beneficialOwners.map((owner, index) => (
-                                    <ThemedView key={index} style={{ flexDirection: "row", gap: "12px", fontSize: "13px" }}>
-                                        <span style={{ flex: 1 }}>{owner.fullName}</span>
-                                        <span>{owner.ownershipPercent}%</span>
-                                        <span>{owner.isPep ? "PEP" : "-"}</span>
-                                    </ThemedView>
-                                ))
-                            ) : (
-                                <ThemedText style={{ fontSize: "13px", opacity: 0.6 }}>{t("No Data Found")}</ThemedText>
-                            )}
-                        </ThemedView>
-
-                        <ThemedView style={{ flexDirection: "column", gap: "8px" }}>
-                            <ThemedText type="defaultSemiBold">{t("Documents")}</ThemedText>
-                            {selected.value?.documents?.length ? (
-                                selected.value.documents.map((doc) => (
-                                    <ThemedView key={doc.id} style={{ flexDirection: "row", gap: "12px", fontSize: "13px" }}>
-                                        <span style={{ flex: 1 }}>{doc.docType}</span>
-                                        <span>{doc.status}</span>
-                                        <span>{doc.expiresOn ?? "-"}</span>
-                                    </ThemedView>
-                                ))
-                            ) : (
-                                <ThemedText style={{ fontSize: "13px", opacity: 0.6 }}>{t("No Data Found")}</ThemedText>
-                            )}
-                        </ThemedView>
-
-                        <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
-                            <VBtn variant="tonal" onClick={assignToMe} loading={actionLoading.value}>
-                                {t("Assign To Me")}
-                            </VBtn>
-                        </ThemedView>
-
-                        <ThemedView style={{ flexDirection: "column", gap: "10px" }}>
-                            <ThemedText type="defaultSemiBold">{t("Request Info")}</ThemedText>
-                            <VTextField
-                                modelValue={requestedItems.value}
-                                onUpdate:modelValue={(v: string) => (requestedItems.value = v)}
-                                label={t("Requested items (comma separated)")}
-                            />
-                            <VTextarea
-                                modelValue={infoRequest.value}
-                                onUpdate:modelValue={(v: string) => (infoRequest.value = v)}
-                                rows={2}
-                                label={t("Message")}
-                            />
-                            <VBtn
-                                variant="tonal"
-                                color="warning"
-                                disabled={!infoRequest.value}
-                                loading={actionLoading.value}
-                                onClick={requestInfo}
-                            >
-                                {t("Request Info")}
-                            </VBtn>
-                        </ThemedView>
-
-                        <ThemedView style={{ flexDirection: "column", gap: "10px" }}>
-                            <ThemedText type="defaultSemiBold">{t("Decision")}</ThemedText>
-                            <VSelect
-                                items={[
-                                    { title: t("Approve"), value: "APPROVE" },
-                                    { title: t("Reject"), value: "REJECT" },
-                                ]}
-                                modelValue={decision.value}
-                                onUpdate:modelValue={(v: "APPROVE" | "REJECT") => (decision.value = v)}
-                                label={t("Decision")}
-                            />
-                            <VSelect
-                                items={REASON_CODES}
-                                modelValue={reasonCode.value}
-                                onUpdate:modelValue={(v: string) => (reasonCode.value = v)}
-                                label={t("Reason Code")}
-                            />
-                            <VTextField
-                                modelValue={notes.value}
-                                onUpdate:modelValue={(v: string) => (notes.value = v)}
-                                label={t("Notes")}
-                            />
-                            <VBtn
-                                color={decision.value === "APPROVE" ? "success" : "error"}
-                                disabled={!checklistComplete.value}
-                                loading={actionLoading.value}
-                                onClick={decide}
-                            >
-                                {t("Decision")}
-                            </VBtn>
-                        </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
         </ScreenContainer>
     );
 });

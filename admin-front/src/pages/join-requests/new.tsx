@@ -1,0 +1,370 @@
+import { dc } from "kt-dc";
+import { computed, onMounted, ref } from "vue";
+import { useLocale } from "vuetify";
+import { useRouter } from "vue-router";
+import {
+    VAlert,
+    VAutocomplete,
+    VBtn,
+    VBtnToggle,
+    VCard,
+    VCardText,
+    VDialog,
+    VSelect,
+    VTextField,
+    VTextarea,
+} from "vuetify/components";
+import ScreenContainer from "@/components/ScreenContainer";
+import { PageHeader } from "@/components/PageHeader";
+import { ThemedView } from "@/components/ThemedView";
+import { ThemedText } from "@/components/ThemedText";
+import { api } from "@/state/api";
+import { urlsMap } from "@/constants/urlsMap";
+import { extractApiErrorMessage } from "@/utils/errors/extractor";
+import { showSnackBar } from "@/utils/snackBar";
+import { copyToClipboard } from "@/utils/common";
+import { formatDateTime } from "./joinRequestHelp";
+
+type MerchantOption = {
+    id: string;
+    title: string;
+    legalName: string;
+    tradeName: string;
+    country: string;
+    businessCategory: string | null;
+    registrationNo: string | null;
+    taxId: string | null;
+    contactPhone: string | null;
+    contactEmail: string | null;
+    status: string;
+};
+
+type ProfileForm = {
+    legalName: string;
+    tradeName: string;
+    country: string;
+    businessCategory: string;
+    registrationNumber: string;
+    taxId: string;
+    registeredAddress: string;
+    websiteUrl: string;
+    contactPhone: string;
+    contactEmail: string;
+    expectedMonthlyVolume: string;
+    currency: string;
+    businessUseDescription: string;
+    payoutBankName: string;
+    payoutAccount: string;
+    riskTier: "LOW" | "STANDARD" | "HIGH";
+};
+
+const emptyForm = (): ProfileForm => ({
+    legalName: "",
+    tradeName: "",
+    country: "LY",
+    businessCategory: "",
+    registrationNumber: "",
+    taxId: "",
+    registeredAddress: "",
+    websiteUrl: "",
+    contactPhone: "",
+    contactEmail: "",
+    expectedMonthlyVolume: "",
+    currency: "LYD",
+    businessUseDescription: "",
+    payoutBankName: "",
+    payoutAccount: "",
+    riskTier: "STANDARD",
+});
+
+const clean = (value: string): string | undefined => (value.trim().length > 0 ? value.trim() : undefined);
+
+const JoinRequestNewPage = dc(() => {
+    const { t } = useLocale();
+    const router = useRouter();
+
+    const mode = ref<"NEW" | "EXISTING">("NEW");
+    const merchantId = ref<string | null>(null);
+    const merchantOptions = ref<MerchantOption[]>([]);
+    const merchantSearch = ref("");
+    const merchantLoading = ref(false);
+    const form = ref<ProfileForm>(emptyForm());
+    const saving = ref(false);
+    const created = ref<{ joinRequestId: string; invitationToken?: string; invitationExpiresAt?: string } | null>(null);
+    const inviteOpen = ref(false);
+    let merchantTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const canSubmit = computed(() => {
+        if (mode.value === "EXISTING") return Boolean(merchantId.value);
+        return Boolean(form.value.legalName.trim() && form.value.tradeName.trim())
+            && Boolean(form.value.contactPhone.trim() || form.value.contactEmail.trim());
+    });
+
+    const loadMerchants = async (search = "") => {
+        merchantLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.merchantsList, {
+                params: { search: search || undefined, page: 1, pageSize: 20, status: "PENDING" },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const rows = (payload.merchants ?? payload.rows ?? payload.items ?? []) as Record<string, unknown>[];
+            merchantOptions.value = rows.map((row) => ({
+                id: String(row.id ?? ""),
+                title: `${String(row.tradeName ?? "")} — ${String(row.legalName ?? "")}`,
+                legalName: String(row.legalName ?? ""),
+                tradeName: String(row.tradeName ?? ""),
+                country: String(row.country ?? "LY"),
+                businessCategory: row.businessCategory ? String(row.businessCategory) : null,
+                registrationNo: row.registrationNo ? String(row.registrationNo) : null,
+                taxId: row.taxId ? String(row.taxId) : null,
+                contactPhone: row.contactPhone ? String(row.contactPhone) : null,
+                contactEmail: row.contactEmail ? String(row.contactEmail) : null,
+                status: String(row.status ?? ""),
+            }));
+        } catch {
+            merchantOptions.value = [];
+        } finally {
+            merchantLoading.value = false;
+        }
+    };
+
+    const onMerchantSearch = (value: string) => {
+        merchantSearch.value = value;
+        if (merchantTimer) clearTimeout(merchantTimer);
+        merchantTimer = setTimeout(() => void loadMerchants(value), 300);
+    };
+
+    const selectMerchant = (id: string | null) => {
+        merchantId.value = id;
+        if (!id) return;
+        const merchant = merchantOptions.value.find((entry) => entry.id === id);
+        if (!merchant) return;
+        form.value = {
+            ...form.value,
+            legalName: merchant.legalName,
+            tradeName: merchant.tradeName,
+            country: merchant.country || "LY",
+            businessCategory: merchant.businessCategory ?? "",
+            registrationNumber: merchant.registrationNo ?? "",
+            taxId: merchant.taxId ?? "",
+            contactPhone: merchant.contactPhone ?? "",
+            contactEmail: merchant.contactEmail ?? "",
+        };
+    };
+
+    onMounted(() => {
+        if (mode.value === "EXISTING") void loadMerchants("");
+    });
+
+    const create = async () => {
+        if (!canSubmit.value) {
+            showSnackBar({ type: "warning", message: t("Complete the mandatory merchant and contact fields") });
+            return;
+        }
+        saving.value = true;
+        try {
+            const body: Record<string, unknown> = {
+                ...(mode.value === "EXISTING" && merchantId.value ? { merchantId: merchantId.value } : {}),
+                riskTier: form.value.riskTier,
+                legalName: clean(form.value.legalName),
+                tradeName: clean(form.value.tradeName),
+                country: clean(form.value.country),
+                businessCategory: clean(form.value.businessCategory),
+                registrationNumber: clean(form.value.registrationNumber),
+                taxId: clean(form.value.taxId),
+                registeredAddress: clean(form.value.registeredAddress),
+                websiteUrl: clean(form.value.websiteUrl),
+                contactPhone: clean(form.value.contactPhone),
+                contactEmail: clean(form.value.contactEmail),
+                expectedMonthlyVolume: clean(form.value.expectedMonthlyVolume),
+                currency: clean(form.value.currency),
+                businessUseDescription: clean(form.value.businessUseDescription),
+                ...(form.value.payoutBankName.trim() || form.value.payoutAccount.trim()
+                    ? {
+                          payoutBankDetails: {
+                              bank: form.value.payoutBankName.trim(),
+                              iban: form.value.payoutAccount.trim(),
+                          },
+                      }
+                    : {}),
+            };
+            const response = await api.post(urlsMap.joinRequestAdminAssisted, body);
+            const payload = (response.data?.data ?? response.data ?? {}) as {
+                joinRequestId: string;
+                invitationToken?: string;
+                invitationExpiresAt?: string;
+            };
+            created.value = payload;
+            showSnackBar({ type: "success", message: t("Admin-assisted onboarding draft created") });
+            if (payload.invitationToken) {
+                inviteOpen.value = true;
+            } else {
+                await router.push({ name: "JoinRequestDetail", params: { id: payload.joinRequestId } });
+            }
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            saving.value = false;
+        }
+    };
+
+    const continueToDraft = async () => {
+        if (!created.value) return;
+        inviteOpen.value = false;
+        await router.push({ name: "JoinRequestDetail", params: { id: created.value.joinRequestId } });
+    };
+
+    return () => (
+        <ScreenContainer>
+            <ThemedView style={{ gap: "18px" }}>
+                <PageHeader
+                    title={t("New admin-assisted join request")}
+                    end={() => (
+                        <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "JoinRequests" })}>
+                            {t("Back to queue")}
+                        </VBtn>
+                    )}
+                />
+
+                <VAlert type="info" variant="tonal">
+                    {t(
+                        "Admin-assisted onboarding prepares the merchant package on the merchant's behalf. The operator who creates it cannot approve or reject it.",
+                    )}
+                </VAlert>
+
+                <VCard>
+                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+                        <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>
+                            {t("Onboarding target")}
+                        </ThemedText>
+                        <VBtnToggle
+                            modelValue={mode.value}
+                            onUpdate:modelValue={(value: unknown) => {
+                                if (!value) return;
+                                mode.value = value as "NEW" | "EXISTING";
+                                if (mode.value === "EXISTING") void loadMerchants("");
+                            }}
+                            mandatory
+                            divided
+                            variant="outlined"
+                            style={{ maxWidth: "520px" }}
+                        >
+                            <VBtn value="NEW">{t("New merchant")}</VBtn>
+                            <VBtn value="EXISTING">{t("Existing pending merchant")}</VBtn>
+                        </VBtnToggle>
+                        {mode.value === "EXISTING" && (
+                            <VAutocomplete
+                                label={t("Merchant")}
+                                items={merchantOptions.value}
+                                itemTitle="title"
+                                itemValue="id"
+                                modelValue={merchantId.value}
+                                loading={merchantLoading.value}
+                                clearable
+                                onUpdate:modelValue={(value: unknown) => selectMerchant(value ? String(value) : null)}
+                                onUpdate:search={onMerchantSearch}
+                                hint={t("Only pending or rejected merchants can start a new onboarding request.")}
+                                persistentHint
+                            />
+                        )}
+                    </VCardText>
+                </VCard>
+
+                <VCard>
+                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+                        <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>
+                            {t("Applicant profile")}
+                        </ThemedText>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "14px" }}>
+                            <VTextField v-model={form.value.legalName} label={`${t("Legal name")} *`} />
+                            <VTextField v-model={form.value.tradeName} label={`${t("Trade name")} *`} />
+                            <VTextField v-model={form.value.country} label={t("Country code (2 letters)")} />
+                            <VTextField v-model={form.value.businessCategory} label={t("Business category")} />
+                            <VTextField v-model={form.value.registrationNumber} label={t("Registration number")} />
+                            <VTextField v-model={form.value.taxId} label={t("Tax ID")} />
+                            <VTextField v-model={form.value.contactPhone} label={t("Contact phone")} />
+                            <VTextField v-model={form.value.contactEmail} label={t("Contact email")} />
+                            <VTextField v-model={form.value.expectedMonthlyVolume} label={t("Expected monthly volume")} />
+                            <VTextField v-model={form.value.currency} label={t("Currency (3 letters)")} />
+                            <VSelect
+                                v-model={form.value.riskTier}
+                                label={t("Proposed risk tier")}
+                                items={["LOW", "STANDARD", "HIGH"]}
+                            />
+                            <VTextField v-model={form.value.websiteUrl} label={t("Website URL")} />
+                        </div>
+                        <VTextField v-model={form.value.registeredAddress} label={t("Registered address")} />
+                        <VTextarea
+                            v-model={form.value.businessUseDescription}
+                            label={t("Business use description")}
+                            rows={3}
+                            autoGrow
+                        />
+                    </VCardText>
+                </VCard>
+
+                <VCard>
+                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+                        <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>
+                            {t("Payout account")}
+                        </ThemedText>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "14px" }}>
+                            <VTextField v-model={form.value.payoutBankName} label={t("Bank name")} />
+                            <VTextField v-model={form.value.payoutAccount} label={t("IBAN / account number")} />
+                        </div>
+                        <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
+                            {t("The payout account is hashed for cross-merchant duplicate detection and reviewed before approval.")}
+                        </ThemedText>
+                    </VCardText>
+                </VCard>
+
+                <ThemedView style={{ flexDirection: "row", gap: "12px", justifyContent: "flex-end" }}>
+                    <VBtn variant="text" onClick={() => void router.push({ name: "JoinRequests" })}>
+                        {t("Cancel")}
+                    </VBtn>
+                    <VBtn color="primary" loading={saving.value} disabled={!canSubmit.value} onClick={() => void create()}>
+                        {t("Create draft")}
+                    </VBtn>
+                </ThemedView>
+            </ThemedView>
+
+            <VDialog modelValue={inviteOpen.value} onUpdate:modelValue={(value: boolean) => (inviteOpen.value = value)} maxWidth="620px" persistent>
+                <VCard>
+                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
+                            {t("Merchant invitation")}
+                        </ThemedText>
+                        <ThemedText>
+                            {t("Share this one-time invitation token with the merchant administrator. It is shown only once.")}
+                        </ThemedText>
+                        <VAlert type="warning" variant="tonal">
+                            <code style={{ wordBreak: "break-all" }}>{created.value?.invitationToken}</code>
+                        </VAlert>
+                        <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
+                            {t("Expires")}: {formatDateTime(created.value?.invitationExpiresAt)}
+                        </ThemedText>
+                        <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
+                            <VBtn
+                                variant="tonal"
+                                prependIcon="mdi-content-copy"
+                                onClick={() => {
+                                    if (created.value?.invitationToken) {
+                                        copyToClipboard(created.value.invitationToken);
+                                        showSnackBar({ type: "success", message: t("Invitation token copied") });
+                                    }
+                                }}
+                            >
+                                {t("Copy token")}
+                            </VBtn>
+                            <VBtn color="primary" onClick={() => void continueToDraft()}>
+                                {t("Continue to draft")}
+                            </VBtn>
+                        </ThemedView>
+                    </VCardText>
+                </VCard>
+            </VDialog>
+        </ScreenContainer>
+    );
+});
+
+export default JoinRequestNewPage;

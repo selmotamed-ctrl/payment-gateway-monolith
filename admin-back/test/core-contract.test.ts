@@ -375,7 +375,7 @@ const cases: ContractCase[] = [
     mapper: toCoreKybDocumentReview,
     publicSchema: kybReviewSchema,
     legacyPayload: { decision: "ACCEPT", checklist: ["readable"], notes: "document is fine" },
-    allowedKeys: ["decision", "reasonCode", "expiresOn"],
+    allowedKeys: ["decision", "reasonCode", "notes", "expiresOn"],
     requiredKeys: ["decision"],
   },
   {

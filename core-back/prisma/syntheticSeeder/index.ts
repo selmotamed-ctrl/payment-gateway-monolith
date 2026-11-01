@@ -11,6 +11,7 @@ import { generateLedgerAndCheckpoints } from "./generators/05_ledgerAndCheckpoin
 import { generateReconciliation } from "./generators/06_reconAndStatements";
 import { generateDisputesCashoutsAdjustments } from "./generators/07_disputesCashoutsAdjustments";
 import { generateAmlAndGovernanceQueues } from "./generators/08_amlAndGovernanceQueues";
+import { generateOperatorCases } from "./generators/09_operatorCasesGenerator";
 import { bulkMysqlWriter } from "./sync/bulkMysqlWriter";
 import { fakeRailsBulkSync } from "./sync/fakeRailsBulkSyncClient";
 import { auditInMemory, postSeedAudit } from "./verify/postSeedAudit";
@@ -57,6 +58,7 @@ export const runSyntheticSeeder = async (): Promise<void> => {
     ["reconciliation", () => generateReconciliation(ctx)],
     ["disputes, cashouts & adjustments", () => generateDisputesCashoutsAdjustments(ctx)],
     ["AML & governance queues", () => generateAmlAndGovernanceQueues(ctx)],
+    ["operator cases & approvals", () => generateOperatorCases(ctx)],
   ];
   for (const [label, run] of phases) {
     const phaseStart = Date.now();
@@ -66,9 +68,11 @@ export const runSyntheticSeeder = async (): Promise<void> => {
 
   const preAudit = auditInMemory(ctx);
   if (!preAudit.ok) {
+    console.error("[synthetic-seeder] operator-case audit:", JSON.stringify(preAudit.operatorCases, null, 2));
     throw new Error(
       `Synthetic ledger invariant failed before writing: drift=${preAudit.ledgerDrift} unbalanced=${preAudit.unbalancedEntries} ` +
-        `succeededWithoutLedger=${preAudit.succeededWithoutLedger} slotViolations=${preAudit.slotViolations}`,
+        `succeededWithoutLedger=${preAudit.succeededWithoutLedger} slotViolations=${preAudit.slotViolations} ` +
+        `operatorCaseViolations=${preAudit.operatorCaseViolations}`,
     );
   }
   console.log(`[synthetic-seeder] in-memory invariant OK (0.0000 LYD drift)`);
@@ -83,7 +87,8 @@ export const runSyntheticSeeder = async (): Promise<void> => {
   if (!audit.ok) {
     throw new Error(
       `Post-seed audit failed: drift=${audit.ledgerDrift} unbalanced=${audit.unbalancedEntries} ` +
-        `succeededWithoutLedger=${audit.succeededWithoutLedger} slotViolations=${audit.slotViolations}`,
+        `succeededWithoutLedger=${audit.succeededWithoutLedger} slotViolations=${audit.slotViolations} ` +
+        `operatorCaseViolations=${audit.operatorCaseViolations}`,
     );
   }
   await recordCompletedSeedRun(client, config, {

@@ -1,5 +1,5 @@
 import type { SeederContext } from "../context";
-import { addDays, addMinutes, amount, chance, sha256Like } from "../builders";
+import { addDays, addMinutes, amount, sha256Like } from "../builders";
 import { businessHour, iterateDays } from "../timelineClock";
 
 const ATTEMPT_STATUS_WEIGHTS = {
@@ -56,6 +56,14 @@ export const generateLinksAndAttempts = (ctx: SeederContext): void => {
   const routes = ctx.refs.routes;
   const credentials = ctx.refs.credentials.filter((credential) => credential.ownerType === "PLATFORM");
   if (routes.length === 0 || credentials.length === 0) return;
+  const channelsByVersion = new Map<string, any>();
+  for (const channel of ctx.dataset.confirmationChannels) {
+    if (!channelsByVersion.has(channel.gatewayVersionId)) {
+      channelsByVersion.set(channel.gatewayVersionId, channel);
+    }
+  }
+  const channelFor = (versionId: string, _env: string): any | undefined =>
+    channelsByVersion.get(versionId);
 
   // ---------------------------------------------------------------- links
   for (let index = 0; index < ctx.config.volumes.paymentLinks; index += 1) {
@@ -132,7 +140,8 @@ export const generateLinksAndAttempts = (ctx: SeederContext): void => {
     const net = Number((totalCharged - gatewayFee - commission).toFixed(4));
     const expiresAt = addMinutes(createdAt, ctx.rng.int(10, 60));
     const graceExpiresAt = addMinutes(expiresAt, ctx.rng.int(5, 120));
-    const terminalAt = TERMINAL.has(status) ? addMinutes(createdAt, ctx.rng.int(1, 120)) : null;
+    const rawTerminalAt = TERMINAL.has(status) ? addMinutes(createdAt, ctx.rng.int(1, 120)) : null;
+    const terminalAt = rawTerminalAt && rawTerminalAt > ctx.timeline.end ? ctx.timeline.end : rawTerminalAt;
     const attemptId = ctx.nextId("attempt");
     const reference = `PG-${ctx.config.namespace.toUpperCase()}-${index.toString(36).padStart(8, "0")}`;
     const groupId = ctx.nextId("attempt-group");
@@ -145,7 +154,21 @@ export const generateLinksAndAttempts = (ctx: SeederContext): void => {
       successCount: status === "SUCCEEDED" ? 1 : 0,
     });
 
-    const providerReference = ["SUCCEEDED", "REFUNDED", "PARTIALLY_REFUNDED", "DISPUTED", "AUTHORIZING", "VERIFYING", "UNKNOWN", "AWAITING_CUSTOMER"].includes(status)
+    const conflictCandidate = status === "UNKNOWN" && ctx.rng.chance(25);
+    const lateSuccessCandidate = status === "EXPIRED" && ctx.rng.chance(20);
+    const manualReviewCandidate = status === "VERIFYING" && ctx.rng.chance(18);
+    const substatus = conflictCandidate
+      ? "CONFLICTING_TRUSTED_SIGNALS"
+      : lateSuccessCandidate
+        ? "LATE_SUCCESS_PENDING"
+        : manualReviewCandidate
+          ? "MANUAL_REVIEW"
+          : status === "AWAITING_CUSTOMER"
+            ? ctx.rng.pick(["OTP_REQUIRED", "REDIRECT_PENDING", "WIDGET_OPEN", "QR_PENDING", "PUSH_PENDING", "CODE_PENDING", "TRANSFER_PENDING"])
+            : status === "AUTHORIZING" || status === "VERIFYING"
+              ? "AML_HOLD"
+              : null;
+    const providerReference = ["SUCCEEDED", "REFUNDED", "PARTIALLY_REFUNDED", "DISPUTED", "AUTHORIZING", "VERIFYING", "UNKNOWN", "AWAITING_CUSTOMER", "EXPIRED"].includes(status)
       ? `FK-${route.gatewayCode.toUpperCase()}-${ctx.config.namespace}-${index.toString(36)}`
       : null;
     const otpAttempts = status === "FAILED" && ctx.rng.chance(20) ? 3 : ctx.rng.int(0, 2);
@@ -169,9 +192,7 @@ export const generateLinksAndAttempts = (ctx: SeederContext): void => {
       mode: route.railCode,
       subMode: null,
       status,
-      substatus: status === "AWAITING_CUSTOMER"
-        ? ctx.rng.pick(["OTP_REQUIRED", "REDIRECT_PENDING", "WIDGET_OPEN", "QR_PENDING", "PUSH_PENDING", "CODE_PENDING", "TRANSFER_PENDING"])
-        : status === "AUTHORIZING" || status === "VERIFYING" ? "AML_HOLD" : null,
+      substatus,
       gatewayReference: providerReference,
       providerReference,
       networkReference: ["moamalat", "ly_pay", "onepay", "mpgs"].includes(route.railCode)
@@ -213,6 +234,7 @@ export const generateLinksAndAttempts = (ctx: SeederContext): void => {
     });
 
     // Step logs: the money-moving phases every attempt goes through.
+    const stepLogStart = ctx.dataset.attemptStepLogs.length;
     const phases = status === "BLOCKED"
       ? ["INITIATE"]
       : status === "CREATED" ? [] : ["INITIATE", ...(status === "INITIATING" ? [] : ["SUBMIT", ...(status === "AWAITING_CUSTOMER" ? [] : ["VERIFY"])])];
@@ -250,10 +272,109 @@ export const generateLinksAndAttempts = (ctx: SeederContext): void => {
     if (status === "CANCELLED") counters.cancelled = true;
     linkState.set(link.id, counters);
 
-    // Failure reason on the last step log, for dashboards.
-    if (status === "FAILED" && ctx.dataset.attemptStepLogs.length > 0) {
-      const last = ctx.dataset.attemptStepLogs[ctx.dataset.attemptStepLogs.length - 1]!;
-      last.outcome = ctx.rng.pick(FAILURE_CODES);
+    // Failure and ambiguity evidence on the last step log, for the case detail.
+    const logsForAttempt = ctx.dataset.attemptStepLogs.slice(stepLogStart);
+    const lastLog = logsForAttempt[logsForAttempt.length - 1];
+    if (lastLog && status === "FAILED") {
+      lastLog.outcome = ctx.rng.pick(FAILURE_CODES);
+      lastLog.httpStatus = ctx.rng.chance(40) ? ctx.rng.pick([400, 402, 422]) : 200;
+    }
+    if (lastLog && status === "UNKNOWN" && !conflictCandidate) {
+      lastLog.outcome = ctx.rng.pick(["TIMEOUT", "GATEWAY_FAULT", "MALFORMED_RESPONSE"]);
+      lastLog.httpStatus = ctx.rng.chance(75) ? ctx.rng.pick([500, 502, 504]) : null;
+      lastLog.durationMs = ctx.rng.pick([15_000, 20_000, 30_000]);
+      lastLog.redactedResponseText = JSON.stringify({ error: "gateway did not return a definitive status" });
+    }
+    if (lastLog && conflictCandidate) {
+      lastLog.outcome = "FAILED";
+      lastLog.httpStatus = 200;
+      lastLog.redactedResponseText = JSON.stringify({
+        status: "FAILED",
+        canonicalError: "DECLINED",
+        provider_reference: providerReference,
+      });
+    }
+
+    // Inbound evidence. A CONFLICT is the combination of a verified paid
+    // webhook and the failed inquiry above; a LATE_SUCCESS is a verified paid
+    // webhook that arrived after the attempt had already expired.
+    const channel = channelFor(version.id, env);
+    const pushInbound = (input: {
+      at: Date;
+      verified: boolean;
+      processingResult: string;
+      status: string;
+      amount: string;
+      verificationError?: string | null;
+    }) => {
+      if (!channel) return;
+      const eventId = ctx.nextId("inbound-event");
+      const body = {
+        event_id: eventId,
+        our_reference: reference,
+        provider_reference: providerReference ?? `FK-LATE-${index.toString(36)}`,
+        status: input.status,
+        amount: input.amount,
+        currency: "LYD",
+        environment: env,
+        timestamp: input.at.toISOString(),
+      };
+      ctx.dataset.inboundEvents.push({
+        id: eventId,
+        createdAt: input.at,
+        updatedAt: input.at,
+        channelId: channel.id,
+        gatewayId: route.gatewayId,
+        env,
+        rawBodyBytes: Buffer.from(JSON.stringify(body)),
+        redactedHeadersJson: {
+          "content-type": "application/json",
+          "x-fake-rails-signature": "******",
+          "x-forwarded-for": `127.0.0.${ctx.rng.int(1, 20)}`,
+        },
+        sourceIp: `127.0.0.${ctx.rng.int(1, 20)}`,
+        verified: input.verified,
+        verificationError: input.verificationError ?? null,
+        dedupeKey: sha256Like(ctx, `inbound:${eventId}:${reference}`),
+        attemptId,
+        receivedAt: input.at,
+        processedAt: addMinutes(input.at, ctx.rng.int(0, 2)),
+        processingResult: input.processingResult,
+      });
+    };
+    if (conflictCandidate) {
+      pushInbound({
+        at: new Date(Math.min(ctx.timeline.end.getTime(), addMinutes(lastLog?.createdAt ?? createdAt, ctx.rng.int(1, 8)).getTime())),
+        verified: true,
+        processingResult: "CONFLICTING_TRUSTED_SIGNALS",
+        status: "PAID",
+        amount: totalCharged.toFixed(4),
+      });
+    } else if (lateSuccessCandidate) {
+      pushInbound({
+        at: new Date(Math.min(ctx.timeline.end.getTime(), addMinutes(terminalAt ?? expiresAt, ctx.rng.int(5, 90)).getTime())),
+        verified: true,
+        processingResult: "LATE_SUCCESS",
+        status: "PAID",
+        amount: totalCharged.toFixed(4),
+      });
+    } else if (status === "SUCCEEDED" && ctx.rng.chance(55)) {
+      pushInbound({
+        at: new Date(Math.min(ctx.timeline.end.getTime(), addMinutes(terminalAt ?? createdAt, ctx.rng.int(0, 3)).getTime())),
+        verified: true,
+        processingResult: "PAID",
+        status: "PAID",
+        amount: totalCharged.toFixed(4),
+      });
+    } else if (status === "FAILED" && ctx.rng.chance(8)) {
+      pushInbound({
+        at: new Date(Math.min(ctx.timeline.end.getTime(), addMinutes(terminalAt ?? createdAt, ctx.rng.int(0, 3)).getTime())),
+        verified: false,
+        verificationError: "SIGNATURE_MISMATCH",
+        processingResult: "REJECTED_UNVERIFIED",
+        status: "PAID",
+        amount: totalCharged.toFixed(4),
+      });
     }
     void addDays;
   }

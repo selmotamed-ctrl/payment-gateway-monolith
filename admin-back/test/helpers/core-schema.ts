@@ -295,6 +295,7 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
     .object({
       decision: z.enum(["ACCEPTED", "REJECTED"]),
       reasonCode: z.string().max(64).optional(),
+      notes: z.string().max(2000).optional(),
       expiresOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     })
     .strict(),

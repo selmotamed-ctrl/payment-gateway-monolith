@@ -25,6 +25,18 @@ const router = createRouter({
                     component: () => import("@/pages/join-requests/index"),
                 },
                 {
+                    path: "join-requests/new",
+                    name: "JoinRequestNew",
+                    component: () => import("@/pages/join-requests/new"),
+                    meta: { parentName: "JoinRequests" },
+                },
+                {
+                    path: "join-requests/:id",
+                    name: "JoinRequestDetail",
+                    component: () => import("@/pages/join-requests/[id]"),
+                    meta: { parentName: "JoinRequests" },
+                },
+                {
                     path: "kyb",
                     name: "KybReview",
                     component: () => import("@/pages/kyb/index"),

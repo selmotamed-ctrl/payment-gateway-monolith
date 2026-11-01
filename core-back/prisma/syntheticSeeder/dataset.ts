@@ -27,6 +27,7 @@ export interface SyntheticDataset {
   gatewayEnvironments: any[];
   gatewayAuths: any[];
   gatewaySettings: any[];
+  confirmationChannels: any[];
   rails: any[];
   railFields: any[];
   railRoutes: any[];
@@ -84,6 +85,7 @@ export const emptyDataset = (): SyntheticDataset => ({
   gatewayEnvironments: [],
   gatewayAuths: [],
   gatewaySettings: [],
+  confirmationChannels: [],
   rails: [],
   railFields: [],
   railRoutes: [],

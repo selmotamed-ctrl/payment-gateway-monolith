@@ -100,6 +100,40 @@ export const generateGatewayLifecycle = (ctx: SeederContext): void => {
         maxResponseBytes: 2_097_152,
         gatewayTimezone: "Africa/Tripoli",
       });
+      // Synthetic webhook channel for the pinned version. The channel is what
+      // makes an inbound event a real, FK-linked piece of evidence instead of
+      // an orphan JSON blob.
+      const route = ctx.refs.routes.find((candidate) => candidate.gatewayId === gateway.id);
+      for (const env of ["SANDBOX", "LIVE"]) {
+        ctx.dataset.confirmationChannels.push({
+          id: ctx.nextId("confirmation-channel"),
+          createdAt: version.createdAt,
+          updatedAt: version.createdAt,
+          gatewayVersionId: versionId,
+          routeId: route?.id ?? null,
+          type: "WEBHOOK",
+          pathToken: `synth-${versionId}-${env.toLowerCase()}-webhook`,
+          cryptoProfileId: null,
+          verifyMethod: "HMAC_BODY",
+          signatureHeader: "x-fake-rails-signature",
+          timestampSelector: "timestamp",
+          timestampToleranceSec: 300,
+          ipAllowlist: ["127.0.0.1/32"],
+          bodyFormat: "JSON",
+          correlationSelector: "our_reference",
+          dedupeKeySelector: "event_id",
+          eventMap: {
+            PAID: "SUCCEEDED",
+            FAILED: "FAILED",
+            EXPIRED: "EXPIRED",
+            REFUNDED: "REFUNDED",
+            DISPUTED: "DISPUTED",
+          },
+          mustInquire: false,
+          ackStatus: 200,
+          ackBodyTemplate: "{\"ok\":true}",
+        });
+      }
       if (version.state === "LIVE") {
         ctx.dataset.gatewayVersionEvidence.push({
           id: ctx.nextId("gateway-evidence"),
@@ -113,6 +147,43 @@ export const generateGatewayLifecycle = (ctx: SeederContext): void => {
           ranAt: version.createdAt,
         });
       }
+    }
+  }
+
+  // Attempts pinned to the already-seeded blueprint versions also need a
+  // confirmation channel, otherwise inbound evidence cannot be FK-linked.
+  for (const version of ctx.refs.versions) {
+    if (ctx.dataset.confirmationChannels.some((channel) => channel.gatewayVersionId === version.id)) continue;
+    const route = ctx.refs.routes.find((candidate) => candidate.gatewayId === version.gatewayId);
+    for (const env of ["SANDBOX", "LIVE"]) {
+      ctx.dataset.confirmationChannels.push({
+        id: ctx.nextId("confirmation-channel"),
+        createdAt: start,
+        updatedAt: start,
+        gatewayVersionId: version.id,
+        routeId: route?.id ?? null,
+        type: "WEBHOOK",
+        pathToken: `synth-ref-${version.id}-${env.toLowerCase()}-webhook`,
+        cryptoProfileId: null,
+        verifyMethod: "HMAC_BODY",
+        signatureHeader: "x-fake-rails-signature",
+        timestampSelector: "timestamp",
+        timestampToleranceSec: 300,
+        ipAllowlist: ["127.0.0.1/32"],
+        bodyFormat: "JSON",
+        correlationSelector: "our_reference",
+        dedupeKeySelector: "event_id",
+        eventMap: {
+          PAID: "SUCCEEDED",
+          FAILED: "FAILED",
+          EXPIRED: "EXPIRED",
+          REFUNDED: "REFUNDED",
+          DISPUTED: "DISPUTED",
+        },
+        mustInquire: false,
+        ackStatus: 200,
+        ackBodyTemplate: "{\"ok\":true}",
+      });
     }
   }
 

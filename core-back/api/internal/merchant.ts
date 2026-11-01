@@ -5,6 +5,7 @@ import { Prisma } from "../../generated/prisma/client";
 import { client } from "../../prisma/client";
 import { invalidationBus } from "../../lib/invalidationBus";
 import { ApiError, parseOrThrow } from "../../lib/error";
+import { nationalIdHash } from "../../lib/joinRequestOnboarding";
 import { buildListQuery, listResponse } from "../../lib/listQuery";
 import { buildMerchantUserInfo } from "../../lib/auth/uiAuthorities";
 import {
@@ -142,7 +143,7 @@ const decryptOwnerIdentifiers = async (
  * list, the screening is linked to the join request and a confirmed match
  * raises an AML case and blocks the activation of the merchant.
  */
-const runOnboardingScreening = async (
+export const runOnboardingScreening = async (
   merchantId: string,
   joinRequestId: string,
 ): Promise<OnboardingScreeningOutcome> => {
@@ -418,7 +419,7 @@ const readFourEyesSetting = async (): Promise<FourEyesPolicySetting> => {
 /**
  * The four-eyes decision of a join request at submission time.
  */
-const resolveFourEyesForSubmission = async (
+export const resolveFourEyesForSubmission = async (
   merchantId: string,
   screening: OnboardingScreeningOutcome,
 ): Promise<FourEyesDecision> => {
@@ -684,6 +685,51 @@ router.post("/auth/verify-identity", async (request: Request, response: Response
     role: identity.user.role,
     merchantId: identity.user.merchantId,
   }) });
+});
+
+router.post("/auth/accept-invitation", async (request: Request, response: Response) => {
+  const body = parseOrThrow(
+    z.object({
+      token: z.string().min(16).max(256),
+      password: z.string().min(10).max(128),
+    }).strict(),
+    request.body,
+  );
+  const tokenHash = createHash("sha256").update(body.token).digest("hex");
+  const user = await client.user.findFirst({
+    where: {
+      invitationTokenHash: tokenHash,
+      status: "INVITED",
+      invitationExpiresAt: { gt: new Date() },
+    },
+  });
+  if (!user) {
+    throw new ApiError(400, "INVITATION_INVALID", "The invitation is invalid or has expired");
+  }
+  const passwordHash = await hashPassword(body.password);
+  await client.$transaction([
+    client.user.update({
+      where: { id: user.id },
+      data: {
+        status: "ACTIVE",
+        passwordHash,
+        invitationTokenHash: null,
+        invitationExpiresAt: null,
+      },
+    }),
+    client.auditLog.create({
+      data: {
+        actorId: user.id,
+        role: user.role,
+        action: "MERCHANT_INVITATION_ACCEPTED",
+        entityType: "USER",
+        entityId: user.id,
+        beforeJson: { status: "INVITED" },
+        afterJson: { status: "ACTIVE" },
+      },
+    }),
+  ]);
+  response.json({ status: "ACTIVE", userId: user.id, merchantId: user.merchantId, loginRequired: true });
 });
 
 router.post("/auth/login", async (request: Request, response: Response) => {
@@ -970,6 +1016,7 @@ router.post("/onboarding/beneficial-owners", async (request: Request, response: 
       merchantId,
       fullNameAr: body.fullName,
       nationalIdCiphertext: ciphertext,
+      nationalIdHash: nationalIdHash(body.identityNumber),
       dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : new Date(),
       nationality: (body.nationality ?? "LY").slice(0, 2).toUpperCase(),
       ownershipPercent: body.ownershipPercent ? new Prisma.Decimal(body.ownershipPercent) : null,

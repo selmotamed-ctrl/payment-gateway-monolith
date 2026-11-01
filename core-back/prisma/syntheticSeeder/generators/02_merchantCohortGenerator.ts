@@ -1,8 +1,13 @@
 import type { SeederContext } from "../context";
 import {
-  addDays, chance, createWalletAccount, formatMoney, randomAddress, randomBank, randomBusinessName,
+  addDays, createWalletAccount, formatMoney, randomAddress, randomBank, randomBusinessName,
   randomCategory, randomName, randomPhone, randomTaxId, sha256Like,
 } from "../builders";
+import {
+  JOIN_REQUEST_CHECKLIST_KEYS,
+  nationalIdHash,
+  payoutAccountHash,
+} from "../../../lib/joinRequestOnboarding";
 
 const MERCHANT_STATUS_WEIGHTS = {
   ACTIVE: 62,
@@ -62,6 +67,14 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
     const suspendedAt = status === "SUSPENDED" ? addDays(end, -ctx.rng.int(0, 400)) : null;
     const closedAt = status === "CLOSED" ? addDays(end, -ctx.rng.int(30, 300)) : null;
 
+    const payoutBankDetails = {
+      bank: randomBank(ctx).en,
+      account: duplicateMerchantIndexes.includes(index)
+        ? "LY8300000000000000000001"
+        : `LY${ctx.rng.int(10, 99)}${ctx.rng.int(1000000000, 9999999999)}`,
+      holder: business.en,
+      address: address.en,
+    };
     ctx.dataset.merchants.push({
       id: merchantId,
       createdAt,
@@ -84,12 +97,8 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
       closedAt,
       commissionReceivableCeiling: ctx.rng.chance(10) ? ctx.rng.decimal(500, 5000, 4) : null,
       negativeBalanceCeiling: ctx.rng.chance(12) ? ctx.rng.decimal(100, 500, 4) : "0.0000",
-      payoutBankDetailsJson: {
-        bank: randomBank(ctx).en,
-        account: `LY${ctx.rng.int(10, 99)}${ctx.rng.int(1000000000, 9999999999)}`,
-        holder: business.en,
-        address: address.en,
-      },
+      payoutBankDetailsJson: payoutBankDetails,
+      payoutAccountHash: payoutAccountHash(payoutBankDetails),
     });
 
     // Wallet + GL account for every merchant that reached onboarding.
@@ -174,6 +183,12 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
         : ctx.rng.weighted(JOIN_STATUS_WEIGHTS);
     const joinRequestId = ctx.nextId("join");
     const submittedBy = ctx.dataset.users.find((user) => user.merchantId === merchantId && user.role === "MERCHANT_ADMIN");
+    const onboardingChannel = ctx.rng.chance(65) ? "SELF_SERVICE" : "ADMIN_ASSISTED";
+    const completedChecklist = Object.fromEntries(JOIN_REQUEST_CHECKLIST_KEYS.map((key) => [key, true]));
+    const partialChecklist = Object.fromEntries(
+      JOIN_REQUEST_CHECKLIST_KEYS.map((key, checklistIndex) => [key, checklistIndex < 4]),
+    );
+    const infoRequestedAt = joinStatus === "INFO_REQUESTED" ? addDays(createdAt, 2) : null;
     ctx.dataset.joinRequests.push({
       id: joinRequestId,
       createdAt,
@@ -181,7 +196,7 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
       merchantId,
       submittedByUserId: submittedBy?.id ?? ctx.refs.adminUsers[0]?.id ?? ctx.nextId("user"),
       status: joinStatus,
-      onboardingChannel: ctx.rng.chance(65) ? "SELF_SERVICE" : "ADMIN_ASSISTED",
+      onboardingChannel,
       submittedAt: joinStatus === "DRAFT" ? null : addDays(createdAt, 1),
       assignedReviewerId: ["IN_REVIEW", "INFO_REQUESTED", "PENDING_CHECKER", "APPROVED", "REJECTED"].includes(joinStatus)
         ? ctx.rng.pick(ctx.refs.adminUsers.filter((user) => user.role === "OPERATOR" || user.role === "COMPLIANCE"))?.id ?? null
@@ -194,7 +209,41 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
       decision: joinStatus === "APPROVED" ? "APPROVED" : joinStatus === "REJECTED" ? "REJECTED" : null,
       decisionReasonCode: joinStatus === "REJECTED" ? ctx.rng.pick(REJECTION_REASONS) : null,
       decisionNotes: joinStatus === "INFO_REQUESTED" ? "Please re-upload a clearer tax certificate." : null,
-      infoRequestJson: joinStatus === "INFO_REQUESTED" ? { fields: ["tax_certificate"] } : null,
+      infoRequestJson: joinStatus === "INFO_REQUESTED"
+        ? [
+            { field: "tax_certificate", message: "Please re-upload a clearer tax certificate." },
+            { field: "payout_account", message: "Confirm the account holder matches the legal entity." },
+          ]
+        : null,
+      profileJson: {
+        legalName: business.en,
+        tradeName: business.ar,
+        country: "LY",
+        businessCategory: ctx.rng.pick(["RETAIL", "ECOMMERCE", "SERVICES", "TRANSPORT", "EDUCATION"]),
+        registrationNumber: `${ctx.rng.int(100000, 999999)}-${city.slice(0, 2).toUpperCase()}`,
+        taxId: randomTaxId(ctx),
+        registeredAddress: address.en,
+        websiteUrl: `https://${business.en.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}.${ctx.config.namespace}.ly`,
+        contactPhone: randomPhone(ctx),
+        contactEmail: `${business.en.toLowerCase().replaceAll(/[^a-z0-9]+/g, ".")}.${index}@${ctx.config.namespace}.ly`,
+        expectedMonthlyVolume: ctx.rng.decimal(5000, 400000, 4),
+        currency: "LYD",
+        businessUseDescription: `${business.en} collects online and in-store payments for ${randomCategory(ctx).en.toLowerCase()} customers.`,
+        ...(onboardingChannel === "ADMIN_ASSISTED"
+          ? { adminAssistedByUserId: ctx.rng.pick(ctx.refs.adminUsers)?.id ?? null }
+          : {}),
+      },
+      reviewChecklistJson: ["IN_REVIEW", "INFO_REQUESTED", "PENDING_CHECKER"].includes(joinStatus)
+        ? partialChecklist
+        : ["APPROVED", "REJECTED"].includes(joinStatus)
+          ? completedChecklist
+          : null,
+      duplicateFlagsJson: duplicateMerchantIndexes.includes(index)
+        ? [{ type: "DUPLICATE_OR_RELATED", field: "payoutAccount" }]
+        : [],
+      slaPausedAt: infoRequestedAt,
+      slaRemainingSeconds: infoRequestedAt ? 2 * 24 * 60 * 60 : null,
+      lastScreenedAt: joinStatus === "DRAFT" ? null : addDays(createdAt, 1),
       resubmissionOfId: null,
       approvalRequestId: null,
     });
@@ -208,6 +257,7 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
         ? (ctx.rng.chance(90) ? "ACCEPTED" : ctx.rng.chance(50) ? "EXPIRED" : "REJECTED")
         : ctx.rng.weighted({ UPLOADED: 45, ACCEPTED: 30, REJECTED: 15, EXPIRED: 10 });
       const expiresOn = addDays(ctx.timeline.end, ctx.rng.chance(6) ? ctx.rng.int(1, 30) : -ctx.rng.int(0, 900));
+      const uploadedBy = ctx.rng.pick(ctx.refs.adminUsers.filter((user) => ["OPERATOR", "COMPLIANCE"].includes(user.role)));
       ctx.dataset.kybDocuments.push({
         id: ctx.nextId("kyb-doc"),
         createdAt: addDays(createdAt, ctx.rng.int(0, 20)),
@@ -218,6 +268,8 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
         subjectId: merchantId,
         docType,
         storageKey: `synthetic/${ctx.config.namespace}/merchants/${merchantId}/${docType}.pdf`,
+        originalFileName: `${docType.toLowerCase()}.pdf`,
+        contentCiphertext: null,
         sha256: isDuplicatePair && docIndex === 0
           ? duplicateHashes[duplicateMerchantIndexes.indexOf(index)]!
           : sha256Like(ctx, `${merchantId}:${docType}:${docIndex}`),
@@ -225,12 +277,14 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
         sizeBytes: ctx.rng.int(80_000, 3_500_000),
         avStatus: ctx.rng.chance(2) ? "INFECTED" : ctx.rng.chance(8) ? "PENDING" : "CLEAN",
         status: docStatus,
+        uploadedById: uploadedBy?.id ?? null,
         reviewedById: docStatus === "ACCEPTED" || docStatus === "REJECTED"
           ? ctx.rng.pick(ctx.refs.adminUsers.filter((user) => user.role === "COMPLIANCE" || user.role === "OPERATOR"))?.id ?? null
           : null,
         reviewedAt: docStatus === "ACCEPTED" || docStatus === "REJECTED" ? addDays(createdAt, ctx.rng.int(1, 15)) : null,
         expiresOn,
         rejectionReasonCode: docStatus === "REJECTED" ? "BLURRY_OR_EXPIRED" : null,
+        reviewNotes: docStatus === "REJECTED" ? "The scan is not readable; request a fresh copy." : null,
       });
     }
 
@@ -239,6 +293,7 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
     for (let ownerIndex = 0; ownerIndex < ownerCount; ownerIndex += 1) {
       const ownerName = randomName(ctx);
       const active = !(ownerIndex === ownerCount - 1 && ctx.rng.chance(25));
+      const rawNationalId = `NID-${merchantId}-${ownerIndex}`;
       ctx.dataset.beneficialOwners.push({
         id: ctx.nextId("owner"),
         createdAt,
@@ -246,7 +301,8 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
         merchantId,
         fullNameAr: ownerName.ar,
         fullNameEn: ownerName.en,
-        nationalIdCiphertext: Buffer.from(`NID-${merchantId}-${ownerIndex}`).toString("base64"),
+        nationalIdCiphertext: Buffer.from(rawNationalId).toString("base64"),
+        nationalIdHash: nationalIdHash(rawNationalId),
         dateOfBirth: addDays(ctx.timeline.start, -ctx.rng.int(9000, 18000)),
         nationality: ctx.rng.chance(88) ? "LY" : ctx.rng.pick(["EG", "TN", "TR"]),
         ownershipPercent: ownerIndex === 0 ? ctx.rng.int(35, 90).toFixed(2) : ctx.rng.int(1, 30).toFixed(2),

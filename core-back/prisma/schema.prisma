@@ -816,6 +816,7 @@ model Merchant {
   commissionReceivableCeiling Decimal?       @db.Decimal(18, 4)
   negativeBalanceCeiling      Decimal        @default(0) @db.Decimal(18, 4)
   payoutBankDetailsJson       Json?
+  payoutAccountHash           String?        @map("payout_account_hash") @db.Char(64)
 
   users              User[]              @relation("MerchantUsers")
   applications       Application[]
@@ -836,6 +837,11 @@ model Merchant {
   @@index([status, createdAt])
   @@index([riskTier])
   @@index([kybStatus, status])
+  @@index([taxId(length: 100)])
+  @@index([registrationNo(length: 100)])
+  @@index([contactPhone])
+  @@index([contactEmail])
+  @@index([payoutAccountHash])
   @@map("merchants")
 }
 
@@ -854,6 +860,9 @@ model User {
   isChecker           Boolean    @default(false) @map("is_checker")
   mfaRequired         Boolean    @default(true) @map("mfa_required")
   mfaSecretCiphertext String?    @map("mfa_secret_ciphertext") @db.Text
+  invitationTokenHash String?    @map("invitation_token_hash") @db.Char(64)
+  invitationExpiresAt DateTime?  @map("invitation_expires_at")
+  invitedById         String?    @map("invited_by")
   status              UserStatus @default(INVITED)
   /**
    * The Employee Academy progress of this user: completed module ids, quiz
@@ -872,6 +881,9 @@ model User {
   submittedJoinRequests    JoinRequest[]       @relation("JoinRequestSubmitter")
   assignedJoinRequests     JoinRequest[]       @relation("JoinRequestReviewer")
   reviewedKybDocuments     KybDocument[]       @relation("KybDocumentReviewer")
+  uploadedKybDocuments     KybDocument[]       @relation("KybDocumentUploader")
+  invitedUsers             User[]              @relation("UserInvitedBy")
+  invitedBy                User?               @relation("UserInvitedBy", fields: [invitedById], references: [id], onDelete: SetNull)
   assignedOperatorCases    OperatorCase[]      @relation("OperatorCaseAssignee")
   detailChangeLogs         DetailChangeLog[]   @relation("DetailChangeLogActor")
   auditLogs                AuditLog[]          @relation("AuditLogActor")
@@ -1320,12 +1332,12 @@ model GatewayVersion {
   changeNote         String?             @map("change_note") @db.Text
   rollbackVersionId  String?             @map("rollback_version_id")
 
-  gateway              Gateway               @relation("GatewayVersions", fields: [gatewayId], references: [id], onDelete: Cascade)
-  activeForGateway     Gateway?              @relation("GatewayActiveVersion")
-  createdBy            User                  @relation("GatewayVersionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  approvalRequest      ApprovalRequest?      @relation("GatewayVersionApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
-  rollbackVersion      GatewayVersion?       @relation("GatewayVersionRollback", fields: [rollbackVersionId], references: [id], onDelete: SetNull)
-  rolledBackVersions   GatewayVersion[]      @relation("GatewayVersionRollback")
+  gateway              Gateway                 @relation("GatewayVersions", fields: [gatewayId], references: [id], onDelete: Cascade)
+  activeForGateway     Gateway?                @relation("GatewayActiveVersion")
+  createdBy            User                    @relation("GatewayVersionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  approvalRequest      ApprovalRequest?        @relation("GatewayVersionApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
+  rollbackVersion      GatewayVersion?         @relation("GatewayVersionRollback", fields: [rollbackVersionId], references: [id], onDelete: SetNull)
+  rolledBackVersions   GatewayVersion[]        @relation("GatewayVersionRollback")
   environments         GatewayEnvironment[]
   auth                 GatewayAuth[]
   setting              GatewaySetting?
@@ -1345,7 +1357,6 @@ model GatewayVersion {
 
 /**
  * The collected go-live evidence of a gateway version.
- *
  * Design v5 §14: no `gateway_versions` row may become `LIVE` without passing
  * all twelve go-live gates. The evidence is produced by the sandbox suite
  * runner (`POST /gateway-versions/:vid/run-suite`) and read back by the
@@ -1353,12 +1364,12 @@ model GatewayVersion {
  * hard-coded constants.
  */
 model GatewayVersionEvidence {
-  id               String         @id @default(uuid(7))
-  createdAt        DateTime       @default(now()) @map("created_at")
-  updatedAt        DateTime       @updatedAt @map("updated_at")
-  gatewayVersionId String         @unique @map("gateway_version_id")
-  evidenceJson     Json           @map("evidence_json")
-  ranAt            DateTime       @default(now()) @map("ran_at")
+  id               String   @id @default(uuid(7))
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+  gatewayVersionId String   @unique @map("gateway_version_id")
+  evidenceJson     Json     @map("evidence_json")
+  ranAt            DateTime @default(now()) @map("ran_at")
 
   gatewayVersion GatewayVersion @relation(fields: [gatewayVersionId], references: [id], onDelete: Cascade)
 
@@ -2019,19 +2030,19 @@ model OperatorCase {
 }
 
 model ReconciliationRun {
-  id                String   @id @default(uuid(7))
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
-  statementSourceId String   @map("statement_source_id")
-  windowStart       DateTime @map("window_start")
-  windowEnd         DateTime @map("window_end")
-  fileHash          String   @unique @map("file_hash") @db.Char(64)
-  statsJson         Json     @map("stats_json")
+  id                String    @id @default(uuid(7))
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  statementSourceId String    @map("statement_source_id")
+  windowStart       DateTime  @map("window_start")
+  windowEnd         DateTime  @map("window_end")
+  fileHash          String    @unique @map("file_hash") @db.Char(64)
+  statsJson         Json      @map("stats_json")
   /// The name of the uploaded statement file.
-  fileName          String?  @map("file_name") @db.Text
+  fileName          String?   @map("file_name") @db.Text
   /// The uploaded statement file itself: the reconciliation is a background
   /// job, so the bytes have to survive the request that stored them.
-  fileContent       Bytes?   @map("file_content") @db.LongBlob
+  fileContent       Bytes?    @map("file_content") @db.LongBlob
   /// Set when the background reconciliation job finished the run. It is the
   /// idempotency marker of the ingestion: a retried job never matches the
   /// same statement twice.
@@ -2182,26 +2193,32 @@ model UserIdentity {
 }
 
 model JoinRequest {
-  id                 String            @id @default(uuid(7))
-  createdAt          DateTime          @default(now()) @map("created_at")
-  updatedAt          DateTime          @updatedAt @map("updated_at")
-  merchantId         String            @map("merchant_id")
-  submittedByUserId  String            @map("submitted_by_user_id")
-  status             JoinRequestStatus @default(DRAFT)
-  onboardingChannel  OnboardingChannel @map("onboarding_channel")
-  submittedAt        DateTime?         @map("submitted_at")
-  assignedReviewerId String?           @map("assigned_reviewer_id")
-  slaDueAt           DateTime          @map("sla_due_at")
-  screeningId        String?           @map("screening_id")
-  proposedRiskTier   RiskTier          @default(STANDARD) @map("proposed_risk_tier")
-  fourEyesRequired   Boolean           @default(true) @map("four_eyes_required")
-  fourEyesReasons    Json?             @map("four_eyes_reasons")
-  decision           String?           @map("decision") @db.Text
-  decisionReasonCode String?           @map("decision_reason_code") @db.Text
-  decisionNotes      String?           @map("decision_notes") @db.Text
-  infoRequestJson    Json?             @map("info_request_json")
-  resubmissionOfId   String?           @map("resubmission_of_id")
-  approvalRequestId  String?           @map("approval_request_id")
+  id                  String            @id @default(uuid(7))
+  createdAt           DateTime          @default(now()) @map("created_at")
+  updatedAt           DateTime          @updatedAt @map("updated_at")
+  merchantId          String            @map("merchant_id")
+  submittedByUserId   String            @map("submitted_by_user_id")
+  status              JoinRequestStatus @default(DRAFT)
+  onboardingChannel   OnboardingChannel @map("onboarding_channel")
+  submittedAt         DateTime?         @map("submitted_at")
+  assignedReviewerId  String?           @map("assigned_reviewer_id")
+  slaDueAt            DateTime          @map("sla_due_at")
+  screeningId         String?           @map("screening_id")
+  proposedRiskTier    RiskTier          @default(STANDARD) @map("proposed_risk_tier")
+  fourEyesRequired    Boolean           @default(true) @map("four_eyes_required")
+  fourEyesReasons     Json?             @map("four_eyes_reasons")
+  decision            String?           @map("decision") @db.Text
+  decisionReasonCode  String?           @map("decision_reason_code") @db.Text
+  decisionNotes       String?           @map("decision_notes") @db.Text
+  infoRequestJson     Json?             @map("info_request_json")
+  profileJson         Json?             @map("profile_json")
+  reviewChecklistJson Json?             @map("review_checklist_json")
+  duplicateFlagsJson  Json?             @map("duplicate_flags_json")
+  slaPausedAt         DateTime?         @map("sla_paused_at")
+  slaRemainingSeconds Int?              @map("sla_remaining_seconds")
+  lastScreenedAt      DateTime?         @map("last_screened_at")
+  resubmissionOfId    String?           @map("resubmission_of_id")
+  approvalRequestId   String?           @map("approval_request_id")
 
   merchant         Merchant         @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   submittedBy      User             @relation("JoinRequestSubmitter", fields: [submittedByUserId], references: [id], onDelete: Restrict)
@@ -2231,18 +2248,23 @@ model KybDocument {
   subjectId           String            @map("subject_id")
   docType             KybDocumentType   @map("doc_type")
   storageKey          String            @map("storage_key") @db.Text
+  originalFileName    String?           @map("original_file_name") @db.Text
+  contentCiphertext   String?           @map("content_ciphertext") @db.LongText
   sha256              String            @db.Char(64)
   mime                String            @db.Text
   sizeBytes           Int               @map("size_bytes")
   avStatus            AvStatus          @default(PENDING) @map("av_status")
   status              KybDocumentStatus @default(UPLOADED)
+  uploadedById        String?           @map("uploaded_by")
   reviewedById        String?           @map("reviewed_by")
   reviewedAt          DateTime?         @map("reviewed_at")
   expiresOn           DateTime?         @map("expires_on") @db.Date
   rejectionReasonCode String?           @map("rejection_reason_code") @db.Text
+  reviewNotes         String?           @map("review_notes") @db.Text
 
   merchant    Merchant     @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   joinRequest JoinRequest? @relation(fields: [joinRequestId], references: [id], onDelete: SetNull)
+  uploadedBy  User?        @relation("KybDocumentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
   reviewedBy  User?        @relation("KybDocumentReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
 
   @@index([merchantId])
@@ -2250,6 +2272,7 @@ model KybDocument {
   @@index([merchantId, status])
   @@index([docType])
   @@index([expiresOn])
+  @@index([uploadedById])
   @@map("kyb_documents")
 }
 
@@ -2261,6 +2284,7 @@ model BeneficialOwner {
   fullNameAr           String              @map("full_name_ar") @db.Text
   fullNameEn           String?             @map("full_name_en") @db.Text
   nationalIdCiphertext String              @map("national_id_ciphertext") @db.Text
+  nationalIdHash       String?             @map("national_id_hash") @db.Char(64)
   dateOfBirth          DateTime            @map("date_of_birth") @db.Date
   nationality          String              @db.Char(2)
   ownershipPercent     Decimal?            @map("ownership_percent") @db.Decimal(5, 2)
@@ -2275,6 +2299,7 @@ model BeneficialOwner {
 
   @@index([merchantId])
   @@index([screeningStatus])
+  @@index([nationalIdHash])
   @@map("beneficial_owners")
 }
 

@@ -2853,11 +2853,68 @@ export async function executeApprovalSubject(
   if (subjectType === "JOIN_REQUEST") {
     const payload = asRecord(input.approval.payloadDiffJson);
     const decision = String(payload.decision ?? "APPROVED").toUpperCase();
+    if (decision === "REJECTED") {
+      const joinRequests = modelOf(tx, "joinRequest");
+      const joinRequest = await joinRequests.findUnique({ where: { id: input.approval.subjectId } });
+      if (!joinRequest) {
+        throw new ApiError(404, "JOIN_REQUEST_NOT_FOUND", "The join request does not exist");
+      }
+      if (joinRequest.status === "REJECTED") {
+        return {
+          status: "EXECUTED",
+          entityId: String(joinRequest.id),
+          idempotent: true,
+        };
+      }
+      const merchants = modelOf(tx, "merchant");
+      const merchant = await merchants.findUnique({ where: { id: String(joinRequest.merchantId) } });
+      if (!merchant) {
+        throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
+      }
+      await joinRequests.update({
+        where: { id: String(joinRequest.id) },
+        data: {
+          status: "REJECTED",
+          decision: "REJECTED",
+          decisionReasonCode: payload.reasonCode === undefined ? null : String(payload.reasonCode),
+          decisionNotes: payload.notes === undefined ? null : String(payload.notes),
+        },
+      });
+      const merchantStatus = String(merchant.status) === "PENDING" ? "REJECTED" : merchant.status;
+      await merchants.update({
+        where: { id: String(joinRequest.merchantId) },
+        data: {
+          status: merchantStatus,
+          kybStatus: ["PENDING", "UNVERIFIED"].includes(String(merchant.kybStatus))
+            ? "REJECTED"
+            : merchant.kybStatus,
+        },
+      });
+      await writeAudit(ctx, tx, {
+        actorId: input.checkerUserId,
+        role: input.checkerRole,
+        action: "JOIN_REQUEST_REJECTED",
+        entityType: "JOIN_REQUEST",
+        entityId: String(joinRequest.id),
+        beforeJson: { status: String(joinRequest.status), merchantStatus: String(merchant.status) },
+        afterJson: {
+          status: "REJECTED",
+          merchantStatus: String(merchantStatus),
+          reasonCode: payload.reasonCode === undefined ? null : String(payload.reasonCode),
+        },
+        approvalRequestId: input.approval.id,
+      });
+      return {
+        status: "EXECUTED",
+        entityId: String(joinRequest.id),
+        idempotent: false,
+      };
+    }
     if (decision !== "APPROVED") {
       throw new ApiError(
         409,
         "JOIN_REQUEST_NOT_APPROVABLE",
-        `The join request approval carries a '${decision}' decision, so it cannot activate the merchant`,
+        `The join request approval carries a '${decision}' decision, so it cannot be executed`,
       );
     }
     const activated = await activateApprovedJoinRequest(ctx, tx, {

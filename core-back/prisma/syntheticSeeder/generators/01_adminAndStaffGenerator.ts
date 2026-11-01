@@ -25,7 +25,8 @@ export const generateAdminAndStaff = (ctx: SeederContext): void => {
     index += 1;
     const name = randomName(ctx);
     const createdAt = addDays(start, ctx.rng.int(0, 120));
-    const isMaker = index % 2 === 1;
+    const isMaker = ["GATEWAY_ADMIN", "SECURITY_ADMIN", "FINANCE", "OPERATOR", "COMPLIANCE", "MLRO"].includes(role);
+    const isChecker = ["SECURITY_ADMIN", "FINANCE", "MLRO"].includes(role);
     const id = ctx.nextId("user");
     ctx.dataset.users.push({
       id,
@@ -39,7 +40,7 @@ export const generateAdminAndStaff = (ctx: SeederContext): void => {
       authoritiesMap: AUTHORITIES[role] ?? {},
       appScopeIds: null,
       isMaker,
-      isChecker: !isMaker,
+      isChecker,
       mfaRequired: true,
       mfaSecretCiphertext: null,
       status: ctx.rng.chance(8) ? "INVITED" : ctx.rng.chance(3) ? "SUSPENDED" : "ACTIVE",

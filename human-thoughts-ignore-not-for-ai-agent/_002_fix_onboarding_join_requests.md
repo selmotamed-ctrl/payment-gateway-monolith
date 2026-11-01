@@ -1,0 +1,1 @@
+onboarding join requests page is in the same situation as the Operator Cases page before fixing, its not up to the design, it lack critical columns, no details page, no actions, no admin assisted onboarding, please plan very carefully and dont take any short cuts, investigate the design, add and enhance it and implement it accordingly, plan for now

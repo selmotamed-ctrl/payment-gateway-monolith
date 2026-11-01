@@ -1,4 +1,5 @@
-import express from "express";
+import express, { type Request, type Response } from "express";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { zIdentifier, zPaginationQuery, zReason } from "../../lib/zReady";
 import {
@@ -8,6 +9,12 @@ import {
   toCoreKybDocumentReview,
 } from "../contract";
 import { coreForward } from "../forward";
+import { callCoreRaw, callCoreResponse, mapCoreHttpError, parseJsonBuffer } from "../../lib/mtlsClient";
+import { env } from "../../lib/env";
+import { parseCidrList, resolveClientIp } from "../../lib/net";
+import { resolveRequestId } from "../../lib/requestLogger";
+import { uploadSingle } from "../upload";
+import { ApiError, parseOrThrow } from "../../lib/error";
 
 const router = express.Router();
 
@@ -55,6 +62,18 @@ export const kybReviewSchema = z
   })
   .strict();
 
+const adminAssistedSchema = z.record(z.string(), z.unknown());
+const ownerParamsSchema = z.object({ id: zIdentifier, ownerId: zIdentifier }).strict();
+const documentParamsSchema = z.object({ id: zIdentifier, docId: zIdentifier }).strict();
+const checklistSchema = z.object({ items: z.record(z.string().max(80), z.boolean()) }).strict();
+
+const coreCallContext = (req: Request) => ({
+  requestId: resolveRequestId(req),
+  clientIp: resolveClientIp(req, parseCidrList(env.TRUSTED_PROXY_CIDRS)),
+  userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
+  authorization: req.headers.authorization,
+});
+
 router.get(
   "/",
   coreForward({
@@ -70,6 +89,139 @@ router.get(
     method: "GET",
     path: (context) => `/internal/admin/join-requests/${encodeURIComponent(context.params.id ?? "")}`,
     paramsSchema: idParamsSchema,
+  }),
+);
+
+router.post(
+  "/admin-assisted",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/admin/join-requests/admin-assisted",
+    schema: adminAssistedSchema,
+    relayStatus: true,
+  }),
+);
+
+router.patch(
+  "/:id/profile",
+  coreForward({
+    method: "PATCH",
+    path: (context) => `/internal/admin/join-requests/${encodeURIComponent(context.params.id ?? "")}/profile`,
+    paramsSchema: idParamsSchema,
+    schema: adminAssistedSchema,
+  }),
+);
+
+router.post(
+  "/:id/beneficial-owners",
+  coreForward({
+    method: "POST",
+    path: (context) =>
+      `/internal/admin/join-requests/${encodeURIComponent(context.params.id ?? "")}/beneficial-owners`,
+    paramsSchema: idParamsSchema,
+    schema: adminAssistedSchema,
+    relayStatus: true,
+  }),
+);
+
+router.patch(
+  "/:id/beneficial-owners/:ownerId",
+  coreForward({
+    method: "PATCH",
+    path: (context) =>
+      `/internal/admin/join-requests/${encodeURIComponent(context.params.id ?? "")}/beneficial-owners/${encodeURIComponent(context.params.ownerId ?? "")}`,
+    paramsSchema: ownerParamsSchema,
+    schema: adminAssistedSchema,
+  }),
+);
+
+router.delete(
+  "/:id/beneficial-owners/:ownerId",
+  coreForward({
+    method: "DELETE",
+    path: (context) =>
+      `/internal/admin/join-requests/${encodeURIComponent(context.params.id ?? "")}/beneficial-owners/${encodeURIComponent(context.params.ownerId ?? "")}`,
+    paramsSchema: ownerParamsSchema,
+  }),
+);
+
+router.post(
+  "/:id/kyb-documents",
+  uploadSingle("file"),
+  async (req: Request, res: Response): Promise<void> => {
+    const file = req.file;
+    if (!file) {
+      throw new ApiError(400, "UPLOAD_REQUIRED", "A KYB document file is required");
+    }
+    const metadata = {
+      documentType: typeof req.body?.documentType === "string" ? req.body.documentType : "OTHER",
+      fileName: file.originalname.slice(0, 255),
+      expiresOn: typeof req.body?.expiresOn === "string" ? req.body.expiresOn : undefined,
+    };
+    const result = await callCoreResponse({
+      method: "POST",
+      path: `/internal/admin/join-requests/${encodeURIComponent(String(req.params.id ?? ""))}/kyb-documents`,
+      rawBody: file.buffer,
+      rawContentType: "application/octet-stream",
+      headers: {
+        "x-upload-content-type": file.mimetype,
+        "x-upload-sha256": createHash("sha256").update(file.buffer).digest("hex"),
+        "x-upload-size": String(file.buffer.byteLength),
+        "x-upload-metadata": Buffer.from(JSON.stringify(metadata), "utf8").toString("base64url"),
+      },
+      ...coreCallContext(req),
+    });
+    res.status(result.status).json(result.body);
+  },
+);
+
+router.delete(
+  "/:id/kyb-documents/:docId",
+  coreForward({
+    method: "DELETE",
+    path: (context) =>
+      `/internal/admin/join-requests/${encodeURIComponent(context.params.id ?? "")}/kyb-documents/${encodeURIComponent(context.params.docId ?? "")}`,
+    paramsSchema: documentParamsSchema,
+  }),
+);
+
+router.post(
+  "/:id/submit",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/join-requests/${encodeURIComponent(context.params.id ?? "")}/submit`,
+    paramsSchema: idParamsSchema,
+    schema: z.record(z.string(), z.unknown()),
+  }),
+);
+
+router.post(
+  "/:id/withdraw",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/join-requests/${encodeURIComponent(context.params.id ?? "")}/withdraw`,
+    paramsSchema: idParamsSchema,
+    schema: z.record(z.string(), z.unknown()),
+  }),
+);
+
+router.patch(
+  "/:id/checklist",
+  coreForward({
+    method: "PATCH",
+    path: (context) => `/internal/admin/join-requests/${encodeURIComponent(context.params.id ?? "")}/checklist`,
+    paramsSchema: idParamsSchema,
+    schema: checklistSchema,
+  }),
+);
+
+router.post(
+  "/:id/screening/retry",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/join-requests/${encodeURIComponent(context.params.id ?? "")}/screening/retry`,
+    paramsSchema: idParamsSchema,
+    schema: z.record(z.string(), z.unknown()),
   }),
 );
 
@@ -124,3 +276,23 @@ kybRouter.post(
     bodyFrom: (_req, body) => toCoreKybDocumentReview(body),
   }),
 );
+
+kybRouter.get("/kyb-documents/:id/content", async (req: Request, res: Response): Promise<void> => {
+  const { id } = parseOrThrow(idParamsSchema, req.params);
+  const upstream = await callCoreRaw({
+    method: "GET",
+    path: `/internal/admin/kyb-documents/${encodeURIComponent(id)}/content`,
+    ...coreCallContext(req),
+  });
+  if (upstream.statusCode >= 400) {
+    throw mapCoreHttpError(upstream.statusCode, parseJsonBuffer(upstream.body));
+  }
+  const contentType = upstream.headers["content-type"];
+  const contentDisposition = upstream.headers["content-disposition"];
+  const cacheControl = upstream.headers["cache-control"];
+  if (typeof contentType === "string") res.setHeader("Content-Type", contentType);
+  if (typeof contentDisposition === "string") res.setHeader("Content-Disposition", contentDisposition);
+  if (typeof cacheControl === "string") res.setHeader("Cache-Control", cacheControl);
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.status(upstream.statusCode).send(upstream.body);
+});

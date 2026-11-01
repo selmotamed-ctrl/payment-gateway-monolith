@@ -330,6 +330,13 @@ export const coreLoginSchema = z
   })
   .strict();
 
+export const coreInvitationAcceptSchema = z
+  .object({
+    token: z.string().min(16).max(256),
+    password: z.string().min(10).max(128),
+  })
+  .strict();
+
 export const coreGoogleSchema = z.object({ idToken: z.string().min(20).max(4096) }).strict();
 
 export const coreMfaSchema = z

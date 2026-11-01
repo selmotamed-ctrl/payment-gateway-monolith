@@ -794,6 +794,10 @@ export const toCoreJoinRequestDecide = (body: unknown): JsonRecord => {
   if (reason) result.reasonCode = clamp(reason, 64);
   const notes = asString(source.notes) ?? reason;
   if (notes) result.notes = clamp(notes, 4000);
+  const proposedRiskTier = asString(source.proposedRiskTier)?.toUpperCase();
+  if (proposedRiskTier === "LOW" || proposedRiskTier === "STANDARD" || proposedRiskTier === "HIGH") {
+    result.proposedRiskTier = proposedRiskTier;
+  }
   return result;
 };
 
@@ -816,6 +820,8 @@ export const toCoreKybDocumentReview = (body: unknown): JsonRecord => {
   const result: JsonRecord = { decision: coreDecision };
   const reasonCode = asString(source.reasonCode) ?? asString(source.notes);
   if (reasonCode) result.reasonCode = clamp(reasonCode, 64);
+  const notes = asString(source.notes);
+  if (notes) result.notes = clamp(notes, 2000);
   const expiresOn = asString(source.expiresOn);
   if (expiresOn && DATE_PATTERN.test(expiresOn)) result.expiresOn = expiresOn;
   return result;

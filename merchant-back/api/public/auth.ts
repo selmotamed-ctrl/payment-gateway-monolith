@@ -6,6 +6,7 @@ import { ApiError } from "../../lib/error";
 import { zEmail, zMfaCode, zPassword, zPhone } from "../../lib/zReady";
 import {
   coreGoogleSchema,
+  coreInvitationAcceptSchema,
   coreLoginSchema,
   coreMfaSchema,
   coreRegisterSchema,
@@ -94,6 +95,24 @@ router.post(
     path: () => "/internal/merchant/auth/verify-identity",
     schema: verifyIdentitySchema,
     coreSchema: coreVerifyIdentitySchema,
+    requireAuth: false,
+  }),
+);
+
+const acceptInvitationSchema = z
+  .object({
+    token: z.string().min(16).max(256),
+    password: zPassword,
+  })
+  .strict();
+
+router.post(
+  "/accept-invitation",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/merchant/auth/accept-invitation",
+    schema: acceptInvitationSchema,
+    coreSchema: coreInvitationAcceptSchema,
     requireAuth: false,
   }),
 );

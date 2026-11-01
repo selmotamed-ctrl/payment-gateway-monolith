@@ -9,9 +9,9 @@ please read the design files in ./design directory:
     - design/Dynamic-Payment-Gateway-Management-Design-v2.md
     - design/opencode_technical_delivery_design.md
 
-to get a general idea on the project, also, please read the schema at core-back/prisma/schema.prisma
+to understand the project read the design files, also, please read the schema at core-back/prisma/schema.prisma
 
-finally after understanding the current state and design of the project please proceed with the planning and implementation of the two design files 
+finally after understanding the current state and design of the project please proceed with the planning and implementation of the design files 
     - design/fake_payment_rails_service_architecture.md
     - design/synthetic_operational_data_seeder_architecture.md
 

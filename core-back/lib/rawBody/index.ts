@@ -14,8 +14,13 @@ export const RAW_BODY_PATHS = [
 
 export const RAW_BODY_LIMIT = "25mb";
 
+const RAW_BODY_PATTERNS = [
+  /^\/internal\/admin\/join-requests\/[^/]+\/kyb-documents$/,
+] as const;
+
 export const isRawBodyPath = (path: string): boolean =>
-  RAW_BODY_PATHS.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+  RAW_BODY_PATHS.some((prefix) => path === prefix || path.startsWith(`${prefix}/`))
+  || RAW_BODY_PATTERNS.some((pattern) => pattern.test(path));
 
 const rawCollector = express.raw({
   type: () => true,

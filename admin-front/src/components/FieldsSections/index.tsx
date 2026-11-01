@@ -161,7 +161,7 @@ const Fields = dc(
                         {props.fields.map((f, i) => {
                             return (
                                 <>
-                                    <Field key={i} copyOnClick={f.copyOnClick} text={f.text} value={f.value} onClick={f.onClick}></Field>
+                                    <Field key={i} copyOnClick={f.copyOnClick} text={f.text} value={f.value} onClick={f.onClick} hint={f.hint} source={f.source}></Field>
                                     {i < props.fields.length - 1 && (
                                         <VDivider
                                             style={{

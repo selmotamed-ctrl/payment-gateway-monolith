@@ -17,6 +17,23 @@ import {
   type OperatorCaseAction,
 } from "../../lib/operatorCases";
 import {
+  JOIN_REQUEST_CHECKLIST_KEYS,
+  buildProfileJson,
+  computeJoinRequestReadiness,
+  detectDuplicateFlags,
+  nationalIdHash,
+  normalizeEmail,
+  normalizePhone,
+  payoutAccountHash,
+  type DuplicateFlag,
+  type ProfileInput,
+} from "../../lib/joinRequestOnboarding";
+import {
+  assertUploadSignature,
+  resolveFourEyesForSubmission,
+  runOnboardingScreening,
+} from "./merchant";
+import {
   generateMfaCode,
   hashMfaCode,
   hashPassword,
@@ -913,17 +930,281 @@ router.patch("/users/:id", async (request: Request, response: Response) => {
   response.json({ id: updated.id, role: updated.role, status: updated.status });
 });
 
+
+const publicKybDocumentSelect = {
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  merchantId: true,
+  joinRequestId: true,
+  docType: true,
+  originalFileName: true,
+  sha256: true,
+  mime: true,
+  sizeBytes: true,
+  avStatus: true,
+  status: true,
+  reviewedById: true,
+  uploadedBy: { select: { id: true, email: true } },
+  reviewedBy: { select: { id: true, email: true } },
+  reviewedAt: true,
+  expiresOn: true,
+  rejectionReasonCode: true,
+  reviewNotes: true,
+} as const;
+
+const adminJoinProfileSchema = z
+  .object({
+    legalName: z.string().min(2).max(200).optional(),
+    tradeName: z.string().min(2).max(200).optional(),
+    country: z.string().length(2).optional(),
+    businessCategory: z.string().min(2).max(80).optional(),
+    registrationNumber: z.string().max(64).optional(),
+    taxId: z.string().max(64).optional(),
+    registeredAddress: z.string().max(500).optional(),
+    websiteUrl: z.string().url().max(300).optional(),
+    contactPhone: z.string().min(6).max(40).optional(),
+    contactEmail: z.string().email().max(160).optional(),
+    expectedMonthlyVolume: z.string().regex(/^\d+(?:\.\d{1,4})?$/).max(32).optional(),
+    currency: z.string().length(3).optional(),
+    businessUseDescription: z.string().max(2000).optional(),
+    payoutBankDetails: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
+
+const adminJoinCreateSchema = adminJoinProfileSchema
+  .extend({
+    merchantId: z.string().min(1).max(64).optional(),
+    riskTier: z.enum(["LOW", "STANDARD", "HIGH"]).optional(),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      Boolean(value.merchantId) ||
+      Boolean(value.legalName && value.tradeName && (value.contactPhone || value.contactEmail)),
+    { message: "A new merchant needs a legal name, a trade name and a phone or email" },
+  );
+
+const adminOwnerSchema = z
+  .object({
+    fullName: z.string().min(2).max(160),
+    fullNameEn: z.string().min(2).max(160).optional(),
+    identityType: z.enum(["NATIONAL_ID", "PASSPORT"]),
+    identityNumber: z.string().min(4).max(32),
+    nationality: z.string().length(2).optional(),
+    dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    ownershipPercent: z.string().regex(/^\d{1,3}(?:\.\d{1,2})?$/).optional(),
+    role: z.enum(["OWNER", "DIRECTOR", "SIGNATORY", "CONTROLLER"]).optional(),
+    pepDeclared: z.boolean().optional(),
+    position: z.string().min(2).max(80).optional(),
+  })
+  .strict();
+
+const JOIN_REQUEST_OPEN_STATUSES = [
+  "DRAFT",
+  "SUBMITTED",
+  "IN_REVIEW",
+  "INFO_REQUESTED",
+  "PENDING_CHECKER",
+] as const;
+
+const profileInputOf = (body: z.infer<typeof adminJoinProfileSchema>): ProfileInput => ({
+  legalName: body.legalName,
+  tradeName: body.tradeName,
+  country: body.country?.toUpperCase(),
+  businessCategory: body.businessCategory,
+  registrationNumber: body.registrationNumber,
+  taxId: body.taxId,
+  registeredAddress: body.registeredAddress,
+  websiteUrl: body.websiteUrl,
+  contactPhone: body.contactPhone ? normalizePhone(body.contactPhone) : undefined,
+  contactEmail: body.contactEmail ? normalizeEmail(body.contactEmail) : undefined,
+  expectedMonthlyVolume: body.expectedMonthlyVolume,
+  currency: body.currency?.toUpperCase(),
+  businessUseDescription: body.businessUseDescription,
+});
+
+const merchantDataOf = (
+  body: z.infer<typeof adminJoinProfileSchema>,
+): Prisma.MerchantUpdateInput => {
+  const data: Prisma.MerchantUpdateInput = {};
+  if (body.legalName !== undefined) data.legalName = body.legalName;
+  if (body.tradeName !== undefined) data.tradeName = body.tradeName;
+  if (body.country !== undefined) data.country = body.country.toUpperCase();
+  if (body.businessCategory !== undefined) data.businessCategory = body.businessCategory;
+  if (body.registrationNumber !== undefined) data.registrationNo = body.registrationNumber;
+  if (body.taxId !== undefined) data.taxId = body.taxId;
+  if (body.contactPhone !== undefined) data.contactPhone = normalizePhone(body.contactPhone);
+  if (body.contactEmail !== undefined) data.contactEmail = normalizeEmail(body.contactEmail);
+  if (body.payoutBankDetails !== undefined) {
+    data.payoutBankDetailsJson = body.payoutBankDetails as Prisma.InputJsonValue;
+    data.payoutAccountHash = payoutAccountHash(body.payoutBankDetails);
+  }
+  return data;
+};
+
+const invalidatePendingJoinApproval = async (
+  tx: Prisma.TransactionClient,
+  joinRequest: { id: string; status: string; approvalRequestId: string | null },
+  reason: string,
+): Promise<boolean> => {
+  if (!joinRequest.approvalRequestId) return false;
+  if (!["PENDING_CHECKER", "IN_REVIEW", "SUBMITTED"].includes(joinRequest.status)) return false;
+  await tx.approvalRequest.update({
+    where: { id: joinRequest.approvalRequestId },
+    data: { state: "REJECTED", rejectionReason: reason },
+  });
+  await tx.joinRequest.update({
+    where: { id: joinRequest.id },
+    data: { status: "IN_REVIEW", approvalRequestId: null },
+  });
+  return true;
+};
+
+const refreshJoinScreening = async (joinRequestId: string): Promise<{
+  screeningResult: string | null;
+  screeningError: string | null;
+}> => {
+  const joinRequest = await client.joinRequest.findUnique({
+    where: { id: joinRequestId },
+    select: { merchantId: true, slaDueAt: true, slaPausedAt: true },
+  });
+  if (!joinRequest) {
+    throw new ApiError(404, "JOIN_REQUEST_NOT_FOUND", "The join request does not exist");
+  }
+  try {
+    const screening = await runOnboardingScreening(joinRequest.merchantId, joinRequestId);
+    const fourEyes = await resolveFourEyesForSubmission(joinRequest.merchantId, screening);
+    await client.joinRequest.update({
+      where: { id: joinRequestId },
+      data: {
+        screeningId: screening.screeningId,
+        lastScreenedAt: new Date(),
+        fourEyesRequired: fourEyes.required,
+        fourEyesReasons: fourEyes.reasons,
+      },
+    });
+    return { screeningResult: screening.result, screeningError: null };
+  } catch (error) {
+    await client.joinRequest.update({
+      where: { id: joinRequestId },
+      data: { lastScreenedAt: new Date() },
+    });
+    return {
+      screeningResult: "ERROR",
+      screeningError: error instanceof Error ? error.message : "Screening failed",
+    };
+  }
+};
+
+const ownerCreateData = async (
+  body: z.infer<typeof adminOwnerSchema>,
+  merchantId: string,
+): Promise<Prisma.BeneficialOwnerUncheckedCreateInput> => ({
+  merchantId,
+  fullNameAr: body.fullName,
+  fullNameEn: body.fullNameEn ?? null,
+  nationalIdCiphertext: await vault.encryptSecret(body.identityNumber, "kyb-national-id"),
+  nationalIdHash: nationalIdHash(body.identityNumber),
+  dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : new Date(),
+  nationality: (body.nationality ?? "LY").toUpperCase(),
+  ownershipPercent: body.ownershipPercent ? new Prisma.Decimal(body.ownershipPercent) : null,
+  role: body.role ?? "OWNER",
+  pepDeclared: body.pepDeclared ?? false,
+  validFrom: new Date(),
+});
+
+
+const refreshJoinDuplicateFlags = async (joinRequestId: string): Promise<DuplicateFlag[]> => {
+  const joinRequest = await client.joinRequest.findUnique({
+    where: { id: joinRequestId },
+    include: { merchant: true, kybDocuments: true },
+  });
+  if (!joinRequest) {
+    throw new ApiError(404, "JOIN_REQUEST_NOT_FOUND", "The join request does not exist");
+  }
+  const owners = await client.beneficialOwner.findMany({
+    where: { merchantId: joinRequest.merchantId, active: true },
+    select: { nationalIdHash: true },
+  });
+  const flags = await detectDuplicateFlags(client, {
+    merchantId: joinRequest.merchantId,
+    joinRequestId,
+    taxId: joinRequest.merchant.taxId,
+    registrationNo: joinRequest.merchant.registrationNo,
+    contactPhone: joinRequest.merchant.contactPhone,
+    contactEmail: joinRequest.merchant.contactEmail,
+    payoutHash: joinRequest.merchant.payoutAccountHash,
+    ownerHashes: owners.map((owner) => owner.nationalIdHash).filter((hash): hash is string => Boolean(hash)),
+    documentHashes: joinRequest.kybDocuments.map((document) => document.sha256),
+  });
+  await client.joinRequest.update({
+    where: { id: joinRequestId },
+    data: { duplicateFlagsJson: flags as unknown as Prisma.InputJsonValue },
+  });
+  return flags;
+};
+
+const joinRequestDetail = async (id: string, role: string | null) => {
+  const joinRequest = await client.joinRequest.findUnique({
+    where: { id },
+    include: {
+      merchant: { include: { wallets: true } },
+      submittedBy: { select: { id: true, email: true } },
+      assignedReviewer: { select: { id: true, email: true } },
+      approvalRequest: true,
+      screening: { include: { matches: true, amlCases: true } },
+      kybDocuments: {
+        select: publicKybDocumentSelect,
+        orderBy: { createdAt: "desc" },
+      },
+    },
+  });
+  if (!joinRequest) {
+    throw new ApiError(404, "JOIN_REQUEST_NOT_FOUND", "The join request does not exist");
+  }
+  const beneficialOwners = await client.beneficialOwner.findMany({
+    where: { merchantId: joinRequest.merchantId },
+    orderBy: [{ active: "desc" }, { createdAt: "asc" }],
+  });
+  const readiness = await computeJoinRequestReadiness(client, id);
+  const confidential = role === "COMPLIANCE" || role === "MLRO";
+  const screening = joinRequest.screening
+    ? {
+        ...joinRequest.screening,
+        matches: joinRequest.screening.matches.map((match) => confidential
+          ? match
+          : {
+              ...match,
+              listName: "[REDACTED]",
+              listEntryRef: "[REDACTED]",
+              matchedName: "[REDACTED]",
+              attributesJson: {},
+              dispositionNotes: null,
+            }),
+      }
+    : null;
+  return {
+    ...joinRequest,
+    screening,
+    beneficialOwners,
+    readiness,
+    checklistKeys: JOIN_REQUEST_CHECKLIST_KEYS,
+    amlDetailsRedacted: !confidential,
+  };
+};
+
 router.get("/join-requests", async (request: Request, response: Response) => {
   requireAuthorities(request, ["kyb:read", "compliance:read"]);
   const built = buildListQuery(request.query, {
-    search: ["merchant.legalName", "merchant.tradeName"],
-    in: { status: "status" }, equals: {proposedRiskTier: "proposedRiskTier", onboardingChannel: "onboardingChannel", assignedReviewerId: "assignedReviewerId"},
+    search: ["merchant.legalName", "merchant.tradeName", "merchant.contactEmail", "merchant.contactPhone"],
+    in: { status: "status" }, equals: {merchantId: "merchantId", proposedRiskTier: "proposedRiskTier", onboardingChannel: "onboardingChannel", assignedReviewerId: "assignedReviewerId"},
     dates: { createdAt: { path: "createdAt" }, slaDueAt: { path: "slaDueAt", fromKey: "dateFrom", toKey: "dateTo" } },
     sortable: { status: "status", submittedAt: "createdAt", slaDueAt: "slaDueAt", riskTier: "proposedRiskTier" },
     defaultSort: { createdAt: "desc" },
   });
   const [joinRequests, total] = await Promise.all([
-    client.joinRequest.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { merchant: true, kybDocuments: true, assignedReviewer: { select: { email: true } } }, skip: built.skip, take: built.take }),
+    client.joinRequest.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { merchant: true, kybDocuments: { select: publicKybDocumentSelect }, assignedReviewer: { select: { email: true } } }, skip: built.skip, take: built.take }),
     client.joinRequest.count({ where: built.where as never }),
   ]);
   response.json(listResponse("joinRequests", joinRequests.map((entry) => ({
@@ -938,6 +1219,596 @@ router.get("/join-requests", async (request: Request, response: Response) => {
 router.get("/join-requests/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["kyb:read", "compliance:read"]);
   const { id } = parseOrThrow(idSchema, request.params);
+  const principal = principalOf(request);
+  response.json({ joinRequest: await joinRequestDetail(id, principal.role ?? null) });
+});
+
+router.post("/join-requests/admin-assisted", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["kyb:write", "compliance:write"]);
+  const body = parseOrThrow(adminJoinCreateSchema, request.body);
+  const actor = actorFromRequest(request);
+  const profileInput = profileInputOf(body);
+  const profileJson = buildProfileJson(profileInput);
+  const merchantData = merchantDataOf(body);
+  const riskTier = body.riskTier ?? "STANDARD";
+
+  if (body.merchantId) {
+    const merchant = await client.merchant.findUnique({ where: { id: body.merchantId } });
+    if (!merchant) {
+      throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
+    }
+    if (!["PENDING", "REJECTED"].includes(merchant.status)) {
+      throw new ApiError(
+        409,
+        "MERCHANT_NOT_ONBOARDABLE",
+        "Admin-assisted onboarding is only available for pending or rejected merchants",
+      );
+    }
+    const existingOpen = await client.joinRequest.findFirst({
+      where: {
+        merchantId: merchant.id,
+        status: { in: [...JOIN_REQUEST_OPEN_STATUSES] },
+      },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, status: true },
+    });
+    if (existingOpen) {
+      throw new ApiError(409, "JOIN_REQUEST_ALREADY_OPEN", "The merchant already has an open join request", {
+        joinRequestId: existingOpen.id,
+        status: existingOpen.status,
+      });
+    }
+    const result = await client.$transaction(async (tx) => {
+      await tx.merchant.update({
+        where: { id: merchant.id },
+        data: {
+          ...merchantData,
+          status: "PENDING",
+          kybStatus: "PENDING",
+          riskTier,
+          onboardingChannel: "ADMIN_ASSISTED",
+        },
+      });
+      const joinRequest = await tx.joinRequest.create({
+        data: {
+          merchantId: merchant.id,
+          submittedByUserId: actor.userId,
+          status: "DRAFT",
+          onboardingChannel: "ADMIN_ASSISTED",
+          slaDueAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
+          proposedRiskTier: riskTier,
+          fourEyesRequired: false,
+          fourEyesReasons: [],
+          profileJson: profileJson as Prisma.InputJsonValue,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorId: actor.userId,
+          role: actor.role ?? "SYSTEM",
+          action: "JOIN_REQUEST_ADMIN_ASSISTED_CREATED",
+          entityType: "JOIN_REQUEST",
+          entityId: joinRequest.id,
+          beforeJson: {},
+          afterJson: {
+            merchantId: merchant.id,
+            existingMerchant: true,
+            onboardingChannel: "ADMIN_ASSISTED",
+          },
+        },
+      });
+      return { merchantId: merchant.id, joinRequestId: joinRequest.id };
+    });
+    await refreshJoinDuplicateFlags(result.joinRequestId);
+    response.status(201).json({
+      ...result,
+      status: "DRAFT",
+      existingMerchant: true,
+      invited: false,
+    });
+    return;
+  }
+
+  const phone = body.contactPhone ? normalizePhone(body.contactPhone) : null;
+  const email = body.contactEmail ? normalizeEmail(body.contactEmail) : null;
+  if (phone) {
+    const existing = await client.userIdentity.findFirst({ where: { kind: "PHONE", identifierNormalized: phone } });
+    if (existing) {
+      throw new ApiError(409, "IDENTITY_ALREADY_REGISTERED", "The phone number is already linked to an account");
+    }
+  }
+  if (email) {
+    const existing = await client.userIdentity.findFirst({ where: { kind: "EMAIL", identifierNormalized: email } });
+    if (existing) {
+      throw new ApiError(409, "IDENTITY_ALREADY_REGISTERED", "The email address is already linked to an account");
+    }
+    const existingUser = await client.user.findUnique({ where: { email } });
+    if (existingUser) {
+      throw new ApiError(409, "IDENTITY_ALREADY_REGISTERED", "The email address is already linked to an account");
+    }
+  }
+
+  const invitationToken = randomBytes(24).toString("base64url");
+  const invitationTokenHash = createHash("sha256").update(invitationToken).digest("hex");
+  const invitationExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const userEmail = email ?? `${phone}@invited.payment-gateway.local`;
+
+  const result = await client.$transaction(async (tx) => {
+    const merchant = await tx.merchant.create({
+      data: {
+        legalName: body.legalName!,
+        tradeName: body.tradeName!,
+        country: body.country?.toUpperCase() ?? "LY",
+        businessCategory: body.businessCategory,
+        registrationNo: body.registrationNumber,
+        taxId: body.taxId,
+        contactPhone: phone,
+        contactEmail: email,
+        status: "PENDING",
+        kybStatus: "PENDING",
+        riskTier,
+        onboardingChannel: "ADMIN_ASSISTED",
+        payoutBankDetailsJson: body.payoutBankDetails as Prisma.InputJsonValue | undefined,
+        payoutAccountHash: payoutAccountHash(body.payoutBankDetails),
+      },
+    });
+    const user = await tx.user.create({
+      data: {
+        merchantId: merchant.id,
+        email: userEmail,
+        phone,
+        role: "MERCHANT_ADMIN",
+        authoritiesMap: ["merchant:read", "merchant:write", "link:write", "payment:read"] as Prisma.InputJsonValue,
+        isMaker: true,
+        isChecker: false,
+        mfaRequired: true,
+        status: "INVITED",
+        invitationTokenHash,
+        invitationExpiresAt,
+        invitedById: actor.userId,
+      },
+    });
+    if (phone) {
+      await tx.userIdentity.create({
+        data: { userId: user.id, kind: "PHONE", identifierNormalized: phone, isPrimary: true },
+      });
+    }
+    if (email) {
+      await tx.userIdentity.create({
+        data: { userId: user.id, kind: "EMAIL", identifierNormalized: email, isPrimary: !phone },
+      });
+    }
+    const glAccount = await tx.glAccount.create({
+      data: {
+        accountType: "MERCHANT_WALLET",
+        ownerId: merchant.id,
+        currency: "LYD",
+        checkpointBalance: new Prisma.Decimal(0),
+      },
+    });
+    await tx.wallet.create({
+      data: { merchantId: merchant.id, glAccountId: glAccount.id, currency: "LYD", status: "PENDING" },
+    });
+    const joinRequest = await tx.joinRequest.create({
+      data: {
+        merchantId: merchant.id,
+        submittedByUserId: actor.userId,
+        status: "DRAFT",
+        onboardingChannel: "ADMIN_ASSISTED",
+        slaDueAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
+        proposedRiskTier: riskTier,
+        fourEyesRequired: false,
+        fourEyesReasons: [],
+        profileJson: profileJson as Prisma.InputJsonValue,
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "SYSTEM",
+        action: "JOIN_REQUEST_ADMIN_ASSISTED_CREATED",
+        entityType: "JOIN_REQUEST",
+        entityId: joinRequest.id,
+        beforeJson: {},
+        afterJson: {
+          merchantId: merchant.id,
+          userId: user.id,
+          existingMerchant: false,
+          onboardingChannel: "ADMIN_ASSISTED",
+        },
+      },
+    });
+    return { merchantId: merchant.id, userId: user.id, joinRequestId: joinRequest.id };
+  });
+  await refreshJoinDuplicateFlags(result.joinRequestId);
+  response.status(201).json({
+    ...result,
+    status: "DRAFT",
+    existingMerchant: false,
+    invited: true,
+    invitationToken,
+    invitationExpiresAt,
+  });
+});
+
+router.patch("/join-requests/:id/profile", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["kyb:write", "compliance:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(adminJoinProfileSchema, request.body);
+  const actor = actorFromRequest(request);
+  const joinRequest = await client.joinRequest.findUnique({ where: { id }, include: { merchant: true } });
+  if (!joinRequest) {
+    throw new ApiError(404, "JOIN_REQUEST_NOT_FOUND", "The join request does not exist");
+  }
+  if (!["DRAFT", "INFO_REQUESTED"].includes(joinRequest.status)) {
+    throw new ApiError(409, "JOIN_REQUEST_NOT_EDITABLE", "The join request profile can no longer be edited");
+  }
+  const profileJson = buildProfileJson(profileInputOf(body), joinRequest.profileJson);
+  const merchantData = merchantDataOf(body);
+  await client.$transaction(async (tx) => {
+    if (Object.keys(merchantData).length > 0) {
+      await tx.merchant.update({ where: { id: joinRequest.merchantId }, data: merchantData });
+    }
+    await tx.joinRequest.update({
+      where: { id },
+      data: { profileJson: profileJson as Prisma.InputJsonValue },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "SYSTEM",
+        action: "JOIN_REQUEST_PROFILE_UPDATED",
+        entityType: "JOIN_REQUEST",
+        entityId: id,
+        beforeJson: joinRequest.profileJson ?? {},
+        afterJson: profileJson as Prisma.InputJsonValue,
+      },
+    });
+  });
+  const duplicateFlags = await refreshJoinDuplicateFlags(id);
+  const readiness = await computeJoinRequestReadiness(client, id);
+  response.json({ id, readiness, duplicateFlags });
+});
+
+router.post("/join-requests/:id/beneficial-owners", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["kyb:write", "compliance:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(adminOwnerSchema, request.body);
+  const actor = actorFromRequest(request);
+  const joinRequest = await client.joinRequest.findUnique({ where: { id } });
+  if (!joinRequest) {
+    throw new ApiError(404, "JOIN_REQUEST_NOT_FOUND", "The join request does not exist");
+  }
+  if (["APPROVED", "REJECTED", "WITHDRAWN", "EXPIRED"].includes(joinRequest.status)) {
+    throw new ApiError(409, "JOIN_REQUEST_NOT_EDITABLE", "The join request can no longer be edited");
+  }
+  const wasSubmitted = ["SUBMITTED", "IN_REVIEW", "PENDING_CHECKER"].includes(joinRequest.status);
+  const data = await ownerCreateData(body, joinRequest.merchantId);
+  const owner = await client.$transaction(async (tx) => {
+    await invalidatePendingJoinApproval(tx, joinRequest, "SUPERSEDED_BY_BENEFICIAL_OWNER_CHANGE");
+    const created = await tx.beneficialOwner.create({ data });
+    if (wasSubmitted) {
+      await tx.joinRequest.update({ where: { id }, data: { status: "IN_REVIEW" } });
+    }
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "SYSTEM",
+        action: "JOIN_REQUEST_BENEFICIAL_OWNER_ADDED",
+        entityType: "JOIN_REQUEST",
+        entityId: id,
+        beforeJson: {},
+        afterJson: { beneficialOwnerId: created.id, ownershipPercent: body.ownershipPercent ?? null },
+      },
+    });
+    return created;
+  });
+  const duplicateFlags = await refreshJoinDuplicateFlags(id);
+  const screening = wasSubmitted ? await refreshJoinScreening(id) : { screeningResult: null, screeningError: null };
+  const { nationalIdCiphertext: _ciphertext, ...safeOwner } = owner;
+  response.status(201).json({ owner: safeOwner, duplicateFlags, screening });
+});
+
+router.patch("/join-requests/:id/beneficial-owners/:ownerId", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["kyb:write", "compliance:write"]);
+  const params = parseOrThrow(
+    z.object({
+      id: z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/),
+      ownerId: z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/),
+    }).strict(),
+    request.params,
+  );
+  const body = parseOrThrow(adminOwnerSchema.partial().strict(), request.body);
+  if (Object.keys(body).length === 0) {
+    throw new ApiError(400, "BENEFICIAL_OWNER_UPDATE_REQUIRED", "At least one beneficial owner field is required");
+  }
+  const actor = actorFromRequest(request);
+  const joinRequest = await client.joinRequest.findUnique({ where: { id: params.id } });
+  if (!joinRequest) {
+    throw new ApiError(404, "JOIN_REQUEST_NOT_FOUND", "The join request does not exist");
+  }
+  if (["APPROVED", "REJECTED", "WITHDRAWN", "EXPIRED"].includes(joinRequest.status)) {
+    throw new ApiError(409, "JOIN_REQUEST_NOT_EDITABLE", "The join request can no longer be edited");
+  }
+  const owner = await client.beneficialOwner.findFirst({
+    where: { id: params.ownerId, merchantId: joinRequest.merchantId },
+  });
+  if (!owner) {
+    throw new ApiError(404, "BENEFICIAL_OWNER_NOT_FOUND", "The beneficial owner does not exist");
+  }
+  const wasSubmitted = ["SUBMITTED", "IN_REVIEW", "PENDING_CHECKER"].includes(joinRequest.status);
+  const data: Prisma.BeneficialOwnerUpdateInput = {};
+  if (body.fullName !== undefined) data.fullNameAr = body.fullName;
+  if (body.fullNameEn !== undefined) data.fullNameEn = body.fullNameEn;
+  if (body.identityNumber !== undefined) {
+    data.nationalIdCiphertext = await vault.encryptSecret(body.identityNumber, "kyb-national-id");
+    data.nationalIdHash = nationalIdHash(body.identityNumber);
+  }
+  if (body.nationality !== undefined) data.nationality = body.nationality.toUpperCase();
+  if (body.dateOfBirth !== undefined) data.dateOfBirth = new Date(body.dateOfBirth);
+  if (body.ownershipPercent !== undefined) data.ownershipPercent = new Prisma.Decimal(body.ownershipPercent);
+  if (body.role !== undefined) data.role = body.role;
+  if (body.pepDeclared !== undefined) data.pepDeclared = body.pepDeclared;
+  const updated = await client.$transaction(async (tx) => {
+    await invalidatePendingJoinApproval(tx, joinRequest, "SUPERSEDED_BY_BENEFICIAL_OWNER_CHANGE");
+    const saved = await tx.beneficialOwner.update({ where: { id: owner.id }, data });
+    if (wasSubmitted) {
+      await tx.joinRequest.update({ where: { id: params.id }, data: { status: "IN_REVIEW" } });
+    }
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "SYSTEM",
+        action: "JOIN_REQUEST_BENEFICIAL_OWNER_UPDATED",
+        entityType: "JOIN_REQUEST",
+        entityId: params.id,
+        beforeJson: { beneficialOwnerId: owner.id },
+        afterJson: { beneficialOwnerId: owner.id },
+      },
+    });
+    return saved;
+  });
+  const duplicateFlags = await refreshJoinDuplicateFlags(params.id);
+  const screening = wasSubmitted ? await refreshJoinScreening(params.id) : { screeningResult: null, screeningError: null };
+  const { nationalIdCiphertext: _ciphertext, ...safeOwner } = updated;
+  response.json({ owner: safeOwner, duplicateFlags, screening });
+});
+
+router.delete("/join-requests/:id/beneficial-owners/:ownerId", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["kyb:write", "compliance:write"]);
+  const params = parseOrThrow(
+    z.object({
+      id: z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/),
+      ownerId: z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/),
+    }).strict(),
+    request.params,
+  );
+  const actor = actorFromRequest(request);
+  const joinRequest = await client.joinRequest.findUnique({ where: { id: params.id } });
+  if (!joinRequest) {
+    throw new ApiError(404, "JOIN_REQUEST_NOT_FOUND", "The join request does not exist");
+  }
+  if (["APPROVED", "REJECTED", "WITHDRAWN", "EXPIRED"].includes(joinRequest.status)) {
+    throw new ApiError(409, "JOIN_REQUEST_NOT_EDITABLE", "The join request can no longer be edited");
+  }
+  const owner = await client.beneficialOwner.findFirst({
+    where: { id: params.ownerId, merchantId: joinRequest.merchantId, active: true },
+  });
+  if (!owner) {
+    throw new ApiError(404, "BENEFICIAL_OWNER_NOT_FOUND", "The beneficial owner does not exist");
+  }
+  const wasSubmitted = ["SUBMITTED", "IN_REVIEW", "PENDING_CHECKER"].includes(joinRequest.status);
+  await client.$transaction(async (tx) => {
+    await invalidatePendingJoinApproval(tx, joinRequest, "SUPERSEDED_BY_BENEFICIAL_OWNER_CHANGE");
+    await tx.beneficialOwner.update({
+      where: { id: owner.id },
+      data: { active: false, validTo: new Date() },
+    });
+    if (wasSubmitted) {
+      await tx.joinRequest.update({ where: { id: params.id }, data: { status: "IN_REVIEW" } });
+    }
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "SYSTEM",
+        action: "JOIN_REQUEST_BENEFICIAL_OWNER_REMOVED",
+        entityType: "JOIN_REQUEST",
+        entityId: params.id,
+        beforeJson: { beneficialOwnerId: owner.id },
+        afterJson: { beneficialOwnerId: owner.id, active: false },
+      },
+    });
+  });
+  const duplicateFlags = await refreshJoinDuplicateFlags(params.id);
+  const screening = wasSubmitted ? await refreshJoinScreening(params.id) : { screeningResult: null, screeningError: null };
+  response.json({ id: owner.id, active: false, duplicateFlags, screening });
+});
+
+router.post("/join-requests/:id/kyb-documents", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["kyb:write", "compliance:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const actor = actorFromRequest(request);
+  const raw = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
+  if (raw.byteLength === 0) {
+    throw new ApiError(400, "UPLOAD_REQUIRED", "A KYB document payload is required");
+  }
+  if (raw.byteLength > 10 * 1024 * 1024) {
+    throw new ApiError(413, "UPLOAD_TOO_LARGE", "KYB documents must be 10 MiB or smaller");
+  }
+  const joinRequest = await client.joinRequest.findUnique({ where: { id } });
+  if (!joinRequest) {
+    throw new ApiError(404, "JOIN_REQUEST_NOT_FOUND", "The join request does not exist");
+  }
+  if (!["DRAFT", "INFO_REQUESTED"].includes(joinRequest.status)) {
+    throw new ApiError(409, "JOIN_REQUEST_NOT_EDITABLE", "Documents can no longer be edited for this join request");
+  }
+  const declaredMime = typeof request.headers["x-upload-content-type"] === "string"
+    ? (request.headers["x-upload-content-type"] as string)
+    : undefined;
+  const mime = assertUploadSignature(raw, declaredMime);
+  let metadata: Record<string, unknown> = {};
+  const metadataHeader = request.headers["x-upload-metadata"];
+  if (typeof metadataHeader === "string") {
+    try {
+      metadata = JSON.parse(Buffer.from(metadataHeader, "base64url").toString("utf8")) as Record<string, unknown>;
+    } catch {
+      throw new ApiError(400, "UPLOAD_METADATA_INVALID", "The upload metadata is not valid JSON");
+    }
+  }
+  const docType = parseOrThrow(
+    z.enum([
+      "COMMERCIAL_REGISTRY",
+      "TAX_CERTIFICATE",
+      "ARTICLES_OF_ASSOCIATION",
+      "OWNER_ID",
+      "SIGNATORY_ID",
+      "PROOF_OF_ADDRESS",
+      "BANK_LETTER",
+      "SECTOR_LICENSE",
+      "OTHER",
+    ]),
+    String(metadata.documentType ?? "OTHER").toUpperCase().replaceAll(" ", "_"),
+  );
+  const originalFileName = String(metadata.fileName ?? "document").slice(0, 255);
+  const expiresOn = typeof metadata.expiresOn === "string" && /^\d{4}-\d{2}-\d{2}$/.test(metadata.expiresOn)
+    ? new Date(metadata.expiresOn)
+    : null;
+  const sha256 = createHash("sha256").update(raw).digest("hex");
+  const scannerMode = process.env.KYB_SCANNER_MODE ?? "eicar";
+  const infected = scannerMode !== "disabled"
+    && raw.includes("EICAR-STANDARD-ANTIVIRUS-TEST-FILE");
+  const avStatus = infected ? "INFECTED" : scannerMode === "disabled" ? "PENDING" : "CLEAN";
+  const storageKey = `kyb/${joinRequest.merchantId}/${sha256}`;
+  const document = await client.kybDocument.create({
+    data: {
+      merchantId: joinRequest.merchantId,
+      joinRequestId: id,
+      subjectType: "MERCHANT",
+      subjectId: joinRequest.merchantId,
+      docType,
+      storageKey,
+      originalFileName,
+      contentCiphertext: await vault.encryptSecret(raw.toString("base64"), "kyb-document"),
+      sha256,
+      mime,
+      sizeBytes: raw.byteLength,
+      avStatus,
+      status: infected ? "REJECTED" : "UPLOADED",
+      uploadedById: actor.userId,
+      expiresOn,
+    },
+  });
+  const duplicateFlags = await refreshJoinDuplicateFlags(id);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "SYSTEM",
+      action: "JOIN_REQUEST_KYB_DOCUMENT_UPLOADED",
+      entityType: "KYB_DOCUMENT",
+      entityId: document.id,
+      beforeJson: {},
+      afterJson: { joinRequestId: id, docType, avStatus, sha256 },
+    },
+  });
+  const payload = {
+    id: document.id,
+    docType: document.docType,
+    originalFileName: document.originalFileName,
+    status: document.status,
+    avStatus: document.avStatus,
+    sha256,
+    duplicateFlags,
+  };
+  if (infected) {
+    response.status(422).json({
+      code: "KIB_DOCUMENT_INFECTED",
+      message: "The uploaded document failed malware scanning",
+      details: payload,
+    });
+    return;
+  }
+  response.status(201).json(payload);
+});
+
+router.delete("/join-requests/:id/kyb-documents/:docId", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["kyb:write", "compliance:write"]);
+  const params = parseOrThrow(
+    z.object({
+      id: z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/),
+      docId: z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/),
+    }).strict(),
+    request.params,
+  );
+  const actor = actorFromRequest(request);
+  const joinRequest = await client.joinRequest.findUnique({ where: { id: params.id } });
+  if (!joinRequest) {
+    throw new ApiError(404, "JOIN_REQUEST_NOT_FOUND", "The join request does not exist");
+  }
+  if (!["DRAFT", "INFO_REQUESTED"].includes(joinRequest.status)) {
+    throw new ApiError(409, "JOIN_REQUEST_NOT_EDITABLE", "Documents can no longer be edited for this join request");
+  }
+  const document = await client.kybDocument.findFirst({
+    where: { id: params.docId, joinRequestId: params.id },
+  });
+  if (!document) {
+    throw new ApiError(404, "KIB_DOCUMENT_NOT_FOUND", "The KYB document does not exist");
+  }
+  await client.kybDocument.delete({ where: { id: document.id } });
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "SYSTEM",
+      action: "JOIN_REQUEST_KYB_DOCUMENT_DELETED",
+      entityType: "KYB_DOCUMENT",
+      entityId: document.id,
+      beforeJson: { joinRequestId: params.id, docType: document.docType, sha256: document.sha256 },
+      afterJson: {},
+    },
+  });
+  const duplicateFlags = await refreshJoinDuplicateFlags(params.id);
+  response.json({ id: document.id, deleted: true, duplicateFlags });
+});
+
+router.get("/kyb-documents/:id/content", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["kyb:read", "compliance:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const actor = actorFromRequest(request);
+  const document = await client.kybDocument.findUnique({ where: { id } });
+  if (!document) {
+    throw new ApiError(404, "KIB_DOCUMENT_NOT_FOUND", "The KYB document does not exist");
+  }
+  if (document.avStatus !== "CLEAN") {
+    throw new ApiError(409, "KIB_DOCUMENT_NOT_SCANNED", "The KYB document has not passed malware scanning");
+  }
+  if (!document.contentCiphertext) {
+    throw new ApiError(404, "KIB_DOCUMENT_CONTENT_MISSING", "The KYB document content is not available");
+  }
+  const base64 = await vault.decryptSecret(document.contentCiphertext);
+  const content = Buffer.from(base64, "base64");
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "SYSTEM",
+      action: "JOIN_REQUEST_KYB_DOCUMENT_VIEWED",
+      entityType: "KYB_DOCUMENT",
+      entityId: document.id,
+      beforeJson: {},
+      afterJson: { joinRequestId: document.joinRequestId, mime: document.mime, sizeBytes: document.sizeBytes },
+    },
+  });
+  const fileName = (document.originalFileName ?? "document").replace(/["\r\n]/g, "_");
+  response.setHeader("Content-Type", document.mime);
+  response.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
+  response.setHeader("Cache-Control", "no-store, private");
+  response.setHeader("Pragma", "no-cache");
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.send(content);
+});
+
+router.post("/join-requests/:id/submit", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["kyb:write", "compliance:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const actor = actorFromRequest(request);
   const joinRequest = await client.joinRequest.findUnique({
     where: { id },
     include: { merchant: true, kybDocuments: true },
@@ -945,7 +1816,195 @@ router.get("/join-requests/:id", async (request: Request, response: Response) =>
   if (!joinRequest) {
     throw new ApiError(404, "JOIN_REQUEST_NOT_FOUND", "The join request does not exist");
   }
-  response.json({ joinRequest });
+  if (!["DRAFT", "INFO_REQUESTED"].includes(joinRequest.status)) {
+    throw new ApiError(409, "JOIN_REQUEST_NOT_SUBMITTABLE", "The join request is not in a submittable state");
+  }
+  const owners = await client.beneficialOwner.findMany({
+    where: { merchantId: joinRequest.merchantId, active: true },
+  });
+  if (!joinRequest.merchant.legalName || !joinRequest.merchant.tradeName) {
+    throw new ApiError(409, "JOIN_REQUEST_PROFILE_INCOMPLETE", "The merchant legal and trade names are required");
+  }
+  if (!joinRequest.merchant.contactPhone && !joinRequest.merchant.contactEmail) {
+    throw new ApiError(409, "JOIN_REQUEST_PROFILE_INCOMPLETE", "A merchant phone or email is required");
+  }
+  if (!joinRequest.merchant.payoutBankDetailsJson) {
+    throw new ApiError(409, "JOIN_REQUEST_PAYOUT_BANK_REQUIRED", "Payout bank details are required");
+  }
+  if (owners.length === 0) {
+    throw new ApiError(409, "JOIN_REQUEST_OWNER_REQUIRED", "At least one beneficial owner is required");
+  }
+  if (joinRequest.kybDocuments.length === 0) {
+    throw new ApiError(409, "KIB_DOCUMENTS_REQUIRED", "At least one KYB document is required before submission");
+  }
+  const screening = await runOnboardingScreening(joinRequest.merchantId, joinRequest.id);
+  if (screening.result === "ERROR") {
+    throw new ApiError(503, "SCREENING_UNAVAILABLE", "The AML screening provider is unavailable", {
+      screeningId: screening.screeningId,
+    });
+  }
+  if (screening.blocked) {
+    throw new ApiError(403, "AML_CONFIRMED_MATCH", "The onboarding screening produced a confirmed watch list match", {
+      screeningId: screening.screeningId,
+      amlCaseId: screening.amlCaseId,
+    });
+  }
+  const fourEyes = await resolveFourEyesForSubmission(joinRequest.merchantId, screening);
+  const now = new Date();
+  const remainingSeconds = joinRequest.slaRemainingSeconds
+    ?? Math.max(0, Math.floor((joinRequest.slaDueAt.getTime() - now.getTime()) / 1000));
+  const slaDueAt = joinRequest.slaPausedAt
+    ? new Date(now.getTime() + remainingSeconds * 1000)
+    : joinRequest.slaDueAt;
+  const duplicateFlags = await refreshJoinDuplicateFlags(id);
+  await client.joinRequest.update({
+    where: { id },
+    data: {
+      status: screening.joinRequestStatus as never,
+      submittedAt: now,
+      screeningId: screening.screeningId,
+      lastScreenedAt: now,
+      fourEyesRequired: fourEyes.required,
+      fourEyesReasons: fourEyes.reasons,
+      duplicateFlagsJson: duplicateFlags as unknown as Prisma.InputJsonValue,
+      slaPausedAt: null,
+      slaRemainingSeconds: null,
+      slaDueAt,
+      infoRequestJson: Prisma.DbNull,
+    },
+  });
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "SYSTEM",
+      action: "JOIN_REQUEST_ADMIN_ASSISTED_SUBMITTED",
+      entityType: "JOIN_REQUEST",
+      entityId: id,
+      beforeJson: { status: joinRequest.status },
+      afterJson: {
+        status: screening.joinRequestStatus,
+        screeningId: screening.screeningId,
+        fourEyesRequired: fourEyes.required,
+      },
+    },
+  });
+  const readiness = await computeJoinRequestReadiness(client, id);
+  response.json({
+    id,
+    status: screening.joinRequestStatus,
+    screeningResult: screening.result,
+    fourEyesRequired: fourEyes.required,
+    fourEyesReasons: fourEyes.reasons,
+    readiness,
+  });
+});
+
+router.post("/join-requests/:id/withdraw", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["kyb:write", "compliance:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const actor = actorFromRequest(request);
+  const joinRequest = await client.joinRequest.findUnique({ where: { id } });
+  if (!joinRequest) {
+    throw new ApiError(404, "JOIN_REQUEST_NOT_FOUND", "The join request does not exist");
+  }
+  if (["APPROVED", "REJECTED", "WITHDRAWN", "EXPIRED"].includes(joinRequest.status)) {
+    throw new ApiError(409, "JOIN_REQUEST_NOT_WITHDRAWABLE", "The join request is no longer open");
+  }
+  await client.$transaction(async (tx) => {
+    await invalidatePendingJoinApproval(tx, joinRequest, "SUPERSEDED_BY_WITHDRAWAL");
+    await tx.joinRequest.update({
+      where: { id },
+      data: { status: "WITHDRAWN", approvalRequestId: null },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "SYSTEM",
+        action: "JOIN_REQUEST_WITHDRAWN",
+        entityType: "JOIN_REQUEST",
+        entityId: id,
+        beforeJson: { status: joinRequest.status },
+        afterJson: { status: "WITHDRAWN" },
+      },
+    });
+  });
+  response.json({ id, status: "WITHDRAWN" });
+});
+
+router.patch("/join-requests/:id/checklist", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["kyb:write", "compliance:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z.object({ items: z.record(z.string(), z.boolean()) }).strict(),
+    request.body,
+  );
+  const actor = actorFromRequest(request);
+  const joinRequest = await client.joinRequest.findUnique({ where: { id } });
+  if (!joinRequest) {
+    throw new ApiError(404, "JOIN_REQUEST_NOT_FOUND", "The join request does not exist");
+  }
+  if (!["SUBMITTED", "IN_REVIEW"].includes(joinRequest.status)) {
+    throw new ApiError(409, "JOIN_REQUEST_CHECKLIST_LOCKED", "The review checklist can no longer be edited");
+  }
+  const knownKeys = new Set<string>(JOIN_REQUEST_CHECKLIST_KEYS);
+  const unknownKeys = Object.keys(body.items).filter((key) => !knownKeys.has(key));
+  if (unknownKeys.length > 0) {
+    throw new ApiError(400, "CHECKLIST_ITEM_UNKNOWN", "The review checklist contains unknown items", { unknownKeys });
+  }
+  const current = (joinRequest.reviewChecklistJson ?? {}) as Record<string, unknown>;
+  const checklist = { ...current, ...body.items };
+  await client.$transaction(async (tx) => {
+    await tx.joinRequest.update({
+      where: { id },
+      data: { reviewChecklistJson: checklist as Prisma.InputJsonValue },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "SYSTEM",
+        action: "JOIN_REQUEST_CHECKLIST_UPDATED",
+        entityType: "JOIN_REQUEST",
+        entityId: id,
+        beforeJson: current as Prisma.InputJsonValue,
+        afterJson: checklist as Prisma.InputJsonValue,
+      },
+    });
+  });
+  const readiness = await computeJoinRequestReadiness(client, id);
+  response.json({ id, checklist, readiness });
+});
+
+router.post("/join-requests/:id/screening/retry", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["kyb:write", "compliance:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const actor = actorFromRequest(request);
+  const joinRequest = await client.joinRequest.findUnique({ where: { id } });
+  if (!joinRequest) {
+    throw new ApiError(404, "JOIN_REQUEST_NOT_FOUND", "The join request does not exist");
+  }
+  if (!["SUBMITTED", "IN_REVIEW", "INFO_REQUESTED"].includes(joinRequest.status)) {
+    throw new ApiError(409, "JOIN_REQUEST_SCREENING_LOCKED", "Screening cannot be retried in this state");
+  }
+  const screening = await refreshJoinScreening(id);
+  if (screening.screeningError) {
+    throw new ApiError(503, "SCREENING_UNAVAILABLE", "The AML screening provider is unavailable", {
+      reason: screening.screeningError,
+    });
+  }
+  const duplicateFlags = await refreshJoinDuplicateFlags(id);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "SYSTEM",
+      action: "JOIN_REQUEST_SCREENING_RETRIED",
+      entityType: "JOIN_REQUEST",
+      entityId: id,
+      beforeJson: {},
+      afterJson: { screeningResult: screening.screeningResult },
+    },
+  });
+  const readiness = await computeJoinRequestReadiness(client, id);
+  response.json({ id, screeningResult: screening.screeningResult, duplicateFlags, readiness });
 });
 
 router.post("/join-requests/:id/assign", async (request: Request, response: Response) => {
@@ -974,11 +2033,31 @@ router.post("/join-requests/:id/request-info", async (request: Request, response
   if (!joinRequest) {
     throw new ApiError(404, "JOIN_REQUEST_NOT_FOUND", "The join request does not exist");
   }
+  const actor = actorFromRequest(request);
+  const now = new Date();
+  const remainingSeconds = joinRequest.slaRemainingSeconds
+    ?? Math.max(0, Math.floor((joinRequest.slaDueAt.getTime() - now.getTime()) / 1000));
   const updated = await client.joinRequest.update({
     where: { id },
-    data: { status: "INFO_REQUESTED", infoRequestJson: body.items },
+    data: {
+      status: "INFO_REQUESTED",
+      infoRequestJson: body.items,
+      slaPausedAt: joinRequest.slaPausedAt ?? now,
+      slaRemainingSeconds: remainingSeconds,
+    },
   });
-  response.json({ id: updated.id, status: updated.status });
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "SYSTEM",
+      action: "JOIN_REQUEST_INFO_REQUESTED",
+      entityType: "JOIN_REQUEST",
+      entityId: id,
+      beforeJson: { status: joinRequest.status },
+      afterJson: { status: "INFO_REQUESTED", items: body.items.length },
+    },
+  });
+  response.json({ id: updated.id, status: updated.status, slaPausedAt: updated.slaPausedAt });
 });
 
 router.post("/join-requests/:id/decide", async (request: Request, response: Response) => {
@@ -1000,10 +2079,33 @@ router.post("/join-requests/:id/decide", async (request: Request, response: Resp
   if (!joinRequest) {
     throw new ApiError(404, "JOIN_REQUEST_NOT_FOUND", "The join request does not exist");
   }
-  if (!["IN_REVIEW", "INFO_REQUESTED", "SUBMITTED", "PENDING_CHECKER"].includes(joinRequest.status)) {
+  if (joinRequest.status === "PENDING_CHECKER") {
+    throw new ApiError(
+      409,
+      "JOIN_REQUEST_AWAITING_CHECKER",
+      "The join request is awaiting four-eyes review in the approvals queue",
+    );
+  }
+  if (!["IN_REVIEW", "INFO_REQUESTED", "SUBMITTED"].includes(joinRequest.status)) {
     throw new ApiError(409, "JOIN_REQUEST_NOT_DECIDABLE", "The join request is not in a decidable state");
   }
+  if (joinRequest.onboardingChannel === "ADMIN_ASSISTED" && joinRequest.submittedByUserId === actor.userId) {
+    throw new ApiError(
+      403,
+      "JOIN_REQUEST_MAKER_CANNOT_DECIDE",
+      "The operator who prepared an admin-assisted onboarding cannot decide it",
+    );
+  }
   if (body.decision === "APPROVED") {
+    const readiness = await computeJoinRequestReadiness(client, id);
+    if (!readiness.ready) {
+      throw new ApiError(
+        409,
+        "JOIN_REQUEST_NOT_READY",
+        "The join request is not ready for approval",
+        { blockers: readiness.blockers },
+      );
+    }
     // A merchant with an open confirmed screening match is never activated.
     const blockingCase = await client.amlCase.findFirst({
       where: {
@@ -1023,21 +2125,43 @@ router.post("/join-requests/:id/decide", async (request: Request, response: Resp
       );
     }
   }
-  const fourEyesRequired = joinRequest.fourEyesRequired;
-  if (fourEyesRequired && body.decision === "APPROVED") {
+  if (joinRequest.fourEyesRequired) {
     const approval = await client.approvalRequest.create({
       data: {
         subjectType: "JOIN_REQUEST",
         subjectId: joinRequest.id,
-        payloadDiffJson: body,
+        payloadDiffJson: body as Prisma.InputJsonValue,
         mode: "STANDARD",
         makerUserId: actor.userId,
         state: "PENDING_REVIEW",
         expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
       },
     });
-    await client.joinRequest.update({ where: { id }, data: { status: "PENDING_CHECKER", approvalRequestId: approval.id } });
-    response.status(202).json({ status: "PENDING_CHECKER", approvalRequestId: approval.id });
+    await client.$transaction([
+      client.joinRequest.update({
+        where: { id },
+        data: { status: "PENDING_CHECKER", approvalRequestId: approval.id },
+      }),
+      client.auditLog.create({
+        data: {
+          actorId: actor.userId,
+          role: actor.role ?? "SYSTEM",
+          action: body.decision === "APPROVED"
+            ? "JOIN_REQUEST_APPROVAL_PROPOSED"
+            : "JOIN_REQUEST_REJECTION_PROPOSED",
+          entityType: "JOIN_REQUEST",
+          entityId: id,
+          beforeJson: { status: joinRequest.status },
+          afterJson: { status: "PENDING_CHECKER", decision: body.decision, approvalRequestId: approval.id },
+          approvalRequestId: approval.id,
+        },
+      }),
+    ]);
+    response.status(202).json({
+      status: "PENDING_CHECKER",
+      approvalRequestId: approval.id,
+      decision: body.decision,
+    });
     return;
   }
   if (body.decision === "APPROVED") {
@@ -1056,14 +2180,38 @@ router.post("/join-requests/:id/decide", async (request: Request, response: Resp
     response.json({ id: joinRequest.id, status: "APPROVED" });
     return;
   }
-  const updated = await client.joinRequest.update({
-    where: { id },
-    data: {
-      status: "REJECTED",
-      decision: "REJECTED",
-      decisionReasonCode: body.reasonCode,
-      decisionNotes: body.notes,
-    },
+  const updated = await client.$transaction(async (tx) => {
+    const row = await tx.joinRequest.update({
+      where: { id },
+      data: {
+        status: "REJECTED",
+        decision: "REJECTED",
+        decisionReasonCode: body.reasonCode,
+        decisionNotes: body.notes,
+      },
+    });
+    const merchant = await tx.merchant.findUnique({ where: { id: joinRequest.merchantId } });
+    if (merchant?.status === "PENDING") {
+      await tx.merchant.update({
+        where: { id: merchant.id },
+        data: {
+          status: "REJECTED",
+          kybStatus: ["PENDING", "UNVERIFIED"].includes(merchant.kybStatus) ? "REJECTED" : merchant.kybStatus,
+        },
+      });
+    }
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "SYSTEM",
+        action: "JOIN_REQUEST_REJECTED",
+        entityType: "JOIN_REQUEST",
+        entityId: id,
+        beforeJson: { status: joinRequest.status },
+        afterJson: { status: "REJECTED", reasonCode: body.reasonCode ?? null },
+      },
+    });
+    return row;
   });
   response.json({ id: updated.id, status: updated.status });
 });
@@ -1076,6 +2224,7 @@ router.post("/kyb-documents/:id/review", async (request: Request, response: Resp
       .object({
         decision: z.enum(["ACCEPTED", "REJECTED"]),
         reasonCode: z.string().max(64).optional(),
+        notes: z.string().max(2000).optional(),
         expiresOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       })
       .strict(),
@@ -1096,7 +2245,19 @@ router.post("/kyb-documents/:id/review", async (request: Request, response: Resp
       reviewedById: actor.userId,
       reviewedAt: new Date(),
       rejectionReasonCode: body.reasonCode,
+      reviewNotes: body.notes,
       expiresOn: body.expiresOn ? new Date(body.expiresOn) : null,
+    },
+  });
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "SYSTEM",
+      action: "KYB_DOCUMENT_REVIEWED",
+      entityType: "KYB_DOCUMENT",
+      entityId: document.id,
+      beforeJson: { status: document.status, avStatus: document.avStatus },
+      afterJson: { status: updated.status, reasonCode: body.reasonCode ?? null },
     },
   });
   response.json({ id: updated.id, status: updated.status });
@@ -1269,6 +2430,16 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
   if (approval.state !== "PENDING_REVIEW" && approval.state !== "DRAFT") {
     throw new ApiError(409, "APPROVAL_NOT_PENDING", "The approval request is not pending review");
   }
+  if (approval.subjectType === "JOIN_REQUEST") {
+    const joinRequest = await client.joinRequest.findUnique({ where: { id: approval.subjectId } });
+    if (joinRequest?.onboardingChannel === "ADMIN_ASSISTED" && joinRequest.submittedByUserId === actor.userId) {
+      throw new ApiError(
+        403,
+        "JOIN_REQUEST_MAKER_CANNOT_CHECK",
+        "The operator who prepared an admin-assisted onboarding cannot check its approval",
+      );
+    }
+  }
   const platform = getPlatformRuntime(client as never);
   if (approval.subjectType === "ADJUSTMENT") {
     // The execution of an adjustment moves the money, so it is a background
@@ -1389,6 +2560,16 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
     throw new ApiError(404, "APPROVAL_REQUEST_NOT_FOUND", "The approval request does not exist");
   }
   assertCheckerIsNotMaker(approval.makerUserId, actor.userId);
+  if (approval.subjectType === "JOIN_REQUEST") {
+    const joinRequest = await client.joinRequest.findUnique({ where: { id: approval.subjectId } });
+    if (joinRequest?.onboardingChannel === "ADMIN_ASSISTED" && joinRequest.submittedByUserId === actor.userId) {
+      throw new ApiError(
+        403,
+        "JOIN_REQUEST_MAKER_CANNOT_CHECK",
+        "The operator who prepared an admin-assisted onboarding cannot check its approval",
+      );
+    }
+  }
   const updated = await client.$transaction(async (tx) => {
     const row = await tx.approvalRequest.update({
       where: { id },
@@ -1410,6 +2591,27 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
             entityId: row.subjectId,
             beforeJson: { state: "PENDING_CHECKER" },
             afterJson: { state: "IN_PROGRESS", rejectionReason: body.reason },
+            approvalRequestId: row.id,
+          },
+        });
+      }
+    }
+    if (row.subjectType === "JOIN_REQUEST") {
+      const joinRequest = await tx.joinRequest.findUnique({ where: { id: row.subjectId } });
+      if (joinRequest) {
+        await tx.joinRequest.update({
+          where: { id: row.subjectId },
+          data: { status: "IN_REVIEW", approvalRequestId: null },
+        });
+        await tx.auditLog.create({
+          data: {
+            actorId: actor.userId,
+            role: actor.role,
+            action: "JOIN_REQUEST_APPROVAL_REJECTED",
+            entityType: "JOIN_REQUEST",
+            entityId: row.subjectId,
+            beforeJson: { state: "PENDING_CHECKER" },
+            afterJson: { state: "IN_REVIEW", rejectionReason: body.reason },
             approvalRequestId: row.id,
           },
         });

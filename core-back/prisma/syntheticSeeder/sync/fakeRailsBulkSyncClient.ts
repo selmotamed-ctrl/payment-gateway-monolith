@@ -39,10 +39,9 @@ export const fakeRailsBulkSync = async (ctx: SeederContext): Promise<{ transacti
     throw new Error("FAKE_RAILS_PUBLIC_BASE_URL and FAKE_RAILS_SEEDER_TOKEN are required for the bulk sync");
   }
   const endpoint = new URL("/portal-api/internal/bulk-seed", baseUrl).toString();
-  const routeByAttempt = new Map(ctx.dataset.paymentAttempts.map((attempt) => [attempt.id, attempt.routeId]));
+  const attemptById = new Map(ctx.dataset.paymentAttempts.map((attempt) => [String(attempt.id), attempt]));
   const routeInfo = new Map(ctx.refs.routes.map((route) => [route.id, route]));
   const railById = new Map(ctx.refs.rails.map((rail) => [rail.id, rail]));
-  void routeByAttempt;
 
   const transactions = ctx.dataset.paymentAttempts.map((attempt) => {
     const route = routeInfo.get(String(attempt.routeId));
@@ -80,7 +79,7 @@ export const fakeRailsBulkSync = async (ctx: SeederContext): Promise<{ transacti
   });
 
   const events = ctx.dataset.attemptStepLogs.map((log) => {
-    const attempt = ctx.dataset.paymentAttempts.find((candidate) => candidate.id === log.attemptId);
+    const attempt = attemptById.get(String(log.attemptId));
     const route = attempt ? routeInfo.get(String(attempt.routeId)) : undefined;
     return {
       id: String(log.id),
