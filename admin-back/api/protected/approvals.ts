@@ -30,6 +30,14 @@ router.get(
 );
 
 router.get(
+  "/summary",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/approvals/summary",
+  }),
+);
+
+router.get(
   "/:id",
   coreForward({
     method: "GET",

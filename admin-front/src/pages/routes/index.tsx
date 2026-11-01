@@ -1,14 +1,16 @@
 import { dc } from "kt-dc";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VCard, VCardText, VDialog, VSelect, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VCard, VCardText, VDialog, VSelect, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
-import { DataTable } from "@/components/Table/DataTable";
+import { ApiTable } from "@/components/Table/ApiTable";
+import TableFilters from "@/components/Table/TableFilters";
+import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
+import { tableRegistry } from "@/components/Table/tableRegistry";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
@@ -18,7 +20,9 @@ import { showSnackBar } from "@/utils/snackBar";
 type GatewayRoute = {
     id: string;
     railCode: string;
+    railName?: string;
     gatewayCode: string;
+    gatewayName?: string;
     credentialPolicy: string;
     priority: number;
     weight: number;
@@ -31,12 +35,29 @@ type GatewayRoute = {
     scope: unknown;
 };
 
+type RouteSummary = {
+    total: number;
+    byStatus: Record<string, number>;
+    byHealth: Record<string, number>;
+    railGatewayPairs: number;
+    active: number;
+    paused: number;
+    draining: number;
+    openBreaker: number;
+};
+
 const RoutesPage = dc(() => {
     const { t } = useLocale();
-    const rows = ref<GatewayRoute[]>([]);
-    const loading = ref(true);
-    const error = ref<string | null>(null);
+    const summary = ref<RouteSummary | null>(null);
     const search = ref<string | null>(null);
+    const filters = ref<FilterValues>({});
+    const pageSize = ref(20);
+    const refreshHook = ref<{
+        reset: () => void;
+        refresh: (props: { queryParams?: Record<string, unknown>; nextSkip?: number }) => Promise<void>;
+        refreshAsIs: () => void;
+    } | null>(null);
+    let filterTimer: ReturnType<typeof setTimeout> | undefined;
 
     const dialogOpen = ref(false);
     const editingRoute = ref<GatewayRoute | null>(null);
@@ -57,24 +78,35 @@ const RoutesPage = dc(() => {
     const railOptions = ref<{ title: string; value: string }[]>([]);
     const gatewayOptions = ref<{ title: string; value: string }[]>([]);
 
-    const load = async () => {
-        loading.value = true;
-        error.value = null;
+    const filterDefinitions = computed(() => tableRegistry.GatewayRoutes?.filters ?? []);
+
+    const loadSummary = async () => {
         try {
-            const response = await api.get(urlsMap.routesList, {
-                params: { search: search.value || undefined },
-            });
+            const response = await api.get(urlsMap.routesSummary);
             const payload = response.data?.data ?? response.data ?? {};
-            rows.value = payload.routes ?? payload.rows ?? payload.items ?? [];
-        } catch (e) {
-            error.value = extractApiErrorMessage(e);
-            rows.value = [];
-        } finally {
-            loading.value = false;
+            summary.value = (payload.summary ?? payload) as RouteSummary;
+        } catch {
+            summary.value = null;
         }
     };
 
-    void load();
+    const refreshAll = () => {
+        refreshHook.value?.reset();
+        void loadSummary();
+    };
+
+    const onFiltersChanged = (key: string, value: unknown) => {
+        filters.value = { ...filters.value, [key]: value };
+        if (filterTimer) clearTimeout(filterTimer);
+        filterTimer = setTimeout(() => refreshHook.value?.reset(), 300);
+    };
+
+    const onFiltersCleared = () => {
+        filters.value = {};
+        refreshHook.value?.reset();
+    };
+
+    void loadSummary();
 
     const openCreateRoute = async () => {
         createOpen.value = true;
@@ -122,7 +154,7 @@ const RoutesPage = dc(() => {
             });
             createOpen.value = false;
             showSnackBar({ type: "success", message: t("Saved") });
-            await load();
+            refreshAll();
         } catch (e) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
         } finally {
@@ -175,7 +207,7 @@ const RoutesPage = dc(() => {
             }
             dialogOpen.value = false;
             showSnackBar({ type: "success", message: t("Update") });
-            await load();
+            refreshAll();
         } catch (e) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
         } finally {
@@ -254,25 +286,83 @@ const RoutesPage = dc(() => {
                     )}
                 />
 
-                {error.value ? (
-                    <StateView error={error.value} onRetry={() => void load()} />
-                ) : (
-                    <VCard>
-                        <VCardText>
-                            <DataTable
-                                title={t("Routes")}
-                                data={rows.value}
-                                headers={headers}
-                                loading={loading.value}
-                                showNumber={true}
-                                xlsx={false}
-                                noElevation={true}
-                                searchValue={search.value}
-                                setSearchValue={(value) => (search.value = value)}
-                            />
+                <VAlert type="info" variant="tonal">
+                    {t("A route binds a rail to a gateway. Health and circuit-breaker state are operational facts, not editable fields.")}
+                </VAlert>
+
+                {summary.value && (
+                    <VCard variant="flat" style={{ borderRadius: "16px" }}>
+                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Route health")}</ThemedText>
+                            <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
+                                {[
+                                    { label: t("Routes"), value: String(summary.value.total), tone: "info" as const },
+                                    { label: t("Active"), value: String(summary.value.active), tone: "success" as const },
+                                    { label: t("Paused"), value: String(summary.value.paused), tone: summary.value.paused > 0 ? "warning" as const : "success" as const },
+                                    { label: t("Draining"), value: String(summary.value.draining), tone: summary.value.draining > 0 ? "info" as const : "success" as const },
+                                    { label: t("Open breakers"), value: String(summary.value.openBreaker), tone: summary.value.openBreaker > 0 ? "error" as const : "success" as const },
+                                    { label: t("Rail/gateway pairs"), value: String(summary.value.railGatewayPairs), tone: "neutral" as const },
+                                ].map((item) => (
+                                    <VCard key={item.label} variant="tonal">
+                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
+                                            <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
+                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
+                                        </VCardText>
+                                    </VCard>
+                                ))}
+                            </ThemedView>
                         </VCardText>
                     </VCard>
                 )}
+
+                <ApiTable<GatewayRoute>
+                    title={t("Route catalog")}
+                    url={urlsMap.routesList}
+                    localSearch={false}
+                    xlsx={false}
+                    showNumber={true}
+                    numberOfItemsPerPage={pageSize.value}
+                    numberOfItemsPerPageChoices={[
+                        { label: "10", value: 10 },
+                        { label: "20", value: 20 },
+                        { label: "50", value: 50 },
+                    ]}
+                    setNumberOfItemsPerPage={(value) => (pageSize.value = value)}
+                    searchValue={search.value}
+                    setSearchValue={(value) => (search.value = value)}
+                    headers={headers}
+                    rowColor={(row) => (row.healthState === "OPEN_BREAKER" ? "#dc2626" : row.healthState === "DEGRADED" ? "#d97706" : undefined)}
+                    apiDataExtractor={(data) => {
+                        const payload = data as { routes?: GatewayRoute[]; rows?: GatewayRoute[] };
+                        return payload.routes ?? payload.rows ?? [];
+                    }}
+                    apiTotalExtractor={(data) => Number((data as { total?: number }).total ?? 0)}
+                    setRefreshHook={(hook) => {
+                        refreshHook.value = hook as typeof refreshHook.value;
+                    }}
+                    clearRefreshHook={() => {
+                        refreshHook.value = null;
+                    }}
+                    onRefresh={(table, refresh) => {
+                        void refresh({
+                            queryParams: {
+                                page: table.page,
+                                pageSize: pageSize.value,
+                                ...(search.value ? { search: search.value } : {}),
+                                ...buildFilterQuery(filterDefinitions.value, filters.value),
+                                ...(table.sortKey ? { sortKey: table.sortKey, sortDirection: table.sortDirection } : {}),
+                            },
+                        });
+                    }}
+                    TopSlot={() => (
+                        <TableFilters
+                            filters={filterDefinitions.value}
+                            values={filters.value}
+                            onChange={onFiltersChanged}
+                            onClear={onFiltersCleared}
+                        />
+                    )}
+                />
             </ThemedView>
 
             <VDialog modelValue={dialogOpen.value} onUpdate:modelValue={(v: any) => (dialogOpen.value = v)} maxWidth="680px" scrollable>

@@ -64,6 +64,11 @@ const router = createRouter({
                     component: () => import("@/pages/approvals/index"),
                 },
                 {
+                    path: "users",
+                    name: "AdminUsers",
+                    component: () => import("@/pages/users/index"),
+                },
+                {
                     path: "aml/cases",
                     name: "AmlCases",
                     component: () => import("@/pages/aml/cases/index"),

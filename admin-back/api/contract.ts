@@ -708,6 +708,10 @@ const flattenAuthorities = (value: unknown): string[] => {
       continue;
     }
     if (Array.isArray(entry)) {
+      if (entry.length === 0) {
+        push(key);
+        continue;
+      }
       for (const item of entry) {
         if (typeof item !== "string") continue;
         push(key.includes(":") ? key : `${key}:${item}`);
@@ -1016,6 +1020,8 @@ export const toCoreAmlRule = (body: unknown): JsonRecord => {
     baseSeverity: pickEnum(source.baseSeverity, AML_SEVERITIES) ?? "MEDIUM",
     params: asRecord(source.params),
   };
+  const scope = asRecord(source.scope);
+  if (Object.keys(scope).length > 0) result.scope = scope;
   const effectiveFrom = asString(source.effectiveFrom);
   if (effectiveFrom) result.effectiveFrom = clamp(effectiveFrom, 64);
   return result;

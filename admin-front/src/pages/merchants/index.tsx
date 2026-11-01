@@ -28,6 +28,25 @@ import type { MerchantSummary } from "./types";
 import MerchantHelpPanel from "./components/MerchantHelpPanel";
 import MerchantActionDialog, { type MerchantActionMode } from "./components/MerchantActionDialog";
 
+type MerchantsSummary = {
+    total: number;
+    active: number;
+    pending: number;
+    suspended: number;
+    rejected: number;
+    closed: number;
+    kybPending: number;
+    kybVerified: number;
+    highRisk: number;
+    reviewOverdue: number;
+    reviewDueSoon: number;
+    pendingApprovals: number;
+    byStatus: Record<string, number>;
+    byKyb: Record<string, number>;
+    byRisk: Record<string, number>;
+    byChannel: Record<string, number>;
+};
+
 const MerchantsPage = dc(() => {
     const { t } = useLocale();
     const theme = useTheme();
@@ -36,6 +55,7 @@ const MerchantsPage = dc(() => {
     const filters = ref<FilterValues>({});
     const rows = ref<MerchantSummary[]>([]);
     const total = ref(0);
+    const summary = ref<MerchantsSummary | null>(null);
     const pageSize = ref(20);
     let filterTimer: ReturnType<typeof setTimeout> | undefined;
     const refreshHook = ref<{
@@ -285,6 +305,36 @@ const MerchantsPage = dc(() => {
         },
     ];
 
+    const loadSummary = async () => {
+        try {
+            const response = await api.get(urlsMap.merchantsSummary);
+            const payload = response.data?.data ?? response.data ?? {};
+            summary.value = (payload.summary ?? payload) as MerchantsSummary;
+        } catch {
+            summary.value = null;
+        }
+    };
+
+    void loadSummary();
+
+    const refreshAll = () => {
+        refreshHook.value?.refreshAsIs();
+        void loadSummary();
+    };
+
+    const summaryItems = computed(() => {
+        const data = summary.value;
+        if (!data) return [];
+        return [
+            { label: t("Active"), value: String(data.active), tone: "success" as const },
+            { label: t("High risk"), value: String(data.highRisk), tone: data.highRisk > 0 ? "warning" as const : "success" as const },
+            { label: t("KYB pending"), value: String(data.kybPending), tone: data.kybPending > 0 ? "warning" as const : "success" as const },
+            { label: t("Review overdue"), value: String(data.reviewOverdue), tone: data.reviewOverdue > 0 ? "error" as const : "success" as const },
+            { label: t("Review due in 30d"), value: String(data.reviewDueSoon), tone: data.reviewDueSoon > 0 ? "warning" as const : "success" as const },
+            { label: t("Pending changes"), value: String(data.pendingApprovals), tone: data.pendingApprovals > 0 ? "warning" as const : "success" as const },
+        ];
+    });
+
     const suspendedCount = computed(() => rows.value.filter((row) => row.status === "SUSPENDED").length);
     const pendingCount = computed(() => rows.value.reduce((sum, row) => sum + row.pendingApprovalCount, 0));
 
@@ -298,9 +348,37 @@ const MerchantsPage = dc(() => {
                             <StatusChip label={`${total.value} ${t("merchants")}`} tone="info" size="small" />
                             <StatusChip label={`${suspendedCount.value} ${t("suspended")}`} tone={suspendedCount.value ? "error" : "neutral"} size="small" />
                             <StatusChip label={`${pendingCount.value} ${t("pending changes")}`} tone={pendingCount.value ? "warning" : "neutral"} size="small" />
+                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
                         </ThemedView>
                     )}
                 />
+
+                {summary.value && (
+                    <VCard variant="flat" style={{ borderRadius: "16px" }}>
+                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Merchant portfolio health")}</ThemedText>
+                            <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px" }}>
+                                {summaryItems.value.map((item) => (
+                                    <VCard key={item.label} variant="tonal">
+                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
+                                            <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
+                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
+                                        </VCardText>
+                                    </VCard>
+                                ))}
+                            </ThemedView>
+                            <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                                {Object.entries(summary.value.byStatus ?? {}).map(([state, count]) => (
+                                    <StatusChip key={state} label={`${state}: ${count}`} tone={statusTone(state)} size="x-small" />
+                                ))}
+                                {Object.entries(summary.value.byKyb ?? {}).map(([state, count]) => (
+                                    <StatusChip key={`kyb-${state}`} label={`KYB ${state}: ${count}`} tone={statusTone(state)} size="x-small" />
+                                ))}
+                            </ThemedView>
+                        </VCardText>
+                    </VCard>
+                )}
+
                 <VCard>
                     <VCardText>
                         <MerchantHelpPanel />

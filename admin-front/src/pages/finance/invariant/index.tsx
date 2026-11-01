@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VCard, VCardText } from "vuetify/components";
+import { VAlert, VBtn, VCard, VCardText } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -31,7 +31,9 @@ type InvariantResult = {
         chargebackReserve: string;
         suspense: string;
     };
-    trialBalance?: { accountCode: string; accountName: string; accountType: string; debit: string; credit: string; balance: string }[];
+    leftSide?: string;
+    rightSide?: string;
+    accounts?: { accountId: string; accountType: string; liveBalance: string; naturalBalance: string; checkpointAt: string | null }[];
 };
 
 const InvariantPage = dc(() => {
@@ -67,7 +69,15 @@ const InvariantPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Invariant Status")} />
+                <PageHeader
+                    title={t("Invariant Status")}
+                    end={() => (
+                        <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                            {data.value?.checkedAt && <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("Last run")} {new Date(data.value.checkedAt).toLocaleTimeString()}</ThemedText>}
+                            <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</VBtn>
+                        </ThemedView>
+                    )}
+                />
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
@@ -75,6 +85,12 @@ const InvariantPage = dc(() => {
                     <StateView loading={true} />
                 ) : (
                     <>
+                        <VAlert type={data.value?.ok ? "success" : "error"} variant="tonal">
+                            {data.value?.ok
+                                ? t("The double-entry invariant is balanced. Payouts may continue subject to normal policy.")
+                                : t("Ledger drift detected. Automated payouts must halt until finance resolves the drift.")}
+                        </VAlert>
+
                         <VCard>
                             <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                 <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "12px" }}>
@@ -97,7 +113,21 @@ const InvariantPage = dc(() => {
                                 </ThemedView>
                                 <ThemedView style={{ flexDirection: "row", justifyContent: "space-between" }}>
                                     <ThemedText style={{ fontSize: "13px" }}>{t("Last Run")}</ThemedText>
-                                    <ThemedText style={{ fontSize: "13px" }}>{data.value?.checkedAt ?? "-"}</ThemedText>
+                                    <ThemedText style={{ fontSize: "13px" }}>{data.value?.checkedAt ? new Date(data.value.checkedAt).toLocaleString() : "-"}</ThemedText>
+                                </ThemedView>
+                                <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "10px" }}>
+                                    {[
+                                        { label: t("Debit side"), value: data.value?.leftSide ?? "0.0000" },
+                                        { label: t("Credit side"), value: data.value?.rightSide ?? "0.0000" },
+                                        { label: t("Accounts"), value: String(data.value?.accounts?.length ?? 0) },
+                                    ].map((item) => (
+                                        <VCard key={item.label} variant="tonal">
+                                            <VCardText style={{ padding: "12px" }}>
+                                                <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{item.label}</ThemedText>
+                                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{item.value}</ThemedText>
+                                            </VCardText>
+                                        </VCard>
+                                    ))}
                                 </ThemedView>
                             </VCardText>
                         </VCard>
@@ -128,18 +158,20 @@ const InvariantPage = dc(() => {
 
                         <VCard>
                             <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                                <ThemedText type="defaultSemiBold">{t("Trial Balance")}</ThemedText>
-                                {(data.value?.trialBalance ?? []).map((row) => (
-                                    <ThemedView
-                                        key={row.accountCode}
-                                        style={{ flexDirection: "row", gap: "14px", alignItems: "center", fontSize: "13px" }}
-                                    >
-                                        <span style={{ width: "110px" }}>{row.accountCode}</span>
-                                        <span style={{ flex: 1 }}>{row.accountName}</span>
-                                        <span>{row.accountType}</span>
-                                        <MoneyText value={row.debit} currency={currency()} showCurrency={false} />
-                                        <MoneyText value={row.credit} currency={currency()} showCurrency={false} />
-                                        <MoneyText value={row.balance} currency={currency()} />
+                                <ThemedText type="defaultSemiBold">{t("Ledger accounts")}</ThemedText>
+                                <ThemedView style={{ flexDirection: "row", gap: "12px", fontSize: "11px", opacity: 0.6, borderBottom: "1px solid rgba(100,116,139,0.2)", paddingBottom: "4px" }}>
+                                    <span style={{ flex: 1 }}>{t("Account")}</span>
+                                    <span style={{ width: "170px" }}>{t("Type")}</span>
+                                    <span style={{ width: "140px", textAlign: "right" }}>{t("Live balance")}</span>
+                                    <span style={{ width: "140px", textAlign: "right" }}>{t("Natural balance")}</span>
+                                </ThemedView>
+                                {(data.value?.accounts ?? []).length === 0 && <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("No Data Found")}</ThemedText>}
+                                {(data.value?.accounts ?? []).map((row) => (
+                                    <ThemedView key={row.accountId} style={{ flexDirection: "row", gap: "12px", alignItems: "center", fontSize: "12px", borderBottom: "1px solid rgba(100,116,139,0.1)", paddingBottom: "5px" }}>
+                                        <span style={{ flex: 1, direction: "ltr", opacity: 0.75 }}>{row.accountId}</span>
+                                        <span style={{ width: "170px" }}>{row.accountType}</span>
+                                        <span style={{ width: "140px", textAlign: "right" }}><MoneyText value={row.liveBalance} currency={currency()} showCurrency={false} /></span>
+                                        <span style={{ width: "140px", textAlign: "right" }}><MoneyText value={row.naturalBalance} currency={currency()} showCurrency={false} bold /></span>
                                     </ThemedView>
                                 ))}
                             </VCardText>

@@ -12,6 +12,7 @@ const querySchema = z
   .object({
     search: z.string().max(120).optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),
+    ownerId: z.string().max(64).optional(),
   })
   .strict();
 

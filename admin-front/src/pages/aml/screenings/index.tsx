@@ -1,13 +1,17 @@
 import { dc } from "kt-dc";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VCard, VCardText, VDialog, VSelect, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VCard, VCardText, VDialog, VProgressCircular, VSelect, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
-import { StateView } from "@/components/StateView";
+import { ThemedText } from "@/components/ThemedText";
 import { StatusChip } from "@/components/StatusChip";
-import { DataTable } from "@/components/Table/DataTable";
+import { statusTone } from "@/components/Table/statusTone";
+import { ApiTable } from "@/components/Table/ApiTable";
+import TableFilters from "@/components/Table/TableFilters";
+import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
+import { tableRegistry } from "@/components/Table/tableRegistry";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
@@ -17,167 +21,461 @@ import { showSnackBar } from "@/utils/snackBar";
 type Screening = {
     id: string;
     subjectType: string;
+    subjectId: string;
     subjectName: string;
+    subjectReference: string;
+    merchantName: string;
     provider: string;
-    lists: string[];
-    listVersions: string;
+    providerRequestRef: string | null;
+    trigger: string;
+    lists: unknown;
     result: string;
-    score: number;
-    screenedAt: string;
+    score: string | null;
+    matchCount: number;
     matchId: string | null;
     disposition: string | null;
+    dispositionSummary: { unreviewed: number; falsePositive: number; trueMatch: number; escalated: number };
+    requestedAt: string;
+    screenedAt: string;
+    completedAt: string | null;
+    ageHours: number;
+};
+
+type ScreeningMatch = {
+    id: string;
+    listType: string;
+    listName: string;
+    listEntryRef: string;
+    matchedName: string;
+    score: string;
+    attributes: Record<string, unknown>;
+    disposition: string;
+    dispositionBy: string | null;
+    dispositionNotes: string | null;
+    suppressFuture: boolean;
+    suppressUntil: string | null;
+    createdAt: string;
+};
+
+type ScreeningDetail = Screening & {
+    matches: ScreeningMatch[];
+    amlCases: Array<{ id: string; status: string; severity: string; createdAt: string }>;
+    canDisposition: boolean;
+};
+
+type ScreeningSummary = {
+    total: number;
+    screened24h: number;
+    unresolvedMatches: number;
+    byResult: Record<string, number>;
+    byTrigger: Record<string, number>;
+    latestScreenedAt: string | null;
 };
 
 const DISPOSITIONS = [
-    { title: "False Positive", value: "FALSE_POSITIVE" },
-    { title: "Confirmed Match", value: "CONFIRMED_MATCH" },
+    { title: "False positive", value: "FALSE_POSITIVE" },
+    { title: "True match", value: "TRUE_MATCH" },
     { title: "Escalated", value: "ESCALATED" },
 ];
+
+const formatDateTime = (value: string | null | undefined): string => {
+    if (!value) return "—";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "—";
+    return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
+};
+
+const resultTone = (result: string) => statusTone(result);
 
 const AmlScreeningsPage = dc(() => {
     const { t } = useLocale();
     const rows = ref<Screening[]>([]);
-    const loading = ref(true);
-    const error = ref<string | null>(null);
+    const total = ref(0);
+    const summary = ref<ScreeningSummary | null>(null);
     const search = ref<string | null>(null);
+    const filters = ref<FilterValues>({});
+    const pageSize = ref(20);
+    const refreshHook = ref<{
+        reset: () => void;
+        refresh: (props: { queryParams?: Record<string, unknown>; nextSkip?: number }) => Promise<void>;
+        refreshAsIs: () => void;
+    } | null>(null);
+    let filterTimer: ReturnType<typeof setTimeout> | undefined;
 
-    const dialogOpen = ref(false);
-    const selected = ref<Screening | null>(null);
-    const disposition = ref<string>("FALSE_POSITIVE");
-    const note = ref<string>("");
+    const detailsOpen = ref(false);
+    const selected = ref<ScreeningDetail | null>(null);
+    const detailLoading = ref(false);
+    const selectedMatchId = ref("");
+    const disposition = ref("FALSE_POSITIVE");
+    const note = ref("");
     const actionLoading = ref(false);
 
-    const load = async () => {
-        loading.value = true;
-        error.value = null;
+    const filterDefinitions = computed(() => tableRegistry.AmlScreenings?.filters ?? []);
+    const unresolvedMatches = computed(() => selected.value?.matches.filter((match) => match.disposition === "UNREVIEWED") ?? []);
+
+    const loadSummary = async () => {
         try {
-            const response = await api.get(urlsMap.amlScreenings, {
-                params: { search: search.value || undefined },
-            });
+            const response = await api.get(urlsMap.amlScreeningsSummary);
             const payload = response.data?.data ?? response.data ?? {};
-            rows.value = payload.screenings ?? payload.rows ?? payload.items ?? [];
-        } catch (e) {
-            error.value = extractApiErrorMessage(e);
-            rows.value = [];
-        } finally {
-            loading.value = false;
+            summary.value = (payload.summary ?? payload) as ScreeningSummary;
+        } catch {
+            summary.value = null;
         }
     };
 
-    void load();
+    void loadSummary();
+
+    const onFiltersChanged = (key: string, value: unknown) => {
+        filters.value = { ...filters.value, [key]: value };
+        if (filterTimer) clearTimeout(filterTimer);
+        filterTimer = setTimeout(() => refreshHook.value?.reset(), 300);
+    };
+
+    const onFiltersCleared = () => {
+        filters.value = {};
+        refreshHook.value?.reset();
+    };
+
+    const refreshAll = () => {
+        refreshHook.value?.refreshAsIs();
+        void loadSummary();
+    };
+
+    const openDetails = async (row: Screening) => {
+        selected.value = { ...row, matches: [], amlCases: [], canDisposition: false };
+        selectedMatchId.value = row.matchId ?? "";
+        disposition.value = "FALSE_POSITIVE";
+        note.value = "";
+        detailsOpen.value = true;
+        detailLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.amlScreeningDetail(row.id));
+            const payload = response.data?.data ?? response.data ?? {};
+            selected.value = (payload.screening ?? payload) as ScreeningDetail;
+            selectedMatchId.value = selected.value.matches.find((match) => match.disposition === "UNREVIEWED")?.id ?? "";
+        } catch (error) {
+            detailsOpen.value = false;
+            selected.value = null;
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            detailLoading.value = false;
+        }
+    };
 
     const submitDisposition = async () => {
-        if (!selected.value?.matchId) {
-            showSnackBar({ type: "error", message: t("No match attached to this screening") });
+        if (!selectedMatchId.value) {
+            showSnackBar({ type: "warning", message: t("Select an unresolved match") });
+            return;
+        }
+        if (note.value.trim().length < 3) {
+            showSnackBar({ type: "warning", message: t("Disposition notes are required") });
             return;
         }
         actionLoading.value = true;
         try {
-            await api.post(urlsMap.amlMatchDisposition(selected.value.matchId), {
+            await api.post(urlsMap.amlMatchDisposition(selectedMatchId.value), {
                 disposition: disposition.value,
-                notes: note.value,
+                notes: note.value.trim(),
             });
-            dialogOpen.value = false;
-            showSnackBar({ type: "success", message: t("Disposition") });
-            await load();
-        } catch (e) {
-            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+            showSnackBar({ type: "success", message: t("Disposition saved") });
+            if (selected.value) {
+                const response = await api.get(urlsMap.amlScreeningDetail(selected.value.id));
+                const payload = response.data?.data ?? response.data ?? {};
+                selected.value = (payload.screening ?? payload) as ScreeningDetail;
+                selectedMatchId.value = selected.value.matches.find((match) => match.disposition === "UNREVIEWED")?.id ?? "";
+                note.value = "";
+            }
+            refreshAll();
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
         } finally {
             actionLoading.value = false;
         }
     };
 
-    const resultTone = (result: string) => {
-        if (result === "CONFIRMED_MATCH") {
-            return "error" as const;
-        }
-        if (result === "POTENTIAL_MATCH") {
-            return "warning" as const;
-        }
-        if (result === "CLEAR") {
-            return "success" as const;
-        }
-        return "neutral" as const;
-    };
+    const summaryItems = computed(() => {
+        const data = summary.value;
+        if (!data) return [];
+        return [
+            { label: t("Screenings"), value: String(data.total), tone: "info" as const },
+            { label: t("Last 24h"), value: String(data.screened24h), tone: "neutral" as const },
+            { label: t("Unresolved matches"), value: String(data.unresolvedMatches), tone: data.unresolvedMatches > 0 ? "warning" as const : "success" as const },
+            { label: t("Potential matches"), value: String(data.byResult?.POTENTIAL_MATCH ?? 0), tone: (data.byResult?.POTENTIAL_MATCH ?? 0) > 0 ? "warning" as const : "success" as const },
+            { label: t("Confirmed matches"), value: String(data.byResult?.CONFIRMED_MATCH ?? 0), tone: (data.byResult?.CONFIRMED_MATCH ?? 0) > 0 ? "error" as const : "success" as const },
+            { label: t("Provider errors"), value: String(data.byResult?.ERROR ?? 0), tone: (data.byResult?.ERROR ?? 0) > 0 ? "error" as const : "success" as const },
+        ];
+    });
 
-    const headers: TableHeader<Screening>[] = [
-        { key: "subjectType", label: "Screening Subject", value: (row) => row.subjectType },
-        { key: "subjectName", label: "Merchant Name", value: (row) => row.subjectName },
-        { key: "provider", label: "Provider", value: (row) => row.provider },
-        { key: "lists", label: "List Version", value: (row) => (row.lists ?? []).join(", ") },
+    const headers = computed<TableHeader<Screening>[]>(() => [
         {
-            key: "result",
-            label: "Status",
-            Value: ({ row }: { row: Screening }) => <StatusChip label={row.result} tone={resultTone(row.result)} />,
-        },
-        { key: "score", label: "Score", value: (row) => String(row.score ?? "") },
-        { key: "screenedAt", label: "Created At", value: (row) => row.screenedAt },
-        { key: "disposition", label: "Disposition", value: (row) => row.disposition ?? "-" },
-        {
-            key: "actions",
-            label: "Actions Column",
+            key: "subject",
+            label: "Subject",
+            value: (row) => row.subjectName,
             Value: ({ row }: { row: Screening }) => (
-                <VBtn
-                    size="small"
-                    variant="tonal"
-                    disabled={!row.matchId}
-                    onClick={() => {
-                        selected.value = row;
-                        disposition.value = "FALSE_POSITIVE";
-                        note.value = "";
-                        dialogOpen.value = true;
-                    }}
-                >
-                    {t("Disposition")}
-                </VBtn>
+                <ThemedView style={{ gap: "2px" }}>
+                    <ThemedText style={{ fontSize: "12px", fontWeight: 600 }}>{row.subjectName || "—"}</ThemedText>
+                    <ThemedText style={{ fontSize: "10px", opacity: 0.55, direction: "ltr" }}>{row.subjectType} · {row.subjectReference}</ThemedText>
+                </ThemedView>
             ),
         },
-    ];
+        {
+            key: "result",
+            label: "Result",
+            value: (row) => row.result,
+            Value: ({ row }: { row: Screening }) => <StatusChip label={row.result} tone={resultTone(row.result)} size="small" />,
+        },
+        {
+            key: "score",
+            label: "Score",
+            sortKey: "score",
+            value: (row) => row.score ?? "",
+            Value: ({ row }: { row: Screening }) => <ThemedText style={{ fontSize: "12px" }}>{row.score ?? "—"}</ThemedText>,
+        },
+        {
+            key: "matches",
+            label: "Matches",
+            value: (row) => String(row.matchCount),
+            Value: ({ row }: { row: Screening }) => (
+                <ThemedView style={{ gap: "2px" }}>
+                    <ThemedText style={{ fontSize: "12px" }}>{row.matchCount}</ThemedText>
+                    <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{row.dispositionSummary.unreviewed} {t("unreviewed")}</ThemedText>
+                </ThemedView>
+            ),
+        },
+        {
+            key: "trigger",
+            label: "Trigger",
+            value: (row) => row.trigger,
+        },
+        {
+            key: "provider",
+            label: "Provider",
+            value: (row) => row.provider,
+            Value: ({ row }: { row: Screening }) => (
+                <ThemedView style={{ gap: "2px" }}>
+                    <ThemedText style={{ fontSize: "11px", direction: "ltr" }}>{row.provider}</ThemedText>
+                    <ThemedText style={{ fontSize: "10px", opacity: 0.55, direction: "ltr" }}>{row.providerRequestRef || ""}</ThemedText>
+                </ThemedView>
+            ),
+        },
+        {
+            key: "screenedAt",
+            label: "Screened",
+            value: (row) => row.screenedAt,
+            Value: ({ row }: { row: Screening }) => <ThemedText style={{ fontSize: "11px" }}>{formatDateTime(row.screenedAt)}</ThemedText>,
+        },
+        {
+            key: "actions",
+            label: "Review",
+            sortable: false,
+            Value: ({ row }: { row: Screening }) => <VBtn size="small" variant="tonal" onClick={() => void openDetails(row)}>{t("Review")}</VBtn>,
+        },
+    ]);
 
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("AML Screenings")} />
+                <PageHeader
+                    title={t("AML Screenings")}
+                    end={() => <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>}
+                />
 
-                {error.value ? (
-                    <StateView error={error.value} onRetry={() => void load()} />
-                ) : (
-                    <DataTable
-                        title={t("AML Screenings")}
-                        data={rows.value}
-                        headers={headers}
-                        loading={loading.value}
-                        showNumber={true}
-                        xlsx={false}
-                        searchValue={search.value}
-                        setSearchValue={(value) => (search.value = value)}
-                    />
+                <VAlert type="error" variant="tonal">
+                    {t("AML-CONFIDENTIAL · Screening results and matches are restricted to Compliance, MLRO and authorised AML reviewers.")}
+                </VAlert>
+
+                {summary.value && (
+                    <VCard variant="flat" style={{ borderRadius: "16px" }}>
+                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Screening health")}</ThemedText>
+                            <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
+                                {summaryItems.value.map((item) => (
+                                    <VCard key={item.label} variant="tonal">
+                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
+                                            <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
+                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
+                                        </VCardText>
+                                    </VCard>
+                                ))}
+                            </ThemedView>
+                            <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                                {Object.entries(summary.value.byResult ?? {}).map(([result, count]) => (
+                                    <StatusChip key={result} label={`${result}: ${count}`} tone={resultTone(result)} size="x-small" />
+                                ))}
+                            </ThemedView>
+                        </VCardText>
+                    </VCard>
                 )}
+
+                <ApiTable<Screening>
+                    title={t("AML screening queue")}
+                    url={urlsMap.amlScreenings}
+                    localSearch={false}
+                    xlsx={false}
+                    showNumber={true}
+                    numberOfItemsPerPage={pageSize.value}
+                    numberOfItemsPerPageChoices={[
+                        { label: "10", value: 10 },
+                        { label: "20", value: 20 },
+                        { label: "50", value: 50 },
+                    ]}
+                    setNumberOfItemsPerPage={(value) => (pageSize.value = value)}
+                    searchValue={search.value}
+                    setSearchValue={(value) => (search.value = value)}
+                    headers={headers.value}
+                    rowColor={(row) => (row.result === "CONFIRMED_MATCH" ? "#dc2626" : row.result === "POTENTIAL_MATCH" ? "#d97706" : row.result === "ERROR" ? "#dc2626" : undefined)}
+                    apiDataExtractor={(data) => {
+                        const payload = data as { screenings?: Screening[]; rows?: Screening[] };
+                        return payload.screenings ?? payload.rows ?? [];
+                    }}
+                    apiTotalExtractor={(data) => Number((data as { total?: number }).total ?? 0)}
+                    onData={(nextRows, nextTotal) => {
+                        rows.value = nextRows;
+                        total.value = nextTotal;
+                    }}
+                    setRefreshHook={(hook) => {
+                        refreshHook.value = hook as typeof refreshHook.value;
+                    }}
+                    clearRefreshHook={() => {
+                        refreshHook.value = null;
+                    }}
+                    onRefresh={(table, refresh) => {
+                        void refresh({
+                            queryParams: {
+                                page: table.page,
+                                pageSize: pageSize.value,
+                                ...(search.value ? { search: search.value } : {}),
+                                ...buildFilterQuery(filterDefinitions.value, filters.value),
+                                ...(table.sortKey ? { sortKey: table.sortKey, sortDirection: table.sortDirection } : {}),
+                            },
+                        });
+                    }}
+                    TopSlot={() => (
+                        <TableFilters
+                            filters={filterDefinitions.value}
+                            values={filters.value}
+                            total={total.value}
+                            onChange={onFiltersChanged}
+                            onClear={onFiltersCleared}
+                        />
+                    )}
+                />
             </ThemedView>
 
-            <VDialog modelValue={dialogOpen.value} onUpdate:modelValue={(v: any) => (dialogOpen.value = v)} maxWidth="520px">
+            <VDialog modelValue={detailsOpen.value} onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)} maxWidth="1080px" scrollable>
                 <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <VSelect
-                            items={DISPOSITIONS}
-                            modelValue={disposition.value}
-                            onUpdate:modelValue={(v: string) => (disposition.value = v)}
-                            label={t("Disposition")}
-                        />
-                        <VTextarea
-                            modelValue={note.value}
-                            onUpdate:modelValue={(v: string) => (note.value = v)}
-                            label={t("Notes")}
-                            rows={3}
-                        />
-                        <VBtn
-                            color="primary"
-                            disabled={note.value.trim().length < 3}
-                            loading={actionLoading.value}
-                            onClick={() => void submitDisposition()}
-                        >
-                            {t("Save")}
-                        </VBtn>
+                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                        {detailLoading.value || !selected.value ? (
+                            <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "280px", gap: "12px" }}>
+                                <VProgressCircular indeterminate size={52} color="primary" />
+                                <ThemedText style={{ opacity: 0.65 }}>{t("Loading screening")}</ThemedText>
+                            </ThemedView>
+                        ) : (
+                            <>
+                                <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
+                                    <ThemedView style={{ gap: "4px" }}>
+                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "19px" }}>{selected.value.subjectName}</ThemedText>
+                                        <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{selected.value.subjectType} · {selected.value.subjectReference}</ThemedText>
+                                    </ThemedView>
+                                    <ThemedView style={{ flexDirection: "row", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+                                        <StatusChip label={selected.value.result} tone={resultTone(selected.value.result)} />
+                                        <StatusChip label={`${selected.value.matchCount} ${t("matches")}`} tone="neutral" size="small" />
+                                    </ThemedView>
+                                </ThemedView>
+
+                                <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "14px" }}>
+                                    <VCard variant="tonal">
+                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
+                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Screening context")}</ThemedText>
+                                            {[
+                                                [t("Provider"), selected.value.provider],
+                                                [t("Provider reference"), selected.value.providerRequestRef || "—"],
+                                                [t("Trigger"), selected.value.trigger],
+                                                [t("Merchant"), selected.value.merchantName || "—"],
+                                                [t("Score"), selected.value.score || "—"],
+                                                [t("Requested"), formatDateTime(selected.value.requestedAt)],
+                                                [t("Completed"), formatDateTime(selected.value.completedAt)],
+                                                [t("List versions"), JSON.stringify(selected.value.lists ?? {})],
+                                            ].map(([label, value]) => (
+                                                <ThemedView key={label} style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", borderBottom: "1px solid rgba(100,116,139,0.12)", paddingBottom: "4px" }}>
+                                                    <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{label}</ThemedText>
+                                                    <ThemedText style={{ fontSize: "11px", textAlign: "right", wordBreak: "break-word", direction: "ltr" }}>{value}</ThemedText>
+                                                </ThemedView>
+                                            ))}
+                                        </VCardText>
+                                    </VCard>
+
+                                    <VCard variant="tonal">
+                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
+                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Related AML cases")}</ThemedText>
+                                            {selected.value.amlCases.length === 0 && <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{t("No AML case linked")}</ThemedText>}
+                                            {selected.value.amlCases.map((entry) => (
+                                                <ThemedView key={entry.id} style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                                                    <StatusChip label={entry.severity} tone={statusTone(entry.severity)} size="x-small" />
+                                                    <StatusChip label={entry.status} tone={statusTone(entry.status)} size="x-small" />
+                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{formatDateTime(entry.createdAt)}</ThemedText>
+                                                </ThemedView>
+                                            ))}
+                                        </VCardText>
+                                    </VCard>
+                                </ThemedView>
+
+                                <VCard variant="tonal">
+                                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                                        <ThemedText type="defaultSemiBold">{t("Matches")}</ThemedText>
+                                        {selected.value.matches.length === 0 && <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("No matches returned")}</ThemedText>}
+                                        {selected.value.matches.map((match) => (
+                                            <ThemedView key={match.id} style={{ gap: "4px", borderBottom: "1px solid rgba(100,116,139,0.12)", paddingBottom: "7px" }}>
+                                                <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                                                    <StatusChip label={match.disposition} tone={match.disposition === "TRUE_MATCH" ? "error" : match.disposition === "UNREVIEWED" ? "warning" : "success"} size="x-small" />
+                                                    <ThemedText style={{ fontSize: "12px", fontWeight: 600 }}>{match.matchedName}</ThemedText>
+                                                    <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>{match.listType} · {match.listName} · {match.score}</ThemedText>
+                                                </ThemedView>
+                                                <ThemedText style={{ fontSize: "10px", opacity: 0.55, direction: "ltr" }}>{match.listEntryRef}</ThemedText>
+                                                {match.dispositionNotes && <ThemedText style={{ fontSize: "10px", opacity: 0.7 }}>{match.dispositionNotes}</ThemedText>}
+                                                {match.dispositionBy && <ThemedText style={{ fontSize: "10px", opacity: 0.5, direction: "ltr" }}>{match.dispositionBy}</ThemedText>}
+                                            </ThemedView>
+                                        ))}
+                                    </VCardText>
+                                </VCard>
+
+                                {unresolvedMatches.value.length > 0 ? (
+                                    <VCard variant="tonal">
+                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                                            <ThemedText type="defaultSemiBold">{t("Disposition an unresolved match")}</ThemedText>
+                                            <VSelect
+                                                items={unresolvedMatches.value.map((match) => ({ title: `${match.matchedName} · ${match.listType} · ${match.score}`, value: match.id }))}
+                                                modelValue={selectedMatchId.value}
+                                                onUpdate:modelValue={(value: string) => (selectedMatchId.value = value)}
+                                                label={t("Unresolved match")}
+                                            />
+                                            <VSelect
+                                                items={DISPOSITIONS}
+                                                modelValue={disposition.value}
+                                                onUpdate:modelValue={(value: string) => (disposition.value = value)}
+                                                label={t("Disposition")}
+                                            />
+                                            <VTextarea
+                                                modelValue={note.value}
+                                                onUpdate:modelValue={(value: string) => (note.value = value)}
+                                                label={t("Disposition notes")}
+                                                hint={t("Required. Explain why the match is false, true or escalated.")}
+                                                persistentHint
+                                                rows={3}
+                                            />
+                                            <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
+                                                <VBtn color="primary" loading={actionLoading.value} onClick={() => void submitDisposition()}>{t("Save disposition")}</VBtn>
+                                                <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
+                                            </ThemedView>
+                                        </VCardText>
+                                    </VCard>
+                                ) : (
+                                    <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
+                                        <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
+                                    </ThemedView>
+                                )}
+                            </>
+                        )}
                     </VCardText>
                 </VCard>
             </VDialog>

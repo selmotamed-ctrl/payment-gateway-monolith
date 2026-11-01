@@ -16,7 +16,7 @@ const userParamsSchema = z.object({ id: zIdentifier });
 export const userCreateSchema = z
   .object({
     email: zEmail,
-    fullName: z.string().min(2).max(120),
+    fullName: z.string().min(2).max(120).optional(),
     role: zAdminRole,
     phone: z.string().min(6).max(20).optional(),
     locale: z.enum(["ar", "en"]).optional(),
@@ -29,7 +29,7 @@ export const userPatchSchema = z
   .object({
     fullName: z.string().min(2).max(120).optional(),
     role: zAdminRole.optional(),
-    status: z.enum(["ACTIVE", "SUSPENDED", "LOCKED"]).optional(),
+    status: z.enum(["INVITED", "ACTIVE", "SUSPENDED", "DISABLED", "LOCKED"]).optional(),
     locale: z.enum(["ar", "en"]).optional(),
     authorities: z.record(z.string().max(64), z.array(z.string().max(64)).max(50)).optional(),
     baseVersion: zBaseVersion.optional(),
@@ -41,7 +41,7 @@ export const userBulkPatchSchema = z
   .object({
     userIds: z.array(zIdentifier).min(1).max(200),
     role: zAdminRole.optional(),
-    status: z.enum(["ACTIVE", "SUSPENDED", "LOCKED"]).optional(),
+    status: z.enum(["INVITED", "ACTIVE", "SUSPENDED", "DISABLED", "LOCKED"]).optional(),
     reason: z.string().min(3).max(500).optional(),
     baseVersion: zBaseVersion.optional(),
   })
@@ -53,6 +53,14 @@ router.get(
     method: "GET",
     path: () => "/internal/admin/users",
     querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
+  "/summary",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/users/summary",
   }),
 );
 

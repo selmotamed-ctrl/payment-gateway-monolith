@@ -295,6 +295,15 @@ router.post(
   }),
 );
 
+router.get(
+  "/summary",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/gateways/summary",
+    querySchema: zListQuery,
+  }),
+);
+
 router.patch(
   "/:id",
   coreForward({

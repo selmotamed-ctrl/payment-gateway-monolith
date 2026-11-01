@@ -1,6 +1,6 @@
 import express from "express";
 import { z } from "zod";
-import { zAmount, zCurrency, zIdentifier, zPaginationQuery, zReason } from "../../lib/zReady";
+import { zAmount, zCurrency, zIdentifier, zJsonObject, zPaginationQuery, zReason } from "../../lib/zReady";
 import {
   toCoreAdjustmentCreate,
   toCoreCashoutProcess,
@@ -41,14 +41,21 @@ export const disputeCreateSchema = z
   })
   .strict();
 
+export const disputeEvidenceSchema = z
+  .object({
+    evidence: zJsonObject,
+    notes: z.string().max(2000).optional(),
+  })
+  .strict();
+
 export const adjustmentCreateSchema = z
   .object({
     disputeId: zIdentifier.optional(),
-    merchantId: zIdentifier,
+    merchantId: zIdentifier.optional(),
     attemptId: zIdentifier.optional(),
     type: z.enum(["CHARGEBACK", "REFUND", "MANUAL_CREDIT", "MANUAL_DEBIT", "CORRECTION", "FEE_VARIANCE", "RECOVERY", "WRITEOFF"]),
     amount: zAmount,
-    currency: zCurrency,
+    currency: zCurrency.optional(),
     reason: zReason.optional(),
     reasonCode: z.string().max(64).optional(),
     notes: z.string().max(2000).optional(),
@@ -144,11 +151,30 @@ router.post(
 );
 
 router.get(
+  "/disputes/summary",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/disputes/summary",
+    querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
   "/disputes/:id",
   coreForward({
     method: "GET",
     path: (context) => `/internal/admin/disputes/${encodeURIComponent(context.params.id ?? "")}`,
     paramsSchema: idParamsSchema,
+  }),
+);
+
+router.post(
+  "/disputes/:id/evidence",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/disputes/${encodeURIComponent(context.params.id ?? "")}/evidence`,
+    paramsSchema: idParamsSchema,
+    schema: disputeEvidenceSchema,
   }),
 );
 
@@ -158,6 +184,24 @@ router.get(
     method: "GET",
     path: () => "/internal/admin/adjustments",
     querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
+  "/adjustments/summary",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/adjustments/summary",
+    querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
+  "/adjustments/:id",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/adjustments/${encodeURIComponent(context.params.id ?? "")}`,
+    paramsSchema: idParamsSchema,
   }),
 );
 
@@ -178,6 +222,24 @@ router.get(
     method: "GET",
     path: () => "/internal/admin/cashouts",
     querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
+  "/cashouts/summary",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/cashouts/summary",
+    querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
+  "/cashouts/:id",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/cashouts/${encodeURIComponent(context.params.id ?? "")}`,
+    paramsSchema: idParamsSchema,
   }),
 );
 

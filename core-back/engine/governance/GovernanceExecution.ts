@@ -15,6 +15,7 @@ import {
   queueMerchantLifecycleNotification,
 } from "../../lib/merchantOps";
 import { moneyToString, type Money } from "../db/money";
+import { normalizeApprovalSubjectType } from "../../lib/approvalQueue";
 import {
   buildLedgerTemplate,
   buildPaymentConfirmationTemplate,
@@ -2967,7 +2968,7 @@ export async function executeApprovalSubject(
     throw new ApiError(409, "APPROVAL_MAKER_EQUALS_CHECKER", "The maker and the checker must be different users");
   }
 
-  const subjectType = String(input.approval.subjectType);
+  const subjectType = normalizeApprovalSubjectType(input.approval.subjectType);
   if (subjectType === "AML_CASE") {
     return executeAmlCaseResolution(ctx, tx, {
       amlCaseId: input.approval.subjectId,
@@ -3031,6 +3032,56 @@ export async function executeApprovalSubject(
       checkerUserId: input.checkerUserId,
       checkerRole: input.checkerRole,
     });
+  }
+  if (subjectType === "AML_RULE") {
+    const payload = asRecord(input.approval.payloadDiffJson);
+    const rules = modelOf(tx, "amlRule");
+    const rule = await rules.findUnique({ where: { id: input.approval.subjectId } });
+    if (!rule) {
+      throw new ApiError(404, "AML_RULE_NOT_FOUND", "The AML rule does not exist");
+    }
+    const effectiveFromRaw = payload.effectiveFrom;
+    const effectiveFrom = typeof effectiveFromRaw === "string" && effectiveFromRaw.trim() !== ""
+      ? new Date(effectiveFromRaw)
+      : new Date();
+    const updated = await rules.update({
+      where: { id: rule.id },
+      data: {
+        code: String(payload.code ?? rule.code),
+        name: String(payload.name ?? rule.name),
+        ruleType: (payload.ruleType === undefined ? rule.ruleType : String(payload.ruleType)) as never,
+        scope: asRecord(payload.scope ?? rule.scope) as never,
+        params: asRecord(payload.params ?? rule.params) as never,
+        action: (payload.action === undefined ? rule.action : String(payload.action)) as never,
+        baseSeverity: (payload.baseSeverity === undefined ? rule.baseSeverity : String(payload.baseSeverity)) as never,
+        active: true,
+        effectiveFrom: Number.isNaN(effectiveFrom.getTime()) ? new Date() : effectiveFrom,
+        version: rule.active ? rule.version + 1 : rule.version,
+        approvalRequestId: input.approval.id,
+      },
+    });
+    await writeAudit(ctx, tx, {
+      actorId: input.checkerUserId,
+      role: input.checkerRole,
+      action: "AML_RULE_ACTIVATED",
+      entityType: "AML_RULE",
+      entityId: updated.id,
+      beforeJson: { active: rule.active, version: rule.version },
+      afterJson: {
+        active: true,
+        version: updated.version,
+        code: updated.code,
+        ruleType: updated.ruleType,
+        action: updated.action,
+        baseSeverity: updated.baseSeverity,
+      },
+      approvalRequestId: input.approval.id,
+    });
+    return {
+      status: "EXECUTED",
+      entityId: updated.id,
+      template: "AML_RULE_ACTIVATED",
+    };
   }
   if (subjectType === "JOIN_REQUEST") {
     const payload = asRecord(input.approval.payloadDiffJson);

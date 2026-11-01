@@ -1091,6 +1091,14 @@ describe("core contract field mapping", () => {
     expect(mapped.authoritiesMap).toEqual(["aml:read", "aml:write", "kyb:read"]);
   });
 
+  test("user updates preserve raw authority keys passed as empty groups", () => {
+    const mapped = toCoreUserUpdate({
+      role: "COMPLIANCE",
+      authorities: { "user:read": [], "user:write": [], "joinrequests.review": [] },
+    });
+    expect(mapped.authoritiesMap).toEqual(["user:read", "user:write", "joinrequests.review"]);
+  });
+
   test("user patch maps the locked status onto the core vocabulary", () => {
     const mapped = toCoreUserUpdate({ status: "LOCKED", role: "SUPPORT" });
     expect(mapped.status).toBe("SUSPENDED");

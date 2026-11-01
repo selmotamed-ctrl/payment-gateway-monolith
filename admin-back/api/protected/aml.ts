@@ -56,6 +56,7 @@ export const ruleSchema = z
     ]),
     action: z.enum(["HOLD", "FLAG", "BLOCK", "CASE_ONLY"]),
     baseSeverity: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]),
+    scope: zJsonObject.optional(),
     params: zJsonObject.optional(),
     effectiveFrom: z.string().max(64).optional(),
   })
@@ -82,6 +83,7 @@ export const reportSchema = z
     periodEnd: z.string().max(64),
     notes: z.string().max(2000).optional(),
     reportType: z.enum(["LARGE_TRANSACTION", "SUSPICIOUS_ACTIVITY", "PERIODIC_RETURN"]).optional(),
+    authority: z.string().min(2).max(64).optional(),
   })
   .strict();
 
@@ -93,6 +95,24 @@ router.get(
     method: "GET",
     path: () => "/internal/admin/aml/screenings",
     querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
+  "/screenings/summary",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/aml/screenings/summary",
+    querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
+  "/screenings/:id",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/aml/screenings/${encodeURIComponent(context.params.id ?? "")}`,
+    paramsSchema: idParamsSchema,
   }),
 );
 
@@ -114,6 +134,24 @@ router.get(
     method: "GET",
     path: () => "/internal/admin/aml/cases",
     querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
+  "/cases/summary",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/aml/cases/summary",
+    querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
+  "/cases/:id",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/aml/cases/${encodeURIComponent(context.params.id ?? "")}`,
+    paramsSchema: idParamsSchema,
   }),
 );
 
@@ -139,6 +177,24 @@ router.get(
   }),
 );
 
+router.get(
+  "/rules/summary",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/aml/rules/summary",
+    querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
+  "/rules/:id",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/aml/rules/${encodeURIComponent(context.params.id ?? "")}`,
+    paramsSchema: idParamsSchema,
+  }),
+);
+
 router.post(
   "/rules",
   coreForward({
@@ -146,7 +202,7 @@ router.post(
     path: () => "/internal/admin/aml/rules",
     schema: ruleSchema,
     bodyFrom: (_req, body) => toCoreAmlRule(body),
-    status: 201,
+    relayStatus: true,
   }),
 );
 
@@ -175,6 +231,24 @@ router.get(
     method: "GET",
     path: () => "/internal/admin/aml/reports",
     querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
+  "/reports/summary",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/aml/reports/summary",
+    querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
+  "/reports/:id",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/aml/reports/${encodeURIComponent(context.params.id ?? "")}`,
+    paramsSchema: idParamsSchema,
   }),
 );
 

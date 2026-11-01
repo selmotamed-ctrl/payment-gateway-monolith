@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VCard, VCardText } from "vuetify/components";
+import { VAlert, VBtn, VCard, VCardText } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -19,9 +19,11 @@ type Liquidity = {
     clearingBalances?: string;
     obligations?: string;
     coverRatio?: string;
-    clearingAgeing?: { gatewayCode: string; t0: string; t1: string; t2: string; older: string; settlementLagDays: number }[];
+    clearingAgeing?: { bucket: string; count: number; amount: string }[];
+    clearingByGateway?: { gatewayId: string; gatewayCode: string; gatewayName: string; balance: string; t0: string; t1: string; t2: string; older: string }[];
+    checkedAt?: string;
     cashoutQueue?: { pending: string; processing: string; completed: string; nextDayDemand: string } | null;
-    holdsAndReserves?: { amlHold: string; chargebackReserve: string; oldestItemAgeDays: number; bySeverity: Record<string, number> };
+    holdsAndReserves?: { amlHold: string; chargebackReserve: string; suspense: string; oldestItemAgeDays: number; bySeverity: Record<string, number> };
     receivables?: { commissionReceivable: string; negativeBalances: string; ceiling: string };
 };
 
@@ -58,14 +60,28 @@ const LiquidityPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Liquidity")} />
+                <PageHeader
+                    title={t("Liquidity")}
+                    end={() => (
+                        <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                            {data.value?.checkedAt && <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("Updated")} {new Date(data.value.checkedAt).toLocaleTimeString()}</ThemedText>}
+                            <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</VBtn>
+                        </ThemedView>
+                    )}
+                />
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : loading.value ? (
                     <StateView loading={true} />
                 ) : (
-                    <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "18px" }}>
+                    <ThemedView style={{ flexDirection: "column", gap: "18px" }}>
+                        {Number(data.value?.coverRatio ?? 1) < 1 && (
+                            <VAlert type="error" variant="tonal">
+                                {t("Treasury cover is below 1. Review clearing balances and cash-out demand before releasing payouts.")}
+                            </VAlert>
+                        )}
+                        <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "18px" }}>
                         <VCard style={{ flex: "1 1 340px" }}>
                             <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedText type="defaultSemiBold">{t("Treasury Cover")}</ThemedText>
@@ -96,6 +112,7 @@ const LiquidityPage = dc(() => {
                                 <ThemedText type="defaultSemiBold">{t("Holds And Reserves")}</ThemedText>
                                 {line("Holds And Reserves", data.value?.holdsAndReserves?.amlHold)}
                                 {line("Chargeback", data.value?.holdsAndReserves?.chargebackReserve)}
+                                {line("Suspense", data.value?.holdsAndReserves?.suspense)}
                                 {line("Commission Receivable", data.value?.receivables?.commissionReceivable)}
                                 <ThemedView style={{ flexDirection: "row", justifyContent: "space-between" }}>
                                     <ThemedText style={{ fontSize: "13px" }}>{t("Oldest")}</ThemedText>
@@ -109,21 +126,40 @@ const LiquidityPage = dc(() => {
 
                         <VCard style={{ flex: "1 1 100%" }}>
                             <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                                <ThemedText type="defaultSemiBold">{t("Clearing Ageing")}</ThemedText>
-                                {(data.value?.clearingAgeing ?? []).map((row) => (
+                                <ThemedText type="defaultSemiBold">{t("Clearing by gateway")}</ThemedText>
+                                {(data.value?.clearingByGateway ?? []).length === 0 && <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("No gateway clearing balances")}</ThemedText>}
+                                {(data.value?.clearingByGateway ?? []).map((row) => (
                                     <ThemedView
-                                        key={row.gatewayCode}
-                                        style={{ flexDirection: "row", gap: "14px", alignItems: "center", fontSize: "13px" }}
+                                        key={row.gatewayId}
+                                        style={{ flexDirection: "row", gap: "14px", alignItems: "center", fontSize: "13px", borderBottom: "1px solid rgba(100,116,139,0.12)", paddingBottom: "6px" }}
                                     >
-                                        <span style={{ flex: 1 }}>{row.gatewayCode}</span>
-                                        <span>{t("T+0")}: {row.t0}</span>
-                                        <span>{t("T+1")}: {row.t1}</span>
-                                        <span>{t("T+2")}: {row.t2}</span>
-                                        <span>{t("Older")}: {row.older}</span>
+                                        <ThemedView style={{ flex: 1, gap: "2px" }}>
+                                            <ThemedText style={{ fontSize: "12px", fontWeight: 600 }}>{row.gatewayCode}</ThemedText>
+                                            <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{row.gatewayName}</ThemedText>
+                                        </ThemedView>
+                                        <MoneyText value={row.balance} currency={currency()} bold />
+                                        <span style={{ opacity: 0.55 }}>{t("T+0")}: {row.t0}</span>
+                                        <span style={{ opacity: 0.55 }}>{t("T+1")}: {row.t1}</span>
+                                        <span style={{ opacity: 0.55 }}>{t("T+2")}: {row.t2}</span>
+                                        <span style={{ opacity: 0.55 }}>{t("Older")}: {row.older}</span>
                                     </ThemedView>
                                 ))}
                             </VCardText>
                         </VCard>
+
+                        <VCard>
+                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                                <ThemedText type="defaultSemiBold">{t("Settlement ageing")}</ThemedText>
+                                {(data.value?.clearingAgeing ?? []).map((row) => (
+                                    <ThemedView key={row.bucket} style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", fontSize: "13px" }}>
+                                        <ThemedText>{row.bucket}</ThemedText>
+                                        <ThemedText>{row.count} {t("attempts")}</ThemedText>
+                                        <MoneyText value={row.amount} currency={currency()} />
+                                    </ThemedView>
+                                ))}
+                            </VCardText>
+                        </VCard>
+                        </ThemedView>
                     </ThemedView>
                 )}
             </ThemedView>

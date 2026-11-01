@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VCard, VCardText, VSelect } from "vuetify/components";
+import { VAlert, VBtn, VCard, VCardText, VSelect } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -9,25 +9,41 @@ import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
 import { EChart } from "@/components/EChart";
 import { MoneyText } from "@/components/MoneyText";
+import { StatusChip } from "@/components/StatusChip";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
-import { formatMoney, toDecimal } from "@/utils/money";
+import { formatMoney, formatPlainNumber, toDecimal } from "@/utils/money";
 
 type Profitability = {
     period?: string;
     currency?: string;
+    windowDays?: number;
+    windowStart?: string;
+    windowEnd?: string;
+    succeededAttempts?: number;
+    grossVolume?: string;
     grossCommissionRevenue?: string;
+    netMerchantAmount?: string;
     gatewayCostRealized?: string;
     gatewayCostAccrued?: string;
+    gatewayCostPeriod?: string;
     netRevenue?: string;
+    periodNetRevenue?: string;
     chargebackLosses?: string;
+    chargebackLossesPeriod?: string;
+    periodNetContribution?: string;
     refundCommissionReversed?: string;
     netContribution?: string;
     commissionReceivable?: string;
-    byRail?: { railCode: string; gross: string; cost: string; net: string }[];
-    byGateway?: { gatewayCode: string; gross: string; cost: string; net: string }[];
-    byDay?: { day: string; gross: string; cost: string; net: string }[];
+    commissionMargin?: string;
+    gatewayCostRatio?: string;
+    netMargin?: string;
+    averageTicket?: string;
+    averageCommission?: string;
+    byRail?: { railCode: string; volume: string; gross: string; cost: string; net: string }[];
+    byGateway?: { gatewayCode: string; volume: string; gross: string; cost: string; net: string }[];
+    byDay?: { day: string; volume: string; gross: string; cost: string; net: string }[];
 };
 
 const ProfitabilityPage = dc(() => {
@@ -41,9 +57,7 @@ const ProfitabilityPage = dc(() => {
         loading.value = true;
         error.value = null;
         try {
-            const response = await api.get(urlsMap.financeProfitability, {
-                params: { period: period.value },
-            });
+            const response = await api.get(urlsMap.financeProfitability, { params: { period: period.value } });
             data.value = (response.data?.data ?? response.data ?? {}) as Profitability;
         } catch (e) {
             error.value = extractApiErrorMessage(e);
@@ -57,11 +71,26 @@ const ProfitabilityPage = dc(() => {
     const currency = () => data.value?.currency ?? "LYD";
 
     const moneyLine = (label: string, value: string | undefined, color?: string) => (
-        <ThemedView key={label} style={{ flexDirection: "row", justifyContent: "space-between", gap: "12px" }}>
+        <ThemedView key={label} style={{ flexDirection: "row", justifyContent: "space-between", gap: "12px", borderBottom: "1px solid rgba(100,116,139,0.12)", paddingBottom: "5px" }}>
             <ThemedText style={{ fontSize: "13px" }}>{t(label)}</ThemedText>
             <MoneyText value={value ?? "0"} currency={currency()} color={color} bold />
         </ThemedView>
     );
+
+    const summaryCards = () => {
+        const entry = data.value;
+        if (!entry) return [];
+        return [
+            { label: t("Gross volume"), value: formatMoney(entry.grossVolume, { currency: currency() }), tone: "info" as const },
+            { label: t("Net to merchants"), value: formatMoney(entry.netMerchantAmount, { currency: currency() }), tone: "neutral" as const },
+            { label: t("Gross commission"), value: formatMoney(entry.grossCommissionRevenue, { currency: currency() }), tone: "success" as const },
+            { label: t("Gateway cost"), value: formatMoney(entry.gatewayCostPeriod, { currency: currency() }), tone: "warning" as const },
+            { label: t("Chargeback losses"), value: formatMoney(entry.chargebackLossesPeriod, { currency: currency() }), tone: "error" as const },
+            { label: t("Period net contribution"), value: formatMoney(entry.periodNetContribution, { currency: currency() }), tone: toDecimal(entry.periodNetContribution).isNegative() ? "error" as const : "success" as const },
+            { label: t("Commission margin"), value: `${formatPlainNumber(entry.commissionMargin, 2)}%`, tone: "info" as const },
+            { label: t("Average ticket"), value: formatMoney(entry.averageTicket, { currency: currency() }), tone: "neutral" as const },
+        ];
+    };
 
     const railChartOption = () => {
         const rows = data.value?.byRail ?? [];
@@ -72,17 +101,8 @@ const ProfitabilityPage = dc(() => {
             xAxis: { type: "category", data: rows.map((row) => row.railCode), axisLabel: { color: "#94a3b8" } },
             yAxis: { type: "value", axisLabel: { color: "#94a3b8" } },
             series: [
-                {
-                    name: t("Gross"),
-                    type: "bar",
-                    data: rows.map((row) => Number(toDecimal(row.gross).toString())),
-                    itemStyle: { borderRadius: [4, 4, 0, 0] },
-                },
-                {
-                    name: t("Gateway Cost Realized"),
-                    type: "bar",
-                    data: rows.map((row) => Number(toDecimal(row.cost).toString())),
-                },
+                { name: t("Gross"), type: "bar", data: rows.map((row) => toDecimal(row.gross).toNumber()), itemStyle: { borderRadius: [4, 4, 0, 0] } },
+                { name: t("Gateway cost"), type: "bar", data: rows.map((row) => toDecimal(row.cost).toNumber()) },
             ],
         };
     };
@@ -91,19 +111,44 @@ const ProfitabilityPage = dc(() => {
         const rows = data.value?.byDay ?? [];
         return {
             tooltip: { trigger: "axis" },
+            legend: { textStyle: { color: "#94a3b8" } },
             grid: { left: "8%", right: "4%", top: "12%", bottom: "12%" },
             xAxis: { type: "category", data: rows.map((row) => row.day), axisLabel: { color: "#94a3b8" } },
             yAxis: { type: "value", axisLabel: { color: "#94a3b8" } },
             series: [
-                {
-                    name: t("Net Contribution"),
-                    type: "line",
-                    smooth: true,
-                    data: rows.map((row) => Number(toDecimal(row.net).toString())),
-                },
+                { name: t("Gross commission"), type: "line", smooth: true, data: rows.map((row) => toDecimal(row.gross).toNumber()) },
+                { name: t("Net"), type: "line", smooth: true, data: rows.map((row) => toDecimal(row.net).toNumber()) },
             ],
         };
     };
+
+    const breakdownTable = (
+        title: string,
+        rows: Array<{ key: string; volume: string; gross: string; cost: string; net: string }>,
+    ) => (
+        <VCard>
+            <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <ThemedText type="defaultSemiBold">{t(title)}</ThemedText>
+                <ThemedView style={{ flexDirection: "row", gap: "12px", fontSize: "11px", opacity: 0.6, borderBottom: "1px solid rgba(100,116,139,0.2)", paddingBottom: "4px" }}>
+                    <span style={{ flex: 1 }}>{t("Name")}</span>
+                    <span style={{ width: "130px", textAlign: "right" }}>{t("Volume")}</span>
+                    <span style={{ width: "120px", textAlign: "right" }}>{t("Gross")}</span>
+                    <span style={{ width: "120px", textAlign: "right" }}>{t("Cost")}</span>
+                    <span style={{ width: "120px", textAlign: "right" }}>{t("Net")}</span>
+                </ThemedView>
+                {rows.length === 0 && <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("No Data Found")}</ThemedText>}
+                {rows.map((row) => (
+                    <ThemedView key={row.key} style={{ flexDirection: "row", gap: "12px", alignItems: "center", fontSize: "12px", borderBottom: "1px solid rgba(100,116,139,0.1)", paddingBottom: "5px" }}>
+                        <span style={{ flex: 1 }}>{row.key}</span>
+                        <span style={{ width: "130px", textAlign: "right" }}><MoneyText value={row.volume} currency={currency()} showCurrency={false} /></span>
+                        <span style={{ width: "120px", textAlign: "right" }}><MoneyText value={row.gross} currency={currency()} showCurrency={false} /></span>
+                        <span style={{ width: "120px", textAlign: "right" }}><MoneyText value={row.cost} currency={currency()} showCurrency={false} /></span>
+                        <span style={{ width: "120px", textAlign: "right" }}><MoneyText value={row.net} currency={currency()} showCurrency={false} bold /></span>
+                    </ThemedView>
+                ))}
+            </VCardText>
+        </VCard>
+    );
 
     return () => (
         <ScreenContainer>
@@ -111,22 +156,25 @@ const ProfitabilityPage = dc(() => {
                 <PageHeader
                     title={t("Profitability")}
                     end={() => (
-                        <VSelect
-                            items={[
-                                { title: t("Today"), value: "today" },
-                                { title: t("Last 7 days"), value: "last_7d" },
-                                { title: t("Last 30 days"), value: "last_30d" },
-                                { title: t("Last 90 days"), value: "last_90d" },
-                            ]}
-                            modelValue={period.value}
-                            onUpdate:modelValue={(v: string) => {
-                                period.value = v;
-                                void load();
-                            }}
-                            density="compact"
-                            hideDetails
-                            style={{ minWidth: "170px" }}
-                        />
+                        <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                            <VSelect
+                                items={[
+                                    { title: t("Today"), value: "today" },
+                                    { title: t("Last 7 days"), value: "last_7d" },
+                                    { title: t("Last 30 days"), value: "last_30d" },
+                                    { title: t("Last 90 days"), value: "last_90d" },
+                                ]}
+                                modelValue={period.value}
+                                onUpdate:modelValue={(value: string) => {
+                                    period.value = value;
+                                    void load();
+                                }}
+                                density="compact"
+                                hideDetails
+                                style={{ minWidth: "170px" }}
+                            />
+                            <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</VBtn>
+                        </ThemedView>
                     )}
                 />
 
@@ -136,54 +184,73 @@ const ProfitabilityPage = dc(() => {
                     <StateView loading={true} />
                 ) : (
                     <>
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                                <ThemedText type="defaultSemiBold">{t("Net Contribution")}</ThemedText>
-                                {moneyLine("Gross Commission Revenue", data.value?.grossCommissionRevenue)}
-                                {moneyLine("Gateway Cost Realized", data.value?.gatewayCostRealized)}
-                                {moneyLine("Gateway Cost Accrued", data.value?.gatewayCostAccrued)}
-                                {moneyLine("Net Revenue", data.value?.netRevenue)}
-                                {moneyLine("Chargeback Losses", data.value?.chargebackLosses, "#dc2626")}
-                                {moneyLine("Net Contribution", data.value?.netContribution, "#059669")}
-                                {moneyLine("Commission Receivable", data.value?.commissionReceivable)}
-                            </VCardText>
-                        </VCard>
+                        <VAlert type="info" variant="tonal">
+                            {t("Period P&L uses succeeded attempts and executed chargeback/refund adjustments. Ledger positions are current balances, not period movements.")}
+                        </VAlert>
+
+                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "10px" }}>
+                            {summaryCards().map((item) => (
+                                <VCard key={item.label} variant="tonal">
+                                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "5px", padding: "14px" }}>
+                                        <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
+                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
+                                    </VCardText>
+                                </VCard>
+                            ))}
+                        </ThemedView>
+
+                        <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "18px" }}>
+                            <VCard style={{ flex: "1 1 420px" }}>
+                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                    <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                                        <ThemedText type="defaultSemiBold">{t("Period P&L")}</ThemedText>
+                                        <StatusChip label={`${data.value?.windowDays ?? 0} ${t("days")}`} tone="neutral" size="small" />
+                                    </ThemedView>
+                                    {moneyLine("Gross commission", data.value?.grossCommissionRevenue)}
+                                    {moneyLine("Gateway cost (period)", data.value?.gatewayCostPeriod)}
+                                    {moneyLine("Period net revenue", data.value?.periodNetRevenue)}
+                                    {moneyLine("Chargeback losses (period)", data.value?.chargebackLossesPeriod, "#dc2626")}
+                                    {moneyLine("Commission reversed (refunds)", data.value?.refundCommissionReversed, "#d97706")}
+                                    {moneyLine("Period net contribution", data.value?.periodNetContribution, "#059669")}
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.5 }}>
+                                        {data.value?.succeededAttempts ?? 0} {t("succeeded attempts")} · {t("Average commission")} {formatMoney(data.value?.averageCommission, { currency: currency() })}
+                                    </ThemedText>
+                                </VCardText>
+                            </VCard>
+
+                            <VCard style={{ flex: "1 1 420px" }}>
+                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                    <ThemedText type="defaultSemiBold">{t("Current ledger position")}</ThemedText>
+                                    {moneyLine("Gateway cost realized", data.value?.gatewayCostRealized)}
+                                    {moneyLine("Gateway cost accrued", data.value?.gatewayCostAccrued)}
+                                    {moneyLine("Chargeback reserve movement", data.value?.chargebackLosses, "#dc2626")}
+                                    {moneyLine("All-time net revenue", data.value?.netRevenue)}
+                                    {moneyLine("All-time net contribution", data.value?.netContribution, "#059669")}
+                                    {moneyLine("Commission receivable", data.value?.commissionReceivable)}
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.5 }}>
+                                        {t("Gateway cost ratio")} {formatPlainNumber(data.value?.gatewayCostRatio, 2)}% · {t("Net margin")} {formatPlainNumber(data.value?.netMargin, 2)}%
+                                    </ThemedText>
+                                </VCardText>
+                            </VCard>
+                        </ThemedView>
 
                         <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "18px" }}>
                             <VCard style={{ flex: "1 1 420px" }}>
                                 <VCardText>
-                                    <ThemedText type="defaultSemiBold" style={{ marginBottom: "10px" }}>
-                                        {t("By Rail")}
-                                    </ThemedText>
+                                    <ThemedText type="defaultSemiBold" style={{ marginBottom: "10px" }}>{t("By rail")}</ThemedText>
                                     <EChart option={railChartOption()} height="300px" />
                                 </VCardText>
                             </VCard>
                             <VCard style={{ flex: "1 1 420px" }}>
                                 <VCardText>
-                                    <ThemedText type="defaultSemiBold" style={{ marginBottom: "10px" }}>
-                                        {t("By Day")}
-                                    </ThemedText>
+                                    <ThemedText type="defaultSemiBold" style={{ marginBottom: "10px" }}>{t("By day")}</ThemedText>
                                     <EChart option={dayChartOption()} height="300px" />
                                 </VCardText>
                             </VCard>
                         </ThemedView>
 
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                                <ThemedText type="defaultSemiBold">{t("By Gateway")}</ThemedText>
-                                {(data.value?.byGateway ?? []).map((row) => (
-                                    <ThemedView
-                                        key={row.gatewayCode}
-                                        style={{ flexDirection: "row", gap: "14px", alignItems: "center", fontSize: "13px" }}
-                                    >
-                                        <span style={{ flex: 1 }}>{row.gatewayCode}</span>
-                                        <span>{formatMoney(row.gross, { currency: currency() })}</span>
-                                        <span>{formatMoney(row.cost, { currency: currency() })}</span>
-                                        <span>{formatMoney(row.net, { currency: currency() })}</span>
-                                    </ThemedView>
-                                ))}
-                            </VCardText>
-                        </VCard>
+                        {breakdownTable("By rail", (data.value?.byRail ?? []).map((row) => ({ key: row.railCode, ...row })))}
+                        {breakdownTable("By gateway", (data.value?.byGateway ?? []).map((row) => ({ key: row.gatewayCode, ...row })))}
                     </>
                 )}
             </ThemedView>

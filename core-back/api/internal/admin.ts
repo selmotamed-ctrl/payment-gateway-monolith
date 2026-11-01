@@ -11,6 +11,17 @@ import { moneyToString } from "../../engine/db/money";
 import { ApiError, parseOrThrow } from "../../lib/error";
 import { buildListQuery, listResponse } from "../../lib/listQuery";
 import {
+  APPROVAL_DOMAIN_SUBJECT_TYPES,
+  APPROVAL_PENDING_STATES,
+  approvalAgeHours,
+  approvalSubjectTypeVariants,
+  approvalDomain,
+  approvalExpiresInHours,
+  approvalIsExpired,
+  approvalListRow,
+  normalizeApprovalSubjectType,
+} from "../../lib/approvalQueue";
+import {
   OPERATOR_CASE_ACTIONS,
   operatorCaseInquiryEligibility,
   operatorCaseInquirySkipMessage,
@@ -273,6 +284,13 @@ export const createRegulatoryReportViaApproval = async (
 ): Promise<{ reportId: string; approvalRequestId: string; status: string }> => {
   const payloadJson = JSON.stringify(input.payload);
   const payloadSha256 = createHash("sha256").update(payloadJson).digest("hex");
+  const parsePeriod = (value: unknown): Date | null => {
+    if (typeof value !== "string" || value.trim() === "") return null;
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  };
+  const periodStart = parsePeriod(input.payload.periodStart);
+  const periodEnd = parsePeriod(input.payload.periodEnd);
   return db.$transaction(async (tx) => {
     const report = await tx.regulatoryReport.create({
       data: {
@@ -281,6 +299,8 @@ export const createRegulatoryReportViaApproval = async (
         subjectType: input.subjectType,
         subjectId: input.subjectId,
         amlCaseId: input.amlCaseId ?? null,
+        periodStart,
+        periodEnd,
         payloadCiphertext: payloadJson,
         payloadSha256,
         status: "PENDING_CHECKER",
@@ -650,72 +670,166 @@ router.get("/auth/me", (_request: Request, response: Response) => {
 
 router.use(requireAuthentication);
 
-router.get("/stats/overview", async (_request: Request, response: Response) => {
+router.get("/stats/overview", async (request: Request, response: Response) => {
   const now = new Date();
-  const staleCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-
+  const period = merchantPeriodLabel(request.query.period);
+  const since = merchantStatsSince(period);
+  const openJoinStatuses = ["DRAFT", "SUBMITTED", "IN_REVIEW", "INFO_REQUESTED", "PENDING_CHECKER"];
+  const openAmlStatuses = ["OPEN", "IN_REVIEW", "PENDING_CHECKER", "FROZEN", "ESCALATED_STR"];
+  const openOperatorStatuses = ["OPEN", "IN_PROGRESS", "PENDING_CHECKER"];
   const [
     merchantsActive,
     merchantsPending,
     attemptsByStateRows,
     unknownAggregate,
-    approvalGroups,
+    approvalPendingRows,
+    joinRequestOpen,
     joinRequestSlaBreaches,
+    amlOpen,
     amlSlaBreaches,
+    operatorOpen,
+    operatorP1,
+    operatorSlaBreaches,
+    routeHealthRows,
+    oldestUnprocessedInbound,
+    reconciliationRows,
   ] = await Promise.all([
     client.merchant.count({ where: { status: "ACTIVE" } }),
     client.merchant.count({ where: { status: "PENDING" } }),
-    client.paymentAttempt.groupBy({ by: ["status"], _count: { _all: true } }),
+    client.paymentAttempt.groupBy({
+      by: ["status"],
+      where: { createdAt: { gte: since } },
+      _count: { _all: true },
+      _sum: { totalChargedAmount: true },
+    }),
     client.paymentAttempt.aggregate({
       where: { status: "UNKNOWN" },
       _count: { _all: true },
       _min: { createdAt: true },
     }),
-    client.approvalRequest.groupBy({
-      by: ["state"],
-      where: { state: "PENDING_REVIEW" },
-      _count: { _all: true },
-      _min: { createdAt: true },
+    client.approvalRequest.findMany({
+      where: { state: { in: [...APPROVAL_PENDING_STATES] } },
+      select: { subjectType: true, state: true, mode: true, createdAt: true, expiresAt: true, ratifyDueAt: true },
     }),
+    client.joinRequest.count({ where: { status: { in: openJoinStatuses as never } } }),
     client.joinRequest.count({
-      where: {
-        status: { in: ["DRAFT", "SUBMITTED", "IN_REVIEW", "INFO_REQUESTED"] },
-        createdAt: { lt: staleCutoff },
-      },
+      where: { status: { in: openJoinStatuses as never }, slaDueAt: { lt: now } },
     }),
+    client.amlCase.count({ where: { status: { in: openAmlStatuses as never } } }),
     client.amlCase.count({
-      where: { status: { in: ["OPEN", "IN_REVIEW"] }, createdAt: { lt: staleCutoff } },
+      where: { status: { in: openAmlStatuses as never }, slaDueAt: { lt: now } },
+    }),
+    client.operatorCase.count({ where: { state: { in: openOperatorStatuses as never } } }),
+    client.operatorCase.count({ where: { state: { in: openOperatorStatuses as never }, priority: "P1" } }),
+    client.operatorCase.count({
+      where: { state: { in: openOperatorStatuses as never }, slaDueAt: { lt: now } },
+    }),
+    client.railRoute.groupBy({ by: ["healthState"], _count: { _all: true } }),
+    client.inboundEvent.findFirst({
+      where: { processedAt: null },
+      orderBy: { receivedAt: "asc" },
+      select: { receivedAt: true },
+    }),
+    client.reconciliationItem.groupBy({
+      by: ["result"],
+      where: { createdAt: { gte: since } },
+      _count: { _all: true },
     }),
   ]);
 
   const attemptsByState: Record<string, number> = {};
+  const volumeByState: Record<string, string> = {};
+  let attemptsTotal = 0;
+  let attemptsSucceeded = 0;
+  let grossVolume = decimal(0);
+  const successStatuses = new Set<string>(merchantSuccessStatuses);
   for (const row of attemptsByStateRows) {
-    attemptsByState[String(row.status)] = (row._count as { _all: number })._all;
+    const count = row._count._all;
+    attemptsByState[String(row.status)] = count;
+    attemptsTotal += count;
+    const charged = decimal(row._sum.totalChargedAmount ?? 0);
+    volumeByState[String(row.status)] = charged.toFixed(4);
+    if (successStatuses.has(String(row.status))) {
+      attemptsSucceeded += count;
+      grossVolume = grossVolume.plus(charged);
+    }
   }
 
   const unknownOldest = unknownAggregate._min.createdAt;
-  const approvalQueueAgeing = approvalGroups.map((group) => ({
-    role: String(group.state),
-    oldestHours: group._min.createdAt
-      ? Math.max(0, Math.round((now.getTime() - group._min.createdAt.getTime()) / 3_600_000))
-      : 0,
-    count: (group._count as { _all: number })._all,
-  }));
+  const byDomain = new Map<string, { count: number; oldestCreatedAt: Date | null }>();
+  let approvalExpired = 0;
+  let approvalEmergencyDue = 0;
+  for (const row of approvalPendingRows) {
+    const domain = approvalDomain(row.subjectType);
+    const current = byDomain.get(domain) ?? { count: 0, oldestCreatedAt: null };
+    current.count += 1;
+    if (!current.oldestCreatedAt || row.createdAt < current.oldestCreatedAt) current.oldestCreatedAt = row.createdAt;
+    byDomain.set(domain, current);
+    if (approvalIsExpired(row.expiresAt, now.getTime())) approvalExpired += 1;
+    if (row.mode === "EMERGENCY_RATIFICATION" && row.ratifyDueAt && row.ratifyDueAt.getTime() <= now.getTime()) {
+      approvalEmergencyDue += 1;
+    }
+  }
+
+  const routeHealth: Record<string, number> = {};
+  for (const row of routeHealthRows) {
+    routeHealth[String(row.healthState)] = row._count._all;
+  }
+
+  let reconciliationMatched = 0;
+  let reconciliationItems = 0;
+  for (const row of reconciliationRows) {
+    const count = row._count._all;
+    reconciliationItems += count;
+    if (row.result === "MATCHED") reconciliationMatched += count;
+  }
+  const reconciliationMatchRate = reconciliationItems === 0
+    ? "0.0000"
+    : ((reconciliationMatched / reconciliationItems) * 100).toFixed(4);
 
   response.json({
+    period,
+    since,
+    merchantsActive,
+    merchantsPending,
     attemptsByState,
+    volumeByState,
+    attemptsTotal,
+    attemptsSucceeded,
+    successRate: attemptsTotal === 0 ? 0 : Number(((attemptsSucceeded / attemptsTotal) * 100).toFixed(2)),
+    grossVolume: grossVolume.toFixed(4),
     unknownBacklog: (unknownAggregate._count as { _all: number })._all,
     unknownOldestAgeSeconds: unknownOldest
       ? Math.max(0, Math.round((now.getTime() - unknownOldest.getTime()) / 1000))
       : 0,
-    openCircuitBreakers: 0,
-    webhookInboxLagSeconds: 0,
-    reconciliationMatchRate: "0",
-    approvalQueueAgeing,
+    openCircuitBreakers: routeHealth.OPEN_BREAKER ?? 0,
+    routeHealth: {
+      healthy: routeHealth.HEALTHY ?? 0,
+      degraded: routeHealth.DEGRADED ?? 0,
+      openBreaker: routeHealth.OPEN_BREAKER ?? 0,
+    },
+    webhookInboxLagSeconds: oldestUnprocessedInbound
+      ? Math.max(0, Math.round((now.getTime() - oldestUnprocessedInbound.receivedAt.getTime()) / 1000))
+      : 0,
+    reconciliationMatchRate,
+    reconciliationItems,
+    approvalPending: approvalPendingRows.length,
+    approvalExpired,
+    approvalEmergencyDue,
+    approvalQueueAgeing: [...byDomain.entries()]
+      .map(([domain, value]) => ({
+        domain,
+        count: value.count,
+        oldestHours: value.oldestCreatedAt ? approvalAgeHours(value.oldestCreatedAt, now.getTime()) : 0,
+      }))
+      .sort((a, b) => b.count - a.count),
+    joinRequestOpen,
     joinRequestSlaBreaches,
+    amlOpen,
     amlSlaBreaches,
-    merchantsActive,
-    merchantsPending,
+    operatorOpen,
+    operatorP1,
+    operatorSlaBreaches,
   });
 });
 
@@ -725,6 +839,7 @@ router.get("/options/:kind", async (request: Request, response: Response) => {
   const kind = String(request.params.kind ?? "");
   const rawSearch = typeof request.query.search === "string" ? request.query.search.trim() : "";
   const limit = Math.min(OPTION_LIMIT, Math.max(1, Number(request.query.limit ?? 50) || 50));
+  const ownerId = typeof request.query.ownerId === "string" ? request.query.ownerId.trim() : "";
   const contains = rawSearch ? { contains: rawSearch } : undefined;
   let items: Array<{ value: string; title: string; subtitle?: string }> = [];
 
@@ -801,11 +916,16 @@ router.get("/options/:kind", async (request: Request, response: Response) => {
     }
     case "gl-accounts": {
       const rows = await client.glAccount.findMany({
+        where: ownerId ? { ownerId, accountType: "MERCHANT_WALLET" } : {},
         orderBy: [{ accountType: "asc" }, { currency: "asc" }],
         take: limit,
-        select: { id: true, accountType: true, currency: true },
+        select: { id: true, accountType: true, currency: true, ownerId: true },
       });
-      items = rows.map((row) => ({ value: row.id, title: `${row.accountType} · ${row.currency}`, subtitle: row.id.slice(0, 8) }));
+      items = rows.map((row) => ({
+        value: row.id,
+        title: `${row.accountType} · ${row.currency}`,
+        subtitle: row.ownerId ? row.ownerId.slice(0, 12) : row.id.slice(0, 8),
+      }));
       break;
     }
     default:
@@ -824,6 +944,12 @@ router.get("/users", async (request: Request, response: Response) => {
     sortable: { email: "email", role: "role", status: "status", createdAt: "createdAt" },
     defaultSort: { createdAt: "desc" },
   });
+  const scope = String(request.query.scope ?? "").trim().toLowerCase();
+  if (scope === "admin") {
+    built.where = { ...(built.where as Record<string, unknown>), merchantId: null };
+  } else if (scope === "merchant") {
+    built.where = { ...(built.where as Record<string, unknown>), merchantId: { not: null } };
+  }
   const [users, total] = await Promise.all([
     client.user.findMany({ where: built.where as never, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
     client.user.count({ where: built.where as never }),
@@ -838,13 +964,67 @@ router.get("/users", async (request: Request, response: Response) => {
     status: user.status,
     isMaker: user.isMaker,
     isChecker: user.isChecker,
+    mfaRequired: user.mfaRequired,
+    invitationExpiresAt: user.invitationExpiresAt,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
   })), total, built));
+});
+
+router.get("/users/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["user:read", "security:read"]);
+  const users = await client.user.findMany({
+    where: { merchantId: null },
+    select: { role: true, status: true, isMaker: true, isChecker: true },
+  });
+  const byRole: Record<string, number> = {};
+  const byStatus: Record<string, number> = {};
+  for (const user of users) {
+    byRole[user.role] = (byRole[user.role] ?? 0) + 1;
+    byStatus[user.status] = (byStatus[user.status] ?? 0) + 1;
+  }
+  const makers = users.filter((user) => user.isMaker).length;
+  const checkers = users.filter((user) => user.isChecker).length;
+  response.json({
+    summary: {
+      total: users.length,
+      active: byStatus.ACTIVE ?? 0,
+      invited: byStatus.INVITED ?? 0,
+      suspended: byStatus.SUSPENDED ?? 0,
+      disabled: byStatus.DISABLED ?? 0,
+      makers,
+      checkers,
+      fourEyes: users.filter((user) => user.isMaker && user.isChecker).length,
+      byRole,
+      byStatus,
+    },
+  });
 });
 
 router.get("/users/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["user:read", "security:read"]);
   const { id } = parseOrThrow(idSchema, request.params);
-  const user = await client.user.findUnique({ where: { id } });
+  const user = await client.user.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      createdAt: true,
+      updatedAt: true,
+      merchantId: true,
+      email: true,
+      phone: true,
+      role: true,
+      authoritiesMap: true,
+      appScopeIds: true,
+      isMaker: true,
+      isChecker: true,
+      mfaRequired: true,
+      status: true,
+      invitedById: true,
+      invitationExpiresAt: true,
+      academyProgressJson: true,
+    },
+  });
   if (!user) {
     throw new ApiError(404, "USER_NOT_FOUND", "The user does not exist");
   }
@@ -956,9 +1136,28 @@ router.patch("/users/:id", async (request: Request, response: Response) => {
   if (!user) {
     throw new ApiError(404, "USER_NOT_FOUND", "The user does not exist");
   }
+  if (body.authoritiesMap || body.role) {
+    const actor = actorFromRequest(request);
+    const approval = await client.approvalRequest.create({
+      data: {
+        subjectType: "USER",
+        subjectId: user.id,
+        payloadDiffJson: {
+          ...(body.authoritiesMap ? { authoritiesMap: body.authoritiesMap } : {}),
+          ...(body.role ? { role: body.role } : {}),
+        },
+        mode: "STANDARD",
+        makerUserId: actor.userId,
+        state: "PENDING_REVIEW",
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
+    });
+    response.status(202).json({ status: "PENDING_REVIEW", approvalRequestId: approval.id });
+    return;
+  }
   const updated = await client.user.update({
     where: { id: user.id },
-    data: { authoritiesMap: body.authoritiesMap, role: body.role as never, status: body.status },
+    data: { status: body.status },
   });
   response.json({ id: updated.id, role: updated.role, status: updated.status });
 });
@@ -1415,6 +1614,58 @@ router.get("/join-requests", async (request: Request, response: Response) => {
     submittedAt: entry.submittedAt ?? entry.createdAt,
     reviewer: entry.assignedReviewer?.email ?? "",
   })), total, built));
+});
+
+router.get("/join-requests/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["kyb:read", "compliance:read"]);
+  const now = new Date();
+  const requests = await client.joinRequest.findMany({
+    select: {
+      status: true,
+      proposedRiskTier: true,
+      slaDueAt: true,
+      slaPausedAt: true,
+      assignedReviewerId: true,
+      fourEyesRequired: true,
+    },
+  });
+  const byStatus: Record<string, number> = {};
+  const byRisk: Record<string, number> = {};
+  let overdue = 0;
+  let dueSoon = 0;
+  let unassigned = 0;
+  let pendingChecker = 0;
+  let fourEyes = 0;
+  const openStatuses = new Set<string>(JOIN_REQUEST_OPEN_STATUSES);
+  for (const entry of requests) {
+    byStatus[entry.status] = (byStatus[entry.status] ?? 0) + 1;
+    byRisk[entry.proposedRiskTier] = (byRisk[entry.proposedRiskTier] ?? 0) + 1;
+    if (openStatuses.has(entry.status) && !entry.slaPausedAt) {
+      if (entry.slaDueAt.getTime() < now.getTime()) overdue += 1;
+      else if (entry.slaDueAt.getTime() - now.getTime() <= 24 * 60 * 60 * 1000) dueSoon += 1;
+    }
+    if (entry.status === "PENDING_CHECKER") pendingChecker += 1;
+    if (!entry.assignedReviewerId && openStatuses.has(entry.status)) unassigned += 1;
+    if (entry.fourEyesRequired && openStatuses.has(entry.status)) fourEyes += 1;
+  }
+  response.json({
+    summary: {
+      total: requests.length,
+      open: requests.filter((entry) => openStatuses.has(entry.status)).length,
+      submitted: byStatus.SUBMITTED ?? 0,
+      inReview: byStatus.IN_REVIEW ?? 0,
+      infoRequested: byStatus.INFO_REQUESTED ?? 0,
+      pendingChecker,
+      approved: byStatus.APPROVED ?? 0,
+      rejected: byStatus.REJECTED ?? 0,
+      overdue,
+      dueSoon,
+      unassigned,
+      fourEyes,
+      byStatus,
+      byRisk,
+    },
+  });
 });
 
 router.get("/join-requests/:id", async (request: Request, response: Response) => {
@@ -2569,6 +2820,52 @@ router.get("/kyb-documents", async (request: Request, response: Response) => {
   response.json(listResponse("kybDocuments", rows, total, built));
 });
 
+router.get("/kyb-documents/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["kyb:read", "compliance:read"]);
+  const now = new Date();
+  const inThirtyDays = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const documents = await client.kybDocument.findMany({
+    where: { OR: [{ joinRequestId: null }, { joinRequest: { status: { not: "DRAFT" } } }] },
+    select: { status: true, avStatus: true, docType: true, expiresOn: true, sha256: true, merchantId: true },
+  });
+  const duplicateRows = (await client.$queryRawUnsafe(
+    "SELECT sha256 FROM kyb_documents GROUP BY sha256 HAVING COUNT(DISTINCT merchant_id) > 1",
+  )) as Array<{ sha256: string }>;
+  const duplicateHashes = new Set(duplicateRows.map((row) => row.sha256));
+  const byStatus: Record<string, number> = {};
+  const byAvStatus: Record<string, number> = {};
+  const byDocType: Record<string, number> = {};
+  let expiringSoon = 0;
+  let expired = 0;
+  let duplicates = 0;
+  for (const doc of documents) {
+    byStatus[doc.status] = (byStatus[doc.status] ?? 0) + 1;
+    byAvStatus[doc.avStatus] = (byAvStatus[doc.avStatus] ?? 0) + 1;
+    byDocType[doc.docType] = (byDocType[doc.docType] ?? 0) + 1;
+    if (duplicateHashes.has(doc.sha256)) duplicates += 1;
+    if (doc.expiresOn) {
+      if (doc.expiresOn.getTime() < now.getTime()) expired += 1;
+      else if (doc.expiresOn.getTime() <= inThirtyDays.getTime()) expiringSoon += 1;
+    }
+  }
+  response.json({
+    summary: {
+      total: documents.length,
+      pending: byStatus.UPLOADED ?? 0,
+      accepted: byStatus.ACCEPTED ?? 0,
+      rejected: byStatus.REJECTED ?? 0,
+      expired,
+      infected: byAvStatus.INFECTED ?? 0,
+      scanning: byAvStatus.PENDING ?? 0,
+      duplicates,
+      expiringSoon,
+      byStatus,
+      byAvStatus,
+      byDocType,
+    },
+  });
+});
+
 router.get("/kyb-documents/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["kyb:read", "compliance:read"]);
   const { id } = parseOrThrow(idSchema, request.params);
@@ -3161,6 +3458,148 @@ const merchantApprovalCheckerAllowed = (
   return role !== "SUPPORT";
 };
 
+const approvalCheckBlockReason = async (
+  approval: {
+    id: string;
+    subjectType: string;
+    subjectId: string;
+    state: string;
+    makerUserId: string;
+    payloadDiffJson: unknown;
+  },
+  actor: { userId: string; role: string | null },
+): Promise<string | null> => {
+  if (!["PENDING_REVIEW", "DRAFT"].includes(approval.state)) return "APPROVAL_NOT_PENDING";
+  if (approval.makerUserId === actor.userId) return "MAKER_CANNOT_CHECK";
+  const subjectType = normalizeApprovalSubjectType(approval.subjectType);
+  if (subjectType === "JOIN_REQUEST") {
+    const joinRequest = await client.joinRequest.findUnique({ where: { id: approval.subjectId } });
+    if (joinRequest?.onboardingChannel === "ADMIN_ASSISTED" && joinRequest.submittedByUserId === actor.userId) {
+      return "ADMIN_ASSISTED_MAKER_CANNOT_CHECK";
+    }
+  }
+  if (subjectType === "MERCHANT" && !merchantApprovalCheckerAllowed(actor.role, approval.payloadDiffJson)) {
+    return "MERCHANT_CHECKER_DOMAIN_FORBIDDEN";
+  }
+  return null;
+};
+
+const approvalSubjectContext = async (subjectType: string, subjectId: string): Promise<Record<string, unknown> | null> => {
+  switch (normalizeApprovalSubjectType(subjectType)) {
+    case "MERCHANT": {
+      const row = await client.merchant.findUnique({
+        where: { id: subjectId },
+        select: { id: true, legalName: true, tradeName: true, displayName: true, status: true, kybStatus: true, riskTier: true },
+      });
+      return row ? { contextType: "MERCHANT", ...row } : null;
+    }
+    case "JOIN_REQUEST": {
+      const row = await client.joinRequest.findUnique({
+        where: { id: subjectId },
+        select: {
+          id: true,
+          status: true,
+          onboardingChannel: true,
+          proposedRiskTier: true,
+          submittedAt: true,
+          slaDueAt: true,
+          decision: true,
+          merchant: { select: { id: true, tradeName: true, legalName: true } },
+        },
+      });
+      return row ? { contextType: "JOIN_REQUEST", ...row } : null;
+    }
+    case "ADJUSTMENT": {
+      const row = await client.adjustment.findUnique({
+        where: { id: subjectId },
+        select: {
+          id: true,
+          type: true,
+          amount: true,
+          state: true,
+          reason: true,
+          sourceAttemptId: true,
+          disputeId: true,
+          targetGlAccount: { select: { currency: true, accountType: true, ownerId: true } },
+        },
+      });
+      return row ? { kind: "ADJUSTMENT", ...row, amount: merchantMoney(row.amount) } : null;
+    }
+    case "OPERATOR_CASE": {
+      const row = await client.operatorCase.findUnique({
+        where: { id: subjectId },
+        select: {
+          id: true,
+          kind: true,
+          priority: true,
+          state: true,
+          slaDueAt: true,
+          attemptId: true,
+          attempt: { select: { reference: true, status: true } },
+        },
+      });
+      return row ? { contextType: "OPERATOR_CASE", ...row } : null;
+    }
+    case "AML_CASE": {
+      const row = await client.amlCase.findUnique({
+        where: { id: subjectId },
+        select: { id: true, status: true, severity: true, triggerReason: true, slaDueAt: true, subjectType: true, subjectId: true },
+      });
+      return row ? { contextType: "AML_CASE", ...row } : null;
+    }
+    case "GATEWAY_VERSION": {
+      const row = await client.gatewayVersion.findUnique({
+        where: { id: subjectId },
+        select: {
+          id: true,
+          versionNumber: true,
+          state: true,
+          gatewayId: true,
+          gateway: { select: { code: true, name: true } },
+        },
+      });
+      return row ? { contextType: "GATEWAY_VERSION", ...row } : null;
+    }
+    case "USER": {
+      const row = await client.user.findUnique({
+        where: { id: subjectId },
+        select: { id: true, email: true, role: true, status: true, isMaker: true, isChecker: true },
+      });
+      return row ? { contextType: "USER", ...row } : null;
+    }
+    case "PLATFORM_SETTING": {
+      const row = await client.platformSetting.findUnique({
+        where: { id: subjectId },
+        select: { id: true, key: true, scope: true, version: true, effectiveFrom: true },
+      });
+      return row ? { contextType: "PLATFORM_SETTING", ...row } : null;
+    }
+    case "REGULATORY_REPORT": {
+      const row = await client.regulatoryReport.findUnique({
+        where: { id: subjectId },
+        select: { id: true, reportType: true, status: true, authority: true, periodStart: true, periodEnd: true },
+      });
+      return row ? { contextType: "REGULATORY_REPORT", ...row } : null;
+    }
+    case "REPORTING_RULE": {
+      const row = await client.reportingRule.findUnique({
+        where: { id: subjectId },
+        select: { id: true, code: true, name: true, status: true, reportType: true },
+      });
+      return row ? { contextType: "REPORTING_RULE", ...row } : null;
+    }
+    case "AML_RULE": {
+      const row = await client.amlRule.findUnique({
+        where: { id: subjectId },
+        select: { id: true, code: true, name: true, ruleType: true, action: true, active: true },
+      });
+      return row ? { contextType: "AML_RULE", ...row } : null;
+    }
+    default:
+      return null;
+  }
+};
+
 router.get("/merchants", async (request: Request, response: Response) => {
   requireAuthorities(request, ["merchant:read"]);
   const principal = principalOf(request);
@@ -3245,6 +3684,61 @@ router.get("/merchants", async (request: Request, response: Response) => {
     total,
     built,
   ));
+});
+
+router.get("/merchants/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["merchant:read"]);
+  const now = new Date();
+  const merchants = await client.merchant.findMany({
+    select: {
+      status: true,
+      kybStatus: true,
+      riskTier: true,
+      onboardingChannel: true,
+      nextKybReviewAt: true,
+    },
+  });
+  const pendingApprovals = await client.approvalRequest.findMany({
+    where: { subjectType: "MERCHANT", state: { in: ["DRAFT", "PENDING_REVIEW"] } },
+    select: { subjectId: true },
+    distinct: ["subjectId"],
+  });
+  const byStatus: Record<string, number> = {};
+  const byKyb: Record<string, number> = {};
+  const byRisk: Record<string, number> = {};
+  const byChannel: Record<string, number> = {};
+  let reviewOverdue = 0;
+  let reviewDueSoon = 0;
+  for (const merchant of merchants) {
+    byStatus[merchant.status] = (byStatus[merchant.status] ?? 0) + 1;
+    byKyb[merchant.kybStatus] = (byKyb[merchant.kybStatus] ?? 0) + 1;
+    byRisk[merchant.riskTier] = (byRisk[merchant.riskTier] ?? 0) + 1;
+    byChannel[merchant.onboardingChannel] = (byChannel[merchant.onboardingChannel] ?? 0) + 1;
+    if (merchant.nextKybReviewAt) {
+      if (merchant.nextKybReviewAt.getTime() < now.getTime()) reviewOverdue += 1;
+      else if (merchant.nextKybReviewAt.getTime() - now.getTime() <= 30 * 24 * 60 * 60 * 1000) reviewDueSoon += 1;
+    }
+  }
+  response.json({
+    summary: {
+      total: merchants.length,
+      active: byStatus.ACTIVE ?? 0,
+      pending: byStatus.PENDING ?? 0,
+      suspended: byStatus.SUSPENDED ?? 0,
+      rejected: byStatus.REJECTED ?? 0,
+      closed: byStatus.CLOSED ?? 0,
+      kybPending: byKyb.PENDING ?? 0,
+      kybVerified: byKyb.VERIFIED ?? 0,
+      highRisk: byRisk.HIGH ?? 0,
+      reviewOverdue,
+      reviewDueSoon,
+      pendingApprovals: pendingApprovals.length,
+      byStatus,
+      byKyb,
+      byRisk,
+      byChannel,
+    },
+  });
 });
 
 router.get("/merchants/:id", async (request: Request, response: Response) => {
@@ -4429,32 +4923,134 @@ router.get("/merchants/:id/detail-changes", async (request: Request, response: R
 
 router.get("/approvals", async (request: Request, response: Response) => {
   requireAuthorities(request, ["approval:read"]);
+  const query = (request.query ?? {}) as Record<string, unknown>;
   const built = buildListQuery(request.query, {
-    search: ["subjectId"],
-    in: { state: "state" }, equals: {subjectType: "subjectType", domain: "domain", makerUserId: "makerUserId", checkerUserId: "checkerUserId"},
-    dates: { createdAt: { path: "createdAt" } },
-    sortable: { state: "state", subjectType: "subjectType", createdAt: "createdAt" },
+    search: ["subjectId", "subjectType", "maker.email", "checker.email"],
+    in: { state: "state", mode: "mode" },
+    equals: { makerUserId: "makerUserId", checkerUserId: "checkerUserId" },
+    dates: {
+      createdAt: { path: "createdAt" },
+      expiresAt: { path: "expiresAt", fromKey: "expiresFrom", toKey: "expiresTo" },
+    },
+    sortable: {
+      subjectType: "subjectType",
+      subjectId: "subjectId",
+      state: "state",
+      mode: "mode",
+      createdAt: "createdAt",
+      expiresAt: "expiresAt",
+    },
     defaultSort: { createdAt: "desc" },
+    defaultPageSize: 20,
   });
+  const domain = typeof query.domain === "string" ? query.domain.trim().toUpperCase() : "";
+  const conditions: Record<string, unknown>[] = [built.where];
+  const requestedSubjectTypes = typeof query.subjectType === "string"
+    ? query.subjectType.split(",").map((value) => value.trim()).filter(Boolean)
+    : [];
+  if (requestedSubjectTypes.length > 0) {
+    conditions.push({
+      subjectType: { in: requestedSubjectTypes.flatMap((value) => approvalSubjectTypeVariants(value)) },
+    });
+  }
+  const domainSubjects = APPROVAL_DOMAIN_SUBJECT_TYPES[domain];
+  if (domainSubjects) {
+    conditions.push({
+      subjectType: { in: domainSubjects.flatMap((value) => approvalSubjectTypeVariants(value)) },
+    });
+  }
+  const expired = query.expired === "true" || query.expired === "false" ? query.expired : "";
+  if (expired === "true") {
+    conditions.push({ expiresAt: { lt: new Date() } });
+  } else if (expired === "false") {
+    conditions.push({ OR: [{ expiresAt: null }, { expiresAt: { gte: new Date() } }] });
+  }
+  const where = conditions.length === 1 ? conditions[0] : { AND: conditions };
   const [approvals, total] = await Promise.all([
-    client.approvalRequest.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { maker: { select: { email: true } }, checker: { select: { email: true } } }, skip: built.skip, take: built.take }),
-    client.approvalRequest.count({ where: built.where as never }),
+    client.approvalRequest.findMany({
+      where: where as never,
+      orderBy: built.orderBy as never,
+      include: { maker: { select: { email: true } }, checker: { select: { email: true } } },
+      skip: built.skip,
+      take: built.take,
+    }),
+    client.approvalRequest.count({ where: where as never }),
   ]);
-  response.json(listResponse("approvals", approvals.map((approval) => ({
-    ...approval,
-    makerName: approval.maker?.email ?? "",
-    checkerName: approval.checker?.email ?? "",
-  })), total, built));
+  response.json(listResponse("approvals", approvals.map((approval) => approvalListRow(approval as never)), total, built));
+});
+
+router.get("/approvals/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["approval:read"]);
+  const pending = await client.approvalRequest.findMany({
+    where: { state: { in: [...APPROVAL_PENDING_STATES] } },
+    select: { subjectType: true, mode: true, state: true, createdAt: true, expiresAt: true, ratifyDueAt: true },
+  });
+  const now = Date.now();
+  const soon = now + 24 * 60 * 60 * 1000;
+  const byState: Record<string, number> = {};
+  const bySubjectType: Record<string, number> = {};
+  const byDomain: Record<string, number> = {};
+  let expired = 0;
+  let expiringSoon = 0;
+  let emergencyDue = 0;
+  let oldestAgeHours = 0;
+  for (const row of pending) {
+    byState[row.state] = (byState[row.state] ?? 0) + 1;
+    const subjectType = normalizeApprovalSubjectType(row.subjectType);
+    bySubjectType[subjectType] = (bySubjectType[subjectType] ?? 0) + 1;
+    const domain = approvalDomain(subjectType);
+    byDomain[domain] = (byDomain[domain] ?? 0) + 1;
+    const age = approvalAgeHours(row.createdAt);
+    if (age > oldestAgeHours) oldestAgeHours = age;
+    if (row.expiresAt) {
+      const expires = row.expiresAt.getTime();
+      if (expires < now) expired += 1;
+      else if (expires <= soon) expiringSoon += 1;
+    }
+    if (row.mode === "EMERGENCY_RATIFICATION" && row.ratifyDueAt && row.ratifyDueAt.getTime() <= now) {
+      emergencyDue += 1;
+    }
+  }
+  response.json({
+    totalPending: pending.length,
+    byState,
+    bySubjectType: Object.entries(bySubjectType).map(([subjectType, count]) => ({ subjectType, count })).sort((a, b) => b.count - a.count),
+    byDomain: Object.entries(byDomain).map(([domain, count]) => ({ domain, count })).sort((a, b) => b.count - a.count),
+    expired,
+    expiringSoon,
+    emergencyDue,
+    oldestAgeHours,
+  });
 });
 
 router.get("/approvals/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["approval:read"]);
   const { id } = parseOrThrow(idSchema, request.params);
-  const approval = await client.approvalRequest.findUnique({ where: { id } });
+  const approval = await client.approvalRequest.findUnique({
+    where: { id },
+    include: { maker: { select: { email: true } }, checker: { select: { email: true } } },
+  });
   if (!approval) {
     throw new ApiError(404, "APPROVAL_REQUEST_NOT_FOUND", "The approval request does not exist");
   }
-  response.json({ approval });
+  const actor = principalOf(request);
+  const [subjectContext, checkBlockedReason] = await Promise.all([
+    approvalSubjectContext(approval.subjectType, approval.subjectId),
+    approvalCheckBlockReason(approval as never, { userId: actor.userId ?? "", role: actor.role ?? null }),
+  ]);
+  response.json({
+    approval: {
+      ...approvalListRow(approval as never),
+      payloadDiff: approval.payloadDiffJson,
+      makerReason: approval.makerReason,
+      rejectionReason: approval.rejectionReason,
+      riskAcceptanceNote: approval.riskAcceptanceNote,
+      subjectContext,
+      canCheck: checkBlockedReason === null,
+      checkBlockedReason,
+      canApprove: checkBlockedReason === null && !approvalIsExpired(approval.expiresAt),
+    },
+  });
 });
 
 router.post("/approvals/:id/approve", async (request: Request, response: Response) => {
@@ -4476,11 +5072,15 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
   if (!approval) {
     throw new ApiError(404, "APPROVAL_REQUEST_NOT_FOUND", "The approval request does not exist");
   }
+  const subjectType = normalizeApprovalSubjectType(approval.subjectType);
   assertCheckerIsNotMaker(approval.makerUserId, actor.userId);
   if (approval.state !== "PENDING_REVIEW" && approval.state !== "DRAFT") {
     throw new ApiError(409, "APPROVAL_NOT_PENDING", "The approval request is not pending review");
   }
-  if (approval.subjectType === "JOIN_REQUEST") {
+  if (approvalIsExpired(approval.expiresAt)) {
+    throw new ApiError(409, "APPROVAL_EXPIRED", "The approval request has expired");
+  }
+  if (subjectType === "JOIN_REQUEST") {
     const joinRequest = await client.joinRequest.findUnique({ where: { id: approval.subjectId } });
     if (joinRequest?.onboardingChannel === "ADMIN_ASSISTED" && joinRequest.submittedByUserId === actor.userId) {
       throw new ApiError(
@@ -4490,7 +5090,7 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
       );
     }
   }
-  if (approval.subjectType === "MERCHANT" && !merchantApprovalCheckerAllowed(actor.role ?? null, approval.payloadDiffJson)) {
+  if (subjectType === "MERCHANT" && !merchantApprovalCheckerAllowed(actor.role ?? null, approval.payloadDiffJson)) {
     throw new ApiError(
       403,
       "MERCHANT_CHECKER_DOMAIN_FORBIDDEN",
@@ -4498,7 +5098,7 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
     );
   }
   const platform = getPlatformRuntime(client as never);
-  if (approval.subjectType === "ADJUSTMENT") {
+  if (subjectType === "ADJUSTMENT") {
     // The execution of an adjustment moves the money, so it is a background
     // job: the request records the checker and queues the execution. The job
     // never invents a checker, it executes with the one that is recorded on
@@ -4541,7 +5141,7 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
     const result = await executeApprovalSubject(governanceContext(platform), tx as never, {
       approval: {
         id: approval.id,
-        subjectType: approval.subjectType,
+        subjectType,
         subjectId: approval.subjectId,
         payloadDiffJson: approval.payloadDiffJson,
         makerUserId: approval.makerUserId,
@@ -4562,7 +5162,7 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
     });
     return { updated: updatedApproval, execution: result };
   });
-  if (approval.subjectType === "GATEWAY_VERSION") {
+  if (subjectType === "GATEWAY_VERSION") {
     // The state change committed with the go-live gate decision; only the
     // outbound cache is invalidated after the commit.
     const version = await client.gatewayVersion.findUnique({ where: { id: approval.subjectId } });
@@ -4616,8 +5216,9 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
   if (!approval) {
     throw new ApiError(404, "APPROVAL_REQUEST_NOT_FOUND", "The approval request does not exist");
   }
+  const subjectType = normalizeApprovalSubjectType(approval.subjectType);
   assertCheckerIsNotMaker(approval.makerUserId, actor.userId);
-  if (approval.subjectType === "JOIN_REQUEST") {
+  if (subjectType === "JOIN_REQUEST") {
     const joinRequest = await client.joinRequest.findUnique({ where: { id: approval.subjectId } });
     if (joinRequest?.onboardingChannel === "ADMIN_ASSISTED" && joinRequest.submittedByUserId === actor.userId) {
       throw new ApiError(
@@ -4627,7 +5228,7 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
       );
     }
   }
-  if (approval.subjectType === "MERCHANT" && !merchantApprovalCheckerAllowed(actor.role ?? null, approval.payloadDiffJson)) {
+  if (subjectType === "MERCHANT" && !merchantApprovalCheckerAllowed(actor.role ?? null, approval.payloadDiffJson)) {
     throw new ApiError(
       403,
       "MERCHANT_CHECKER_DOMAIN_FORBIDDEN",
@@ -4639,7 +5240,7 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
       where: { id },
       data: { checkerUserId: actor.userId, state: "REJECTED", rejectionReason: body.reason },
     });
-    if (row.subjectType === "OPERATOR_CASE") {
+    if (subjectType === "OPERATOR_CASE") {
       const operatorCase = await tx.operatorCase.findUnique({ where: { id: row.subjectId } });
       if (operatorCase) {
         await tx.operatorCase.updateMany({
@@ -4660,7 +5261,7 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
         });
       }
     }
-    if (row.subjectType === "JOIN_REQUEST") {
+    if (subjectType === "JOIN_REQUEST") {
       const joinRequest = await tx.joinRequest.findUnique({ where: { id: row.subjectId } });
       if (joinRequest) {
         await tx.joinRequest.update({
@@ -4681,7 +5282,7 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
         });
       }
     }
-    if (row.subjectType === "MERCHANT") {
+    if (subjectType === "MERCHANT") {
       const kind = merchantApprovalKind(row.payloadDiffJson);
       await tx.auditLog.create({
         data: {
@@ -4703,26 +5304,132 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
   response.json({ id: updated.id, state: updated.state });
 });
 
+const amlScreeningRow = (
+  screening: Record<string, any>,
+  maps: Awaited<ReturnType<typeof amlCaseSubjectMaps>>,
+) => {
+  const merchant = maps.merchants.get(screening.subjectId);
+  const attempt = maps.attempts.get(screening.subjectId);
+  const owner = maps.owners.get(screening.subjectId);
+  const matches = Array.isArray(screening.matches) ? screening.matches : [];
+  const unresolved = matches.filter((match: Record<string, unknown>) => match.disposition === "UNREVIEWED");
+  return {
+    id: screening.id,
+    subjectType: screening.subjectType,
+    subjectId: screening.subjectId,
+    subjectName: merchant?.tradeName
+      ?? attempt?.merchant?.tradeName
+      ?? (owner ? owner.fullNameEn ?? owner.fullNameAr : null)
+      ?? screening.subjectId,
+    subjectReference: attempt?.reference ?? screening.subjectId,
+    merchantName: merchant?.tradeName ?? attempt?.merchant?.tradeName ?? owner?.merchant?.tradeName ?? "",
+    provider: screening.providerCode,
+    providerRequestRef: screening.providerRequestRef,
+    trigger: screening.trigger,
+    lists: screening.listVersionsJson,
+    result: screening.result,
+    score: screening.highestScore ? merchantMoney(screening.highestScore) : null,
+    matchCount: screening.matchCount,
+    matchId: unresolved[0]?.id ?? null,
+    disposition: unresolved.length === 0 && matches.length > 0 ? matches[0]?.disposition ?? null : null,
+    dispositionSummary: {
+      unreviewed: unresolved.length,
+      falsePositive: matches.filter((match: Record<string, unknown>) => match.disposition === "FALSE_POSITIVE").length,
+      trueMatch: matches.filter((match: Record<string, unknown>) => match.disposition === "TRUE_MATCH").length,
+      escalated: matches.filter((match: Record<string, unknown>) => match.disposition === "ESCALATED").length,
+    },
+    requestedAt: screening.requestedAt,
+    screenedAt: screening.requestedAt,
+    completedAt: screening.completedAt,
+    ageHours: approvalAgeHours(new Date(screening.requestedAt)),
+  };
+};
+
 router.get("/aml/screenings", async (request: Request, response: Response) => {
   assertConfidential(request);
   const built = buildListQuery(request.query, {
-    search: ["subjectId", "providerCode"],
-    in: { result: "result" }, equals: {subjectType: "subjectType", providerCode: "providerCode"},
+    search: ["subjectId", "providerCode", "providerRequestRef"],
+    in: { result: "result", subjectType: "subjectType", trigger: "trigger" },
+    equals: { providerCode: "providerCode" },
     ranges: { score: { path: "highestScore", kind: "decimal" } },
-    dates: { createdAt: { path: "requestedAt" } },
-    sortable: { result: "result", requestedAt: "requestedAt", score: "highestScore" },
+    dates: {
+      createdAt: { path: "requestedAt" },
+      requestedAt: { path: "requestedAt", fromKey: "requestedFrom", toKey: "requestedTo" },
+    },
+    sortable: { result: "result", requestedAt: "requestedAt", score: "highestScore", matchCount: "matchCount" },
     defaultSort: { requestedAt: "desc" },
+    defaultPageSize: 20,
   });
   const [screenings, total] = await Promise.all([
     client.amlScreening.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { matches: true }, skip: built.skip, take: built.take }),
     client.amlScreening.count({ where: built.where as never }),
   ]);
-  response.json(listResponse("screenings", screenings.map((screening) => ({
-    ...screening,
-    provider: screening.providerCode,
-    score: screening.highestScore,
-    screenedAt: screening.requestedAt,
-  })), total, built));
+  const maps = await amlCaseSubjectMaps(screenings.map((screening) => ({ subjectType: screening.subjectType, subjectId: screening.subjectId })));
+  response.json(listResponse("screenings", screenings.map((screening) => amlScreeningRow(screening as never, maps)), total, built));
+});
+
+router.get("/aml/screenings/summary", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const [resultRows, triggerRows, total, screened24h, unresolvedMatches, latest] = await Promise.all([
+    client.amlScreening.groupBy({ by: ["result"], _count: { _all: true } }),
+    client.amlScreening.groupBy({ by: ["trigger"], _count: { _all: true } }),
+    client.amlScreening.count(),
+    client.amlScreening.count({ where: { requestedAt: { gte: since } } }),
+    client.amlScreeningMatch.count({ where: { disposition: "UNREVIEWED" } }),
+    client.amlScreening.findFirst({ orderBy: { requestedAt: "desc" }, select: { requestedAt: true } }),
+  ]);
+  const byResult: Record<string, number> = {};
+  for (const row of resultRows) byResult[row.result] = row._count._all;
+  const byTrigger: Record<string, number> = {};
+  for (const row of triggerRows) byTrigger[row.trigger] = row._count._all;
+  response.json({
+    total,
+    screened24h,
+    unresolvedMatches,
+    byResult,
+    byTrigger,
+    latestScreenedAt: latest?.requestedAt ?? null,
+  });
+});
+
+router.get("/aml/screenings/:id", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const screening = await client.amlScreening.findUnique({
+    where: { id },
+    include: {
+      matches: {
+        orderBy: { score: "desc" },
+        include: { dispositionBy: { select: { email: true } } },
+      },
+      amlCases: { select: { id: true, status: true, severity: true, createdAt: true } },
+    },
+  });
+  if (!screening) throw new ApiError(404, "AML_SCREENING_NOT_FOUND", "The AML screening does not exist");
+  const maps = await amlCaseSubjectMaps([{ subjectType: screening.subjectType, subjectId: screening.subjectId }]);
+  response.json({
+    screening: {
+      ...amlScreeningRow(screening as never, maps),
+      matches: screening.matches.map((match) => ({
+        id: match.id,
+        listType: match.listType,
+        listName: match.listName,
+        listEntryRef: match.listEntryRef,
+        matchedName: match.matchedName,
+        score: merchantMoney(match.score),
+        attributes: match.attributesJson,
+        disposition: match.disposition,
+        dispositionBy: match.dispositionBy?.email ?? null,
+        dispositionNotes: match.dispositionNotes,
+        suppressFuture: match.suppressFuture,
+        suppressUntil: match.suppressUntil,
+        createdAt: match.createdAt,
+      })),
+      amlCases: screening.amlCases,
+      canDisposition: screening.matches.some((match) => match.disposition === "UNREVIEWED"),
+    },
+  });
 });
 
 router.post("/aml/matches/:id/disposition", async (request: Request, response: Response) => {
@@ -4744,33 +5451,244 @@ router.post("/aml/matches/:id/disposition", async (request: Request, response: R
   if (!match) {
     throw new ApiError(404, "SCREENING_MATCH_NOT_FOUND", "The screening match does not exist");
   }
-  const updated = await client.amlScreeningMatch.update({
-    where: { id },
-    data: {
-      disposition: body.disposition,
-      dispositionById: actor.userId,
-      dispositionNotes: body.notes,
-      suppressFuture: body.suppressFuture,
-      suppressUntil: body.suppressUntil ? new Date(body.suppressUntil) : null,
-    },
+  const updated = await client.$transaction(async (tx) => {
+    const row = await tx.amlScreeningMatch.update({
+      where: { id },
+      data: {
+        disposition: body.disposition,
+        dispositionById: actor.userId,
+        dispositionNotes: body.notes,
+        suppressFuture: body.suppressFuture,
+        suppressUntil: body.suppressUntil ? new Date(body.suppressUntil) : null,
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "COMPLIANCE",
+        action: "AML_SCREENING_MATCH_DISPOSITIONED",
+        entityType: "AML_SCREENING_MATCH",
+        entityId: id,
+        beforeJson: { disposition: match.disposition },
+        afterJson: { disposition: row.disposition, notes: body.notes ?? null, suppressFuture: body.suppressFuture },
+      },
+    });
+    return row;
   });
   response.json({ id: updated.id, disposition: updated.disposition });
 });
 
+const AML_OPEN_STATUSES = ["OPEN", "IN_REVIEW", "PENDING_CHECKER"] as const;
+const AML_RESOLVED_STATUSES = ["RELEASED", "REJECTED_VOID", "FROZEN", "ESCALATED_STR"] as const;
+
+const amlCaseSubjectMaps = async (cases: Array<{ subjectType: string; subjectId: string }>) => {
+  const merchantIds = new Set<string>();
+  const attemptIds = new Set<string>();
+  const ownerIds = new Set<string>();
+  for (const entry of cases) {
+    if (entry.subjectType === "MERCHANT") merchantIds.add(entry.subjectId);
+    else if (entry.subjectType === "PAYMENT_ATTEMPT") attemptIds.add(entry.subjectId);
+    else if (entry.subjectType === "BENEFICIAL_OWNER") ownerIds.add(entry.subjectId);
+  }
+  const [merchants, attempts, owners] = await Promise.all([
+    merchantIds.size === 0 ? [] : client.merchant.findMany({
+      where: { id: { in: [...merchantIds] } },
+      select: { id: true, tradeName: true, legalName: true, status: true },
+    }),
+    attemptIds.size === 0 ? [] : client.paymentAttempt.findMany({
+      where: { id: { in: [...attemptIds] } },
+      select: {
+        id: true,
+        reference: true,
+        status: true,
+        totalChargedAmount: true,
+        currency: true,
+        merchant: { select: { tradeName: true, legalName: true } },
+      },
+    }),
+    ownerIds.size === 0 ? [] : client.beneficialOwner.findMany({
+      where: { id: { in: [...ownerIds] } },
+      select: { id: true, fullNameEn: true, fullNameAr: true, merchant: { select: { tradeName: true, legalName: true } } },
+    }),
+  ]);
+  return {
+    merchants: new Map(merchants.map((row) => [row.id, row])),
+    attempts: new Map(attempts.map((row) => [row.id, row])),
+    owners: new Map(owners.map((row) => [row.id, row])),
+  };
+};
+
+const amlCaseListRow = (
+  entry: Record<string, any>,
+  maps: Awaited<ReturnType<typeof amlCaseSubjectMaps>>,
+) => {
+  const merchant = maps.merchants.get(entry.subjectId);
+  const attempt = maps.attempts.get(entry.subjectId);
+  const owner = maps.owners.get(entry.subjectId);
+  const subjectName = merchant?.tradeName
+    ?? attempt?.merchant?.tradeName
+    ?? (owner ? owner.fullNameEn ?? owner.fullNameAr : null)
+    ?? entry.subjectId;
+  const amount = attempt?.totalChargedAmount ? merchantMoney(attempt.totalChargedAmount) : null;
+  return {
+    id: entry.id,
+    caseRef: `AML-${String(entry.id).slice(-8).toUpperCase()}`,
+    subjectType: entry.subjectType,
+    subjectId: entry.subjectId,
+    subjectName,
+    subjectReference: attempt?.reference ?? entry.subjectId,
+    subjectStatus: merchant?.status ?? attempt?.status ?? null,
+    merchantName: merchant?.tradeName ?? attempt?.merchant?.tradeName ?? owner?.merchant?.tradeName ?? "",
+    severity: entry.severity,
+    status: entry.status,
+    amount,
+    currency: attempt?.currency ?? null,
+    ruleId: entry.ruleId,
+    ruleCode: entry.rule?.code ?? null,
+    ruleName: entry.rule?.name ?? null,
+    ruleVersion: entry.ruleVersion,
+    screeningId: entry.screeningId,
+    screeningResult: entry.screening?.result ?? null,
+    screeningScore: entry.screening?.highestScore ? merchantMoney(entry.screening.highestScore) : null,
+    triggerReason: entry.triggerReason,
+    severityInputs: entry.severityInputsJson,
+    holdJournalEntryId: entry.holdJournalEntryId,
+    regulatoryReportId: entry.regulatoryReportId,
+    assignedReviewerId: entry.assignedReviewerId,
+    assignedReviewerName: entry.assignedReviewer?.email ?? "",
+    reviewerNotes: entry.reviewerNotes,
+    confidential: entry.confidential,
+    openedAt: entry.createdAt,
+    createdAt: entry.createdAt,
+    updatedAt: entry.updatedAt,
+    slaDueAt: entry.slaDueAt,
+    ageHours: approvalAgeHours(new Date(entry.createdAt)),
+    slaOverdue: Boolean(entry.slaDueAt && new Date(entry.slaDueAt).getTime() < Date.now()),
+  };
+};
+
 router.get("/aml/cases", async (request: Request, response: Response) => {
   assertConfidential(request);
   const built = buildListQuery(request.query, {
-    search: ["caseRef"],
-    in: { status: "status" }, equals: {severity: "severity", subjectType: "subjectType", ruleCode: "rule.code"},
-    dates: { createdAt: { path: "createdAt" }, slaDueAt: { path: "slaDueAt", fromKey: "dateFrom", toKey: "dateTo" } },
-    sortable: { caseRef: "caseRef", status: "status", severity: "severity", openedAt: "createdAt", slaDueAt: "slaDueAt" },
+    search: ["triggerReason", "subjectId", "rule.code", "rule.name", "assignedReviewer.email"],
+    in: { status: "status", severity: "severity", subjectType: "subjectType" },
+    equals: { ruleCode: "rule.code", assignedReviewerId: "assignedReviewerId" },
+    dates: {
+      createdAt: { path: "createdAt" },
+      slaDueAt: { path: "slaDueAt", fromKey: "dateFrom", toKey: "dateTo" },
+    },
+    sortable: { status: "status", severity: "severity", openedAt: "createdAt", slaDueAt: "slaDueAt" },
     defaultSort: { createdAt: "desc" },
+    defaultPageSize: 20,
   });
   const [cases, total] = await Promise.all([
-    client.amlCase.findMany({ where: built.where as never, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
+    client.amlCase.findMany({
+      where: built.where as never,
+      orderBy: built.orderBy as never,
+      include: {
+        rule: { select: { code: true, name: true } },
+        screening: { select: { id: true, result: true, highestScore: true } },
+        assignedReviewer: { select: { email: true } },
+      },
+      skip: built.skip,
+      take: built.take,
+    }),
     client.amlCase.count({ where: built.where as never }),
   ]);
-  response.json(listResponse("cases", cases.map((entry) => ({ ...entry, openedAt: entry.createdAt })), total, built));
+  const maps = await amlCaseSubjectMaps(cases.map((entry) => ({ subjectType: entry.subjectType, subjectId: entry.subjectId })));
+  response.json(listResponse("cases", cases.map((entry) => amlCaseListRow(entry as never, maps)), total, built));
+});
+
+router.get("/aml/cases/summary", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const now = new Date();
+  const [statusRows, severityRows, openAggregate, oldest] = await Promise.all([
+    client.amlCase.groupBy({ by: ["status"], _count: { _all: true } }),
+    client.amlCase.groupBy({ by: ["severity"], _count: { _all: true } }),
+    client.amlCase.aggregate({ where: { status: { in: [...AML_OPEN_STATUSES] as never } }, _count: { _all: true } }),
+    client.amlCase.findFirst({
+      where: { status: { in: [...AML_OPEN_STATUSES] as never } },
+      orderBy: { createdAt: "asc" },
+      select: { createdAt: true },
+    }),
+  ]);
+  const [overdue, criticalOpen, frozen, escalated] = await Promise.all([
+    client.amlCase.count({ where: { status: { in: [...AML_OPEN_STATUSES] as never }, slaDueAt: { lt: now } } }),
+    client.amlCase.count({ where: { status: { in: [...AML_OPEN_STATUSES] as never }, severity: "CRITICAL" } }),
+    client.amlCase.count({ where: { status: "FROZEN" } }),
+    client.amlCase.count({ where: { status: "ESCALATED_STR" } }),
+  ]);
+  const byStatus: Record<string, number> = {};
+  for (const row of statusRows) byStatus[row.status] = row._count._all;
+  const bySeverity: Record<string, number> = {};
+  for (const row of severityRows) bySeverity[row.severity] = row._count._all;
+  response.json({
+    totalOpen: (openAggregate._count as { _all: number })._all,
+    byStatus,
+    bySeverity,
+    overdue,
+    criticalOpen,
+    frozen,
+    escalated,
+    oldestOpenAgeHours: oldest ? approvalAgeHours(oldest.createdAt, now.getTime()) : 0,
+  });
+});
+
+router.get("/aml/cases/:id", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const entry = await client.amlCase.findUnique({
+    where: { id },
+    include: {
+      rule: { select: { id: true, code: true, name: true, ruleType: true, action: true, baseSeverity: true } },
+      screening: { include: { matches: true } },
+      assignedReviewer: { select: { id: true, email: true } },
+      holdJournalEntry: { select: { id: true, refType: true, refId: true, description: true } },
+      regulatoryReport: { select: { id: true, reportType: true, status: true, submittedAt: true } },
+    },
+  });
+  if (!entry) throw new ApiError(404, "AML_CASE_NOT_FOUND", "The AML case does not exist");
+  const maps = await amlCaseSubjectMaps([{ subjectType: entry.subjectType, subjectId: entry.subjectId }]);
+  const approval = await client.approvalRequest.findFirst({
+    where: { subjectType: { in: approvalSubjectTypeVariants("AML_CASE") as never }, subjectId: entry.id },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, state: true, makerUserId: true, checkerUserId: true, rejectionReason: true, createdAt: true },
+  });
+  response.json({
+    case: {
+      ...amlCaseListRow(entry as never, maps),
+      severityInputs: entry.severityInputsJson,
+      screening: entry.screening ? {
+        id: entry.screening.id,
+        result: entry.screening.result,
+        trigger: entry.screening.trigger,
+        providerCode: entry.screening.providerCode,
+        requestedAt: entry.screening.requestedAt,
+        completedAt: entry.screening.completedAt,
+        highestScore: entry.screening.highestScore ? merchantMoney(entry.screening.highestScore) : null,
+        matches: entry.screening.matches.map((match) => ({
+          id: match.id,
+          listType: match.listType,
+          listName: match.listName,
+          listEntryRef: match.listEntryRef,
+          matchedName: match.matchedName,
+          score: merchantMoney(match.score),
+          disposition: match.disposition,
+          dispositionNotes: match.dispositionNotes,
+        })),
+      } : null,
+      holdJournalEntry: entry.holdJournalEntry,
+      regulatoryReport: entry.regulatoryReport,
+      approval: approval ? {
+        id: approval.id,
+        state: approval.state,
+        makerUserId: approval.makerUserId,
+        checkerUserId: approval.checkerUserId,
+        rejectionReason: approval.rejectionReason,
+        createdAt: approval.createdAt,
+      } : null,
+    },
+  });
 });
 
 router.post("/aml/cases/:id/propose", async (request: Request, response: Response) => {
@@ -4815,7 +5733,65 @@ router.get("/aml/rules", async (request: Request, response: Response) => {
     client.amlRule.findMany({ where: built.where as never, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
     client.amlRule.count({ where: built.where as never }),
   ]);
-  response.json(listResponse("rules", rules, total, built));
+  const ruleIds = rules.map((rule) => rule.id);
+  const approvals = ruleIds.length === 0
+    ? []
+    : await client.approvalRequest.findMany({
+        where: { subjectType: { in: approvalSubjectTypeVariants("AML_RULE") as never }, subjectId: { in: ruleIds } },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, subjectId: true, state: true },
+      });
+  const approvalMap = new Map<string, { id: string; state: string }>();
+  for (const approval of approvals) {
+    if (!approvalMap.has(approval.subjectId)) approvalMap.set(approval.subjectId, { id: approval.id, state: approval.state });
+  }
+  response.json(listResponse(
+    "rules",
+    rules.map((rule) => ({
+      ...rule,
+      approvalRequestId: approvalMap.get(rule.id)?.id ?? null,
+      approvalState: approvalMap.get(rule.id)?.state ?? null,
+      pendingApproval: approvalMap.get(rule.id)?.state === "PENDING_REVIEW",
+    })),
+    total,
+    built,
+  ));
+});
+
+router.get("/aml/rules/summary", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const [active, pendingApprovals, severityRows, typeRows, actionRows] = await Promise.all([
+    client.amlRule.count({ where: { active: true } }),
+    client.approvalRequest.count({ where: { subjectType: { in: approvalSubjectTypeVariants("AML_RULE") as never }, state: "PENDING_REVIEW" } }),
+    client.amlRule.groupBy({ by: ["baseSeverity"], _count: { _all: true } }),
+    client.amlRule.groupBy({ by: ["ruleType"], _count: { _all: true } }),
+    client.amlRule.groupBy({ by: ["action"], _count: { _all: true } }),
+  ]);
+  const bySeverity: Record<string, number> = {};
+  for (const row of severityRows) bySeverity[row.baseSeverity] = row._count._all;
+  const byType: Record<string, number> = {};
+  for (const row of typeRows) byType[row.ruleType] = row._count._all;
+  const byAction: Record<string, number> = {};
+  for (const row of actionRows) byAction[row.action] = row._count._all;
+  const total = await client.amlRule.count();
+  response.json({ total, active, inactive: total - active, pendingApprovals, bySeverity, byType, byAction });
+});
+
+router.get("/aml/rules/:id", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const rule = await client.amlRule.findUnique({
+    where: { id },
+    include: { approvalRequest: { select: { id: true, state: true, makerUserId: true, checkerUserId: true, rejectionReason: true, createdAt: true } } },
+  });
+  if (!rule) throw new ApiError(404, "AML_RULE_NOT_FOUND", "The AML rule does not exist");
+  response.json({
+    rule: {
+      ...rule,
+      approvalState: rule.approvalRequest?.state ?? null,
+      approval: rule.approvalRequest,
+    },
+  });
 });
 
 router.post("/aml/rules", async (request: Request, response: Response) => {
@@ -4843,19 +5819,59 @@ router.post("/aml/rules", async (request: Request, response: Response) => {
       .strict(),
     request.body,
   );
-  const rule = await client.amlRule.create({
-    data: {
-      code: body.code,
-      name: body.name,
-      ruleType: body.ruleType,
-      scope: json(body.scope),
-      params: json(body.params),
-      action: body.action,
-      baseSeverity: body.baseSeverity,
-      effectiveFrom: body.effectiveFrom ? new Date(body.effectiveFrom) : new Date(),
-    },
+  const actor = actorFromRequest(request);
+  let created: { ruleId: string; approvalRequestId: string };
+  try {
+    created = await client.$transaction(async (tx) => {
+      const rule = await tx.amlRule.create({
+        data: {
+          code: body.code,
+          name: body.name,
+          ruleType: body.ruleType,
+          scope: json(body.scope),
+          params: json(body.params),
+          action: body.action,
+          baseSeverity: body.baseSeverity,
+          active: false,
+          effectiveFrom: body.effectiveFrom ? new Date(body.effectiveFrom) : new Date(),
+        },
+      });
+      const approval = await tx.approvalRequest.create({
+        data: {
+          subjectType: "AML_RULE",
+          subjectId: rule.id,
+          payloadDiffJson: json(body),
+          mode: "STANDARD",
+          makerUserId: actor.userId,
+          state: "PENDING_REVIEW",
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorId: actor.userId,
+          role: actor.role ?? "COMPLIANCE",
+          action: "AML_RULE_DRAFTED",
+          entityType: "AML_RULE",
+          entityId: rule.id,
+          beforeJson: {},
+          afterJson: { code: rule.code, state: "PENDING_REVIEW", approvalRequestId: approval.id },
+          approvalRequestId: approval.id,
+        },
+      });
+      return { ruleId: rule.id, approvalRequestId: approval.id };
+    });
+  } catch (error) {
+    if ((error as { code?: string }).code === "P2002") {
+      throw new ApiError(409, "AML_RULE_CODE_EXISTS", "An AML rule with this code already exists");
+    }
+    throw error;
+  }
+  response.status(202).json({
+    status: "PENDING_REVIEW",
+    ruleId: created.ruleId,
+    approvalRequestId: created.approvalRequestId,
   });
-  response.status(201).json({ id: rule.id, code: rule.code, version: rule.version });
 });
 
 router.get("/aml/reporting-rules", async (request: Request, response: Response) => {
@@ -4907,29 +5923,135 @@ router.post("/aml/reporting-rules/:id/promote", async (request: Request, respons
   response.status(202).json(result);
 });
 
+const AML_REPORT_OPEN_STATUSES = ["DRAFT", "PENDING_CHECKER", "APPROVED"] as const;
+const AML_REPORT_SUBMITTED_STATUSES = ["SUBMITTED", "ACKNOWLEDGED", "REJECTED_BY_AUTHORITY"] as const;
+
+const regulatoryReportRow = (report: Record<string, any>, subjectNameOverride?: string | null) => ({
+  id: report.id,
+  reportRef: `RPT-${String(report.id).slice(-8).toUpperCase()}`,
+  reportType: report.reportType,
+  authority: report.authority,
+  status: report.status,
+  state: report.status,
+  subjectType: report.subjectType,
+  subjectId: report.subjectId,
+  amlCaseId: report.amlCaseId,
+  amlCaseStatus: report.amlCase?.status ?? null,
+  amlCaseSeverity: report.amlCase?.severity ?? null,
+  subjectName: subjectNameOverride ?? report.amlCase?.subjectId ?? report.subjectId,
+  periodStart: report.periodStart,
+  periodEnd: report.periodEnd,
+  submissionRef: report.submissionRef,
+  payloadSha256: report.payloadSha256,
+  confidential: report.confidential,
+  approvalRequestId: report.approvalRequestId,
+  approvalState: report.approvalRequest?.state ?? null,
+  submittedAt: report.submittedAt,
+  createdAt: report.createdAt,
+  updatedAt: report.updatedAt,
+  ageHours: approvalAgeHours(new Date(report.createdAt)),
+});
+
 router.get("/aml/reports", async (request: Request, response: Response) => {
   assertConfidential(request);
   const built = buildListQuery(request.query, {
-    search: ["subjectId", "submissionRef"],
-    in: { status: "status" }, equals: {reportType: "reportType", authority: "authority",},
-    dates: { createdAt: { path: "createdAt" }, submittedAt: { path: "submittedAt", fromKey: "dateFrom", toKey: "dateTo" } },
+    search: ["subjectId", "submissionRef", "amlCaseId"],
+    in: { status: "status", reportType: "reportType" },
+    equals: { authority: "authority", amlCaseId: "amlCaseId" },
+    dates: {
+      createdAt: { path: "createdAt" },
+      submittedAt: { path: "submittedAt", fromKey: "dateFrom", toKey: "dateTo" },
+      periodStart: { path: "periodStart", fromKey: "periodFrom", toKey: "periodTo" },
+    },
     sortable: { reportType: "reportType", authority: "authority", status: "status", createdAt: "createdAt", submittedAt: "submittedAt" },
     defaultSort: { createdAt: "desc" },
+    defaultPageSize: 20,
   });
   const [reports, total] = await Promise.all([
-    client.regulatoryReport.findMany({ where: built.where as never, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
+    client.regulatoryReport.findMany({
+      where: built.where as never,
+      orderBy: built.orderBy as never,
+      include: {
+        amlCase: { select: { id: true, status: true, severity: true, subjectType: true, subjectId: true } },
+        approvalRequest: { select: { state: true } },
+      },
+      skip: built.skip,
+      take: built.take,
+    }),
     client.regulatoryReport.count({ where: built.where as never }),
   ]);
-  response.json(listResponse("reports", reports.map((report) => ({
-    id: report.id,
-    reportType: report.reportType,
-    authority: report.authority,
-    status: report.status,
-    confidential: report.confidential,
-    submissionRef: report.submissionRef,
-    submittedAt: report.submittedAt,
-    approvalRequestId: report.approvalRequestId,
-  })), total, built));
+  const ruleIds = reports.filter((report) => report.subjectType === "REPORTING_RULE").map((report) => report.subjectId);
+  const rules = ruleIds.length === 0
+    ? []
+    : await client.reportingRule.findMany({
+        where: { id: { in: ruleIds } },
+        select: { id: true, sourceReference: true, reportType: true, status: true },
+      });
+  const ruleNames = new Map(rules.map((rule) => [rule.id, rule.sourceReference ?? `${rule.reportType} · ${rule.status}`]));
+  response.json(listResponse(
+    "reports",
+    reports.map((report) => regulatoryReportRow(report as never, ruleNames.get(report.subjectId) ?? null)),
+    total,
+    built,
+  ));
+});
+
+router.get("/aml/reports/summary", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const [statusRows, typeRows, submittedThisMonth, total] = await Promise.all([
+    client.regulatoryReport.groupBy({ by: ["status"], _count: { _all: true } }),
+    client.regulatoryReport.groupBy({ by: ["reportType"], _count: { _all: true } }),
+    client.regulatoryReport.count({
+      where: {
+        submittedAt: { gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) },
+      },
+    }),
+    client.regulatoryReport.count(),
+  ]);
+  const byStatus: Record<string, number> = {};
+  for (const row of statusRows) byStatus[row.status] = row._count._all;
+  const byType: Record<string, number> = {};
+  for (const row of typeRows) byType[row.reportType] = row._count._all;
+  response.json({
+    total,
+    byStatus,
+    byType,
+    submittedThisMonth,
+    pendingChecker: byStatus.PENDING_CHECKER ?? 0,
+    drafts: byStatus.DRAFT ?? 0,
+    acknowledged: byStatus.ACKNOWLEDGED ?? 0,
+    rejected: byStatus.REJECTED_BY_AUTHORITY ?? 0,
+  });
+});
+
+router.get("/aml/reports/:id", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const report = await client.regulatoryReport.findUnique({
+    where: { id },
+    include: {
+      amlCase: { select: { id: true, status: true, severity: true, subjectType: true, subjectId: true, triggerReason: true } },
+      approvalRequest: { select: { id: true, state: true, makerUserId: true, checkerUserId: true, rejectionReason: true, createdAt: true } },
+    },
+  });
+  if (!report) throw new ApiError(404, "REGULATORY_REPORT_NOT_FOUND", "The regulatory report does not exist");
+  const subjectRule = report.subjectType === "REPORTING_RULE"
+    ? await client.reportingRule.findUnique({ where: { id: report.subjectId }, select: { sourceReference: true, reportType: true, status: true } })
+    : null;
+  response.json({
+    report: {
+      ...regulatoryReportRow(report as never, subjectRule ? subjectRule.sourceReference ?? `${subjectRule.reportType} · ${subjectRule.status}` : null),
+      approval: report.approvalRequest ? {
+        id: report.approvalRequest.id,
+        state: report.approvalRequest.state,
+        makerUserId: report.approvalRequest.makerUserId,
+        checkerUserId: report.approvalRequest.checkerUserId,
+        rejectionReason: report.approvalRequest.rejectionReason,
+        createdAt: report.approvalRequest.createdAt,
+      } : null,
+      amlCase: report.amlCase,
+    },
+  });
 });
 
 router.post("/aml/reports", async (request: Request, response: Response) => {
@@ -5527,6 +6649,40 @@ router.get("/operator-cases", async (request: Request, response: Response) => {
   response.json(listResponse("cases", cases.map(flattenOperatorCase), total, built));
 });
 
+router.get("/operator-cases/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["case:read", "operator:read"]);
+  const cases = await client.operatorCase.findMany({
+    select: { state: true, priority: true, slaDueAt: true, assigneeUserId: true },
+  });
+  const now = new Date();
+  const byState: Record<string, number> = {};
+  const byPriority: Record<string, number> = {};
+  let overdue = 0;
+  let unassigned = 0;
+  let pendingChecker = 0;
+  for (const item of cases) {
+    byState[item.state] = (byState[item.state] ?? 0) + 1;
+    byPriority[item.priority] = (byPriority[item.priority] ?? 0) + 1;
+    if (!item.assigneeUserId) unassigned += 1;
+    if (item.state === "PENDING_CHECKER") pendingChecker += 1;
+    if (item.state !== "RESOLVED" && item.slaDueAt.getTime() < now.getTime()) overdue += 1;
+  }
+  response.json({
+    summary: {
+      total: cases.length,
+      open: byState.OPEN ?? 0,
+      inProgress: byState.IN_PROGRESS ?? 0,
+      pendingChecker,
+      resolved: byState.RESOLVED ?? 0,
+      unassigned,
+      overdue,
+      p1Open: cases.filter((item) => item.priority === "P1" && item.state !== "RESOLVED").length,
+      byState,
+      byPriority,
+    },
+  });
+});
+
 router.get("/operator-cases/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["case:read", "operator:read"]);
   const { id } = parseOrThrow(idSchema, request.params);
@@ -6037,10 +7193,87 @@ router.get("/gateways", async (request: Request, response: Response) => {
     defaultSort: { code: "asc" },
   });
   const [gateways, total] = await Promise.all([
-    client.gateway.findMany({ where: built.where as never, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
+    client.gateway.findMany({
+      where: built.where as never,
+      orderBy: built.orderBy as never,
+      include: {
+        versions: { orderBy: { versionNumber: "desc" }, select: { id: true, versionNumber: true, state: true, createdAt: true } },
+        activeVersion: { select: { id: true, versionNumber: true, state: true } },
+        _count: { select: { credentialSets: true, railRoutes: true, statementSources: true } },
+      },
+      skip: built.skip,
+      take: built.take,
+    }),
     client.gateway.count({ where: built.where as never }),
   ]);
-  response.json(listResponse("gateways", gateways, total, built));
+  const gatewayIds = gateways.map((gateway) => gateway.id);
+  const routeHealth = gatewayIds.length === 0
+    ? []
+    : await client.railRoute.groupBy({
+        by: ["gatewayId", "healthState"],
+        where: { gatewayId: { in: gatewayIds } },
+        _count: { _all: true },
+      });
+  const healthMap = new Map<string, Record<string, number>>();
+  for (const row of routeHealth) {
+    const current = healthMap.get(row.gatewayId) ?? {};
+    current[row.healthState] = row._count._all;
+    healthMap.set(row.gatewayId, current);
+  }
+  response.json(listResponse(
+    "gateways",
+    gateways.map((gateway) => ({
+      ...gateway,
+      versionCount: gateway.versions.length,
+      activeVersion: gateway.activeVersion,
+      pendingVersion: gateway.versions.find((version) => version.state === "PENDING_APPROVAL") ?? null,
+      routeCount: gateway._count.railRoutes,
+      credentialSetCount: gateway._count.credentialSets,
+      statementSourceCount: gateway._count.statementSources,
+      routeHealth: {
+        healthy: healthMap.get(gateway.id)?.HEALTHY ?? 0,
+        degraded: healthMap.get(gateway.id)?.DEGRADED ?? 0,
+        openBreaker: healthMap.get(gateway.id)?.OPEN_BREAKER ?? 0,
+      },
+    })),
+    total,
+    built,
+  ));
+});
+
+router.get("/gateways/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["gateway:read"]);
+  const [statusRows, kindRows, verificationRows, riskRows, routeHealthRows, pendingVersions] = await Promise.all([
+    client.gateway.groupBy({ by: ["status"], _count: { _all: true } }),
+    client.gateway.groupBy({ by: ["kind"], _count: { _all: true } }),
+    client.gateway.groupBy({ by: ["verificationState"], _count: { _all: true } }),
+    client.gateway.groupBy({ by: ["riskClass"], _count: { _all: true } }),
+    client.railRoute.groupBy({ by: ["healthState"], _count: { _all: true } }),
+    client.gatewayVersion.count({ where: { state: "PENDING_APPROVAL" } }),
+  ]);
+  const byStatus: Record<string, number> = {};
+  for (const row of statusRows) byStatus[row.status] = row._count._all;
+  const byKind: Record<string, number> = {};
+  for (const row of kindRows) byKind[row.kind] = row._count._all;
+  const byVerification: Record<string, number> = {};
+  for (const row of verificationRows) byVerification[row.verificationState] = row._count._all;
+  const byRisk: Record<string, number> = {};
+  for (const row of riskRows) byRisk[row.riskClass] = row._count._all;
+  const routeHealth: Record<string, number> = {};
+  for (const row of routeHealthRows) routeHealth[row.healthState] = row._count._all;
+  response.json({
+    total: statusRows.reduce((sum, row) => sum + row._count._all, 0),
+    byStatus,
+    byKind,
+    byVerification,
+    byRisk,
+    pendingVersions,
+    routes: {
+      healthy: routeHealth.HEALTHY ?? 0,
+      degraded: routeHealth.DEGRADED ?? 0,
+      openBreaker: routeHealth.OPEN_BREAKER ?? 0,
+    },
+  });
 });
 
 router.get("/gateways/:id", async (request: Request, response: Response) => {
@@ -8182,10 +9415,73 @@ router.get("/rails", async (request: Request, response: Response) => {
     defaultSort: { displayOrder: "asc" },
   });
   const [rails, total] = await Promise.all([
-    client.rail.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { fields: true }, skip: built.skip, take: built.take }),
+    client.rail.findMany({
+      where: built.where as never,
+      orderBy: built.orderBy as never,
+      include: {
+        fields: true,
+        _count: { select: { routes: true, flows: true, paymentAttempts: true } },
+      },
+      skip: built.skip,
+      take: built.take,
+    }),
     client.rail.count({ where: built.where as never }),
   ]);
-  response.json(listResponse("rails", rails, total, built));
+  const railIds = rails.map((rail) => rail.id);
+  const routeHealth = railIds.length === 0
+    ? []
+    : await client.railRoute.groupBy({
+        by: ["railId", "healthState", "status"],
+        where: { railId: { in: railIds } },
+        _count: { _all: true },
+      });
+  const healthMap = new Map<string, { healthy: number; degraded: number; openBreaker: number; active: number }>();
+  for (const row of routeHealth) {
+    const current = healthMap.get(row.railId) ?? { healthy: 0, degraded: 0, openBreaker: 0, active: 0 };
+    if (row.healthState === "HEALTHY") current.healthy += row._count._all;
+    else if (row.healthState === "DEGRADED") current.degraded += row._count._all;
+    else if (row.healthState === "OPEN_BREAKER") current.openBreaker += row._count._all;
+    if (row.status === "ACTIVE") current.active += row._count._all;
+    healthMap.set(row.railId, current);
+  }
+  response.json(listResponse(
+    "rails",
+    rails.map((rail) => ({
+      ...rail,
+      fieldCount: rail.fields.length,
+      routeCount: rail._count.routes,
+      flowCount: rail._count.flows,
+      paymentAttemptCount: rail._count.paymentAttempts,
+      routeHealth: healthMap.get(rail.id) ?? { healthy: 0, degraded: 0, openBreaker: 0, active: 0 },
+    })),
+    total,
+    built,
+  ));
+});
+
+router.get("/rails/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["gateway:read"]);
+  const [total, blocked, modeRows, routeHealthRows] = await Promise.all([
+    client.rail.count(),
+    client.rail.count({ where: { blocked: true } }),
+    client.rail.groupBy({ by: ["collectionMode"], _count: { _all: true } }),
+    client.railRoute.groupBy({ by: ["healthState"], _count: { _all: true } }),
+  ]);
+  const byMode: Record<string, number> = {};
+  for (const row of modeRows) byMode[row.collectionMode] = row._count._all;
+  const routeHealth: Record<string, number> = {};
+  for (const row of routeHealthRows) routeHealth[row.healthState] = row._count._all;
+  response.json({
+    total,
+    active: total - blocked,
+    blocked,
+    byMode,
+    routes: {
+      healthy: routeHealth.HEALTHY ?? 0,
+      degraded: routeHealth.DEGRADED ?? 0,
+      openBreaker: routeHealth.OPEN_BREAKER ?? 0,
+    },
+  });
 });
 
 router.get("/rails/:id", async (request: Request, response: Response) => {
@@ -8369,10 +9665,54 @@ router.get("/routes", async (request: Request, response: Response) => {
     defaultSort: [{ priority: "asc" }, { createdAt: "desc" }],
   });
   const [routes, total] = await Promise.all([
-    client.railRoute.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { rail: true, gateway: true }, skip: built.skip, take: built.take }),
+    client.railRoute.findMany({
+      where: built.where as never,
+      orderBy: built.orderBy as never,
+      include: {
+        rail: { select: { id: true, code: true, nameEn: true } },
+        gateway: { select: { id: true, code: true, name: true } },
+      },
+      skip: built.skip,
+      take: built.take,
+    }),
     client.railRoute.count({ where: built.where as never }),
   ]);
-  response.json(listResponse("routes", routes.map((route) => ({ ...route, railCode: route.rail?.code ?? "", gatewayCode: route.gateway?.code ?? "" })), total, built));
+  response.json(listResponse(
+    "routes",
+    routes.map((route) => ({
+      ...route,
+      railCode: route.rail?.code ?? "",
+      railName: route.rail?.nameEn ?? "",
+      gatewayCode: route.gateway?.code ?? "",
+      gatewayName: route.gateway?.name ?? "",
+    })),
+    total,
+    built,
+  ));
+});
+
+router.get("/routes/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["gateway:read"]);
+  const [statusRows, healthRows, pairRows, total] = await Promise.all([
+    client.railRoute.groupBy({ by: ["status"], _count: { _all: true } }),
+    client.railRoute.groupBy({ by: ["healthState"], _count: { _all: true } }),
+    client.railRoute.groupBy({ by: ["railId", "gatewayId"], _count: { _all: true } }),
+    client.railRoute.count(),
+  ]);
+  const byStatus: Record<string, number> = {};
+  for (const row of statusRows) byStatus[row.status] = row._count._all;
+  const byHealth: Record<string, number> = {};
+  for (const row of healthRows) byHealth[row.healthState] = row._count._all;
+  response.json({
+    total,
+    byStatus,
+    byHealth,
+    railGatewayPairs: pairRows.length,
+    active: byStatus.ACTIVE ?? 0,
+    paused: byStatus.PAUSED ?? 0,
+    draining: byStatus.DRAINING ?? 0,
+    openBreaker: byHealth.OPEN_BREAKER ?? 0,
+  });
 });
 
 router.get("/routes/:id", async (request: Request, response: Response) => {
@@ -8520,19 +9860,43 @@ router.post("/assets", async (request: Request, response: Response) => {
   response.status(201).json({ id: asset.id, name: asset.name });
 });
 
+const reconciliationSourceRow = (source: Record<string, any>) => {
+  const parser = source.parserConfig && typeof source.parserConfig === "object" && !Array.isArray(source.parserConfig)
+    ? source.parserConfig as Record<string, unknown>
+    : {};
+  return {
+    id: source.id,
+    name: source.gateway?.name ? `${source.gateway.name} · ${source.type}` : source.type,
+    gatewayId: source.gatewayId,
+    gatewayCode: source.gateway?.code ?? "",
+    type: source.type,
+    format: typeof parser.format === "string" ? parser.format : source.type,
+    delimiter: typeof parser.delimiter === "string" ? parser.delimiter : ",",
+    currency: typeof parser.currency === "string" ? parser.currency : "LYD",
+    scheduleCron: source.scheduleCron,
+    settlementLagDays: source.settlementLagDays,
+    dedupeKeyTemplate: source.dedupeKeyTemplate,
+    active: true,
+    columnMapping: parser.columns ?? parser.columnMapping ?? {},
+    parserConfig: parser,
+    createdAt: source.createdAt,
+    updatedAt: source.updatedAt,
+  };
+};
+
 router.get("/reconciliation/sources", async (request: Request, response: Response) => {
   requireAuthorities(request, ["reconciliation:read"]);
   const built = buildListQuery(request.query, {
-    search: ["gateway.code"],
+    search: ["gateway.code", "gateway.name"],
     dates: { createdAt: { path: "createdAt" } },
     sortable: { name: "gatewayId", createdAt: "createdAt" },
     defaultSort: { createdAt: "desc" },
   });
   const [sources, total] = await Promise.all([
-    client.statementSource.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { gateway: true }, skip: built.skip, take: built.take }),
+    client.statementSource.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { gateway: { select: { id: true, code: true, name: true } } }, skip: built.skip, take: built.take }),
     client.statementSource.count({ where: built.where as never }),
   ]);
-  response.json(listResponse("sources", sources, total, built));
+  response.json(listResponse("sources", sources.map((source) => reconciliationSourceRow(source as never)), total, built));
 });
 
 router.post("/reconciliation/sources", async (request: Request, response: Response) => {
@@ -8563,20 +9927,150 @@ router.post("/reconciliation/sources", async (request: Request, response: Respon
   response.status(201).json({ id: source.id, type: source.type });
 });
 
+const reconciliationRunRow = (run: Record<string, any>) => {
+  const stats = run.statsJson && typeof run.statsJson === "object" && !Array.isArray(run.statsJson)
+    ? run.statsJson as Record<string, unknown>
+    : {};
+  const totalRows = Number(stats.totalRows ?? stats.statementLines ?? run.items?.length ?? 0);
+  const matchedRows = Number(stats.matched ?? 0);
+  const amountMismatch = Number(stats.amountMismatch ?? stats.mismatched ?? 0);
+  const missingAtGateway = Number(stats.missingAtGateway ?? 0);
+  const missingLocally = Number(stats.missingLocally ?? 0);
+  const duplicates = Number(stats.duplicates ?? 0);
+  const feeVariances = Number(stats.feeVariances ?? 0);
+  const unmatchedRows = Number(stats.mismatched ?? amountMismatch + missingAtGateway + missingLocally + duplicates);
+  return {
+    id: run.id,
+    sourceId: run.statementSourceId,
+    sourceName: run.statementSource?.gateway?.name
+      ? `${run.statementSource.gateway.name} · ${run.statementSource.type}`
+      : run.statementSource?.type ?? "",
+    fileName: run.fileName ?? "—",
+    state: run.ingestedAt ? "COMPLETED" : "PROCESSING",
+    totalRows,
+    matchedRows,
+    unmatchedRows,
+    amountMismatch,
+    missingAtGateway,
+    missingLocally,
+    duplicates,
+    feeVariances,
+    matchRate: totalRows === 0 ? "0.0000" : ((matchedRows / totalRows) * 100).toFixed(4),
+    drift: amountMismatch + missingAtGateway + missingLocally,
+    stats,
+    startedAt: run.createdAt,
+    createdAt: run.createdAt,
+    finishedAt: run.ingestedAt,
+    ingestedAt: run.ingestedAt,
+  };
+};
+
 router.get("/reconciliation/runs", async (request: Request, response: Response) => {
   requireAuthorities(request, ["reconciliation:read"]);
+  const query = (request.query ?? {}) as Record<string, unknown>;
   const built = buildListQuery(request.query, {
     search: ["fileName"],
     equals: { statementSourceId: "statementSourceId" },
     dates: { createdAt: { path: "createdAt" } },
-    sortable: { fileName: "fileName", createdAt: "createdAt" },
+    sortable: { fileName: "fileName", createdAt: "createdAt", ingestedAt: "ingestedAt" },
     defaultSort: { createdAt: "desc" },
+    defaultPageSize: 20,
   });
+  const conditions: Record<string, unknown>[] = [built.where];
+  if (query.state === "COMPLETED") conditions.push({ ingestedAt: { not: null } });
+  else if (query.state === "PROCESSING") conditions.push({ ingestedAt: null });
+  const where = conditions.length === 1 ? conditions[0] : { AND: conditions };
   const [runs, total] = await Promise.all([
-    client.reconciliationRun.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { items: true }, skip: built.skip, take: built.take }),
-    client.reconciliationRun.count({ where: built.where as never }),
+    client.reconciliationRun.findMany({
+      where: where as never,
+      orderBy: built.orderBy as never,
+      include: {
+        items: { select: { result: true } },
+        statementSource: { select: { type: true, gateway: { select: { code: true, name: true } } } },
+      },
+      skip: built.skip,
+      take: built.take,
+    }),
+    client.reconciliationRun.count({ where: where as never }),
   ]);
-  response.json(listResponse("runs", runs, total, built));
+  response.json(listResponse("runs", runs.map((run) => reconciliationRunRow(run as never)), total, built));
+});
+
+router.get("/reconciliation/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["reconciliation:read"]);
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const [runs, resultRows, sourceCount] = await Promise.all([
+    client.reconciliationRun.findMany({
+      where: { createdAt: { gte: since } },
+      select: { ingestedAt: true, statsJson: true, createdAt: true },
+    }),
+    client.reconciliationItem.groupBy({
+      by: ["result"],
+      where: { createdAt: { gte: since } },
+      _count: { _all: true },
+    }),
+    client.statementSource.count(),
+  ]);
+  const resultCounts: Record<string, number> = {};
+  for (const row of resultRows) resultCounts[row.result] = row._count._all;
+  let totalRows = 0;
+  let matchedRows = 0;
+  let mismatchedRows = 0;
+  for (const run of runs) {
+    const stats = run.statsJson && typeof run.statsJson === "object" && !Array.isArray(run.statsJson)
+      ? run.statsJson as Record<string, unknown>
+      : {};
+    totalRows += Number(stats.totalRows ?? stats.statementLines ?? 0);
+    matchedRows += Number(stats.matched ?? 0);
+    mismatchedRows += Number(stats.mismatched ?? (Number(stats.amountMismatch ?? 0) + Number(stats.missingAtGateway ?? 0) + Number(stats.missingLocally ?? 0) + Number(stats.duplicates ?? 0)));
+  }
+  response.json({
+    sources: sourceCount,
+    runs: runs.length,
+    completedRuns: runs.filter((run) => run.ingestedAt !== null).length,
+    processingRuns: runs.filter((run) => run.ingestedAt === null).length,
+    totalRows,
+    matchedRows,
+    mismatchedRows,
+    matchRate: totalRows === 0 ? "0.0000" : ((matchedRows / totalRows) * 100).toFixed(4),
+    resultCounts,
+  });
+});
+
+router.get("/reconciliation/runs/:id", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["reconciliation:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const run = await client.reconciliationRun.findUnique({
+    where: { id },
+    include: {
+      statementSource: { select: { type: true, gateway: { select: { code: true, name: true } } } },
+      items: {
+        take: 200,
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          ourReference: true,
+          providerReference: true,
+          batchReference: true,
+          statementAmount: true,
+          statementFee: true,
+          result: true,
+          attemptId: true,
+        },
+      },
+    },
+  });
+  if (!run) throw new ApiError(404, "RECONCILIATION_RUN_NOT_FOUND", "The reconciliation run does not exist");
+  response.json({
+    run: {
+      ...reconciliationRunRow(run as never),
+      items: run.items.map((item) => ({
+        ...item,
+        statementAmount: merchantMoney(item.statementAmount),
+        statementFee: merchantMoney(item.statementFee),
+      })),
+    },
+  });
 });
 
 // The statement is never parsed in the request: the upload stores the file
@@ -8590,36 +10084,242 @@ router.post("/reconciliation/upload", async (request: Request, response: Respons
   await upload(request, response);
 });
 
+const DISPUTE_OPEN_STATUSES: readonly string[] = ["OPENED", "EVIDENCE_REQUESTED", "EVIDENCE_SUBMITTED"];
+const DISPUTE_EVIDENCE_PENDING_STATUSES: readonly string[] = ["OPENED", "EVIDENCE_REQUESTED"];
+
+const disputeEvidenceSubmittedAt = (value: unknown): string | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const submittedAt = (value as Record<string, unknown>).submittedAt;
+  return typeof submittedAt === "string" ? submittedAt : null;
+};
+
+const disputeListRow = (dispute: Record<string, any>) => {
+  const dueAt = dispute.evidenceDueAt ? new Date(dispute.evidenceDueAt) : null;
+  const now = Date.now();
+  return {
+    id: dispute.id,
+    externalDisputeRef: dispute.externalDisputeRef,
+    disputeRef: dispute.externalDisputeRef,
+    source: dispute.source,
+    status: dispute.status,
+    state: dispute.status,
+    reasonCode: dispute.reasonCode,
+    amount: merchantMoney(dispute.amount),
+    currency: dispute.currency,
+    openedAt: dispute.openedAt,
+    evidenceDueAt: dispute.evidenceDueAt,
+    outcomeAt: dispute.outcomeAt,
+    evidenceDueInHours: dueAt ? Math.ceil((dueAt.getTime() - now) / 3_600_000) : null,
+    evidenceOverdue: Boolean(dueAt && dueAt.getTime() < now && DISPUTE_EVIDENCE_PENDING_STATUSES.includes(dispute.status)),
+    evidenceSubmittedAt: disputeEvidenceSubmittedAt(dispute.evidenceJson),
+    ageHours: dispute.openedAt ? approvalAgeHours(new Date(dispute.openedAt), now) : 0,
+    merchantId: dispute.attempt?.merchant?.id ?? null,
+    merchantName: dispute.attempt?.merchant?.tradeName ?? "",
+    attemptId: dispute.attemptId,
+    attemptReference: dispute.attempt?.reference ?? null,
+    attemptStatus: dispute.attempt?.status ?? null,
+    railCode: dispute.attempt?.rail?.code ?? dispute.rail?.code ?? "",
+    railName: dispute.attempt?.rail?.nameEn ?? dispute.rail?.nameEn ?? "",
+    gatewayCode: dispute.gateway?.code ?? "",
+    gatewayName: dispute.gateway?.name ?? "",
+    adjustmentId: dispute.adjustmentId,
+    adjustmentState: dispute.adjustment?.state ?? null,
+    adjustmentJournalEntryId: dispute.adjustment?.journalEntryId ?? null,
+  };
+};
+
 router.get("/disputes", async (request: Request, response: Response) => {
   requireAuthorities(request, ["dispute:read"]);
+  const query = (request.query ?? {}) as Record<string, unknown>;
   const built = buildListQuery(request.query, {
-    search: ["disputeRef", "externalDisputeRef", "reasonCode"],
-    in: { status: "status" }, equals: {railId: "railId", gatewayId: "gatewayId"},
+    search: ["externalDisputeRef", "reasonCode", "attempt.reference", "attempt.merchant.tradeName"],
+    in: { status: "status", source: "source" },
+    equals: { railId: "railId", gatewayId: "gatewayId" },
     ranges: { amount: { path: "amount", kind: "decimal" } },
-    dates: { createdAt: { path: "openedAt" }, evidenceDueAt: { path: "evidenceDueAt", fromKey: "dateFrom", toKey: "dateTo" } },
-    sortable: { disputeRef: "disputeRef", status: "status", amount: "amount", openedAt: "openedAt", evidenceDueAt: "evidenceDueAt" },
+    dates: {
+      createdAt: { path: "openedAt" },
+      openedAt: { path: "openedAt", fromKey: "openedFrom", toKey: "openedTo" },
+      evidenceDueAt: { path: "evidenceDueAt", fromKey: "dateFrom", toKey: "dateTo" },
+    },
+    sortable: {
+      externalDisputeRef: "externalDisputeRef",
+      status: "status",
+      source: "source",
+      amount: "amount",
+      openedAt: "openedAt",
+      evidenceDueAt: "evidenceDueAt",
+    },
     defaultSort: { openedAt: "desc" },
+    defaultPageSize: 20,
   });
+  const conditions: Record<string, unknown>[] = [built.where];
+  const merchantId = typeof query.merchantId === "string" && query.merchantId.trim() ? query.merchantId.trim() : "";
+  if (merchantId) {
+    conditions.push({ attempt: { merchantId } });
+  }
+  const where = conditions.length === 1 ? conditions[0] : { AND: conditions };
   const [disputes, total] = await Promise.all([
-    client.dispute.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { attempt: { select: { merchant: { select: { tradeName: true } }, rail: { select: { code: true } } } } }, skip: built.skip, take: built.take }),
-    client.dispute.count({ where: built.where as never }),
+    client.dispute.findMany({
+      where: where as never,
+      orderBy: built.orderBy as never,
+      include: {
+        attempt: {
+          select: {
+            id: true,
+            reference: true,
+            status: true,
+            merchant: { select: { id: true, tradeName: true, legalName: true } },
+            rail: { select: { id: true, code: true, nameEn: true } },
+          },
+        },
+        gateway: { select: { id: true, code: true, name: true } },
+        rail: { select: { id: true, code: true, nameEn: true } },
+        adjustment: { select: { id: true, state: true, journalEntryId: true } },
+      },
+      skip: built.skip,
+      take: built.take,
+    }),
+    client.dispute.count({ where: where as never }),
   ]);
-  response.json(listResponse("disputes", disputes.map((dispute) => ({
-    ...dispute,
-    state: dispute.status,
-    merchantName: dispute.attempt?.merchant?.tradeName ?? "",
-    railCode: dispute.attempt?.rail?.code ?? "",
-  })), total, built));
+  response.json(listResponse("disputes", disputes.map((dispute) => disputeListRow(dispute as never)), total, built));
+});
+
+router.get("/disputes/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["dispute:read"]);
+  const now = new Date();
+  const soon = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+  const [statusRows, openAggregate, overdue, dueSoon, earliestDue] = await Promise.all([
+    client.dispute.groupBy({ by: ["status"], _count: { _all: true } }),
+    client.dispute.aggregate({
+      where: { status: { in: [...DISPUTE_OPEN_STATUSES] as never } },
+      _count: { _all: true },
+      _sum: { amount: true },
+    }),
+    client.dispute.count({
+      where: { status: { in: [...DISPUTE_EVIDENCE_PENDING_STATUSES] as never }, evidenceDueAt: { lt: now } },
+    }),
+    client.dispute.count({
+      where: { status: { in: [...DISPUTE_EVIDENCE_PENDING_STATUSES] as never }, evidenceDueAt: { gte: now, lte: soon } },
+    }),
+    client.dispute.findFirst({
+      where: { status: { in: [...DISPUTE_EVIDENCE_PENDING_STATUSES] as never }, evidenceDueAt: { not: null } },
+      orderBy: { evidenceDueAt: "asc" },
+      select: { evidenceDueAt: true },
+    }),
+  ]);
+  const byStatus: Record<string, number> = {};
+  for (const row of statusRows) byStatus[row.status] = row._count._all;
+  const openCount = (openAggregate._count as { _all: number })._all;
+  const openAmount = (openAggregate._sum as { amount: unknown } | undefined)?.amount;
+  response.json({
+    totalOpen: openCount,
+    openAmount: merchantMoney(openAmount),
+    byStatus,
+    overdue,
+    dueSoon,
+    earliestEvidenceDueAt: earliestDue?.evidenceDueAt ?? null,
+  });
 });
 
 router.get("/disputes/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["dispute:read"]);
   const { id } = parseOrThrow(idSchema, request.params);
-  const dispute = await client.dispute.findUnique({ where: { id } });
+  const dispute = await client.dispute.findUnique({
+    where: { id },
+    include: {
+      attempt: {
+        select: {
+          id: true,
+          reference: true,
+          status: true,
+          settledAmount: true,
+          merchant: { select: { id: true, tradeName: true, legalName: true } },
+          rail: { select: { id: true, code: true, nameEn: true } },
+        },
+      },
+      gateway: { select: { id: true, code: true, name: true } },
+      rail: { select: { id: true, code: true, nameEn: true } },
+      adjustment: { select: { id: true, state: true, journalEntryId: true, reason: true } },
+    },
+  });
   if (!dispute) {
     throw new ApiError(404, "DISPUTE_NOT_FOUND", "The dispute does not exist");
   }
-  response.json({ dispute });
+  const dueAt = dispute.evidenceDueAt ? new Date(dispute.evidenceDueAt) : null;
+  const evidenceOpen = DISPUTE_OPEN_STATUSES.includes(dispute.status)
+    && dispute.status !== "EVIDENCE_SUBMITTED"
+    && (!dueAt || dueAt.getTime() >= Date.now());
+  response.json({
+    dispute: {
+      ...disputeListRow(dispute as never),
+      attemptSettledAmount: merchantMoney(dispute.attempt?.settledAmount),
+      adjustmentReason: dispute.adjustment?.reason ?? null,
+      evidenceJson: dispute.evidenceJson,
+      canSubmitEvidence: evidenceOpen,
+      evidenceBlockedReason: evidenceOpen
+        ? null
+        : dispute.status === "EVIDENCE_SUBMITTED"
+          ? "EVIDENCE_ALREADY_SUBMITTED"
+          : dueAt && dueAt.getTime() < Date.now()
+            ? "EVIDENCE_WINDOW_CLOSED"
+            : "DISPUTE_NOT_OPEN",
+    },
+  });
+});
+
+router.post("/disputes/:id/evidence", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["dispute:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z.object({
+      evidence: z.record(z.string().max(64), z.unknown()),
+      notes: z.string().max(2000).optional(),
+    }).strict(),
+    request.body ?? {},
+  );
+  const dispute = await client.dispute.findUnique({ where: { id } });
+  if (!dispute) throw new ApiError(404, "DISPUTE_NOT_FOUND", "The dispute does not exist");
+  if (!DISPUTE_OPEN_STATUSES.includes(dispute.status) || dispute.status === "EVIDENCE_SUBMITTED") {
+    throw new ApiError(409, "DISPUTE_NOT_OPEN_FOR_EVIDENCE", "The dispute is not open for evidence submission");
+  }
+  if (dispute.evidenceDueAt && dispute.evidenceDueAt.getTime() < Date.now()) {
+    throw new ApiError(409, "DISPUTE_EVIDENCE_WINDOW_CLOSED", "The dispute evidence window has closed");
+  }
+  const existing = dispute.evidenceJson && typeof dispute.evidenceJson === "object" && !Array.isArray(dispute.evidenceJson)
+    ? dispute.evidenceJson as Record<string, unknown>
+    : {};
+  const submittedAt = new Date().toISOString();
+  const evidenceJson = {
+    ...existing,
+    ...body.evidence,
+    ...(body.notes ? { notes: body.notes } : {}),
+    submittedAt,
+  };
+  const actor = actorFromRequest(request);
+  const updated = await client.$transaction(async (tx) => {
+    const row = await tx.dispute.update({
+      where: { id },
+      data: { status: "EVIDENCE_SUBMITTED", evidenceJson: json(evidenceJson) },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "OPERATOR",
+        action: "DISPUTE_EVIDENCE_SUBMITTED",
+        entityType: "DISPUTE",
+        entityId: id,
+        beforeJson: { status: dispute.status, evidenceSubmittedAt: disputeEvidenceSubmittedAt(dispute.evidenceJson) },
+        afterJson: { status: row.status, submittedAt, keys: Object.keys(body.evidence) },
+      },
+    });
+    return row;
+  });
+  response.json({
+    id: updated.id,
+    status: updated.status,
+    evidenceSubmittedAt: submittedAt,
+    evidenceJson: updated.evidenceJson,
+  });
 });
 
 router.post("/disputes", async (request: Request, response: Response) => {
@@ -8672,25 +10372,178 @@ router.post("/disputes", async (request: Request, response: Response) => {
   });
 });
 
+const ADJUSTMENT_EXECUTED_STATES: readonly string[] = ["EXECUTED"];
+const ADJUSTMENT_OPEN_STATES: readonly string[] = ["DRAFT", "PENDING_REVIEW", "APPROVED", "EXECUTING"];
+
+const adjustmentListRow = (adjustment: Record<string, any>, approval?: { id: string; state: string; checkerUserId: string | null } | null) => ({
+  id: adjustment.id,
+  type: adjustment.type,
+  state: adjustment.state,
+  amount: merchantMoney(adjustment.amount),
+  currency: adjustment.targetGlAccount?.currency ?? adjustment.sourceAttempt?.currency ?? "LYD",
+  reverseCommission: adjustment.reverseCommission,
+  reason: adjustment.reason,
+  externalDisputeRef: adjustment.externalDisputeRef,
+  providerRefundRef: adjustment.providerRefundRef,
+  draftedBySystem: adjustment.draftedBySystem,
+  sourceAttemptId: adjustment.sourceAttemptId,
+  sourceAttemptReference: adjustment.sourceAttempt?.reference ?? null,
+  sourceAttemptStatus: adjustment.sourceAttempt?.status ?? null,
+  disputeId: adjustment.disputeId,
+  disputeReference: adjustment.dispute?.externalDisputeRef ?? null,
+  disputeStatus: adjustment.dispute?.status ?? null,
+  targetGlAccountId: adjustment.targetGlAccountId,
+  targetAccountType: adjustment.targetGlAccount?.accountType ?? null,
+  targetAccountOwnerId: adjustment.targetGlAccount?.ownerId ?? null,
+  merchantId: adjustment.sourceAttempt?.merchant?.id ?? adjustment.targetGlAccount?.ownerId ?? null,
+  merchantName: adjustment.sourceAttempt?.merchant?.tradeName ?? "",
+  journalEntryId: adjustment.journalEntryId,
+  approvalRequestId: approval?.id ?? null,
+  approvalState: approval?.state ?? null,
+  checkerUserId: approval?.checkerUserId ?? null,
+  createdAt: adjustment.createdAt,
+  updatedAt: adjustment.updatedAt,
+  executedAt: adjustment.state === "EXECUTED" ? adjustment.updatedAt : null,
+});
+
 router.get("/adjustments", async (request: Request, response: Response) => {
   requireAuthorities(request, ["finance:read"]);
+  const query = (request.query ?? {}) as Record<string, unknown>;
   const built = buildListQuery(request.query, {
-    search: ["reason", "externalDisputeRef"],
-    in: { state: "state" }, equals: {type: "type",},
+    search: ["reason", "externalDisputeRef", "providerRefundRef", "id", "sourceAttempt.reference", "dispute.externalDisputeRef"],
+    in: { state: "state", type: "type" },
     booleans: { draftedBySystem: "draftedBySystem" },
+    equals: { sourceAttemptId: "sourceAttemptId", disputeId: "disputeId" },
     ranges: { amount: { path: "amount", kind: "decimal" } },
-    dates: { createdAt: { path: "createdAt" } },
-    sortable: { type: "type", state: "state", amount: "amount", createdAt: "createdAt" },
+    dates: { createdAt: { path: "createdAt" }, updatedAt: { path: "updatedAt", fromKey: "updatedFrom", toKey: "updatedTo" } },
+    sortable: { type: "type", state: "state", amount: "amount", createdAt: "createdAt", updatedAt: "updatedAt" },
     defaultSort: { createdAt: "desc" },
+    defaultPageSize: 20,
   });
+  const conditions: Record<string, unknown>[] = [built.where];
+  const merchantId = typeof query.merchantId === "string" && query.merchantId.trim() ? query.merchantId.trim() : "";
+  if (merchantId) {
+    conditions.push({
+      OR: [
+        { sourceAttempt: { merchantId } },
+        { targetGlAccount: { ownerId: merchantId } },
+      ],
+    });
+  }
+  const where = conditions.length === 1 ? conditions[0] : { AND: conditions };
   const [adjustments, total] = await Promise.all([
-    client.adjustment.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { sourceAttempt: { select: { merchant: { select: { tradeName: true } } } } }, skip: built.skip, take: built.take }),
-    client.adjustment.count({ where: built.where as never }),
+    client.adjustment.findMany({
+      where: where as never,
+      orderBy: built.orderBy as never,
+      include: {
+        sourceAttempt: { select: { id: true, reference: true, status: true, currency: true, merchant: { select: { id: true, tradeName: true, legalName: true } } } },
+        dispute: { select: { id: true, externalDisputeRef: true, status: true } },
+        targetGlAccount: { select: { id: true, accountType: true, currency: true, ownerId: true } },
+      },
+      skip: built.skip,
+      take: built.take,
+    }),
+    client.adjustment.count({ where: where as never }),
   ]);
-  response.json(listResponse("adjustments", adjustments.map((adjustment) => ({
-    ...adjustment,
-    merchantName: adjustment.sourceAttempt?.merchant?.tradeName ?? "",
-  })), total, built));
+  const ids = adjustments.map((adjustment) => adjustment.id);
+  const approvals = ids.length === 0
+    ? []
+    : await client.approvalRequest.findMany({
+        where: {
+          subjectType: { in: approvalSubjectTypeVariants("ADJUSTMENT") as never },
+          subjectId: { in: ids },
+        },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, subjectId: true, state: true, checkerUserId: true },
+      });
+  const approvalByAdjustment = new Map<string, { id: string; state: string; checkerUserId: string | null }>();
+  for (const approval of approvals) {
+    if (!approvalByAdjustment.has(approval.subjectId)) {
+      approvalByAdjustment.set(approval.subjectId, { id: approval.id, state: approval.state, checkerUserId: approval.checkerUserId });
+    }
+  }
+  response.json(listResponse(
+    "adjustments",
+    adjustments.map((adjustment) => adjustmentListRow(adjustment as never, approvalByAdjustment.get(adjustment.id) ?? null)),
+    total,
+    built,
+  ));
+});
+
+router.get("/adjustments/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["finance:read"]);
+  const [stateRows, typeRows, openAggregate, executedAggregate] = await Promise.all([
+    client.adjustment.groupBy({ by: ["state"], _count: { _all: true }, _sum: { amount: true } }),
+    client.adjustment.groupBy({ by: ["type"], _count: { _all: true }, _sum: { amount: true } }),
+    client.adjustment.aggregate({
+      where: { state: { in: [...ADJUSTMENT_OPEN_STATES] as never } },
+      _count: { _all: true },
+      _sum: { amount: true },
+    }),
+    client.adjustment.aggregate({
+      where: { state: { in: [...ADJUSTMENT_EXECUTED_STATES] as never } },
+      _count: { _all: true },
+      _sum: { amount: true },
+    }),
+  ]);
+  const byState: Record<string, number> = {};
+  const amountByState: Record<string, string> = {};
+  for (const row of stateRows) {
+    byState[row.state] = row._count._all;
+    amountByState[row.state] = merchantMoney(row._sum.amount);
+  }
+  const byType: Record<string, number> = {};
+  const amountByType: Record<string, string> = {};
+  for (const row of typeRows) {
+    byType[row.type] = row._count._all;
+    amountByType[row.type] = merchantMoney(row._sum.amount);
+  }
+  response.json({
+    totalOpen: (openAggregate._count as { _all: number })._all,
+    openAmount: merchantMoney((openAggregate._sum as { amount?: unknown } | undefined)?.amount),
+    executedCount: (executedAggregate._count as { _all: number })._all,
+    executedAmount: merchantMoney((executedAggregate._sum as { amount?: unknown } | undefined)?.amount),
+    byState,
+    amountByState,
+    byType,
+    amountByType,
+  });
+});
+
+router.get("/adjustments/:id", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["finance:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const adjustment = await client.adjustment.findUnique({
+    where: { id },
+    include: {
+      sourceAttempt: { select: { id: true, reference: true, status: true, currency: true, merchant: { select: { id: true, tradeName: true, legalName: true } } } },
+      dispute: { select: { id: true, externalDisputeRef: true, status: true, amount: true, openedAt: true } },
+      targetGlAccount: { select: { id: true, accountType: true, currency: true, ownerId: true } },
+      journalEntry: { select: { id: true, refType: true, refId: true, description: true } },
+    },
+  });
+  if (!adjustment) throw new ApiError(404, "ADJUSTMENT_NOT_FOUND", "The adjustment does not exist");
+  const approval = await client.approvalRequest.findFirst({
+    where: { subjectType: { in: approvalSubjectTypeVariants("ADJUSTMENT") as never }, subjectId: adjustment.id },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, state: true, checkerUserId: true, makerUserId: true, rejectionReason: true, createdAt: true },
+  });
+  response.json({
+    adjustment: {
+      ...adjustmentListRow(adjustment as never, approval),
+      disputeAmount: adjustment.dispute ? merchantMoney(adjustment.dispute.amount) : null,
+      disputeOpenedAt: adjustment.dispute?.openedAt ?? null,
+      journalEntry: adjustment.journalEntry ?? null,
+      approval: approval ? {
+        id: approval.id,
+        state: approval.state,
+        makerUserId: approval.makerUserId,
+        checkerUserId: approval.checkerUserId,
+        rejectionReason: approval.rejectionReason,
+        createdAt: approval.createdAt,
+      } : null,
+    },
+  });
 });
 
 router.post("/adjustments", async (request: Request, response: Response) => {
@@ -8763,25 +10616,117 @@ router.post("/adjustments", async (request: Request, response: Response) => {
   });
 });
 
+const CASHOUT_OPEN_STATES: readonly string[] = ["PENDING", "PROCESSING"];
+
+const cashoutListRow = (cashout: Record<string, any>) => ({
+  id: cashout.id,
+  merchantId: cashout.merchantId,
+  merchantName: cashout.merchant?.tradeName ?? "",
+  walletId: cashout.walletId,
+  currency: cashout.wallet?.currency ?? "LYD",
+  amount: merchantMoney(cashout.amount),
+  state: cashout.state,
+  destination: merchantMaskedJson(cashout.destinationBankJson),
+  adjustmentId: cashout.adjustmentId,
+  adjustmentState: cashout.adjustment?.state ?? null,
+  adjustmentJournalEntryId: cashout.adjustment?.journalEntryId ?? null,
+  requestedAt: cashout.createdAt,
+  createdAt: cashout.createdAt,
+  updatedAt: cashout.updatedAt,
+  ageHours: approvalAgeHours(new Date(cashout.createdAt)),
+});
+
 router.get("/cashouts", async (request: Request, response: Response) => {
   requireAuthorities(request, ["cashout:read"]);
   const built = buildListQuery(request.query, {
-    search: ["merchant.tradeName", "walletId"],
-    in: { state: "state" }, equals: {merchantId: "merchantId", walletId: "walletId"},
+    search: ["merchant.tradeName", "walletId", "id"],
+    in: { state: "state" },
+    equals: { merchantId: "merchantId", walletId: "walletId" },
     ranges: { amount: { path: "amount", kind: "decimal" } },
     dates: { createdAt: { path: "createdAt" } },
-    sortable: { merchantName: "merchantId", state: "state", amount: "amount", requestedAt: "createdAt" },
+    sortable: { state: "state", amount: "amount", requestedAt: "createdAt", createdAt: "createdAt", updatedAt: "updatedAt" },
     defaultSort: { createdAt: "desc" },
+    defaultPageSize: 20,
   });
   const [cashouts, total] = await Promise.all([
-    client.cashoutRequest.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { merchant: { select: { tradeName: true } } }, skip: built.skip, take: built.take }),
+    client.cashoutRequest.findMany({
+      where: built.where as never,
+      orderBy: built.orderBy as never,
+      include: {
+        merchant: { select: { id: true, tradeName: true, legalName: true } },
+        wallet: { select: { id: true, currency: true, status: true } },
+        adjustment: { select: { id: true, state: true, journalEntryId: true } },
+      },
+      skip: built.skip,
+      take: built.take,
+    }),
     client.cashoutRequest.count({ where: built.where as never }),
   ]);
-  response.json(listResponse("cashouts", cashouts.map((cashout) => ({
-    ...cashout,
-    merchantName: cashout.merchant?.tradeName ?? "",
-    requestedAt: cashout.createdAt,
-  })), total, built));
+  response.json(listResponse("cashouts", cashouts.map((cashout) => cashoutListRow(cashout as never)), total, built));
+});
+
+router.get("/cashouts/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["cashout:read"]);
+  const now = new Date();
+  const [statusRows, openAggregate, oldestPending] = await Promise.all([
+    client.cashoutRequest.groupBy({ by: ["state"], _count: { _all: true }, _sum: { amount: true } }),
+    client.cashoutRequest.aggregate({
+      where: { state: { in: [...CASHOUT_OPEN_STATES] as never } },
+      _count: { _all: true },
+      _sum: { amount: true },
+    }),
+    client.cashoutRequest.findFirst({
+      where: { state: "PENDING" },
+      orderBy: { createdAt: "asc" },
+      select: { createdAt: true },
+    }),
+  ]);
+  const byState: Record<string, number> = {};
+  const amountByState: Record<string, string> = {};
+  for (const row of statusRows) {
+    byState[row.state] = row._count._all;
+    amountByState[row.state] = merchantMoney(row._sum.amount);
+  }
+  response.json({
+    totalOpen: (openAggregate._count as { _all: number })._all,
+    openAmount: merchantMoney((openAggregate._sum as { amount?: unknown } | undefined)?.amount),
+    pendingCount: byState.PENDING ?? 0,
+    processingCount: byState.PROCESSING ?? 0,
+    completedCount: byState.COMPLETE ?? 0,
+    subtractedCount: byState.SUBTRACTED ?? 0,
+    rejectedCount: byState.REJECTED ?? 0,
+    oldestPendingAgeHours: oldestPending ? approvalAgeHours(oldestPending.createdAt, now.getTime()) : 0,
+    byState,
+    amountByState,
+  });
+});
+
+router.get("/cashouts/:id", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["cashout:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const cashout = await client.cashoutRequest.findUnique({
+    where: { id },
+    include: {
+      merchant: { select: { id: true, tradeName: true, legalName: true } },
+      wallet: { select: { id: true, currency: true, status: true } },
+      adjustment: { select: { id: true, state: true, journalEntryId: true, reason: true, amount: true } },
+    },
+  });
+  if (!cashout) throw new ApiError(404, "CASHOUT_NOT_FOUND", "The cash-out request does not exist");
+  const balance = await merchantWalletBalance(client, cashout.merchantId);
+  const wallet = balance.wallets.find((entry) => entry.id === cashout.walletId);
+  response.json({
+    cashout: {
+      ...cashoutListRow(cashout as never),
+      merchantLegalName: cashout.merchant.legalName,
+      walletStatus: cashout.wallet.status,
+      walletBalance: wallet?.balance ?? null,
+      adjustmentReason: cashout.adjustment?.reason ?? null,
+      adjustmentAmount: cashout.adjustment ? merchantMoney(cashout.adjustment.amount) : null,
+      canProcess: cashout.state === "PENDING",
+      processBlockedReason: cashout.state === "PENDING" ? null : "CASHOUT_NOT_PENDING",
+    },
+  });
 });
 
 router.post("/cashouts/:id/process", async (request: Request, response: Response) => {
@@ -8981,6 +10926,7 @@ router.get("/finance/profitability", async (request: Request, response: Response
   let grossVolume = decimal(0);
   let grossCommission = decimal(0);
   let netMerchant = decimal(0);
+  let gatewayCostPeriod = decimal(0);
   const byRail = new Map<string, ProfitBucket>();
   const byDay = new Map<string, ProfitBucket>();
   const byGateway = new Map<string, ProfitBucket>();
@@ -8995,6 +10941,7 @@ router.get("/finance/profitability", async (request: Request, response: Response
     grossVolume = grossVolume.plus(volume);
     grossCommission = grossCommission.plus(commission);
     netMerchant = netMerchant.plus(decimal(attempt.netMerchantAmount));
+    gatewayCostPeriod = gatewayCostPeriod.plus(cost);
 
     const railCode = railCodes.get(attempt.railId) ?? "unknown";
     const railEntry = byRail.get(railCode) ?? bucket();
@@ -9034,6 +10981,20 @@ router.get("/finance/profitability", async (request: Request, response: Response
   const commissionReceivable = natural("COMMISSION_RECEIVABLE");
   const netRevenue = grossCommission.minus(gatewayCostRealized);
   const netContribution = netRevenue.minus(chargebackLosses);
+  const [chargebackPeriod, refundCommissionPeriod] = await Promise.all([
+    client.adjustment.aggregate({
+      where: { type: "CHARGEBACK", state: "EXECUTED", updatedAt: { gte: since, lte: windowEnd } },
+      _sum: { amount: true },
+    }),
+    client.adjustment.aggregate({
+      where: { type: "REFUND", reverseCommission: true, state: "EXECUTED", updatedAt: { gte: since, lte: windowEnd } },
+      _sum: { amount: true },
+    }),
+  ]);
+  const chargebackLossesPeriod = decimal(chargebackPeriod._sum.amount ?? 0);
+  const refundCommissionReversed = decimal(refundCommissionPeriod._sum.amount ?? 0);
+  const periodNetRevenue = grossCommission.minus(gatewayCostPeriod);
+  const periodNetContribution = periodNetRevenue.minus(chargebackLossesPeriod);
 
   const toRows = (source: Map<string, ProfitBucket>, keyName: string) =>
     [...source.entries()]
@@ -9047,13 +11008,16 @@ router.get("/finance/profitability", async (request: Request, response: Response
       }))
       .sort((left, right) => String(left[keyName]).localeCompare(String(right[keyName])));
 
+  const succeededAttempts = attempts.filter((attempt) => attempt.status === "SUCCEEDED").length;
+  const percentage = (numerator: Decimal, denominator: Decimal): string =>
+    denominator.isZero() ? "0.0000" : numerator.div(denominator).mul(100).toFixed(4);
   response.json({
     period,
     currency: query.currency?.toUpperCase() ?? "LYD",
     windowDays,
     windowStart: since.toISOString(),
     windowEnd: windowEnd.toISOString(),
-    succeededAttempts: attempts.filter((attempt) => attempt.status === "SUCCEEDED").length,
+    succeededAttempts,
     grossVolume: grossVolume.toFixed(4),
     grossCommissionRevenue: grossCommission.toFixed(4),
     netMerchantAmount: netMerchant.toFixed(4),
@@ -9062,7 +11026,17 @@ router.get("/finance/profitability", async (request: Request, response: Response
     netRevenue: netRevenue.toFixed(4),
     chargebackLosses: chargebackLosses.toFixed(4),
     netContribution: netContribution.toFixed(4),
+    gatewayCostPeriod: gatewayCostPeriod.toFixed(4),
+    periodNetRevenue: periodNetRevenue.toFixed(4),
+    chargebackLossesPeriod: chargebackLossesPeriod.toFixed(4),
+    periodNetContribution: periodNetContribution.toFixed(4),
+    refundCommissionReversed: refundCommissionReversed.toFixed(4),
     commissionReceivable: commissionReceivable.toFixed(4),
+    commissionMargin: percentage(periodNetRevenue, grossCommission),
+    gatewayCostRatio: percentage(gatewayCostPeriod, grossCommission),
+    netMargin: percentage(periodNetContribution, grossCommission),
+    averageTicket: succeededAttempts === 0 ? "0.0000" : grossVolume.div(succeededAttempts).toFixed(4),
+    averageCommission: succeededAttempts === 0 ? "0.0000" : grossCommission.div(succeededAttempts).toFixed(4),
     byRail: toRows(byRail, "railCode"),
     byDay: toRows(byDay, "day"),
     byGateway: toRows(byGateway, "gatewayCode"),
@@ -9131,7 +11105,7 @@ router.get("/finance/liquidity", async (request: Request, response: Response) =>
   requireAuthorities(request, ["finance:read"]);
   const balances = await loadLedgerBalances();
   const debitPositive = (type: string): Decimal => balances.get(type) ?? decimal(0);
-  const creditPositive = (type: string): Decimal => (balances.get(type) ?? decimal(0)).neg();
+  const creditPositive = (type: string): Decimal => naturalBalance(type, balances.get(type) ?? decimal(0));
 
   const treasury = debitPositive("TREASURY");
   const clearing = debitPositive("GATEWAY_CLEARING");
@@ -9160,8 +11134,66 @@ router.get("/finance/liquidity", async (request: Request, response: Response) =>
 
   const unsettled = await client.paymentAttempt.findMany({
     where: { status: "SUCCEEDED", createdAt: { gte: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000) } },
-    select: { createdAt: true, settledAmount: true, totalChargedAmount: true },
+    select: { createdAt: true, settledAmount: true, totalChargedAmount: true, routeId: true },
   });
+  const routeGateways = new Map(
+    (await client.railRoute.findMany({ select: { id: true, gatewayId: true } })).map((route) => [route.id, route.gatewayId]),
+  );
+  const clearingAccounts = await client.glAccount.findMany({
+    where: { accountType: "GATEWAY_CLEARING" },
+    select: { id: true, gatewayId: true, checkpointAt: true, checkpointBalance: true, gateway: { select: { code: true, name: true } } },
+  });
+  const clearingAccountIds = clearingAccounts.map((account) => account.id);
+  const clearingLines = clearingAccountIds.length === 0
+    ? []
+    : await client.journalLine.findMany({
+        where: { glAccountId: { in: clearingAccountIds } },
+        select: { glAccountId: true, direction: true, amount: true, createdAt: true },
+      });
+  const clearingBalanceByGateway = new Map<string, Decimal>();
+  const clearingBucketsByGateway = new Map<string, { t0: Decimal; t1: Decimal; t2: Decimal; older: Decimal }>();
+  for (const account of clearingAccounts) {
+    if (!account.gatewayId) continue;
+    let balance = decimal(account.checkpointBalance ?? 0);
+    const buckets = { t0: decimal(0), t1: decimal(0), t2: decimal(0), older: decimal(0) };
+    for (const line of clearingLines) {
+      if (line.glAccountId !== account.id) continue;
+      if (account.checkpointAt && line.createdAt <= account.checkpointAt) continue;
+      const value = decimal(line.amount);
+      if (line.direction === "DEBIT") balance = balance.plus(value);
+      else balance = balance.minus(value);
+      const ageDays = Math.floor((Date.now() - line.createdAt.getTime()) / (24 * 60 * 60 * 1000));
+      const key = ageDays <= 0 ? "t0" : ageDays <= 1 ? "t1" : ageDays <= 2 ? "t2" : "older";
+      buckets[key] = buckets[key].plus(value);
+    }
+    clearingBalanceByGateway.set(account.gatewayId, (clearingBalanceByGateway.get(account.gatewayId) ?? decimal(0)).plus(balance));
+    const current = clearingBucketsByGateway.get(account.gatewayId) ?? { t0: decimal(0), t1: decimal(0), t2: decimal(0), older: decimal(0) };
+    current.t0 = current.t0.plus(buckets.t0);
+    current.t1 = current.t1.plus(buckets.t1);
+    current.t2 = current.t2.plus(buckets.t2);
+    current.older = current.older.plus(buckets.older);
+    clearingBucketsByGateway.set(account.gatewayId, current);
+  }
+  const gatewayCodes = new Map(
+    (await client.gateway.findMany({ select: { id: true, code: true, name: true } })).map((gateway) => [gateway.id, gateway]),
+  );
+  const clearingByGateway = [...clearingBalanceByGateway.entries()]
+    .map(([gatewayId, balance]) => {
+      const gateway = gatewayCodes.get(gatewayId);
+      const buckets = clearingBucketsByGateway.get(gatewayId) ?? { t0: decimal(0), t1: decimal(0), t2: decimal(0), older: decimal(0) };
+      return {
+        gatewayId,
+        gatewayCode: gateway?.code ?? gatewayId,
+        gatewayName: gateway?.name ?? "",
+        balance: balance.toFixed(4),
+        t0: buckets.t0.toFixed(4),
+        t1: buckets.t1.toFixed(4),
+        t2: buckets.t2.toFixed(4),
+        older: buckets.older.toFixed(4),
+      };
+    })
+    .sort((left, right) => left.gatewayCode.localeCompare(right.gatewayCode));
+
   const ageingBucket = (label: string, minDays: number, maxDays: number) => {
     const rows = unsettled.filter((attempt) => {
       const age = Math.floor((Date.now() - attempt.createdAt.getTime()) / (24 * 60 * 60 * 1000));
@@ -9178,6 +11210,7 @@ router.get("/finance/liquidity", async (request: Request, response: Response) =>
 
   response.json({
     currency: "LYD",
+    checkedAt: new Date().toISOString(),
     treasuryBalance: treasury.toFixed(4),
     clearingBalances: clearing.toFixed(4),
     obligations: walletObligations.toFixed(4),
@@ -9189,9 +11222,9 @@ router.get("/finance/liquidity", async (request: Request, response: Response) =>
       nextDayDemand: nextDayDemand.toFixed(4),
     },
     holdsAndReserves: {
-      amlHold: debitPositive("AML_HOLD").toFixed(4),
-      chargebackReserve: debitPositive("CHARGEBACK_RESERVE").toFixed(4),
-      suspense: debitPositive("SUSPENSE").toFixed(4),
+      amlHold: creditPositive("AML_HOLD").toFixed(4),
+      chargebackReserve: creditPositive("CHARGEBACK_RESERVE").toFixed(4),
+      suspense: creditPositive("SUSPENSE").toFixed(4),
       oldestItemAgeDays,
     },
     receivables: {
@@ -9202,6 +11235,7 @@ router.get("/finance/liquidity", async (request: Request, response: Response) =>
       ageingBucket("8-30 days", 8, 30),
       ageingBucket("31+ days", 31, 3650),
     ],
+    clearingByGateway,
   });
 });
 
@@ -9257,6 +11291,13 @@ router.get("/finance/invariant-check", async (request: Request, response: Respon
       chargebackReserve: chargebackReserve.toFixed(4),
       suspense: suspense.toFixed(4),
     },
+    accounts: result.accountBalances.map((account) => ({
+      accountId: account.accountId,
+      accountType: account.accountType,
+      liveBalance: account.liveBalance.toFixed(4),
+      naturalBalance: naturalBalance(account.accountType, account.liveBalance).toFixed(4),
+      checkpointAt: account.checkpointAt ?? null,
+    })),
   });
 });
 

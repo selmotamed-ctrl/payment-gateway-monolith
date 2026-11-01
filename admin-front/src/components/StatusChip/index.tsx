@@ -34,7 +34,8 @@ export const StatusChip = dc(
         const theme = useTheme();
         return () => {
             const color = toneColor(props.tone ?? "neutral", theme);
-            const explanation = lookupTerm(props.label);
+            const label = String(props.label ?? "");
+            const explanation = label ? lookupTerm(label) : undefined;
             return (
                 <span
                     title={explanation ? `${explanation.title} — ${explanation.meaningEn}` : undefined}
@@ -46,7 +47,7 @@ export const StatusChip = dc(
                         color={color}
                         style={{ fontWeight: "700", letterSpacing: "0.2px" }}
                     >
-                        {props.label}
+                        {label}
                     </VChip>
                 </span>
             );

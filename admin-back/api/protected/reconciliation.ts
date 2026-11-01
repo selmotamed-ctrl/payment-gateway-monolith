@@ -78,6 +78,24 @@ router.post(
 );
 
 router.get(
+  "/runs/summary",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/reconciliation/summary",
+    querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
+  "/runs/:id",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/reconciliation/runs/${encodeURIComponent(context.params.id ?? "")}`,
+    paramsSchema: z.object({ id: zIdentifier }).strict(),
+  }),
+);
+
+router.get(
   "/runs",
   coreForward({
     method: "GET",

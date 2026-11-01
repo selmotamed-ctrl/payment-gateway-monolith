@@ -167,6 +167,15 @@ router.post(
   }),
 );
 
+router.get(
+  "/summary",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/rails/summary",
+    querySchema: zListQuery,
+  }),
+);
+
 router.patch(
   "/:id",
   coreForward({
@@ -229,6 +238,15 @@ routesRouter.patch(
     paramsSchema: idParamsSchema,
     schema: routePatchSchema,
     bodyFrom: (_req, body) => toCoreRouteUpdate(body),
+  }),
+);
+
+routesRouter.get(
+  "/summary",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/routes/summary",
+    querySchema: zPaginationQuery,
   }),
 );
 

@@ -37,10 +37,34 @@ const KYB_DOCUMENT_TYPE = [
     "OTHER",
 ];
 const APPROVAL_STATE = ["DRAFT", "PENDING_REVIEW", "APPROVED", "EXECUTED", "REJECTED"];
+const APPROVAL_MODE = ["STANDARD", "EMERGENCY_RATIFICATION"];
+const APPROVAL_DOMAIN = ["ONBOARDING", "MERCHANT", "FINANCE", "COMPLIANCE", "OPERATIONS", "GATEWAY", "SECURITY", "SETTINGS", "OTHER"];
+const APPROVAL_SUBJECT_TYPE = [
+    "MERCHANT",
+    "JOIN_REQUEST",
+    "KYB_DOCUMENT",
+    "APPLICATION",
+    "ADJUSTMENT",
+    "CASHOUT_REQUEST",
+    "COMMISSION_PROFILE",
+    "VELOCITY_RULE",
+    "AML_CASE",
+    "AML_RULE",
+    "REPORTING_RULE",
+    "REGULATORY_REPORT",
+    "OPERATOR_CASE",
+    "GATEWAY",
+    "GATEWAY_VERSION",
+    "CREDENTIAL_SET",
+    "USER",
+    "PLATFORM_SETTING",
+];
 const AML_CASE_STATUS = ["OPEN", "IN_REVIEW", "PENDING_CHECKER", "RELEASED", "REJECTED_VOID", "FROZEN", "ESCALATED_STR"];
 const AML_SEVERITY = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+const AML_SUBJECT_TYPE = ["MERCHANT", "END_CLIENT", "PAYMENT_ATTEMPT", "BENEFICIAL_OWNER"];
 const SCREENING_RESULT = ["CLEAR", "POTENTIAL_MATCH", "CONFIRMED_MATCH", "ERROR"];
 const DISPUTE_STATUS = ["OPENED", "EVIDENCE_REQUESTED", "EVIDENCE_SUBMITTED", "WON", "LOST", "EXPIRED", "WITHDRAWN"];
+const DISPUTE_SOURCE = ["WEBHOOK", "STATEMENT", "MANUAL"];
 const ADJUSTMENT_STATE = ["DRAFT", "PENDING_REVIEW", "APPROVED", "EXECUTING", "EXECUTED", "REJECTED"];
 const ADJUSTMENT_TYPE = ["CHARGEBACK", "REFUND", "MANUAL_CREDIT", "MANUAL_DEBIT", "CORRECTION", "CASHOUT_SUBTRACTION"];
 const CASHOUT_STATE = ["PENDING", "REJECTED", "PROCESSING", "COMPLETE", "SUBTRACTED"];
@@ -51,6 +75,8 @@ const REPORT_STATUS = ["DRAFT", "PENDING_CHECKER", "APPROVED", "SUBMITTED", "ACK
 const RULE_TYPES = ["SINGLE_AMOUNT", "CUMULATIVE_WINDOW", "STRUCTURING", "RISK_TIER", "COUNTERPARTY_COUNTRY", "RAIL", "MERCHANT_DIRECT_AMOUNT"];
 const RULE_ACTIONS = ["HOLD", "FLAG", "BLOCK", "CASE_ONLY"];
 const ROUTE_STATUS = ["ACTIVE", "PAUSED", "DRAINING"];
+const ADMIN_USER_ROLES = ["GATEWAY_ADMIN", "SECURITY_ADMIN", "FINANCE", "OPERATOR", "COMPLIANCE", "MLRO", "SUPPORT"];
+const ADMIN_USER_STATUS = ["INVITED", "ACTIVE", "SUSPENDED", "DISABLED"];
 const ROUTE_HEALTH = ["HEALTHY", "DEGRADED", "DOWN"];
 const CREDENTIAL_POLICY = ["PLATFORM", "MERCHANT_REQUIRED", "MERCHANT_OR_PLATFORM"];
 
@@ -67,6 +93,16 @@ export const tableRegistry: Record<string, TableServerConfig> = {
             { key: "date", label: "Created", type: "date" },
         ],
         defaultSort: { key: "code", direction: "asc" },
+    },
+    Users: {
+        url: urlsMap.adminUsers,
+        listKey: "users",
+        filters: [
+            { key: "role", label: "Role", type: "data-autocomplete", options: options(ADMIN_USER_ROLES), multiple: true },
+            { key: "status", label: "Status", type: "data-autocomplete", options: options(ADMIN_USER_STATUS), multiple: true },
+            { key: "date", label: "Created", type: "date", queryFrom: "from", queryTo: "to" },
+        ],
+        defaultSort: { key: "createdAt", direction: "desc" },
     },
     Rails: {
         url: urlsMap.railsList,
@@ -150,10 +186,14 @@ export const tableRegistry: Record<string, TableServerConfig> = {
         listKey: "approvals",
         filters: [
             { key: "state", label: "State", type: "data-autocomplete", options: options(APPROVAL_STATE), multiple: true },
-            { key: "subjectType", label: "Subject", type: "text" },
+            { key: "subjectType", label: "Subject", type: "data-autocomplete", options: options(APPROVAL_SUBJECT_TYPE), multiple: true },
+            { key: "domain", label: "Domain", type: "data-autocomplete", options: options(APPROVAL_DOMAIN) },
+            { key: "mode", label: "Mode", type: "data-autocomplete", options: options(APPROVAL_MODE) },
             { key: "makerUserId", label: "Maker", type: "api-autocomplete", load: users },
             { key: "checkerUserId", label: "Checker", type: "api-autocomplete", load: users },
             { key: "from", label: "Created", type: "date", queryFrom: "from", queryTo: "to" },
+            { key: "expires", label: "Expires", type: "date", queryFrom: "expiresFrom", queryTo: "expiresTo" },
+            { key: "expired", label: "Expired", type: "boolean", trueLabel: "Expired", falseLabel: "Active" },
         ],
         defaultSort: { key: "createdAt", direction: "desc" },
     },
@@ -162,8 +202,9 @@ export const tableRegistry: Record<string, TableServerConfig> = {
         listKey: "cases",
         filters: [
             { key: "status", label: "Status", type: "data-autocomplete", options: options(AML_CASE_STATUS), multiple: true },
-            { key: "severity", label: "Severity", type: "data-autocomplete", options: options(AML_SEVERITY) },
-            { key: "subjectType", label: "Subject", type: "text" },
+            { key: "severity", label: "Severity", type: "data-autocomplete", options: options(AML_SEVERITY), multiple: true },
+            { key: "subjectType", label: "Subject", type: "data-autocomplete", options: options(AML_SUBJECT_TYPE), multiple: true },
+            { key: "ruleCode", label: "Rule code", type: "text", placeholder: "e.g. STRUCTURING_1" },
             { key: "from", label: "Opened", type: "date", queryFrom: "from", queryTo: "to" },
             { key: "sla", label: "SLA due", type: "date", queryFrom: "dateFrom", queryTo: "dateTo" },
         ],
@@ -174,7 +215,8 @@ export const tableRegistry: Record<string, TableServerConfig> = {
         listKey: "screenings",
         filters: [
             { key: "result", label: "Result", type: "data-autocomplete", options: options(SCREENING_RESULT), multiple: true },
-            { key: "subjectType", label: "Subject", type: "text" },
+            { key: "subjectType", label: "Subject", type: "data-autocomplete", options: options(AML_SUBJECT_TYPE), multiple: true },
+            { key: "trigger", label: "Trigger", type: "data-autocomplete", options: options(["ONBOARDING", "PERIODIC", "LIST_UPDATE", "OWNER_CHANGE", "TRANSACTION", "MANUAL"]) },
             { key: "providerCode", label: "Provider", type: "text" },
             { key: "score", label: "Score", type: "number-range" },
             { key: "from", label: "Screened", type: "date", queryFrom: "from", queryTo: "to" },
@@ -211,6 +253,7 @@ export const tableRegistry: Record<string, TableServerConfig> = {
         filters: [
             { key: "type", label: "Type", type: "data-autocomplete", options: options(ADJUSTMENT_TYPE) },
             { key: "state", label: "State", type: "data-autocomplete", options: options(ADJUSTMENT_STATE), multiple: true },
+            { key: "merchantId", label: "Merchant", type: "api-autocomplete", load: merchants },
             { key: "amount", label: "Amount", type: "number-range" },
             { key: "draftedBySystem", label: "Drafted by system", type: "boolean" },
             { key: "from", label: "Created", type: "date", queryFrom: "from", queryTo: "to" },
@@ -234,6 +277,8 @@ export const tableRegistry: Record<string, TableServerConfig> = {
         listKey: "disputes",
         filters: [
             { key: "status", label: "Status", type: "data-autocomplete", options: options(DISPUTE_STATUS), multiple: true },
+            { key: "source", label: "Source", type: "data-autocomplete", options: options(DISPUTE_SOURCE) },
+            { key: "merchantId", label: "Merchant", type: "api-autocomplete", load: merchants },
             { key: "railId", label: "Rail", type: "api-autocomplete", load: rails, query: "railId" },
             { key: "amount", label: "Amount", type: "number-range" },
             { key: "from", label: "Opened", type: "date", queryFrom: "from", queryTo: "to" },

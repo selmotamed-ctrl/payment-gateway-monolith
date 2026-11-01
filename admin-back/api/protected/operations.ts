@@ -49,6 +49,14 @@ router.get(
   }),
 );
 
+router.get(
+  "/operator-cases/summary",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/operator-cases/summary",
+  }),
+);
+
 router.post(
   "/operator-cases/bulk-inquire",
   coreForward({

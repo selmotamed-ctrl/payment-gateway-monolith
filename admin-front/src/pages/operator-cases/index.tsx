@@ -37,6 +37,19 @@ import {
 } from "./operatorCaseHelp";
 import type { BulkInquiryResult, OperatorCaseSummary } from "./types";
 
+type OperatorCasesSummary = {
+    total: number;
+    open: number;
+    inProgress: number;
+    pendingChecker: number;
+    resolved: number;
+    unassigned: number;
+    overdue: number;
+    p1Open: number;
+    byState: Record<string, number>;
+    byPriority: Record<string, number>;
+};
+
 const filterDefinitions = tableRegistry.OperatorCases?.filters ?? [];
 
 const reasonText = (reason: string | undefined): string => {
@@ -53,6 +66,7 @@ const OperatorCasesPage = dc(() => {
     const filters = ref<FilterValues>({});
     const rows = ref<OperatorCaseSummary[]>([]);
     const total = ref(0);
+    const summary = ref<OperatorCasesSummary | null>(null);
     const pageSize = ref(20);
     const selected = ref<Record<string, OperatorCaseSummary>>({});
     const bulkLoading = ref(false);
@@ -60,6 +74,36 @@ const OperatorCasesPage = dc(() => {
     const bulkResult = ref<BulkInquiryResult | null>(null);
     const resultOpen = ref(false);
     let filterTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const loadSummary = async () => {
+        try {
+            const response = await api.get(urlsMap.operatorCasesSummary);
+            const payload = response.data?.data ?? response.data ?? {};
+            summary.value = (payload.summary ?? payload) as OperatorCasesSummary;
+        } catch {
+            summary.value = null;
+        }
+    };
+
+    void loadSummary();
+
+    const refreshAll = () => {
+        refreshHook.value?.refreshAsIs();
+        void loadSummary();
+    };
+
+    const summaryItems = computed(() => {
+        const data = summary.value;
+        if (!data) return [];
+        return [
+            { label: t("Queue"), value: String(data.total), tone: "info" as const },
+            { label: t("P1 open"), value: String(data.p1Open), tone: data.p1Open > 0 ? "error" as const : "success" as const },
+            { label: t("Overdue"), value: String(data.overdue), tone: data.overdue > 0 ? "error" as const : "success" as const },
+            { label: t("Unassigned"), value: String(data.unassigned), tone: data.unassigned > 0 ? "warning" as const : "success" as const },
+            { label: t("Pending checker"), value: String(data.pendingChecker), tone: data.pendingChecker > 0 ? "warning" as const : "success" as const },
+            { label: t("Resolved"), value: String(data.resolved), tone: "success" as const },
+        ];
+    });
     const refreshHook = ref<{
         reset: () => void;
         refresh: (props: { queryParams?: Record<string, unknown>; nextSkip?: number }) => Promise<void>;
@@ -518,9 +562,39 @@ const OperatorCasesPage = dc(() => {
                                 tone={selectedCount.value > 0 ? "primary" : "neutral"}
                                 size="small"
                             />
+                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
                         </ThemedView>
                     )}
                 />
+
+                {summary.value && (
+                    <VCard variant="flat" style={{ borderRadius: "16px" }}>
+                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px", flex: 1 }}>{t("Operator queue health")}</ThemedText>
+                                <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("P1 target: 4h · P2 target: 24h")}</ThemedText>
+                            </ThemedView>
+                            <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px" }}>
+                                {summaryItems.value.map((item) => (
+                                    <VCard key={item.label} variant="tonal">
+                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
+                                            <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
+                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
+                                        </VCardText>
+                                    </VCard>
+                                ))}
+                            </ThemedView>
+                            <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                                {Object.entries(summary.value.byPriority ?? {}).map(([priority, count]) => (
+                                    <StatusChip key={priority} label={`${priority}: ${count}`} tone={statusTone(priority)} size="x-small" />
+                                ))}
+                                {Object.entries(summary.value.byState ?? {}).map(([state, count]) => (
+                                    <StatusChip key={state} label={`${state.replaceAll("_", " ")}: ${count}`} tone={statusTone(state)} size="x-small" />
+                                ))}
+                            </ThemedView>
+                        </VCardText>
+                    </VCard>
+                )}
 
                 <ApiTable<OperatorCaseSummary>
                     title={t("Operator Cases")}

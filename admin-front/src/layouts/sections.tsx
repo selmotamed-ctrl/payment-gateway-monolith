@@ -29,6 +29,7 @@ export const routesAuthorities: {
     Merchants: ["merchants.read", "support.read_merchant"],
     MerchantDetail: ["merchants.read", "support.read_merchant"],
     Approvals: ["approvals.approve", "approvals.reject"],
+    AdminUsers: [],
     AmlCases: ["aml.read_confidential"],
     AmlScreenings: ["aml.read_confidential"],
     AmlRules: ["aml.read_confidential"],
@@ -108,6 +109,11 @@ export const useSections = () => {
                     name: "Approvals",
                     icon: "mdi-clipboard-check-outline",
                     if: () => hasOneOfAuthorities(["approvals.approve", "approvals.reject"]),
+                },
+                {
+                    label: t("Admin Users"),
+                    name: "AdminUsers",
+                    icon: "mdi-account-cog-outline",
                 },
                 {
                     label: t("AML Cases"),

@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale, useTheme } from "vuetify";
-import { VBtn } from "vuetify/components";
+import { VBtn, VCard, VCardText } from "vuetify/components";
 import { useRouter } from "vue-router";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
@@ -26,6 +26,23 @@ import {
 } from "./joinRequestHelp";
 import type { JoinRequestSummary } from "./types";
 
+type JoinRequestsSummary = {
+    total: number;
+    open: number;
+    submitted: number;
+    inReview: number;
+    infoRequested: number;
+    pendingChecker: number;
+    approved: number;
+    rejected: number;
+    overdue: number;
+    dueSoon: number;
+    unassigned: number;
+    fourEyes: number;
+    byStatus: Record<string, number>;
+    byRisk: Record<string, number>;
+};
+
 const filterDefinitions = tableRegistry.JoinRequests?.filters ?? [];
 
 const textValue = (value: unknown): string => (value === null || value === undefined ? "" : String(value));
@@ -39,6 +56,7 @@ const JoinRequestsPage = dc(() => {
     const filters = ref<FilterValues>({});
     const rows = ref<JoinRequestSummary[]>([]);
     const total = ref(0);
+    const summary = ref<JoinRequestsSummary | null>(null);
     const pageSize = ref(20);
     let filterTimer: ReturnType<typeof setTimeout> | undefined;
     const refreshHook = ref<{
@@ -46,6 +64,36 @@ const JoinRequestsPage = dc(() => {
         refresh: (props: { queryParams?: Record<string, unknown>; nextSkip?: number }) => Promise<void>;
         refreshAsIs: () => void;
     } | null>(null);
+
+    const loadSummary = async () => {
+        try {
+            const response = await api.get(urlsMap.joinRequestsSummary);
+            const payload = response.data?.data ?? response.data ?? {};
+            summary.value = (payload.summary ?? payload) as JoinRequestsSummary;
+        } catch {
+            summary.value = null;
+        }
+    };
+
+    void loadSummary();
+
+    const refreshAll = () => {
+        refreshHook.value?.refreshAsIs();
+        void loadSummary();
+    };
+
+    const summaryItems = computed(() => {
+        const data = summary.value;
+        if (!data) return [];
+        return [
+            { label: t("Open queue"), value: String(data.open), tone: "info" as const },
+            { label: t("Overdue"), value: String(data.overdue), tone: data.overdue > 0 ? "error" as const : "success" as const },
+            { label: t("Due within 24h"), value: String(data.dueSoon), tone: data.dueSoon > 0 ? "warning" as const : "success" as const },
+            { label: t("Unassigned"), value: String(data.unassigned), tone: data.unassigned > 0 ? "warning" as const : "success" as const },
+            { label: t("Pending checker"), value: String(data.pendingChecker), tone: data.pendingChecker > 0 ? "warning" as const : "success" as const },
+            { label: t("Four-eyes"), value: String(data.fourEyes), tone: data.fourEyes > 0 ? "error" as const : "success" as const },
+        ];
+    });
 
     const canWrite = computed(() => hasOneOfAuthorities(["joinrequests.review", "kyb.review"]));
 
@@ -224,6 +272,7 @@ const JoinRequestsPage = dc(() => {
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
                             <StatusChip label={`${total.value} ${t("requests")}`} tone="info" size="small" />
+                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
                             {canWrite.value && (
                                 <VBtn
                                     color="primary"
@@ -236,6 +285,35 @@ const JoinRequestsPage = dc(() => {
                         </ThemedView>
                     )}
                 />
+
+                {summary.value && (
+                    <VCard variant="flat" style={{ borderRadius: "16px" }}>
+                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px", flex: 1 }}>{t("Onboarding SLA health")}</ThemedText>
+                                <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("Paused SLAs are excluded from overdue counts.")}</ThemedText>
+                            </ThemedView>
+                            <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px" }}>
+                                {summaryItems.value.map((item) => (
+                                    <VCard key={item.label} variant="tonal">
+                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
+                                            <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
+                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
+                                        </VCardText>
+                                    </VCard>
+                                ))}
+                            </ThemedView>
+                            <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                                {Object.entries(summary.value.byStatus ?? {}).map(([state, count]) => (
+                                    <StatusChip key={state} label={`${state.replaceAll("_", " ")}: ${count}`} tone={statusTone(state)} size="x-small" />
+                                ))}
+                                {Object.entries(summary.value.byRisk ?? {}).map(([risk, count]) => (
+                                    <StatusChip key={risk} label={`${risk}: ${count}`} tone={statusTone(risk)} size="x-small" />
+                                ))}
+                            </ThemedView>
+                        </VCardText>
+                    </VCard>
+                )}
 
                 <ApiTable<JoinRequestSummary>
                     title={t("Join Requests")}

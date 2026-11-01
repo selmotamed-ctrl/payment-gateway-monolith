@@ -1,14 +1,16 @@
 import { dc } from "kt-dc";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VCard, VCardText, VDialog, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VCard, VCardText, VDialog, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
-import { DataTable } from "@/components/Table/DataTable";
+import { ApiTable } from "@/components/Table/ApiTable";
+import TableFilters from "@/components/Table/TableFilters";
+import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
+import { tableRegistry } from "@/components/Table/tableRegistry";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
@@ -33,6 +35,11 @@ type RailField = {
 
 type Rail = {
     id: string;
+    fieldCount?: number;
+    routeCount?: number;
+    flowCount?: number;
+    paymentAttemptCount?: number;
+    routeHealth?: { healthy: number; degraded: number; openBreaker: number; active: number };
     code: string;
     nameAr: string;
     nameEn: string;
@@ -116,12 +123,26 @@ const toPublicField = (field: RailField): PublicField => {
     };
 };
 
+type RailSummary = {
+    total: number;
+    active: number;
+    blocked: number;
+    byMode: Record<string, number>;
+    routes: { healthy: number; degraded: number; openBreaker: number };
+};
+
 const RailsPage = dc(() => {
     const { t } = useLocale();
-    const rows = ref<Rail[]>([]);
-    const loading = ref(true);
-    const error = ref<string | null>(null);
+    const summary = ref<RailSummary | null>(null);
     const search = ref<string | null>(null);
+    const filters = ref<FilterValues>({});
+    const pageSize = ref(20);
+    const refreshHook = ref<{
+        reset: () => void;
+        refresh: (props: { queryParams?: Record<string, unknown>; nextSkip?: number }) => Promise<void>;
+        refreshAsIs: () => void;
+    } | null>(null);
+    let filterTimer: ReturnType<typeof setTimeout> | undefined;
 
     // Create rail
     const createOpen = ref(false);
@@ -151,24 +172,35 @@ const RailsPage = dc(() => {
     const editingFieldIndex = ref<number | null>(null);
     const actionLoading = ref(false);
 
-    const load = async () => {
-        loading.value = true;
-        error.value = null;
+    const filterDefinitions = computed(() => tableRegistry.Rails?.filters ?? []);
+
+    const loadSummary = async () => {
         try {
-            const response = await api.get(urlsMap.railsList, {
-                params: { search: search.value || undefined },
-            });
+            const response = await api.get(urlsMap.railsSummary);
             const payload = response.data?.data ?? response.data ?? {};
-            rows.value = payload.rails ?? payload.rows ?? payload.items ?? [];
-        } catch (e) {
-            error.value = extractApiErrorMessage(e);
-            rows.value = [];
-        } finally {
-            loading.value = false;
+            summary.value = (payload.summary ?? payload) as RailSummary;
+        } catch {
+            summary.value = null;
         }
     };
 
-    void load();
+    const refreshAll = () => {
+        refreshHook.value?.reset();
+        void loadSummary();
+    };
+
+    const onFiltersChanged = (key: string, value: unknown) => {
+        filters.value = { ...filters.value, [key]: value };
+        if (filterTimer) clearTimeout(filterTimer);
+        filterTimer = setTimeout(() => refreshHook.value?.reset(), 300);
+    };
+
+    const onFiltersCleared = () => {
+        filters.value = {};
+        refreshHook.value?.reset();
+    };
+
+    void loadSummary();
 
     const openCreateRail = () => {
         railForm.value = { code: "", name: "", collectionMode: "REDIRECT" };
@@ -189,7 +221,7 @@ const RailsPage = dc(() => {
             });
             createOpen.value = false;
             showSnackBar({ type: "success", message: t("Saved") });
-            await load();
+            refreshAll();
         } catch (e) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
         } finally {
@@ -230,7 +262,7 @@ const RailsPage = dc(() => {
             await api.patch(urlsMap.railDetail(editingRail.value.id), payload);
             editOpen.value = false;
             showSnackBar({ type: "success", message: t("Update") });
-            await load();
+            refreshAll();
         } catch (e) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
         } finally {
@@ -288,7 +320,7 @@ const RailsPage = dc(() => {
             fields.value = next;
             resetFieldForm();
             showSnackBar({ type: "success", message: t("Save") });
-            await load();
+            refreshAll();
         } catch (e) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
         } finally {
@@ -329,6 +361,20 @@ const RailsPage = dc(() => {
         { key: "currency", label: "Currency", value: (row) => row.currency },
         { key: "limits", label: "Amount", value: (row) => `${row.minAmount ?? ""} - ${row.maxAmount ?? ""}` },
         {
+            key: "routes",
+            label: "Routes / health",
+            value: (row) => `${row.routeCount ?? 0} ${row.routeHealth?.healthy ?? 0}/${row.routeHealth?.degraded ?? 0}/${row.routeHealth?.openBreaker ?? 0}`,
+            Value: ({ row }: { row: Rail }) => (
+                <ThemedView style={{ gap: "2px" }}>
+                    <ThemedText style={{ fontSize: "12px" }}>{row.routeCount ?? 0}</ThemedText>
+                    <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>
+                        {row.routeHealth?.healthy ?? 0} {t("healthy")} · {row.routeHealth?.degraded ?? 0} {t("degraded")} · {row.routeHealth?.openBreaker ?? 0} {t("open")}
+                    </ThemedText>
+                </ThemedView>
+            ),
+        },
+        { key: "fields", label: "Fields", value: (row) => String(row.fieldCount ?? (row.fields ?? []).length) },
+        {
             key: "status",
             label: "Status",
             Value: ({ row }: { row: Rail }) => (
@@ -364,25 +410,83 @@ const RailsPage = dc(() => {
                     )}
                 />
 
-                {error.value ? (
-                    <StateView error={error.value} onRetry={() => void load()} />
-                ) : (
-                    <VCard>
-                        <VCardText>
-                            <DataTable
-                                title={t("Rails")}
-                                data={rows.value}
-                                headers={headers}
-                                loading={loading.value}
-                                showNumber={true}
-                                xlsx={false}
-                                noElevation={true}
-                                searchValue={search.value}
-                                setSearchValue={(value) => (search.value = value)}
-                            />
+                <VAlert type="info" variant="tonal">
+                    {t("Rails define the customer-facing payment methods. Route health and circuit breaker state come from the live catalog.")}
+                </VAlert>
+
+                {summary.value && (
+                    <VCard variant="flat" style={{ borderRadius: "16px" }}>
+                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Rail health")}</ThemedText>
+                            <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
+                                {[
+                                    { label: t("Rails"), value: String(summary.value.total), tone: "info" as const },
+                                    { label: t("Active"), value: String(summary.value.active), tone: "success" as const },
+                                    { label: t("Blocked"), value: String(summary.value.blocked), tone: summary.value.blocked > 0 ? "error" as const : "success" as const },
+                                    { label: t("Healthy routes"), value: String(summary.value.routes.healthy), tone: "success" as const },
+                                    { label: t("Degraded routes"), value: String(summary.value.routes.degraded), tone: summary.value.routes.degraded > 0 ? "warning" as const : "success" as const },
+                                    { label: t("Open breakers"), value: String(summary.value.routes.openBreaker), tone: summary.value.routes.openBreaker > 0 ? "error" as const : "success" as const },
+                                ].map((item) => (
+                                    <VCard key={item.label} variant="tonal">
+                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
+                                            <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
+                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
+                                        </VCardText>
+                                    </VCard>
+                                ))}
+                            </ThemedView>
                         </VCardText>
                     </VCard>
                 )}
+
+                <ApiTable<Rail>
+                    title={t("Rail catalog")}
+                    url={urlsMap.railsList}
+                    localSearch={false}
+                    xlsx={false}
+                    showNumber={true}
+                    numberOfItemsPerPage={pageSize.value}
+                    numberOfItemsPerPageChoices={[
+                        { label: "10", value: 10 },
+                        { label: "20", value: 20 },
+                        { label: "50", value: 50 },
+                    ]}
+                    setNumberOfItemsPerPage={(value) => (pageSize.value = value)}
+                    searchValue={search.value}
+                    setSearchValue={(value) => (search.value = value)}
+                    headers={headers}
+                    rowColor={(row) => (row.blocked ? "#dc2626" : (row.routeHealth?.openBreaker ?? 0) > 0 ? "#d97706" : undefined)}
+                    apiDataExtractor={(data) => {
+                        const payload = data as { rails?: Rail[]; rows?: Rail[] };
+                        return payload.rails ?? payload.rows ?? [];
+                    }}
+                    apiTotalExtractor={(data) => Number((data as { total?: number }).total ?? 0)}
+                    setRefreshHook={(hook) => {
+                        refreshHook.value = hook as typeof refreshHook.value;
+                    }}
+                    clearRefreshHook={() => {
+                        refreshHook.value = null;
+                    }}
+                    onRefresh={(table, refresh) => {
+                        void refresh({
+                            queryParams: {
+                                page: table.page,
+                                pageSize: pageSize.value,
+                                ...(search.value ? { search: search.value } : {}),
+                                ...buildFilterQuery(filterDefinitions.value, filters.value),
+                                ...(table.sortKey ? { sortKey: table.sortKey, sortDirection: table.sortDirection } : {}),
+                            },
+                        });
+                    }}
+                    TopSlot={() => (
+                        <TableFilters
+                            filters={filterDefinitions.value}
+                            values={filters.value}
+                            onChange={onFiltersChanged}
+                            onClear={onFiltersCleared}
+                        />
+                    )}
+                />
             </ThemedView>
 
             {/* Customer catalog: list + add/edit/delete fields */}

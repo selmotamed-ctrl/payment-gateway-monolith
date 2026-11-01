@@ -31,6 +31,21 @@ import KybDocumentPreview from "./components/KybDocumentPreview";
 import KybReviewDialog from "./components/KybReviewDialog";
 import KybActionDialog, { type KybActionMode } from "./components/KybActionDialog";
 
+type KybDocumentsSummary = {
+    total: number;
+    pending: number;
+    accepted: number;
+    rejected: number;
+    expired: number;
+    infected: number;
+    scanning: number;
+    duplicates: number;
+    expiringSoon: number;
+    byStatus: Record<string, number>;
+    byAvStatus: Record<string, number>;
+    byDocType: Record<string, number>;
+};
+
 const filterDefinitions = tableRegistry.KybReview?.filters ?? [];
 
 const text = (value: unknown): string => (value === null || value === undefined ? "" : String(value));
@@ -53,6 +68,7 @@ const KybReviewPage = dc(() => {
     const filters = ref<FilterValues>({});
     const rows = ref<KybDocumentSummary[]>([]);
     const total = ref(0);
+    const summary = ref<KybDocumentsSummary | null>(null);
     const pageSize = ref(20);
     let filterTimer: ReturnType<typeof setTimeout> | undefined;
     const refreshHook = ref<{
@@ -60,6 +76,36 @@ const KybReviewPage = dc(() => {
         refresh: (props: { queryParams?: Record<string, unknown>; nextSkip?: number }) => Promise<void>;
         refreshAsIs: () => void;
     } | null>(null);
+    const loadSummary = async () => {
+        try {
+            const response = await api.get(urlsMap.kybDocumentsSummary);
+            const payload = response.data?.data ?? response.data ?? {};
+            summary.value = (payload.summary ?? payload) as KybDocumentsSummary;
+        } catch {
+            summary.value = null;
+        }
+    };
+
+    void loadSummary();
+
+    const refreshAll = () => {
+        refreshHook.value?.refreshAsIs();
+        void loadSummary();
+    };
+
+    const summaryItems = computed(() => {
+        const data = summary.value;
+        if (!data) return [];
+        return [
+            { label: t("Awaiting review"), value: String(data.pending), tone: "warning" as const },
+            { label: t("Accepted"), value: String(data.accepted), tone: "success" as const },
+            { label: t("Expiring in 30d"), value: String(data.expiringSoon), tone: data.expiringSoon > 0 ? "warning" as const : "success" as const },
+            { label: t("Expired"), value: String(data.expired), tone: data.expired > 0 ? "error" as const : "success" as const },
+            { label: t("Duplicates"), value: String(data.duplicates), tone: data.duplicates > 0 ? "warning" as const : "success" as const },
+            { label: t("Infected"), value: String(data.infected), tone: data.infected > 0 ? "error" as const : "success" as const },
+        ];
+    });
+
     const previewOpen = ref(false);
     const previewDocument = ref<KybDocumentSummary | null>(null);
     const reviewOpen = ref(false);
@@ -334,9 +380,37 @@ const KybReviewPage = dc(() => {
                             <StatusChip label={`${total.value} ${t("documents")}`} tone="info" size="small" />
                             <StatusChip label={`${actionableCount.value} ${t("actionable")}`} tone="success" size="small" />
                             <StatusChip label={`${duplicateCount.value} ${t("duplicates")}`} tone={duplicateCount.value ? "warning" : "neutral"} size="small" />
+                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
                         </ThemedView>
                     )}
                 />
+
+                {summary.value && (
+                    <VCard variant="flat" style={{ borderRadius: "16px" }}>
+                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Document review health")}</ThemedText>
+                            <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px" }}>
+                                {summaryItems.value.map((item) => (
+                                    <VCard key={item.label} variant="tonal">
+                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
+                                            <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
+                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
+                                        </VCardText>
+                                    </VCard>
+                                ))}
+                            </ThemedView>
+                            <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                                {Object.entries(summary.value.byStatus ?? {}).map(([state, count]) => (
+                                    <StatusChip key={state} label={`${state}: ${count}`} tone={statusTone(state)} size="x-small" />
+                                ))}
+                                {Object.entries(summary.value.byAvStatus ?? {}).map(([state, count]) => (
+                                    <StatusChip key={`av-${state}`} label={`AV ${state}: ${count}`} tone={statusTone(state)} size="x-small" />
+                                ))}
+                            </ThemedView>
+                        </VCardText>
+                    </VCard>
+                )}
+
                 <VCard>
                     <VCardText>
                         <KybHelpPanel />
