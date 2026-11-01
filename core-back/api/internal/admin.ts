@@ -34,6 +34,21 @@ import {
   runOnboardingScreening,
 } from "./merchant";
 import {
+  KYB_DOCUMENT_REJECTION_REASONS,
+  daysUntilExpiry,
+  distinctDuplicateMerchantIds,
+  duplicateJustificationRequired,
+  expiryState,
+  isKybDocumentActionable,
+  mergeInfoRequestItems,
+  readKybRefreshPolicy,
+  recomputeMerchantKybStatus,
+  secondsBetween,
+} from "../../lib/kybReview";
+import { queueKybNotification } from "../../lib/kybNotifications";
+import { scanKybBytes } from "../../lib/kybScan";
+import { mysqlPlaceholders } from "../../engine/db/rawRows";
+import {
   generateMfaCode,
   hashMfaCode,
   hashPassword,
@@ -937,6 +952,8 @@ const publicKybDocumentSelect = {
   updatedAt: true,
   merchantId: true,
   joinRequestId: true,
+  subjectType: true,
+  subjectId: true,
   docType: true,
   originalFileName: true,
   sha256: true,
@@ -951,7 +968,173 @@ const publicKybDocumentSelect = {
   expiresOn: true,
   rejectionReasonCode: true,
   reviewNotes: true,
+  duplicateJustification: true,
+  statusChangedAt: true,
+  expiredAt: true,
 } as const;
+
+
+const KYB_OPEN_JOIN_STATUSES = ["SUBMITTED", "IN_REVIEW", "INFO_REQUESTED", "PENDING_CHECKER"] as const;
+
+const kybDocumentContextSelect = {
+  ...publicKybDocumentSelect,
+  merchant: {
+    select: {
+      id: true,
+      legalName: true,
+      tradeName: true,
+      status: true,
+      kybStatus: true,
+      riskTier: true,
+      businessCategory: true,
+      country: true,
+      contactEmail: true,
+      contactPhone: true,
+    },
+  },
+  joinRequest: {
+    select: {
+      id: true,
+      status: true,
+      onboardingChannel: true,
+      proposedRiskTier: true,
+      slaDueAt: true,
+      slaPausedAt: true,
+      slaRemainingSeconds: true,
+      assignedReviewer: { select: { id: true, email: true } },
+    },
+  },
+} as const;
+
+const contentAvailabilityForIds = async (ids: string[]): Promise<Map<string, boolean>> => {
+  if (ids.length === 0) return new Map();
+  const placeholders = mysqlPlaceholders(ids.length);
+  const rows = (await client.$queryRawUnsafe(
+    `SELECT id, (content_ciphertext IS NOT NULL) AS contentAvailable FROM kyb_documents WHERE id IN (${placeholders})`,
+    ...ids,
+  )) as Array<{ id: string; contentAvailable: number | bigint | boolean }>;
+  return new Map(rows.map((row) => [String(row.id), Boolean(Number(row.contentAvailable))]));
+};
+
+const subjectOwnerNames = async (documents: Array<{ subjectType: string; subjectId: string }>): Promise<Map<string, string>> => {
+  const ids = documents
+    .filter((document) => document.subjectType === "BENEFICIAL_OWNER")
+    .map((document) => document.subjectId);
+  if (ids.length === 0) return new Map();
+  const owners = await client.beneficialOwner.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, fullNameAr: true, fullNameEn: true },
+  });
+  return new Map(owners.map((owner) => [owner.id, owner.fullNameEn || owner.fullNameAr]));
+};
+
+const duplicateDocumentsForHash = async (document: {
+  id: string;
+  merchantId: string;
+  sha256: string;
+}) => {
+  const matches = await client.kybDocument.findMany({
+    where: {
+      sha256: document.sha256,
+      id: { not: document.id },
+      merchantId: { not: document.merchantId },
+    },
+    select: {
+      id: true,
+      merchantId: true,
+      joinRequestId: true,
+      docType: true,
+      status: true,
+      avStatus: true,
+      createdAt: true,
+      reviewedAt: true,
+      merchant: { select: { id: true, legalName: true, tradeName: true, status: true, kybStatus: true } },
+      joinRequest: { select: { id: true, status: true } },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 20,
+  });
+  return matches;
+};
+
+const openJoinRequestForDocument = async (document: {
+  merchantId: string;
+  joinRequestId: string | null;
+}) => {
+  if (document.joinRequestId) {
+    const linked = await client.joinRequest.findUnique({ where: { id: document.joinRequestId } });
+    if (linked && KYB_OPEN_JOIN_STATUSES.includes(String(linked.status) as never)) {
+      return linked;
+    }
+  }
+  return client.joinRequest.findFirst({
+    where: {
+      merchantId: document.merchantId,
+      status: { in: [...KYB_OPEN_JOIN_STATUSES] },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+};
+
+const maybeRaiseDuplicateAmlCase = async (input: {
+  document: { id: string; merchantId: string; sha256: string; docType: string };
+  duplicateMerchantIds: string[];
+  actorUserId: string;
+  actorRole: string;
+}): Promise<string | null> => {
+  const distinctMerchants = new Set([input.document.merchantId, ...input.duplicateMerchantIds]);
+  const policy = await readKybRefreshPolicy(client);
+  if (distinctMerchants.size < policy.duplicateAmlThreshold) return null;
+  const existing = await client.amlCase.findFirst({
+    where: {
+      subjectType: "MERCHANT",
+      subjectId: input.document.merchantId,
+      triggerReason: { startsWith: `KYB_DOCUMENT_REUSE:${input.document.sha256}` },
+      status: { in: ["OPEN", "IN_REVIEW", "PENDING_CHECKER", "FROZEN", "ESCALATED_STR"] },
+    },
+    select: { id: true },
+  });
+  if (existing) return existing.id;
+  const amlCaseId = await client.$transaction(async (tx) => {
+    const amlCase = await tx.amlCase.create({
+      data: {
+        subjectType: "MERCHANT",
+        subjectId: input.document.merchantId,
+        triggerReason: `KYB_DOCUMENT_REUSE:${input.document.sha256}`,
+        severity: "HIGH",
+        severityInputsJson: {
+          documentId: input.document.id,
+          documentType: input.document.docType,
+          sha256: input.document.sha256,
+          duplicateMerchantIds: [...distinctMerchants].filter((id) => id !== input.document.merchantId),
+          distinctMerchantCount: distinctMerchants.size,
+        },
+        status: "OPEN",
+        slaDueAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        confidential: true,
+        reviewerNotes: "The same KYB document hash was reused by multiple merchants and accepted with reviewer justification.",
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: input.actorUserId,
+        role: input.actorRole,
+        action: "KYB_DOCUMENT_REUSE_AML_CASE_OPENED",
+        entityType: "AML_CASE",
+        entityId: amlCase.id,
+        beforeJson: {},
+        afterJson: {
+          documentId: input.document.id,
+          merchantId: input.document.merchantId,
+          sha256: input.document.sha256,
+          distinctMerchantCount: distinctMerchants.size,
+        },
+      },
+    });
+    return amlCase.id;
+  });
+  return amlCaseId;
+};
 
 const adminJoinProfileSchema = z
   .object({
@@ -1074,7 +1257,7 @@ const refreshJoinScreening = async (joinRequestId: string): Promise<{
   }
   try {
     const screening = await runOnboardingScreening(joinRequest.merchantId, joinRequestId);
-    const fourEyes = await resolveFourEyesForSubmission(joinRequest.merchantId, screening);
+    const fourEyes = await resolveFourEyesForSubmission(joinRequest.merchantId, screening, joinRequestId);
     await client.joinRequest.update({
       where: { id: joinRequestId },
       data: {
@@ -1674,10 +1857,8 @@ router.post("/join-requests/:id/kyb-documents", async (request: Request, respons
     ? new Date(metadata.expiresOn)
     : null;
   const sha256 = createHash("sha256").update(raw).digest("hex");
-  const scannerMode = process.env.KYB_SCANNER_MODE ?? "eicar";
-  const infected = scannerMode !== "disabled"
-    && raw.includes("EICAR-STANDARD-ANTIVIRUS-TEST-FILE");
-  const avStatus = infected ? "INFECTED" : scannerMode === "disabled" ? "PENDING" : "CLEAN";
+  const avStatus = scanKybBytes(raw);
+  const infected = avStatus === "INFECTED";
   const storageKey = `kyb/${joinRequest.merchantId}/${sha256}`;
   const document = await client.kybDocument.create({
     data: {
@@ -1849,7 +2030,7 @@ router.post("/join-requests/:id/submit", async (request: Request, response: Resp
       amlCaseId: screening.amlCaseId,
     });
   }
-  const fourEyes = await resolveFourEyesForSubmission(joinRequest.merchantId, screening);
+  const fourEyes = await resolveFourEyesForSubmission(joinRequest.merchantId, screening, joinRequest.id);
   const now = new Date();
   const remainingSeconds = joinRequest.slaRemainingSeconds
     ?? Math.max(0, Math.floor((joinRequest.slaDueAt.getTime() - now.getTime()) / 1000));
@@ -2216,6 +2397,221 @@ router.post("/join-requests/:id/decide", async (request: Request, response: Resp
   response.json({ id: updated.id, status: updated.status });
 });
 
+router.get("/kyb-documents", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["kyb:read", "compliance:read"]);
+  const built = buildListQuery(request.query, {
+    search: [
+      "merchant.legalName",
+      "merchant.tradeName",
+      "merchant.contactEmail",
+      "merchant.contactPhone",
+      "originalFileName",
+      "sha256",
+    ],
+    contains: {
+      requestRef: "joinRequest.id",
+      merchantName: ["merchant.legalName", "merchant.tradeName"],
+    },
+    in: { status: "status", avStatus: "avStatus", docType: "docType", subjectType: "subjectType" },
+    equals: {
+      merchantId: "merchantId",
+      joinRequestId: "joinRequestId",
+      reviewedById: "reviewedById",
+    },
+    dates: {
+      createdAt: { path: "createdAt", fromKey: "uploadedFrom", toKey: "uploadedTo" },
+      expiresOn: { path: "expiresOn", fromKey: "expiryFrom", toKey: "expiryTo" },
+    },
+    sortable: {
+      createdAt: "createdAt",
+      expiresOn: "expiresOn",
+      status: "status",
+      avStatus: "avStatus",
+      docType: "docType",
+    },
+    defaultSort: { createdAt: "desc" },
+  });
+  const query = (request.query ?? {}) as Record<string, unknown>;
+  const conditions = ((built.where as Record<string, unknown>).AND as Record<string, unknown>[] | undefined) ?? [];
+  const and = [...conditions];
+  // Draft-request evidence stays out of reviewer queues (design Edge Case 116).
+  and.push({ OR: [{ joinRequestId: null }, { joinRequest: { status: { not: "DRAFT" } } }] });
+  const requestStatuses = typeof query.requestStatus === "string"
+    ? query.requestStatus.split(",").map((value) => value.trim()).filter(Boolean)
+    : [];
+  if (requestStatuses.length > 0) {
+    and.push({ joinRequest: { status: { in: requestStatuses } } });
+  }
+  if (query.duplicateOnly === "true") {
+    const duplicateHashes = (await client.$queryRawUnsafe(
+      "SELECT sha256 FROM kyb_documents GROUP BY sha256 HAVING COUNT(DISTINCT merchant_id) > 1",
+    )) as Array<{ sha256: string }>;
+    if (duplicateHashes.length === 0) {
+      response.json(listResponse("kybDocuments", [], 0, built));
+      return;
+    }
+    and.push({ sha256: { in: duplicateHashes.map((row) => row.sha256) } });
+  }
+  if (query.expiringSoon === "true") {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const thirtyDays = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
+    and.push({ expiresOn: { gte: today, lte: thirtyDays } });
+    and.push({ status: { in: ["UPLOADED", "ACCEPTED"] } });
+  }
+  const where = { AND: and };
+  const [documents, total] = await Promise.all([
+    client.kybDocument.findMany({
+      where: where as never,
+      orderBy: built.orderBy as never,
+      skip: built.skip,
+      take: built.take,
+      select: kybDocumentContextSelect,
+    }),
+    client.kybDocument.count({ where: where as never }),
+  ]);
+  const ids = documents.map((document) => document.id);
+  const merchantIds = [...new Set(documents.map((document) => document.merchantId))];
+  const hashes = [...new Set(documents.map((document) => document.sha256))];
+  const [availability, subjectNames, duplicateRows, openRequests, openRevalidations] = await Promise.all([
+    contentAvailabilityForIds(ids),
+    subjectOwnerNames(documents),
+    hashes.length === 0
+      ? Promise.resolve([] as Array<{ id: string; merchantId: string; sha256: string }>)
+      : client.kybDocument.findMany({
+          where: { sha256: { in: hashes } },
+          select: { id: true, merchantId: true, sha256: true },
+        }),
+    merchantIds.length === 0
+      ? Promise.resolve([] as Array<{ id: string; merchantId: string; status: string }>)
+      : client.joinRequest.findMany({
+          where: { merchantId: { in: merchantIds }, status: { in: [...KYB_OPEN_JOIN_STATUSES] } },
+          orderBy: { createdAt: "desc" },
+          select: { id: true, merchantId: true, status: true },
+        }),
+    ids.length === 0
+      ? Promise.resolve([] as Array<{ documentId: string | null }>)
+      : client.kybRevalidationRequest.findMany({
+          where: { documentId: { in: ids }, status: "OPEN" },
+          select: { documentId: true },
+        }),
+  ]);
+  const duplicateMerchantMap = new Map<string, Set<string>>();
+  for (const row of duplicateRows) {
+    const set = duplicateMerchantMap.get(row.sha256) ?? new Set<string>();
+    set.add(row.merchantId);
+    duplicateMerchantMap.set(row.sha256, set);
+  }
+  const openRequestByMerchant = new Map<string, { id: string; status: string }>();
+  for (const joinRequest of openRequests) {
+    if (!openRequestByMerchant.has(joinRequest.merchantId)) {
+      openRequestByMerchant.set(joinRequest.merchantId, joinRequest);
+    }
+  }
+  const openRevalidationDocuments = new Set(
+    openRevalidations
+      .map((row) => row.documentId)
+      .filter((value): value is string => Boolean(value)),
+  );
+  const rows = documents.map((document) => {
+    const duplicates = duplicateMerchantMap.get(document.sha256) ?? new Set<string>();
+    const duplicateMerchantCount = [...duplicates].filter((id) => id !== document.merchantId).length;
+    const openRequest = document.joinRequestId
+      ? document.joinRequest
+      : openRequestByMerchant.get(document.merchantId) ?? null;
+    return {
+      ...document,
+      merchantName: document.merchant?.tradeName ?? document.merchant?.legalName ?? "",
+      merchantLegalName: document.merchant?.legalName ?? "",
+      merchantStatus: document.merchant?.status ?? null,
+      merchantKybStatus: document.merchant?.kybStatus ?? null,
+      reviewer: document.reviewedBy?.email ?? "",
+      uploader: document.uploadedBy?.email ?? "",
+      subjectName: document.subjectType === "BENEFICIAL_OWNER"
+        ? subjectNames.get(document.subjectId) ?? null
+        : null,
+      contentAvailable: availability.get(document.id) ?? false,
+      duplicateMerchantCount,
+      duplicateDocumentCount: duplicates.size,
+      expiryState: expiryState(document.expiresOn),
+      daysUntilExpiry: daysUntilExpiry(document.expiresOn),
+      canReview: isKybDocumentActionable(document)
+        && (!document.joinRequest || !["APPROVED", "REJECTED", "WITHDRAWN", "EXPIRED"].includes(String(document.joinRequest.status))),
+      canRequestReplacement: Boolean(openRequest && KYB_OPEN_JOIN_STATUSES.includes(String(openRequest.status) as never)),
+      canRequestRevalidation: Boolean(
+        document.merchant?.status === "ACTIVE"
+        && document.status !== "UPLOADED"
+        && !openRequest
+        && !openRevalidationDocuments.has(document.id),
+      ),
+      openJoinRequest: openRequest ? { id: openRequest.id, status: openRequest.status } : null,
+    };
+  });
+  response.json(listResponse("kybDocuments", rows, total, built));
+});
+
+router.get("/kyb-documents/:id", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["kyb:read", "compliance:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const document = await client.kybDocument.findUnique({
+    where: { id },
+    select: kybDocumentContextSelect,
+  });
+  if (!document) {
+    throw new ApiError(404, "KYB_DOCUMENT_NOT_FOUND", "The KYB document does not exist");
+  }
+  const [availability, duplicateMatches, subjectName, readiness, openJoinRequest, openRevalidations] = await Promise.all([
+    contentAvailabilityForIds([document.id]),
+    duplicateDocumentsForHash(document),
+    document.subjectType === "BENEFICIAL_OWNER"
+      ? client.beneficialOwner.findUnique({
+          where: { id: document.subjectId },
+          select: { id: true, fullNameAr: true, fullNameEn: true, screeningStatus: true, active: true },
+        })
+      : Promise.resolve(null),
+    document.joinRequestId
+      ? computeJoinRequestReadiness(client, document.joinRequestId)
+      : Promise.resolve(null),
+    openJoinRequestForDocument(document),
+    client.kybRevalidationRequest.findMany({
+      where: { documentId: document.id, status: "OPEN" },
+      orderBy: { requestedAt: "desc" },
+    }),
+  ]);
+  const linkedJoinRequest = document.joinRequest;
+  response.json({
+    kybDocument: {
+      ...document,
+      contentAvailable: availability.get(document.id) ?? false,
+      merchantName: document.merchant?.tradeName ?? document.merchant?.legalName ?? "",
+      subjectName: subjectName
+        ? subjectName.fullNameEn || subjectName.fullNameAr
+        : null,
+      subjectOwner: subjectName,
+      expiryState: expiryState(document.expiresOn),
+      daysUntilExpiry: daysUntilExpiry(document.expiresOn),
+      duplicateMatches,
+      duplicateMerchantCount: new Set(duplicateMatches.map((match) => match.merchantId)).size,
+      duplicateDocumentCount: duplicateMatches.length,
+      readiness,
+      canReview: isKybDocumentActionable(document)
+        && (!linkedJoinRequest || !["APPROVED", "REJECTED", "WITHDRAWN", "EXPIRED"].includes(String(linkedJoinRequest.status))),
+      canRequestReplacement: Boolean(
+        openJoinRequest && KYB_OPEN_JOIN_STATUSES.includes(String(openJoinRequest.status) as never),
+      ),
+      canRequestRevalidation: Boolean(
+        document.merchant?.status === "ACTIVE"
+        && document.status !== "UPLOADED"
+        && !openJoinRequest
+        && openRevalidations.length === 0,
+      ),
+      openJoinRequest: openJoinRequest ? { id: openJoinRequest.id, status: openJoinRequest.status } : null,
+      openRevalidations,
+      reviewReasonCodes: KYB_DOCUMENT_REJECTION_REASONS,
+    },
+  });
+});
+
 router.post("/kyb-documents/:id/review", async (request: Request, response: Response) => {
   requireAuthorities(request, ["kyb:write", "compliance:write"]);
   const { id } = parseOrThrow(idSchema, request.params);
@@ -2225,7 +2621,129 @@ router.post("/kyb-documents/:id/review", async (request: Request, response: Resp
         decision: z.enum(["ACCEPTED", "REJECTED"]),
         reasonCode: z.string().max(64).optional(),
         notes: z.string().max(2000).optional(),
+        duplicateJustification: z.string().max(4000).optional(),
         expiresOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      })
+      .strict(),
+    request.body,
+  );
+  const actor = actorFromRequest(request);
+  const document = await client.kybDocument.findUnique({
+    where: { id },
+    select: kybDocumentContextSelect,
+  });
+  if (!document) {
+    throw new ApiError(404, "KYB_DOCUMENT_NOT_FOUND", "The KYB document does not exist");
+  }
+  if (document.avStatus !== "CLEAN") {
+    throw new ApiError(409, "KYB_DOCUMENT_NOT_SCANNED", "The KYB document has not passed malware scanning");
+  }
+  if (!isKybDocumentActionable(document)) {
+    throw new ApiError(409, "KYB_DOCUMENT_NOT_ACTIONABLE", "Only an uploaded, clean and unexpired document can be reviewed");
+  }
+  const linkedJoinRequest = document.joinRequestId
+    ? await client.joinRequest.findUnique({ where: { id: document.joinRequestId } })
+    : null;
+  if (linkedJoinRequest && ["APPROVED", "REJECTED", "WITHDRAWN", "EXPIRED"].includes(linkedJoinRequest.status)) {
+    throw new ApiError(409, "KYB_DOCUMENT_REVIEW_LOCKED", "The related join request is already closed");
+  }
+  if (body.decision === "REJECTED") {
+    if (!body.reasonCode || !KYB_DOCUMENT_REJECTION_REASONS.includes(body.reasonCode as never)) {
+      throw new ApiError(400, "KYB_REJECTION_REASON_REQUIRED", "A valid document rejection reason is required");
+    }
+  }
+  const expiresOn = body.expiresOn
+    ? new Date(`${body.expiresOn}T00:00:00.000Z`)
+    : document.expiresOn;
+  if (body.decision === "ACCEPTED" && expiryState(expiresOn) === "EXPIRED") {
+    throw new ApiError(409, "KYB_DOCUMENT_EXPIRED", "An expired document cannot be accepted; request a replacement");
+  }
+  const duplicateMerchantIds = await distinctDuplicateMerchantIds(client, document.sha256, document.merchantId);
+  if (duplicateJustificationRequired({
+    decision: body.decision,
+    duplicateMerchantCount: duplicateMerchantIds.length,
+    justification: body.duplicateJustification,
+  })) {
+    throw new ApiError(
+      422,
+      "KYB_DUPLICATE_JUSTIFICATION_REQUIRED",
+      "Accepting a document reused by another merchant requires a written justification",
+      { duplicateMerchantIds },
+    );
+  }
+  const now = new Date();
+  const updated = await client.$transaction(async (tx) => {
+    if (linkedJoinRequest?.status === "PENDING_CHECKER") {
+      await invalidatePendingJoinApproval(tx, linkedJoinRequest, "SUPERSEDED_BY_KYB_DOCUMENT_REVIEW");
+    }
+    const saved = await tx.kybDocument.update({
+      where: { id },
+      data: {
+        status: body.decision,
+        reviewedById: actor.userId,
+        reviewedAt: now,
+        statusChangedAt: now,
+        rejectionReasonCode: body.decision === "REJECTED" ? body.reasonCode : null,
+        reviewNotes: body.notes,
+        duplicateJustification: body.duplicateJustification,
+        expiresOn,
+        ...(body.decision === "ACCEPTED" ? { expiredAt: null } : {}),
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "SYSTEM",
+        action: body.decision === "ACCEPTED" ? "KYB_DOCUMENT_ACCEPTED" : "KYB_DOCUMENT_REJECTED",
+        entityType: "KYB_DOCUMENT",
+        entityId: document.id,
+        beforeJson: {
+          status: document.status,
+          avStatus: document.avStatus,
+          expiresOn: document.expiresOn?.toISOString() ?? null,
+        },
+        afterJson: {
+          status: saved.status,
+          reasonCode: body.reasonCode ?? null,
+          expiresOn: saved.expiresOn?.toISOString() ?? null,
+          duplicateMerchantIds,
+        },
+      },
+    });
+    return saved;
+  });
+  const kybStatus = await recomputeMerchantKybStatus(client, document.merchantId);
+  const amlCaseId = body.decision === "ACCEPTED"
+    ? await maybeRaiseDuplicateAmlCase({
+        document: {
+          id: document.id,
+          merchantId: document.merchantId,
+          sha256: document.sha256,
+          docType: document.docType,
+        },
+        duplicateMerchantIds,
+        actorUserId: actor.userId,
+        actorRole: actor.role ?? "SYSTEM",
+      })
+    : null;
+  response.json({
+    id: updated.id,
+    status: updated.status,
+    expiresOn: updated.expiresOn,
+    kybStatus,
+    duplicateMerchantCount: duplicateMerchantIds.length,
+    amlCaseId,
+  });
+});
+
+router.post("/kyb-documents/:id/request-replacement", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["kyb:write", "compliance:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z
+      .object({
+        reasonCode: z.string().max(64).optional(),
+        message: z.string().min(5).max(2000),
       })
       .strict(),
     request.body,
@@ -2233,34 +2751,167 @@ router.post("/kyb-documents/:id/review", async (request: Request, response: Resp
   const actor = actorFromRequest(request);
   const document = await client.kybDocument.findUnique({ where: { id } });
   if (!document) {
-    throw new ApiError(404, "KIB_DOCUMENT_NOT_FOUND", "The KYB document does not exist");
+    throw new ApiError(404, "KYB_DOCUMENT_NOT_FOUND", "The KYB document does not exist");
   }
-  if (document.avStatus !== "CLEAN") {
-    throw new ApiError(409, "KIB_DOCUMENT_NOT_SCANNED", "The KYB document has not passed malware scanning");
+  const joinRequest = await openJoinRequestForDocument(document);
+  if (!joinRequest) {
+    throw new ApiError(
+      409,
+      "KYB_REVALIDATION_REQUIRED",
+      "The document has no open join request; use the active-merchant revalidation action",
+    );
   }
-  const updated = await client.kybDocument.update({
+  const reasonCode = body.reasonCode ?? "REPLACEMENT_REQUESTED";
+  if (!KYB_DOCUMENT_REJECTION_REASONS.includes(reasonCode as never)) {
+    throw new ApiError(400, "KYB_REJECTION_REASON_REQUIRED", "A valid replacement reason is required");
+  }
+  const now = new Date();
+  await client.$transaction(async (tx) => {
+    await invalidatePendingJoinApproval(tx, joinRequest, "SUPERSEDED_BY_KYB_REPLACEMENT_REQUEST");
+    await tx.kybDocument.update({
+      where: { id },
+      data: {
+        status: "REJECTED",
+        reviewedById: actor.userId,
+        reviewedAt: now,
+        statusChangedAt: now,
+        rejectionReasonCode: reasonCode,
+        reviewNotes: body.message,
+      },
+    });
+    const remainingSeconds = joinRequest.slaRemainingSeconds
+      ?? secondsBetween(now, joinRequest.slaDueAt);
+    const infoRequestJson = mergeInfoRequestItems(joinRequest.infoRequestJson, [
+      { field: String(document.docType), message: body.message },
+    ]);
+    await tx.joinRequest.update({
+      where: { id: joinRequest.id },
+      data: {
+        status: "INFO_REQUESTED",
+        infoRequestJson,
+        slaPausedAt: joinRequest.slaPausedAt ?? now,
+        slaRemainingSeconds: remainingSeconds,
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "SYSTEM",
+        action: "KYB_DOCUMENT_REPLACEMENT_REQUESTED",
+        entityType: "KYB_DOCUMENT",
+        entityId: document.id,
+        beforeJson: { status: document.status, joinRequestStatus: joinRequest.status },
+        afterJson: {
+          status: "REJECTED",
+          joinRequestStatus: "INFO_REQUESTED",
+          reasonCode,
+          docType: document.docType,
+        },
+      },
+    });
+  });
+  await queueKybNotification(client, {
+    merchantId: document.merchantId,
+    code: "KYB_DOCUMENT_REPLACEMENT_REQUESTED",
+    payload: { documentType: document.docType, message: body.message },
+    eventKey: `replacement:${document.id}:${now.toISOString()}`,
+  });
+  await recomputeMerchantKybStatus(client, document.merchantId);
+  response.json({ id: document.id, status: "REJECTED", joinRequestStatus: "INFO_REQUESTED" });
+});
+
+router.post("/kyb-documents/:id/request-revalidation", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["kyb:write", "compliance:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z
+      .object({
+        reasonCode: z.string().max(64).optional(),
+        message: z.string().min(5).max(2000),
+        dueAt: z.string().datetime().optional(),
+      })
+      .strict(),
+    request.body,
+  );
+  const actor = actorFromRequest(request);
+  const document = await client.kybDocument.findUnique({
     where: { id },
-    data: {
-      status: body.decision,
-      reviewedById: actor.userId,
-      reviewedAt: new Date(),
-      rejectionReasonCode: body.reasonCode,
-      reviewNotes: body.notes,
-      expiresOn: body.expiresOn ? new Date(body.expiresOn) : null,
-    },
+    include: { merchant: true },
   });
-  await client.auditLog.create({
-    data: {
-      actorId: actor.userId,
-      role: actor.role ?? "SYSTEM",
-      action: "KYB_DOCUMENT_REVIEWED",
-      entityType: "KYB_DOCUMENT",
-      entityId: document.id,
-      beforeJson: { status: document.status, avStatus: document.avStatus },
-      afterJson: { status: updated.status, reasonCode: body.reasonCode ?? null },
-    },
+  if (!document) {
+    throw new ApiError(404, "KYB_DOCUMENT_NOT_FOUND", "The KYB document does not exist");
+  }
+  if (document.merchant.status === "CLOSED") {
+    throw new ApiError(409, "KYB_REVALIDATION_NOT_AVAILABLE", "A closed merchant cannot be asked for documents");
+  }
+  if (document.status === "UPLOADED") {
+    throw new ApiError(409, "KYB_DOCUMENT_PENDING_REVIEW", "Review or decide the uploaded document before requesting re-verification");
+  }
+  const openRequest = await openJoinRequestForDocument(document);
+  if (openRequest) {
+    throw new ApiError(
+      409,
+      "KYB_REPLACEMENT_REQUIRED",
+      "The document belongs to an open join request; request a replacement instead",
+    );
+  }
+  const existing = await client.kybRevalidationRequest.findFirst({
+    where: { documentId: document.id, status: "OPEN" },
+    select: { id: true },
   });
-  response.json({ id: updated.id, status: updated.status });
+  if (existing) {
+    throw new ApiError(409, "KYB_REVALIDATION_ALREADY_OPEN", "A revalidation request is already open for this document", {
+      revalidationRequestId: existing.id,
+    });
+  }
+  const policy = await readKybRefreshPolicy(client);
+  const now = new Date();
+  const dueAt = body.dueAt
+    ? new Date(body.dueAt)
+    : new Date(now.getTime() + policy.revalidationDueDays * 24 * 60 * 60 * 1000);
+  const revalidation = await client.$transaction(async (tx) => {
+    const created = await tx.kybRevalidationRequest.create({
+      data: {
+        merchantId: document.merchantId,
+        documentId: document.id,
+        docType: document.docType,
+        reasonCode: body.reasonCode ?? "PERIODIC_REVIEW",
+        message: body.message,
+        status: "OPEN",
+        requestedById: actor.userId,
+        requestedAt: now,
+        dueAt,
+      },
+    });
+    await tx.merchant.update({
+      where: { id: document.merchantId },
+      data: { kybStatus: "PENDING" },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "SYSTEM",
+        action: "KYB_REVALIDATION_REQUESTED",
+        entityType: "KYB_REVALIDATION_REQUEST",
+        entityId: created.id,
+        beforeJson: {},
+        afterJson: {
+          merchantId: document.merchantId,
+          documentId: document.id,
+          docType: document.docType,
+          dueAt: dueAt.toISOString(),
+        },
+      },
+    });
+    return created;
+  });
+  await queueKybNotification(client, {
+    merchantId: document.merchantId,
+    code: "KYB_REVALIDATION_DUE",
+    payload: { documentType: document.docType, dueAt: dueAt.toISOString(), message: body.message },
+    eventKey: `revalidation:${revalidation.id}`,
+  });
+  response.status(201).json({ id: revalidation.id, status: revalidation.status, dueAt: revalidation.dueAt });
 });
 
 router.get("/merchants", async (request: Request, response: Response) => {

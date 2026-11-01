@@ -1,5 +1,6 @@
 import { Decimal } from "decimal.js";
 import { ApiError } from "../../lib/error";
+import { nextKybReviewAt, parseKybRefreshPolicy } from "../../lib/kybReview";
 import { moneyToString, type Money } from "../db/money";
 import {
   buildLedgerTemplate,
@@ -573,6 +574,11 @@ export async function activateApprovedJoinRequest(
 
   const riskTier = input.proposedRiskTier ?? joinRequest.proposedRiskTier ?? merchant.riskTier;
   const activatedAt = new Date();
+  const refreshSetting = await modelOf(tx, "platformSetting").findFirst({
+    where: { key: "kyb.refresh_policy" },
+    orderBy: { version: "desc" },
+  });
+  const nextReviewAt = nextKybReviewAt(riskTier, activatedAt, parseKybRefreshPolicy(refreshSetting?.valueJson));
   await joinRequests.update({
     where: { id: String(joinRequest.id) },
     data: {
@@ -590,6 +596,7 @@ export async function activateApprovedJoinRequest(
       kybStatus: "VERIFIED",
       riskTier,
       activatedAt,
+      nextKybReviewAt: nextReviewAt,
     },
   });
 

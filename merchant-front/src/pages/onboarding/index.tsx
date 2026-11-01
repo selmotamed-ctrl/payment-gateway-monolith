@@ -46,6 +46,15 @@ type DocumentItem = {
     expiresOn: string;
 };
 
+type RevalidationRequest = {
+    id: string;
+    docType: string;
+    message: string;
+    dueAt: string | null;
+    status: string;
+    sourceDocument?: { id: string; docType: string; originalFileName: string | null } | null;
+};
+
 const STEPS = [
     { key: "profile", title: "Business Profile" },
     { key: "owners", title: "Beneficial Owners" },
@@ -55,13 +64,15 @@ const STEPS = [
 ];
 
 const DOCUMENT_TYPES = [
-    "Commercial Registry",
-    "Tax Certificate",
-    "Articles Of Association",
-    "Proof Of Address",
-    "Bank Letter",
-    "Sector Licence",
-    "Identification Document",
+    { title: "Commercial Registry", value: "COMMERCIAL_REGISTRY" },
+    { title: "Tax Certificate", value: "TAX_CERTIFICATE" },
+    { title: "Articles Of Association", value: "ARTICLES_OF_ASSOCIATION" },
+    { title: "Proof Of Address", value: "PROOF_OF_ADDRESS" },
+    { title: "Bank Letter", value: "BANK_LETTER" },
+    { title: "Sector Licence", value: "SECTOR_LICENSE" },
+    { title: "Owner ID", value: "OWNER_ID" },
+    { title: "Signatory ID", value: "SIGNATORY_ID" },
+    { title: "Other", value: "OTHER" },
 ];
 
 const CATEGORIES = [
@@ -103,6 +114,9 @@ const OnboardingPage = dc(() => {
     const profile = ref<BusinessProfile>(emptyProfile());
     const owners = ref<Owner[]>([]);
     const documents = ref<DocumentItem[]>([]);
+    const revalidations = ref<RevalidationRequest[]>([]);
+    const revalidationFiles = ref<Record<string, File | null>>({});
+    const revalidationExpiry = ref<Record<string, string>>({});
     const payout = ref({
         bankName: "",
         accountHolder: "",
@@ -115,7 +129,10 @@ const OnboardingPage = dc(() => {
         loading.value = true;
         error.value = null;
         try {
-            const response = await api.get(urlsMap.onboardingJoinRequest);
+            const [response, revalidationResponse] = await Promise.all([
+                api.get(urlsMap.onboardingJoinRequest),
+                api.get(urlsMap.onboardingKybRevalidations).catch(() => null),
+            ]);
             const payload = response.data?.data ?? response.data ?? {};
             joinStatus.value = payload.status ?? payload.joinRequest?.status ?? null;
             requestedInfo.value = payload.requestedInfo ?? null;
@@ -123,6 +140,10 @@ const OnboardingPage = dc(() => {
             profile.value = { ...emptyProfile(), ...source };
             owners.value = payload.beneficialOwners ?? payload.owners ?? [];
             documents.value = payload.documents ?? [];
+            const revalidationPayload = revalidationResponse?.data?.data ?? revalidationResponse?.data ?? {};
+            revalidations.value = (revalidationPayload.revalidations ?? []).filter(
+                (request: RevalidationRequest) => request.status === "OPEN",
+            );
             payout.value = { ...payout.value, ...(payload.payoutBankDetails ?? {}) };
         } catch (e) {
             error.value = extractApiErrorMessage(e);
@@ -173,6 +194,31 @@ const OnboardingPage = dc(() => {
                 headers: { "Content-Type": "multipart/form-data" },
             });
             showSnackBar({ type: "success", message: t("Uploaded File") });
+        } catch (e) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+        } finally {
+            saving.value = false;
+        }
+    };
+
+    const uploadRevalidation = async (request: RevalidationRequest) => {
+        const file = revalidationFiles.value[request.id];
+        if (!file) {
+            showSnackBar({ type: "warning", message: t("Choose a replacement document first") });
+            return;
+        }
+        saving.value = true;
+        try {
+            const body = new FormData();
+            body.append("documentType", request.docType);
+            body.append("expiresAt", revalidationExpiry.value[request.id] ?? "");
+            body.append("revalidationRequestId", request.id);
+            body.append("document", file);
+            await api.post(urlsMap.onboardingKybDocuments, body, {
+                headers: { "Content-Type": "multipart/form-data" },
+            });
+            showSnackBar({ type: "success", message: t("Replacement uploaded") });
+            await load();
         } catch (e) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
         } finally {
@@ -243,6 +289,57 @@ const OnboardingPage = dc(() => {
                     <VAlert type="warning" variant="tonal" density="compact">
                         {requestedInfo.value}
                     </VAlert>
+                )}
+
+                {revalidations.value.length > 0 && (
+                    <VCard variant="tonal" color="warning">
+                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>
+                                {t("KYB re-verification required")}
+                            </ThemedText>
+                            {revalidations.value.map((request) => (
+                                <ThemedView key={request.id} style={{ gap: "8px" }}>
+                                    <ThemedText style={{ fontSize: "13px" }}>
+                                        {request.docType}: {request.message}
+                                    </ThemedText>
+                                    {request.dueAt && (
+                                        <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>
+                                            {t("Due")}: {new Date(request.dueAt).toLocaleDateString()}
+                                        </ThemedText>
+                                    )}
+                                    <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+                                        <VFileInput
+                                            label={t("Replacement file")}
+                                            modelValue={revalidationFiles.value[request.id] ?? null}
+                                            onUpdate:modelValue={(value: File | File[] | null) => {
+                                                revalidationFiles.value[request.id] = Array.isArray(value) ? (value[0] ?? null) : value;
+                                            }}
+                                            density="compact"
+                                            hideDetails
+                                            style={{ minWidth: "260px" }}
+                                        />
+                                        <VTextField
+                                            label={t("Expiry date")}
+                                            modelValue={revalidationExpiry.value[request.id] ?? ""}
+                                            onUpdate:modelValue={(value: string) => (revalidationExpiry.value[request.id] = value)}
+                                            density="compact"
+                                            hideDetails
+                                            style={{ minWidth: "180px" }}
+                                        />
+                                        <VBtn
+                                            size="small"
+                                            variant="flat"
+                                            color="warning"
+                                            loading={saving.value}
+                                            onClick={() => void uploadRevalidation(request)}
+                                        >
+                                            {t("Upload replacement")}
+                                        </VBtn>
+                                    </ThemedView>
+                                </ThemedView>
+                            ))}
+                        </VCardText>
+                    </VCard>
                 )}
 
                 {error.value ? (
@@ -466,7 +563,7 @@ const OnboardingPage = dc(() => {
                                             onClick={() =>
                                                 documents.value = [
                                                     ...documents.value,
-                                                    { docType: DOCUMENT_TYPES[0] ?? "Commercial Registry", file: null, expiresOn: "" },
+                                                    { docType: DOCUMENT_TYPES[0]?.value ?? "COMMERCIAL_REGISTRY", file: null, expiresOn: "" },
                                                 ]
                                             }
                                         >
@@ -481,6 +578,8 @@ const OnboardingPage = dc(() => {
                                         >
                                             <VSelect
                                                 items={DOCUMENT_TYPES}
+                                                itemTitle="title"
+                                                itemValue="value"
                                                 modelValue={document.docType}
                                                 onUpdate:modelValue={(v: string) => (documents.value[index]!.docType = v)}
                                                 label={t("Document Type")}

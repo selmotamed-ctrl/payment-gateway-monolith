@@ -6,15 +6,14 @@ import {
   toCoreJoinRequestAssign,
   toCoreJoinRequestDecide,
   toCoreJoinRequestRequestInfo,
-  toCoreKybDocumentReview,
 } from "../contract";
 import { coreForward } from "../forward";
-import { callCoreRaw, callCoreResponse, mapCoreHttpError, parseJsonBuffer } from "../../lib/mtlsClient";
+import { callCoreResponse } from "../../lib/mtlsClient";
 import { env } from "../../lib/env";
 import { parseCidrList, resolveClientIp } from "../../lib/net";
 import { resolveRequestId } from "../../lib/requestLogger";
 import { uploadSingle } from "../upload";
-import { ApiError, parseOrThrow } from "../../lib/error";
+import { ApiError } from "../../lib/error";
 
 const router = express.Router();
 
@@ -262,37 +261,3 @@ router.post(
 );
 
 export const joinRequestsRouter = router;
-
-export const kybRouter = express.Router();
-
-kybRouter.post(
-  "/kyb-documents/:id/review",
-  coreForward({
-    method: "POST",
-    path: (context) =>
-      `/internal/admin/kyb-documents/${encodeURIComponent(context.params.id ?? "")}/review`,
-    paramsSchema: idParamsSchema,
-    schema: kybReviewSchema,
-    bodyFrom: (_req, body) => toCoreKybDocumentReview(body),
-  }),
-);
-
-kybRouter.get("/kyb-documents/:id/content", async (req: Request, res: Response): Promise<void> => {
-  const { id } = parseOrThrow(idParamsSchema, req.params);
-  const upstream = await callCoreRaw({
-    method: "GET",
-    path: `/internal/admin/kyb-documents/${encodeURIComponent(id)}/content`,
-    ...coreCallContext(req),
-  });
-  if (upstream.statusCode >= 400) {
-    throw mapCoreHttpError(upstream.statusCode, parseJsonBuffer(upstream.body));
-  }
-  const contentType = upstream.headers["content-type"];
-  const contentDisposition = upstream.headers["content-disposition"];
-  const cacheControl = upstream.headers["cache-control"];
-  if (typeof contentType === "string") res.setHeader("Content-Type", contentType);
-  if (typeof contentDisposition === "string") res.setHeader("Content-Disposition", contentDisposition);
-  if (typeof cacheControl === "string") res.setHeader("Cache-Control", cacheControl);
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.status(upstream.statusCode).send(upstream.body);
-});

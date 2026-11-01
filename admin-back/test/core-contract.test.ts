@@ -31,6 +31,8 @@ import {
   toCoreJoinRequestAssign,
   toCoreJoinRequestDecide,
   toCoreJoinRequestRequestInfo,
+  toCoreKybDocumentReplacement,
+  toCoreKybDocumentRevalidation,
   toCoreKybDocumentReview,
   toCoreMerchantProposeEdit,
   toCoreMerchantReinstate,
@@ -78,9 +80,9 @@ import { decisionSchema as approvalDecisionSchema } from "../api/protected/appro
 import {
   assignSchema,
   decideSchema,
-  kybReviewSchema,
   requestInfoSchema,
 } from "../api/protected/joinRequests";
+import { kybReplacementSchema, kybRevalidationSchema, kybReviewSchema } from "../api/protected/kybReview";
 import {
   proposeEditSchema,
   reinstateSchema,
@@ -375,8 +377,24 @@ const cases: ContractCase[] = [
     mapper: toCoreKybDocumentReview,
     publicSchema: kybReviewSchema,
     legacyPayload: { decision: "ACCEPT", checklist: ["readable"], notes: "document is fine" },
-    allowedKeys: ["decision", "reasonCode", "notes", "expiresOn"],
+    allowedKeys: ["decision", "reasonCode", "notes", "duplicateJustification", "expiresOn"],
     requiredKeys: ["decision"],
+  },
+  {
+    route: "POST /kyb-documents/:id/request-replacement",
+    mapper: toCoreKybDocumentReplacement,
+    publicSchema: kybReplacementSchema,
+    legacyPayload: { reasonCode: "BLURRY_OR_UNREADABLE", message: "Please upload a clearer copy." },
+    allowedKeys: ["reasonCode", "message"],
+    requiredKeys: ["message"],
+  },
+  {
+    route: "POST /kyb-documents/:id/request-revalidation",
+    mapper: toCoreKybDocumentRevalidation,
+    publicSchema: kybRevalidationSchema,
+    legacyPayload: { reasonCode: "PERIODIC_REVIEW", message: "Please upload a current copy.", dueAt: "2026-12-01T00:00:00.000Z" },
+    allowedKeys: ["reasonCode", "message", "dueAt"],
+    requiredKeys: ["message"],
   },
   {
     route: "POST /merchants/:id/suspend",

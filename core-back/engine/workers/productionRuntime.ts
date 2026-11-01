@@ -11,6 +11,7 @@ import { OutboxNotificationWorker } from "./OutboxNotificationWorker";
 import { LedgerInvariantWorker } from "./LedgerInvariantWorker";
 import { JoinRequestExpiryWorker } from "./JoinRequestExpiryWorker";
 import { PeriodicScreeningWorker } from "./PeriodicScreeningWorker";
+import { KybExpiryWorker } from "./KybExpiryWorker";
 import { RetentionWorker } from "./RetentionWorker";
 import { BackgroundJobWorker } from "./BackgroundJobWorker";
 import {
@@ -40,6 +41,14 @@ export interface ProductionWorkerRuntimeOptions {
    * picks it up again.
    */
   rescreenIntervalMs?: number;
+  /**
+   * How often the KYB expiry and periodic re-verification worker runs.
+   */
+  kybExpiryIntervalMs?: number;
+  /**
+   * How many KYB rows the worker checks in one pass.
+   */
+  kybExpiryBatchSize?: number;
   /**
    * The record retention worker (OD-4). It is off unless the deployment
    * turns it on, because it removes evidence.
@@ -266,6 +275,13 @@ export const createProductionWorkerRuntime = (
       ...workerOptions,
       screening: platform.screening,
       rescreenIntervalMs: options.rescreenIntervalMs,
+    }),
+    // The KYB lifecycle: expiry, notices, automatic suspension and periodic
+    // re-verification requests (design §16.4 and §16.10).
+    new KybExpiryWorker({
+      ...workerOptions,
+      intervalMs: options.kybExpiryIntervalMs ?? env.WORKER_KYB_EXPIRY_INTERVAL_MS,
+      batchSize: options.kybExpiryBatchSize ?? env.WORKER_KYB_EXPIRY_BATCH_SIZE,
     }),
     // The record retention worker (OD-4) removes the regulatory evidence
     // that passed the retention period. It only runs when the deployment

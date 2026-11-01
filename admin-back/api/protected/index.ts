@@ -9,7 +9,8 @@ import { assetsRouter } from "./assets";
 import { credentialSetsRouter } from "./credentialSets";
 import { financeRouter } from "./finance";
 import { gatewaysRouter, gatewayVersionsRouter } from "./gateways";
-import { joinRequestsRouter, kybRouter } from "./joinRequests";
+import { joinRequestsRouter } from "./joinRequests";
+import { kybReviewRouter } from "./kybReview";
 import { merchantsRouter } from "./merchants";
 import { operationsRouter } from "./operations";
 import { railsRouter, routesRouter } from "./rails";
@@ -53,7 +54,7 @@ router.use("/reconciliation", reconciliationRouter);
 router.use("/settings", settingsRouter);
 router.use("/options", optionsRouter);
 router.use("/stats", statsRouter);
-router.use("/", kybRouter);
+router.use("/kyb-documents", kybReviewRouter);
 router.use("/", operationsRouter);
 router.use("/", financeRouter);
 

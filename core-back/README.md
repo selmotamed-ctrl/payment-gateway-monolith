@@ -57,6 +57,7 @@ green on a machine without a database.
 | `WORKER_BACKGROUND_JOBS_ENABLED` | Starts the durable job queue worker (the statement reconciliation and the dispute / adjustment execution) |
 | `WORKER_BACKGROUND_JOBS_INTERVAL_MS` / `WORKER_BACKGROUND_JOBS_BATCH_SIZE` | Queue drain cadence and batch size, defaults `2000` / `10` |
 | `WORKER_BACKGROUND_JOBS_LEASE_SECONDS` | Lease of a claimed job: a job that is still `RUNNING` when its lease expired belonged to a crashed node and is re-queued, defaults `300` |
+| `WORKER_KYB_EXPIRY_INTERVAL_MS` / `WORKER_KYB_EXPIRY_BATCH_SIZE` | KYB expiry, notice, suspension and periodic re-verification cadence and batch size, defaults `21600000` / `200` |
 | `WORKER_RETENTION_ENABLED` | Starts the record retention worker (OD-4), the only place where regulatory evidence is removed |
 | `WORKER_RETENTION_INTERVAL_MS` / `WORKER_RETENTION_BATCH_SIZE` | Retention cadence and batch size, defaults `3600000` / `500` |
 | `RETENTION_DRY_RUN` | The retention worker reports what it would purge without deleting anything |

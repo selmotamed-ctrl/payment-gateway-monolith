@@ -1,110 +1,424 @@
 import { dc } from "kt-dc";
-import { ref } from "vue";
-import { useLocale } from "vuetify";
-import { VCard, VCardText } from "vuetify/components";
+import { computed, ref } from "vue";
+import { useLocale, useTheme } from "vuetify";
+import { VBtn, VCard, VCardText, VDialog } from "vuetify/components";
+import { useRouter } from "vue-router";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
-import { StateView } from "@/components/StateView";
+import { ThemedText } from "@/components/ThemedText";
 import { StatusChip } from "@/components/StatusChip";
-import { DataTable } from "@/components/Table/DataTable";
+import { ApiTable } from "@/components/Table/ApiTable";
+import TableFilters from "@/components/Table/TableFilters";
+import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
+import { tableRegistry } from "@/components/Table/tableRegistry";
+import { statusTone } from "@/components/Table/statusTone";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
-import { extractApiErrorMessage } from "@/utils/errors/extractor";
+import {
+    COLUMN_HELP,
+    avStatusHelp,
+    documentStatusHelp,
+    documentTypeHelp,
+    expiryHelp,
+    formatBytes,
+    formatDateTime,
+} from "./kybReviewHelp";
+import type { KybDocumentSummary } from "./types";
+import KybHelpPanel from "./components/KybHelpPanel";
+import KybDocumentPreview from "./components/KybDocumentPreview";
+import KybReviewDialog from "./components/KybReviewDialog";
+import KybActionDialog, { type KybActionMode } from "./components/KybActionDialog";
 
-type KybDocument = {
-    id: string;
-    merchantId: string;
-    merchantName: string;
-    docType: string;
-    status: string;
-    fileName: string;
-    contentHash: string;
-    uploadedAt: string;
-    expiresOn: string | null;
-    reviewNote: string | null;
+const filterDefinitions = tableRegistry.KybReview?.filters ?? [];
+
+const text = (value: unknown): string => (value === null || value === undefined ? "" : String(value));
+
+const requestSlaLabel = (row: KybDocumentSummary): { label: string; tone: "success" | "warning" | "error" | "neutral" } => {
+    if (!row.joinRequest) return { label: "No request", tone: "neutral" };
+    if (row.joinRequest.slaPausedAt) return { label: "Paused", tone: "neutral" };
+    const diff = new Date(row.joinRequest.slaDueAt).getTime() - Date.now();
+    if (Number.isNaN(diff)) return { label: "—", tone: "neutral" };
+    if (diff < 0) return { label: "Overdue", tone: "error" };
+    if (diff < 24 * 3600 * 1000) return { label: `${Math.max(1, Math.round(diff / 3600000))}h`, tone: "warning" };
+    return { label: `${Math.round(diff / 86400000)}d`, tone: "success" };
 };
 
 const KybReviewPage = dc(() => {
     const { t } = useLocale();
-    const rows = ref<KybDocument[]>([]);
-    const loading = ref(true);
-    const error = ref<string | null>(null);
+    const theme = useTheme();
+    const router = useRouter();
     const search = ref<string | null>(null);
+    const filters = ref<FilterValues>({});
+    const rows = ref<KybDocumentSummary[]>([]);
+    const total = ref(0);
+    const pageSize = ref(20);
+    let filterTimer: ReturnType<typeof setTimeout> | undefined;
+    const refreshHook = ref<{
+        reset: () => void;
+        refresh: (props: { queryParams?: Record<string, unknown>; nextSkip?: number }) => Promise<void>;
+        refreshAsIs: () => void;
+    } | null>(null);
+    const previewOpen = ref(false);
+    const previewDocument = ref<KybDocumentSummary | null>(null);
+    const reviewOpen = ref(false);
+    const reviewDocument = ref<KybDocumentSummary | null>(null);
+    const reviewInitial = ref<"ACCEPTED" | "REJECTED">("ACCEPTED");
+    const actionOpen = ref(false);
+    const actionMode = ref<KybActionMode>("REPLACEMENT");
+    const actionDocument = ref<KybDocumentSummary | null>(null);
 
-    const load = async () => {
-        loading.value = true;
-        error.value = null;
-        try {
-            const response = await api.get(urlsMap.joinRequestsList, {
-                params: { search: search.value || undefined, include: "kyb_documents" },
-            });
-            const payload = response.data?.data ?? response.data ?? {};
-            rows.value = payload.kybDocuments ?? payload.documents ?? payload.rows ?? payload.items ?? [];
-        } catch (e) {
-            error.value = extractApiErrorMessage(e);
-            rows.value = [];
-        } finally {
-            loading.value = false;
-        }
+    const onFiltersChanged = (key: string, value: unknown) => {
+        filters.value = { ...filters.value, [key]: value };
+        if (filterTimer) clearTimeout(filterTimer);
+        filterTimer = setTimeout(() => refreshHook.value?.reset(), 300);
     };
 
-    void load();
-
-    const statusTone = (status: string) => {
-        switch (status) {
-            case "ACCEPTED":
-                return "success" as const;
-            case "REJECTED":
-                return "error" as const;
-            case "EXPIRED":
-                return "warning" as const;
-            default:
-                return "info" as const;
-        }
+    const onFiltersCleared = () => {
+        filters.value = {};
+        refreshHook.value?.reset();
     };
 
-    const headers: TableHeader<KybDocument>[] = [
-        { key: "merchantName", label: "Merchant Name", value: (row) => row.merchantName },
-        { key: "docType", label: "Document Type", value: (row) => row.docType },
+    const openDetail = (row: KybDocumentSummary) => {
+        void router.push({ name: "KybReviewDetail", params: { id: row.id } });
+    };
+
+    const openPreview = (row: KybDocumentSummary) => {
+        previewDocument.value = row;
+        previewOpen.value = true;
+    };
+
+    const openReview = (row: KybDocumentSummary, decision: "ACCEPTED" | "REJECTED") => {
+        reviewDocument.value = row;
+        reviewInitial.value = decision;
+        reviewOpen.value = true;
+    };
+
+    const openAction = (row: KybDocumentSummary) => {
+        actionDocument.value = row;
+        actionMode.value = row.canRequestReplacement ? "REPLACEMENT" : "REVALIDATION";
+        actionOpen.value = true;
+    };
+
+    const refreshAfterAction = () => refreshHook.value?.refreshAsIs();
+
+    const toneColor = (tone: ReturnType<typeof statusTone>): string => {
+        const colors = theme.current.value.colors as Record<string, string>;
+        return colors[tone] ?? colors["on-surface-variant"] ?? "#64748b";
+    };
+
+    const rowColor = (row: KybDocumentSummary): string | undefined => {
+        if (row.avStatus === "INFECTED" || row.expiryState === "EXPIRED" || row.status === "REJECTED") {
+            return toneColor("error");
+        }
+        if (row.avStatus === "PENDING" || row.expiryState === "DUE_SOON" || row.duplicateMerchantCount > 0) {
+            return toneColor("warning");
+        }
+        return undefined;
+    };
+
+    const headers: TableHeader<KybDocumentSummary>[] = [
+        {
+            key: "merchant",
+            label: "Merchant / subject",
+            sortKey: "merchantName",
+            headerTooltip: COLUMN_HELP.merchant,
+            value: (row) => `${row.merchantName} ${row.subjectName ?? ""}`,
+            Value: ({ row }: { row: KybDocumentSummary }) => (
+                <ThemedView style={{ gap: "3px" }}>
+                    <ThemedText style={{ fontSize: "13px", fontWeight: 700 }}>{row.merchantName || "—"}</ThemedText>
+                    <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>
+                        {row.merchantLegalName || row.merchantId}
+                    </ThemedText>
+                    <ThemedView style={{ flexDirection: "row", gap: "4px", flexWrap: "wrap" }}>
+                        <StatusChip label={row.merchantStatus || "—"} tone={statusTone(row.merchantStatus ?? "")} size="x-small" />
+                        <StatusChip label={`KYB ${row.merchantKybStatus || "—"}`} tone={statusTone(row.merchantKybStatus ?? "")} size="x-small" />
+                        {row.subjectType === "BENEFICIAL_OWNER" && (
+                            <StatusChip label={row.subjectName || "Owner"} tone="info" size="x-small" />
+                        )}
+                    </ThemedView>
+                </ThemedView>
+            ),
+        },
+        {
+            key: "docType",
+            label: "Document type",
+            sortKey: "docType",
+            headerTooltip: COLUMN_HELP.documentType,
+            value: (row) => documentTypeHelp(row.docType).label,
+            Value: ({ row }: { row: KybDocumentSummary }) => {
+                const help = documentTypeHelp(row.docType);
+                return (
+                    <span title={help.meaning}>
+                        <StatusChip label={help.label} tone="info" size="small" />
+                    </span>
+                );
+            },
+        },
+        {
+            key: "file",
+            label: "File",
+            headerTooltip: COLUMN_HELP.file,
+            value: (row) => row.originalFileName ?? "",
+            Value: ({ row }: { row: KybDocumentSummary }) => (
+                <ThemedView style={{ gap: "2px" }}>
+                    <ThemedText style={{ fontSize: "12px", fontWeight: 600 }}>{row.originalFileName || "—"}</ThemedText>
+                    <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>
+                        {formatBytes(row.sizeBytes)} · {row.mime}
+                    </ThemedText>
+                </ThemedView>
+            ),
+        },
         {
             key: "status",
             label: "Status",
-            Value: ({ row }: { row: KybDocument }) => <StatusChip label={row.status} tone={statusTone(row.status)} />,
+            sortKey: "status",
+            headerTooltip: COLUMN_HELP.status,
+            value: (row) => row.status,
+            Value: ({ row }: { row: KybDocumentSummary }) => {
+                const help = documentStatusHelp(row.status);
+                return (
+                    <span title={help.meaning}>
+                        <StatusChip label={help.label} tone={help.tone} size="small" />
+                    </span>
+                );
+            },
         },
-        { key: "fileName", label: "Uploaded File", value: (row) => row.fileName },
-        { key: "contentHash", label: "Content Hash", value: (row) => (row.contentHash ?? "").slice(0, 16) },
-        { key: "uploadedAt", label: "Created At", value: (row) => row.uploadedAt },
-        { key: "expiresOn", label: "Expiry Date", value: (row) => row.expiresOn ?? "-" },
-        { key: "reviewNote", label: "Notes", value: (row) => row.reviewNote ?? "-" },
+        {
+            key: "avStatus",
+            label: "AV scan",
+            sortKey: "avStatus",
+            headerTooltip: COLUMN_HELP.avStatus,
+            value: (row) => row.avStatus,
+            Value: ({ row }: { row: KybDocumentSummary }) => {
+                const help = avStatusHelp(row.avStatus);
+                return (
+                    <span title={help.meaning}>
+                        <StatusChip label={help.label} tone={help.tone} size="small" />
+                    </span>
+                );
+            },
+        },
+        {
+            key: "expiry",
+            label: "Expiry",
+            sortKey: "expiresOn",
+            headerTooltip: COLUMN_HELP.expiry,
+            value: (row) => row.expiresOn ?? "",
+            Value: ({ row }: { row: KybDocumentSummary }) => {
+                const help = expiryHelp(row.expiryState);
+                return (
+                    <ThemedView style={{ gap: "3px" }}>
+                        <span title={help.meaning}>
+                            <StatusChip
+                                label={row.daysUntilExpiry === null ? help.label : `${help.label} ${row.daysUntilExpiry < 0 ? `(${Math.abs(row.daysUntilExpiry)}d ago)` : `(${row.daysUntilExpiry}d)`}`}
+                                tone={help.tone}
+                                size="x-small"
+                            />
+                        </span>
+                        <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{formatDateTime(row.expiresOn)}</ThemedText>
+                    </ThemedView>
+                );
+            },
+        },
+        {
+            key: "duplicate",
+            label: "Duplicate",
+            headerTooltip: COLUMN_HELP.duplicate,
+            value: (row) => String(row.duplicateMerchantCount),
+            Value: ({ row }: { row: KybDocumentSummary }) =>
+                row.duplicateMerchantCount > 0 ? (
+                    <StatusChip
+                        label={`${row.duplicateMerchantCount} merchant${row.duplicateMerchantCount === 1 ? "" : "s"}`}
+                        tone="warning"
+                        size="x-small"
+                    />
+                ) : (
+                    <ThemedText style={{ opacity: 0.55 }}>—</ThemedText>
+                ),
+        },
+        {
+            key: "request",
+            label: "Join request",
+            headerTooltip: COLUMN_HELP.request,
+            value: (row) => row.joinRequest?.status ?? "",
+            Value: ({ row }: { row: KybDocumentSummary }) => {
+                if (!row.joinRequest) return <ThemedText style={{ opacity: 0.55 }}>—</ThemedText>;
+                const sla = requestSlaLabel(row);
+                return (
+                    <ThemedView style={{ gap: "3px" }}>
+                        <StatusChip label={row.joinRequest.status} tone={statusTone(row.joinRequest.status)} size="x-small" />
+                        <StatusChip label={`SLA ${sla.label}`} tone={sla.tone} size="x-small" />
+                        <ThemedText style={{ fontSize: "10px", opacity: 0.5, direction: "ltr" }}>
+                            {row.joinRequest.id}
+                        </ThemedText>
+                    </ThemedView>
+                );
+            },
+        },
+        {
+            key: "uploaded",
+            label: "Uploaded",
+            sortKey: "createdAt",
+            headerTooltip: COLUMN_HELP.uploaded,
+            value: (row) => row.createdAt,
+            Value: ({ row }: { row: KybDocumentSummary }) => (
+                <ThemedView style={{ gap: "2px" }}>
+                    <ThemedText style={{ fontSize: "11px" }}>{formatDateTime(row.createdAt)}</ThemedText>
+                    <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{row.uploader || "—"}</ThemedText>
+                </ThemedView>
+            ),
+        },
+        {
+            key: "reviewed",
+            label: "Reviewed",
+            headerTooltip: COLUMN_HELP.reviewed,
+            value: (row) => row.reviewedAt ?? "",
+            Value: ({ row }: { row: KybDocumentSummary }) => (
+                <ThemedView style={{ gap: "2px" }}>
+                    <ThemedText style={{ fontSize: "11px" }}>{formatDateTime(row.reviewedAt)}</ThemedText>
+                    <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{row.reviewer || "—"}</ThemedText>
+                </ThemedView>
+            ),
+        },
+        {
+            key: "actions",
+            label: "Actions",
+            sortable: false,
+            headerTooltip: COLUMN_HELP.actions,
+            Value: ({ row }: { row: KybDocumentSummary }) => (
+                <ThemedView style={{ flexDirection: "row", gap: "4px", flexWrap: "wrap" }}>
+                    <VBtn size="x-small" variant="text" prependIcon="mdi-open-in-new" onClick={() => openDetail(row)}>
+                        {t("Open")}
+                    </VBtn>
+                    <VBtn
+                        size="x-small"
+                        variant="text"
+                        prependIcon="mdi-eye-outline"
+                        disabled={row.avStatus !== "CLEAN" || !row.contentAvailable}
+                        onClick={() => openPreview(row)}
+                    >
+                        {t("Preview")}
+                    </VBtn>
+                    {row.canReview && (
+                        <>
+                            <VBtn size="x-small" variant="text" color="success" onClick={() => openReview(row, "ACCEPTED")}>
+                                {t("Accept")}
+                            </VBtn>
+                            <VBtn size="x-small" variant="text" color="error" onClick={() => openReview(row, "REJECTED")}>
+                                {t("Reject")}
+                            </VBtn>
+                        </>
+                    )}
+                    {(row.canRequestReplacement || row.canRequestRevalidation) && (
+                        <VBtn size="x-small" variant="text" color="warning" onClick={() => openAction(row)}>
+                            {t(row.canRequestReplacement ? "Replace" : "Re-verify")}
+                        </VBtn>
+                    )}
+                </ThemedView>
+            ),
+        },
     ];
+
+    const actionableCount = computed(() => rows.value.filter((row) => row.canReview).length);
+    const duplicateCount = computed(() => rows.value.filter((row) => row.duplicateMerchantCount > 0).length);
 
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("KYB Review")} />
-
-                {error.value ? (
-                    <StateView error={error.value} onRetry={() => void load()} />
-                ) : (
-                    <VCard>
-                        <VCardText>
-                            <DataTable
-                                title={t("KYB Review")}
-                                data={rows.value}
-                                headers={headers}
-                                loading={loading.value}
-                                showNumber={true}
-                                xlsx={false}
-                                noElevation={true}
-                                searchValue={search.value}
-                                setSearchValue={(value) => (search.value = value)}
-                            />
-                        </VCardText>
-                    </VCard>
-                )}
+                <PageHeader
+                    title={t("KYB Review")}
+                    end={() => (
+                        <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                            <StatusChip label={`${total.value} ${t("documents")}`} tone="info" size="small" />
+                            <StatusChip label={`${actionableCount.value} ${t("actionable")}`} tone="success" size="small" />
+                            <StatusChip label={`${duplicateCount.value} ${t("duplicates")}`} tone={duplicateCount.value ? "warning" : "neutral"} size="small" />
+                        </ThemedView>
+                    )}
+                />
+                <VCard>
+                    <VCardText>
+                        <KybHelpPanel />
+                    </VCardText>
+                </VCard>
+                <ApiTable<KybDocumentSummary>
+                    title={t("KYB Review")}
+                    url={urlsMap.kybDocumentsList}
+                    showNumber={true}
+                    xlsx={false}
+                    localSearch={false}
+                    numberOfItemsPerPage={pageSize.value}
+                    setNumberOfItemsPerPage={(value) => (pageSize.value = value)}
+                    searchValue={search.value}
+                    setSearchValue={(value) => (search.value = value)}
+                    headers={headers}
+                    rowColor={rowColor}
+                    apiDataExtractor={(data) => {
+                        const payload = data as { kybDocuments?: KybDocumentSummary[]; rows?: KybDocumentSummary[] };
+                        return payload.kybDocuments ?? payload.rows ?? [];
+                    }}
+                    apiTotalExtractor={(data) => {
+                        const payload = data as { total?: number; kybDocuments?: KybDocumentSummary[] };
+                        return Number(payload.total ?? payload.kybDocuments?.length ?? 0);
+                    }}
+                    onData={(nextRows, nextTotal) => {
+                        rows.value = nextRows;
+                        total.value = nextTotal;
+                    }}
+                    setRefreshHook={(hook) => {
+                        refreshHook.value = hook as typeof refreshHook.value;
+                    }}
+                    clearRefreshHook={() => {
+                        refreshHook.value = null;
+                    }}
+                    onRefresh={(props, refresh) => {
+                        void refresh({
+                            queryParams: {
+                                page: props.page,
+                                pageSize: pageSize.value,
+                                ...(search.value ? { search: search.value } : {}),
+                                ...buildFilterQuery(filterDefinitions, filters.value),
+                                ...(props.sortKey
+                                    ? { sortKey: props.sortKey, sortDirection: props.sortDirection }
+                                    : {}),
+                            },
+                        });
+                    }}
+                    TopSlot={() => (
+                        <TableFilters
+                            filters={filterDefinitions}
+                            values={filters.value}
+                            total={total.value}
+                            onChange={onFiltersChanged}
+                            onClear={onFiltersCleared}
+                        />
+                    )}
+                />
             </ThemedView>
+
+            <VDialog modelValue={previewOpen.value} onUpdate:modelValue={(value: boolean) => (previewOpen.value = value)} maxWidth="1100px" scrollable>
+                <VCard>
+                    <VCardText>
+                        <KybDocumentPreview document={previewDocument.value} />
+                    </VCardText>
+                </VCard>
+            </VDialog>
+
+            <KybReviewDialog
+                open={reviewOpen.value}
+                document={reviewDocument.value}
+                initialDecision={reviewInitial.value}
+                onUpdate={(value) => (reviewOpen.value = value)}
+                onDone={refreshAfterAction}
+            />
+            <KybActionDialog
+                open={actionOpen.value}
+                mode={actionMode.value}
+                document={actionDocument.value}
+                onUpdate={(value) => (actionOpen.value = value)}
+                onDone={refreshAfterAction}
+            />
         </ScreenContainer>
     );
 });

@@ -62,17 +62,21 @@ const beneficialOwnerParamsSchema = z.object({ id: zIdentifier });
 const kybDocumentSchema = z
   .object({
     documentType: z.enum([
-      "REGISTRATION_CERTIFICATE",
+      "COMMERCIAL_REGISTRY",
       "TAX_CERTIFICATE",
+      "ARTICLES_OF_ASSOCIATION",
+      "OWNER_ID",
+      "SIGNATORY_ID",
+      "PROOF_OF_ADDRESS",
       "BANK_LETTER",
-      "OWNERSHIP_DEED",
-      "IDENTITY_DOCUMENT",
+      "SECTOR_LICENSE",
       "OTHER",
     ]),
     reference: z.string().min(1).max(128).optional(),
     issuedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     expiresAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     notes: z.string().max(1000).optional(),
+    revalidationRequestId: zIdentifier.optional(),
   })
   .strict();
 
@@ -98,6 +102,14 @@ router.put(
     path: () => "/internal/merchant/onboarding/join-request",
     schema: joinRequestSchema,
     coreSchema: coreJoinRequestSchema,
+  }),
+);
+
+router.get(
+  "/kyb-revalidations",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/merchant/onboarding/kyb-revalidations",
   }),
 );
 

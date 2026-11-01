@@ -25,6 +25,7 @@ export const routesAuthorities: {
     JoinRequestNew: ["joinrequests.review"],
     JoinRequestDetail: ["joinrequests.review"],
     KybReview: ["kyb.review"],
+    KybReviewDetail: ["kyb.review"],
     Merchants: ["merchants.read", "support.read_merchant"],
     Approvals: ["approvals.approve", "approvals.reject"],
     AmlCases: ["aml.read_confidential"],

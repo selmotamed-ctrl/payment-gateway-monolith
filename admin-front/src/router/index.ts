@@ -42,6 +42,12 @@ const router = createRouter({
                     component: () => import("@/pages/kyb/index"),
                 },
                 {
+                    path: "kyb/:id",
+                    name: "KybReviewDetail",
+                    component: () => import("@/pages/kyb/[id]"),
+                    meta: { parentName: "KybReview" },
+                },
+                {
                     path: "merchants",
                     name: "Merchants",
                     component: () => import("@/pages/merchants/index"),

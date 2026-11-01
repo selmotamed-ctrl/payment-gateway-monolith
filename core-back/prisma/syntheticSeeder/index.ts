@@ -14,6 +14,7 @@ import { generateAmlAndGovernanceQueues } from "./generators/08_amlAndGovernance
 import { generateOperatorCases } from "./generators/09_operatorCasesGenerator";
 import { bulkMysqlWriter } from "./sync/bulkMysqlWriter";
 import { fakeRailsBulkSync } from "./sync/fakeRailsBulkSyncClient";
+import { enrichKybDocuments } from "./sync/enrichKybDocuments";
 import { auditInMemory, postSeedAudit } from "./verify/postSeedAudit";
 import { findCompletedSeedRun, recordCompletedSeedRun } from "./seedRunRegistry";
 
@@ -79,6 +80,12 @@ export const runSyntheticSeeder = async (): Promise<void> => {
 
   const writeReport = await bulkMysqlWriter(client, ctx);
   console.log(`[synthetic-seeder] wrote ${writeReport.reduce((sum, row) => sum + row.rows, 0)} rows across ${writeReport.length} tables`);
+
+  const kyb = await enrichKybDocuments(client);
+  console.log(
+    `[synthetic-seeder] KYB enrichment: ${kyb.documents} document payloads, ${kyb.ownerDocuments} owner documents, ` +
+      `${kyb.revalidations} re-verification requests, ${kyb.merchantsScheduled} review dates`,
+  );
 
   const synced = await fakeRailsBulkSync(ctx);
   console.log(`[synthetic-seeder] synced ${synced.transactions} transactions and ${synced.events} events to Fake Rails`);

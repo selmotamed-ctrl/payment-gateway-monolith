@@ -2061,12 +2061,13 @@ const checks: Record<string, Check> = {
   async upload_magic_bytes() {
     const merchantSource = readSource("api/internal/merchant.ts");
     const adminSource = readSource("api/internal/admin.ts");
-    expect(merchantSource).toContain('avStatus: "PENDING"');
     expect(merchantSource).toContain("x-upload-size");
     expect(merchantSource).toContain("assertUploadSignature(raw, declaredMime)");
-    expect(adminSource).toContain("KIB_DOCUMENT_NOT_SCANNED");
+    expect(merchantSource).toContain("scanKybBytes(raw)");
+    expect(merchantSource).toContain("contentCiphertext: await vault.encryptSecret");
+    expect(adminSource).toContain("KYB_DOCUMENT_NOT_SCANNED");
     expect(adminSource).toContain('document.avStatus !== "CLEAN"');
-    expect(adminSource).toContain("sizeBytes: z.number().int().min(1).max(2_000_000)");
+    expect(adminSource).toContain("scanKybBytes(raw)");
 
     const peHeader = Buffer.from([0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00]);
     let mismatch: ApiError | null = null;

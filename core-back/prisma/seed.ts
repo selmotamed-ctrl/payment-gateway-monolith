@@ -106,6 +106,41 @@ const platformSettings = [
     },
   },
   {
+    // The default KYB document set and the per-category additions. The
+    // reviewer readiness panel and the expiry worker read the same setting.
+    key: "onboarding.required_documents",
+    valueJson: {
+      default: ["COMMERCIAL_REGISTRY", "TAX_CERTIFICATE", "BANK_LETTER", "PROOF_OF_ADDRESS"],
+      byCategory: {
+        CRYPTO: ["COMMERCIAL_REGISTRY", "TAX_CERTIFICATE", "BANK_LETTER", "PROOF_OF_ADDRESS", "SECTOR_LICENSE"],
+        GAMBLING: ["COMMERCIAL_REGISTRY", "TAX_CERTIFICATE", "BANK_LETTER", "PROOF_OF_ADDRESS", "SECTOR_LICENSE"],
+        MONEY_TRANSMISSION: ["COMMERCIAL_REGISTRY", "TAX_CERTIFICATE", "BANK_LETTER", "PROOF_OF_ADDRESS", "SECTOR_LICENSE"],
+        ARMS: ["COMMERCIAL_REGISTRY", "TAX_CERTIFICATE", "BANK_LETTER", "PROOF_OF_ADDRESS", "SECTOR_LICENSE"],
+      },
+      description: "Required KYB evidence; a category entry replaces the default list.",
+    },
+  },
+  {
+    key: "join_request.volume_threshold",
+    valueJson: {
+      amount: 250000,
+      currency: "LYD",
+      description: "An expected monthly volume above this amount forces a second reviewer.",
+    },
+  },
+  {
+    key: "kyb.refresh_policy",
+    valueJson: {
+      highMonths: 12,
+      standardMonths: 24,
+      lowMonths: 36,
+      expiryGraceDays: 30,
+      revalidationDueDays: 30,
+      duplicateAmlThreshold: 3,
+      description: "Periodic KYB re-verification cadence, expiry grace and duplicate-reuse AML threshold.",
+    },
+  },
+  {
     // The internal watch list of the platform. The compliance team maintains
     // the entries; the version is what invalidates the cached screening
     // results, so a published revision always carries a new version.

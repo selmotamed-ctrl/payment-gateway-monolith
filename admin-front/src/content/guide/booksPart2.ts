@@ -160,9 +160,9 @@ export const BOOKS_PART_2: GuideBook[] = [
     {
         "id": "book-9",
         "number": 9,
-        "titleEn": "Merchant Onboarding, KYB Document Verification & Duplicate Detection (`/join-requests`)",
-        "titleAr": "تأهيل التجار والتحقق من وثائق KYB وكشف التكرار (/join-requests)",
-        "summaryEn": "The join_requests lifecycle, the seven-point KYB checklist, document forensics, beneficial owners, and duplicate detection.",
+        "titleEn": "Merchant Onboarding, KYB Document Verification & Duplicate Detection (`/join-requests` & `/kyb`)",
+        "titleAr": "تأهيل التجار والتحقق من وثائق KYB وكشف التكرار (/join-requests و /kyb)",
+        "summaryEn": "The join_requests lifecycle, the seven-point KYB checklist, document forensics, the KYB review queue, beneficial owners, expiry and duplicate detection.",
         "summaryAr": "دورة حياة join_requests وقائمة KYB ذات النقاط السبع وتحليل الوثائق والمالكون المستفيدون وكشف التكرار.",
         "chapters": [
             {
@@ -208,6 +208,27 @@ export const BOOKS_PART_2: GuideBook[] = [
                     "join-requests",
                     "verify"
                 ]
+            },
+            {
+                "id": "book-9-chapter-9.3",
+                "number": "9.3",
+                "titleEn": "KYB Review Queue, Document Forensics & Per-Document Decisions (`/kyb`)",
+                "titleAr": "قائمة مراجعة KYB وتحليل الوثائق والقرارات لكل وثيقة (/kyb)",
+                "bodyEn": "The `/kyb` workspace is the document-level review queue. It is not a second join-request decision screen: the seven-point checklist, screening context and final four-eyes decision remain on `/join-requests/:id`.\n\n**Queue scope.** The queue shows documents for submitted/active onboarding and active merchants. Documents that belong only to a `DRAFT` join request are excluded from reviewer queues (Edge Case 116). Each row shows the merchant, document type, original file, status, antivirus status, expiry state, duplicate count, related join request/SLA, uploader and reviewer.\n\n**Safe review order.** 1. Confirm `av_status = CLEAN`. A `PENDING` or `INFECTED` file cannot be opened or accepted. 2. Open the secure preview and verify the file is genuine, legible and of the declared type. 3. Compare the legal name, registration number, tax certificate and expiry with the merchant profile. 4. For a `BANK_LETTER`, verify the IBAN/account holder belongs to the merchant legal entity. 5. Read the required-document readiness panel before approving the broader join request. 6. Record the document decision and a clear note.\n\n**Duplicate documents.** A duplicate is the same `sha256` hash under an unrelated merchant, not merely the same file name. A duplicate does not block automatically: it raises a warning and requires written justification before acceptance. Repeated reuse across multiple merchants can open an AML case. Never ignore a duplicate because the preview looks clean; investigate the linked merchant and join request first.\n\n**Expiry and replacements.** A document within 30 days of expiry is `DUE_SOON`; after the date it is `EXPIRED` and cannot be accepted as current evidence. Request a replacement when the document belongs to an open join request: the document is rejected, the join request moves to `INFO_REQUESTED`, and the SLA pauses. For an active merchant, request periodic re-verification instead. A replacement is always a new `kyb_documents` row; the platform never overwrites the old file.\n\n**Access and audit.** Document bytes are encrypted at rest and list/detail APIs never expose ciphertext. Every preview, review, replacement request and automatic expiry is written to `audit_log`. Merchant messages use neutral KYB wording and never expose AML, sanctions, PEP or watchlist details.",
+                "bodyAr": "مساحة `/kyb` هي قائمة مراجعة الوثائق على مستوى كل وثيقة. ليست شاشة قرار ثانية لطلب الانضمام: قائمة النقاط السبع وسياق الفحص وقرار الأربع أعين النهائي تبقى في `/join-requests/:id`.\n\n**نطاق القائمة.** تعرض القائمة وثائق طلبات الانضمام المقدمة والتجار النشطين. لا تظهر وثائق طلب بحالة `DRAFT` في قوائم المراجعين. يعرض كل صف التاجر ونوع الوثيقة والملف وحالة الوثيقة وحالة مكافحة الفيروسات والانتهاء وعدد التكرارات وطلب الانضمام وSLA ومن رفعها وراجعها.\n\n**ترتيب المراجعة الآمن.** تأكد أولاً أن `av_status = CLEAN`. لا يمكن فتح أو قبول ملف بحالة `PENDING` أو `INFECTED`. افتح المعاينة الآمنة وتأكد أن الملف حقيقي ومقروء ومن النوع المعلن. طابق الاسم القانوني ورقم التسجيل وشهادة الضريبة وتاريخ الانتهاء مع ملف التاجر. في خطاب البنك تحقق من أن الحساب يخص الكيان القانوني. راجع لوحة الوثائق المطلوبة قبل الموافقة على طلب الانضمام. سجّل قرار الوثيقة وملاحظة واضحة.\n\n**الوثائق المكررة.** التكرار هو تطابق بصمة `sha256` لدى تاجر غير مرتبط، وليس مجرد تطابق اسم الملف. لا يمنع التكرار القبول تلقائياً، لكنه يطلق تحذيراً ويتطلب تبريراً مكتوباً قبل القبول. التكرار المتعدد قد يفتح حالة AML. لا تتجاهل التكرار لمجرد أن المعاينة تبدو سليمة؛ افحص التاجر وطلب الانضمام المرتبطين أولاً.\n\n**الانتهاء والبدائل.** الوثيقة التي تنتهي خلال 30 يوماً تظهر `DUE_SOON`، وبعد تاريخ الانتهاء تصبح `EXPIRED` ولا تصلح كدليل حالي. اطلب بديلاً عندما تنتمي الوثيقة إلى طلب انضمام مفتوح: تُرفض الوثيقة وينتقل الطلب إلى `INFO_REQUESTED` وتتوقف مؤقتاً مهلة SLA. أما التاجر النشط فتُطلب منه إعادة تحقق دورية. البديل دائماً صف جديد في `kyb_documents` ولا يتم استبدال الملف القديم فوق نفسه.\n\n**الوصول والتدقيق.** محتوى الوثائق مشفر عند التخزين ولا تعرض واجهات القائمة أو التفاصيل النص المشفر. كل معاينة أو قرار أو طلب بديل أو انتهاء تلقائي يُسجل في `audit_log`. رسائل التاجر تستخدم لغة KYB محايدة ولا تكشف تفاصيل AML أو العقوبات أو PEP أو قوائم المراقبة.",
+                "humanErrorWarning": "NEVER preview or accept a file whose av_status is not CLEAN. NEVER ignore a DUPLICATE_DOCUMENT warning without documented justification. NEVER accept an expired document as current evidence. NEVER expose AML, sanctions, PEP or watchlist details to a merchant.",
+                "sopChecklist": [
+                    "Confirm the document is UPLOADED, unexpired and av_status = CLEAN.",
+                    "Open the secure preview and verify the file is genuine and legible.",
+                    "Check the type, legal name, registration/tax data, expiry and bank account holder.",
+                    "Investigate every duplicate SHA-256 match before accepting.",
+                    "Ask for a replacement or active-merchant re-verification instead of accepting expired evidence.",
+                    "Leave a clear decision note; complete the join-request checklist and decision on the Join Request page."
+                ],
+                "tags": [
+                    "kyb", "review", "queue", "document", "antivirus", "sha256", "duplicate",
+                    "expiry", "replacement", "revalidation", "audit", "forensics", "join-requests"
+                ]
             }
         ],
         "sopChecklist": [
@@ -217,7 +238,7 @@ export const BOOKS_PART_2: GuideBook[] = [
             "Verify every beneficial owner at or above 25% and their screening disposition.",
             "Verify the payout IBAN belongs to the merchant's legal entity and assign the proposed risk tier."
         ],
-        "humanErrorWarning": "NEVER activate a PENDING merchant before KYB and AML are complete. NEVER ignore a DUPLICATE_DOCUMENT or DUPLICATE_OR_RELATED flag. NEVER approve a join request you prepared yourself under ADMIN_ASSISTED onboarding.",
+        "humanErrorWarning": "NEVER activate a PENDING merchant before KYB and AML are complete. NEVER ignore a DUPLICATE_DOCUMENT or DUPLICATE_OR_RELATED flag. NEVER open an AV-pending or infected KYB file. NEVER accept an expired document. NEVER approve a join request you prepared yourself under ADMIN_ASSISTED onboarding. NEVER expose AML, sanctions, PEP or watchlist details to a merchant.",
         "tags": [
             "merchant",
             "onboarding",

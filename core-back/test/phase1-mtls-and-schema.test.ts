@@ -72,6 +72,7 @@ const designModelNames = [
   "UserIdentity",
   "JoinRequest",
   "KybDocument",
+  "KybRevalidationRequest",
   "BeneficialOwner",
   "AmlScreening",
   "AmlScreeningMatch",
@@ -91,11 +92,11 @@ const designModelNames = [
 describe("prisma schema", () => {
   const schema = fs.readFileSync(schemaPath, "utf8");
 
-  test("declares exactly the 66 design models", () => {
+  test("declares exactly the 67 design models", () => {
     const modelNames = [...schema.matchAll(/^model\s+(\w+)\s*\{/gm)].map(
       (match) => match[1] as string,
     );
-    expect(modelNames.length).toBe(66);
+    expect(modelNames.length).toBe(67);
     expect([...modelNames].sort()).toEqual([...designModelNames].sort());
   });
 

@@ -23,7 +23,11 @@ export const urlsMap = {
     joinRequestOwner: (id: string, ownerId: string) => `v1/admin/join-requests/${id}/beneficial-owners/${ownerId}`,
     joinRequestDocuments: (id: string) => `v1/admin/join-requests/${id}/kyb-documents`,
     joinRequestDocument: (id: string, docId: string) => `v1/admin/join-requests/${id}/kyb-documents/${docId}`,
+    kybDocumentsList: "v1/admin/kyb-documents",
+    kybDocumentDetail: (id: string) => `v1/admin/kyb-documents/${id}`,
     kybDocumentReview: (id: string) => `v1/admin/kyb-documents/${id}/review`,
+    kybDocumentReplacement: (id: string) => `v1/admin/kyb-documents/${id}/request-replacement`,
+    kybDocumentRevalidation: (id: string) => `v1/admin/kyb-documents/${id}/request-revalidation`,
     kybDocumentContent: (id: string) => `v1/admin/kyb-documents/${id}/content`,
 
     merchantsList: "v1/admin/merchants",

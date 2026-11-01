@@ -155,6 +155,33 @@ describe("the join request four-eyes policy (design §18, OD-2)", () => {
     expect(decision.reasons).toContain("PREVIOUSLY_REJECTED");
   });
 
+  test("a duplicate or related-party flag forces a second reviewer", () => {
+    const decision = computeFourEyesDecision(
+      { ...lowRiskApplicant, duplicateOrRelated: true },
+      setting(),
+    );
+    expect(decision.required).toBe(true);
+    expect(decision.reasons).toContain("DUPLICATE_OR_RELATED");
+  });
+
+  test("a payout account holder mismatch forces a second reviewer", () => {
+    const decision = computeFourEyesDecision(
+      { ...lowRiskApplicant, payoutOwnerMismatch: true },
+      setting(),
+    );
+    expect(decision.required).toBe(true);
+    expect(decision.reasons).toContain("PAYOUT_ACCOUNT_OWNERSHIP_MISMATCH");
+  });
+
+  test("an expected volume above the configured threshold forces a second reviewer", () => {
+    const decision = computeFourEyesDecision(
+      { ...lowRiskApplicant, expectedMonthlyVolume: "60000", volumeThreshold: 50000 },
+      setting(),
+    );
+    expect(decision.required).toBe(true);
+    expect(decision.reasons).toContain("VOLUME_ABOVE_THRESHOLD");
+  });
+
   test("the ALWAYS policy always requires a second reviewer", () => {
     const decision = computeFourEyesDecision(lowRiskApplicant, setting({ policy: "ALWAYS" }));
     expect(decision.required).toBe(true);

@@ -5,7 +5,10 @@ import { Prisma } from "../../generated/prisma/client";
 import { client } from "../../prisma/client";
 import { invalidationBus } from "../../lib/invalidationBus";
 import { ApiError, parseOrThrow } from "../../lib/error";
-import { nationalIdHash } from "../../lib/joinRequestOnboarding";
+import { detectDuplicateFlags, nationalIdHash, payoutAccountHash } from "../../lib/joinRequestOnboarding";
+import { payoutOwnerMismatch } from "../../lib/kybReview";
+import { queueKybNotification } from "../../lib/kybNotifications";
+import { scanKybBytes } from "../../lib/kybScan";
 import { buildListQuery, listResponse } from "../../lib/listQuery";
 import { buildMerchantUserInfo } from "../../lib/auth/uiAuthorities";
 import {
@@ -324,6 +327,14 @@ export interface FourEyesSubject {
   businessCategory: string | null;
   /** The applicant was rejected before. */
   previouslyRejected: boolean;
+  /** Expected monthly volume from the onboarding profile. */
+  expectedMonthlyVolume?: unknown;
+  /** The configured review threshold, when one is set. */
+  volumeThreshold?: number | null;
+  /** The payout account holder differs from the merchant legal/trade name. */
+  payoutOwnerMismatch?: boolean;
+  /** A duplicate/related-party flag was raised at submission. */
+  duplicateOrRelated?: boolean;
 }
 
 export interface FourEyesDecision {
@@ -390,6 +401,22 @@ export const computeFourEyesDecision = (
     if (subject.previouslyRejected) {
       reasons.push("PREVIOUSLY_REJECTED");
     }
+    if (subject.duplicateOrRelated) {
+      reasons.push("DUPLICATE_OR_RELATED");
+    }
+    if (subject.payoutOwnerMismatch) {
+      reasons.push("PAYOUT_ACCOUNT_OWNERSHIP_MISMATCH");
+    }
+    const volumeThreshold = Number(subject.volumeThreshold);
+    const expectedVolume = Number(subject.expectedMonthlyVolume);
+    if (
+      Number.isFinite(volumeThreshold)
+      && volumeThreshold > 0
+      && Number.isFinite(expectedVolume)
+      && expectedVolume > volumeThreshold
+    ) {
+      reasons.push("VOLUME_ABOVE_THRESHOLD");
+    }
   }
   const unique = [...new Set(reasons)];
   return {
@@ -417,13 +444,31 @@ const readFourEyesSetting = async (): Promise<FourEyesPolicySetting> => {
 };
 
 /**
+ * Reads the expected-volume threshold of the four-eyes policy. A value may be
+ * a number, a numeric string or an object carrying `amount`.
+ */
+const readVolumeThreshold = async (): Promise<number | null> => {
+  const setting = await client.platformSetting.findFirst({
+    where: { key: "join_request.volume_threshold" },
+    orderBy: { version: "desc" },
+  });
+  const value = setting?.valueJson;
+  const raw = value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>).amount ?? (value as Record<string, unknown>).value
+    : value;
+  const threshold = Number(raw);
+  return Number.isFinite(threshold) && threshold > 0 ? threshold : null;
+};
+
+/**
  * The four-eyes decision of a join request at submission time.
  */
 export const resolveFourEyesForSubmission = async (
   merchantId: string,
   screening: OnboardingScreeningOutcome,
+  joinRequestId?: string,
 ): Promise<FourEyesDecision> => {
-  const [merchant, owners, setting, priorRejection] = await Promise.all([
+  const [merchant, owners, setting, priorRejection, joinRequest, volumeThreshold] = await Promise.all([
     client.merchant.findUnique({ where: { id: merchantId } }),
     client.beneficialOwner.findMany({ where: { merchantId, active: true } }),
     readFourEyesSetting(),
@@ -431,8 +476,16 @@ export const resolveFourEyesForSubmission = async (
       where: { merchantId, status: "REJECTED" },
       select: { id: true },
     }),
+    joinRequestId
+      ? client.joinRequest.findUnique({ where: { id: joinRequestId } })
+      : client.joinRequest.findFirst({ where: { merchantId }, orderBy: { createdAt: "desc" } }),
+    readVolumeThreshold(),
   ]);
   const matches = [...screening.report.confirmedMatches, ...screening.report.potentialMatches];
+  const profile = joinRequest?.profileJson && typeof joinRequest.profileJson === "object" && !Array.isArray(joinRequest.profileJson)
+    ? (joinRequest.profileJson as Record<string, unknown>)
+    : {};
+  const duplicateFlags = Array.isArray(joinRequest?.duplicateFlagsJson) ? joinRequest.duplicateFlagsJson : [];
   return computeFourEyesDecision(
     {
       riskTier: merchant?.riskTier ?? null,
@@ -445,6 +498,14 @@ export const resolveFourEyesForSubmission = async (
       })),
       businessCategory: merchant?.businessCategory ?? null,
       previouslyRejected: priorRejection !== null,
+      expectedMonthlyVolume: profile.expectedMonthlyVolume,
+      volumeThreshold,
+      payoutOwnerMismatch: payoutOwnerMismatch({
+        payoutBankDetails: merchant?.payoutBankDetailsJson,
+        legalName: merchant?.legalName,
+        tradeName: merchant?.tradeName,
+      }),
+      duplicateOrRelated: duplicateFlags.length > 0,
     },
     setting,
   );
@@ -941,8 +1002,22 @@ router.put("/onboarding/join-request", async (request: Request, response: Respon
   response.json({ updated: true, merchantId });
 });
 
+router.get("/onboarding/kyb-revalidations", async (request: Request, response: Response) => {
+  const merchantId = merchantIdOf(request);
+  const requests = await client.kybRevalidationRequest.findMany({
+    where: { merchantId },
+    orderBy: [{ status: "asc" }, { requestedAt: "desc" }],
+    include: {
+      sourceDocument: { select: { id: true, docType: true, originalFileName: true, status: true, expiresOn: true } },
+      fulfilledDocument: { select: { id: true, docType: true, status: true, avStatus: true } },
+    },
+  });
+  response.json({ revalidations: requests });
+});
+
 router.post("/onboarding/kyb-documents", async (request: Request, response: Response) => {
   const merchantId = merchantIdOf(request);
+  const principal = principalOf(request);
   const raw = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
   if (raw.byteLength === 0) {
     throw new ApiError(400, "UPLOAD_REQUIRED", "A KYB document payload is required");
@@ -950,42 +1025,164 @@ router.post("/onboarding/kyb-documents", async (request: Request, response: Resp
   const declaredMime = typeof request.headers["x-upload-content-type"] === "string"
     ? (request.headers["x-upload-content-type"] as string)
     : undefined;
-  // The declared MIME is never trusted on its own: the magic bytes decide the
-  // stored type, and a mismatch is rejected (Safeguard 15).
   const mime = assertUploadSignature(raw, declaredMime);
   const sha256 = createHash("sha256").update(raw).digest("hex");
-  const duplicates = await client.kybDocument.findMany({ where: { sha256 } });
-  if (duplicates.length > 0) {
-    throw new ApiError(409, "KIB_DOCUMENT_DUPLICATE", "This document was already submitted by another merchant", {
-      existingIds: duplicates.map((entry) => entry.id),
-    });
-  }
   const metadataHeader = request.headers["x-upload-metadata"];
   const metadata = typeof metadataHeader === "string"
     ? (JSON.parse(Buffer.from(metadataHeader, "base64url").toString("utf8")) as Record<string, unknown>)
     : {};
+  const revalidationRequestId = typeof metadata.revalidationRequestId === "string"
+    ? metadata.revalidationRequestId
+    : null;
+  const revalidation = revalidationRequestId
+    ? await client.kybRevalidationRequest.findFirst({
+        where: { id: revalidationRequestId, merchantId, status: "OPEN" },
+      })
+    : null;
+  if (revalidationRequestId && !revalidation) {
+    throw new ApiError(404, "KYB_REVALIDATION_NOT_FOUND", "The open revalidation request does not exist");
+  }
+  const existingDocument = await client.kybDocument.findMany({ where: { sha256 } });
   const sizeBytes = Number(request.headers["x-upload-size"] ?? raw.byteLength);
   const storageKey = `kyb/${merchantId}/${sha256}`;
-  const joinRequest = await client.joinRequest.findFirst({
-    where: { merchantId },
-    orderBy: { createdAt: "desc" },
+  const joinRequest = revalidation
+    ? null
+    : await client.joinRequest.findFirst({
+        where: { merchantId },
+        orderBy: { createdAt: "desc" },
+      });
+  const docType = revalidation
+    ? String(revalidation.docType)
+    : String(metadata.documentType ?? "OTHER").toUpperCase().replaceAll(" ", "_");
+  const avStatus = scanKybBytes(raw);
+  const now = new Date();
+  const originalFileNameHeader = typeof request.headers["x-upload-filename"] === "string"
+    ? request.headers["x-upload-filename"]
+    : "";
+  let originalFileName = String(metadata.fileName ?? "document").slice(0, 255);
+  if (originalFileNameHeader) {
+    try {
+      originalFileName = decodeURIComponent(originalFileNameHeader).slice(0, 255);
+    } catch {
+      originalFileName = originalFileNameHeader.slice(0, 255);
+    }
+  }
+  const expiresOn = typeof metadata.expiresAt === "string" && /^\d{4}-\d{2}-\d{2}$/.test(metadata.expiresAt)
+    ? new Date(metadata.expiresAt)
+    : null;
+  const document = await client.$transaction(async (tx) => {
+    const created = await tx.kybDocument.create({
+      data: {
+        merchantId,
+        joinRequestId: joinRequest?.id ?? null,
+        subjectType: "MERCHANT",
+        subjectId: merchantId,
+        docType: docType as never,
+        storageKey,
+        originalFileName,
+        contentCiphertext: await vault.encryptSecret(raw.toString("base64"), "kyb-document"),
+        sha256,
+        mime,
+        sizeBytes,
+        avStatus,
+        status: avStatus === "INFECTED" ? "REJECTED" : "UPLOADED",
+        uploadedById: principal.userId ?? null,
+        expiresOn,
+        statusChangedAt: now,
+      },
+    });
+    if (revalidation && avStatus !== "INFECTED") {
+      await tx.kybRevalidationRequest.update({
+        where: { id: revalidation.id },
+        data: {
+          status: "FULFILLED",
+          fulfilledAt: now,
+          fulfilledDocumentId: created.id,
+          resolutionNotes: originalFileName,
+        },
+      });
+      await tx.merchant.update({
+        where: { id: merchantId },
+        data: { kybStatus: "PENDING" },
+      });
+    }
+    const auditActorId = principal.userId
+      ?? (await tx.user.findFirst({
+        where: { merchantId, role: "MERCHANT_ADMIN" },
+        select: { id: true },
+      }))?.id;
+    if (auditActorId) {
+      await tx.auditLog.create({
+        data: {
+          actorId: auditActorId,
+          role: principal.role ?? "MERCHANT_ADMIN",
+          action: revalidation ? "KYB_REVALIDATION_DOCUMENT_UPLOADED" : "KYB_DOCUMENT_UPLOADED",
+          entityType: "KYB_DOCUMENT",
+          entityId: created.id,
+          beforeJson: {},
+          afterJson: {
+            merchantId,
+            docType,
+            sha256,
+            avStatus,
+            revalidationRequestId: revalidation?.id ?? null,
+            duplicateDocuments: existingDocument.map((entry) => entry.id),
+          },
+        },
+      });
+    }
+    return created;
   });
-  const document = await client.kybDocument.create({
-    data: {
+  if (joinRequest) {
+    const merchant = await client.merchant.findUnique({ where: { id: merchantId } });
+    const owners = await client.beneficialOwner.findMany({
+      where: { merchantId, active: true },
+      select: { nationalIdHash: true },
+    });
+    const flags = merchant
+      ? await detectDuplicateFlags(client, {
+          merchantId,
+          joinRequestId: joinRequest.id,
+          taxId: merchant.taxId,
+          registrationNo: merchant.registrationNo,
+          contactPhone: merchant.contactPhone,
+          contactEmail: merchant.contactEmail,
+          payoutHash: merchant.payoutAccountHash ?? payoutAccountHash(merchant.payoutBankDetailsJson),
+          ownerHashes: owners.map((owner) => owner.nationalIdHash).filter((value): value is string => Boolean(value)),
+          documentHashes: (await client.kybDocument.findMany({ where: { joinRequestId: joinRequest.id }, select: { sha256: true } })).map((row) => row.sha256),
+        })
+      : [];
+    await client.joinRequest.update({
+      where: { id: joinRequest.id },
+      data: { duplicateFlagsJson: flags as never },
+    });
+  }
+  if (revalidation && avStatus !== "INFECTED") {
+    await queueKybNotification(client, {
       merchantId,
-      joinRequestId: joinRequest?.id ?? null,
-      subjectType: "MERCHANT",
-      subjectId: merchantId,
-      docType: String(metadata.documentType ?? "OTHER").toUpperCase().replaceAll(" ", "_") as never,
-      storageKey,
-      sha256,
-      mime,
-      sizeBytes,
-      avStatus: "PENDING",
-      status: "UPLOADED",
-    },
+      code: "KYB_DOCUMENT_REPLACEMENT_RECEIVED",
+      payload: { documentType: docType, documentId: document.id },
+      eventKey: `revalidation-received:${revalidation.id}`,
+    });
+  }
+  if (avStatus === "INFECTED") {
+    response.status(422).json({
+      id: document.id,
+      status: document.status,
+      avStatus: document.avStatus,
+      code: "KYB_DOCUMENT_INFECTED",
+      message: "The uploaded document failed malware scanning",
+    });
+    return;
+  }
+  response.status(201).json({
+    id: document.id,
+    sha256,
+    status: document.status,
+    avStatus: document.avStatus,
+    duplicateDocuments: existingDocument.map((entry) => entry.id),
+    revalidationRequestId: revalidation?.id ?? null,
   });
-  response.status(201).json({ id: document.id, sha256, status: document.status, avStatus: document.avStatus });
 });
 
 router.get("/onboarding/beneficial-owners", async (request: Request, response: Response) => {
@@ -1090,7 +1287,7 @@ router.post("/onboarding/submit", async (request: Request, response: Response) =
   // The four-eyes policy (design §18, OD-2) is evaluated at submission time:
   // a risky applicant needs a second pair of eyes, a clean one is decided by
   // a single authorized reviewer.
-  const fourEyes = await resolveFourEyesForSubmission(merchantId, screening);
+  const fourEyes = await resolveFourEyesForSubmission(merchantId, screening, joinRequest.id);
   const submitted = await client.joinRequest.update({
     where: { id: joinRequest.id },
     data: {

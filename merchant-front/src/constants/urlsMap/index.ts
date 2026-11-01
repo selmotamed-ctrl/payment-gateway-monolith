@@ -9,6 +9,7 @@ export const urlsMap = {
 
     onboardingJoinRequest: "v1/merchant/onboarding/join-request",
     onboardingKybDocuments: "v1/merchant/onboarding/kyb-documents",
+    onboardingKybRevalidations: "v1/merchant/onboarding/kyb-revalidations",
     onboardingBeneficialOwners: "v1/merchant/onboarding/beneficial-owners",
     onboardingSubmit: "v1/merchant/onboarding/submit",
 

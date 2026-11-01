@@ -506,6 +506,23 @@ const JoinRequestDetailPage = dc(() => {
         }, t("Document uploaded and scanned"));
     };
 
+    const canReviewDocument = (document: KybDocument): boolean => {
+        if (["APPROVED", "REJECTED", "WITHDRAWN", "EXPIRED"].includes(detail.value?.status ?? "")) {
+            return false;
+        }
+        if (document.status !== "UPLOADED" || document.avStatus !== "CLEAN") {
+            return false;
+        }
+        if (!document.expiresOn) return true;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        return new Date(document.expiresOn).getTime() >= today.getTime();
+    };
+
+    const openKybDocument = (document: KybDocument) => {
+        void router.push({ name: "KybReviewDetail", params: { id: document.id } });
+    };
+
     const previewDocument = async (document: KybDocument) => {
         const tab = window.open("", "_blank");
         try {
@@ -520,6 +537,13 @@ const JoinRequestDetailPage = dc(() => {
     };
 
     const openReview = (document: KybDocument) => {
+        if (!canReviewDocument(document)) {
+            showSnackBar({
+                type: "warning",
+                message: t("Only an uploaded, clean and unexpired document on an open request can be reviewed."),
+            });
+            return;
+        }
         reviewTarget.value = document;
         reviewDecision.value = "ACCEPTED";
         reviewNotes.value = "";
@@ -892,11 +916,19 @@ const JoinRequestDetailPage = dc(() => {
                                                     {t("Preview")}
                                                 </VBtn>
                                             )}
-                                            {canWrite.value && document.avStatus === "CLEAN" && (
+                                            {canWrite.value && canReviewDocument(document) && (
                                                 <VBtn size="x-small" variant="text" prependIcon="mdi-file-check-outline" onClick={() => openReview(document)}>
                                                     {t("Review")}
                                                 </VBtn>
                                             )}
+                                            <VBtn
+                                                size="x-small"
+                                                variant="text"
+                                                prependIcon="mdi-file-search-outline"
+                                                onClick={() => openKybDocument(document)}
+                                            >
+                                                {t("KYB details")}
+                                            </VBtn>
                                             {canWrite.value && isEditable.value && (
                                                 <VBtn size="x-small" variant="text" color="error" onClick={() => removeDocument(document)}>
                                                     {t("Delete")}

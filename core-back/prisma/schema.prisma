@@ -657,6 +657,13 @@ enum KybDocumentStatus {
   EXPIRED
 }
 
+enum KybRevalidationStatus {
+  OPEN
+  FULFILLED
+  CANCELLED
+  EXPIRED
+}
+
 enum BeneficialOwnerRole {
   OWNER
   DIRECTOR
@@ -817,20 +824,22 @@ model Merchant {
   negativeBalanceCeiling      Decimal        @default(0) @db.Decimal(18, 4)
   payoutBankDetailsJson       Json?
   payoutAccountHash           String?        @map("payout_account_hash") @db.Char(64)
+  nextKybReviewAt             DateTime?      @map("next_kyb_review_at")
 
-  users              User[]              @relation("MerchantUsers")
-  applications       Application[]
-  wallets            Wallet[]
-  accessTokens       AccessToken[]
-  commissionProfiles CommissionProfile[] @relation("MerchantCommissionProfiles")
-  credentialSets     CredentialSet[]     @relation("MerchantCredentialSets")
-  cashoutRequests    CashoutRequest[]
-  paymentAttempts    PaymentAttempt[]    @relation("MerchantPaymentAttempts")
-  detailChangeLogs   DetailChangeLog[]   @relation("MerchantDetailChangeLogs")
-  joinRequests       JoinRequest[]
-  kybDocuments       KybDocument[]
-  beneficialOwners   BeneficialOwner[]
-  notifications      Notification[]      @relation("MerchantNotifications")
+  users                   User[]                   @relation("MerchantUsers")
+  applications            Application[]
+  wallets                 Wallet[]
+  accessTokens            AccessToken[]
+  commissionProfiles      CommissionProfile[]      @relation("MerchantCommissionProfiles")
+  credentialSets          CredentialSet[]          @relation("MerchantCredentialSets")
+  cashoutRequests         CashoutRequest[]
+  paymentAttempts         PaymentAttempt[]         @relation("MerchantPaymentAttempts")
+  detailChangeLogs        DetailChangeLog[]        @relation("MerchantDetailChangeLogs")
+  joinRequests            JoinRequest[]
+  kybDocuments            KybDocument[]
+  kybRevalidationRequests KybRevalidationRequest[]
+  beneficialOwners        BeneficialOwner[]
+  notifications           Notification[]           @relation("MerchantNotifications")
 
   @@index([status])
   @@index([kybStatus])
@@ -842,6 +851,7 @@ model Merchant {
   @@index([contactPhone])
   @@index([contactEmail])
   @@index([payoutAccountHash])
+  @@index([nextKybReviewAt])
   @@map("merchants")
 }
 
@@ -871,23 +881,24 @@ model User {
    */
   academyProgressJson Json?      @map("academy_progress_json")
 
-  merchant                 Merchant?           @relation("MerchantUsers", fields: [merchantId], references: [id], onDelete: SetNull)
+  merchant                 Merchant?                @relation("MerchantUsers", fields: [merchantId], references: [id], onDelete: SetNull)
   identities               UserIdentity[]
-  createdGatewayVersions   GatewayVersion[]    @relation("GatewayVersionCreatedBy")
-  makerApprovalRequests    ApprovalRequest[]   @relation("ApprovalMaker")
-  checkerApprovalRequests  ApprovalRequest[]   @relation("ApprovalChecker")
-  amlCases                 AmlCase[]           @relation("AmlCaseReviewer")
-  amlScreeningDispositions AmlScreeningMatch[] @relation("AmlScreeningDispositionBy")
-  submittedJoinRequests    JoinRequest[]       @relation("JoinRequestSubmitter")
-  assignedJoinRequests     JoinRequest[]       @relation("JoinRequestReviewer")
-  reviewedKybDocuments     KybDocument[]       @relation("KybDocumentReviewer")
-  uploadedKybDocuments     KybDocument[]       @relation("KybDocumentUploader")
-  invitedUsers             User[]              @relation("UserInvitedBy")
-  invitedBy                User?               @relation("UserInvitedBy", fields: [invitedById], references: [id], onDelete: SetNull)
-  assignedOperatorCases    OperatorCase[]      @relation("OperatorCaseAssignee")
-  detailChangeLogs         DetailChangeLog[]   @relation("DetailChangeLogActor")
-  auditLogs                AuditLog[]          @relation("AuditLogActor")
-  notifications            Notification[]      @relation("NotificationRecipient")
+  createdGatewayVersions   GatewayVersion[]         @relation("GatewayVersionCreatedBy")
+  makerApprovalRequests    ApprovalRequest[]        @relation("ApprovalMaker")
+  checkerApprovalRequests  ApprovalRequest[]        @relation("ApprovalChecker")
+  amlCases                 AmlCase[]                @relation("AmlCaseReviewer")
+  amlScreeningDispositions AmlScreeningMatch[]      @relation("AmlScreeningDispositionBy")
+  submittedJoinRequests    JoinRequest[]            @relation("JoinRequestSubmitter")
+  assignedJoinRequests     JoinRequest[]            @relation("JoinRequestReviewer")
+  reviewedKybDocuments     KybDocument[]            @relation("KybDocumentReviewer")
+  uploadedKybDocuments     KybDocument[]            @relation("KybDocumentUploader")
+  kybRevalidationRequests  KybRevalidationRequest[] @relation("KybRevalidationRequester")
+  invitedUsers             User[]                   @relation("UserInvitedBy")
+  invitedBy                User?                    @relation("UserInvitedBy", fields: [invitedById], references: [id], onDelete: SetNull)
+  assignedOperatorCases    OperatorCase[]           @relation("OperatorCaseAssignee")
+  detailChangeLogs         DetailChangeLog[]        @relation("DetailChangeLogActor")
+  auditLogs                AuditLog[]               @relation("AuditLogActor")
+  notifications            Notification[]           @relation("NotificationRecipient")
 
   @@index([merchantId])
   @@index([role])
@@ -2220,14 +2231,15 @@ model JoinRequest {
   resubmissionOfId    String?           @map("resubmission_of_id")
   approvalRequestId   String?           @map("approval_request_id")
 
-  merchant         Merchant         @relation(fields: [merchantId], references: [id], onDelete: Restrict)
-  submittedBy      User             @relation("JoinRequestSubmitter", fields: [submittedByUserId], references: [id], onDelete: Restrict)
-  assignedReviewer User?            @relation("JoinRequestReviewer", fields: [assignedReviewerId], references: [id], onDelete: SetNull)
-  screening        AmlScreening?    @relation("JoinRequestScreening", fields: [screeningId], references: [id], onDelete: SetNull)
-  resubmissionOf   JoinRequest?     @relation("JoinRequestResubmission", fields: [resubmissionOfId], references: [id], onDelete: SetNull)
-  resubmissions    JoinRequest[]    @relation("JoinRequestResubmission")
-  approvalRequest  ApprovalRequest? @relation("JoinRequestApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
-  kybDocuments     KybDocument[]
+  merchant                Merchant                 @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  submittedBy             User                     @relation("JoinRequestSubmitter", fields: [submittedByUserId], references: [id], onDelete: Restrict)
+  assignedReviewer        User?                    @relation("JoinRequestReviewer", fields: [assignedReviewerId], references: [id], onDelete: SetNull)
+  screening               AmlScreening?            @relation("JoinRequestScreening", fields: [screeningId], references: [id], onDelete: SetNull)
+  resubmissionOf          JoinRequest?             @relation("JoinRequestResubmission", fields: [resubmissionOfId], references: [id], onDelete: SetNull)
+  resubmissions           JoinRequest[]            @relation("JoinRequestResubmission")
+  approvalRequest         ApprovalRequest?         @relation("JoinRequestApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
+  kybDocuments            KybDocument[]
+  kybRevalidationRequests KybRevalidationRequest[]
 
   @@index([merchantId])
   @@index([status])
@@ -2239,41 +2251,83 @@ model JoinRequest {
 }
 
 model KybDocument {
-  id                  String            @id @default(uuid(7))
-  createdAt           DateTime          @default(now()) @map("created_at")
-  updatedAt           DateTime          @updatedAt @map("updated_at")
-  merchantId          String            @map("merchant_id")
-  joinRequestId       String?           @map("join_request_id")
-  subjectType         KybSubjectType    @map("subject_type")
-  subjectId           String            @map("subject_id")
-  docType             KybDocumentType   @map("doc_type")
-  storageKey          String            @map("storage_key") @db.Text
-  originalFileName    String?           @map("original_file_name") @db.Text
-  contentCiphertext   String?           @map("content_ciphertext") @db.LongText
-  sha256              String            @db.Char(64)
-  mime                String            @db.Text
-  sizeBytes           Int               @map("size_bytes")
-  avStatus            AvStatus          @default(PENDING) @map("av_status")
-  status              KybDocumentStatus @default(UPLOADED)
-  uploadedById        String?           @map("uploaded_by")
-  reviewedById        String?           @map("reviewed_by")
-  reviewedAt          DateTime?         @map("reviewed_at")
-  expiresOn           DateTime?         @map("expires_on") @db.Date
-  rejectionReasonCode String?           @map("rejection_reason_code") @db.Text
-  reviewNotes         String?           @map("review_notes") @db.Text
+  id                     String            @id @default(uuid(7))
+  createdAt              DateTime          @default(now()) @map("created_at")
+  updatedAt              DateTime          @updatedAt @map("updated_at")
+  merchantId             String            @map("merchant_id")
+  joinRequestId          String?           @map("join_request_id")
+  subjectType            KybSubjectType    @map("subject_type")
+  subjectId              String            @map("subject_id")
+  docType                KybDocumentType   @map("doc_type")
+  storageKey             String            @map("storage_key") @db.Text
+  originalFileName       String?           @map("original_file_name") @db.Text
+  contentCiphertext      String?           @map("content_ciphertext") @db.LongText
+  sha256                 String            @db.Char(64)
+  mime                   String            @db.Text
+  sizeBytes              Int               @map("size_bytes")
+  avStatus               AvStatus          @default(PENDING) @map("av_status")
+  status                 KybDocumentStatus @default(UPLOADED)
+  uploadedById           String?           @map("uploaded_by")
+  reviewedById           String?           @map("reviewed_by")
+  reviewedAt             DateTime?         @map("reviewed_at")
+  expiresOn              DateTime?         @map("expires_on") @db.Date
+  rejectionReasonCode    String?           @map("rejection_reason_code") @db.Text
+  reviewNotes            String?           @map("review_notes") @db.Text
+  duplicateJustification String?           @map("duplicate_justification") @db.Text
+  statusChangedAt        DateTime?         @map("status_changed_at")
+  expiryNotice30SentAt   DateTime?         @map("expiry_notice_30_sent_at")
+  expiryNotice7SentAt    DateTime?         @map("expiry_notice_7_sent_at")
+  expiredAt              DateTime?         @map("expired_at")
 
-  merchant    Merchant     @relation(fields: [merchantId], references: [id], onDelete: Restrict)
-  joinRequest JoinRequest? @relation(fields: [joinRequestId], references: [id], onDelete: SetNull)
-  uploadedBy  User?        @relation("KybDocumentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
-  reviewedBy  User?        @relation("KybDocumentReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  merchant                      Merchant                 @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  joinRequest                   JoinRequest?             @relation(fields: [joinRequestId], references: [id], onDelete: SetNull)
+  uploadedBy                    User?                    @relation("KybDocumentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+  reviewedBy                    User?                    @relation("KybDocumentReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  revalidationSourceRequests    KybRevalidationRequest[] @relation("KybRevalidationSourceDocument")
+  fulfilledRevalidationRequests KybRevalidationRequest[] @relation("KybRevalidationFulfilledDocument")
 
   @@index([merchantId])
+  @@index([joinRequestId])
   @@index([sha256])
   @@index([merchantId, status])
+  @@index([status, avStatus, createdAt])
   @@index([docType])
   @@index([expiresOn])
   @@index([uploadedById])
+  @@index([reviewedById])
   @@map("kyb_documents")
+}
+
+model KybRevalidationRequest {
+  id                  String                @id @default(uuid(7))
+  createdAt           DateTime              @default(now()) @map("created_at")
+  updatedAt           DateTime              @updatedAt @map("updated_at")
+  merchantId          String                @map("merchant_id")
+  joinRequestId       String?               @map("join_request_id")
+  documentId          String?               @map("document_id")
+  docType             KybDocumentType       @map("doc_type")
+  reasonCode          String                @map("reason_code") @db.Text
+  message             String                @db.Text
+  status              KybRevalidationStatus @default(OPEN)
+  requestedById       String                @map("requested_by")
+  requestedAt         DateTime              @default(now()) @map("requested_at")
+  dueAt               DateTime?             @map("due_at")
+  fulfilledAt         DateTime?             @map("fulfilled_at")
+  fulfilledDocumentId String?               @unique @map("fulfilled_document_id")
+  resolutionNotes     String?               @map("resolution_notes") @db.Text
+
+  merchant          Merchant     @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  joinRequest       JoinRequest? @relation(fields: [joinRequestId], references: [id], onDelete: SetNull)
+  sourceDocument    KybDocument? @relation("KybRevalidationSourceDocument", fields: [documentId], references: [id], onDelete: SetNull)
+  fulfilledDocument KybDocument? @relation("KybRevalidationFulfilledDocument", fields: [fulfilledDocumentId], references: [id], onDelete: SetNull)
+  requestedBy       User         @relation("KybRevalidationRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+
+  @@index([merchantId, status])
+  @@index([status, dueAt])
+  @@index([documentId])
+  @@index([joinRequestId])
+  @@index([requestedById])
+  @@map("kyb_revalidation_requests")
 }
 
 model BeneficialOwner {

@@ -20,6 +20,20 @@ const KYB_STATUS = ["UNVERIFIED", "PENDING", "VERIFIED", "REJECTED"];
 const RISK_TIER = ["LOW", "STANDARD", "HIGH"];
 const COLLECTION_MODES = ["OTP_PULL", "REDIRECT", "EMBEDDED", "PUSH_APPROVAL", "QR_DISPLAY", "PAY_CODE", "DEEP_LINK", "MANUAL", "HYBRID"];
 const JOIN_STATUS = ["DRAFT", "SUBMITTED", "IN_REVIEW", "INFO_REQUESTED", "PENDING_CHECKER", "APPROVED", "REJECTED", "WITHDRAWN", "EXPIRED"];
+const KYB_DOCUMENT_STATUS = ["UPLOADED", "ACCEPTED", "REJECTED", "EXPIRED"];
+const KYB_AV_STATUS = ["PENDING", "CLEAN", "INFECTED"];
+const KYB_SUBJECT_TYPE = ["MERCHANT", "BENEFICIAL_OWNER"];
+const KYB_DOCUMENT_TYPE = [
+    "COMMERCIAL_REGISTRY",
+    "TAX_CERTIFICATE",
+    "ARTICLES_OF_ASSOCIATION",
+    "OWNER_ID",
+    "SIGNATORY_ID",
+    "PROOF_OF_ADDRESS",
+    "BANK_LETTER",
+    "SECTOR_LICENSE",
+    "OTHER",
+];
 const APPROVAL_STATE = ["DRAFT", "PENDING_REVIEW", "APPROVED", "EXECUTED", "REJECTED"];
 const AML_CASE_STATUS = ["OPEN", "IN_REVIEW", "PENDING_CHECKER", "RELEASED", "REJECTED_VOID", "FROZEN", "ESCALATED_STR"];
 const AML_SEVERITY = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
@@ -102,14 +116,23 @@ export const tableRegistry: Record<string, TableServerConfig> = {
         defaultSort: { key: "submittedAt", direction: "desc" },
     },
     KybReview: {
-        url: urlsMap.joinRequestsList,
-        listKey: "joinRequests",
+        url: urlsMap.kybDocumentsList,
+        listKey: "kybDocuments",
         filters: [
+            { key: "requestRef", label: "Request reference", type: "text", placeholder: "Join request ID" },
+            { key: "merchantName", label: "Merchant name", type: "text", placeholder: "Legal or trade name" },
+            { key: "subjectType", label: "Subject", type: "data-autocomplete", options: options(KYB_SUBJECT_TYPE), multiple: true },
+            { key: "status", label: "Document status", type: "data-autocomplete", options: options(KYB_DOCUMENT_STATUS), multiple: true },
+            { key: "avStatus", label: "AV status", type: "data-autocomplete", options: options(KYB_AV_STATUS), multiple: true },
+            { key: "docType", label: "Document type", type: "data-autocomplete", options: options(KYB_DOCUMENT_TYPE), multiple: true },
             { key: "merchantId", label: "Merchant", type: "api-autocomplete", load: merchants },
-            { key: "status", label: "Status", type: "data-autocomplete", options: options(JOIN_STATUS), multiple: true },
-            { key: "from", label: "Submitted", type: "date", queryFrom: "from", queryTo: "to" },
+            { key: "reviewer", label: "Reviewer", type: "api-autocomplete", load: users, query: "reviewedById" },
+            { key: "uploaded", label: "Uploaded", type: "date", queryFrom: "uploadedFrom", queryTo: "uploadedTo" },
+            { key: "expiry", label: "Expiry", type: "date", queryFrom: "expiryFrom", queryTo: "expiryTo" },
+            { key: "duplicateOnly", label: "Duplicates only", type: "boolean", trueLabel: "Duplicates", falseLabel: "All" },
+            { key: "expiringSoon", label: "Expiring within 30 days", type: "boolean", trueLabel: "Expiring", falseLabel: "All" },
         ],
-        defaultSort: { key: "submittedAt", direction: "desc" },
+        defaultSort: { key: "createdAt", direction: "desc" },
     },
     Approvals: {
         url: urlsMap.approvalsList,

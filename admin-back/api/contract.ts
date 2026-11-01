@@ -822,8 +822,28 @@ export const toCoreKybDocumentReview = (body: unknown): JsonRecord => {
   if (reasonCode) result.reasonCode = clamp(reasonCode, 64);
   const notes = asString(source.notes);
   if (notes) result.notes = clamp(notes, 2000);
+  const duplicateJustification = asString(source.duplicateJustification);
+  if (duplicateJustification) result.duplicateJustification = clamp(duplicateJustification, 4000);
   const expiresOn = asString(source.expiresOn);
   if (expiresOn && DATE_PATTERN.test(expiresOn)) result.expiresOn = expiresOn;
+  return result;
+};
+
+export const toCoreKybDocumentReplacement = (body: unknown): JsonRecord => {
+  const source = asRecord(body);
+  const result: JsonRecord = { message: clamp(asString(source.message) ?? "", 2000) };
+  const reasonCode = asString(source.reasonCode);
+  if (reasonCode) result.reasonCode = clamp(reasonCode, 64);
+  return result;
+};
+
+export const toCoreKybDocumentRevalidation = (body: unknown): JsonRecord => {
+  const source = asRecord(body);
+  const result: JsonRecord = { message: clamp(asString(source.message) ?? "", 2000) };
+  const reasonCode = asString(source.reasonCode);
+  if (reasonCode) result.reasonCode = clamp(reasonCode, 64);
+  const dueAt = asString(source.dueAt);
+  if (dueAt) result.dueAt = dueAt;
   return result;
 };
 

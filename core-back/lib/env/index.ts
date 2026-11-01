@@ -62,6 +62,15 @@ export const envSchema = z.strictObject({
    */
   WORKER_RESCREEN_INTERVAL_MS: z.coerce.number().int().positive().default(86_400_000),
   /**
+   * How often the KYB expiry, notice, suspension and periodic re-verification
+   * worker runs.
+   */
+  WORKER_KYB_EXPIRY_INTERVAL_MS: z.coerce.number().int().positive().default(6 * 60 * 60 * 1000),
+  /**
+   * How many KYB documents or merchants the worker checks in one pass.
+   */
+  WORKER_KYB_EXPIRY_BATCH_SIZE: z.coerce.number().int().positive().max(10_000).default(200),
+  /**
    * The record retention worker (OD-4). It purges the regulatory evidence
    * that passed the retention period, and it is off unless a deployment
    * turns it on.
@@ -196,6 +205,8 @@ const resolveEnvironment = (): CoreEnv => {
     WORKER_MAX_ATTEMPTS: 3,
     WORKER_REQUEST_TIMEOUT_MS: 15000,
     WORKER_RESCREEN_INTERVAL_MS: 86_400_000,
+    WORKER_KYB_EXPIRY_INTERVAL_MS: 21_600_000,
+    WORKER_KYB_EXPIRY_BATCH_SIZE: 200,
     WORKER_RETENTION_ENABLED: false,
     WORKER_RETENTION_INTERVAL_MS: 3_600_000,
     WORKER_RETENTION_BATCH_SIZE: 500,

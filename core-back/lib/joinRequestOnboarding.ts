@@ -185,19 +185,40 @@ export const detectDuplicateFlags = async (
   return flags;
 };
 
-const readRequiredDocuments = async (db: PrismaClient): Promise<string[]> => {
-  const setting = await db.platformSetting.findFirst({
-    where: { key: "onboarding.required_documents" },
-    orderBy: { version: "desc" },
-  });
-  const value = setting?.valueJson as Record<string, unknown> | undefined;
-  if (Array.isArray(value?.default)) {
-    return value.default.map(String);
+export const requiredDocumentsFromSetting = (
+  value: unknown,
+  businessCategory?: string | null,
+): string[] => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return [...DEFAULT_REQUIRED_KYB_DOCUMENTS];
+  }
+  const setting = value as Record<string, unknown>;
+  const category = (businessCategory ?? "").trim().toUpperCase();
+  const byCategory = setting.byCategory ?? setting.by_category;
+  if (category && byCategory && typeof byCategory === "object" && !Array.isArray(byCategory)) {
+    const configured = (byCategory as Record<string, unknown>)[category];
+    if (Array.isArray(configured)) {
+      return configured.map(String);
+    }
+  }
+  if (Array.isArray(setting.default)) {
+    return setting.default.map(String);
   }
   return [...DEFAULT_REQUIRED_KYB_DOCUMENTS];
 };
 
-const readOwnerThreshold = async (db: PrismaClient): Promise<number> => {
+export const readRequiredDocuments = async (
+  db: PrismaClient,
+  businessCategory?: string | null,
+): Promise<string[]> => {
+  const setting = await db.platformSetting.findFirst({
+    where: { key: "onboarding.required_documents" },
+    orderBy: { version: "desc" },
+  });
+  return requiredDocumentsFromSetting(setting?.valueJson, businessCategory);
+};
+
+export const readOwnerThreshold = async (db: PrismaClient): Promise<number> => {
   const setting = await db.platformSetting.findFirst({
     where: { key: "join_request.four_eyes_policy" },
     orderBy: { version: "desc" },
@@ -242,7 +263,7 @@ export const computeJoinRequestReadiness = async (
     throw new Error(`Join request '${joinRequestId}' does not exist`);
   }
   const [requiredDocuments, ownerThreshold, activeOwners] = await Promise.all([
-    readRequiredDocuments(db),
+    readRequiredDocuments(db, joinRequest.merchant.businessCategory),
     readOwnerThreshold(db),
     db.beneficialOwner.findMany({ where: { merchantId: joinRequest.merchantId, active: true } }),
   ]);
