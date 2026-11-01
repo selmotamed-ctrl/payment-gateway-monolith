@@ -72,7 +72,7 @@ export class SshRunner {
   }
 
   /** Runs a command on the remote host. `sudo` wraps it in `sudo -S`. */
-  run(target: SshTarget, command: string, options: { sudo?: boolean; sudoUser?: string; cwd?: string } = {}): RunResult {
+  run(target: SshTarget, command: string, options: { sudo?: boolean; sudoUser?: string; cwd?: string; timeoutMs?: number } = {}): RunResult {
     const remoteCommand = options.cwd
       ? `cd ${shellQuote(options.cwd)} && ${command}`
       : command;
@@ -93,12 +93,12 @@ export class SshRunner {
         ? spawnSync("sudo", ["-S", "-p", "", ...(options.sudoUser ? ["-u", options.sudoUser] : []), "bash", "-lc", remoteCommand], {
             input: `${target.sudoPassword}\n`,
             encoding: "utf8",
-            timeout: this.options.timeoutMs ?? 15 * 60_000,
+            timeout: options.timeoutMs ?? this.options.timeoutMs ?? 15 * 60_000,
             cwd: options.cwd,
           })
         : spawnSync("bash", ["-lc", remoteCommand], {
             encoding: "utf8",
-            timeout: this.options.timeoutMs ?? 15 * 60_000,
+            timeout: options.timeoutMs ?? this.options.timeoutMs ?? 15 * 60_000,
             cwd: options.cwd,
           });
       if (result.error) throw new Error(`Local command failed: ${result.error.message}`);
@@ -113,7 +113,7 @@ export class SshRunner {
     const result = spawnSync("ssh", args, {
       input: options.sudo ? `${target.sudoPassword}\n` : undefined,
       encoding: "utf8",
-      timeout: this.options.timeoutMs ?? 15 * 60_000,
+      timeout: options.timeoutMs ?? this.options.timeoutMs ?? 15 * 60_000,
     });
     if (result.error) {
       throw new Error(`SSH to ${target.host} failed: ${result.error.message}`);

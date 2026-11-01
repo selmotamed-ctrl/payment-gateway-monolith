@@ -89,7 +89,7 @@ const base = z.strictObject({
     .min(1)
     .max(64)
     .regex(/^[A-Za-z0-9_]+$/, "must be an identifier"),
-  DB_PASSWORD: z.string().min(8).max(256),
+  DB_PASSWORD: z.string().min(2).max(256),
   DATABASE_URL: z.string().trim().min(1).max(1000),
 
   // 2. Core

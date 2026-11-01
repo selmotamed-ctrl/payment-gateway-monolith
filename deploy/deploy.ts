@@ -589,11 +589,14 @@ const main = async (): Promise<void> => {
     const coreRemote = `${config.CORE_REMOTE_DIR}/current/core-back`;
     const bun = 'PATH="$HOME/.bun/bin:/usr/local/bin:$PATH" bun';
     if (config.SEED_FAKE_RAILS_BLUEPRINTS) {
-      runner.run(coreHost.ssh, `${bun} run seed-fake-rails`, { cwd: coreRemote, sudo: false });
+      runner.run(coreHost.ssh, `${bun} run seed-fake-rails`, { cwd: coreRemote, sudo: false, timeoutMs: 30 * 60_000 });
       log("  fake rails blueprints seeded in core-back");
     }
     if (config.RUN_SYNTHETIC_HISTORY_SEED) {
-      const seeded = runner.run(coreHost.ssh, `${bun} run seed-synthetic-history`, { cwd: coreRemote, sudo: false });
+      // The STANDARD profile generates/writes ~280k rows and syncs 120k
+      // transactions to Fake Rails; on a single box this exceeds the default
+      // 15-minute command timeout, so give it a generous ceiling.
+      const seeded = runner.run(coreHost.ssh, `${bun} run seed-synthetic-history`, { cwd: coreRemote, sudo: false, timeoutMs: 60 * 60_000 });
       const summary = seeded.stdout.trim().split("\n").slice(-4).join("\n");
       if (summary) log(summary.split("\n").map((line) => `  ${line}`).join("\n"));
       log(`  synthetic history seeded (${config.SYNTHETIC_SEED_PROFILE})`);
