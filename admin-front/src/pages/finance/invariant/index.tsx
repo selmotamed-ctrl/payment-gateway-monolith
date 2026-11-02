@@ -11,6 +11,7 @@ import { StatusChip } from "@/components/StatusChip";
 import { MoneyText } from "@/components/MoneyText";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
+import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
@@ -84,15 +85,10 @@ const InvariantPage = dc(() => {
                 rows.push([`account.${row.accountId}.checkpoint_at`, row.checkpointAt ?? ""]);
             }
             const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
-            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement("a");
-            link.href = url;
-            link.download = `invariant-${new Date().toISOString().slice(0, 10)}.csv`;
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            URL.revokeObjectURL(url);
+            await xlsxUIPipeline.downloadXlsxFromCsvLines({
+                title: `invariant-${new Date().toISOString().slice(0, 10)}.xlsx`,
+                lines,
+            });
             showSnackBar({ type: "success", message: t("Invariant snapshot exported") });
         } catch (e) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(e) });

@@ -12,6 +12,7 @@ import { MoneyText } from "@/components/MoneyText";
 import { StatusChip } from "@/components/StatusChip";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
+import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { formatMoney, formatPlainNumber, toDecimal } from "@/utils/money";
 import { showSnackBar } from "@/utils/snackBar";
@@ -120,15 +121,10 @@ const ProfitabilityPage = dc(() => {
                 rows.push([`day.${row.day}.net`, row.net]);
             }
             const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
-            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement("a");
-            link.href = url;
-            link.download = `profitability-${period.value}-${new Date().toISOString().slice(0, 10)}.csv`;
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            URL.revokeObjectURL(url);
+            await xlsxUIPipeline.downloadXlsxFromCsvLines({
+                title: `profitability-${period.value}-${new Date().toISOString().slice(0, 10)}.xlsx`,
+                lines,
+            });
             showSnackBar({ type: "success", message: t("Profitability snapshot exported") });
         } catch (e) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(e) });

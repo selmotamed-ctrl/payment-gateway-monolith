@@ -728,6 +728,7 @@ export const appCatalogue: Record<string, [string, string]> = {
     "Clear comparison": ["Clear comparison", "مسح المقارنة"],
     "No differences in this version pair.": ["No differences in this version pair.", "لا توجد فروقات بين هذين الإصدارين."],
     "Export CSV": ["Export CSV", "تصدير CSV"],
+    "Export Excel": ["Export Excel", "تصدير Excel"],
     "No approvals match the current filters.": ["No approvals match the current filters.", "لا توجد موافقات تطابق عوامل التصفية الحالية."],
     "Exported": ["Exported", "تم التصدير"],
     "Export items": ["Export items", "تصدير البنود"],

@@ -17,6 +17,7 @@ import { tableRegistry } from "@/components/Table/tableRegistry";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
+import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
@@ -137,7 +138,7 @@ const GatewaysPage = dc(() => {
         refreshHook.value?.reset();
     };
 
-    const exportCsv = async () => {
+    const exportExcel = async () => {
         if (exportLoading.value) return;
         exportLoading.value = true;
         try {
@@ -183,15 +184,10 @@ const GatewaysPage = dc(() => {
                         .join(","),
                 ),
             ];
-            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement("a");
-            link.href = url;
-            link.download = `gateways-${new Date().toISOString().slice(0, 10)}.csv`;
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            URL.revokeObjectURL(url);
+            await xlsxUIPipeline.downloadXlsxFromCsvLines({
+                title: `gateways-${new Date().toISOString().slice(0, 10)}.xlsx`,
+                lines,
+            });
             showSnackBar({
                 type: payload.truncated ? "warning" : "success",
                 message: payload.truncated
@@ -313,15 +309,10 @@ const GatewaysPage = dc(() => {
             for (const [state, count] of Object.entries(snapshot.byVerification ?? {})) rows.push([`verification.${state}.count`, count]);
             for (const [risk, count] of Object.entries(snapshot.byRisk ?? {})) rows.push([`risk.${risk}.count`, count]);
             const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
-            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement("a");
-            link.href = url;
-            link.download = `gateway-summary-${new Date().toISOString().slice(0, 10)}.csv`;
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            URL.revokeObjectURL(url);
+            await xlsxUIPipeline.downloadXlsxFromCsvLines({
+                title: `gateway-summary-${new Date().toISOString().slice(0, 10)}.xlsx`,
+                lines,
+            });
             showSnackBar({ type: "success", message: t("Gateway summary exported") });
         } catch (error) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
@@ -447,7 +438,7 @@ const GatewaysPage = dc(() => {
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportCsv()}>{t("Export CSV")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
                             <VBtn color="primary" variant="tonal" prependIcon="mdi-robot-outline" onClick={() => void router.push({ name: "GatewayAiImport" })}>{t("Smart AI Integration")}</VBtn>
                             <VBtn color="primary" variant="flat" prependIcon="mdi-plus" onClick={openCreate}>{t("New Gateway")}</VBtn>
                         </ThemedView>

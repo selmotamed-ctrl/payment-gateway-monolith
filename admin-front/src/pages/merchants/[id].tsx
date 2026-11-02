@@ -28,6 +28,7 @@ import { statusTone } from "@/components/Table/statusTone";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities, user } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
+import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import {
@@ -175,15 +176,10 @@ const MerchantDetailPage = dc(() => {
                 rows.push([`merchant.${field}`, value]);
             }
             const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
-            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement("a");
-            link.href = url;
-            link.download = `merchant-360-${merchantId.value}-${new Date().toISOString().slice(0, 10)}.csv`;
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            URL.revokeObjectURL(url);
+            await xlsxUIPipeline.downloadXlsxFromCsvLines({
+                title: `merchant-360-${merchantId.value}-${new Date().toISOString().slice(0, 10)}.xlsx`,
+                lines,
+            });
             showSnackBar({ type: "success", message: t("Merchant 360 summary exported") });
         } catch (cause) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(cause) });

@@ -22,6 +22,7 @@ import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
+import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
@@ -204,15 +205,10 @@ const PlatformSettingsPage = dc(() => {
             ];
             for (const [scope, count] of Object.entries(snapshot.scopes ?? {})) rows.push([`scope.${scope}.count`, count]);
             const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
-            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement("a");
-            link.href = url;
-            link.download = `platform-settings-summary-${new Date().toISOString().slice(0, 10)}.csv`;
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            URL.revokeObjectURL(url);
+            await xlsxUIPipeline.downloadXlsxFromCsvLines({
+                title: `platform-settings-summary-${new Date().toISOString().slice(0, 10)}.xlsx`,
+                lines,
+            });
             showSnackBar({ type: "success", message: t("Platform settings summary exported") });
         } catch (error) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(error) });

@@ -13,6 +13,7 @@ import type { TableHeader } from "@/components/Table/types";
 import { MoneyText } from "@/components/MoneyText";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
+import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { toDecimal } from "@/utils/money";
@@ -118,15 +119,12 @@ const StatementsPage = dc(() => {
         }
         try {
             const response = await api.get(urlsMap.walletStatementExport(walletId.value, month.value), {
-                responseType: "blob",
+                responseType: "text",
             });
-            const blob = new Blob([response.data], { type: "text/csv;charset=utf-8" });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement("a");
-            link.href = url;
-            link.download = `statement-${walletId.value}-${month.value}.csv`;
-            link.click();
-            URL.revokeObjectURL(url);
+            await xlsxUIPipeline.downloadXlsxFromCsvText({
+                title: `statement-${walletId.value}-${month.value}.xlsx`,
+                csv: String(response.data ?? ""),
+            });
             showSnackBar({ type: "success", message: t("Download") });
         } catch (e) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(e) });

@@ -14,6 +14,7 @@ import { api } from "@/state/api";
 import { hasOneOfAuthorities } from "@/state/user";
 import { areChecklistsVisible } from "@/constants/env";
 import { urlsMap } from "@/constants/urlsMap";
+import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { formatPlainNumber } from "@/utils/money";
 import { showSnackBar } from "@/utils/snackBar";
@@ -162,15 +163,10 @@ const DashboardPage = dc(() => {
                 columns.map(escape).join(","),
                 ...rowsData.map((row) => [row.createdAt, row.actorEmail, row.role, row.action, row.entityType, row.entityId, row.approvalRequestId ?? ""].map(escape).join(",")),
             ];
-            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement("a");
-            link.href = url;
-            link.download = `dashboard-activity-${new Date().toISOString().slice(0, 10)}.csv`;
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            URL.revokeObjectURL(url);
+            await xlsxUIPipeline.downloadXlsxFromCsvLines({
+                title: `dashboard-activity-${new Date().toISOString().slice(0, 10)}.xlsx`,
+                lines,
+            });
             showSnackBar({ type: "success", message: t("Dashboard activity exported") });
         } catch (error) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
@@ -239,15 +235,10 @@ const DashboardPage = dc(() => {
             }
             const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
             const lines = ["metric,value", ...rows.map(([metric, value]) => `${escape(metric)},${escape(value)}`)];
-            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement("a");
-            link.href = url;
-            link.download = `dashboard-${period.value}-${new Date().toISOString().slice(0, 10)}.csv`;
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            URL.revokeObjectURL(url);
+            await xlsxUIPipeline.downloadXlsxFromCsvLines({
+                title: `dashboard-${period.value}-${new Date().toISOString().slice(0, 10)}.xlsx`,
+                lines,
+            });
             await api.post(urlsMap.dashboardExportAudit, {
                 period: period.value,
                 checklist: EXPORT_CHECKS.filter((check) => exportChecklist.value[check.key]).map((check) => check.key),
