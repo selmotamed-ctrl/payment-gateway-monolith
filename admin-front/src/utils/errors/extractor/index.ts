@@ -60,16 +60,16 @@ export const extractApiError = (_error: any): ApiError | null => {
         }),
     ) as any;
 
-    const errorStatus: number | undefined = normalized?.status;
+    const errorStatus: number | undefined = normalized?.status ?? _error?.response?.status;
     const errorMessage: string | undefined = normalized?.error ?? normalized?.message;
     const errorCode: string | undefined = normalized?.code;
 
-    if (errorCode && errorStatus && errorMessage) {
+    if (errorCode && errorMessage) {
         return {
-            code: normalized.code,
+            code: errorCode,
             error: errorMessage,
             errors: normalized.errors ?? [],
-            status: errorStatus,
+            status: errorStatus ?? 500,
         };
     }
     return null;

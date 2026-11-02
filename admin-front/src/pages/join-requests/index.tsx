@@ -17,6 +17,8 @@ import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
+import { extractApiErrorMessage } from "@/utils/errors/extractor";
+import { showSnackBar } from "@/utils/snackBar";
 import {
     COLUMN_HELP,
     channelLabel,
@@ -58,6 +60,8 @@ const JoinRequestsPage = dc(() => {
     const total = ref(0);
     const summary = ref<JoinRequestsSummary | null>(null);
     const pageSize = ref(20);
+    const exportLoading = ref(false);
+    const summaryExportLoading = ref(false);
     let filterTimer: ReturnType<typeof setTimeout> | undefined;
     const refreshHook = ref<{
         reset: () => void;
@@ -77,9 +81,114 @@ const JoinRequestsPage = dc(() => {
 
     void loadSummary();
 
+    const exportCsv = async () => {
+        if (exportLoading.value) return;
+        exportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.joinRequestsExport, {
+                params: {
+                    ...(search.value ? { search: search.value } : {}),
+                    ...buildFilterQuery(filterDefinitions, filters.value),
+                },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const rowsData = (payload.joinRequests ?? []) as JoinRequestSummary[];
+            if (rowsData.length === 0) {
+                showSnackBar({ type: "warning", message: t("No join requests match the current filters.") });
+                return;
+            }
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const columns = ["id", "merchantId", "merchantName", "legalName", "status", "riskTier", "onboardingChannel", "submittedAt", "slaDueAt", "slaPausedAt", "reviewer", "fourEyesRequired", "decision", "decisionReasonCode"];
+            const lines = [
+                columns.map(escape).join(","),
+                ...rowsData.map((row) =>
+                    [
+                        row.id,
+                        row.merchantId,
+                        row.merchantName,
+                        row.merchant?.legalName ?? "",
+                        row.status,
+                        row.riskTier,
+                        row.onboardingChannel,
+                        row.submittedAt ?? "",
+                        row.slaDueAt,
+                        row.slaPausedAt ?? "",
+                        row.reviewer,
+                        row.fourEyesRequired,
+                        row.decision ?? "",
+                        row.decisionReasonCode ?? "",
+                    ]
+                        .map(escape)
+                        .join(","),
+                ),
+            ];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `join-requests-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({
+                type: payload.truncated ? "warning" : "success",
+                message: payload.truncated
+                    ? `${t("Exported")} ${rowsData.length} / ${payload.total}`
+                    : `${t("Exported")} ${rowsData.length}`,
+            });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            exportLoading.value = false;
+        }
+    };
+
     const refreshAll = () => {
         refreshHook.value?.refreshAsIs();
         void loadSummary();
+    };
+
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.joinRequestsSummaryExport);
+            const payload = response.data?.data ?? response.data ?? {};
+            const snapshot = (payload.summary ?? payload) as JoinRequestsSummary;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["total", snapshot.total],
+                ["open", snapshot.open],
+                ["submitted", snapshot.submitted],
+                ["in_review", snapshot.inReview],
+                ["info_requested", snapshot.infoRequested],
+                ["pending_checker", snapshot.pendingChecker],
+                ["approved", snapshot.approved],
+                ["rejected", snapshot.rejected],
+                ["overdue", snapshot.overdue],
+                ["due_soon", snapshot.dueSoon],
+                ["unassigned", snapshot.unassigned],
+                ["four_eyes", snapshot.fourEyes],
+            ];
+            for (const [status, count] of Object.entries(snapshot.byStatus ?? {})) rows.push([`status.${status}.count`, count]);
+            for (const [risk, count] of Object.entries(snapshot.byRisk ?? {})) rows.push([`risk.${risk}.count`, count]);
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `join-request-summary-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: t("Join request summary exported") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            summaryExportLoading.value = false;
+        }
     };
 
     const summaryItems = computed(() => {
@@ -273,6 +382,7 @@ const JoinRequestsPage = dc(() => {
                         <ThemedView style={{ flexDirection: "row", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
                             <StatusChip label={`${total.value} ${t("requests")}`} tone="info" size="small" />
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportCsv()}>{t("Export CSV")}</VBtn>
                             {canWrite.value && (
                                 <VBtn
                                     color="primary"
@@ -291,6 +401,7 @@ const JoinRequestsPage = dc(() => {
                         <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "15px", flex: 1 }}>{t("Onboarding SLA health")}</ThemedText>
+                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
                                 <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("Paused SLAs are excluded from overdue counts.")}</ThemedText>
                             </ThemedView>
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px" }}>

@@ -119,6 +119,7 @@ const MerchantDetailPage = dc(() => {
     const transactionOpen = ref(false);
     const selectedTransaction = ref<MerchantTransaction | null>(null);
     const transactionRefresh = ref<(() => void) | null>(null);
+    const summaryExportLoading = ref(false);
     const sectionCommand = ref<SectionCommand | null>(null);
     const sectionCommandSeq = ref(0);
     const activeTab = ref<MerchantDetailTab>("all");
@@ -133,6 +134,63 @@ const MerchantDetailPage = dc(() => {
     const statusHelp = computed(() => merchantStatusHelp(merchant.value?.status ?? ""));
     const balance = computed(() => merchant.value?.walletBalance?.balance ?? null);
     const currency = computed(() => merchant.value?.walletBalance?.wallets?.[0]?.currency ?? "LYD");
+
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.merchantSummaryExport(merchantId.value));
+            const payload = (response.data?.data ?? response.data ?? {}) as Record<string, any>;
+            const merchant = (payload.merchant ?? {}) as Record<string, any>;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["id", merchant.id],
+                ["display_name", merchant.displayName ?? merchant.tradeName ?? ""],
+                ["legal_name", merchant.legalName ?? ""],
+                ["status", merchant.status ?? ""],
+                ["kyb_status", merchant.kybStatus ?? ""],
+                ["risk_tier", merchant.riskTier ?? ""],
+                ["country", merchant.country ?? ""],
+                ["version", merchant.version ?? ""],
+                ["wallet_count", merchant.walletCount ?? 0],
+                ["application_count", merchant.applicationCount ?? 0],
+                ["user_count", merchant.userCount ?? 0],
+                ["join_request_count", merchant.joinRequestCount ?? 0],
+                ["kyb_document_count", merchant.kybDocumentCount ?? 0],
+                ["pending_approvals", merchant.pendingApprovalCount ?? 0],
+                ["wallet_balance", payload.walletBalance?.balance ?? ""],
+                ["open_disputes", payload.openDisputes ?? 0],
+                ["pending_cashouts", payload.pendingCashouts ?? 0],
+                ["open_aml_cases", payload.openAmlCases ?? 0],
+                ["generated_at", payload.generatedAt ?? ""],
+            ];
+            for (const metric of payload.metrics ?? []) {
+                rows.push([`attempts.${metric.status}.count`, metric.count]);
+                rows.push([`attempts.${metric.status}.charged_amount`, metric.chargedAmount]);
+            }
+            for (const [field, value] of Object.entries(merchant)) {
+                if (["id", "displayName", "tradeName", "legalName", "status", "kybStatus", "riskTier", "country", "version", "walletCount", "applicationCount", "userCount", "joinRequestCount", "kybDocumentCount", "pendingApprovalCount"].includes(field)) continue;
+                if (["joinRequests", "wallets", "applications", "users", "accessTokens", "credentialSets", "pendingChanges", "fieldHistory", "beneficialOwners", "kybDocuments", "amlCases", "revalidations", "metrics", "walletBalance"].includes(field)) continue;
+                if (value !== null && typeof value === "object") continue;
+                rows.push([`merchant.${field}`, value]);
+            }
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `merchant-360-${merchantId.value}-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: t("Merchant 360 summary exported") });
+        } catch (cause) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(cause) });
+        } finally {
+            summaryExportLoading.value = false;
+        }
+    };
 
     const load = async () => {
         loading.value = true;
@@ -522,6 +580,7 @@ const MerchantDetailPage = dc(() => {
                                     </>
                                 )}
                                 <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</VBtn>
+                                <VBtn variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
                                 {canWrite.value && (
                                     <>
                                         <VBtn variant="tonal" prependIcon="mdi-pencil-outline" onClick={() => openEdit("DESCRIPTIVE")}>{t("Edit descriptive")}</VBtn>

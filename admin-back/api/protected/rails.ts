@@ -69,6 +69,17 @@ export const railPatchSchema = z
     instructionsAr: z.string().max(2000).optional(),
     instructionsEn: z.string().max(2000).optional(),
     baseVersion: zBaseVersion.optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "NAMES_VERIFIED",
+          "LIMITS_VERIFIED",
+          "INSTRUCTIONS_REVIEWED",
+          "AVAILABILITY_IMPACT_REVIEWED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .catchall(z.unknown());
 
@@ -102,6 +113,17 @@ export const railFieldsSchema = z
       )
       .min(1)
       .max(50),
+    checklist: z
+      .array(
+        z.enum([
+          "FIELD_CODES_VERIFIED",
+          "VALIDATION_RULES_REVIEWED",
+          "SENSITIVITY_REVIEWED",
+          "CHECKOUT_IMPACT_REVIEWED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .catchall(z.unknown());
 
@@ -132,6 +154,17 @@ export const routePatchSchema = z
     dailyCapAmount: zAmount.optional(),
     limitCurrency: zCurrency.optional(),
     baseVersion: zBaseVersion.optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "PRIORITY_WEIGHT_REVIEWED",
+          "LIMITS_CAP_VERIFIED",
+          "SCOPE_COST_REVIEWED",
+          "ROUTING_IMPACT_REVIEWED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict();
 
@@ -140,6 +173,17 @@ export const routeStateSchema = z
     status: z.enum(["ACTIVE", "PAUSED", "DRAINING"]).optional(),
     state: z.enum(["ACTIVE", "PAUSED", "DRAINING"]).optional(),
     reason: z.string().min(3).max(500).optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "PRIORITY_WEIGHT_REVIEWED",
+          "LIMITS_CAP_VERIFIED",
+          "SCOPE_COST_REVIEWED",
+          "ROUTING_IMPACT_REVIEWED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict()
   .refine((value) => value.status !== undefined || value.state !== undefined, {
@@ -168,11 +212,28 @@ router.post(
 );
 
 router.get(
+  "/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/rails/export",
+    querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
   "/summary",
   coreForward({
     method: "GET",
     path: () => "/internal/admin/rails/summary",
     querySchema: zListQuery,
+  }),
+);
+
+router.get(
+  "/summary/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/rails/summary/export",
   }),
 );
 
@@ -242,11 +303,28 @@ routesRouter.patch(
 );
 
 routesRouter.get(
+  "/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/routes/export",
+    querySchema: zPaginationQuery,
+  }),
+);
+
+routesRouter.get(
   "/summary",
   coreForward({
     method: "GET",
     path: () => "/internal/admin/routes/summary",
     querySchema: zPaginationQuery,
+  }),
+);
+
+routesRouter.get(
+  "/summary/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/routes/summary/export",
   }),
 );
 

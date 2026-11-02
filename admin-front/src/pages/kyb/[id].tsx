@@ -25,7 +25,7 @@ import {
     formatBytes,
     formatDateTime,
 } from "./kybReviewHelp";
-import type { KybDocumentDetail } from "./types";
+import type { KybAuditEntry, KybDocumentDetail } from "./types";
 import KybHelpPanel from "./components/KybHelpPanel";
 import KybDocumentPreview from "./components/KybDocumentPreview";
 import KybReviewDialog from "./components/KybReviewDialog";
@@ -43,6 +43,29 @@ const field = (text: string, value: unknown, hint?: string, source?: string, cop
     source,
     copyOnClick: copy,
 });
+
+const auditValue = (value: unknown): string => {
+    if (value === null || value === undefined) return "—";
+    if (typeof value === "string") return value.length > 80 ? `${value.slice(0, 77)}…` : value;
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    try {
+        const text = JSON.stringify(value);
+        return text.length > 80 ? `${text.slice(0, 77)}…` : text;
+    } catch {
+        return String(value);
+    }
+};
+
+const auditRecord = (value: unknown): Record<string, unknown> =>
+    value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+
+const auditChangeSummary = (entry: KybAuditEntry): string => {
+    const before = auditRecord(entry.beforeJson);
+    const after = auditRecord(entry.afterJson);
+    const keys = Array.from(new Set([...Object.keys(before), ...Object.keys(after)])).slice(0, 4);
+    if (keys.length === 0) return "";
+    return keys.map((key) => `${key}: ${auditValue(before[key])} → ${auditValue(after[key])}`).join(" · ");
+};
 
 const KybReviewDetailPage = dc(() => {
     const { t } = useLocale();
@@ -269,6 +292,55 @@ const KybReviewDetailPage = dc(() => {
                     </VCard>
 
                     <FieldsSections sections={sections.value} />
+
+                    <VCard>
+                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "16px", flex: 1 }}>{t("Audit trail")}</ThemedText>
+                                <StatusChip label={`${entry.auditTrail?.length ?? 0} ${t("events")}`} tone="neutral" size="x-small" />
+                            </ThemedView>
+                            <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>
+                                {t("Last 100 recorded actions on this document, newest first.")}
+                            </ThemedText>
+                            {(entry.auditTrail ?? []).length === 0 && (
+                                <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("No audit events recorded yet.")}</ThemedText>
+                            )}
+                            {(entry.auditTrail ?? []).map((event) => {
+                                const change = auditChangeSummary(event);
+                                return (
+                                    <ThemedView
+                                        key={event.id}
+                                        style={{
+                                            gap: "4px",
+                                            padding: "10px 12px",
+                                            borderRadius: "10px",
+                                            border: "1px solid rgba(100,116,139,0.2)",
+                                        }}
+                                    >
+                                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                            <ThemedText style={{ fontSize: "12px", fontWeight: 700, direction: "ltr" }}>
+                                                {event.action.replaceAll("_", " ")}
+                                            </ThemedText>
+                                            <StatusChip label={event.role} tone="info" size="x-small" />
+                                            {event.approvalRequestId && (
+                                                <StatusChip label={t("Approval linked")} tone="warning" size="x-small" />
+                                            )}
+                                            <div style={{ flex: 1 }} />
+                                            <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{formatDateTime(event.createdAt)}</ThemedText>
+                                        </ThemedView>
+                                        <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>
+                                            {event.actor?.email ?? "—"}
+                                        </ThemedText>
+                                        {change && (
+                                            <ThemedText style={{ fontSize: "11px", opacity: 0.75, direction: "ltr" }}>
+                                                {change}
+                                            </ThemedText>
+                                        )}
+                                    </ThemedView>
+                                );
+                            })}
+                        </VCardText>
+                    </VCard>
 
                     <VCard>
                         <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>

@@ -18,6 +18,7 @@ import { reconciliationRouter } from "./reconciliation";
 import { settingsRouter } from "./settings";
 import { optionsRouter } from "./options";
 import { statsRouter } from "./stats";
+import { auditLogsRouter } from "./auditLogs";
 import { usersRouter } from "./users";
 
 const router = express.Router();
@@ -54,6 +55,7 @@ router.use("/reconciliation", reconciliationRouter);
 router.use("/settings", settingsRouter);
 router.use("/options", optionsRouter);
 router.use("/stats", statsRouter);
+router.use("/audit-logs", auditLogsRouter);
 router.use("/kyb-documents", kybReviewRouter);
 router.use("/", operationsRouter);
 router.use("/", financeRouter);

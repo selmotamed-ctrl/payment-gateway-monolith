@@ -7,6 +7,7 @@ import {
     VBtn,
     VCard,
     VCardText,
+    VCheckbox,
     VDialog,
     VExpansionPanel,
     VExpansionPanelText,
@@ -87,6 +88,13 @@ const field = (
     copyOnClick: copy,
 });
 
+const RESOLVE_CHECKS = [
+    { key: "EVIDENCE_REVIEWED", label: "Evidence reviewed" },
+    { key: "ATTEMPT_STATUS_VERIFIED", label: "Attempt status verified" },
+    { key: "OUTCOME_DOCUMENTED", label: "Outcome documented" },
+    { key: "CHECKER_REQUIREMENT_CONFIRMED", label: "Checker requirement confirmed" },
+] as const;
+
 const OperatorCaseDetailPage = dc(() => {
     const { t } = useLocale();
     const route = useRoute();
@@ -100,6 +108,7 @@ const OperatorCaseDetailPage = dc(() => {
     const resolveAction = ref("MARK_FAILED");
     const resolveReason = ref("");
     const resolveNotes = ref("");
+    const resolveChecklist = ref<Record<string, boolean>>({});
     const providerReference = ref("");
     const settledAmount = ref("");
     const checkerReason = ref("");
@@ -197,6 +206,7 @@ const OperatorCaseDetailPage = dc(() => {
         }
         resolveReason.value = "";
         resolveNotes.value = "";
+        resolveChecklist.value = {};
         providerReference.value = detail.value?.attempt?.providerReference ?? "";
         settledAmount.value = detail.value?.attempt?.totalChargedAmount ?? "";
         resolveAction.value = actionOptions.value[0]?.value ?? "CLOSE_CASE";
@@ -262,8 +272,14 @@ const OperatorCaseDetailPage = dc(() => {
         }
     };
 
+    const resolveChecklistComplete = computed(() => RESOLVE_CHECKS.every((check) => resolveChecklist.value[check.key] === true));
+
     const proposeResolution = async () => {
         if (!detail.value || resolveReason.value.trim().length < 3) return;
+        if (!resolveChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all resolution checklist items before submitting") });
+            return;
+        }
         actionLoading.value = true;
         try {
             await api.post(urlsMap.operatorCaseResolve(caseId.value), {
@@ -273,6 +289,7 @@ const OperatorCaseDetailPage = dc(() => {
                 ...(resolveAction.value === "MARK_SUCCEEDED" && providerReference.value.trim()
                     ? { providerReference: providerReference.value.trim() }
                     : {}),
+                checklist: RESOLVE_CHECKS.filter((check) => resolveChecklist.value[check.key]).map((check) => check.key),
                 ...(resolveAction.value === "MARK_SUCCEEDED" && settledAmount.value.trim()
                     ? { settledAmount: settledAmount.value.trim() }
                     : {}),
@@ -1028,6 +1045,22 @@ const OperatorCaseDetailPage = dc(() => {
                             hint={t("Optional evidence notes for the checker.")}
                             persistentHint
                         />
+                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Resolution checklist")}</ThemedText>
+                            {RESOLVE_CHECKS.map((check) => (
+                                <VCheckbox
+                                    key={check.key}
+                                    modelValue={resolveChecklist.value[check.key] === true}
+                                    onUpdate:modelValue={(value: unknown) => (resolveChecklist.value = { ...resolveChecklist.value, [check.key]: Boolean(value) })}
+                                    label={t(check.label)}
+                                    density="compact"
+                                    hideDetails
+                                />
+                            ))}
+                            {!resolveChecklistComplete.value && (
+                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all resolution checklist items before submitting")}</ThemedText>
+                            )}
+                        </ThemedView>
                         <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
                             <VBtn variant="text" onClick={() => (resolveOpen.value = false)}>
                                 {t("Cancel")}
@@ -1037,6 +1070,7 @@ const OperatorCaseDetailPage = dc(() => {
                                 loading={actionLoading.value}
                                 disabled={
                                     resolveReason.value.trim().length < 3 ||
+                                    !resolveChecklistComplete.value ||
                                     (resolveAction.value === "MARK_SUCCEEDED" && providerReference.value.trim().length === 0)
                                 }
                                 onClick={() => void proposeResolution()}

@@ -81,6 +81,11 @@ const HeaderCell = defineComponent(
                                 activator: ({ props: activatorProps }: any) => (
                                     <VIcon
                                         {...activatorProps}
+                                        {...{
+                                            tabindex: 0,
+                                            role: "button",
+                                            "aria-label": `${t(h.label ?? h.key)} ${t("help")}`,
+                                        }}
                                         icon="mdi-help-circle-outline"
                                         size={14}
                                         style={{ opacity: 0.55, cursor: "help", flex: "0 0 auto" }}
@@ -106,6 +111,11 @@ const HeaderCell = defineComponent(
                             <Button
                                 variant="text"
                                 color={!isSortSelected ? colors.grey.darken1 : colors.blue.base}
+                                {...{
+                                    "aria-label": isSortSelected
+                                        ? `${t("Sorted")} ${props.sortDirection === "asc" ? t("ascending") : t("descending")} ${t("by")} ${t(h.label ?? h.key)}`
+                                        : `${t("Sort by")} ${t(h.label ?? h.key)}`,
+                                }}
                                 onClick={() => {
                                     if (isSortSelected) {
                                         props.onSetSort(sortKey, props.sortDirection == "asc" ? "desc" : "asc");
@@ -220,6 +230,7 @@ export const Table = defineComponent(
             }
         };
         const theme = useTheme();
+        const { t } = useLocale();
 
         return () => {
             const isMobile = display.mobile.value;
@@ -231,6 +242,7 @@ export const Table = defineComponent(
                 <ThemedView>
                     <ThemedView style={[props.tableContainerStyle]} class="table-wrapper">
                         <table
+                            aria-label={typeof (props as any).title === "string" ? t((props as any).title) : undefined}
                             style={{
                                 borderCollapse: "separate",
                                 borderSpacing: "0",
@@ -240,11 +252,24 @@ export const Table = defineComponent(
                             class="modern-table"
                         >
                             <thead>
+                                {typeof (props as any).title === "string" && (
+                                    <caption class="pg-sr-only">{t((props as any).title)}</caption>
+                                )}
                                 <tr class="table-header-row">
                                     {props.headers.map((header) => {
                                         return (
                                             <th
                                                 key={header.key}
+                                                scope="col"
+                                                aria-sort={
+                                                    header.sortable !== false && !header.Header && header.key !== "actions" && header.label
+                                                        ? props.sortBy === (header.sortKey ?? header.key)
+                                                            ? props.sortDirection === "asc"
+                                                                ? "ascending"
+                                                                : "descending"
+                                                            : "none"
+                                                        : undefined
+                                                }
                                                 style={{
                                                     borderInlineEnd: header.endSeparator ? separatorStyle : undefined,
                                                     borderInlineStart: header.startSeparator ? separatorStyle : undefined,

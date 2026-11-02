@@ -6,6 +6,7 @@ import {
     VBtn,
     VCard,
     VCardText,
+    VCheckbox,
     VChip,
     VExpansionPanel,
     VExpansionPanelText,
@@ -15,6 +16,7 @@ import {
     VRadio,
     VRadioGroup,
     VSelect,
+    VTextField,
 } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
@@ -115,6 +117,26 @@ const asLegacyProgress = (input: unknown): EmployeeAcademyProgress | null => {
     return progress;
 };
 
+const TEAM_EXPORT_CHECKS = [
+    { en: "Team scope verified", ar: "تم التحقق من نطاق الفريق", key: "TEAM_SCOPE_VERIFIED" },
+    { en: "Privacy impact reviewed", ar: "تمت مراجعة أثر الخصوصية", key: "PRIVACY_REVIEWED" },
+    { en: "Progress data reviewed", ar: "تمت مراجعة بيانات التقدم", key: "PROGRESS_DATA_REVIEWED" },
+    { en: "Export approval confirmed", ar: "تم تأكيد الموافقة على التصدير", key: "EXPORT_APPROVAL_CONFIRMED" },
+] as const;
+
+type AcademyOverviewSummary = {
+    totalUsers: number;
+    usersWithProgress: number;
+    notStarted: number;
+    completedModules: number;
+    completedLessons: number;
+    completedLabs: number;
+    earnedBadges: number;
+    quizScores: number;
+    activeLast7d: number;
+    byRole: Record<string, number>;
+};
+
 const AcademyPage = dc(() => {
     const { t, current } = useLocale();
     const isArabic = computed(() => current.value === "ar");
@@ -124,6 +146,16 @@ const AcademyPage = dc(() => {
     const loadError = ref<string | null>(null);
     const persistWarning = ref<string | null>(null);
     const saving = ref(false);
+    const exportLoading = ref(false);
+    const summary = ref<AcademyOverviewSummary | null>(null);
+    const summaryExportLoading = ref(false);
+    const teamExportChecklist = ref<Record<string, boolean>>({});
+    const teamOpen = ref<string | null>(null);
+    const teamUsers = ref<Array<{ id: string; email: string; role: string; isMaker: boolean; isChecker: boolean; progress: unknown }>>([]);
+    const teamLoading = ref(false);
+    const teamLoaded = ref(false);
+    const teamError = ref<string | null>(null);
+    const teamSearch = ref("");
     const selectedTrack = ref<AcademyTrack>("SUPPORT");
     const selectedModuleId = ref<string>("M1");
     const answers = ref<Record<string, Record<number, number | undefined>>>({});
@@ -203,6 +235,62 @@ const AcademyPage = dc(() => {
     };
 
     void loadProgress();
+
+    const loadSummary = async () => {
+        try {
+            const response = await api.get(urlsMap.academyProgressSummary);
+            const payload = response.data?.data ?? response.data ?? {};
+            summary.value = (payload.summary ?? payload) as AcademyOverviewSummary;
+        } catch {
+            summary.value = null;
+        }
+    };
+
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        if (!teamExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: isArabic.value ? "أكمل قائمة التحقق قبل التصدير" : "Complete the export checklist before exporting" });
+            return;
+        }
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.academyProgressSummaryExport, {
+                params: { checklist: TEAM_EXPORT_CHECKS.filter((check) => teamExportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const snapshot = (payload.summary ?? payload) as AcademyOverviewSummary;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["total_users", snapshot.totalUsers],
+                ["users_with_progress", snapshot.usersWithProgress],
+                ["not_started", snapshot.notStarted],
+                ["completed_modules", snapshot.completedModules],
+                ["completed_lessons", snapshot.completedLessons],
+                ["completed_labs", snapshot.completedLabs],
+                ["earned_badges", snapshot.earnedBadges],
+                ["quiz_scores", snapshot.quizScores],
+                ["active_last_7d", snapshot.activeLast7d],
+            ];
+            for (const [role, count] of Object.entries(snapshot.byRole ?? {})) rows.push([`role.${role}.count`, count]);
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `academy-summary-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: isArabic.value ? "تم تصدير ملخص الأكاديمية" : "Academy summary exported" });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            summaryExportLoading.value = false;
+        }
+    };
+
+    void loadSummary();
 
     const selectModule = (moduleId: string) => {
         selectedModuleId.value = moduleId;
@@ -314,6 +402,107 @@ const AcademyPage = dc(() => {
         submitted.value = next;
     };
 
+    const loadTeam = async () => {
+        if (teamLoaded.value || teamLoading.value) return;
+        teamLoading.value = true;
+        teamError.value = null;
+        try {
+            const response = await api.get(urlsMap.academyProgressOverview);
+            const payload = response.data?.data ?? response.data ?? {};
+            teamUsers.value = (payload.users ?? []) as typeof teamUsers.value;
+            teamLoaded.value = true;
+        } catch (e) {
+            teamError.value = extractApiErrorMessage(e);
+        } finally {
+            teamLoading.value = false;
+        }
+    };
+
+    const teamRows = computed(() => {
+        const query = teamSearch.value.trim().toLowerCase();
+        return teamUsers.value
+            .map((row) => {
+                const normalized = normalizeAcademyProgress(row.progress);
+                const completed = ACADEMY_MODULES.filter((module) => moduleMastered(normalized, module)).length;
+                return {
+                    ...row,
+                    completed,
+                    percent: Math.round((completed / ACADEMY_MODULES.length) * 100),
+                    badges: earnedBadges(normalized),
+                    updatedAt: normalized.updatedAt ?? null,
+                };
+            })
+            .filter((row) => !query || row.email.toLowerCase().includes(query) || row.role.toLowerCase().includes(query))
+            .sort((left, right) => right.percent - left.percent || left.email.localeCompare(right.email));
+    });
+
+    const teamExportChecklistComplete = computed(() => TEAM_EXPORT_CHECKS.every((check) => teamExportChecklist.value[check.key] === true));
+
+    const exportCertifications = async () => {
+        if (exportLoading.value) return;
+        if (!teamExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: isArabic.value ? "أكمل قائمة التحقق قبل التصدير" : "Complete the export checklist before exporting" });
+            return;
+        }
+        exportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.academyOverviewExport, {
+                params: { checklist: TEAM_EXPORT_CHECKS.filter((check) => teamExportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const users = (payload.users ?? []) as Array<{
+                id: string;
+                email: string;
+                role: string;
+                isMaker: boolean;
+                isChecker: boolean;
+                progress: unknown;
+            }>;
+            if (users.length === 0) {
+                showSnackBar({ type: "warning", message: t("No academy progress to export.") });
+                return;
+            }
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const columns = ["userId", "email", "role", "isMaker", "isChecker", "completedModules", "totalModules", "completionPercent", "badges", "lastUpdated"];
+            const lines = [
+                columns.map(escape).join(","),
+                ...users.map((row) => {
+                    const normalized = normalizeAcademyProgress(row.progress);
+                    const completed = ACADEMY_MODULES.filter((module) => moduleMastered(normalized, module)).length;
+                    const percent = Math.round((completed / ACADEMY_MODULES.length) * 100);
+                    return [
+                        row.id,
+                        row.email,
+                        row.role,
+                        row.isMaker,
+                        row.isChecker,
+                        completed,
+                        ACADEMY_MODULES.length,
+                        percent,
+                        earnedBadges(normalized).join(";"),
+                        normalized.updatedAt ?? "",
+                    ]
+                        .map(escape)
+                        .join(",");
+                }),
+            ];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `academy-certifications-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: `${t("Exported")} ${users.length}` });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            exportLoading.value = false;
+        }
+    };
+
     const badgeEarned = (badge: AcademyBadge): boolean => progress.value.earnedBadges.includes(badge);
 
     return () => (
@@ -325,9 +514,121 @@ const AcademyPage = dc(() => {
                         <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                             <StatusChip label={`${completedModules.value} / ${ACADEMY_MODULES.length} ${isArabic.value ? "وحدات" : "modules"}`} tone="info" />
                             <StatusChip label={`${overallPercent.value}%`} tone={overallPercent.value === 100 ? "success" : "primary"} />
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} disabled={!teamExportChecklistComplete.value} onClick={() => void exportCertifications()}>
+                                {isArabic.value ? "تصدير الشهادات" : "Export certifications"}
+                            </VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!teamExportChecklistComplete.value} onClick={() => void exportSummary()}>
+                                {isArabic.value ? "تصدير الملخص" : "Export summary"}
+                            </VBtn>
                         </ThemedView>
                     )}
                 />
+
+                <VCard variant="tonal">
+                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{isArabic.value ? "قائمة التحقق من تصدير الفريق" : "Team export checklist"}</ThemedText>
+                        {TEAM_EXPORT_CHECKS.map((check) => (
+                            <VCheckbox
+                                key={check.key}
+                                modelValue={teamExportChecklist.value[check.key] === true}
+                                onUpdate:modelValue={(value: unknown) => (teamExportChecklist.value = { ...teamExportChecklist.value, [check.key]: Boolean(value) })}
+                                label={isArabic.value ? check.ar : check.en}
+                                density="compact"
+                                hideDetails
+                            />
+                        ))}
+                        {!teamExportChecklistComplete.value && (
+                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{isArabic.value ? "أكمل قائمة التحقق قبل التصدير" : "Complete the export checklist before exporting"}</ThemedText>
+                        )}
+                    </VCardText>
+                </VCard>
+
+                {summary.value && (
+                    <VCard variant="flat" style={{ borderRadius: "16px" }}>
+                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{isArabic.value ? "صحة الأكاديمية" : "Academy health"}</ThemedText>
+                            <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
+                                {[
+                                    [isArabic.value ? "المستخدمون" : "Users", `${summary.value.usersWithProgress}/${summary.value.totalUsers}`],
+                                    [isArabic.value ? "لم يبدأ" : "Not started", String(summary.value.notStarted)],
+                                    [isArabic.value ? "الوحدات" : "Modules", String(summary.value.completedModules)],
+                                    [isArabic.value ? "الدروس" : "Lessons", String(summary.value.completedLessons)],
+                                    [isArabic.value ? "المختبرات" : "Labs", String(summary.value.completedLabs)],
+                                    [isArabic.value ? "الشارات" : "Badges", String(summary.value.earnedBadges)],
+                                    [isArabic.value ? "نشط 7 أيام" : "Active 7d", String(summary.value.activeLast7d)],
+                                ].map(([label, value]) => (
+                                    <VCard key={label} variant="tonal">
+                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
+                                            <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{label}</ThemedText>
+                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{value}</ThemedText>
+                                        </VCardText>
+                                    </VCard>
+                                ))}
+                            </ThemedView>
+                        </VCardText>
+                    </VCard>
+                )}
+
+                <VExpansionPanels
+                    modelValue={teamOpen.value}
+                    onUpdate:modelValue={(value: unknown) => {
+                        teamOpen.value = Array.isArray(value) ? String(value[0] ?? "") : value ? String(value) : null;
+                        if (teamOpen.value === "team") void loadTeam();
+                    }}
+                    variant="accordion"
+                >
+                    <VExpansionPanel value="team">
+                        <VExpansionPanelTitle>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                <ThemedText type="defaultSemiBold">{isArabic.value ? "شهادات الفريق" : "Team certifications"}</ThemedText>
+                                <StatusChip label={`${teamUsers.value.length} ${isArabic.value ? "مستخدم" : "users"}`} tone="info" size="x-small" />
+                            </ThemedView>
+                        </VExpansionPanelTitle>
+                        <VExpansionPanelText>
+                            <ThemedView style={{ gap: "10px" }}>
+                                <VTextField
+                                    label={isArabic.value ? "بحث بالبريد أو الدور" : "Search by email or role"}
+                                    modelValue={teamSearch.value}
+                                    onUpdate:modelValue={(value: string) => (teamSearch.value = value)}
+                                    prependInnerIcon="mdi-magnify"
+                                    clearable
+                                    hideDetails
+                                />
+                                {teamLoading.value && <StateView loading={true} minHeight="120px" />}
+                                {teamError.value && <VAlert type="error" variant="tonal" density="compact">{teamError.value}</VAlert>}
+                                {!teamLoading.value && teamLoaded.value && teamRows.value.length === 0 && (
+                                    <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{isArabic.value ? "لا توجد نتائج." : "No results."}</ThemedText>
+                                )}
+                                {teamRows.value.map((row) => (
+                                    <VCard key={row.id} variant="tonal">
+                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                                <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{row.email}</ThemedText>
+                                                <StatusChip label={row.role.replaceAll("_", " ")} tone="neutral" size="x-small" />
+                                                {row.isMaker && <VChip size="x-small" variant="tonal" color="primary">{isArabic.value ? "صانع" : "Maker"}</VChip>}
+                                                {row.isChecker && <VChip size="x-small" variant="tonal" color="secondary">{isArabic.value ? "مدقق" : "Checker"}</VChip>}
+                                                <div style={{ flex: 1 }} />
+                                                <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{row.percent}%</ThemedText>
+                                            </ThemedView>
+                                            <VProgressLinear modelValue={row.percent} color={row.percent === 100 ? "success" : "primary"} height="6px" rounded />
+                                            <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                                                <StatusChip label={`${row.completed}/${ACADEMY_MODULES.length} ${isArabic.value ? "وحدات" : "modules"}`} tone="neutral" size="x-small" />
+                                                {row.badges.map((badge) => (
+                                                    <VChip key={badge} size="x-small" variant="tonal" color="success">{badge}</VChip>
+                                                ))}
+                                                {row.updatedAt && (
+                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>
+                                                        {isArabic.value ? "آخر تحديث" : "Updated"}: {new Date(row.updatedAt).toLocaleString()}
+                                                    </ThemedText>
+                                                )}
+                                            </ThemedView>
+                                        </VCardText>
+                                    </VCard>
+                                ))}
+                            </ThemedView>
+                        </VExpansionPanelText>
+                    </VExpansionPanel>
+                </VExpansionPanels>
 
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>

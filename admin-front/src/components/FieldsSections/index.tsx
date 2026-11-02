@@ -7,6 +7,8 @@ import { ThemedView } from "../ThemedView";
 import { ThemedText } from "../ThemedText";
 import type { SectionCommand } from "../CollapsibleSection";
 
+let fieldsSectionIdSequence = 0;
+
 type FieldSection = {
     title?: string;
     description?: string;
@@ -135,6 +137,7 @@ const Fields = dc(
         command?: SectionCommand | null;
     }) => {
         const theme = useTheme();
+        const contentId = `pg-fields-section-${++fieldsSectionIdSequence}`;
         const open = ref(readExpanded(props.storageKey ?? "", props.defaultExpanded !== false));
         watch(
             () => props.storageKey,
@@ -162,6 +165,7 @@ const Fields = dc(
             return (
                 <>
                     <ThemedView
+                        {...{ id: contentId }}
                         style={{
                             flex: 1,
                             height: "100%",
@@ -212,13 +216,14 @@ const Fields = dc(
                                 <button
                                     type="button"
                                     aria-expanded={open.value ? "true" : "false"}
+                                    aria-controls={contentId}
                                     onClick={() => (open.value = !open.value)}
                                     style={style}
                                 >
                                     {header}
                                 </button>
                             ) : (
-                                <ThemedView style={style}>{header}</ThemedView>
+                                <ThemedView {...{ role: "heading", "aria-level": 3 }} style={style}>{header}</ThemedView>
                             );
                         })()}
                         {expanded && props.fields.map((f, i) => {

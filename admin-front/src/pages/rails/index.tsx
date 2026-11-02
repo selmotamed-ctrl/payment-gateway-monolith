@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
-import { VAlert, VBtn, VCard, VCardText, VDialog, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -33,6 +33,27 @@ type RailField = {
     sensitivity: string;
 };
 
+const SUMMARY_EXPORT_CHECKS = [
+    { key: "RAIL_SCOPE_VERIFIED", label: "Rail portfolio scope verified" },
+    { key: "COLLECTION_MODE_REVIEWED", label: "Collection-mode breakdown reviewed" },
+    { key: "ROUTE_HEALTH_REVIEWED", label: "Route health reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
+const RAIL_FIELD_CHECKS = [
+    { key: "FIELD_CODES_VERIFIED", label: "Field codes verified" },
+    { key: "VALIDATION_RULES_REVIEWED", label: "Validation rules reviewed" },
+    { key: "SENSITIVITY_REVIEWED", label: "Sensitivity reviewed" },
+    { key: "CHECKOUT_IMPACT_REVIEWED", label: "Checkout impact reviewed" },
+] as const;
+
+const RAIL_EDIT_CHECKS = [
+    { key: "NAMES_VERIFIED", label: "Rail names verified" },
+    { key: "LIMITS_VERIFIED", label: "Amount limits verified" },
+    { key: "INSTRUCTIONS_REVIEWED", label: "Payer instructions reviewed" },
+    { key: "AVAILABILITY_IMPACT_REVIEWED", label: "Availability impact reviewed" },
+] as const;
+
 type Rail = {
     id: string;
     fieldCount?: number;
@@ -52,6 +73,8 @@ type Rail = {
     displayOrder?: number;
     instructionsAr?: string;
     instructionsEn?: string;
+    createdAt?: string;
+    updatedAt?: string;
     fields: RailField[];
 };
 
@@ -137,6 +160,9 @@ const RailsPage = dc(() => {
     const search = ref<string | null>(null);
     const filters = ref<FilterValues>({});
     const pageSize = ref(20);
+    const exportLoading = ref(false);
+    const summaryExportLoading = ref(false);
+    const summaryExportChecklist = ref<Record<string, boolean>>({});
     const refreshHook = ref<{
         reset: () => void;
         refresh: (props: { queryParams?: Record<string, unknown>; nextSkip?: number }) => Promise<void>;
@@ -151,6 +177,7 @@ const RailsPage = dc(() => {
 
     // Update rail
     const editOpen = ref(false);
+    const railEditChecklist = ref<Record<string, boolean>>({});
     const savingRail = ref(false);
     const editingRail = ref<Rail | null>(null);
     const railEditForm = ref({
@@ -169,6 +196,7 @@ const RailsPage = dc(() => {
     const selected = ref<Rail | null>(null);
     const fields = ref<PublicField[]>([]);
     const fieldForm = ref<PublicField>(blankField());
+    const railFieldChecklist = ref<Record<string, boolean>>({});
     const editingFieldIndex = ref<number | null>(null);
     const actionLoading = ref(false);
 
@@ -181,6 +209,75 @@ const RailsPage = dc(() => {
             summary.value = (payload.summary ?? payload) as RailSummary;
         } catch {
             summary.value = null;
+        }
+    };
+
+    const exportCsv = async () => {
+        if (exportLoading.value) return;
+        exportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.railsExport, {
+                params: {
+                    ...(search.value ? { search: search.value } : {}),
+                    ...buildFilterQuery(filterDefinitions.value, filters.value),
+                },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const rowsData = (payload.rails ?? []) as Rail[];
+            if (rowsData.length === 0) {
+                showSnackBar({ type: "warning", message: t("No rails match the current filters.") });
+                return;
+            }
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const columns = ["id", "code", "nameEn", "nameAr", "collectionMode", "currency", "minAmount", "maxAmount", "blocked", "displayOrder", "fields", "routes", "flows", "attempts", "healthyRoutes", "degradedRoutes", "openBreakers", "activeRoutes", "createdAt"];
+            const lines = [
+                columns.map(escape).join(","),
+                ...rowsData.map((row) => {
+                    const health = row.routeHealth ?? { healthy: 0, degraded: 0, openBreaker: 0, active: 0 };
+                    return [
+                        row.id,
+                        row.code,
+                        row.nameEn,
+                        row.nameAr,
+                        row.collectionMode,
+                        row.currency,
+                        row.minAmount,
+                        row.maxAmount,
+                        row.blocked ?? false,
+                        row.displayOrder ?? "",
+                        row.fieldCount ?? row.fields.length,
+                        row.routeCount ?? 0,
+                        row.flowCount ?? 0,
+                        row.paymentAttemptCount ?? 0,
+                        health.healthy,
+                        health.degraded,
+                        health.openBreaker,
+                        health.active,
+                        row.createdAt ?? "",
+                    ]
+                        .map(escape)
+                        .join(",");
+                }),
+            ];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `rails-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({
+                type: payload.truncated ? "warning" : "success",
+                message: payload.truncated
+                    ? `${t("Exported")} ${rowsData.length} / ${payload.total}`
+                    : `${t("Exported")} ${rowsData.length}`,
+            });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            exportLoading.value = false;
         }
     };
 
@@ -241,14 +338,21 @@ const RailsPage = dc(() => {
             instructionsEn: rail.instructionsEn ?? "",
             instructionsAr: rail.instructionsAr ?? "",
         };
+        railEditChecklist.value = {};
         editOpen.value = true;
     };
+
+    const railEditChecklistComplete = computed(() => RAIL_EDIT_CHECKS.every((check) => railEditChecklist.value[check.key] === true));
 
     const saveRail = async () => {
         if (!editingRail.value || savingRail.value) {
             return;
         }
         const form = railEditForm.value;
+        if (!railEditChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all rail checklist items before saving") });
+            return;
+        }
         const payload: Record<string, unknown> = { active: form.active };
         if (form.nameEn.trim()) payload.nameEn = form.nameEn.trim();
         if (form.nameAr.trim()) payload.nameAr = form.nameAr.trim();
@@ -257,6 +361,7 @@ const RailsPage = dc(() => {
         if (form.displayOrder.trim()) payload.displayOrder = Number(form.displayOrder);
         if (form.instructionsEn.trim()) payload.instructionsEn = form.instructionsEn.trim();
         if (form.instructionsAr.trim()) payload.instructionsAr = form.instructionsAr.trim();
+        payload.checklist = RAIL_EDIT_CHECKS.filter((check) => railEditChecklist.value[check.key]).map((check) => check.key);
         savingRail.value = true;
         try {
             await api.patch(urlsMap.railDetail(editingRail.value.id), payload);
@@ -272,6 +377,7 @@ const RailsPage = dc(() => {
 
     const resetFieldForm = () => {
         fieldForm.value = blankField();
+        railFieldChecklist.value = {};
         editingFieldIndex.value = null;
     };
 
@@ -299,8 +405,14 @@ const RailsPage = dc(() => {
         editingFieldIndex.value = index;
     };
 
+    const railFieldChecklistComplete = computed(() => RAIL_FIELD_CHECKS.every((check) => railFieldChecklist.value[check.key] === true));
+
     const persistFields = async (next: PublicField[]): Promise<void> => {
         if (!selected.value) {
+            return;
+        }
+        if (!railFieldChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all rail field checklist items before saving") });
             return;
         }
         actionLoading.value = true;
@@ -316,6 +428,7 @@ const RailsPage = dc(() => {
                     ...(field.minLength.trim() ? { minLength: Number(field.minLength) } : {}),
                     ...(field.maxLength.trim() ? { maxLength: Number(field.maxLength) } : {}),
                 })),
+                checklist: RAIL_FIELD_CHECKS.filter((check) => railFieldChecklist.value[check.key]).map((check) => check.key),
             });
             fields.value = next;
             resetFieldForm();
@@ -351,6 +464,48 @@ const RailsPage = dc(() => {
             resetFieldForm();
         }
         await persistFields(next);
+    };
+
+    const summaryExportChecklistComplete = computed(() => SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
+
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        if (!summaryExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all summary export checklist items before exporting") });
+            return;
+        }
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.railsSummaryExport, {
+                params: { checklist: SUMMARY_EXPORT_CHECKS.filter((check) => summaryExportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
+            const snapshot = (response.data?.data ?? response.data ?? {}) as RailSummary;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["total", snapshot.total],
+                ["active", snapshot.active],
+                ["blocked", snapshot.blocked],
+                ["routes_healthy", snapshot.routes.healthy],
+                ["routes_degraded", snapshot.routes.degraded],
+                ["routes_open_breaker", snapshot.routes.openBreaker],
+            ];
+            for (const [mode, count] of Object.entries(snapshot.byMode ?? {})) rows.push([`mode.${mode}.count`, count]);
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `rail-summary-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: t("Rail summary exported") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            summaryExportLoading.value = false;
+        }
     };
 
     const headers: TableHeader<Rail>[] = [
@@ -404,9 +559,12 @@ const RailsPage = dc(() => {
                 <PageHeader
                     title={t("Rails")}
                     end={() => (
-                        <VBtn color="primary" variant="flat" prependIcon={"mdi-plus"} onClick={() => openCreateRail()}>
-                            {t("Add Rail")}
-                        </VBtn>
+                        <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportCsv()}>{t("Export CSV")}</VBtn>
+                            <VBtn color="primary" variant="flat" prependIcon={"mdi-plus"} onClick={() => openCreateRail()}>
+                                {t("Add Rail")}
+                            </VBtn>
+                        </ThemedView>
                     )}
                 />
 
@@ -417,8 +575,28 @@ const RailsPage = dc(() => {
                 {summary.value && (
                     <VCard variant="flat" style={{ borderRadius: "16px" }}>
                         <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Rail health")}</ThemedText>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Rail health")}</ThemedText>
+                                <div style={{ flex: 1 }} />
+                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
+                            </ThemedView>
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
+                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
+                                    {SUMMARY_EXPORT_CHECKS.map((check) => (
+                                        <VCheckbox
+                                            key={check.key}
+                                            modelValue={summaryExportChecklist.value[check.key] === true}
+                                            onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
+                                            label={t(check.label)}
+                                            density="compact"
+                                            hideDetails
+                                        />
+                                    ))}
+                                    {!summaryExportChecklistComplete.value && (
+                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
+                                    )}
+                                </ThemedView>
                                 {[
                                     { label: t("Rails"), value: String(summary.value.total), tone: "info" as const },
                                     { label: t("Active"), value: String(summary.value.active), tone: "success" as const },
@@ -593,6 +771,22 @@ const RailsPage = dc(() => {
                             />
                         </ThemedView>
                         <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Rail field checklist")}</ThemedText>
+                                {RAIL_FIELD_CHECKS.map((check) => (
+                                    <VCheckbox
+                                        key={check.key}
+                                        modelValue={railFieldChecklist.value[check.key] === true}
+                                        onUpdate:modelValue={(value: unknown) => (railFieldChecklist.value = { ...railFieldChecklist.value, [check.key]: Boolean(value) })}
+                                        label={t(check.label)}
+                                        density="compact"
+                                        hideDetails
+                                    />
+                                ))}
+                                {!railFieldChecklistComplete.value && (
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all rail field checklist items before saving")}</ThemedText>
+                                )}
+                            </ThemedView>
                             {editingFieldIndex.value !== null && (
                                 <VBtn variant="text" onClick={() => resetFieldForm()}>
                                     {t("Cancel")}
@@ -601,7 +795,7 @@ const RailsPage = dc(() => {
                             <VBtn
                                 color="primary"
                                 loading={actionLoading.value}
-                                disabled={!fieldForm.value.code.trim() || !fieldForm.value.label.trim()}
+                                disabled={!fieldForm.value.code.trim() || !fieldForm.value.label.trim() || !railFieldChecklistComplete.value}
                                 onClick={() => void saveField()}
                             >
                                 {editingFieldIndex.value === null ? t("Add") : t("Save")}
@@ -670,13 +864,29 @@ const RailsPage = dc(() => {
                             </div>
                         </div>
                         <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Rail edit checklist")}</ThemedText>
+                                {RAIL_EDIT_CHECKS.map((check) => (
+                                    <VCheckbox
+                                        key={check.key}
+                                        modelValue={railEditChecklist.value[check.key] === true}
+                                        onUpdate:modelValue={(value: unknown) => (railEditChecklist.value = { ...railEditChecklist.value, [check.key]: Boolean(value) })}
+                                        label={t(check.label)}
+                                        density="compact"
+                                        hideDetails
+                                    />
+                                ))}
+                                {!railEditChecklistComplete.value && (
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all rail checklist items before saving")}</ThemedText>
+                                )}
+                            </ThemedView>
                             <VBtn variant="text" onClick={() => (editOpen.value = false)}>
                                 {t("Cancel")}
                             </VBtn>
                             <VBtn
                                 color="primary"
                                 loading={savingRail.value}
-                                disabled={!railEditForm.value.nameEn.trim() && !railEditForm.value.nameAr.trim()}
+                                disabled={(!railEditForm.value.nameEn.trim() && !railEditForm.value.nameAr.trim()) || !railEditChecklistComplete.value}
                                 onClick={() => void saveRail()}
                             >
                                 {t("Save")}

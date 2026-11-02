@@ -2,12 +2,15 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale, useTheme } from "vuetify";
 import {
+    VAutocomplete,
     VBtn,
     VCard,
     VCardText,
     VCheckbox,
     VDialog,
     VDivider,
+    VSelect,
+    VTextField,
 } from "vuetify/components";
 import { useRouter } from "vue-router";
 import ScreenContainer from "@/components/ScreenContainer";
@@ -19,6 +22,7 @@ import { MoneyText } from "@/components/MoneyText";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
+import { createOptionsLoader } from "@/components/Table/referenceOptions";
 import { tableRegistry } from "@/components/Table/tableRegistry";
 import { statusTone } from "@/components/Table/statusTone";
 import type { TableHeader } from "@/components/Table/types";
@@ -36,6 +40,8 @@ import {
     slaInfo,
 } from "./operatorCaseHelp";
 import type { BulkInquiryResult, OperatorCaseSummary } from "./types";
+
+type AssigneeOption = { title: string; value: string };
 
 type OperatorCasesSummary = {
     total: number;
@@ -57,6 +63,34 @@ const reasonText = (reason: string | undefined): string => {
     return reason.replaceAll("_", " ").toLowerCase();
 };
 
+const SUMMARY_EXPORT_CHECKS = [
+    { key: "OPEN_SCOPE_VERIFIED", label: "Open case scope verified" },
+    { key: "SLA_REVIEWED", label: "SLA status reviewed" },
+    { key: "PRIORITY_BREAKDOWN_REVIEWED", label: "Priority breakdown reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
+const INQUIRY_CHECKS = [
+    { key: "ELIGIBILITY_REVIEWED", label: "Inquiry eligibility reviewed" },
+    { key: "ATTEMPT_STATUS_VERIFIED", label: "Attempt status verified" },
+    { key: "GATEWAY_SUPPORT_CONFIRMED", label: "Gateway inquiry support confirmed" },
+    { key: "INQUIRY_SCOPE_CONFIRMED", label: "Inquiry scope confirmed" },
+] as const;
+
+const STATE_CHANGE_CHECKS = [
+    { key: "CASE_SCOPE_CONFIRMED", label: "Selected case scope confirmed" },
+    { key: "STATE_IMPACT_REVIEWED", label: "State impact reviewed" },
+    { key: "SLA_IMPACT_REVIEWED", label: "SLA impact reviewed" },
+    { key: "NOTIFICATION_PLANNED", label: "Notification planned" },
+] as const;
+
+const ASSIGN_CHECKS = [
+    { key: "ASSIGNEE_VERIFIED", label: "Assignee verified" },
+    { key: "WORKLOAD_REVIEWED", label: "Workload reviewed" },
+    { key: "NOTIFICATION_PLANNED", label: "Assignee notification planned" },
+    { key: "CASE_SCOPE_CONFIRMED", label: "Selected case scope confirmed" },
+] as const;
+
 const OperatorCasesPage = dc(() => {
     const { t } = useLocale();
     const theme = useTheme();
@@ -67,12 +101,31 @@ const OperatorCasesPage = dc(() => {
     const rows = ref<OperatorCaseSummary[]>([]);
     const total = ref(0);
     const summary = ref<OperatorCasesSummary | null>(null);
+    const exportLoading = ref(false);
+    const summaryExportLoading = ref(false);
+    const summaryExportChecklist = ref<Record<string, boolean>>({});
     const pageSize = ref(20);
     const selected = ref<Record<string, OperatorCaseSummary>>({});
     const bulkLoading = ref(false);
     const inquiringId = ref<string | null>(null);
     const bulkResult = ref<BulkInquiryResult | null>(null);
     const resultOpen = ref(false);
+    const inquiryOpen = ref(false);
+    const inquiryCaseIds = ref<string[]>([]);
+    const inquiryChecklist = ref<Record<string, boolean>>({});
+    const assignOpen = ref(false);
+    const assignSaving = ref(false);
+    const assignUserId = ref<string | null>(null);
+    const assignReason = ref("");
+    const assignChecklist = ref<Record<string, boolean>>({});
+    const assignOptions = ref<AssigneeOption[]>([]);
+    const assignOptionsLoading = ref(false);
+    const loadAssigneeOptions = createOptionsLoader("users");
+    const stateOpen = ref(false);
+    const stateSaving = ref(false);
+    const bulkState = ref<"OPEN" | "IN_PROGRESS">("IN_PROGRESS");
+    const stateReason = ref("");
+    const stateChangeChecklist = ref<Record<string, boolean>>({});
     let filterTimer: ReturnType<typeof setTimeout> | undefined;
 
     const loadSummary = async () => {
@@ -87,9 +140,125 @@ const OperatorCasesPage = dc(() => {
 
     void loadSummary();
 
+    const exportCsv = async () => {
+        if (exportLoading.value) return;
+        exportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.operatorCasesExport, {
+                params: {
+                    ...(search.value ? { search: search.value } : {}),
+                    ...buildFilterQuery(filterDefinitions, filters.value),
+                },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const rowsData = (payload.cases ?? []) as OperatorCaseSummary[];
+            if (rowsData.length === 0) {
+                showSnackBar({ type: "warning", message: t("No operator cases match the current filters.") });
+                return;
+            }
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const columns = ["id", "caseRef", "caseType", "priority", "state", "merchantName", "merchantStatus", "railCode", "gatewayCode", "attemptReference", "attemptStatus", "amount", "currency", "providerReference", "reconciliationResult", "approvalState", "assigneeEmail", "openedAt", "slaDueAt", "inquiryEligible", "inquiryReason"];
+            const lines = [
+                columns.map(escape).join(","),
+                ...rowsData.map((row) =>
+                    [
+                        row.id,
+                        row.caseRef,
+                        row.caseType,
+                        row.priority,
+                        row.state,
+                        row.merchantName,
+                        row.merchantStatus ?? "",
+                        row.railCode,
+                        row.gatewayCode,
+                        row.attemptReference ?? "",
+                        row.attemptStatus ?? "",
+                        row.chargedAmount ?? row.statementAmount ?? "",
+                        row.currency ?? "",
+                        row.providerReference ?? "",
+                        row.reconciliationResult ?? "",
+                        row.approvalState ?? "",
+                        row.assigneeEmail ?? "",
+                        row.openedAt,
+                        row.slaDueAt,
+                        row.inquiryEligibility?.eligible ?? false,
+                        row.inquiryEligibility?.reason ?? "",
+                    ]
+                        .map(escape)
+                        .join(","),
+                ),
+            ];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `operator-cases-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({
+                type: payload.truncated ? "warning" : "success",
+                message: payload.truncated
+                    ? `${t("Exported")} ${rowsData.length} / ${payload.total}`
+                    : `${t("Exported")} ${rowsData.length}`,
+            });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            exportLoading.value = false;
+        }
+    };
+
     const refreshAll = () => {
         refreshHook.value?.refreshAsIs();
         void loadSummary();
+    };
+
+    const summaryExportChecklistComplete = computed(() => SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
+
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        if (!summaryExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all summary export checklist items before exporting") });
+            return;
+        }
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.operatorCasesSummaryExport, {
+                params: { checklist: SUMMARY_EXPORT_CHECKS.filter((check) => summaryExportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const snapshot = (payload.summary ?? payload) as OperatorCasesSummary;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["total", snapshot.total],
+                ["open", snapshot.open],
+                ["in_progress", snapshot.inProgress],
+                ["pending_checker", snapshot.pendingChecker],
+                ["resolved", snapshot.resolved],
+                ["unassigned", snapshot.unassigned],
+                ["overdue", snapshot.overdue],
+                ["p1_open", snapshot.p1Open],
+            ];
+            for (const [state, count] of Object.entries(snapshot.byState ?? {})) rows.push([`state.${state}.count`, count]);
+            for (const [priority, count] of Object.entries(snapshot.byPriority ?? {})) rows.push([`priority.${priority}.count`, count]);
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `operator-case-summary-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: t("Operator case summary exported") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            summaryExportLoading.value = false;
+        }
     };
 
     const summaryItems = computed(() => {
@@ -111,6 +280,7 @@ const OperatorCasesPage = dc(() => {
     } | null>(null);
 
     const canInquire = computed(() => hasOneOfAuthorities(["attempt:inquire", "case:write"]));
+    const canAssign = computed(() => hasOneOfAuthorities(["case:write", "operator:write"]));
     const selectedList = computed(() => Object.values(selected.value));
     const selectedCount = computed(() => selectedList.value.length);
     const eligibleSelected = computed(() =>
@@ -192,11 +362,29 @@ const OperatorCasesPage = dc(() => {
         void router.push({ name: "OperatorCaseDetail", params: { id: row.id } });
     };
 
+    const openInquiry = (caseIds: string[]) => {
+        if (caseIds.length === 0) return;
+        inquiryCaseIds.value = caseIds;
+        inquiryChecklist.value = {};
+        inquiryOpen.value = true;
+    };
+
+    const inquiryChecklistComplete = computed(() => INQUIRY_CHECKS.every((check) => inquiryChecklist.value[check.key] === true));
+
+    const confirmInquiry = () => {
+        if (!inquiryChecklistComplete.value) return;
+        inquiryOpen.value = false;
+        void runBulkInquiry(inquiryCaseIds.value);
+    };
+
     const runBulkInquiry = async (caseIds: string[]) => {
         if (caseIds.length === 0) return;
         bulkLoading.value = true;
         try {
-            const response = await api.post(urlsMap.operatorCasesBulkInquire, { caseIds });
+            const response = await api.post(urlsMap.operatorCasesBulkInquire, {
+                caseIds,
+                checklist: INQUIRY_CHECKS.filter((check) => inquiryChecklist.value[check.key]).map((check) => check.key),
+            });
             const payload = (response.data?.data ?? response.data ?? {}) as BulkInquiryResult;
             bulkResult.value = payload;
             resultOpen.value = true;
@@ -213,10 +401,113 @@ const OperatorCasesPage = dc(() => {
         }
     };
 
+    const openAssign = async () => {
+        if (selectedCount.value === 0) return;
+        assignUserId.value = null;
+        assignReason.value = "";
+        assignChecklist.value = {};
+        assignOpen.value = true;
+        assignOptionsLoading.value = true;
+        try {
+            assignOptions.value = (await loadAssigneeOptions("")) as AssigneeOption[];
+        } catch {
+            assignOptions.value = [];
+        } finally {
+            assignOptionsLoading.value = false;
+        }
+    };
+
+    const openState = () => {
+        if (selectedCount.value === 0) return;
+        bulkState.value = "IN_PROGRESS";
+        stateReason.value = "";
+        stateChangeChecklist.value = {};
+        stateOpen.value = true;
+    };
+
+    const stateChangeChecklistComplete = computed(() => STATE_CHANGE_CHECKS.every((check) => stateChangeChecklist.value[check.key] === true));
+
+    const applyBulkState = async () => {
+        if (selectedCount.value === 0 || stateSaving.value) return;
+        if (!stateChangeChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all state checklist items before applying") });
+            return;
+        }
+        stateSaving.value = true;
+        try {
+            const response = await api.post(urlsMap.operatorCasesBulkState, {
+                caseIds: Object.keys(selected.value),
+                state: bulkState.value,
+                ...(stateReason.value.trim() ? { reason: stateReason.value.trim() } : {}),
+                checklist: STATE_CHANGE_CHECKS.filter((check) => stateChangeChecklist.value[check.key]).map((check) => check.key),
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const updated = Number(payload.updated ?? 0);
+            const skipped = Number(payload.skipped ?? 0);
+            showSnackBar({
+                type: skipped > 0 ? "warning" : "success",
+                message: `${t("Updated")}: ${updated} · ${t("Skipped")}: ${skipped}`,
+            });
+            stateOpen.value = false;
+            clearSelection();
+            refreshHook.value?.refreshAsIs();
+            void loadSummary();
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            stateSaving.value = false;
+        }
+    };
+
+    const searchAssignees = async (value: string) => {
+        assignOptionsLoading.value = true;
+        try {
+            assignOptions.value = (await loadAssigneeOptions(value)) as AssigneeOption[];
+        } catch {
+            assignOptions.value = [];
+        } finally {
+            assignOptionsLoading.value = false;
+        }
+    };
+
+    const assignChecklistComplete = computed(() => ASSIGN_CHECKS.every((check) => assignChecklist.value[check.key] === true));
+
+    const assignSelected = async () => {
+        if (selectedCount.value === 0 || assignSaving.value) return;
+        if (!assignChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all assignment checklist items before assigning") });
+            return;
+        }
+        assignSaving.value = true;
+        try {
+            const response = await api.post(urlsMap.operatorCasesBulkAssign, {
+                caseIds: Object.keys(selected.value),
+                assigneeUserId: assignUserId.value,
+                ...(assignReason.value.trim() ? { reason: assignReason.value.trim() } : {}),
+                checklist: ASSIGN_CHECKS.filter((check) => assignChecklist.value[check.key]).map((check) => check.key),
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const assigned = Number(payload.assigned ?? 0);
+            const skipped = Number(payload.skipped ?? 0);
+            showSnackBar({
+                type: skipped > 0 ? "warning" : "success",
+                message: `${t("Assigned")}: ${assigned} · ${t("Skipped")}: ${skipped}`,
+            });
+            assignOpen.value = false;
+            clearSelection();
+            refreshHook.value?.refreshAsIs();
+            void loadSummary();
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            assignSaving.value = false;
+        }
+    };
+
     const inquireOne = async (row: OperatorCaseSummary) => {
         inquiringId.value = row.id;
         try {
-            await runBulkInquiry([row.id]);
+            openInquiry([row.id]);
         } finally {
             inquiringId.value = null;
         }
@@ -563,6 +854,7 @@ const OperatorCasesPage = dc(() => {
                                 size="small"
                             />
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportCsv()}>{t("Export CSV")}</VBtn>
                         </ThemedView>
                     )}
                 />
@@ -572,7 +864,24 @@ const OperatorCasesPage = dc(() => {
                         <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "15px", flex: 1 }}>{t("Operator queue health")}</ThemedText>
+                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
                                 <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("P1 target: 4h · P2 target: 24h")}</ThemedText>
+                            </ThemedView>
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
+                                {SUMMARY_EXPORT_CHECKS.map((check) => (
+                                    <VCheckbox
+                                        key={check.key}
+                                        modelValue={summaryExportChecklist.value[check.key] === true}
+                                        onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
+                                        label={t(check.label)}
+                                        density="compact"
+                                        hideDetails
+                                    />
+                                ))}
+                                {!summaryExportChecklistComplete.value && (
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
+                                )}
                             </ThemedView>
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px" }}>
                                 {summaryItems.value.map((item) => (
@@ -689,12 +998,30 @@ const OperatorCasesPage = dc(() => {
                                 </VBtn>
                                 <VBtn
                                     size="small"
+                                    variant="tonal"
+                                    prependIcon="mdi-account-arrow-right-outline"
+                                    disabled={selectedCount.value === 0 || !canAssign.value}
+                                    onClick={() => void openAssign()}
+                                >
+                                    {t("Assign selected")}
+                                </VBtn>
+                                <VBtn
+                                    size="small"
+                                    variant="tonal"
+                                    prependIcon="mdi-progress-clock"
+                                    disabled={selectedCount.value === 0 || !canAssign.value}
+                                    onClick={openState}
+                                >
+                                    {t("Set state")}
+                                </VBtn>
+                                <VBtn
+                                    size="small"
                                     color="primary"
                                     variant="flat"
                                     prependIcon="mdi-radar"
                                     loading={bulkLoading.value}
                                     disabled={selectedCount.value === 0 || !canInquire.value}
-                                    onClick={() => void runBulkInquiry(Object.keys(selected.value))}
+                                    onClick={() => openInquiry(Object.keys(selected.value))}
                                 >
                                     {t("Inquire selected")} ({selectedCount.value})
                                 </VBtn>
@@ -704,6 +1031,136 @@ const OperatorCasesPage = dc(() => {
                     )}
                 />
             </ThemedView>
+
+            <VDialog modelValue={inquiryOpen.value} onUpdate:modelValue={(value: boolean) => (inquiryOpen.value = value)} maxWidth="560px">
+                <VCard>
+                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{t("Inquire about selected cases")}</ThemedText>
+                        <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
+                            {t("Only eligible UNKNOWN or VERIFYING attempts on supported gateways are scheduled.")}
+                        </ThemedText>
+                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Inquiry checklist")}</ThemedText>
+                            {INQUIRY_CHECKS.map((check) => (
+                                <VCheckbox
+                                    key={check.key}
+                                    modelValue={inquiryChecklist.value[check.key] === true}
+                                    onUpdate:modelValue={(value: unknown) => (inquiryChecklist.value = { ...inquiryChecklist.value, [check.key]: Boolean(value) })}
+                                    label={t(check.label)}
+                                    density="compact"
+                                    hideDetails
+                                />
+                            ))}
+                            {!inquiryChecklistComplete.value && (
+                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all inquiry checklist items before continuing")}</ThemedText>
+                            )}
+                        </ThemedView>
+                        <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
+                            <VBtn variant="text" onClick={() => (inquiryOpen.value = false)}>{t("Cancel")}</VBtn>
+                            <VBtn color="primary" loading={bulkLoading.value} disabled={!inquiryChecklistComplete.value} onClick={() => confirmInquiry()}>{t("Inquire")} ({inquiryCaseIds.value.length})</VBtn>
+                        </ThemedView>
+                    </VCardText>
+                </VCard>
+            </VDialog>
+
+            <VDialog modelValue={assignOpen.value} onUpdate:modelValue={(value: boolean) => (assignOpen.value = value)} maxWidth="560px">
+                <VCard>
+                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
+                            {t("Assign selected cases")}
+                        </ThemedText>
+                        <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
+                            {t("Resolved and pending-checker cases are skipped automatically.")}
+                        </ThemedText>
+                        <VAutocomplete
+                            label={t("Assignee")}
+                            items={assignOptions.value}
+                            itemTitle="title"
+                            itemValue="value"
+                            modelValue={assignUserId.value}
+                            loading={assignOptionsLoading.value}
+                            clearable
+                            hint={t("Leave empty to unassign the selected cases.")}
+                            persistentHint
+                            onUpdate:modelValue={(value: unknown) => (assignUserId.value = value ? String(value) : null)}
+                            onUpdate:search={(value: string) => void searchAssignees(value)}
+                        />
+                        <VTextField
+                            label={t("Reason (optional)")}
+                            modelValue={assignReason.value}
+                            onUpdate:modelValue={(value: string) => (assignReason.value = value)}
+                        />
+                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Assignment checklist")}</ThemedText>
+                            {ASSIGN_CHECKS.map((check) => (
+                                <VCheckbox
+                                    key={check.key}
+                                    modelValue={assignChecklist.value[check.key] === true}
+                                    onUpdate:modelValue={(value: unknown) => (assignChecklist.value = { ...assignChecklist.value, [check.key]: Boolean(value) })}
+                                    label={t(check.label)}
+                                    density="compact"
+                                    hideDetails
+                                />
+                            ))}
+                            {!assignChecklistComplete.value && (
+                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all assignment checklist items before assigning")}</ThemedText>
+                            )}
+                        </ThemedView>
+                        <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
+                            <VBtn variant="text" onClick={() => (assignOpen.value = false)}>{t("Cancel")}</VBtn>
+                            <VBtn color="primary" loading={assignSaving.value} disabled={!assignChecklistComplete.value} onClick={() => void assignSelected()}>
+                                {t("Assign")} ({selectedCount.value})
+                            </VBtn>
+                        </ThemedView>
+                    </VCardText>
+                </VCard>
+            </VDialog>
+
+            <VDialog modelValue={stateOpen.value} onUpdate:modelValue={(value: boolean) => (stateOpen.value = value)} maxWidth="520px">
+                <VCard>
+                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
+                            {t("Set state for selected cases")}
+                        </ThemedText>
+                        <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
+                            {t("Resolved, pending-checker and unchanged cases are skipped automatically.")}
+                        </ThemedText>
+                        <VSelect
+                            label={t("State")}
+                            items={["OPEN", "IN_PROGRESS"]}
+                            modelValue={bulkState.value}
+                            onUpdate:modelValue={(value: string | null) => (bulkState.value = value === "OPEN" ? "OPEN" : "IN_PROGRESS")}
+                        />
+                        <VTextField
+                            label={t("Reason (optional)")}
+                            modelValue={stateReason.value}
+                            onUpdate:modelValue={(value: string) => (stateReason.value = value)}
+                        />
+                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("State change checklist")}</ThemedText>
+                            {STATE_CHANGE_CHECKS.map((check) => (
+                                <VCheckbox
+                                    key={check.key}
+                                    modelValue={stateChangeChecklist.value[check.key] === true}
+                                    onUpdate:modelValue={(value: unknown) => (stateChangeChecklist.value = { ...stateChangeChecklist.value, [check.key]: Boolean(value) })}
+                                    label={t(check.label)}
+                                    density="compact"
+                                    hideDetails
+                                />
+                            ))}
+                            {!stateChangeChecklistComplete.value && (
+                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all state checklist items before applying")}</ThemedText>
+                            )}
+                        </ThemedView>
+                        <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
+                            <VBtn variant="text" onClick={() => (stateOpen.value = false)}>{t("Cancel")}</VBtn>
+                            <VBtn color="primary" loading={stateSaving.value} disabled={!stateChangeChecklistComplete.value} onClick={() => void applyBulkState()}>
+                                {t("Apply")} ({selectedCount.value})
+                            </VBtn>
+                        </ThemedView>
+                    </VCardText>
+                </VCard>
+            </VDialog>
 
             <VDialog
                 modelValue={resultOpen.value}

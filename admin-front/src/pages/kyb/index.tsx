@@ -16,6 +16,8 @@ import { statusTone } from "@/components/Table/statusTone";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
+import { extractApiErrorMessage } from "@/utils/errors/extractor";
+import { showSnackBar } from "@/utils/snackBar";
 import {
     COLUMN_HELP,
     avStatusHelp,
@@ -70,6 +72,8 @@ const KybReviewPage = dc(() => {
     const total = ref(0);
     const summary = ref<KybDocumentsSummary | null>(null);
     const pageSize = ref(20);
+    const exportLoading = ref(false);
+    const summaryExportLoading = ref(false);
     let filterTimer: ReturnType<typeof setTimeout> | undefined;
     const refreshHook = ref<{
         reset: () => void;
@@ -88,9 +92,122 @@ const KybReviewPage = dc(() => {
 
     void loadSummary();
 
+    const exportCsv = async () => {
+        if (exportLoading.value) return;
+        exportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.kybDocumentsExport, {
+                params: {
+                    ...(search.value ? { search: search.value } : {}),
+                    ...buildFilterQuery(filterDefinitions, filters.value),
+                },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const rowsData = (payload.documents ?? []) as KybDocumentSummary[];
+            if (rowsData.length === 0) {
+                showSnackBar({ type: "warning", message: t("No KYB documents match the current filters.") });
+                return;
+            }
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const columns = ["id", "merchantId", "merchantName", "merchantLegalName", "merchantStatus", "merchantKybStatus", "joinRequestId", "joinRequestStatus", "subjectType", "subjectId", "docType", "originalFileName", "mime", "sizeBytes", "sha256", "avStatus", "status", "expiresOn", "expiryState", "uploader", "reviewer", "reviewedAt", "rejectionReasonCode", "createdAt"];
+            const lines = [
+                columns.map(escape).join(","),
+                ...rowsData.map((row) =>
+                    [
+                        row.id,
+                        row.merchantId,
+                        row.merchantName,
+                        row.merchantLegalName,
+                        row.merchantStatus ?? "",
+                        row.merchantKybStatus ?? "",
+                        row.joinRequestId ?? "",
+                        row.joinRequest?.status ?? "",
+                        row.subjectType,
+                        row.subjectId,
+                        row.docType,
+                        row.originalFileName ?? "",
+                        row.mime,
+                        row.sizeBytes,
+                        row.sha256,
+                        row.avStatus,
+                        row.status,
+                        row.expiresOn ?? "",
+                        row.expiryState,
+                        row.uploader,
+                        row.reviewer,
+                        row.reviewedAt ?? "",
+                        row.rejectionReasonCode ?? "",
+                        row.createdAt,
+                    ]
+                        .map(escape)
+                        .join(","),
+                ),
+            ];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `kyb-documents-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({
+                type: payload.truncated ? "warning" : "success",
+                message: payload.truncated
+                    ? `${t("Exported")} ${rowsData.length} / ${payload.total}`
+                    : `${t("Exported")} ${rowsData.length}`,
+            });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            exportLoading.value = false;
+        }
+    };
+
     const refreshAll = () => {
         refreshHook.value?.refreshAsIs();
         void loadSummary();
+    };
+
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.kybDocumentsSummaryExport);
+            const payload = response.data?.data ?? response.data ?? {};
+            const snapshot = (payload.summary ?? payload) as KybDocumentsSummary;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["total", snapshot.total],
+                ["pending", snapshot.pending],
+                ["accepted", snapshot.accepted],
+                ["rejected", snapshot.rejected],
+                ["expired", snapshot.expired],
+                ["expiring_soon", snapshot.expiringSoon],
+                ["infected", snapshot.infected],
+                ["scanning", snapshot.scanning],
+                ["duplicates", snapshot.duplicates],
+            ];
+            for (const [status, count] of Object.entries(snapshot.byStatus ?? {})) rows.push([`status.${status}.count`, count]);
+            for (const [status, count] of Object.entries(snapshot.byAvStatus ?? {})) rows.push([`av_status.${status}.count`, count]);
+            for (const [type, count] of Object.entries(snapshot.byDocType ?? {})) rows.push([`doc_type.${type}.count`, count]);
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `kyb-document-summary-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: t("KYB document summary exported") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            summaryExportLoading.value = false;
+        }
     };
 
     const summaryItems = computed(() => {
@@ -381,6 +498,7 @@ const KybReviewPage = dc(() => {
                             <StatusChip label={`${actionableCount.value} ${t("actionable")}`} tone="success" size="small" />
                             <StatusChip label={`${duplicateCount.value} ${t("duplicates")}`} tone={duplicateCount.value ? "warning" : "neutral"} size="small" />
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportCsv()}>{t("Export CSV")}</VBtn>
                         </ThemedView>
                     )}
                 />
@@ -388,7 +506,11 @@ const KybReviewPage = dc(() => {
                 {summary.value && (
                     <VCard variant="flat" style={{ borderRadius: "16px" }}>
                         <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Document review health")}</ThemedText>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Document review health")}</ThemedText>
+                                <div style={{ flex: 1 }} />
+                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
+                            </ThemedView>
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px" }}>
                                 {summaryItems.value.map((item) => (
                                     <VCard key={item.label} variant="tonal">

@@ -179,8 +179,8 @@ const cases: ContractCase[] = [
     route: "POST /gateways/:id/rollback",
     mapper: toCoreGatewayRollback,
     publicSchema: rollbackSchema,
-    legacyPayload: { targetVersionId: "gv_1", reason: "rollback" },
-    allowedKeys: ["versionId"],
+    legacyPayload: { targetVersionId: "gv_1", reason: "rollback", checklist: ["TARGET_VERSION_VERIFIED", "GATES_VERIFIED", "IMPACT_REVIEWED", "ROLLBACK_AUTHORITY_CONFIRMED"] },
+    allowedKeys: ["versionId", "reason", "checklist"],
     requiredKeys: ["versionId"],
   },
   {

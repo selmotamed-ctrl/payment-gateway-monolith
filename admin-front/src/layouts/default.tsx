@@ -1,5 +1,5 @@
 import { dc } from "kt-dc";
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import {
     VAppBar,
@@ -14,11 +14,13 @@ import {
     VMain,
     VMenu,
     VNavigationDrawer,
+    VProgressLinear,
     VTooltip,
 } from "vuetify/components";
 import { useDisplay, useLocale, useTheme } from "vuetify";
 import LogoSvg from "@/assets/images/logo.svg";
 import { logout, user } from "@/state/user";
+import { routeLoading } from "@/state/route";
 import { toggleTheme } from "@/state/app/index";
 import { setLocale } from "@/plugins/localization";
 import { showSnackBar } from "@/utils/snackBar";
@@ -63,6 +65,10 @@ const DefaultLayout = dc(() => {
             if (isCompact.value) {
                 drawerOpen.value = false;
             }
+            void nextTick(() => {
+                const main = document.getElementById("pg-main-content");
+                main?.focus({ preventScroll: true });
+            });
         },
     );
 
@@ -93,6 +99,16 @@ const DefaultLayout = dc(() => {
         if (event.key === "Escape") {
             guideSearchOpen.value = false;
         }
+        const target = event.target as HTMLElement | null;
+        const typing =
+            target?.tagName === "INPUT" ||
+            target?.tagName === "TEXTAREA" ||
+            target?.tagName === "SELECT" ||
+            target?.isContentEditable === true;
+        if (!typing && !event.ctrlKey && !event.metaKey && !event.altKey && event.key === "?") {
+            event.preventDefault();
+            helpDrawerOpen.value = true;
+        }
     };
 
     onMounted(() => window.addEventListener("keydown", onGlobalKeydown));
@@ -100,11 +116,25 @@ const DefaultLayout = dc(() => {
 
     return () => (
         <>
+            <a
+                href="#pg-main-content"
+                class="pg-skip-link"
+                onClick={(event: MouseEvent) => {
+                    event.preventDefault();
+                    const main = document.getElementById("pg-main-content");
+                    main?.focus();
+                    main?.scrollIntoView({ block: "start" });
+                }}
+            >
+                {t("Skip to content")}
+            </a>
             <VAppBar flat height={64} color="surface" class="pg-app-bar">
                 <VBtn
                     icon
                     variant="text"
                     aria-label={t("Toggle navigation")}
+                    aria-expanded={drawerOpen.value ? "true" : "false"}
+                    aria-controls="pg-navigation-drawer"
                     onClick={() => (drawerOpen.value = !drawerOpen.value)}
                 >
                     <VIcon icon={drawerOpen.value ? "mdi-menu-open" : "mdi-menu"} />
@@ -139,7 +169,16 @@ const DefaultLayout = dc(() => {
                 <VTooltip text={isDark.value ? t("Light Mode") : t("Dark Mode")} location="bottom">
                     {{
                         activator: ({ props }: any) => (
-                            <VBtn {...props} icon variant="text" aria-label={t("Toggle theme")} onClick={() => toggleTheme()}>
+                            <VBtn
+                                {...props}
+                                icon
+                                variant="text"
+                                {...{
+                                    "aria-label": isDark.value ? t("Switch to light mode") : t("Switch to dark mode"),
+                                    "aria-pressed": isDark.value ? "true" : "false",
+                                }}
+                                onClick={() => toggleTheme()}
+                            >
                                 <VIcon icon={isDark.value ? "mdi-weather-sunny" : "mdi-weather-night"} />
                             </VBtn>
                         ),
@@ -149,22 +188,32 @@ const DefaultLayout = dc(() => {
                 <VMenu location="bottom end">
                     {{
                         activator: ({ props }: any) => (
-                            <VBtn {...props} icon variant="text" aria-label={t("Language")}>
+                            <VBtn
+                                {...props}
+                                icon
+                                variant="text"
+                                {...{
+                                    "aria-label": `${t("Language")}: ${locale.value === "ar" ? "العربية" : "English"}`,
+                                    "aria-haspopup": "menu",
+                                }}
+                            >
                                 <VIcon icon="mdi-translate" />
                             </VBtn>
                         ),
                         default: () => (
-                            <VList density="compact" class="pg-menu">
+                            <VList density="compact" class="pg-menu" {...{ role: "menu" }}>
                                 <VListItem
                                     title="العربية"
-                                    prependIcon="mdi-web"
+                                    prependIcon={locale.value === "ar" ? "mdi-check" : "mdi-web"}
                                     active={locale.value === "ar"}
+                                    {...{ role: "menuitemradio", "aria-checked": locale.value === "ar" ? "true" : "false" }}
                                     onClick={() => setLocale("ar")}
                                 />
                                 <VListItem
                                     title="English"
-                                    prependIcon="mdi-web"
+                                    prependIcon={locale.value === "en" ? "mdi-check" : "mdi-web"}
                                     active={locale.value === "en"}
+                                    {...{ role: "menuitemradio", "aria-checked": locale.value === "en" ? "true" : "false" }}
                                     onClick={() => setLocale("en")}
                                 />
                             </VList>
@@ -175,7 +224,7 @@ const DefaultLayout = dc(() => {
                 <VMenu location="bottom end">
                     {{
                         activator: ({ props }: any) => (
-                            <VBtn {...props} variant="text" rounded="pill" class="pg-user-btn" aria-label={t("Account")}>
+                            <VBtn {...props} variant="text" rounded="pill" class="pg-user-btn" aria-label={t("Account")} aria-haspopup="menu">
                                 <VAvatar size={30} class="pg-avatar">
                                     {initial.value}
                                 </VAvatar>
@@ -183,7 +232,7 @@ const DefaultLayout = dc(() => {
                             </VBtn>
                         ),
                         default: () => (
-                            <VList density="compact" class="pg-menu">
+                            <VList density="compact" class="pg-menu" {...{ role: "menu" }}>
                                 <VListItem
                                     title={displayName.value}
                                     subtitle={role.value}
@@ -193,6 +242,7 @@ const DefaultLayout = dc(() => {
                                 <VListItem
                                     title={t("Logout")}
                                     prependIcon="mdi-logout"
+                                    {...{ role: "menuitem" }}
                                     onClick={() => {
                                         showSnackBar({ type: "primary", message: t("Logout") });
                                         void logout();
@@ -205,6 +255,7 @@ const DefaultLayout = dc(() => {
             </VAppBar>
 
             <VNavigationDrawer
+                {...{ id: "pg-navigation-drawer" }}
                 modelValue={drawerOpen.value}
                 onUpdate:modelValue={(value: boolean) => (drawerOpen.value = value)}
                 permanent={!isCompact.value}
@@ -274,7 +325,15 @@ const DefaultLayout = dc(() => {
                 </div>
             </VNavigationDrawer>
 
-            <VMain class="pg-main">
+            {routeLoading.value && (
+                <div class="pg-route-progress" role="status" aria-live="polite" aria-label={t("Loading page")}>
+                    <VProgressLinear indeterminate color="primary" height={3} aria-hidden="true" />
+                </div>
+            )}
+            <VMain
+                class="pg-main"
+                {...{ id: "pg-main-content", tabindex: "-1", "aria-busy": routeLoading.value ? "true" : "false" }}
+            >
                 <RouterView />
             </VMain>
 

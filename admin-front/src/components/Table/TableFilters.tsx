@@ -69,6 +69,7 @@ const filterSummary = (filter: TableFilter, value: unknown): string => {
 
 const ApiAutocompleteControl = dc(
     (props: { filter: Extract<TableFilter, { type: "api-autocomplete" }>; value: unknown; onChange: (value: unknown) => void }) => {
+        const { t } = useLocale();
         const options = ref<FilterOption[]>([]);
         const loading = ref(false);
         const error = ref<string | null>(null);
@@ -119,7 +120,7 @@ const ApiAutocompleteControl = dc(
                                 icon
                                 size="x-small"
                                 variant="text"
-                                aria-label="Refresh options"
+                                aria-label={t("Refresh options")}
                                 onClick={() => void load("")}
                             >
                                 <VIcon icon="mdi-refresh" size="18" />
@@ -128,11 +129,11 @@ const ApiAutocompleteControl = dc(
                     }}
                 </VAutocomplete>
                 {error.value && (
-                    <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "rgb(var(--v-theme-error))", fontSize: "11px" }}>
-                        <VIcon icon="mdi-alert-circle-outline" size="14" />
+                    <div role="alert" aria-live="assertive" style={{ display: "flex", alignItems: "center", gap: "6px", color: "rgb(var(--v-theme-error))", fontSize: "11px" }}>
+                        <VIcon icon="mdi-alert-circle-outline" size="14" aria-hidden="true" />
                         <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{error.value}</span>
                         <VBtn size="x-small" variant="text" onClick={() => void load("")}>
-                            Retry
+                            {t("Retry")}
                         </VBtn>
                     </div>
                 )}
@@ -261,6 +262,7 @@ const TableFilters = dc(
         const theme = useTheme();
         const display = useDisplay();
         const open = ref(!display.mobile.value);
+        const contentId = `pg-table-filters-${Math.random().toString(36).slice(2, 10)}`;
 
         // LG gets three roomy columns, XL four; never cram.
         const columns = computed(() => {
@@ -296,6 +298,8 @@ const TableFilters = dc(
                             variant={count > 0 ? "flat" : "tonal"}
                             color={count > 0 ? "primary" : undefined}
                             prependIcon="mdi-filter-variant"
+                            aria-expanded={open.value ? "true" : "false"}
+                            aria-controls={contentId}
                             onClick={() => (open.value = !open.value)}
                         >
                             {t("Filters")}
@@ -326,6 +330,7 @@ const TableFilters = dc(
                                     variant="tonal"
                                     color={toneColor(theme, optionTone(filter, props.values[filter.key]))}
                                     closable
+                                    closeLabel={t("Remove filter")}
                                     onClick:close={() => props.onChange(filter.key, undefined)}
                                 >
                                     <span style={{ fontWeight: 700, opacity: 0.7, marginInlineEnd: "6px" }}>{filter.label}:</span>
@@ -337,6 +342,7 @@ const TableFilters = dc(
 
                     {open.value && (
                         <div
+                            id={contentId}
                             style={{
                                 display: "grid",
                                 gridTemplateColumns: `repeat(${columns.value}, minmax(0, 1fr))`,

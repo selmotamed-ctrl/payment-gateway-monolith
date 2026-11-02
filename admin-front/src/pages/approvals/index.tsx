@@ -7,6 +7,7 @@ import {
     VBtn,
     VCard,
     VCardText,
+    VCheckbox,
     VDialog,
     VProgressCircular,
     VSelect,
@@ -39,6 +40,27 @@ import {
 import type { ApprovalDetail, ApprovalRow, ApprovalSummary } from "./types";
 
 type ApprovalView = "pending" | "history" | "all";
+
+const SUMMARY_EXPORT_CHECKS = [
+    { key: "PENDING_SCOPE_VERIFIED", label: "Pending approval scope verified" },
+    { key: "EXPIRY_REVIEWED", label: "Expiry and emergency status reviewed" },
+    { key: "DOMAIN_BREAKDOWN_REVIEWED", label: "Domain breakdown reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
+const BULK_REJECT_CHECKS = [
+    { key: "SELECTION_REVIEWED", label: "Selected requests reviewed" },
+    { key: "REASONS_DOCUMENTED", label: "Rejection reasons documented" },
+    { key: "MAKER_NOTIFICATION_PLANNED", label: "Maker notification planned" },
+    { key: "CHECKER_AUTHORITY_CONFIRMED", label: "Checker authority confirmed" },
+] as const;
+
+const APPROVAL_CHECKS = [
+    { key: "DIFF_REVIEWED", label: "Diff reviewed" },
+    { key: "SUBJECT_CONTEXT_REVIEWED", label: "Subject context reviewed" },
+    { key: "MAKER_CHECKER_SEPARATION_VERIFIED", label: "Maker/checker separation verified" },
+    { key: "RISK_ASSESSED", label: "Risk assessed" },
+] as const;
 
 const PENDING_STATES = ["PENDING_REVIEW"];
 const HISTORY_STATES = ["APPROVED", "EXECUTED", "REJECTED"];
@@ -81,6 +103,15 @@ const ApprovalsPage = dc(() => {
     const router = useRouter();
     const rows = ref<ApprovalRow[]>([]);
     const total = ref(0);
+    const selectedApprovals = ref<Record<string, ApprovalRow>>({});
+    const bulkRejectOpen = ref(false);
+    const bulkRejectReason = ref("");
+    const bulkRejectLoading = ref(false);
+    const bulkRejectError = ref<string | null>(null);
+    const bulkRejectChecklist = ref<Record<string, boolean>>({});
+    const exportLoading = ref(false);
+    const summaryExportLoading = ref(false);
+    const summaryExportChecklist = ref<Record<string, boolean>>({});
     const summary = ref<ApprovalSummary | null>(null);
     const search = ref<string | null>(null);
     const activeView = ref<ApprovalView>("pending");
@@ -100,8 +131,92 @@ const ApprovalsPage = dc(() => {
     const outcome = ref<"WON" | "LOST" | "">("");
     const riskAcceptanceNote = ref("");
     const actionLoading = ref(false);
+    const decisionChecklist = ref<Record<string, boolean>>({});
 
     const filterDefinitions = computed(() => tableRegistry.Approvals?.filters ?? []);
+    const selectedList = computed(() => Object.values(selectedApprovals.value));
+    const selectedCount = computed(() => selectedList.value.length);
+    const allVisibleSelected = computed(
+        () => rows.value.length > 0 && rows.value.every((row) => row.state !== "PENDING_REVIEW" || Boolean(selectedApprovals.value[row.id])),
+    );
+    const someVisibleSelected = computed(
+        () => rows.value.some((row) => Boolean(selectedApprovals.value[row.id])) && !allVisibleSelected.value,
+    );
+    const clearSelection = () => {
+        selectedApprovals.value = {};
+    };
+    const toggleRow = (row: ApprovalRow, value: boolean | null) => {
+        if (row.state !== "PENDING_REVIEW") return;
+        if (value) selectedApprovals.value = { ...selectedApprovals.value, [row.id]: row };
+        else {
+            const next = { ...selectedApprovals.value };
+            delete next[row.id];
+            selectedApprovals.value = next;
+        }
+    };
+    const toggleVisible = (value: boolean | null) => {
+        if (!value) {
+            const next = { ...selectedApprovals.value };
+            for (const row of rows.value) delete next[row.id];
+            selectedApprovals.value = next;
+            return;
+        }
+        const next = { ...selectedApprovals.value };
+        for (const row of rows.value) {
+            if (row.state === "PENDING_REVIEW") next[row.id] = row;
+        }
+        selectedApprovals.value = next;
+    };
+    const openBulkReject = () => {
+        if (selectedCount.value === 0) return;
+        bulkRejectReason.value = "";
+        bulkRejectError.value = null;
+        bulkRejectChecklist.value = {};
+        bulkRejectOpen.value = true;
+    };
+    const bulkRejectChecklistComplete = computed(() => BULK_REJECT_CHECKS.every((check) => bulkRejectChecklist.value[check.key] === true));
+
+    const runBulkReject = async () => {
+        if (selectedCount.value === 0 || bulkRejectLoading.value) return;
+        if (bulkRejectReason.value.trim().length < 2) {
+            bulkRejectError.value = t("A rejection reason of at least 2 characters is required.");
+            return;
+        }
+        if (!bulkRejectChecklistComplete.value) {
+            bulkRejectError.value = t("Complete all bulk rejection checklist items before continuing.");
+            return;
+        }
+        bulkRejectLoading.value = true;
+        bulkRejectError.value = null;
+        try {
+            const response = await api.post(urlsMap.approvalsBulkReject, {
+                approvalIds: Object.keys(selectedApprovals.value),
+                reason: bulkRejectReason.value.trim(),
+                checklist: BULK_REJECT_CHECKS.filter((check) => bulkRejectChecklist.value[check.key]).map((check) => check.key),
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const rejected = Number(payload.rejected ?? 0);
+            const failed = Number(payload.failed ?? 0);
+            const failedIds = new Set(
+                (Array.isArray(payload.results) ? payload.results : [])
+                    .filter((item: Record<string, unknown>) => item.status === "FAILED")
+                    .map((item: Record<string, unknown>) => String(item.approvalId ?? "")),
+            );
+            selectedApprovals.value = Object.fromEntries(
+                Object.entries(selectedApprovals.value).filter(([id]) => failedIds.has(id)),
+            );
+            showSnackBar({
+                type: failed > 0 ? "warning" : "success",
+                message: `${t("Rejected")}: ${rejected} · ${t("Failed")}: ${failed}`,
+            });
+            bulkRejectOpen.value = false;
+            refreshAll();
+        } catch (e) {
+            bulkRejectError.value = extractApiErrorMessage(e);
+        } finally {
+            bulkRejectLoading.value = false;
+        }
+    };
 
     const loadSummary = async () => {
         try {
@@ -145,7 +260,83 @@ const ApprovalsPage = dc(() => {
         void loadSummary();
     };
 
-    const subjectRoute = (row: ApprovalRow): { name: string; params: Record<string, string> } | null => {
+    const exportCsv = async () => {
+        if (exportLoading.value) return;
+        exportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.approvalsExport, {
+                params: {
+                    ...(search.value ? { search: search.value } : {}),
+                    ...buildFilterQuery(filterDefinitions.value, filters.value),
+                },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const rowsData = (payload.approvals ?? []) as ApprovalRow[];
+            if (rowsData.length === 0) {
+                showSnackBar({ type: "warning", message: t("No approvals match the current filters.") });
+                return;
+            }
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const columns = [
+                "id",
+                "subjectType",
+                "subjectId",
+                "domain",
+                "kind",
+                "state",
+                "mode",
+                "maker",
+                "checker",
+                "createdAt",
+                "expiresAt",
+                "ageHours",
+            ];
+            const lines = [
+                columns.map(escape).join(","),
+                ...rowsData.map((row) =>
+                    [
+                        row.id,
+                        row.subjectType,
+                        row.subjectId,
+                        row.domain,
+                        row.kind,
+                        row.state,
+                        row.mode,
+                        row.makerName || row.makerUserId,
+                        row.checkerName || "",
+                        row.createdAt,
+                        row.expiresAt ?? "",
+                        row.ageHours,
+                    ]
+                        .map(escape)
+                        .join(","),
+                ),
+            ];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `approvals-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({
+                type: payload.truncated ? "warning" : "success",
+                message: payload.truncated
+                    ? `${t("Exported")} ${rowsData.length} / ${payload.total}`
+                    : `${t("Exported")} ${rowsData.length}`,
+            });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            exportLoading.value = false;
+        }
+    };
+
+    const subjectRoute = (
+        row: ApprovalRow,
+    ): { name: string; params?: Record<string, string>; query?: Record<string, string> } | null => {
         switch (row.subjectType) {
             case "MERCHANT":
                 return { name: "MerchantDetail", params: { id: row.subjectId } };
@@ -153,6 +344,10 @@ const ApprovalsPage = dc(() => {
                 return { name: "JoinRequestDetail", params: { id: row.subjectId } };
             case "OPERATOR_CASE":
                 return { name: "OperatorCaseDetail", params: { id: row.subjectId } };
+            case "COMMISSION_PROFILE":
+                return { name: "PricingControls", query: { tab: "COMMISSION" } };
+            case "VELOCITY_RULE":
+                return { name: "PricingControls", query: { tab: "VELOCITY" } };
             default:
                 return null;
         }
@@ -174,6 +369,7 @@ const ApprovalsPage = dc(() => {
         decisionReason.value = "";
         outcome.value = "";
         riskAcceptanceNote.value = "";
+        decisionChecklist.value = {};
         detailsOpen.value = true;
         detailLoading.value = true;
         try {
@@ -201,6 +397,8 @@ const ApprovalsPage = dc(() => {
         return APPROVAL_BLOCK_REASON_HELP[reason] ?? reason.replaceAll("_", " ");
     });
 
+    const decisionChecklistComplete = computed(() => APPROVAL_CHECKS.every((check) => decisionChecklist.value[check.key] === true));
+
     const decide = async (approve: boolean) => {
         if (!selected.value) return;
         if (approve && !canApprove.value) return;
@@ -214,6 +412,10 @@ const ApprovalsPage = dc(() => {
             showSnackBar({ type: "warning", message: t("Choose the chargeback outcome before approving") });
             return;
         }
+        if (!decisionChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all decision checklist items before deciding") });
+            return;
+        }
         actionLoading.value = true;
         try {
             const response = await api.post(
@@ -222,6 +424,7 @@ const ApprovalsPage = dc(() => {
                     ...(approve && requiresOutcome.value && outcome.value ? { outcome: outcome.value } : {}),
                     ...(reason ? { reason } : {}),
                     ...(approve && riskAcceptanceNote.value.trim() ? { riskAcceptanceNote: riskAcceptanceNote.value.trim() } : {}),
+                    checklist: APPROVAL_CHECKS.filter((check) => decisionChecklist.value[check.key]).map((check) => check.key),
                 },
             );
             const payload = response.data?.data ?? response.data ?? {};
@@ -239,6 +442,50 @@ const ApprovalsPage = dc(() => {
             showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
         } finally {
             actionLoading.value = false;
+        }
+    };
+
+    const summaryExportChecklistComplete = computed(() => SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
+
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        if (!summaryExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all summary export checklist items before exporting") });
+            return;
+        }
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.approvalsSummaryExport, {
+                params: { checklist: SUMMARY_EXPORT_CHECKS.filter((check) => summaryExportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const snapshot = payload as ApprovalSummary;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["total_pending", snapshot.totalPending],
+                ["expired", snapshot.expired],
+                ["expiring_soon", snapshot.expiringSoon],
+                ["emergency_due", snapshot.emergencyDue],
+                ["oldest_age_hours", snapshot.oldestAgeHours],
+            ];
+            for (const [state, count] of Object.entries(snapshot.byState ?? {})) rows.push([`state.${state}.count`, count]);
+            for (const item of snapshot.bySubjectType ?? []) rows.push([`subject.${item.subjectType}.count`, item.count]);
+            for (const item of snapshot.byDomain ?? []) rows.push([`domain.${item.domain}.count`, item.count]);
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `approval-summary-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: t("Approval summary exported") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            summaryExportLoading.value = false;
         }
     };
 
@@ -283,10 +530,54 @@ const ApprovalsPage = dc(() => {
         push(t("Role"), context.role);
         push(t("Setting key"), context.key);
         push(t("Report type"), context.reportType);
+        push(t("Rail code"), context.railCode);
+        push(t("Calculation"), context.calcType);
+        push(t("Flat fee"), context.flatFee);
+        push(t("Percentage"), context.percentageRate);
+        push(t("Fee bearer"), context.feeBearerDefault);
+        push(t("Scope type"), context.scopeType);
+        push(t("Scope value"), context.scopeValue);
+        push(t("Window seconds"), context.windowSeconds);
+        push(t("Max count"), context.maxCount);
+        push(t("Max amount"), context.maxAmount);
+        push(t("Action"), context.action);
+        push(t("Active"), context.active === undefined ? null : context.active ? t("Yes") : t("No"));
+        push(t("Effective from"), context.effectiveFrom ? formatDateTime(String(context.effectiveFrom)) : null);
+        push(t("Effective to"), context.effectiveTo ? formatDateTime(String(context.effectiveTo)) : null);
         return rows;
     });
 
     const headers = computed<TableHeader<ApprovalRow>[]>(() => [
+        {
+            key: "select",
+            label: "",
+            sortable: false,
+            headerCellStyle: { justifyContent: "center" },
+            Header: () => (
+                <span style={{ width: "28px", height: "40px", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                    <VCheckbox
+                        modelValue={allVisibleSelected.value}
+                        indeterminate={someVisibleSelected.value}
+                        onUpdate:modelValue={(value: boolean | null) => toggleVisible(value)}
+                        density="compact"
+                        hideDetails
+                        aria-label="Select all pending approvals on this page"
+                    />
+                </span>
+            ),
+            Value: ({ row }: { row: ApprovalRow }) => (
+                <ThemedView style={{ width: "28px", height: "40px", alignItems: "center", justifyContent: "center" }}>
+                    <VCheckbox
+                        modelValue={Boolean(selectedApprovals.value[row.id])}
+                        onUpdate:modelValue={(value: boolean | null) => toggleRow(row, value)}
+                        disabled={row.state !== "PENDING_REVIEW"}
+                        density="compact"
+                        hideDetails
+                        aria-label={`Select approval ${row.id}`}
+                    />
+                </ThemedView>
+            ),
+        },
         {
             key: "subject",
             label: "Subject",
@@ -383,6 +674,7 @@ const ApprovalsPage = dc(() => {
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportCsv()}>{t("Export CSV")}</VBtn>
                         </ThemedView>
                     )}
                 />
@@ -394,7 +686,27 @@ const ApprovalsPage = dc(() => {
                 {summary.value && (
                     <VCard variant="flat" style={{ borderRadius: "16px" }}>
                         <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Queue health")}</ThemedText>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Queue health")}</ThemedText>
+                                <div style={{ flex: 1 }} />
+                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
+                            </ThemedView>
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
+                                {SUMMARY_EXPORT_CHECKS.map((check) => (
+                                    <VCheckbox
+                                        key={check.key}
+                                        modelValue={summaryExportChecklist.value[check.key] === true}
+                                        onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
+                                        label={t(check.label)}
+                                        density="compact"
+                                        hideDetails
+                                    />
+                                ))}
+                                {!summaryExportChecklistComplete.value && (
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
+                                )}
+                            </ThemedView>
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
                                 {summaryItems.value.map((item) => (
                                     <VCard key={item.label} variant="tonal">
@@ -428,6 +740,29 @@ const ApprovalsPage = dc(() => {
                     <VTab value="history" prependIcon="mdi-history">{t("History")}</VTab>
                     <VTab value="all" prependIcon="mdi-view-list-outline">{t("All")}</VTab>
                 </VTabs>
+
+                {selectedCount.value > 0 && (
+                    <ThemedView
+                        style={{
+                            flexDirection: "row",
+                            gap: "10px",
+                            alignItems: "center",
+                            flexWrap: "wrap",
+                            padding: "10px 14px",
+                            borderRadius: "12px",
+                            border: "1px solid rgba(100,116,139,0.25)",
+                            background: "rgba(100,116,139,0.06)",
+                        }}
+                    >
+                        <ThemedText style={{ fontSize: "13px", fontWeight: 700 }}>{selectedCount.value} {t("selected")}</ThemedText>
+                        <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("Only pending requests can be rejected in bulk.")}</ThemedText>
+                        <div style={{ flex: 1 }} />
+                        <VBtn size="small" variant="text" onClick={clearSelection}>{t("Clear selection")}</VBtn>
+                        <VBtn size="small" color="error" variant="flat" prependIcon="mdi-close-octagon-outline" onClick={openBulkReject}>
+                            {t("Reject selected")}
+                        </VBtn>
+                    </ThemedView>
+                )}
 
                 <ApiTable<ApprovalRow>
                     title={t("Approval requests")}
@@ -491,6 +826,48 @@ const ApprovalsPage = dc(() => {
 
                 <VCard><VCardText><ApprovalHelpPanel /></VCardText></VCard>
             </ThemedView>
+
+            <VDialog modelValue={bulkRejectOpen.value} onUpdate:modelValue={(value: boolean) => (bulkRejectOpen.value = value)} maxWidth="520px">
+                <VCard>
+                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{t("Reject selected approvals")}</ThemedText>
+                        <VAlert type="warning" variant="tonal">
+                            {t("Each request is validated independently. Requests you made yourself or cannot check will fail and remain selected.")}
+                        </VAlert>
+                        <VTextarea
+                            label={t("Rejection reason")}
+                            modelValue={bulkRejectReason.value}
+                            onUpdate:modelValue={(value: string) => (bulkRejectReason.value = value)}
+                            rows={3}
+                            hint={t("At least 2 characters. Applied to every selected request.")}
+                            persistentHint
+                        />
+                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Bulk rejection checklist")}</ThemedText>
+                            {BULK_REJECT_CHECKS.map((check) => (
+                                <VCheckbox
+                                    key={check.key}
+                                    modelValue={bulkRejectChecklist.value[check.key] === true}
+                                    onUpdate:modelValue={(value: unknown) => (bulkRejectChecklist.value = { ...bulkRejectChecklist.value, [check.key]: Boolean(value) })}
+                                    label={t(check.label)}
+                                    density="compact"
+                                    hideDetails
+                                />
+                            ))}
+                            {!bulkRejectChecklistComplete.value && (
+                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all bulk rejection checklist items before continuing.")}</ThemedText>
+                            )}
+                        </ThemedView>
+                        {bulkRejectError.value && <VAlert type="error" variant="tonal" density="compact">{bulkRejectError.value}</VAlert>}
+                        <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
+                            <VBtn variant="text" onClick={() => (bulkRejectOpen.value = false)}>{t("Cancel")}</VBtn>
+                            <VBtn color="error" loading={bulkRejectLoading.value} disabled={!bulkRejectChecklistComplete.value} onClick={() => void runBulkReject()}>
+                                {t("Reject")} ({selectedCount.value})
+                            </VBtn>
+                        </ThemedView>
+                    </VCardText>
+                </VCard>
+            </VDialog>
 
             <VDialog modelValue={detailsOpen.value} onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)} maxWidth="1040px" scrollable>
                 <VCard>
@@ -590,6 +967,22 @@ const ApprovalsPage = dc(() => {
                                                 onUpdate:modelValue={(value: string | null) => (outcome.value = (value as "WON" | "LOST" | null) ?? "")}
                                             />
                                         )}
+                                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Decision checklist")}</ThemedText>
+                                            {APPROVAL_CHECKS.map((check) => (
+                                                <VCheckbox
+                                                    key={check.key}
+                                                    modelValue={decisionChecklist.value[check.key] === true}
+                                                    onUpdate:modelValue={(value: unknown) => (decisionChecklist.value = { ...decisionChecklist.value, [check.key]: Boolean(value) })}
+                                                    label={t(check.label)}
+                                                    density="compact"
+                                                    hideDetails
+                                                />
+                                            ))}
+                                            {!decisionChecklistComplete.value && (
+                                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all decision checklist items before deciding")}</ThemedText>
+                                            )}
+                                        </ThemedView>
                                         <VTextarea
                                             modelValue={decisionReason.value}
                                             onUpdate:modelValue={(value: string) => (decisionReason.value = value)}
@@ -607,7 +1000,7 @@ const ApprovalsPage = dc(() => {
                                         <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
                                             <VBtn
                                                 color="success"
-                                                disabled={!canApprove.value}
+                                                disabled={!canApprove.value || !decisionChecklistComplete.value}
                                                 loading={actionLoading.value}
                                                 onClick={() => void decide(true)}
                                             >
@@ -616,7 +1009,7 @@ const ApprovalsPage = dc(() => {
                                             <VBtn
                                                 color="error"
                                                 variant="tonal"
-                                                disabled={!canReject.value}
+                                                disabled={!canReject.value || !decisionChecklistComplete.value}
                                                 loading={actionLoading.value}
                                                 onClick={() => void decide(false)}
                                             >

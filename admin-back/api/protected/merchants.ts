@@ -39,6 +39,17 @@ export const suspendSchema = z
     emergency: z.boolean().optional(),
     ratifyWithinHours: z.number().int().min(1).max(168).optional(),
     baseVersion: zBaseVersion.optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "IMPACT_REVIEWED",
+          "REASON_DOCUMENTED",
+          "NOTIFICATION_PLANNED",
+          "WALLET_DISPUTE_CHECKED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict()
   .refine((value) => Boolean(value.reasonCode || value.reason), {
@@ -50,6 +61,17 @@ export const reinstateSchema = z
   .object({
     reason: zReason,
     baseVersion: zBaseVersion.optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "COMPLIANCE_CLEARANCE_VERIFIED",
+          "OUTSTANDING_ITEMS_RESOLVED",
+          "WALLET_DISPUTE_CHECKED",
+          "REASON_DOCUMENTED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict();
 
@@ -58,6 +80,17 @@ export const proposeEditSchema = z
     reason: zReason,
     patch: zJsonPatch.min(1).max(200),
     baseVersion: zBaseVersion,
+    checklist: z
+      .array(
+        z.enum([
+          "PATCH_REVIEWED",
+          "SOURCE_DOCUMENT_VERIFIED",
+          "MAKER_REASON_DOCUMENTED",
+          "CHECKER_SCOPE_CONFIRMED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict();
 
@@ -82,6 +115,17 @@ export const closeSchema = z
     reasonCode: z.enum(MERCHANT_CLOSE_REASONS),
     notes: z.string().max(2000).optional(),
     baseVersion: zBaseVersion.optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "BALANCE_ZERO_VERIFIED",
+          "OPEN_DISPUTES_CLEARED",
+          "CASHOUTS_CLEARED",
+          "IRREVERSIBLE_ACKNOWLEDGED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict();
 
@@ -99,10 +143,36 @@ router.get(
 );
 
 router.get(
+  "/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/merchants/export",
+    querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
   "/summary",
   coreForward({
     method: "GET",
     path: () => "/internal/admin/merchants/summary",
+  }),
+);
+
+router.get(
+  "/summary/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/merchants/summary/export",
+  }),
+);
+
+router.get(
+  "/:id/summary/export",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/merchants/${encodeURIComponent(context.params.id ?? "")}/summary/export`,
+    paramsSchema: idParamsSchema,
   }),
 );
 

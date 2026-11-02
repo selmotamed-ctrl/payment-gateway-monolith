@@ -22,6 +22,17 @@ export const userCreateSchema = z
     locale: z.enum(["ar", "en"]).optional(),
     temporaryPassword: zPassword.optional(),
     authorities: z.record(z.string().max(64), z.array(z.string().max(64)).max(50)).optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "EMAIL_VERIFIED",
+          "ROLE_SCOPE_CONFIRMED",
+          "AUTHORITIES_REVIEWED",
+          "MFA_REQUIREMENT_CONFIRMED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict();
 
@@ -34,6 +45,17 @@ export const userPatchSchema = z
     authorities: z.record(z.string().max(64), z.array(z.string().max(64)).max(50)).optional(),
     baseVersion: zBaseVersion.optional(),
     reason: z.string().min(3).max(500).optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "SELECTION_REVIEWED",
+          "STATUS_IMPACT_REVIEWED",
+          "NOTIFICATION_PLANNED",
+          "AUTHORITY_CONFIRMED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict();
 
@@ -44,6 +66,17 @@ export const userBulkPatchSchema = z
     status: z.enum(["INVITED", "ACTIVE", "SUSPENDED", "DISABLED", "LOCKED"]).optional(),
     reason: z.string().min(3).max(500).optional(),
     baseVersion: zBaseVersion.optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "SELECTION_REVIEWED",
+          "STATUS_IMPACT_REVIEWED",
+          "NOTIFICATION_PLANNED",
+          "AUTHORITY_CONFIRMED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict();
 
@@ -52,6 +85,15 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/users",
+    querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
+  "/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/users/export",
     querySchema: zPaginationQuery,
   }),
 );
@@ -115,6 +157,14 @@ router.patch(
     schema: userPatchSchema,
     bodyFrom: (_req, body) => toCoreUserUpdate(body),
     relayStatus: true,
+  }),
+);
+
+router.get(
+  "/summary/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/users/summary/export",
   }),
 );
 

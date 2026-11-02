@@ -27,6 +27,8 @@ export const AwaitedConfirmationDialog = dc<{}, { show(opts: ConfirmOptions): Pr
     const loading = ref(false);
     const apiError = ref(null as null | ApiError);
     const form = ref({} as JSONObject);
+    const titleId = "pg-confirm-title";
+    const messageId = "pg-confirm-message";
 
     function show(opts: ConfirmOptions): Promise<boolean> {
         title.value = opts.title;
@@ -82,15 +84,43 @@ export const AwaitedConfirmationDialog = dc<{}, { show(opts: ConfirmOptions): Pr
                 zIndex: 100,
             }}
             modelValue={visible.value}
-            onUpdate:modelValue={(v: boolean | null) => (visible.value = !!v)}
+            onUpdate:modelValue={(v: boolean | null) => {
+                if (v) {
+                    visible.value = true;
+                    return;
+                }
+                if (loading.value) {
+                    visible.value = true;
+                    return;
+                }
+                if (visible.value) onCancel();
+            }}
             persistent
             max-width="650"
+            {...{
+                role: "alertdialog",
+                "aria-modal": "true",
+                "aria-labelledby": titleId,
+                "aria-describedby": messageId,
+                "aria-busy": loading.value ? "true" : "false",
+            }}
         >
             {{
                 default: () => (
-                    <VCard>
-                        <VCardTitle class="text-h6">{t(title.value)}</VCardTitle>
-                        <VCardText>{t(message.value)}</VCardText>
+                    <VCard
+                        onKeydown={(event: KeyboardEvent) => {
+                            if (event.key === "Escape" && !loading.value) {
+                                event.preventDefault();
+                                onCancel();
+                            }
+                        }}
+                    >
+                        <div id={titleId}>
+                            <VCardTitle class="text-h6">{t(title.value)}</VCardTitle>
+                        </div>
+                        <VCardText>
+                            <div id={messageId}>{t(message.value)}</div>
+                        </VCardText>
                         {slot.value && (
                             <VCardText>
                                 <VForm
@@ -107,11 +137,11 @@ export const AwaitedConfirmationDialog = dc<{}, { show(opts: ConfirmOptions): Pr
                             <AlertView type="error" message={apiError.value?.error} messages={apiError.value?.errors}></AlertView>
                         </VCardText>
                         <VCardActions class="justify-end">
-                            <Button disabled={loading.value} variant="text" onClick={onCancel}>
+                            <Button {...{ autofocus: true }} disabled={loading.value} variant="text" onClick={onCancel}>
                                 {t("Cancel")}
                             </Button>
-                            <Button variant="text" loading={loading.value} disabled={!valid.value || loading.value} color={type.value} onClick={onConfirm}>
-                                {t("Confirm")}
+                            <Button variant="text" loading={loading.value} disabled={!valid.value || loading.value} color={type.value} onClick={onConfirm} {...{ "aria-label": t(submitButtonLabel.value ?? "Confirm") }}>
+                                {t(submitButtonLabel.value ?? "Confirm")}
                             </Button>
                         </VCardActions>
                     </VCard>

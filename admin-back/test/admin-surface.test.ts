@@ -229,6 +229,32 @@ describe("admin asynchronous routes", () => {
     expect(payload.jobId).toBe("job-1");
   });
 
+  test("approval export forwards filters to core", async () => {
+    const response = await call("GET", "/api/v1/admin/approvals/export?state=PENDING_REVIEW&domain=FINANCE", {
+      token: operator,
+    });
+    expect(response.status).toBe(200);
+    expect(core.requests.at(-1)?.url).toContain("/internal/admin/approvals/export");
+    expect(core.requests.at(-1)?.url).toContain("state=PENDING_REVIEW");
+    expect(core.requests.at(-1)?.url).toContain("domain=FINANCE");
+  });
+
+  test("bulk approval rejection fans out and returns per-request results", async () => {
+    const response = await call("POST", "/api/v1/admin/approvals/bulk-reject", {
+      token: operator,
+      body: { approvalIds: ["apr_1", "apr_2"], reason: "stale requests" },
+    });
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as { rejected: number; failed: number; results: unknown[] };
+    expect(payload.rejected).toBe(2);
+    expect(payload.failed).toBe(0);
+    expect(payload.results).toHaveLength(2);
+    expect(core.requests.slice(-2).map((request) => request.url)).toEqual([
+      "/internal/admin/approvals/apr_1/reject",
+      "/internal/admin/approvals/apr_2/reject",
+    ]);
+  });
+
   test("an approval relays the accepted status of core", async () => {
     const response = await call("POST", "/api/v1/admin/approvals/apr_1/approve", {
       token: operator,
@@ -260,6 +286,19 @@ describe("admin asynchronous routes", () => {
       body: { userIds: ["usr_1", "usr_2"], role: "SUPPORT" },
     });
     expect(response.status).toBe(202);
+    const recent = core.requests.slice(-2);
+    expect(recent.map((request) => request.url)).toEqual([
+      "/internal/admin/users",
+      "/internal/admin/users",
+    ]);
+  });
+
+  test("a bulk status-only user change relays success", async () => {
+    const response = await call("PATCH", "/api/v1/admin/users", {
+      token: operator,
+      body: { userIds: ["usr_1", "usr_2"], status: "SUSPENDED", reason: "policy review" },
+    });
+    expect(response.status).toBe(200);
     const recent = core.requests.slice(-2);
     expect(recent.map((request) => request.url)).toEqual([
       "/internal/admin/users",
@@ -425,6 +464,12 @@ describe("portal guide routes", () => {
     expect(core.requests.at(-1)?.url).toBe("/internal/admin/settings/checkout-support");
   });
 
+  test("forwards the checkout support config history", async () => {
+    const response = await call("GET", "/api/v1/admin/settings/checkout-support/history", { token: operator });
+    expect(response.status).toBe(200);
+    expect(core.requests.at(-1)?.url).toBe("/internal/admin/settings/checkout-support/history");
+  });
+
   test("forwards the checkout support config write as { value }", async () => {
     const value = {
       enabled: true,
@@ -572,6 +617,34 @@ describe("admin core contract forwarding", () => {
       baseSeverity: "HIGH",
       params: { amount: "1000.0000" },
     });
+  });
+
+  test("commission profile expiry and velocity deactivation relay the accepted status", async () => {
+    const expire = await call("POST", "/api/v1/admin/commission-profiles/cp_1/expire", {
+      token: operator,
+      body: { effectiveTo: "2026-12-31T00:00:00.000Z", reason: "replace pricing" },
+    });
+    expect(expire.status).toBe(202);
+    expect(core.requests.at(-1)?.url).toBe("/internal/admin/commission-profiles/cp_1/expire");
+    expect(forwardedBody()).toEqual({ effectiveTo: "2026-12-31T00:00:00.000Z", reason: "replace pricing" });
+
+    const deactivate = await call("POST", "/api/v1/admin/velocity-rules/vr_1/deactivate", {
+      token: operator,
+      body: { reason: "replace policy" },
+    });
+    expect(deactivate.status).toBe(202);
+    expect(core.requests.at(-1)?.url).toBe("/internal/admin/velocity-rules/vr_1/deactivate");
+    expect(forwardedBody()).toEqual({ reason: "replace policy" });
+  });
+
+  test("a gateway version clone forwards the changelog", async () => {
+    const response = await call("POST", "/api/v1/admin/gateway-versions/gv_1/clone", {
+      token: operator,
+      body: { changelog: "copy live for editing" },
+    });
+    expect(response.status).toBe(201);
+    expect(core.requests.at(-1)?.url).toBe("/internal/admin/gateway-versions/gv_1/clone");
+    expect(forwardedBody()).toEqual({ changelog: "copy live for editing" });
   });
 
   test("forwards a canonical gateway environment body", async () => {
@@ -797,13 +870,13 @@ describe("admin forwards payloads core accepts", () => {
     {
       method: "POST",
       path: "/api/v1/admin/approvals/ap_1/approve",
-      body: { reason: "checked" },
+      body: { reason: "checked", checklist: ["DIFF_REVIEWED", "SUBJECT_CONTEXT_REVIEWED", "MAKER_CHECKER_SEPARATION_VERIFIED", "RISK_ASSESSED"] },
       contract: "POST /approvals/:id/approve",
     },
     {
       method: "POST",
       path: "/api/v1/admin/approvals/ap_1/reject",
-      body: { reason: "not checked" },
+      body: { reason: "not checked", checklist: ["DIFF_REVIEWED", "SUBJECT_CONTEXT_REVIEWED", "MAKER_CHECKER_SEPARATION_VERIFIED", "RISK_ASSESSED"] },
       contract: "POST /approvals/:id/reject",
     },
     {
@@ -978,7 +1051,7 @@ describe("admin forwards payloads core accepts", () => {
     {
       method: "POST",
       path: "/api/v1/admin/cashouts/co_1/process",
-      body: { decision: "APPROVE", reason: "verified the request" },
+      body: { decision: "APPROVE", reason: "verified the request", checklist: ["BANK_DETAILS_VERIFIED", "WALLET_BALANCE_VERIFIED", "MERCHANT_ACTIVE", "NO_AML_RESTRICTIONS"] },
       contract: "POST /cashouts/:id/process",
     },
     {
@@ -1041,21 +1114,34 @@ describe("admin route surface", () => {
     { method: "POST", path: "/api/v1/admin/auth/mfa", body: { code: "123456" } },
     { method: "GET", path: "/api/v1/admin/users" },
     { method: "GET", path: "/api/v1/admin/users/summary" },
+    { method: "GET", path: "/api/v1/admin/users/summary/export" },
+    { method: "GET", path: "/api/v1/admin/users/export?scope=admin&status=ACTIVE" },
     { method: "GET", path: "/api/v1/admin/stats/overview" },
+    { method: "GET", path: "/api/v1/admin/stats/recent-activity?limit=8" },
+    { method: "GET", path: "/api/v1/admin/stats/recent-activity/export?limit=200" },
+    { method: "GET", path: "/api/v1/admin/stats/export?period=7d" },
+    { method: "POST", path: "/api/v1/admin/stats/export-audit", body: { period: "7d" } },
     { method: "POST", path: "/api/v1/admin/users", body: { email: "admin@example.com", fullName: "Admin", role: "FINANCE" } },
     { method: "PATCH", path: "/api/v1/admin/users", body: { userIds: ["usr_1"], role: "SUPPORT" } },
     { method: "PATCH", path: "/api/v1/admin/users/usr_1", body: { fullName: "Admin Two" } },
     { method: "GET", path: "/api/v1/admin/join-requests" },
     { method: "GET", path: "/api/v1/admin/join-requests/summary" },
+    { method: "GET", path: "/api/v1/admin/join-requests/summary/export" },
+    { method: "GET", path: "/api/v1/admin/join-requests/export?status=SUBMITTED" },
     { method: "GET", path: "/api/v1/admin/join-requests/jr_1" },
     { method: "POST", path: "/api/v1/admin/join-requests/jr_1/assign", body: { assigneeUserId: "usr_1" } },
     { method: "POST", path: "/api/v1/admin/join-requests/jr_1/request-info", body: { requestedItems: ["id"], message: "need more" } },
     { method: "POST", path: "/api/v1/admin/join-requests/jr_1/decide", body: { decision: "APPROVE", reason: "kyb ok" } },
     { method: "POST", path: "/api/v1/admin/kyb-documents/kyb_1/review", body: { decision: "ACCEPT" } },
     { method: "GET", path: "/api/v1/admin/kyb-documents/summary" },
+    { method: "GET", path: "/api/v1/admin/kyb-documents/summary/export" },
+    { method: "GET", path: "/api/v1/admin/kyb-documents/export?status=UPLOADED" },
     { method: "GET", path: "/api/v1/admin/merchants" },
     { method: "GET", path: "/api/v1/admin/merchants/summary" },
+    { method: "GET", path: "/api/v1/admin/merchants/summary/export" },
+    { method: "GET", path: "/api/v1/admin/merchants/export?status=ACTIVE" },
     { method: "GET", path: "/api/v1/admin/merchants/mch_1" },
+    { method: "GET", path: "/api/v1/admin/merchants/mch_1/summary/export" },
     { method: "POST", path: "/api/v1/admin/merchants/mch_1/suspend", body: { reason: "fraud" } },
     { method: "POST", path: "/api/v1/admin/merchants/mch_1/reinstate", body: { reason: "cleared" } },
     { method: "POST", path: "/api/v1/admin/merchants/mch_1/propose-edit", body: { reason: "typo", patch: [{ op: "replace", path: "/name", value: "x" }], baseVersion: 1 } },
@@ -1071,30 +1157,46 @@ describe("admin route surface", () => {
     { method: "GET", path: "/api/v1/admin/merchants/mch_1/stats" },
     { method: "GET", path: "/api/v1/admin/approvals" },
     { method: "GET", path: "/api/v1/admin/approvals/summary" },
+    { method: "GET", path: "/api/v1/admin/approvals/summary/export" },
+    { method: "GET", path: "/api/v1/admin/approvals/export?state=PENDING_REVIEW" },
+    { method: "POST", path: "/api/v1/admin/approvals/bulk-reject", body: { approvalIds: ["apr_1"], reason: "stale" } },
     { method: "GET", path: "/api/v1/admin/approvals/ap_1" },
     { method: "POST", path: "/api/v1/admin/approvals/ap_1/approve", body: { reason: "checked" } },
     { method: "POST", path: "/api/v1/admin/approvals/ap_1/reject", body: { reason: "not checked" } },
     { method: "GET", path: "/api/v1/admin/aml/screenings" },
     { method: "GET", path: "/api/v1/admin/aml/screenings/summary" },
+    { method: "GET", path: "/api/v1/admin/aml/screenings/summary/export" },
+    { method: "GET", path: "/api/v1/admin/aml/screenings/export?result=POTENTIAL_MATCH" },
     { method: "POST", path: "/api/v1/admin/aml/matches/m_1/disposition", body: { disposition: "FALSE_POSITIVE", notes: "clean" } },
     { method: "GET", path: "/api/v1/admin/aml/cases" },
     { method: "GET", path: "/api/v1/admin/aml/cases/summary" },
+    { method: "GET", path: "/api/v1/admin/aml/cases/summary/export" },
+    { method: "GET", path: "/api/v1/admin/aml/cases/export?status=OPEN" },
     { method: "POST", path: "/api/v1/admin/aml/cases/c_1/propose", body: { severity: "HIGH", action: "AML_HOLD", reason: "structuring" } },
     { method: "GET", path: "/api/v1/admin/aml/rules" },
     { method: "GET", path: "/api/v1/admin/aml/rules/summary" },
+    { method: "GET", path: "/api/v1/admin/aml/rules/summary/export" },
+    { method: "GET", path: "/api/v1/admin/aml/rules/export?active=true" },
     { method: "POST", path: "/api/v1/admin/aml/rules", body: { code: "R1", name: "rule", ruleType: "SINGLE_AMOUNT", action: "BLOCK", baseSeverity: "HIGH", params: {} } },
     { method: "GET", path: "/api/v1/admin/aml/reporting-rules" },
     { method: "POST", path: "/api/v1/admin/aml/reporting-rules", body: { code: "CBL", name: "cbl", mode: "PROVISIONAL", threshold: "1000.0000", currency: "LYD", windowDays: 30 } },
     { method: "GET", path: "/api/v1/admin/aml/reports" },
     { method: "GET", path: "/api/v1/admin/aml/reports/summary" },
+    { method: "GET", path: "/api/v1/admin/aml/reports/summary/export" },
+    { method: "GET", path: "/api/v1/admin/aml/reports/export?status=DRAFT" },
     { method: "POST", path: "/api/v1/admin/aml/reports", body: { reportingRuleId: "rr_1", periodStart: "2026-01-01", periodEnd: "2026-01-31" } },
+    { method: "POST", path: "/api/v1/admin/aml/reports/rep_1/submit", body: { submissionRef: "CBL-1", checklist: ["REPORT_APPROVED_VERIFIED", "AUTHORITY_REFERENCE_VERIFIED", "DEADLINE_VERIFIED", "PAYLOAD_DIGEST_VERIFIED"] } },
+    { method: "POST", path: "/api/v1/admin/aml/reports/rep_1/acknowledge", body: { status: "ACKNOWLEDGED", checklist: ["AUTHORITY_RESPONSE_VERIFIED", "DECISION_RECORDED", "REJECTION_REASON_DOCUMENTED", "REPORT_CLOSURE_CONFIRMED"] } },
     { method: "GET", path: "/api/v1/admin/gateways" },
+    { method: "GET", path: "/api/v1/admin/gateways/export?status=LIVE" },
     { method: "GET", path: "/api/v1/admin/gateways/summary" },
+    { method: "GET", path: "/api/v1/admin/gateways/summary/export" },
     { method: "POST", path: "/api/v1/admin/gateways", body: { code: "GW1", name: "Gateway one" } },
     { method: "PATCH", path: "/api/v1/admin/gateways/gw_1", body: { name: "Gateway two" } },
     { method: "GET", path: "/api/v1/admin/gateways/gw_1/versions" },
     { method: "POST", path: "/api/v1/admin/gateways/gw_1/versions", body: { version: 1 } },
     { method: "POST", path: "/api/v1/admin/gateways/gw_1/rollback", body: { targetVersionId: "gv_1", reason: "rollback" } },
+    { method: "POST", path: "/api/v1/admin/gateway-versions/gv_1/clone", body: { changelog: "clone for edit" } },
     { method: "PUT", path: "/api/v1/admin/gateway-versions/gv_1/environments", body: { environments: [{ code: "live", baseUrl: "https://gw.example.com" }] } },
     { method: "PUT", path: "/api/v1/admin/gateway-versions/gv_1/auth", body: { authMethod: "API_KEY" } },
     { method: "PUT", path: "/api/v1/admin/gateway-versions/gv_1/settings", body: { settings: {} } },
@@ -1108,11 +1210,15 @@ describe("admin route surface", () => {
     { method: "POST", path: "/api/v1/admin/gateway-versions/gv_1/submit-approval", body: { reason: "ready" } },
     { method: "GET", path: "/api/v1/admin/rails" },
     { method: "GET", path: "/api/v1/admin/rails/summary" },
+    { method: "GET", path: "/api/v1/admin/rails/summary/export" },
+    { method: "GET", path: "/api/v1/admin/rails/export?blocked=false" },
     { method: "POST", path: "/api/v1/admin/rails", body: { code: "RAIL1", name: "Rail one", collectionMode: "REDIRECT" } },
     { method: "PATCH", path: "/api/v1/admin/rails/rail_1", body: { name: "Rail two" } },
     { method: "PUT", path: "/api/v1/admin/rails/rail_1/fields", body: { fields: [{ code: "phone", label: "Phone", type: "PHONE" }] } },
     { method: "GET", path: "/api/v1/admin/routes" },
     { method: "GET", path: "/api/v1/admin/routes/summary" },
+    { method: "GET", path: "/api/v1/admin/routes/summary/export" },
+    { method: "GET", path: "/api/v1/admin/routes/export?status=ACTIVE" },
     { method: "POST", path: "/api/v1/admin/routes", body: { railId: "rail_1", gatewayId: "gw_1", environment: "live", credentialPolicy: "PLATFORM" } },
     { method: "PATCH", path: "/api/v1/admin/routes/route_1", body: { priority: 5 } },
     { method: "POST", path: "/api/v1/admin/routes/route_1/state", body: { state: "DRAINING" } },
@@ -1120,6 +1226,10 @@ describe("admin route surface", () => {
     { method: "POST", path: "/api/v1/admin/assets", body: { kind: "LOGO", name: "logo", contentType: "image/png", storageKey: "assets/logo.png", sizeBytes: 1024, checksumSha256: "a".repeat(64) } },
     { method: "GET", path: "/api/v1/admin/operator-cases" },
     { method: "GET", path: "/api/v1/admin/operator-cases/summary" },
+    { method: "GET", path: "/api/v1/admin/operator-cases/summary/export" },
+    { method: "GET", path: "/api/v1/admin/operator-cases/export?state=OPEN" },
+    { method: "POST", path: "/api/v1/admin/operator-cases/bulk-assign", body: { caseIds: ["oc_1"], assigneeUserId: "usr_1", reason: "load balance" } },
+    { method: "POST", path: "/api/v1/admin/operator-cases/bulk-state", body: { caseIds: ["oc_1"], state: "IN_PROGRESS", reason: "start work" } },
     { method: "POST", path: "/api/v1/admin/operator-cases/bulk-inquire", body: { caseIds: ["oc_1"], reason: "unknown backlog" } },
     { method: "PATCH", path: "/api/v1/admin/operator-cases/oc_1", body: { assigneeUserId: "user_1", state: "IN_PROGRESS" } },
     { method: "POST", path: "/api/v1/admin/operator-cases/oc_1/resolve", body: { action: "MARK_FAILED", reason: "gateway confirmed unpaid" } },
@@ -1128,23 +1238,57 @@ describe("admin route surface", () => {
     { method: "POST", path: "/api/v1/admin/reconciliation/sources", body: { code: "SRC1", name: "source", gatewayId: "gw_1", fileType: "CSV", type: "UPLOAD" } },
     { method: "GET", path: "/api/v1/admin/reconciliation/runs" },
     { method: "GET", path: "/api/v1/admin/reconciliation/runs/summary" },
+    { method: "GET", path: "/api/v1/admin/reconciliation/runs/summary/export" },
+    { method: "PATCH", path: "/api/v1/admin/reconciliation/sources/src_1", body: { active: false, settlementLagDays: 2 } },
+    { method: "GET", path: "/api/v1/admin/reconciliation/runs/run_1/export?result=AMOUNT_MISMATCH" },
     { method: "GET", path: "/api/v1/admin/disputes" },
     { method: "GET", path: "/api/v1/admin/disputes/summary" },
+    { method: "GET", path: "/api/v1/admin/disputes/summary/export" },
+    { method: "GET", path: "/api/v1/admin/disputes/export?status=OPENED" },
     { method: "POST", path: "/api/v1/admin/disputes", body: { merchantId: "mch_1", gatewayId: "gw_1", railId: "rail_1", paymentReference: "REF1", externalDisputeRef: "CB1", type: "CHARGEBACK", amount: "10.0000", currency: "LYD", reason: "fraud", source: "MANUAL" } },
+    { method: "POST", path: "/api/v1/admin/disputes/dsp_1/evidence", body: { evidence: { reference: "CB-1" }, notes: "submitted", checklist: ["EVIDENCE_REFERENCE_VERIFIED", "SUPPORTING_DOCUMENTS_ATTACHED", "EVIDENCE_WINDOW_VERIFIED", "SUMMARY_REVIEWED"] } },
     { method: "GET", path: "/api/v1/admin/adjustments" },
     { method: "GET", path: "/api/v1/admin/adjustments/summary" },
+    { method: "GET", path: "/api/v1/admin/adjustments/summary/export" },
+    { method: "GET", path: "/api/v1/admin/adjustments/export?state=PENDING_REVIEW" },
     { method: "POST", path: "/api/v1/admin/adjustments", body: { merchantId: "mch_1", targetGlAccountId: "gl_1", type: "CHARGEBACK", amount: "10.0000", currency: "LYD", reason: "chargeback" } },
     { method: "GET", path: "/api/v1/admin/cashouts" },
     { method: "GET", path: "/api/v1/admin/cashouts/summary" },
+    { method: "GET", path: "/api/v1/admin/cashouts/summary/export" },
+    { method: "GET", path: "/api/v1/admin/cashouts/export?state=PENDING" },
     { method: "POST", path: "/api/v1/admin/cashouts/co_1/process", body: { decision: "APPROVE" } },
     { method: "GET", path: "/api/v1/admin/commission-profiles" },
+    { method: "GET", path: "/api/v1/admin/commission-profiles/summary" },
+    { method: "POST", path: "/api/v1/admin/commission-profiles/cp_1/expire", body: { effectiveTo: "2026-12-31T00:00:00.000Z", reason: "replace pricing" } },
+    { method: "GET", path: "/api/v1/admin/commission-profiles/cp_1/history" },
+    { method: "GET", path: "/api/v1/admin/velocity-rules/vr_1/history" },
+    { method: "POST", path: "/api/v1/admin/velocity-rules/vr_1/deactivate", body: { reason: "replace policy" } },
     { method: "POST", path: "/api/v1/admin/commission-profiles", body: { code: "STD", name: "standard", model: "PERCENTAGE", percentage: "3.0000", railCode: "cib" } },
     { method: "GET", path: "/api/v1/admin/velocity-rules" },
+    { method: "GET", path: "/api/v1/admin/velocity-rules/summary" },
     { method: "POST", path: "/api/v1/admin/velocity-rules", body: { code: "V1", name: "velocity", scope: "MERCHANT", windowSeconds: 60, maxAttempts: 5, action: "BLOCK" } },
     { method: "GET", path: "/api/v1/admin/finance/profitability" },
+    { method: "GET", path: "/api/v1/admin/finance/profitability/export?period=last_7d" },
     { method: "GET", path: "/api/v1/admin/finance/liquidity" },
+    { method: "GET", path: "/api/v1/admin/finance/liquidity/export" },
     { method: "GET", path: "/api/v1/admin/finance/invariant-check" },
+    { method: "GET", path: "/api/v1/admin/finance/invariant-check/export" },
     { method: "GET", path: "/api/v1/admin/settings" },
+    { method: "GET", path: "/api/v1/admin/settings/summary" },
+    { method: "GET", path: "/api/v1/admin/settings/summary/export" },
+    { method: "GET", path: "/api/v1/admin/audit-logs" },
+    { method: "GET", path: "/api/v1/admin/audit-logs/summary" },
+    { method: "GET", path: "/api/v1/admin/audit-logs/summary/export" },
+    { method: "GET", path: "/api/v1/admin/audit-logs/export?action=APPROVAL" },
+    { method: "GET", path: "/api/v1/admin/settings/checkout-support/history" },
+    { method: "GET", path: "/api/v1/admin/settings/checkout-support/summary" },
+    { method: "GET", path: "/api/v1/admin/settings/checkout-support/summary/export" },
+    { method: "GET", path: "/api/v1/admin/academy/progress/overview/summary" },
+    { method: "GET", path: "/api/v1/admin/academy/progress/overview/summary/export" },
+    { method: "GET", path: "/api/v1/admin/academy/progress/overview/export" },
+    { method: "GET", path: "/api/v1/admin/settings/export" },
+    { method: "POST", path: "/api/v1/admin/settings/restore-preview", body: { backup: { settings: [{ key: "checkout.support_config", valueJson: {} }] } } },
+    { method: "POST", path: "/api/v1/admin/settings/restore-apply", body: { confirm: true, reason: "restore approved backup", backup: { settings: [{ key: "checkout.support_config", valueJson: {}, expectedCurrentVersion: 1 }] } } },
     { method: "PUT", path: "/api/v1/admin/settings", body: { settings: { "join_request.four_eyes_policy": "RISK_BASED" } } },
   ];
 

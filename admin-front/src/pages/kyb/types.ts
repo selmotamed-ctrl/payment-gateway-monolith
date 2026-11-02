@@ -134,6 +134,17 @@ export type KybRevalidationRequest = {
     resolutionNotes: string | null;
 };
 
+export type KybAuditEntry = {
+    id: string;
+    createdAt: string;
+    action: string;
+    role: string;
+    beforeJson: Record<string, unknown> | null;
+    afterJson: Record<string, unknown> | null;
+    approvalRequestId: string | null;
+    actor: { id: string; email: string } | null;
+};
+
 export type KybDocumentDetail = KybDocumentSummary & {
     subjectOwner: {
         id: string;
@@ -147,4 +158,5 @@ export type KybDocumentDetail = KybDocumentSummary & {
     openRevalidations: KybRevalidationRequest[];
     reviewReasonCodes: string[];
     canRequestRevalidation: boolean;
+    auditTrail: KybAuditEntry[];
 };

@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
-import { VAlert, VBtn, VCard, VCardText, VDialog, VSelect, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VSelect, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -16,6 +16,20 @@ import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+
+const SUMMARY_EXPORT_CHECKS = [
+    { key: "ROUTE_SCOPE_VERIFIED", label: "Route portfolio scope verified" },
+    { key: "STATUS_HEALTH_REVIEWED", label: "Status and health reviewed" },
+    { key: "PAIR_SCOPE_REVIEWED", label: "Rail/gateway pair scope reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
+const ROUTE_EDIT_CHECKS = [
+    { key: "PRIORITY_WEIGHT_REVIEWED", label: "Priority and weight reviewed" },
+    { key: "LIMITS_CAP_VERIFIED", label: "Amount limits and daily cap verified" },
+    { key: "SCOPE_COST_REVIEWED", label: "Scope and cost model reviewed" },
+    { key: "ROUTING_IMPACT_REVIEWED", label: "Routing impact reviewed" },
+] as const;
 
 type GatewayRoute = {
     id: string;
@@ -52,6 +66,9 @@ const RoutesPage = dc(() => {
     const search = ref<string | null>(null);
     const filters = ref<FilterValues>({});
     const pageSize = ref(20);
+    const exportLoading = ref(false);
+    const summaryExportLoading = ref(false);
+    const summaryExportChecklist = ref<Record<string, boolean>>({});
     const refreshHook = ref<{
         reset: () => void;
         refresh: (props: { queryParams?: Record<string, unknown>; nextSkip?: number }) => Promise<void>;
@@ -60,6 +77,7 @@ const RoutesPage = dc(() => {
     let filterTimer: ReturnType<typeof setTimeout> | undefined;
 
     const dialogOpen = ref(false);
+    const routeEditChecklist = ref<Record<string, boolean>>({});
     const editingRoute = ref<GatewayRoute | null>(null);
     const actionLoading = ref(false);
     const routeEditForm = ref({
@@ -87,6 +105,68 @@ const RoutesPage = dc(() => {
             summary.value = (payload.summary ?? payload) as RouteSummary;
         } catch {
             summary.value = null;
+        }
+    };
+
+    const exportCsv = async () => {
+        if (exportLoading.value) return;
+        exportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.routesExport, {
+                params: {
+                    ...(search.value ? { search: search.value } : {}),
+                    ...buildFilterQuery(filterDefinitions.value, filters.value),
+                },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const rowsData = (payload.routes ?? []) as GatewayRoute[];
+            if (rowsData.length === 0) {
+                showSnackBar({ type: "warning", message: t("No routes match the current filters.") });
+                return;
+            }
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const columns = ["id", "railCode", "railName", "gatewayCode", "gatewayName", "credentialPolicy", "priority", "weight", "minAmount", "maxAmount", "dailyCapAmount", "status", "healthState"];
+            const lines = [
+                columns.map(escape).join(","),
+                ...rowsData.map((row) =>
+                    [
+                        row.id,
+                        row.railCode,
+                        row.railName ?? "",
+                        row.gatewayCode,
+                        row.gatewayName ?? "",
+                        row.credentialPolicy,
+                        row.priority,
+                        row.weight,
+                        row.minAmount,
+                        row.maxAmount,
+                        row.dailyCapAmount,
+                        row.status,
+                        row.healthState,
+                    ]
+                        .map(escape)
+                        .join(","),
+                ),
+            ];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `routes-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({
+                type: payload.truncated ? "warning" : "success",
+                message: payload.truncated
+                    ? `${t("Exported")} ${rowsData.length} / ${payload.total}`
+                    : `${t("Exported")} ${rowsData.length}`,
+            });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            exportLoading.value = false;
         }
     };
 
@@ -174,8 +254,11 @@ const RoutesPage = dc(() => {
             scope: JSON.stringify(route.scope ?? {}, null, 2),
             status: route.status,
         };
+        routeEditChecklist.value = {};
         dialogOpen.value = true;
     };
+
+    const routeEditChecklistComplete = computed(() => ROUTE_EDIT_CHECKS.every((check) => routeEditChecklist.value[check.key] === true));
 
     const saveRoute = async () => {
         if (!editingRoute.value || actionLoading.value) {
@@ -190,6 +273,10 @@ const RoutesPage = dc(() => {
             showSnackBar({ type: "error", message: t("Cost model and scope must be valid JSON") });
             return;
         }
+        if (!routeEditChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all route checklist items before saving") });
+            return;
+        }
         actionLoading.value = true;
         try {
             const form = routeEditForm.value;
@@ -201,9 +288,13 @@ const RoutesPage = dc(() => {
                 ...(form.dailyCapAmount.trim() ? { dailyCapAmount: form.dailyCapAmount.trim() } : {}),
                 ...(costModel && typeof costModel === "object" && Object.keys(costModel as object).length ? { costModel } : {}),
                 ...(scope && typeof scope === "object" && Object.keys(scope as object).length ? { scope } : {}),
+                checklist: ROUTE_EDIT_CHECKS.filter((check) => routeEditChecklist.value[check.key]).map((check) => check.key),
             });
             if (form.status !== editingRoute.value.status) {
-                await api.post(urlsMap.routeState(editingRoute.value.id), { status: form.status });
+                await api.post(urlsMap.routeState(editingRoute.value.id), {
+                    status: form.status,
+                    checklist: ROUTE_EDIT_CHECKS.filter((check) => routeEditChecklist.value[check.key]).map((check) => check.key),
+                });
             }
             dialogOpen.value = false;
             showSnackBar({ type: "success", message: t("Update") });
@@ -236,6 +327,49 @@ const RoutesPage = dc(() => {
                 return "warning" as const;
             default:
                 return "error" as const;
+        }
+    };
+
+    const summaryExportChecklistComplete = computed(() => SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
+
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        if (!summaryExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all summary export checklist items before exporting") });
+            return;
+        }
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.routesSummaryExport, {
+                params: { checklist: SUMMARY_EXPORT_CHECKS.filter((check) => summaryExportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
+            const snapshot = (response.data?.data ?? response.data ?? {}) as RouteSummary;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["total", snapshot.total],
+                ["active", snapshot.active],
+                ["paused", snapshot.paused],
+                ["draining", snapshot.draining],
+                ["open_breaker", snapshot.openBreaker],
+                ["rail_gateway_pairs", snapshot.railGatewayPairs],
+            ];
+            for (const [status, count] of Object.entries(snapshot.byStatus ?? {})) rows.push([`status.${status}.count`, count]);
+            for (const [state, count] of Object.entries(snapshot.byHealth ?? {})) rows.push([`health.${state}.count`, count]);
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `route-summary-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: t("Route summary exported") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            summaryExportLoading.value = false;
         }
     };
 
@@ -280,9 +414,12 @@ const RoutesPage = dc(() => {
                 <PageHeader
                     title={t("Routes")}
                     end={() => (
-                        <VBtn color="primary" variant="flat" prependIcon={"mdi-plus"} onClick={() => void openCreateRoute()}>
-                            {t("Add Route")}
-                        </VBtn>
+                        <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportCsv()}>{t("Export CSV")}</VBtn>
+                            <VBtn color="primary" variant="flat" prependIcon={"mdi-plus"} onClick={() => void openCreateRoute()}>
+                                {t("Add Route")}
+                            </VBtn>
+                        </ThemedView>
                     )}
                 />
 
@@ -293,8 +430,28 @@ const RoutesPage = dc(() => {
                 {summary.value && (
                     <VCard variant="flat" style={{ borderRadius: "16px" }}>
                         <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Route health")}</ThemedText>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Route health")}</ThemedText>
+                                <div style={{ flex: 1 }} />
+                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
+                            </ThemedView>
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
+                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
+                                    {SUMMARY_EXPORT_CHECKS.map((check) => (
+                                        <VCheckbox
+                                            key={check.key}
+                                            modelValue={summaryExportChecklist.value[check.key] === true}
+                                            onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
+                                            label={t(check.label)}
+                                            density="compact"
+                                            hideDetails
+                                        />
+                                    ))}
+                                    {!summaryExportChecklistComplete.value && (
+                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
+                                    )}
+                                </ThemedView>
                                 {[
                                     { label: t("Routes"), value: String(summary.value.total), tone: "info" as const },
                                     { label: t("Active"), value: String(summary.value.active), tone: "success" as const },
@@ -426,11 +583,27 @@ const RoutesPage = dc(() => {
                                 />
                             </div>
                         </div>
+                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Route edit checklist")}</ThemedText>
+                            {ROUTE_EDIT_CHECKS.map((check) => (
+                                <VCheckbox
+                                    key={check.key}
+                                    modelValue={routeEditChecklist.value[check.key] === true}
+                                    onUpdate:modelValue={(value: unknown) => (routeEditChecklist.value = { ...routeEditChecklist.value, [check.key]: Boolean(value) })}
+                                    label={t(check.label)}
+                                    density="compact"
+                                    hideDetails
+                                />
+                            ))}
+                            {!routeEditChecklistComplete.value && (
+                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all route checklist items before saving")}</ThemedText>
+                            )}
+                        </ThemedView>
                         <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
                             <VBtn variant="text" onClick={() => (dialogOpen.value = false)}>
                                 {t("Cancel")}
                             </VBtn>
-                            <VBtn color="primary" loading={actionLoading.value} onClick={() => void saveRoute()}>
+                            <VBtn color="primary" loading={actionLoading.value} disabled={!routeEditChecklistComplete.value} onClick={() => void saveRoute()}>
                                 {t("Save")}
                             </VBtn>
                         </ThemedView>

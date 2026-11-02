@@ -192,3 +192,10 @@
     background-color: rgba(255, 255, 255, 0.05) !important;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
+
+.table-row-action-button:focus-visible,
+.pagination-button:focus-visible,
+.page-number-button:focus-visible {
+    outline: 3px solid rgb(var(--v-theme-primary));
+    outline-offset: 2px;
+}

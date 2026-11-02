@@ -14,12 +14,16 @@ export const SnackBar = dc<
     const visible = ref(false);
     const message = ref<string>("");
     const type = ref("primary" as string);
+    const sequence = ref(0);
 
     function show(opts: SnackBarOptions): void {
         message.value = opts.message;
         visible.value = true;
         type.value = opts.type;
+        sequence.value += 1;
     }
+
+    const announcement = () => (type.value === "error" ? "assertive" : "polite");
 
     const { t } = useLocale();
 
@@ -31,21 +35,32 @@ export const SnackBar = dc<
             onUpdate:modelValue={(v) => {
                 visible.value = v;
             }}
-            timeout={4e3}
+            timeout={6e3}
             color={type.value}
+            {...{
+                role: type.value === "error" ? "alert" : "status",
+                "aria-live": announcement(),
+                "aria-atomic": "true",
+            }}
         >
             {{
                 default: () => {
                     return (
-                        <p style={{ fontSize: "14px", fontWeight: "700" }}>
-                            {t(message.value)}
-                        </p>
+                        <>
+                            <div class="pg-snackbar-announcer" aria-live={announcement()} aria-atomic="true">
+                                {t(message.value)}
+                            </div>
+                            <p key={sequence.value} style={{ fontSize: "14px", fontWeight: "700" }}>
+                                {t(message.value)}
+                            </p>
+                        </>
                     );
                 },
                 actions: () => {
                     return (
                         <Button
                             variant="text"
+                            aria-label={t("Dismiss notification")}
                             onClick={() => {
                                 visible.value = false;
                             }}

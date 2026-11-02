@@ -34,7 +34,23 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
       snapshot: z.record(z.string().max(64), z.unknown()).default({}),
     })
     .strict(),
-  "POST /gateways/:id/rollback": z.object({ versionId: z.string().min(1).max(64) }).strict(),
+  "POST /gateways/:id/rollback": z
+    .object({
+      versionId: z.string().min(1).max(64),
+      reason: z.string().min(3).max(500).optional(),
+      checklist: z
+        .array(
+          z.enum([
+            "TARGET_VERSION_VERIFIED",
+            "GATES_VERIFIED",
+            "IMPACT_REVIEWED",
+            "ROLLBACK_AUTHORITY_CONFIRMED",
+          ]),
+        )
+        .max(10)
+        .optional(),
+    })
+    .strict(),
   "PUT /gateway-versions/:vid/environments": z
     .object({
       env: z.enum(["SANDBOX", "LIVE"]),
@@ -236,10 +252,38 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
       railCode: z.string().max(64).optional(),
       amount: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).optional(),
       currency: z.string().length(3).optional(),
+      checklist: z
+        .array(
+          z.enum([
+            "CREDENTIAL_REFS_VERIFIED",
+            "ENVIRONMENT_MATCH_REVIEWED",
+            "SECRET_STORAGE_VERIFIED",
+            "CREDENTIAL_CHECK_APPROVED",
+            "PHASE_SELECTED",
+            "SAMPLE_PAYLOAD_REVIEWED",
+            "CREDENTIAL_CONTEXT_READY",
+            "RESULT_INTERPRETATION_REVIEWED",
+          ]),
+        )
+        .max(10)
+        .optional(),
     })
     .strict(),
   "POST /gateway-versions/:vid/run-suite": z
-    .object({ scenarios: z.array(z.string().max(64)).max(30).optional() })
+    .object({
+      scenarios: z.array(z.string().max(64)).max(30).optional(),
+      checklist: z
+        .array(
+          z.enum([
+            "SUITE_SELECTED",
+            "SANDBOX_ENV_VERIFIED",
+            "EVIDENCE_CAPTURE_READY",
+            "RESULTS_REVIEW_PLANNED",
+          ]),
+        )
+        .max(10)
+        .optional(),
+    })
     .strict(),
   "POST /users": z
     .object({
@@ -258,6 +302,17 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
       authoritiesMap: z.array(z.string().min(2).max(64)).max(60).default([]),
       isMaker: z.boolean().default(false),
       isChecker: z.boolean().default(false),
+      checklist: z
+        .array(
+          z.enum([
+            "EMAIL_VERIFIED",
+            "ROLE_SCOPE_CONFIRMED",
+            "AUTHORITIES_REVIEWED",
+            "MFA_REQUIREMENT_CONFIRMED",
+          ]),
+        )
+        .max(10)
+        .optional(),
     })
     .strict(),
   "PATCH /users": z
@@ -268,6 +323,17 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
       status: z.enum(["INVITED", "ACTIVE", "SUSPENDED", "DISABLED"]).optional(),
       isMaker: z.boolean().optional(),
       isChecker: z.boolean().optional(),
+      checklist: z
+        .array(
+          z.enum([
+            "SELECTION_REVIEWED",
+            "STATUS_IMPACT_REVIEWED",
+            "NOTIFICATION_PLANNED",
+            "AUTHORITY_CONFIRMED",
+          ]),
+        )
+        .max(10)
+        .optional(),
     })
     .strict(),
   "PATCH /users/:id": z
@@ -275,6 +341,17 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
       authoritiesMap: z.array(z.string().min(2).max(64)).max(60).optional(),
       role: z.string().max(40).optional(),
       status: z.enum(["INVITED", "ACTIVE", "SUSPENDED", "DISABLED"]).optional(),
+      checklist: z
+        .array(
+          z.enum([
+            "SELECTION_REVIEWED",
+            "STATUS_IMPACT_REVIEWED",
+            "NOTIFICATION_PLANNED",
+            "AUTHORITY_CONFIRMED",
+          ]),
+        )
+        .max(10)
+        .optional(),
     })
     .strict(),
   "POST /join-requests/:id/assign": z.object({ reviewerId: z.string().min(1).max(64) }).strict(),
@@ -351,6 +428,17 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
       patch: z.array(z.record(z.string().max(64), z.unknown())).min(1),
       reason: z.string().min(3).max(2000),
       baseVersion: z.number().int().min(1),
+      checklist: z
+        .array(
+          z.enum([
+            "PATCH_REVIEWED",
+            "SOURCE_DOCUMENT_VERIFIED",
+            "MAKER_REASON_DOCUMENTED",
+            "CHECKER_SCOPE_CONFIRMED",
+          ]),
+        )
+        .max(10)
+        .optional(),
     })
     .strict(),
   "POST /approvals/:id/approve": z
@@ -358,21 +446,69 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
       notes: z.string().max(2000).optional(),
       riskAcceptanceNote: z.string().max(2000).optional(),
       outcome: z.enum(["WON", "LOST"]).optional(),
+      checklist: z
+        .array(
+          z.enum([
+            "DIFF_REVIEWED",
+            "SUBJECT_CONTEXT_REVIEWED",
+            "MAKER_CHECKER_SEPARATION_VERIFIED",
+            "RISK_ASSESSED",
+          ]),
+        )
+        .max(10)
+        .optional(),
     })
     .strict(),
-  "POST /approvals/:id/reject": z.object({ reason: z.string().min(2).max(2000) }).strict(),
+  "POST /approvals/:id/reject": z
+    .object({
+      reason: z.string().min(2).max(2000),
+      checklist: z
+        .array(
+          z.enum([
+            "DIFF_REVIEWED",
+            "SUBJECT_CONTEXT_REVIEWED",
+            "MAKER_CHECKER_SEPARATION_VERIFIED",
+            "RISK_ASSESSED",
+          ]),
+        )
+        .max(10)
+        .optional(),
+    })
+    .strict(),
   "POST /aml/matches/:id/disposition": z
     .object({
       disposition: z.enum(["FALSE_POSITIVE", "TRUE_MATCH", "ESCALATED"]),
       notes: z.string().max(2000).optional(),
       suppressFuture: z.boolean().default(false),
       suppressUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      checklist: z
+        .array(
+          z.enum([
+            "MATCH_DETAILS_REVIEWED",
+            "IDENTITY_EVIDENCE_CHECKED",
+            "DISPOSITION_RATIONALE_DOCUMENTED",
+            "ESCALATION_PATH_CONFIRMED",
+          ]),
+        )
+        .max(10)
+        .optional(),
     })
     .strict(),
   "POST /aml/cases/:id/propose": z
     .object({
       action: z.enum(["HOLD", "RELEASE", "REJECT", "ESCALATE"]),
       notes: z.string().max(2000).optional(),
+      checklist: z
+        .array(
+          z.enum([
+            "EVIDENCE_REVIEWED",
+            "SUBJECT_IDENTIFIED",
+            "REGULATORY_OBLIGATION_ASSESSED",
+            "CHECKER_INDEPENDENCE_CONFIRMED",
+          ]),
+        )
+        .max(10)
+        .optional(),
     })
     .strict(),
   "POST /aml/rules": z
@@ -393,6 +529,17 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
       action: z.enum(["HOLD", "FLAG", "BLOCK", "CASE_ONLY"]),
       baseSeverity: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]),
       effectiveFrom: z.string().max(64).optional(),
+      checklist: z
+        .array(
+          z.enum([
+            "RULE_LOGIC_REVIEWED",
+            "THRESHOLDS_VERIFIED",
+            "REGULATORY_BASIS_DOCUMENTED",
+            "CHECKER_INDEPENDENCE_CONFIRMED",
+          ]),
+        )
+        .max(10)
+        .optional(),
     })
     .strict(),
   "POST /aml/reporting-rules": z
@@ -454,6 +601,17 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
       capabilities: z.record(z.string().max(40), z.boolean()).optional(),
       instructionsAr: z.string().max(2000).optional(),
       instructionsEn: z.string().max(2000).optional(),
+      checklist: z
+        .array(
+          z.enum([
+            "NAMES_VERIFIED",
+            "LIMITS_VERIFIED",
+            "INSTRUCTIONS_REVIEWED",
+            "AVAILABILITY_IMPACT_REVIEWED",
+          ]),
+        )
+        .max(10)
+        .optional(),
     })
     .strict(),
   "PUT /rails/:id/fields": z
@@ -491,6 +649,17 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
           }),
         )
         .max(40),
+      checklist: z
+        .array(
+          z.enum([
+            "FIELD_CODES_VERIFIED",
+            "VALIDATION_RULES_REVIEWED",
+            "SENSITIVITY_REVIEWED",
+            "CHECKOUT_IMPACT_REVIEWED",
+          ]),
+        )
+        .max(10)
+        .optional(),
     })
     .strict(),
   "POST /routes": z
@@ -554,6 +723,17 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
       notes: z.string().max(2000).optional(),
       providerReference: z.string().min(1).max(191).optional(),
       settledAmount: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).optional(),
+      checklist: z
+        .array(
+          z.enum([
+            "EVIDENCE_REVIEWED",
+            "ATTEMPT_STATUS_VERIFIED",
+            "OUTCOME_DOCUMENTED",
+            "CHECKER_REQUIREMENT_CONFIRMED",
+          ]),
+        )
+        .max(10)
+        .optional(),
     })
     .strict(),
   "POST /reconciliation/sources": z
@@ -598,12 +778,34 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
       reverseCommission: z.boolean().default(false),
       reason: z.string().min(2).max(1000),
       externalDisputeRef: z.string().max(120).optional(),
+      checklist: z
+        .array(
+          z.enum([
+            "TARGET_ACCOUNT_VERIFIED",
+            "AMOUNT_CURRENCY_VERIFIED",
+            "REASON_DOCUMENTED",
+            "SOURCE_LINKAGE_VERIFIED",
+          ]),
+        )
+        .max(10)
+        .optional(),
     })
     .strict(),
   "POST /cashouts/:id/process": z
     .object({
       decision: z.enum(["APPROVE", "REJECT"]),
       reason: z.string().max(1000).optional(),
+      checklist: z
+        .array(
+          z.enum([
+            "BANK_DETAILS_VERIFIED",
+            "WALLET_BALANCE_VERIFIED",
+            "MERCHANT_ACTIVE",
+            "NO_AML_RESTRICTIONS",
+          ]),
+        )
+        .max(10)
+        .optional(),
     })
     .strict(),
   "POST /commission-profiles": z
@@ -654,6 +856,17 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
         )
         .min(1)
         .max(50),
+      checklist: z
+        .array(
+          z.enum([
+            "KEY_SCOPE_VERIFIED",
+            "VALUE_SCHEMA_REVIEWED",
+            "EFFECTIVE_DATE_REVIEWED",
+            "IMMUTABLE_VERSION_ACKNOWLEDGED",
+          ]),
+        )
+        .max(10)
+        .optional(),
     })
     .strict(),
 };

@@ -2,7 +2,7 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VCard, VCardText, VDialog, VProgressCircular, VSelect, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VProgressCircular, VSelect, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -100,6 +100,13 @@ const parseJsonObject = (text: string): Record<string, unknown> | null => {
     }
 };
 
+const RULE_CHECKS = [
+    { key: "RULE_LOGIC_REVIEWED", label: "Rule logic reviewed" },
+    { key: "THRESHOLDS_VERIFIED", label: "Thresholds verified" },
+    { key: "REGULATORY_BASIS_DOCUMENTED", label: "Regulatory basis documented" },
+    { key: "CHECKER_INDEPENDENCE_CONFIRMED", label: "Checker independence confirmed" },
+] as const;
+
 const AmlRulesPage = dc(() => {
     const { t } = useLocale();
     const router = useRouter();
@@ -128,6 +135,9 @@ const AmlRulesPage = dc(() => {
         effectiveFrom: "",
     });
     const actionLoading = ref(false);
+    const ruleChecklist = ref<Record<string, boolean>>({});
+    const exportLoading = ref(false);
+    const summaryExportLoading = ref(false);
 
     const detailsOpen = ref(false);
     const selected = ref<AmlRuleDetail | null>(null);
@@ -158,6 +168,67 @@ const AmlRulesPage = dc(() => {
         refreshHook.value?.reset();
     };
 
+    const exportCsv = async () => {
+        if (exportLoading.value) return;
+        exportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.amlRulesExport, {
+                params: {
+                    ...(search.value ? { search: search.value } : {}),
+                    ...buildFilterQuery(filterDefinitions.value, filters.value),
+                },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const rowsData = (payload.rules ?? []) as AmlRule[];
+            if (rowsData.length === 0) {
+                showSnackBar({ type: "warning", message: t("No AML rules match the current filters.") });
+                return;
+            }
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const columns = ["id", "code", "name", "ruleType", "action", "baseSeverity", "active", "version", "effectiveFrom", "effectiveTo", "approvalState", "createdAt"];
+            const lines = [
+                columns.map(escape).join(","),
+                ...rowsData.map((row) =>
+                    [
+                        row.id,
+                        row.code,
+                        row.name,
+                        row.ruleType,
+                        row.action,
+                        row.baseSeverity,
+                        row.active,
+                        row.version,
+                        row.effectiveFrom,
+                        row.effectiveTo ?? "",
+                        row.approvalState ?? "",
+                        row.createdAt,
+                    ]
+                        .map(escape)
+                        .join(","),
+                ),
+            ];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `aml-rules-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({
+                type: payload.truncated ? "warning" : "success",
+                message: payload.truncated
+                    ? `${t("Exported")} ${rowsData.length} / ${payload.total}`
+                    : `${t("Exported")} ${rowsData.length}`,
+            });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            exportLoading.value = false;
+        }
+    };
+
     const refreshAll = () => {
         refreshHook.value?.refreshAsIs();
         void loadSummary();
@@ -174,6 +245,7 @@ const AmlRulesPage = dc(() => {
             paramsText: PARAM_HELP.SINGLE_AMOUNT?.match(/\{.*\}/)?.[0] ?? "{}",
             effectiveFrom: "",
         };
+        ruleChecklist.value = {};
         createOpen.value = true;
     };
 
@@ -199,11 +271,17 @@ const AmlRulesPage = dc(() => {
         }
     };
 
+    const ruleChecklistComplete = computed(() => RULE_CHECKS.every((check) => ruleChecklist.value[check.key] === true));
+
     const submit = async () => {
         const scope = parseJsonObject(form.value.scopeText);
         const params = parseJsonObject(form.value.paramsText);
         if (scope === null || params === null) {
             showSnackBar({ type: "warning", message: t("Scope and params must be valid JSON objects") });
+            return;
+        }
+        if (!ruleChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all rule checklist items before drafting") });
             return;
         }
         actionLoading.value = true;
@@ -217,6 +295,7 @@ const AmlRulesPage = dc(() => {
                 scope,
                 params,
                 ...(form.value.effectiveFrom ? { effectiveFrom: form.value.effectiveFrom } : {}),
+                checklist: RULE_CHECKS.filter((check) => ruleChecklist.value[check.key]).map((check) => check.key),
             });
             const payload = response.data?.data ?? response.data ?? {};
             createOpen.value = false;
@@ -231,6 +310,40 @@ const AmlRulesPage = dc(() => {
             showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
         } finally {
             actionLoading.value = false;
+        }
+    };
+
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.amlRulesSummaryExport);
+            const snapshot = (response.data?.data ?? response.data ?? {}) as RuleSummary;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["total", snapshot.total],
+                ["active", snapshot.active],
+                ["inactive", snapshot.inactive],
+                ["pending_approvals", snapshot.pendingApprovals],
+            ];
+            for (const [severity, count] of Object.entries(snapshot.bySeverity ?? {})) rows.push([`severity.${severity}.count`, count]);
+            for (const [type, count] of Object.entries(snapshot.byType ?? {})) rows.push([`type.${type}.count`, count]);
+            for (const [action, count] of Object.entries(snapshot.byAction ?? {})) rows.push([`action.${action}.count`, count]);
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `aml-rule-summary-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: t("AML rule summary exported") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            summaryExportLoading.value = false;
         }
     };
 
@@ -321,6 +434,7 @@ const AmlRulesPage = dc(() => {
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportCsv()}>{t("Export CSV")}</VBtn>
                             <VBtn color="primary" prependIcon="mdi-plus" onClick={openCreate}>{t("Draft rule")}</VBtn>
                         </ThemedView>
                     )}
@@ -333,7 +447,11 @@ const AmlRulesPage = dc(() => {
                 {summary.value && (
                     <VCard variant="flat" style={{ borderRadius: "16px" }}>
                         <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Rule posture")}</ThemedText>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Rule posture")}</ThemedText>
+                                <div style={{ flex: 1 }} />
+                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
+                            </ThemedView>
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "10px" }}>
                                 {summaryItems.value.map((item) => (
                                     <VCard key={item.label} variant="tonal">
@@ -506,9 +624,25 @@ const AmlRulesPage = dc(() => {
                         <VTextField type="date" label={t("Effective from (optional)")} modelValue={form.value.effectiveFrom} onUpdate:modelValue={(value: string) => (form.value.effectiveFrom = value)} />
                         <VTextarea label={t("Scope JSON")} modelValue={form.value.scopeText} onUpdate:modelValue={(value: string) => (form.value.scopeText = value)} rows={3} hint={t("Use {} for all merchants and rails.")} persistentHint />
                         <VTextarea label={t("Params JSON")} modelValue={form.value.paramsText} onUpdate:modelValue={(value: string) => (form.value.paramsText = value)} rows={4} hint={PARAM_HELP[form.value.ruleType] ?? ""} persistentHint />
+                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Rule checklist")}</ThemedText>
+                            {RULE_CHECKS.map((check) => (
+                                <VCheckbox
+                                    key={check.key}
+                                    modelValue={ruleChecklist.value[check.key] === true}
+                                    onUpdate:modelValue={(value: unknown) => (ruleChecklist.value = { ...ruleChecklist.value, [check.key]: Boolean(value) })}
+                                    label={t(check.label)}
+                                    density="compact"
+                                    hideDetails
+                                />
+                            ))}
+                            {!ruleChecklistComplete.value && (
+                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all rule checklist items before drafting")}</ThemedText>
+                            )}
+                        </ThemedView>
                         <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end", flexWrap: "wrap" }}>
                             <VBtn variant="text" onClick={() => (createOpen.value = false)}>{t("Cancel")}</VBtn>
-                            <VBtn color="primary" loading={actionLoading.value} disabled={!form.value.code.trim() || !form.value.name.trim()} onClick={() => void submit()}>{t("Create draft")}</VBtn>
+                            <VBtn color="primary" loading={actionLoading.value} disabled={!form.value.code.trim() || !form.value.name.trim() || !ruleChecklistComplete.value} onClick={() => void submit()}>{t("Create draft")}</VBtn>
                         </ThemedView>
                     </VCardText>
                 </VCard>

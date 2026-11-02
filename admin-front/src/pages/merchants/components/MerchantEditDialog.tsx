@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
-import { VAlert, VBtn, VCard, VCardText, VDialog, VSelect, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VSelect, VTextField, VTextarea } from "vuetify/components";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { api } from "@/state/api";
@@ -9,6 +9,13 @@ import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import type { MerchantDetail, MerchantSummary } from "../types";
+
+const EDIT_CHECKS = [
+    { key: "PATCH_REVIEWED", label: "Proposed changes reviewed" },
+    { key: "SOURCE_DOCUMENT_VERIFIED", label: "Source document verified" },
+    { key: "MAKER_REASON_DOCUMENTED", label: "Maker reason documented" },
+    { key: "CHECKER_SCOPE_CONFIRMED", label: "Checker scope confirmed" },
+] as const;
 
 export type MerchantEditMode = "DESCRIPTIVE" | "SENSITIVE";
 
@@ -73,6 +80,7 @@ const MerchantEditDialog = dc(
         const original = ref<EditForm>(emptyForm());
         const error = ref<string | null>(null);
         const saving = ref(false);
+        const checklist = ref<Record<string, boolean>>({});
         const isDescriptive = computed(() => props.mode === "DESCRIPTIVE");
 
         const formFromMerchant = (merchant: MerchantDetail | MerchantSummary): EditForm => {
@@ -106,6 +114,7 @@ const MerchantEditDialog = dc(
                 if (!open || !props.merchant) return;
                 form.value = formFromMerchant(props.merchant);
                 original.value = formFromMerchant(props.merchant);
+                checklist.value = {};
                 error.value = null;
             },
             { immediate: true },
@@ -151,11 +160,17 @@ const MerchantEditDialog = dc(
             return patch;
         };
 
+        const checklistComplete = computed(() => EDIT_CHECKS.every((check) => checklist.value[check.key] === true));
+
         const submit = async () => {
             if (!props.merchant) return;
             error.value = null;
             if (props.mode === "SENSITIVE" && form.value.reason.trim().length < 3) {
                 error.value = t("A maker reason is required for a sensitive change");
+                return;
+            }
+            if (props.mode === "SENSITIVE" && !checklistComplete.value) {
+                error.value = t("Complete all edit checklist items before submitting");
                 return;
             }
             saving.value = true;
@@ -181,6 +196,7 @@ const MerchantEditDialog = dc(
                         reason: form.value.reason.trim(),
                         patch,
                         baseVersion: props.merchant.version,
+                        checklist: EDIT_CHECKS.filter((check) => checklist.value[check.key]).map((check) => check.key),
                     });
                     showSnackBar({ type: "success", message: t("Sensitive change submitted for checker approval") });
                 }
@@ -233,11 +249,29 @@ const MerchantEditDialog = dc(
                                 </div>
                             </>
                         )}
+                        {!isDescriptive.value && (
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Edit checklist")}</ThemedText>
+                                {EDIT_CHECKS.map((check) => (
+                                    <VCheckbox
+                                        key={check.key}
+                                        modelValue={checklist.value[check.key] === true}
+                                        onUpdate:modelValue={(value: unknown) => (checklist.value = { ...checklist.value, [check.key]: Boolean(value) })}
+                                        label={t(check.label)}
+                                        density="compact"
+                                        hideDetails
+                                    />
+                                ))}
+                                {!checklistComplete.value && (
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all edit checklist items before submitting")}</ThemedText>
+                                )}
+                            </ThemedView>
+                        )}
                         <VTextarea v-model={form.value.reason} label={isDescriptive.value ? t("Change note (optional)") : t("Maker reason (required)")} rows={3} autoGrow />
                         {error.value && <VAlert type="error" variant="tonal">{error.value}</VAlert>}
                         <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
                             <VBtn variant="text" onClick={() => props.onUpdate(false)}>{t("Cancel")}</VBtn>
-                            <VBtn color="primary" loading={saving.value} onClick={() => void submit()}>
+                            <VBtn color="primary" loading={saving.value} disabled={!isDescriptive.value && !checklistComplete.value} onClick={() => void submit()}>
                                 {isDescriptive.value ? t("Save descriptive fields") : t("Submit for approval")}
                             </VBtn>
                         </ThemedView>

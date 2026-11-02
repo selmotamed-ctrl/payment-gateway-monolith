@@ -8,6 +8,7 @@ import {
     VBtn,
     VCard,
     VCardText,
+    VCheckbox,
     VDialog,
     VProgressCircular,
     VSelect,
@@ -92,6 +93,20 @@ type AdjustmentSummary = {
 type AdjustmentView = "open" | "executed" | "all";
 
 const ADJUSTMENT_TYPES = ["CHARGEBACK", "REFUND", "MANUAL_CREDIT", "MANUAL_DEBIT", "CORRECTION", "CASHOUT_SUBTRACTION"];
+const SUMMARY_EXPORT_CHECKS = [
+    { key: "OPEN_SCOPE_VERIFIED", label: "Open adjustment scope verified" },
+    { key: "AMOUNT_TOTALS_REVIEWED", label: "Amount totals reviewed" },
+    { key: "STATE_TYPE_BREAKDOWN_REVIEWED", label: "State and type breakdown reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
+const ADJUSTMENT_CHECKS = [
+    { key: "TARGET_ACCOUNT_VERIFIED", label: "Target merchant account verified" },
+    { key: "AMOUNT_CURRENCY_VERIFIED", label: "Amount and currency verified" },
+    { key: "REASON_DOCUMENTED", label: "Reason documented" },
+    { key: "SOURCE_LINKAGE_VERIFIED", label: "Payment or dispute linkage verified" },
+] as const;
+
 const OPEN_STATES = ["DRAFT", "PENDING_REVIEW", "APPROVED", "EXECUTING"];
 const EXECUTED_STATES = ["EXECUTED"];
 
@@ -145,6 +160,10 @@ const AdjustmentsPage = dc(() => {
     const createOpen = ref(false);
     const form = ref(emptyForm());
     const actionLoading = ref(false);
+    const proposalChecklist = ref<Record<string, boolean>>({});
+    const exportLoading = ref(false);
+    const summaryExportLoading = ref(false);
+    const summaryExportChecklist = ref<Record<string, boolean>>({});
     const merchantOptions = ref<{ title: string; value: string; subtitle?: string }[]>([]);
     const glAccountOptions = ref<{ title: string; value: string; subtitle?: string }[]>([]);
 
@@ -212,6 +231,67 @@ const AdjustmentsPage = dc(() => {
         refreshHook.value?.reset();
     };
 
+    const exportCsv = async () => {
+        if (exportLoading.value) return;
+        exportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.adjustmentsExport, {
+                params: {
+                    ...(search.value ? { search: search.value } : {}),
+                    ...buildFilterQuery(filterDefinitions.value, filters.value),
+                },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const rowsData = (payload.adjustments ?? []) as Adjustment[];
+            if (rowsData.length === 0) {
+                showSnackBar({ type: "warning", message: t("No adjustments match the current filters.") });
+                return;
+            }
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const columns = ["id", "type", "state", "amount", "currency", "merchant", "reason", "sourceAttemptReference", "disputeReference", "approvalState", "journalEntryId", "createdAt"];
+            const lines = [
+                columns.map(escape).join(","),
+                ...rowsData.map((row) =>
+                    [
+                        row.id,
+                        row.type,
+                        row.state,
+                        row.amount,
+                        row.currency,
+                        row.merchantName || row.merchantId || "",
+                        row.reason,
+                        row.sourceAttemptReference ?? "",
+                        row.disputeReference ?? "",
+                        row.approvalState ?? "",
+                        row.journalEntryId ?? "",
+                        row.createdAt,
+                    ]
+                        .map(escape)
+                        .join(","),
+                ),
+            ];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `adjustments-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({
+                type: payload.truncated ? "warning" : "success",
+                message: payload.truncated
+                    ? `${t("Exported")} ${rowsData.length} / ${payload.total}`
+                    : `${t("Exported")} ${rowsData.length}`,
+            });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            exportLoading.value = false;
+        }
+    };
+
     const refreshAll = () => {
         refreshHook.value?.refreshAsIs();
         void loadSummary();
@@ -242,6 +322,7 @@ const AdjustmentsPage = dc(() => {
 
     const openCreate = () => {
         form.value = emptyForm();
+        proposalChecklist.value = {};
         glAccountOptions.value = [];
         createOpen.value = true;
         void loadMerchants();
@@ -253,6 +334,8 @@ const AdjustmentsPage = dc(() => {
         void loadGlAccounts(form.value.merchantId);
     };
 
+    const proposalChecklistComplete = computed(() => ADJUSTMENT_CHECKS.every((check) => proposalChecklist.value[check.key] === true));
+
     const submit = async () => {
         const amount = form.value.amount.trim();
         if (!/^\d{1,14}(\.\d{1,4})?$/.test(amount)) {
@@ -261,6 +344,10 @@ const AdjustmentsPage = dc(() => {
         }
         if (form.value.reason.trim().length < 2) {
             showSnackBar({ type: "warning", message: t("Reason is required") });
+            return;
+        }
+        if (!proposalChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all proposal checklist items before drafting") });
             return;
         }
         actionLoading.value = true;
@@ -274,6 +361,7 @@ const AdjustmentsPage = dc(() => {
                 ...(form.value.sourceAttemptId.trim() ? { attemptId: form.value.sourceAttemptId.trim() } : {}),
                 ...(form.value.disputeId.trim() ? { disputeId: form.value.disputeId.trim() } : {}),
                 ...(form.value.externalDisputeRef.trim() ? { externalDisputeRef: form.value.externalDisputeRef.trim() } : {}),
+                checklist: ADJUSTMENT_CHECKS.filter((check) => proposalChecklist.value[check.key]).map((check) => check.key),
             });
             const payload = response.data?.data ?? response.data ?? {};
             createOpen.value = false;
@@ -288,6 +376,53 @@ const AdjustmentsPage = dc(() => {
             showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
         } finally {
             actionLoading.value = false;
+        }
+    };
+
+    const summaryExportChecklistComplete = computed(() => SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
+
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        if (!summaryExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all summary export checklist items before exporting") });
+            return;
+        }
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.adjustmentsSummaryExport, {
+                params: { checklist: SUMMARY_EXPORT_CHECKS.filter((check) => summaryExportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
+            const snapshot = (response.data?.data ?? response.data ?? {}) as AdjustmentSummary;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["total_open", snapshot.totalOpen],
+                ["open_amount", snapshot.openAmount],
+                ["executed_count", snapshot.executedCount],
+                ["executed_amount", snapshot.executedAmount],
+            ];
+            for (const [state, count] of Object.entries(snapshot.byState ?? {})) {
+                rows.push([`state.${state}.count`, count]);
+                rows.push([`state.${state}.amount`, snapshot.amountByState?.[state] ?? "0"]);
+            }
+            for (const [type, count] of Object.entries(snapshot.byType ?? {})) {
+                rows.push([`type.${type}.count`, count]);
+                rows.push([`type.${type}.amount`, snapshot.amountByType?.[type] ?? "0"]);
+            }
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `adjustment-summary-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: t("Adjustment summary exported") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            summaryExportLoading.value = false;
         }
     };
 
@@ -388,6 +523,7 @@ const AdjustmentsPage = dc(() => {
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportCsv()}>{t("Export CSV")}</VBtn>
                             <VBtn color="primary" prependIcon="mdi-plus" onClick={openCreate}>{t("Propose")}</VBtn>
                         </ThemedView>
                     )}
@@ -400,7 +536,27 @@ const AdjustmentsPage = dc(() => {
                 {summary.value && (
                     <VCard variant="flat" style={{ borderRadius: "16px" }}>
                         <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Adjustment health")}</ThemedText>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Adjustment health")}</ThemedText>
+                                <div style={{ flex: 1 }} />
+                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
+                            </ThemedView>
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
+                                {SUMMARY_EXPORT_CHECKS.map((check) => (
+                                    <VCheckbox
+                                        key={check.key}
+                                        modelValue={summaryExportChecklist.value[check.key] === true}
+                                        onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
+                                        label={t(check.label)}
+                                        density="compact"
+                                        hideDetails
+                                    />
+                                ))}
+                                {!summaryExportChecklistComplete.value && (
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
+                                )}
+                            </ThemedView>
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "10px" }}>
                                 {summaryItems.value.map((item) => (
                                     <VCard key={item.label} variant="tonal">
@@ -629,6 +785,22 @@ const AdjustmentsPage = dc(() => {
                             modelValue={form.value.externalDisputeRef}
                             onUpdate:modelValue={(value: string) => (form.value.externalDisputeRef = value)}
                         />
+                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Proposal checklist")}</ThemedText>
+                            {ADJUSTMENT_CHECKS.map((check) => (
+                                <VCheckbox
+                                    key={check.key}
+                                    modelValue={proposalChecklist.value[check.key] === true}
+                                    onUpdate:modelValue={(value: unknown) => (proposalChecklist.value = { ...proposalChecklist.value, [check.key]: Boolean(value) })}
+                                    label={t(check.label)}
+                                    density="compact"
+                                    hideDetails
+                                />
+                            ))}
+                            {!proposalChecklistComplete.value && (
+                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all proposal checklist items before drafting")}</ThemedText>
+                            )}
+                        </ThemedView>
                         <VSwitch
                             label={t("Reverse commission")}
                             modelValue={form.value.reverseCommission}
@@ -639,7 +811,7 @@ const AdjustmentsPage = dc(() => {
                             <VBtn
                                 color="primary"
                                 loading={actionLoading.value}
-                                disabled={!form.value.merchantId || !form.value.targetGlAccountId || !form.value.amount.trim() || form.value.reason.trim().length < 2}
+                                disabled={!form.value.merchantId || !form.value.targetGlAccountId || !form.value.amount.trim() || form.value.reason.trim().length < 2 || !proposalChecklistComplete.value}
                                 onClick={() => void submit()}
                             >
                                 {t("Create draft")}

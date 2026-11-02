@@ -976,6 +976,91 @@ export async function executeMerchantPatch(
 }
 
 /**
+ * Expires a commission profile after a checker approves the lifecycle change.
+ */
+export async function executeCommissionProfileExpiry(
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  input: {
+    approvalId: string;
+    profileId: string;
+    payload: unknown;
+    checkerUserId: string;
+    checkerRole: string;
+  },
+): Promise<GovernanceExecutionResult> {
+  const profiles = modelOf(tx, "commissionProfile");
+  const profile = await profiles.findUnique({ where: { id: input.profileId } });
+  if (!profile) {
+    throw new ApiError(404, "COMMISSION_PROFILE_NOT_FOUND", "The commission profile does not exist");
+  }
+  const payload = asRecord(input.payload);
+  const effectiveToRaw = payload.effectiveTo;
+  const effectiveTo =
+    typeof effectiveToRaw === "string" && effectiveToRaw.trim() !== ""
+      ? new Date(effectiveToRaw)
+      : new Date();
+  if (Number.isNaN(effectiveTo.getTime())) {
+    throw new ApiError(400, "INVALID_EFFECTIVE_TO", "effectiveTo must be a valid date");
+  }
+  const updated = await profiles.update({
+    where: { id: profile.id },
+    data: { effectiveTo, approvalRequestId: input.approvalId },
+  });
+  await writeAudit(ctx, tx, {
+    actorId: input.checkerUserId,
+    role: input.checkerRole,
+    action: "COMMISSION_PROFILE_EXPIRED",
+    entityType: "COMMISSION_PROFILE",
+    entityId: updated.id,
+    beforeJson: { effectiveTo: profile.effectiveTo?.toISOString() ?? null },
+    afterJson: { effectiveTo: effectiveTo.toISOString() },
+    approvalRequestId: input.approvalId,
+  });
+  return { status: "EXECUTED", entityId: updated.id, idempotent: false };
+}
+
+/**
+ * Deactivates a velocity rule after a checker approves the lifecycle change.
+ */
+export async function executeVelocityRuleDeactivation(
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  input: {
+    approvalId: string;
+    ruleId: string;
+    payload: unknown;
+    checkerUserId: string;
+    checkerRole: string;
+  },
+): Promise<GovernanceExecutionResult> {
+  const rules = modelOf(tx, "velocityRule");
+  const rule = await rules.findUnique({ where: { id: input.ruleId } });
+  if (!rule) {
+    throw new ApiError(404, "VELOCITY_RULE_NOT_FOUND", "The velocity rule does not exist");
+  }
+  if (!rule.active) {
+    return { status: "EXECUTED", entityId: rule.id, idempotent: true };
+  }
+  const effectiveTo = new Date();
+  const updated = await rules.update({
+    where: { id: rule.id },
+    data: { active: false, effectiveTo, approvalRequestId: input.approvalId },
+  });
+  await writeAudit(ctx, tx, {
+    actorId: input.checkerUserId,
+    role: input.checkerRole,
+    action: "VELOCITY_RULE_DEACTIVATED",
+    entityType: "VELOCITY_RULE",
+    entityId: updated.id,
+    beforeJson: { active: rule.active, effectiveTo: rule.effectiveTo?.toISOString() ?? null },
+    afterJson: { active: false, effectiveTo: effectiveTo.toISOString() },
+    approvalRequestId: input.approvalId,
+  });
+  return { status: "EXECUTED", entityId: updated.id, idempotent: false };
+}
+
+/**
  * Applies a pending authority/role change of a user (design §7.1).
  */
 export async function executeUserAuthorityChange(
@@ -3171,6 +3256,24 @@ export async function executeApprovalSubject(
       approvalId: input.approval.id,
       merchantId: input.approval.subjectId,
       patch: input.approval.payloadDiffJson,
+      checkerUserId: input.checkerUserId,
+      checkerRole: input.checkerRole,
+    });
+  }
+  if (subjectType === "COMMISSION_PROFILE") {
+    return executeCommissionProfileExpiry(ctx, tx, {
+      approvalId: input.approval.id,
+      profileId: input.approval.subjectId,
+      payload: input.approval.payloadDiffJson,
+      checkerUserId: input.checkerUserId,
+      checkerRole: input.checkerRole,
+    });
+  }
+  if (subjectType === "VELOCITY_RULE") {
+    return executeVelocityRuleDeactivation(ctx, tx, {
+      approvalId: input.approval.id,
+      ruleId: input.approval.subjectId,
+      payload: input.approval.payloadDiffJson,
       checkerUserId: input.checkerUserId,
       checkerRole: input.checkerRole,
     });

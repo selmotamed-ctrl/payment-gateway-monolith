@@ -1,5 +1,5 @@
 import { dc } from "kt-dc";
-import { VAlert, VBtn, VIcon, VProgressCircular } from "vuetify/components";
+import { VBtn, VIcon, VProgressCircular } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
@@ -22,6 +22,7 @@ export const StateView = dc(
             if (props.loading) {
                 return (
                     <ThemedView
+                        {...{ role: "status", "aria-live": "polite", "aria-busy": "true" }}
                         style={{
                             alignItems: "center",
                             justifyContent: "center",
@@ -31,7 +32,7 @@ export const StateView = dc(
                             width: "100%",
                         }}
                     >
-                        <VProgressCircular indeterminate size={48} color="primary" width={4} />
+                        <VProgressCircular indeterminate size={48} color="primary" width={4} aria-label={t("Loading")} />
                         <ThemedText style={{ fontSize: "14px", opacity: 0.7 }}>{t("Loading")}</ThemedText>
                     </ThemedView>
                 );
@@ -40,6 +41,7 @@ export const StateView = dc(
             if (props.error) {
                 return (
                     <ThemedView
+                        {...{ role: "alert", "aria-live": "assertive", "aria-atomic": "true" }}
                         style={{
                             alignItems: "center",
                             justifyContent: "center",
@@ -49,10 +51,10 @@ export const StateView = dc(
                             width: "100%",
                         }}
                     >
-                        <VIcon icon={"mdi-alert-circle-outline"} size={"40px"} color="error" />
+                        <VIcon icon={"mdi-alert-circle-outline"} size={"40px"} color="error" aria-hidden="true" />
                         <ThemedText style={{ fontSize: "15px", textAlign: "center" }}>{props.error}</ThemedText>
                         {props.onRetry && (
-                            <VBtn variant="tonal" color="primary" onClick={() => props.onRetry?.()}>
+                            <VBtn variant="tonal" color="primary" onClick={() => props.onRetry?.()} aria-label={t("Retry")}>
                                 {t("Retry")}
                             </VBtn>
                         )}
@@ -63,6 +65,7 @@ export const StateView = dc(
             if (props.empty) {
                 return (
                     <ThemedView
+                        {...{ role: "status", "aria-live": "polite" }}
                         style={{
                             alignItems: "center",
                             justifyContent: "center",
@@ -74,7 +77,7 @@ export const StateView = dc(
                             border: "1px dashed rgba(100,116,139,0.4)",
                         }}
                     >
-                        <VIcon icon={"mdi-inbox-outline"} size={"38px"} color="on-surface-variant" />
+                        <VIcon icon={"mdi-inbox-outline"} size={"38px"} color="on-surface-variant" aria-hidden="true" />
                         <ThemedText type="defaultSemiBold">
                             {props.emptyTitle ? t(props.emptyTitle) : t("No Data Found")}
                         </ThemedText>

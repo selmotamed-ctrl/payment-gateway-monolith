@@ -193,9 +193,26 @@ export const errorMapsSchema = z
 
 export const dryRunSchema = z
   .object({
-    scenario: z.string().min(2).max(64),
+    scenario: z.string().min(2).max(64).optional(),
+    phase: z.string().max(64).optional(),
+    credentialSets: z.array(z.record(z.string().max(64), z.unknown())).max(40).optional(),
     payload: zJsonObject.optional(),
     dryRun: z.boolean().optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "CREDENTIAL_REFS_VERIFIED",
+          "ENVIRONMENT_MATCH_REVIEWED",
+          "SECRET_STORAGE_VERIFIED",
+          "CREDENTIAL_CHECK_APPROVED",
+          "PHASE_SELECTED",
+          "SAMPLE_PAYLOAD_REVIEWED",
+          "CREDENTIAL_CONTEXT_READY",
+          "RESULT_INTERPRETATION_REVIEWED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict();
 
@@ -203,6 +220,17 @@ export const runSuiteSchema = z
   .object({
     suite: z.enum(["SANDBOX_15", "CONTRACT_AMOUNT", "CONTRACT_REFERENCE", "CONTRACT_SIGNATURE"]),
     environment: z.enum(["sandbox", "test", "uat", "live"]).optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "SUITE_SELECTED",
+          "SANDBOX_ENV_VERIFIED",
+          "EVIDENCE_CAPTURE_READY",
+          "RESULTS_REVIEW_PLANNED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict();
 
@@ -210,6 +238,17 @@ export const submitApprovalSchema = z
   .object({
     reason: z.string().min(3).max(500),
     baseVersion: zBaseVersion.optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "GATES_REVIEWED",
+          "EVIDENCE_VERIFIED",
+          "ROLLBACK_READY",
+          "CHECKER_INDEPENDENCE_CONFIRMED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict();
 
@@ -217,6 +256,17 @@ export const rollbackSchema = z
   .object({
     targetVersionId: zIdentifier,
     reason: z.string().min(3).max(500),
+    checklist: z
+      .array(
+        z.enum([
+          "TARGET_VERSION_VERIFIED",
+          "GATES_VERIFIED",
+          "IMPACT_REVIEWED",
+          "ROLLBACK_AUTHORITY_CONFIRMED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict();
 
@@ -244,6 +294,17 @@ export const specImportSchema = z
     credentialsValues: z.record(z.string().max(64), z.string().max(4096)).optional(),
     credentials_values: z.record(z.string().max(64), z.string().max(4096)).optional(),
     mode: z.enum(["CREATE_NEW", "NEW_VERSION"]).optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "SPEC_VERIFIED",
+          "CREDENTIALS_VERIFIED",
+          "IMPORT_MODE_REVIEWED",
+          "NO_SECRET_EXPOSURE_CONFIRMED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict();
 
@@ -276,6 +337,15 @@ router.post(
 );
 
 router.get(
+  "/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/gateways/export",
+    querySchema: zListQuery,
+  }),
+);
+
+router.get(
   "/",
   coreForward({
     method: "GET",
@@ -301,6 +371,14 @@ router.get(
     method: "GET",
     path: () => "/internal/admin/gateways/summary",
     querySchema: zListQuery,
+  }),
+);
+
+router.get(
+  "/summary/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/gateways/summary/export",
   }),
 );
 
@@ -357,6 +435,21 @@ router.post(
 );
 
 const versionRouter = express.Router();
+
+export const versionCloneSchema = z
+  .object({ changelog: z.string().max(1000).optional() })
+  .strict();
+
+versionRouter.post(
+  "/:vid/clone",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/gateway-versions/${encodeURIComponent(context.params.vid ?? "")}/clone`,
+    paramsSchema: versionParamsSchema,
+    schema: versionCloneSchema,
+    status: 201,
+  }),
+);
 
 versionRouter.get(
   "/:vid",

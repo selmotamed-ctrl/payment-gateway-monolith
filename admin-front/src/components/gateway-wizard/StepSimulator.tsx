@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
-import { VAlert, VBtn, VCard, VCardText, VSelect, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VCard, VCardText, VCheckbox, VSelect, VTextField, VTextarea } from "vuetify/components";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StatusChip } from "@/components/StatusChip";
@@ -10,6 +10,27 @@ import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import type { WizardStepProps } from "./StepIdentity";
+
+const DRY_RUN_CHECKS = [
+    { key: "PHASE_SELECTED", label: "Dry-run phase selected" },
+    { key: "SAMPLE_PAYLOAD_REVIEWED", label: "Sample payload reviewed" },
+    { key: "CREDENTIAL_CONTEXT_READY", label: "Credential context ready" },
+    { key: "RESULT_INTERPRETATION_REVIEWED", label: "Result interpretation reviewed" },
+] as const;
+
+const SUITE_CHECKS = [
+    { key: "SUITE_SELECTED", label: "Test suite selected" },
+    { key: "SANDBOX_ENV_VERIFIED", label: "Sandbox environment verified" },
+    { key: "EVIDENCE_CAPTURE_READY", label: "Evidence capture ready" },
+    { key: "RESULTS_REVIEW_PLANNED", label: "Results review planned" },
+] as const;
+
+const SUBMIT_CHECKS = [
+    { key: "GATES_REVIEWED", label: "Go-live gates reviewed" },
+    { key: "EVIDENCE_VERIFIED", label: "Sandbox evidence verified" },
+    { key: "ROLLBACK_READY", label: "Rollback version ready" },
+    { key: "CHECKER_INDEPENDENCE_CONFIRMED", label: "Checker independence confirmed" },
+] as const;
 
 const GO_LIVE_GATE_KEYS = [
     "MAKER_CHECKER_APPROVAL",
@@ -49,10 +70,12 @@ export const StepSimulator = dc(
         const dryRunning = ref(false);
         const dryRunOutput = ref<string | null>(null);
         const dryRunError = ref<string | null>(null);
+        const dryRunChecklist = ref<Record<string, boolean>>({});
 
         const suiteRunning = ref(false);
         const scenarios = ref<ScenarioResult[]>([]);
         const suiteError = ref<string | null>(null);
+        const suiteChecklist = ref<Record<string, boolean>>({});
 
         const gates = ref<GateResult[]>(
             GO_LIVE_GATE_KEYS.map((key) => ({ key, passed: false, detail: "not evaluated yet" })),
@@ -61,6 +84,9 @@ export const StepSimulator = dc(
         const rollbackVersionId = ref(props.model.rollbackVersionId ?? "");
         const submitReason = ref("");
         const submitting = ref(false);
+        const submitChecklist = ref<Record<string, boolean>>({});
+
+        const dryRunChecklistComplete = computed(() => DRY_RUN_CHECKS.every((check) => dryRunChecklist.value[check.key] === true));
 
         const runDryRun = async () => {
             dryRunning.value = true;
@@ -75,6 +101,7 @@ export const StepSimulator = dc(
                 }
                 const response = await api.post(urlsMap.gatewayVersionDryRun(props.model.versionId ?? ""), {
                     scenario: phase.value,
+                    checklist: DRY_RUN_CHECKS.filter((check) => dryRunChecklist.value[check.key]).map((check) => check.key),
                     payload: {
                         ...parsedForm,
                         amount: sampleAmount.value,
@@ -90,12 +117,15 @@ export const StepSimulator = dc(
             }
         };
 
+        const suiteChecklistComplete = computed(() => SUITE_CHECKS.every((check) => suiteChecklist.value[check.key] === true));
+
         const runSuite = async () => {
             suiteRunning.value = true;
             suiteError.value = null;
             try {
                 const response = await api.post(urlsMap.gatewayVersionRunSuite(props.model.versionId ?? ""), {
                     suite: "SANDBOX_15",
+                    checklist: SUITE_CHECKS.filter((check) => suiteChecklist.value[check.key]).map((check) => check.key),
                 });
                 const payload = response.data?.data ?? response.data ?? {};
                 const results = payload.evidence?.scenarioResults ?? payload.scenarios ?? payload.results ?? [];
@@ -120,11 +150,14 @@ export const StepSimulator = dc(
             }
         };
 
+        const submitChecklistComplete = computed(() => SUBMIT_CHECKS.every((check) => submitChecklist.value[check.key] === true));
+
         const submitForApproval = async () => {
             submitting.value = true;
             try {
                 await api.post(urlsMap.gatewayVersionSubmitApproval(props.model.versionId ?? ""), {
                     reason: submitReason.value.trim() || "Ready for approval",
+                    checklist: SUBMIT_CHECKS.filter((check) => submitChecklist.value[check.key]).map((check) => check.key),
                 });
                 showSnackBar({ type: "success", message: t("Submit For Approval") });
             } catch (e) {
@@ -179,7 +212,23 @@ export const StepSimulator = dc(
                             onUpdate:modelValue={(v: string) => (formData.value = v)}
                             rows={4}
                         />
-                        <VBtn color="primary" loading={dryRunning.value} onClick={() => void runDryRun()}>
+                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Dry-run checklist")}</ThemedText>
+                            {DRY_RUN_CHECKS.map((check) => (
+                                <VCheckbox
+                                    key={check.key}
+                                    modelValue={dryRunChecklist.value[check.key] === true}
+                                    onUpdate:modelValue={(value: unknown) => (dryRunChecklist.value = { ...dryRunChecklist.value, [check.key]: Boolean(value) })}
+                                    label={t(check.label)}
+                                    density="compact"
+                                    hideDetails
+                                />
+                            ))}
+                            {!dryRunChecklistComplete.value && (
+                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all dry-run checklist items before running")}</ThemedText>
+                            )}
+                        </ThemedView>
+                        <VBtn color="primary" loading={dryRunning.value} disabled={!dryRunChecklistComplete.value} onClick={() => void runDryRun()}>
                             {t("Dry Run")}
                         </VBtn>
                         {dryRunError.value && (
@@ -212,10 +261,27 @@ export const StepSimulator = dc(
                         >
                             <ThemedText type="defaultSemiBold">{t("Test Suite")}</ThemedText>
                             <ThemedView style={{ flexDirection: "row", gap: "8px" }}>
-                                <VBtn color="primary" size="small" loading={suiteRunning.value} onClick={() => void runSuite()}>
+                                <VBtn color="primary" size="small" loading={suiteRunning.value} disabled={!suiteChecklistComplete.value} onClick={() => void runSuite()}>
                                     {t("Run")}
                                 </VBtn>
                             </ThemedView>
+                        </ThemedView>
+
+                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Test suite checklist")}</ThemedText>
+                            {SUITE_CHECKS.map((check) => (
+                                <VCheckbox
+                                    key={check.key}
+                                    modelValue={suiteChecklist.value[check.key] === true}
+                                    onUpdate:modelValue={(value: unknown) => (suiteChecklist.value = { ...suiteChecklist.value, [check.key]: Boolean(value) })}
+                                    label={t(check.label)}
+                                    density="compact"
+                                    hideDetails
+                                />
+                            ))}
+                            {!suiteChecklistComplete.value && (
+                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all test suite checklist items before running")}</ThemedText>
+                            )}
                         </ThemedView>
 
                         {suiteError.value && (
@@ -269,7 +335,23 @@ export const StepSimulator = dc(
                             onUpdate:modelValue={(v: string) => (submitReason.value = v)}
                             rows={3}
                         />
-                        <VBtn color="primary" loading={submitting.value} onClick={() => void submitForApproval()}>
+                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Go-live checklist")}</ThemedText>
+                            {SUBMIT_CHECKS.map((check) => (
+                                <VCheckbox
+                                    key={check.key}
+                                    modelValue={submitChecklist.value[check.key] === true}
+                                    onUpdate:modelValue={(value: unknown) => (submitChecklist.value = { ...submitChecklist.value, [check.key]: Boolean(value) })}
+                                    label={t(check.label)}
+                                    density="compact"
+                                    hideDetails
+                                />
+                            ))}
+                            {!submitChecklistComplete.value && (
+                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all go-live checklist items before submitting")}</ThemedText>
+                            )}
+                        </ThemedView>
+                        <VBtn color="primary" loading={submitting.value} disabled={!submitChecklistComplete.value} onClick={() => void submitForApproval()}>
                             {t("Submit For Approval")}
                         </VBtn>
                     </VCardText>

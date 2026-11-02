@@ -117,5 +117,20 @@ export const createReconciliationUploadHandler = (
     };
   }) as Promise<ReconciliationUploadResult>;
 
-  response.status(202).json(result);
+  const resolved = await result;
+  const checklist = Array.isArray(metadata.checklist)
+    ? metadata.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10)
+    : [];
+  await deps.db.auditLog.create({
+    data: {
+      actorId: typeof metadata.actorId === "string" ? metadata.actorId : "system",
+      role: typeof metadata.actorRole === "string" ? metadata.actorRole : "OPERATOR",
+      action: "RECONCILIATION_UPLOAD_CHECKLIST",
+      entityType: "RECONCILIATION_RUN",
+      entityId: resolved.runId,
+      beforeJson: {},
+      afterJson: { checklist, idempotent: resolved.idempotent },
+    },
+  });
+  response.status(202).json(resolved);
 };

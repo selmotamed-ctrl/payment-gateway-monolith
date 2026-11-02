@@ -35,12 +35,14 @@ export const setUserState = (userData: UserState | null) => {
 
 export const loggingOut = ref(false);
 
-export const logout = async () => {
+export const logout = async (options?: { redirect?: string }) => {
     loggingOut.value = true;
     setUserState(null);
     await nextTick();
+    const redirect = options?.redirect && options.redirect !== "/login" ? options.redirect : undefined;
     await router.push({
         name: "Login",
+        ...(redirect ? { query: { redirect } } : {}),
     }).catch(() => undefined);
     loggingOut.value = false;
 };

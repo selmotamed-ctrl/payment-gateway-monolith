@@ -2,7 +2,7 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VCard, VCardText, VDialog, VProgressCircular, VTab, VTabs, VTextarea, VTextField } from "vuetify/components";
+import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VProgressCircular, VTab, VTabs, VTextarea, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -69,6 +69,20 @@ type DisputeSummary = {
 
 type DisputeView = "open" | "resolved" | "all";
 
+const SUMMARY_EXPORT_CHECKS = [
+    { key: "OPEN_SCOPE_VERIFIED", label: "Open dispute scope verified" },
+    { key: "DUE_DATE_REVIEWED", label: "Evidence due dates reviewed" },
+    { key: "STATUS_BREAKDOWN_REVIEWED", label: "Status breakdown reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
+const EVIDENCE_CHECKS = [
+    { key: "EVIDENCE_REFERENCE_VERIFIED", label: "Evidence reference verified" },
+    { key: "SUPPORTING_DOCUMENTS_ATTACHED", label: "Supporting documents attached" },
+    { key: "EVIDENCE_WINDOW_VERIFIED", label: "Evidence deadline and window verified" },
+    { key: "SUMMARY_REVIEWED", label: "Evidence summary reviewed" },
+] as const;
+
 const OPEN_STATES = ["OPENED", "EVIDENCE_REQUESTED", "EVIDENCE_SUBMITTED"];
 const RESOLVED_STATES = ["WON", "LOST", "EXPIRED", "WITHDRAWN"];
 
@@ -117,6 +131,10 @@ const DisputesPage = dc(() => {
     const evidenceReference = ref("");
     const evidenceDocumentUrl = ref("");
     const evidenceNotes = ref("");
+    const evidenceChecklist = ref<Record<string, boolean>>({});
+    const exportLoading = ref(false);
+    const summaryExportLoading = ref(false);
+    const summaryExportChecklist = ref<Record<string, boolean>>({});
 
     const filterDefinitions = computed(() => tableRegistry.Disputes?.filters ?? []);
 
@@ -157,6 +175,69 @@ const DisputesPage = dc(() => {
         refreshHook.value?.reset();
     };
 
+    const exportCsv = async () => {
+        if (exportLoading.value) return;
+        exportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.disputesExport, {
+                params: {
+                    ...(search.value ? { search: search.value } : {}),
+                    ...buildFilterQuery(filterDefinitions.value, filters.value),
+                },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const rowsData = (payload.disputes ?? []) as Dispute[];
+            if (rowsData.length === 0) {
+                showSnackBar({ type: "warning", message: t("No disputes match the current filters.") });
+                return;
+            }
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const columns = ["id", "disputeRef", "externalDisputeRef", "status", "source", "amount", "currency", "merchant", "attemptReference", "railCode", "gatewayCode", "openedAt", "evidenceDueAt", "ageHours"];
+            const lines = [
+                columns.map(escape).join(","),
+                ...rowsData.map((row) =>
+                    [
+                        row.id,
+                        row.disputeRef,
+                        row.externalDisputeRef,
+                        row.status,
+                        row.source,
+                        row.amount,
+                        row.currency,
+                        row.merchantName || row.merchantId || "",
+                        row.attemptReference ?? "",
+                        row.railCode,
+                        row.gatewayCode,
+                        row.openedAt,
+                        row.evidenceDueAt ?? "",
+                        row.ageHours,
+                    ]
+                        .map(escape)
+                        .join(","),
+                ),
+            ];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `disputes-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({
+                type: payload.truncated ? "warning" : "success",
+                message: payload.truncated
+                    ? `${t("Exported")} ${rowsData.length} / ${payload.total}`
+                    : `${t("Exported")} ${rowsData.length}`,
+            });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            exportLoading.value = false;
+        }
+    };
+
     const refreshAll = () => {
         refreshHook.value?.refreshAsIs();
         void loadSummary();
@@ -174,6 +255,7 @@ const DisputesPage = dc(() => {
         evidenceReference.value = "";
         evidenceDocumentUrl.value = "";
         evidenceNotes.value = "";
+        evidenceChecklist.value = {};
         detailsOpen.value = true;
         detailLoading.value = true;
         try {
@@ -189,6 +271,8 @@ const DisputesPage = dc(() => {
         }
     };
 
+    const evidenceChecklistComplete = computed(() => EVIDENCE_CHECKS.every((check) => evidenceChecklist.value[check.key] === true));
+
     const submitEvidence = async () => {
         if (!selected.value) return;
         const evidence: Record<string, unknown> = {};
@@ -199,9 +283,17 @@ const DisputesPage = dc(() => {
             showSnackBar({ type: "warning", message: t("Add at least one evidence field") });
             return;
         }
+        if (!evidenceChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all evidence checklist items before submitting") });
+            return;
+        }
         actionLoading.value = true;
         try {
-            await api.post(urlsMap.disputeEvidence(selected.value.id), { evidence, notes: evidenceNotes.value.trim() || undefined });
+            await api.post(urlsMap.disputeEvidence(selected.value.id), {
+                evidence,
+                notes: evidenceNotes.value.trim() || undefined,
+                checklist: EVIDENCE_CHECKS.filter((check) => evidenceChecklist.value[check.key]).map((check) => check.key),
+            });
             showSnackBar({ type: "success", message: t("Evidence submitted") });
             detailsOpen.value = false;
             refreshAll();
@@ -209,6 +301,49 @@ const DisputesPage = dc(() => {
             showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
         } finally {
             actionLoading.value = false;
+        }
+    };
+
+    const summaryExportChecklistComplete = computed(() => SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
+
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        if (!summaryExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all summary export checklist items before exporting") });
+            return;
+        }
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.disputesSummaryExport, {
+                params: { checklist: SUMMARY_EXPORT_CHECKS.filter((check) => summaryExportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
+            const snapshot = (response.data?.data ?? response.data ?? {}) as DisputeSummary;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["total_open", snapshot.totalOpen],
+                ["open_amount", snapshot.openAmount],
+                ["overdue", snapshot.overdue],
+                ["due_soon", snapshot.dueSoon],
+                ["earliest_evidence_due_at", snapshot.earliestEvidenceDueAt ?? ""],
+            ];
+            for (const [state, count] of Object.entries(snapshot.byStatus ?? {})) {
+                rows.push([`status.${state}.count`, count]);
+            }
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `dispute-summary-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: t("Dispute summary exported") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            summaryExportLoading.value = false;
         }
     };
 
@@ -325,7 +460,10 @@ const DisputesPage = dc(() => {
                 <PageHeader
                     title={t("Disputes")}
                     end={() => (
-                        <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
+                        <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
+                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportCsv()}>{t("Export CSV")}</VBtn>
+                        </ThemedView>
                     )}
                 />
 
@@ -336,7 +474,27 @@ const DisputesPage = dc(() => {
                 {summary.value && (
                     <VCard variant="flat" style={{ borderRadius: "16px" }}>
                         <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Dispute health")}</ThemedText>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Dispute health")}</ThemedText>
+                                <div style={{ flex: 1 }} />
+                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
+                            </ThemedView>
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
+                                {SUMMARY_EXPORT_CHECKS.map((check) => (
+                                    <VCheckbox
+                                        key={check.key}
+                                        modelValue={summaryExportChecklist.value[check.key] === true}
+                                        onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
+                                        label={t(check.label)}
+                                        density="compact"
+                                        hideDetails
+                                    />
+                                ))}
+                                {!summaryExportChecklistComplete.value && (
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
+                                )}
+                            </ThemedView>
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "10px" }}>
                                 {summaryItems.value.map((item) => (
                                     <VCard key={item.label} variant="tonal">
@@ -518,6 +676,22 @@ const DisputesPage = dc(() => {
                                                 onUpdate:modelValue={(value: string) => (evidenceDocumentUrl.value = value)}
                                                 placeholder="https://"
                                             />
+                                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Evidence checklist")}</ThemedText>
+                                                {EVIDENCE_CHECKS.map((check) => (
+                                                    <VCheckbox
+                                                        key={check.key}
+                                                        modelValue={evidenceChecklist.value[check.key] === true}
+                                                        onUpdate:modelValue={(value: unknown) => (evidenceChecklist.value = { ...evidenceChecklist.value, [check.key]: Boolean(value) })}
+                                                        label={t(check.label)}
+                                                        density="compact"
+                                                        hideDetails
+                                                    />
+                                                ))}
+                                                {!evidenceChecklistComplete.value && (
+                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all evidence checklist items before submitting")}</ThemedText>
+                                                )}
+                                            </ThemedView>
                                             <VTextarea
                                                 label={t("Evidence notes")}
                                                 modelValue={evidenceNotes.value}
@@ -525,7 +699,7 @@ const DisputesPage = dc(() => {
                                                 rows={3}
                                             />
                                             <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
-                                                <VBtn color="primary" loading={actionLoading.value} onClick={() => void submitEvidence()}>{t("Submit evidence")}</VBtn>
+                                                <VBtn color="primary" loading={actionLoading.value} disabled={!evidenceChecklistComplete.value} onClick={() => void submitEvidence()}>{t("Submit evidence")}</VBtn>
                                                 <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
                                             </ThemedView>
                                         </VCardText>

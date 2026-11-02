@@ -2,7 +2,7 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VCard, VCardText, VDialog, VProgressCircular, VSelect, VTab, VTabs, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VProgressCircular, VSelect, VTab, VTabs, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -100,6 +100,13 @@ type AmlCaseSummary = {
 
 type AmlCaseView = "open" | "resolved" | "all";
 
+const AML_CASE_CHECKS = [
+    { key: "EVIDENCE_REVIEWED", label: "Evidence reviewed" },
+    { key: "SUBJECT_IDENTIFIED", label: "Subject identified and verified" },
+    { key: "REGULATORY_OBLIGATION_ASSESSED", label: "Regulatory obligation assessed" },
+    { key: "CHECKER_INDEPENDENCE_CONFIRMED", label: "Checker independence confirmed" },
+] as const;
+
 const OPEN_STATES = ["OPEN", "IN_REVIEW", "PENDING_CHECKER"];
 const RESOLVED_STATES = ["RELEASED", "REJECTED_VOID", "FROZEN", "ESCALATED_STR"];
 const RESOLUTIONS = [
@@ -154,7 +161,10 @@ const AmlCasesPage = dc(() => {
     const detailLoading = ref(false);
     const resolution = ref("RELEASE");
     const rationale = ref("");
+    const caseChecklist = ref<Record<string, boolean>>({});
     const actionLoading = ref(false);
+    const exportLoading = ref(false);
+    const summaryExportLoading = ref(false);
 
     const filterDefinitions = computed(() => tableRegistry.AmlCases?.filters ?? []);
 
@@ -195,6 +205,69 @@ const AmlCasesPage = dc(() => {
         refreshHook.value?.reset();
     };
 
+    const exportCsv = async () => {
+        if (exportLoading.value) return;
+        exportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.amlCasesExport, {
+                params: {
+                    ...(search.value ? { search: search.value } : {}),
+                    ...buildFilterQuery(filterDefinitions.value, filters.value),
+                },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const rowsData = (payload.cases ?? []) as AmlCase[];
+            if (rowsData.length === 0) {
+                showSnackBar({ type: "warning", message: t("No AML cases match the current filters.") });
+                return;
+            }
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const columns = ["id", "caseRef", "subjectType", "subjectName", "merchantName", "severity", "status", "ruleCode", "screeningResult", "assignedReviewerName", "openedAt", "slaDueAt", "ageHours", "slaOverdue"];
+            const lines = [
+                columns.map(escape).join(","),
+                ...rowsData.map((row) =>
+                    [
+                        row.id,
+                        row.caseRef,
+                        row.subjectType,
+                        row.subjectName,
+                        row.merchantName,
+                        row.severity,
+                        row.status,
+                        row.ruleCode ?? "",
+                        row.screeningResult ?? "",
+                        row.assignedReviewerName,
+                        row.openedAt,
+                        row.slaDueAt ?? "",
+                        row.ageHours,
+                        row.slaOverdue,
+                    ]
+                        .map(escape)
+                        .join(","),
+                ),
+            ];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `aml-cases-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({
+                type: payload.truncated ? "warning" : "success",
+                message: payload.truncated
+                    ? `${t("Exported")} ${rowsData.length} / ${payload.total}`
+                    : `${t("Exported")} ${rowsData.length}`,
+            });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            exportLoading.value = false;
+        }
+    };
+
     const refreshAll = () => {
         refreshHook.value?.refreshAsIs();
         void loadSummary();
@@ -210,6 +283,7 @@ const AmlCasesPage = dc(() => {
         };
         resolution.value = "RELEASE";
         rationale.value = "";
+        caseChecklist.value = {};
         detailsOpen.value = true;
         detailLoading.value = true;
         try {
@@ -227,10 +301,16 @@ const AmlCasesPage = dc(() => {
 
     const canPropose = computed(() => selected.value && ["OPEN", "IN_REVIEW"].includes(selected.value.status));
 
+    const caseChecklistComplete = computed(() => AML_CASE_CHECKS.every((check) => caseChecklist.value[check.key] === true));
+
     const propose = async () => {
         if (!selected.value) return;
         if (rationale.value.trim().length < 3) {
             showSnackBar({ type: "warning", message: t("Rationale is required") });
+            return;
+        }
+        if (!caseChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all case checklist items before proposing") });
             return;
         }
         actionLoading.value = true;
@@ -239,6 +319,7 @@ const AmlCasesPage = dc(() => {
                 severity: selected.value.severity,
                 action: resolution.value,
                 reason: rationale.value.trim(),
+                checklist: AML_CASE_CHECKS.filter((check) => caseChecklist.value[check.key]).map((check) => check.key),
             });
             const payload = response.data?.data ?? response.data ?? {};
             detailsOpen.value = false;
@@ -253,6 +334,41 @@ const AmlCasesPage = dc(() => {
             showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
         } finally {
             actionLoading.value = false;
+        }
+    };
+
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.amlCasesSummaryExport);
+            const snapshot = (response.data?.data ?? response.data ?? {}) as AmlCaseSummary;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["total_open", snapshot.totalOpen],
+                ["overdue", snapshot.overdue],
+                ["critical_open", snapshot.criticalOpen],
+                ["frozen", snapshot.frozen],
+                ["escalated", snapshot.escalated],
+                ["oldest_open_age_hours", snapshot.oldestOpenAgeHours],
+            ];
+            for (const [state, count] of Object.entries(snapshot.byStatus ?? {})) rows.push([`status.${state}.count`, count]);
+            for (const [severity, count] of Object.entries(snapshot.bySeverity ?? {})) rows.push([`severity.${severity}.count`, count]);
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `aml-case-summary-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: t("AML case summary exported") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            summaryExportLoading.value = false;
         }
     };
 
@@ -352,7 +468,12 @@ const AmlCasesPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("AML Cases")}
-                    end={() => <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>}
+                    end={() => (
+                        <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
+                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportCsv()}>{t("Export CSV")}</VBtn>
+                        </ThemedView>
+                    )}
                 />
 
                 <VAlert type="error" variant="tonal">
@@ -362,7 +483,11 @@ const AmlCasesPage = dc(() => {
                 {summary.value && (
                     <VCard variant="flat" style={{ borderRadius: "16px" }}>
                         <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("AML case health")}</ThemedText>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("AML case health")}</ThemedText>
+                                <div style={{ flex: 1 }} />
+                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
+                            </ThemedView>
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
                                 {summaryItems.value.map((item) => (
                                     <VCard key={item.label} variant="tonal">
@@ -553,6 +678,22 @@ const AmlCasesPage = dc(() => {
                                                 onUpdate:modelValue={(value: string) => (resolution.value = value)}
                                                 label={t("Resolution")}
                                             />
+                                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Case checklist")}</ThemedText>
+                                                {AML_CASE_CHECKS.map((check) => (
+                                                    <VCheckbox
+                                                        key={check.key}
+                                                        modelValue={caseChecklist.value[check.key] === true}
+                                                        onUpdate:modelValue={(value: unknown) => (caseChecklist.value = { ...caseChecklist.value, [check.key]: Boolean(value) })}
+                                                        label={t(check.label)}
+                                                        density="compact"
+                                                        hideDetails
+                                                    />
+                                                ))}
+                                                {!caseChecklistComplete.value && (
+                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all case checklist items before proposing")}</ThemedText>
+                                                )}
+                                            </ThemedView>
                                             <VTextarea
                                                 modelValue={rationale.value}
                                                 onUpdate:modelValue={(value: string) => (rationale.value = value)}
@@ -562,7 +703,7 @@ const AmlCasesPage = dc(() => {
                                                 rows={3}
                                             />
                                             <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
-                                                <VBtn color="primary" loading={actionLoading.value} onClick={() => void propose()}>{t("Propose resolution")}</VBtn>
+                                                <VBtn color="primary" loading={actionLoading.value} disabled={!caseChecklistComplete.value} onClick={() => void propose()}>{t("Propose resolution")}</VBtn>
                                                 <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
                                             </ThemedView>
                                         </VCardText>

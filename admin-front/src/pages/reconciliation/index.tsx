@@ -1,7 +1,21 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
-import { VAlert, VBtn, VCard, VCardText, VDialog, VFileInput, VProgressCircular, VSelect, VTextField } from "vuetify/components";
+import { useRouter } from "vue-router";
+import {
+    VAlert,
+    VBtn,
+    VCard,
+    VCardText,
+    VCheckbox,
+    VDialog,
+    VFileInput,
+    VProgressCircular,
+    VSelect,
+    VSwitch,
+    VTextField,
+    VTextarea,
+} from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -19,6 +33,27 @@ import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { formatPlainNumber } from "@/utils/money";
+
+const UPLOAD_CHECKS = [
+    { key: "SOURCE_VERIFIED", label: "Statement source verified" },
+    { key: "FILE_REVIEWED", label: "Statement file reviewed" },
+    { key: "PERIOD_VERIFIED", label: "Statement period verified" },
+    { key: "DUPLICATE_CHECK_ACKNOWLEDGED", label: "Duplicate-file behavior acknowledged" },
+] as const;
+
+const SUMMARY_EXPORT_CHECKS = [
+    { key: "RUN_SCOPE_VERIFIED", label: "Reconciliation run scope verified" },
+    { key: "MATCH_RATE_REVIEWED", label: "Match rate reviewed" },
+    { key: "RESULT_BREAKDOWN_REVIEWED", label: "Result breakdown reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
+const SOURCE_EDIT_CHECKS = [
+    { key: "PARSER_CONFIG_REVIEWED", label: "Parser config reviewed" },
+    { key: "SCHEDULE_LAG_VERIFIED", label: "Schedule and settlement lag verified" },
+    { key: "DEDUPE_TEMPLATE_REVIEWED", label: "Dedupe template reviewed" },
+    { key: "SOURCE_IMPACT_REVIEWED", label: "Source impact reviewed" },
+] as const;
 
 type StatementSource = {
     id: string;
@@ -70,10 +105,16 @@ type ReconciliationItem = {
     statementFee: string;
     result: string;
     attemptId: string | null;
+    operatorCaseId: string | null;
+    operatorCase: { id: string; state: string; priority: string } | null;
 };
 
 type ReconciliationRunDetail = ReconciliationRun & {
     items: ReconciliationItem[];
+    itemResultCounts?: Record<string, number>;
+    itemsTotal?: number;
+    itemsTruncated?: boolean;
+    itemResultFilter?: string | null;
 };
 
 type ReconciliationSummary = {
@@ -128,6 +169,7 @@ const parseCsvPreview = (text: string, delimiter = ","): { columns: string[]; ro
 
 const ReconciliationPage = dc(() => {
     const { t } = useLocale();
+    const router = useRouter();
     const sources = ref<StatementSource[]>([]);
     const runs = ref<ReconciliationRun[]>([]);
     const runTotal = ref(0);
@@ -138,6 +180,7 @@ const ReconciliationPage = dc(() => {
     const selectedSourceId = ref<string | null>(null);
     const file = ref<File | null>(null);
     const uploadLoading = ref(false);
+    const uploadChecklist = ref<Record<string, boolean>>({});
     const today = new Date();
     const defaultStart = new Date(today.getTime() - 31 * 24 * 60 * 60 * 1000);
     const periodStart = ref(defaultStart.toISOString().slice(0, 10));
@@ -154,6 +197,22 @@ const ReconciliationPage = dc(() => {
     let filterTimer: ReturnType<typeof setTimeout> | undefined;
 
     const detailsOpen = ref(false);
+    const exportLoading = ref(false);
+    const summaryExportLoading = ref(false);
+    const summaryExportChecklist = ref<Record<string, boolean>>({});
+    const runResultFilter = ref("ALL");
+    const sourceEditOpen = ref(false);
+    const sourceSaving = ref(false);
+    const sourceError = ref<string | null>(null);
+    const editingSource = ref<StatementSource | null>(null);
+    const sourceEditChecklist = ref<Record<string, boolean>>({});
+    const sourceForm = ref({
+        scheduleCron: "",
+        settlementLagDays: "0",
+        dedupeKeyTemplate: "",
+        active: true,
+        parserConfig: "{}",
+    });
     const selectedRun = ref<ReconciliationRunDetail | null>(null);
     const detailLoading = ref(false);
 
@@ -222,6 +281,8 @@ const ReconciliationPage = dc(() => {
         }
     };
 
+    const uploadChecklistComplete = computed(() => UPLOAD_CHECKS.every((check) => uploadChecklist.value[check.key] === true));
+
     const upload = async () => {
         if (!file.value || !selectedSourceId.value) {
             showSnackBar({ type: "warning", message: t("Choose a statement source and a file") });
@@ -231,6 +292,10 @@ const ReconciliationPage = dc(() => {
             showSnackBar({ type: "warning", message: t("Choose the statement period") });
             return;
         }
+        if (!uploadChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all upload checklist items before uploading") });
+            return;
+        }
         uploadLoading.value = true;
         try {
             const body = new FormData();
@@ -238,6 +303,7 @@ const ReconciliationPage = dc(() => {
             body.append("sourceId", selectedSourceId.value);
             body.append("periodStart", periodStart.value);
             body.append("periodEnd", periodEnd.value);
+            body.append("checklist", JSON.stringify(UPLOAD_CHECKS.filter((check) => uploadChecklist.value[check.key]).map((check) => check.key)));
             const response = await api.post(urlsMap.reconciliationUpload, body, {
                 headers: { "Content-Type": "multipart/form-data" },
             });
@@ -270,12 +336,126 @@ const ReconciliationPage = dc(() => {
         runRefreshHook.value?.reset();
     };
 
-    const openRun = async (row: ReconciliationRun) => {
-        selectedRun.value = { ...row, items: [] };
-        detailsOpen.value = true;
+    const exportRunItems = async () => {
+        if (!selectedRun.value || exportLoading.value) return;
+        exportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.reconciliationRunExport(selectedRun.value.id), {
+                params: runResultFilter.value === "ALL" ? {} : { result: runResultFilter.value },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const items = (payload.items ?? []) as ReconciliationItem[];
+            if (items.length === 0) {
+                showSnackBar({ type: "warning", message: t("No items to export for this run.") });
+                return;
+            }
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const columns = ["id", "ourReference", "providerReference", "batchReference", "statementAmount", "statementFee", "result", "attemptId", "operatorCaseId", "operatorCaseState"];
+            const lines = [
+                columns.map(escape).join(","),
+                ...items.map((item) =>
+                    [
+                        item.id,
+                        item.ourReference,
+                        item.providerReference,
+                        item.batchReference ?? "",
+                        item.statementAmount,
+                        item.statementFee,
+                        item.result,
+                        item.attemptId ?? "",
+                        item.operatorCaseId ?? "",
+                        item.operatorCase?.state ?? "",
+                    ]
+                        .map(escape)
+                        .join(","),
+                ),
+            ];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `reconciliation-${selectedRun.value.id}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({
+                type: payload.truncated ? "warning" : "success",
+                message: payload.truncated
+                    ? `${t("Exported")} ${items.length} / ${payload.total}`
+                    : `${t("Exported")} ${items.length}`,
+            });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            exportLoading.value = false;
+        }
+    };
+
+    const openSourceEdit = (source: StatementSource) => {
+        editingSource.value = source;
+        sourceForm.value = {
+            scheduleCron: source.scheduleCron ?? "",
+            settlementLagDays: String(source.settlementLagDays),
+            dedupeKeyTemplate: source.dedupeKeyTemplate ?? "",
+            active: source.active,
+            parserConfig: JSON.stringify(source.parserConfig ?? {}, null, 2),
+        };
+        sourceError.value = null;
+        sourceEditChecklist.value = {};
+        sourceEditOpen.value = true;
+    };
+
+    const sourceEditChecklistComplete = computed(() => SOURCE_EDIT_CHECKS.every((check) => sourceEditChecklist.value[check.key] === true));
+
+    const saveSourceEdit = async () => {
+        if (!editingSource.value || sourceSaving.value) return;
+        let parserConfig: unknown;
+        try {
+            parserConfig = JSON.parse(sourceForm.value.parserConfig || "{}");
+        } catch {
+            sourceError.value = t("Parser config must be valid JSON.");
+            return;
+        }
+        if (parserConfig === null || typeof parserConfig !== "object" || Array.isArray(parserConfig)) {
+            sourceError.value = t("Parser config must be a JSON object.");
+            return;
+        }
+        const lag = Number(sourceForm.value.settlementLagDays);
+        if (!Number.isInteger(lag) || lag < 0 || lag > 365) {
+            sourceError.value = t("Settlement lag must be between 0 and 365 days.");
+            return;
+        }
+        if (!sourceEditChecklistComplete.value) {
+            sourceError.value = t("Complete all source checklist items before saving.");
+            return;
+        }
+        sourceSaving.value = true;
+        sourceError.value = null;
+        try {
+            await api.patch(urlsMap.reconciliationSourceUpdate(editingSource.value.id), {
+                scheduleCron: sourceForm.value.scheduleCron.trim() || null,
+                settlementLagDays: lag,
+                dedupeKeyTemplate: sourceForm.value.dedupeKeyTemplate.trim() || null,
+                active: sourceForm.value.active,
+                parserConfig,
+            });
+            showSnackBar({ type: "success", message: t("Statement source updated") });
+            sourceEditOpen.value = false;
+            await load();
+        } catch (e) {
+            sourceError.value = extractApiErrorMessage(e);
+        } finally {
+            sourceSaving.value = false;
+        }
+    };
+
+    const loadRunDetail = async (id: string, result: string) => {
         detailLoading.value = true;
         try {
-            const response = await api.get(urlsMap.reconciliationRunDetail(row.id));
+            const response = await api.get(urlsMap.reconciliationRunDetail(id), {
+                params: result === "ALL" ? {} : { result },
+            });
             const payload = response.data?.data ?? response.data ?? {};
             selectedRun.value = (payload.run ?? payload) as ReconciliationRunDetail;
         } catch (e) {
@@ -284,6 +464,64 @@ const ReconciliationPage = dc(() => {
             showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
         } finally {
             detailLoading.value = false;
+        }
+    };
+
+    const openRun = async (row: ReconciliationRun) => {
+        selectedRun.value = { ...row, items: [] };
+        runResultFilter.value = "ALL";
+        detailsOpen.value = true;
+        await loadRunDetail(row.id, "ALL");
+    };
+
+    const changeRunResult = async (value: string | null) => {
+        const next = value || "ALL";
+        runResultFilter.value = next;
+        if (selectedRun.value) await loadRunDetail(selectedRun.value.id, next);
+    };
+
+    const summaryExportChecklistComplete = computed(() => SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
+
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        if (!summaryExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all summary export checklist items before exporting") });
+            return;
+        }
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.reconciliationSummaryExport, {
+                params: { checklist: SUMMARY_EXPORT_CHECKS.filter((check) => summaryExportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const snapshot = payload as ReconciliationSummary;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["sources", snapshot.sources],
+                ["runs", snapshot.runs],
+                ["completed_runs", snapshot.completedRuns],
+                ["processing_runs", snapshot.processingRuns],
+                ["total_rows", snapshot.totalRows],
+                ["matched_rows", snapshot.matchedRows],
+                ["mismatched_rows", snapshot.mismatchedRows],
+                ["match_rate", snapshot.matchRate],
+            ];
+            for (const [result, count] of Object.entries(snapshot.resultCounts ?? {})) rows.push([`result.${result}.count`, count]);
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `reconciliation-summary-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: t("Reconciliation summary exported") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            summaryExportLoading.value = false;
         }
     };
 
@@ -331,6 +569,14 @@ const ReconciliationPage = dc(() => {
             key: "active",
             label: "Status",
             Value: ({ row }: { row: StatementSource }) => <StatusChip label={row.active ? t("Active") : t("Inactive")} tone={row.active ? "success" : "neutral"} size="small" />,
+        },
+        {
+            key: "actions",
+            label: "Actions",
+            sortable: false,
+            Value: ({ row }: { row: StatementSource }) => (
+                <VBtn size="small" variant="text" onClick={() => openSourceEdit(row)}>{t("Edit")}</VBtn>
+            ),
         },
     ]);
 
@@ -381,6 +627,24 @@ const ReconciliationPage = dc(() => {
         { key: "batch", label: "Batch", value: (row) => row.batchReference ?? "—" },
         { key: "amount", label: "Statement amount", value: (row) => row.statementAmount },
         { key: "fee", label: "Statement fee", value: (row) => row.statementFee },
+        {
+            key: "case",
+            label: "Operator case",
+            value: (row) => row.operatorCase?.state ?? (row.operatorCaseId ? "LINKED" : ""),
+            Value: ({ row }: { row: ReconciliationItem }) =>
+                row.operatorCaseId ? (
+                    <VBtn
+                        size="x-small"
+                        variant="text"
+                        prependIcon="mdi-lifebuoy"
+                        onClick={() => void router.push({ name: "OperatorCaseDetail", params: { id: row.operatorCaseId ?? "" } })}
+                    >
+                        {row.operatorCase?.state ?? t("Open case")}
+                    </VBtn>
+                ) : (
+                    <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>—</ThemedText>
+                ),
+        },
     ];
 
     const resultTone = (result: string) => statusTone(result);
@@ -390,7 +654,12 @@ const ReconciliationPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Reconciliation")}
-                    end={() => <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => { void load(); runRefreshHook.value?.refreshAsIs(); }}>{t("Refresh")}</VBtn>}
+                    end={() => (
+                        <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
+                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => { void load(); runRefreshHook.value?.refreshAsIs(); }}>{t("Refresh")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
+                        </ThemedView>
+                    )}
                 />
 
                 {error.value ? (
@@ -406,6 +675,22 @@ const ReconciliationPage = dc(() => {
                                 <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Reconciliation health")}</ThemedText>
                                     <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
+                                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
+                                            {SUMMARY_EXPORT_CHECKS.map((check) => (
+                                                <VCheckbox
+                                                    key={check.key}
+                                                    modelValue={summaryExportChecklist.value[check.key] === true}
+                                                    onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
+                                                    label={t(check.label)}
+                                                    density="compact"
+                                                    hideDetails
+                                                />
+                                            ))}
+                                            {!summaryExportChecklistComplete.value && (
+                                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
+                                            )}
+                                        </ThemedView>
                                         {summaryItems.value.map((item) => (
                                             <VCard key={item.label} variant="tonal">
                                                 <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
@@ -441,7 +726,23 @@ const ReconciliationPage = dc(() => {
                                     <VTextField type="date" label={t("Period start")} modelValue={periodStart.value} onUpdate:modelValue={(value: string) => (periodStart.value = value)} style={{ minWidth: "170px" }} />
                                     <VTextField type="date" label={t("Period end")} modelValue={periodEnd.value} onUpdate:modelValue={(value: string) => (periodEnd.value = value)} style={{ minWidth: "170px" }} />
                                     <VFileInput label={t("Statement file")} modelValue={file.value} onUpdate:modelValue={(value: File | File[] | null) => void onFileChanged(value)} style={{ minWidth: "260px" }} />
-                                    <VBtn color="primary" loading={uploadLoading.value} disabled={!selectedSourceId.value || !file.value} onClick={() => void upload()}>{t("Upload")}</VBtn>
+                                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Upload checklist")}</ThemedText>
+                                        {UPLOAD_CHECKS.map((check) => (
+                                            <VCheckbox
+                                                key={check.key}
+                                                modelValue={uploadChecklist.value[check.key] === true}
+                                                onUpdate:modelValue={(value: unknown) => (uploadChecklist.value = { ...uploadChecklist.value, [check.key]: Boolean(value) })}
+                                                label={t(check.label)}
+                                                density="compact"
+                                                hideDetails
+                                            />
+                                        ))}
+                                        {!uploadChecklistComplete.value && (
+                                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all upload checklist items before uploading")}</ThemedText>
+                                        )}
+                                    </ThemedView>
+                                    <VBtn color="primary" loading={uploadLoading.value} disabled={!selectedSourceId.value || !file.value || !uploadChecklistComplete.value} onClick={() => void upload()}>{t("Upload")}</VBtn>
                                 </ThemedView>
                             </VCardText>
                         </VCard>
@@ -541,6 +842,57 @@ const ReconciliationPage = dc(() => {
                 )}
             </ThemedView>
 
+            <VDialog modelValue={sourceEditOpen.value} onUpdate:modelValue={(value: boolean) => (sourceEditOpen.value = value)} maxWidth="720px">
+                <VCard>
+                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{t("Edit statement source")}</ThemedText>
+                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+                            <ThemedText style={{ fontSize: "13px", flex: 1 }}>{editingSource.value?.name}</ThemedText>
+                            <VSwitch
+                                label={t("Active")}
+                                modelValue={sourceForm.value.active}
+                                onUpdate:modelValue={(value: boolean | null) => (sourceForm.value.active = !!value)}
+                                color="primary"
+                                hideDetails
+                            />
+                        </ThemedView>
+                        <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
+                            <VTextField label={t("Schedule cron")} modelValue={sourceForm.value.scheduleCron} onUpdate:modelValue={(value: string) => (sourceForm.value.scheduleCron = value)} style={{ flex: "1 1 240px" }} />
+                            <VTextField label={t("Settlement lag days")} type="number" modelValue={sourceForm.value.settlementLagDays} onUpdate:modelValue={(value: string) => (sourceForm.value.settlementLagDays = value)} style={{ flex: "1 1 180px" }} />
+                        </ThemedView>
+                        <VTextField label={t("Dedupe key template")} modelValue={sourceForm.value.dedupeKeyTemplate} onUpdate:modelValue={(value: string) => (sourceForm.value.dedupeKeyTemplate = value)} />
+                        <VTextarea
+                            label={t("Parser config JSON")}
+                            modelValue={sourceForm.value.parserConfig}
+                            onUpdate:modelValue={(value: string) => (sourceForm.value.parserConfig = value)}
+                            rows={8}
+                            style={{ fontFamily: "ui-monospace, monospace", direction: "ltr" }}
+                        />
+                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Source edit checklist")}</ThemedText>
+                            {SOURCE_EDIT_CHECKS.map((check) => (
+                                <VCheckbox
+                                    key={check.key}
+                                    modelValue={sourceEditChecklist.value[check.key] === true}
+                                    onUpdate:modelValue={(value: unknown) => (sourceEditChecklist.value = { ...sourceEditChecklist.value, [check.key]: Boolean(value) })}
+                                    label={t(check.label)}
+                                    density="compact"
+                                    hideDetails
+                                />
+                            ))}
+                            {!sourceEditChecklistComplete.value && (
+                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all source checklist items before saving.")}</ThemedText>
+                            )}
+                        </ThemedView>
+                        {sourceError.value && <VAlert type="error" variant="tonal" density="compact">{sourceError.value}</VAlert>}
+                        <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
+                            <VBtn variant="text" onClick={() => (sourceEditOpen.value = false)}>{t("Cancel")}</VBtn>
+                            <VBtn color="primary" loading={sourceSaving.value} disabled={!sourceEditChecklistComplete.value} onClick={() => void saveSourceEdit()}>{t("Save")}</VBtn>
+                        </ThemedView>
+                    </VCardText>
+                </VCard>
+            </VDialog>
+
             <VDialog modelValue={detailsOpen.value} onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)} maxWidth="1100px" scrollable>
                 <VCard>
                     <VCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
@@ -584,6 +936,31 @@ const ReconciliationPage = dc(() => {
                                     {t("Created")} {formatDateTime(selectedRun.value.createdAt)} · {t("Finished")} {formatDateTime(selectedRun.value.finishedAt)}
                                 </ThemedText>
 
+                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                                    <VSelect
+                                        label={t("Filter by result")}
+                                        items={[
+                                            { title: t("All results"), value: "ALL" },
+                                            ...Object.entries(selectedRun.value.itemResultCounts ?? {}).map(([result, count]) => ({
+                                                title: `${result.replaceAll("_", " ")} (${count})`,
+                                                value: result,
+                                            })),
+                                        ]}
+                                        modelValue={runResultFilter.value}
+                                        onUpdate:modelValue={(value: string | null) => void changeRunResult(value)}
+                                        style={{ maxWidth: "360px" }}
+                                    />
+                                    <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>
+                                        {selectedRun.value.itemsTotal ?? selectedRun.value.items.length} {t("items")}
+                                    </ThemedText>
+                                </ThemedView>
+
+                                {selectedRun.value.itemsTruncated && (
+                                    <VAlert type="info" variant="tonal" density="compact">
+                                        {t("Showing the first 200 filtered items. Export includes all matching rows.")}
+                                    </VAlert>
+                                )}
+
                                 <DataTable
                                     title={t("Statement items")}
                                     data={selectedRun.value.items}
@@ -593,7 +970,8 @@ const ReconciliationPage = dc(() => {
                                     noElevation={true}
                                 />
 
-                                <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end" }}>
+                                <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
+                                    <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportRunItems()}>{t("Export items")}</VBtn>
                                     <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
                                 </ThemedView>
                             </>

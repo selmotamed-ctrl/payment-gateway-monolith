@@ -74,4 +74,28 @@ router.get(
   }),
 );
 
+router.get(
+  "/progress/overview/summary",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/academy/progress/overview/summary",
+  }),
+);
+
+router.get(
+  "/progress/overview/summary/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/academy/progress/overview/summary/export",
+  }),
+);
+
+router.get(
+  "/progress/overview/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/academy/progress/overview/export",
+  }),
+);
+
 export const academyRouter = router;

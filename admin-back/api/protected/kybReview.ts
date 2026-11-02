@@ -64,10 +64,27 @@ router.get(
 );
 
 router.get(
+  "/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/kyb-documents/export",
+    querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
   "/summary",
   coreForward({
     method: "GET",
     path: () => "/internal/admin/kyb-documents/summary",
+  }),
+);
+
+router.get(
+  "/summary/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/kyb-documents/summary/export",
   }),
 );
 

@@ -140,6 +140,19 @@ export type JoinRequestSummary = {
     profileJson: Record<string, unknown> | null;
     merchant: MerchantSummary;
     kybDocuments?: KybDocument[];
+    decision?: string | null;
+    decisionReasonCode?: string | null;
+};
+
+export type JoinAuditEntry = {
+    id: string;
+    createdAt: string;
+    action: string;
+    role: string;
+    beforeJson: Record<string, unknown> | null;
+    afterJson: Record<string, unknown> | null;
+    approvalRequestId: string | null;
+    actor: { id: string; email: string } | null;
 };
 
 export type JoinRequestDetail = JoinRequestSummary & {
@@ -159,6 +172,7 @@ export type JoinRequestDetail = JoinRequestSummary & {
     readiness: JoinReadiness;
     checklistKeys: string[];
     amlDetailsRedacted: boolean;
+    auditTrail: JoinAuditEntry[];
 };
 
 export type KybUploadResult = {

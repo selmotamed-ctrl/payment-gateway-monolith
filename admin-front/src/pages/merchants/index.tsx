@@ -17,6 +17,8 @@ import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities, user } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
+import { extractApiErrorMessage } from "@/utils/errors/extractor";
+import { showSnackBar } from "@/utils/snackBar";
 import {
     COLUMN_HELP,
     formatDateTime,
@@ -66,6 +68,8 @@ const MerchantsPage = dc(() => {
     const actionOpen = ref(false);
     const actionMode = ref<MerchantActionMode>("SUSPEND");
     const actionMerchant = ref<MerchantSummary | null>(null);
+    const exportLoading = ref(false);
+    const summaryExportLoading = ref(false);
 
     const canWrite = computed(() =>
         hasOneOfAuthorities(["merchant:write", "merchants.edit_descriptive", "merchants.propose_sensitive", "merchants.suspend", "merchants.reinstate"]),
@@ -317,9 +321,120 @@ const MerchantsPage = dc(() => {
 
     void loadSummary();
 
+    const exportCsv = async () => {
+        if (exportLoading.value) return;
+        exportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.merchantsExport, {
+                params: {
+                    ...(search.value ? { search: search.value } : {}),
+                    ...buildFilterQuery(filterDefinitions.value, filters.value),
+                },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const rowsData = (payload.merchants ?? []) as MerchantSummary[];
+            if (rowsData.length === 0) {
+                showSnackBar({ type: "warning", message: t("No merchants match the current filters.") });
+                return;
+            }
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const columns = ["id", "tradeName", "legalName", "country", "status", "kybStatus", "riskTier", "onboardingChannel", "contactEmail", "contactPhone", "activatedAt", "nextKybReviewAt", "wallets", "applications", "users", "joinRequests", "kybDocuments", "pendingApprovals"];
+            const lines = [
+                columns.map(escape).join(","),
+                ...rowsData.map((row) =>
+                    [
+                        row.id,
+                        row.tradeName,
+                        row.legalName,
+                        row.country,
+                        row.status,
+                        row.kybStatus ?? "",
+                        row.riskTier ?? "",
+                        row.onboardingChannel,
+                        row.contactEmail ?? "",
+                        row.contactPhone ?? "",
+                        row.activatedAt ?? "",
+                        row.nextKybReviewAt ?? "",
+                        row.walletCount,
+                        row.applicationCount,
+                        row.userCount,
+                        row.joinRequestCount,
+                        row.kybDocumentCount,
+                        row.pendingApprovalCount,
+                    ]
+                        .map(escape)
+                        .join(","),
+                ),
+            ];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `merchants-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({
+                type: payload.truncated ? "warning" : "success",
+                message: payload.truncated
+                    ? `${t("Exported")} ${rowsData.length} / ${payload.total}`
+                    : `${t("Exported")} ${rowsData.length}`,
+            });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            exportLoading.value = false;
+        }
+    };
+
     const refreshAll = () => {
         refreshHook.value?.refreshAsIs();
         void loadSummary();
+    };
+
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.merchantsSummaryExport);
+            const payload = response.data?.data ?? response.data ?? {};
+            const snapshot = (payload.summary ?? payload) as MerchantsSummary;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["total", snapshot.total],
+                ["active", snapshot.active],
+                ["pending", snapshot.pending],
+                ["suspended", snapshot.suspended],
+                ["rejected", snapshot.rejected],
+                ["closed", snapshot.closed],
+                ["kyb_pending", snapshot.kybPending],
+                ["kyb_verified", snapshot.kybVerified],
+                ["high_risk", snapshot.highRisk],
+                ["review_overdue", snapshot.reviewOverdue],
+                ["review_due_soon", snapshot.reviewDueSoon],
+                ["pending_approvals", snapshot.pendingApprovals],
+            ];
+            for (const [status, count] of Object.entries(snapshot.byStatus ?? {})) rows.push([`status.${status}.count`, count]);
+            for (const [state, count] of Object.entries(snapshot.byKyb ?? {})) rows.push([`kyb.${state}.count`, count]);
+            for (const [risk, count] of Object.entries(snapshot.byRisk ?? {})) rows.push([`risk.${risk}.count`, count]);
+            for (const [channel, count] of Object.entries(snapshot.byChannel ?? {})) rows.push([`channel.${channel}.count`, count]);
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `merchant-summary-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: t("Merchant summary exported") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            summaryExportLoading.value = false;
+        }
     };
 
     const summaryItems = computed(() => {
@@ -349,6 +464,7 @@ const MerchantsPage = dc(() => {
                             <StatusChip label={`${suspendedCount.value} ${t("suspended")}`} tone={suspendedCount.value ? "error" : "neutral"} size="small" />
                             <StatusChip label={`${pendingCount.value} ${t("pending changes")}`} tone={pendingCount.value ? "warning" : "neutral"} size="small" />
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportCsv()}>{t("Export CSV")}</VBtn>
                         </ThemedView>
                     )}
                 />
@@ -356,7 +472,11 @@ const MerchantsPage = dc(() => {
                 {summary.value && (
                     <VCard variant="flat" style={{ borderRadius: "16px" }}>
                         <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Merchant portfolio health")}</ThemedText>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Merchant portfolio health")}</ThemedText>
+                                <div style={{ flex: 1 }} />
+                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
+                            </ThemedView>
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px" }}>
                                 {summaryItems.value.map((item) => (
                                     <VCard key={item.label} variant="tonal">

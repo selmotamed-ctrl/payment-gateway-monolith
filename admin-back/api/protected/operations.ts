@@ -15,6 +15,17 @@ export const resolveSchema = z
     notes: z.string().max(2000).optional(),
     providerReference: z.string().min(1).max(191).optional(),
     settledAmount: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "EVIDENCE_REVIEWED",
+          "ATTEMPT_STATUS_VERIFIED",
+          "OUTCOME_DOCUMENTED",
+          "CHECKER_REQUIREMENT_CONFIRMED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict();
 
@@ -22,6 +33,55 @@ export const bulkInquireSchema = z
   .object({
     caseIds: z.array(zIdentifier).min(1).max(200),
     reason: z.string().max(500).optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "ELIGIBILITY_REVIEWED",
+          "ATTEMPT_STATUS_VERIFIED",
+          "GATEWAY_SUPPORT_CONFIRMED",
+          "INQUIRY_SCOPE_CONFIRMED",
+        ]),
+      )
+      .max(10)
+      .optional(),
+  })
+  .strict();
+
+export const bulkAssignSchema = z
+  .object({
+    caseIds: z.array(zIdentifier).min(1).max(200),
+    assigneeUserId: zIdentifier.nullable(),
+    reason: z.string().max(500).optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "ASSIGNEE_VERIFIED",
+          "WORKLOAD_REVIEWED",
+          "NOTIFICATION_PLANNED",
+          "CASE_SCOPE_CONFIRMED",
+        ]),
+      )
+      .max(10)
+      .optional(),
+  })
+  .strict();
+
+export const bulkStateSchema = z
+  .object({
+    caseIds: z.array(zIdentifier).min(1).max(200),
+    state: z.enum(["OPEN", "IN_PROGRESS"]),
+    reason: z.string().max(500).optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "CASE_SCOPE_CONFIRMED",
+          "STATE_IMPACT_REVIEWED",
+          "SLA_IMPACT_REVIEWED",
+          "NOTIFICATION_PLANNED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict();
 
@@ -50,6 +110,15 @@ router.get(
 );
 
 router.get(
+  "/operator-cases/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/operator-cases/export",
+    querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
   "/operator-cases/summary",
   coreForward({
     method: "GET",
@@ -63,6 +132,24 @@ router.post(
     method: "POST",
     path: () => "/internal/admin/operator-cases/bulk-inquire",
     schema: bulkInquireSchema,
+  }),
+);
+
+router.post(
+  "/operator-cases/bulk-assign",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/admin/operator-cases/bulk-assign",
+    schema: bulkAssignSchema,
+  }),
+);
+
+router.post(
+  "/operator-cases/bulk-state",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/admin/operator-cases/bulk-state",
+    schema: bulkStateSchema,
   }),
 );
 
@@ -86,6 +173,14 @@ router.post(
     schema: resolveSchema,
     bodyFrom: (_req, body) => toCoreOperatorCaseResolve(body),
     relayStatus: true,
+  }),
+);
+
+router.get(
+  "/operator-cases/summary/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/operator-cases/summary/export",
   }),
 );
 

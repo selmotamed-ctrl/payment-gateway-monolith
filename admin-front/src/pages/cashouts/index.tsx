@@ -2,7 +2,7 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VCard, VCardText, VDialog, VProgressCircular, VSelect, VTab, VTabs, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VProgressCircular, VSelect, VTab, VTabs, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -62,6 +62,20 @@ type CashoutSummary = {
 
 type CashoutView = "open" | "history" | "all";
 
+const SUMMARY_EXPORT_CHECKS = [
+    { key: "OPEN_SCOPE_VERIFIED", label: "Open cash-out scope verified" },
+    { key: "AMOUNT_TOTALS_REVIEWED", label: "Amount totals reviewed" },
+    { key: "STATE_BREAKDOWN_REVIEWED", label: "State breakdown reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
+const PROCESS_CHECKS = [
+    { key: "BANK_DETAILS_VERIFIED", label: "Bank details snapshot verified" },
+    { key: "WALLET_BALANCE_VERIFIED", label: "Wallet balance and holds verified" },
+    { key: "MERCHANT_ACTIVE", label: "Merchant is active and not suspended" },
+    { key: "NO_AML_RESTRICTIONS", label: "No AML restriction blocks the payout" },
+] as const;
+
 const OPEN_STATES = ["PENDING", "PROCESSING"];
 const HISTORY_STATES = ["COMPLETE", "SUBTRACTED", "REJECTED"];
 
@@ -111,6 +125,10 @@ const CashoutsPage = dc(() => {
     const decision = ref<"APPROVE" | "REJECT">("APPROVE");
     const reason = ref("");
     const actionLoading = ref(false);
+    const checklist = ref<Record<string, boolean>>({});
+    const exportLoading = ref(false);
+    const summaryExportLoading = ref(false);
+    const summaryExportChecklist = ref<Record<string, boolean>>({});
 
     const filterDefinitions = computed(() => tableRegistry.CashOuts?.filters ?? []);
 
@@ -151,12 +169,119 @@ const CashoutsPage = dc(() => {
         refreshHook.value?.reset();
     };
 
+    const exportCsv = async () => {
+        if (exportLoading.value) return;
+        exportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.cashoutsExport, {
+                params: {
+                    ...(search.value ? { search: search.value } : {}),
+                    ...buildFilterQuery(filterDefinitions.value, filters.value),
+                },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const rowsData = (payload.cashouts ?? []) as Cashout[];
+            if (rowsData.length === 0) {
+                showSnackBar({ type: "warning", message: t("No cash-outs match the current filters.") });
+                return;
+            }
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const columns = ["id", "merchant", "walletId", "currency", "amount", "state", "adjustmentId", "adjustmentState", "requestedAt", "ageHours"];
+            const lines = [
+                columns.map(escape).join(","),
+                ...rowsData.map((row) =>
+                    [
+                        row.id,
+                        row.merchantName || row.merchantId,
+                        row.walletId,
+                        row.currency,
+                        row.amount,
+                        row.state,
+                        row.adjustmentId ?? "",
+                        row.adjustmentState ?? "",
+                        row.requestedAt,
+                        row.ageHours,
+                    ]
+                        .map(escape)
+                        .join(","),
+                ),
+            ];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `cashouts-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({
+                type: payload.truncated ? "warning" : "success",
+                message: payload.truncated
+                    ? `${t("Exported")} ${rowsData.length} / ${payload.total}`
+                    : `${t("Exported")} ${rowsData.length}`,
+            });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            exportLoading.value = false;
+        }
+    };
+
+    const summaryExportChecklistComplete = computed(() => SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
+
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        if (!summaryExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all summary export checklist items before exporting") });
+            return;
+        }
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.cashoutsSummaryExport, {
+                params: { checklist: SUMMARY_EXPORT_CHECKS.filter((check) => summaryExportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
+            const snapshot = (response.data?.data ?? response.data ?? {}) as CashoutSummary;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["total_open", snapshot.totalOpen],
+                ["open_amount", snapshot.openAmount],
+                ["pending_count", snapshot.pendingCount],
+                ["processing_count", snapshot.processingCount],
+                ["completed_count", snapshot.completedCount],
+                ["subtracted_count", snapshot.subtractedCount],
+                ["rejected_count", snapshot.rejectedCount],
+                ["oldest_pending_age_hours", snapshot.oldestPendingAgeHours],
+            ];
+            for (const [state, count] of Object.entries(snapshot.byState ?? {})) {
+                rows.push([`state.${state}.count`, count]);
+                rows.push([`state.${state}.amount`, snapshot.amountByState?.[state] ?? "0"]);
+            }
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `cashout-summary-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: t("Cash-out summary exported") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            summaryExportLoading.value = false;
+        }
+    };
+
     const refreshAll = () => {
         refreshHook.value?.refreshAsIs();
         void loadSummary();
     };
 
     const openDetails = async (row: Cashout) => {
+        checklist.value = {};
         selected.value = {
             ...row,
             merchantLegalName: "",
@@ -184,9 +309,15 @@ const CashoutsPage = dc(() => {
         }
     };
 
+    const checklistComplete = computed(() => PROCESS_CHECKS.every((check) => checklist.value[check.key] === true));
+
     const process = async () => {
         if (!selected.value) return;
         if (!selected.value.canProcess) return;
+        if (!checklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all checklist items before processing") });
+            return;
+        }
         if (decision.value === "REJECT" && reason.value.trim().length < 3) {
             showSnackBar({ type: "warning", message: t("A rejection reason is required") });
             return;
@@ -196,6 +327,7 @@ const CashoutsPage = dc(() => {
             await api.post(urlsMap.cashoutProcess(selected.value.id), {
                 decision: decision.value,
                 reason: reason.value.trim() || undefined,
+                checklist: PROCESS_CHECKS.filter((check) => checklist.value[check.key]).map((check) => check.key),
             });
             showSnackBar({ type: "success", message: decision.value === "APPROVE" ? t("Cash-out approved") : t("Cash-out rejected") });
             detailsOpen.value = false;
@@ -297,7 +429,12 @@ const CashoutsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Cash-Outs")}
-                    end={() => <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>}
+                    end={() => (
+                        <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
+                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportCsv()}>{t("Export CSV")}</VBtn>
+                        </ThemedView>
+                    )}
                 />
 
                 <VAlert type="info" variant="tonal">
@@ -307,7 +444,27 @@ const CashoutsPage = dc(() => {
                 {summary.value && (
                     <VCard variant="flat" style={{ borderRadius: "16px" }}>
                         <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Cash-out health")}</ThemedText>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Cash-out health")}</ThemedText>
+                                <div style={{ flex: 1 }} />
+                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
+                            </ThemedView>
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
+                                {SUMMARY_EXPORT_CHECKS.map((check) => (
+                                    <VCheckbox
+                                        key={check.key}
+                                        modelValue={summaryExportChecklist.value[check.key] === true}
+                                        onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
+                                        label={t(check.label)}
+                                        density="compact"
+                                        hideDetails
+                                    />
+                                ))}
+                                {!summaryExportChecklistComplete.value && (
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
+                                )}
+                            </ThemedView>
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "10px" }}>
                                 {summaryItems.value.map((item) => (
                                     <VCard key={item.label} variant="tonal">
@@ -461,6 +618,22 @@ const CashoutsPage = dc(() => {
                                     <VCard variant="tonal">
                                         <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                             <ThemedText type="defaultSemiBold">{t("Finance decision")}</ThemedText>
+                                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Process checklist")}</ThemedText>
+                                                {PROCESS_CHECKS.map((check) => (
+                                                    <VCheckbox
+                                                        key={check.key}
+                                                        modelValue={checklist.value[check.key] === true}
+                                                        onUpdate:modelValue={(value: unknown) => (checklist.value = { ...checklist.value, [check.key]: Boolean(value) })}
+                                                        label={t(check.label)}
+                                                        density="compact"
+                                                        hideDetails
+                                                    />
+                                                ))}
+                                                {!checklistComplete.value && (
+                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all checklist items before processing")}</ThemedText>
+                                                )}
+                                            </ThemedView>
                                             <VSelect
                                                 items={[
                                                     { title: t("Approve and execute"), value: "APPROVE" },
@@ -479,7 +652,7 @@ const CashoutsPage = dc(() => {
                                                 persistentHint
                                             />
                                             <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
-                                                <VBtn color={decision.value === "APPROVE" ? "success" : "error"} loading={actionLoading.value} onClick={() => void process()}>
+                                                <VBtn color={decision.value === "APPROVE" ? "success" : "error"} loading={actionLoading.value} disabled={!checklistComplete.value} onClick={() => void process()}>
                                                     {decision.value === "APPROVE" ? t("Approve cash-out") : t("Reject cash-out")}
                                                 </VBtn>
                                                 <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>

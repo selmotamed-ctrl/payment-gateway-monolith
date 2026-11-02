@@ -6,6 +6,8 @@ import { isEmpty } from "@/utils/clientValidationRules";
 import { showSnackBar } from "@/utils/snackBar";
 import { VIcon, VTooltip } from "vuetify/components";
 
+let fieldIdSequence = 0;
+
 export type FieldProps = {
     value?: string | null | number;
     text: string;
@@ -21,6 +23,9 @@ export const Field = dc(
     (props: FieldProps) => {
         const { t } = useLocale();
         const theme = useTheme();
+        const fieldId = `pg-field-${++fieldIdSequence}`;
+        const labelId = `${fieldId}-label`;
+        const helpId = `${fieldId}-help`;
 
         return () => {
             const cc = theme.current.value.colors;
@@ -57,6 +62,7 @@ export const Field = dc(
                         class="print-hide"
                     >
                         <p
+                            id={labelId}
                             style={{
                                 color: cc.onSurfaceVariant,
                                 fontSize: "12px",
@@ -71,6 +77,7 @@ export const Field = dc(
                         </p>
                         {isInteractive && props.copyOnClick && (
                             <VIcon
+                                aria-hidden="true"
                                 size="14"
                                 class="field-copy-icon"
                                 style={{
@@ -97,6 +104,12 @@ export const Field = dc(
                                     activator: ({ props: activatorProps }: { props: Record<string, unknown> }) => (
                                         <VIcon
                                             {...activatorProps}
+                                            {...{
+                                                id: helpId,
+                                                tabindex: 0,
+                                                role: "button",
+                                                "aria-label": `${t(props.text)} ${t("help")}`,
+                                            }}
                                             icon="mdi-help-circle-outline"
                                             size="14"
                                             style={{ color: cc.onSurfaceVariant, opacity: 0.5, cursor: "help" }}
@@ -108,6 +121,23 @@ export const Field = dc(
                     </ThemedView>
                     <ThemedView
                         onClick={isInteractive ? handleClick : undefined}
+                        onKeydown={
+                            isInteractive
+                                ? (event: KeyboardEvent) => {
+                                      if (event.key === "Enter" || event.key === " ") {
+                                          event.preventDefault();
+                                          handleClick();
+                                      }
+                                  }
+                                : undefined
+                        }
+                        {...(isInteractive
+                            ? {
+                                  role: "button",
+                                  tabindex: 0,
+                                  "aria-label": `${t(props.text)}: ${String(props.value)}${props.copyOnClick ? ` (${t("copy")})` : ""}`,
+                              }
+                            : { "aria-labelledby": labelId })}
                         style={{
                             minHeight: "24px",
                             display: "flex",

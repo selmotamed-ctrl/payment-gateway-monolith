@@ -279,6 +279,7 @@ export const createRegulatoryReportViaApproval = async (
     subjectId: string;
     amlCaseId?: string | null;
     payload: Record<string, unknown>;
+    checklist?: string[];
   },
   actor: { userId: string; role: string | null },
 ): Promise<{ reportId: string; approvalRequestId: string; status: string }> => {
@@ -317,6 +318,7 @@ export const createRegulatoryReportViaApproval = async (
           subjectType: input.subjectType,
           subjectId: input.subjectId,
           ruleId: input.payload.ruleId ?? null,
+          checklist: input.checklist ?? [],
         },
         mode: "STANDARD",
         makerUserId: actor.userId,
@@ -340,6 +342,7 @@ export const createRegulatoryReportViaApproval = async (
           reportType: report.reportType,
           authority: report.authority,
           approvalRequestId: approval.id,
+          checklist: input.checklist ?? [],
         },
         approvalRequestId: approval.id,
       },
@@ -670,6 +673,60 @@ router.get("/auth/me", (_request: Request, response: Response) => {
 
 router.use(requireAuthentication);
 
+const recentActivityRows = async (limit: number) => {
+  const rows = await client.auditLog.findMany({
+    orderBy: { createdAt: "desc" },
+    take: limit,
+    include: { actor: { select: { email: true } } },
+  });
+  return rows.map((row) => ({
+    id: row.id,
+    createdAt: row.createdAt,
+    actorEmail: row.actor?.email ?? "",
+    role: row.role,
+    action: row.action,
+    entityType: row.entityType,
+    entityId: row.entityId,
+    approvalRequestId: row.approvalRequestId,
+  }));
+};
+
+router.get("/stats/recent-activity", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["security:read"]);
+  const parsedLimit = Number(request.query.limit ?? 8);
+  const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(Math.trunc(parsedLimit), 1), 20) : 8;
+  response.json({ recentActivity: await recentActivityRows(limit) });
+});
+
+router.get("/stats/recent-activity/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["security:read"]);
+  const parsedLimit = Number(request.query.limit ?? 200);
+  const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(Math.trunc(parsedLimit), 1), 5000) : 200;
+  const rows = await recentActivityRows(limit);
+  const allowedChecklist = new Set([
+    "ACTIVITY_SCOPE_VERIFIED",
+    "ACTORS_REVIEWED",
+    "SECURITY_SCOPE_CONFIRMED",
+    "EXPORT_AUDIT_ACKNOWLEDGED",
+  ]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "DASHBOARD_RECENT_ACTIVITY_EXPORTED",
+      entityType: "AUDIT_LOG",
+      entityId: "dashboard-recent-activity",
+      beforeJson: {},
+      afterJson: { exported: rows.length, checklist },
+    },
+  });
+  response.json({ recentActivity: rows, exported: rows.length, exportedAt: new Date().toISOString() });
+});
+
 router.get("/stats/overview", async (request: Request, response: Response) => {
   const now = new Date();
   const period = merchantPeriodLabel(request.query.period);
@@ -833,6 +890,34 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
   });
 });
 
+router.post("/stats/export-audit", async (request: Request, response: Response) => {
+  const body = parseOrThrow(
+    z.object({
+      period: z.string().min(1).max(32),
+      checklist: z.array(z.enum([
+        "PERIOD_VERIFIED",
+        "METRICS_REVIEWED",
+        "DISTRIBUTION_ACKNOWLEDGED",
+        "EXPORT_SCOPE_CONFIRMED",
+      ])).max(10).optional(),
+    }).strict(),
+    request.body ?? {},
+  );
+  const actor = actorFromRequest(request);
+  const created = await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "DASHBOARD_SNAPSHOT_EXPORTED",
+      entityType: "DASHBOARD",
+      entityId: "snapshot",
+      beforeJson: {},
+      afterJson: { period: body.period, checklist: body.checklist ?? [] },
+    },
+  });
+  response.status(201).json({ id: created.id });
+});
+
 const OPTION_LIMIT = 100;
 
 router.get("/options/:kind", async (request: Request, response: Response) => {
@@ -971,8 +1056,61 @@ router.get("/users", async (request: Request, response: Response) => {
   })), total, built));
 });
 
-router.get("/users/summary", async (request: Request, response: Response) => {
+router.get("/users/export", async (request: Request, response: Response) => {
   requireAuthorities(request, ["user:read", "security:read"]);
+  const built = buildListQuery(request.query, {
+    search: ["email", "phone"],
+    in: { status: "status" }, equals: {role: "role", merchantId: "merchantId"},
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { email: "email", role: "role", status: "status", createdAt: "createdAt" },
+    defaultSort: { createdAt: "desc" },
+  });
+  const scope = String(request.query.scope ?? "").trim().toLowerCase();
+  if (scope === "admin") {
+    built.where = { ...(built.where as Record<string, unknown>), merchantId: null };
+  } else if (scope === "merchant") {
+    built.where = { ...(built.where as Record<string, unknown>), merchantId: { not: null } };
+  }
+  const take = 5000;
+  const [users, total] = await Promise.all([
+    client.user.findMany({ where: built.where as never, orderBy: built.orderBy as never, take }),
+    client.user.count({ where: built.where as never }),
+  ]);
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "ADMIN_USERS_EXPORTED",
+      entityType: "USER",
+      entityId: "export",
+      beforeJson: {},
+      afterJson: { total, exported: users.length, filters: JSON.stringify(request.query ?? {}) },
+    },
+  });
+  response.json({
+    users: users.map((user) => ({
+      id: user.id,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      merchantId: user.merchantId,
+      authoritiesMap: user.authoritiesMap,
+      status: user.status,
+      isMaker: user.isMaker,
+      isChecker: user.isChecker,
+      mfaRequired: user.mfaRequired,
+      invitationExpiresAt: user.invitationExpiresAt,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    })),
+    total,
+    exported: users.length,
+    truncated: total > users.length,
+  });
+});
+
+const buildInternalUserSummary = async () => {
   const users = await client.user.findMany({
     where: { merchantId: null },
     select: { role: true, status: true, isMaker: true, isChecker: true },
@@ -985,7 +1123,7 @@ router.get("/users/summary", async (request: Request, response: Response) => {
   }
   const makers = users.filter((user) => user.isMaker).length;
   const checkers = users.filter((user) => user.isChecker).length;
-  response.json({
+  return {
     summary: {
       total: users.length,
       active: byStatus.ACTIVE ?? 0,
@@ -998,8 +1136,48 @@ router.get("/users/summary", async (request: Request, response: Response) => {
       byRole,
       byStatus,
     },
-  });
+  };
+};
+
+router.get("/users/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["user:read", "security:read"]);
+  response.json(await buildInternalUserSummary());
 });
+
+router.get("/users/summary/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["user:read", "security:read"]);
+  const snapshot = await buildInternalUserSummary();
+  const actor = actorFromRequest(request);
+  const allowedChecklist = new Set([
+    "ACCESS_SCOPE_VERIFIED",
+    "ROLE_STATUS_REVIEWED",
+    "MAKER_CHECKER_REVIEWED",
+    "EXPORT_APPROVAL_CONFIRMED",
+  ]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "INTERNAL_USER_SUMMARY_EXPORTED",
+      entityType: "USER",
+      entityId: "summary",
+      beforeJson: {},
+      afterJson: {
+        total: snapshot.summary.total,
+        active: snapshot.summary.active,
+        invited: snapshot.summary.invited,
+        makers: snapshot.summary.makers,
+        checkers: snapshot.summary.checkers,
+        checklist,
+      },
+    },
+  });
+  response.json({ ...snapshot, exportedAt: new Date().toISOString() });
+});
+
 
 router.get("/users/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["user:read", "security:read"]);
@@ -1028,7 +1206,46 @@ router.get("/users/:id", async (request: Request, response: Response) => {
   if (!user) {
     throw new ApiError(404, "USER_NOT_FOUND", "The user does not exist");
   }
-  response.json({ user });
+  const [approvalHistory, auditTrail] = await Promise.all([
+    client.approvalRequest.findMany({
+      where: { OR: [{ makerUserId: user.id }, { checkerUserId: user.id }] },
+      orderBy: { createdAt: "desc" },
+      take: 25,
+      select: {
+        id: true,
+        subjectType: true,
+        subjectId: true,
+        state: true,
+        mode: true,
+        makerUserId: true,
+        checkerUserId: true,
+        makerReason: true,
+        rejectionReason: true,
+        createdAt: true,
+        updatedAt: true,
+        expiresAt: true,
+        maker: { select: { id: true, email: true } },
+        checker: { select: { id: true, email: true } },
+      },
+    }),
+    client.auditLog.findMany({
+      where: { actorId: user.id },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      select: {
+        id: true,
+        createdAt: true,
+        action: true,
+        role: true,
+        entityType: true,
+        entityId: true,
+        beforeJson: true,
+        afterJson: true,
+        approvalRequestId: true,
+      },
+    }),
+  ]);
+  response.json({ user, approvalHistory, auditTrail });
 });
 
 router.post("/users", async (request: Request, response: Response) => {
@@ -1051,6 +1268,12 @@ router.post("/users", async (request: Request, response: Response) => {
         authoritiesMap: z.array(z.string().min(2).max(64)).max(60).default([]),
         isMaker: z.boolean().default(false),
         isChecker: z.boolean().default(false),
+        checklist: z.array(z.enum([
+          "EMAIL_VERIFIED",
+          "ROLE_SCOPE_CONFIRMED",
+          "AUTHORITIES_REVIEWED",
+          "MFA_REQUIREMENT_CONFIRMED",
+        ])).max(10).optional(),
       })
       .strict(),
     request.body,
@@ -1068,6 +1291,18 @@ router.post("/users", async (request: Request, response: Response) => {
       status: "INVITED",
     },
   });
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "INTERNAL_USER_INVITED",
+      entityType: "USER",
+      entityId: user.id,
+      beforeJson: {},
+      afterJson: { email: user.email, role: user.role, checklist: body.checklist ?? [] },
+    },
+  });
   response.status(201).json({ id: user.id, email: user.email, role: user.role, status: user.status });
 });
 
@@ -1082,6 +1317,12 @@ router.patch("/users", async (request: Request, response: Response) => {
         status: z.enum(["INVITED", "ACTIVE", "SUSPENDED", "DISABLED"]).optional(),
         isMaker: z.boolean().optional(),
         isChecker: z.boolean().optional(),
+        checklist: z.array(z.enum([
+          "SELECTION_REVIEWED",
+          "STATUS_IMPACT_REVIEWED",
+          "NOTIFICATION_PLANNED",
+          "AUTHORITY_CONFIRMED",
+        ])).max(10).optional(),
       })
       .strict(),
     request.body,
@@ -1116,6 +1357,19 @@ router.patch("/users", async (request: Request, response: Response) => {
       isChecker: body.isChecker,
     },
   });
+  if (body.status !== undefined) {
+    await client.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role,
+        action: "ADMIN_USER_STATUS_UPDATED",
+        entityType: "USER",
+        entityId: user.id,
+        beforeJson: { status: user.status },
+        afterJson: { status: updated.status, checklist: body.checklist ?? [] },
+      },
+    });
+  }
   response.json({ id: updated.id, role: updated.role, status: updated.status });
 });
 
@@ -1128,6 +1382,12 @@ router.patch("/users/:id", async (request: Request, response: Response) => {
         authoritiesMap: z.array(z.string().min(2).max(64)).max(60).optional(),
         role: z.string().max(40).optional(),
         status: z.enum(["INVITED", "ACTIVE", "SUSPENDED", "DISABLED"]).optional(),
+        checklist: z.array(z.enum([
+          "SELECTION_REVIEWED",
+          "STATUS_IMPACT_REVIEWED",
+          "NOTIFICATION_PLANNED",
+          "AUTHORITY_CONFIRMED",
+        ])).max(10).optional(),
       })
       .strict(),
     request.body,
@@ -1145,6 +1405,7 @@ router.patch("/users/:id", async (request: Request, response: Response) => {
         payloadDiffJson: {
           ...(body.authoritiesMap ? { authoritiesMap: body.authoritiesMap } : {}),
           ...(body.role ? { role: body.role } : {}),
+          checklist: body.checklist ?? [],
         },
         mode: "STANDARD",
         makerUserId: actor.userId,
@@ -1159,6 +1420,19 @@ router.patch("/users/:id", async (request: Request, response: Response) => {
     where: { id: user.id },
     data: { status: body.status },
   });
+  if (body.status !== undefined) {
+    await client.auditLog.create({
+      data: {
+        actorId: actorFromRequest(request).userId,
+        role: actorFromRequest(request).role,
+        action: "ADMIN_USER_STATUS_UPDATED",
+        entityType: "USER",
+        entityId: user.id,
+        beforeJson: { status: user.status },
+        afterJson: { status: updated.status, checklist: body.checklist ?? [] },
+      },
+    });
+  }
   response.json({ id: updated.id, role: updated.role, status: updated.status });
 });
 
@@ -1568,6 +1842,21 @@ const joinRequestDetail = async (id: string, role: string | null) => {
     orderBy: [{ active: "desc" }, { createdAt: "asc" }],
   });
   const readiness = await computeJoinRequestReadiness(client, id);
+  const auditTrail = await client.auditLog.findMany({
+    where: { entityType: "JOIN_REQUEST", entityId: id },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+    select: {
+      id: true,
+      createdAt: true,
+      action: true,
+      role: true,
+      beforeJson: true,
+      afterJson: true,
+      approvalRequestId: true,
+      actor: { select: { id: true, email: true } },
+    },
+  });
   const confidential = role === "COMPLIANCE" || role === "MLRO";
   const screening = joinRequest.screening
     ? {
@@ -1589,6 +1878,7 @@ const joinRequestDetail = async (id: string, role: string | null) => {
     screening,
     beneficialOwners,
     readiness,
+    auditTrail,
     checklistKeys: JOIN_REQUEST_CHECKLIST_KEYS,
     amlDetailsRedacted: !confidential,
   };
@@ -1616,8 +1906,65 @@ router.get("/join-requests", async (request: Request, response: Response) => {
   })), total, built));
 });
 
-router.get("/join-requests/summary", async (request: Request, response: Response) => {
+router.get("/join-requests/export", async (request: Request, response: Response) => {
   requireAuthorities(request, ["kyb:read", "compliance:read"]);
+  const built = buildListQuery(request.query, {
+    search: ["merchant.legalName", "merchant.tradeName", "merchant.contactEmail", "merchant.contactPhone"],
+    in: { status: "status" }, equals: {merchantId: "merchantId", proposedRiskTier: "proposedRiskTier", onboardingChannel: "onboardingChannel", assignedReviewerId: "assignedReviewerId"},
+    dates: { createdAt: { path: "createdAt" }, slaDueAt: { path: "slaDueAt", fromKey: "dateFrom", toKey: "dateTo" } },
+    sortable: { status: "status", submittedAt: "createdAt", slaDueAt: "slaDueAt", riskTier: "proposedRiskTier" },
+    defaultSort: { createdAt: "desc" },
+  });
+  const take = 5000;
+  const [joinRequests, total] = await Promise.all([
+    client.joinRequest.findMany({
+      where: built.where as never,
+      orderBy: built.orderBy as never,
+      include: {
+        merchant: { select: { id: true, tradeName: true, legalName: true } },
+        assignedReviewer: { select: { email: true } },
+      },
+      take,
+    }),
+    client.joinRequest.count({ where: built.where as never }),
+  ]);
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "JOIN_REQUESTS_EXPORTED",
+      entityType: "JOIN_REQUEST",
+      entityId: "export",
+      beforeJson: {},
+      afterJson: { total, exported: joinRequests.length, filters: JSON.stringify(request.query ?? {}) },
+    },
+  });
+  response.json({
+    joinRequests: joinRequests.map((entry) => ({
+      id: entry.id,
+      merchantId: entry.merchantId,
+      merchantName: entry.merchant?.tradeName ?? "",
+      legalName: entry.merchant?.legalName ?? "",
+      status: entry.status,
+      riskTier: entry.proposedRiskTier,
+      onboardingChannel: entry.onboardingChannel,
+      submittedAt: entry.submittedAt ?? entry.createdAt,
+      createdAt: entry.createdAt,
+      slaDueAt: entry.slaDueAt,
+      slaPausedAt: entry.slaPausedAt,
+      reviewer: entry.assignedReviewer?.email ?? "",
+      fourEyesRequired: entry.fourEyesRequired,
+      decision: entry.decision ?? null,
+      decisionReasonCode: entry.decisionReasonCode ?? null,
+    })),
+    total,
+    exported: joinRequests.length,
+    truncated: total > joinRequests.length,
+  });
+});
+
+const buildJoinRequestSummary = async () => {
   const now = new Date();
   const requests = await client.joinRequest.findMany({
     select: {
@@ -1648,7 +1995,7 @@ router.get("/join-requests/summary", async (request: Request, response: Response
     if (!entry.assignedReviewerId && openStatuses.has(entry.status)) unassigned += 1;
     if (entry.fourEyesRequired && openStatuses.has(entry.status)) fourEyes += 1;
   }
-  response.json({
+  return {
     summary: {
       total: requests.length,
       open: requests.filter((entry) => openStatuses.has(entry.status)).length,
@@ -1665,8 +2012,38 @@ router.get("/join-requests/summary", async (request: Request, response: Response
       byStatus,
       byRisk,
     },
-  });
+  };
+};
+
+router.get("/join-requests/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["kyb:read", "compliance:read"]);
+  response.json(await buildJoinRequestSummary());
 });
+
+router.get("/join-requests/summary/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["kyb:read", "compliance:read"]);
+  const snapshot = await buildJoinRequestSummary();
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "JOIN_REQUEST_SUMMARY_EXPORTED",
+      entityType: "JOIN_REQUEST",
+      entityId: "summary",
+      beforeJson: {},
+      afterJson: {
+        total: snapshot.summary.total,
+        open: snapshot.summary.open,
+        overdue: snapshot.summary.overdue,
+        unassigned: snapshot.summary.unassigned,
+        fourEyes: snapshot.summary.fourEyes,
+      },
+    },
+  });
+  response.json({ ...snapshot, exportedAt: new Date().toISOString() });
+});
+
 
 router.get("/join-requests/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["kyb:read", "compliance:read"]);
@@ -2820,8 +3197,141 @@ router.get("/kyb-documents", async (request: Request, response: Response) => {
   response.json(listResponse("kybDocuments", rows, total, built));
 });
 
-router.get("/kyb-documents/summary", async (request: Request, response: Response) => {
+router.get("/kyb-documents/export", async (request: Request, response: Response) => {
   requireAuthorities(request, ["kyb:read", "compliance:read"]);
+  const built = buildListQuery(request.query, {
+    search: [
+      "merchant.legalName",
+      "merchant.tradeName",
+      "merchant.contactEmail",
+      "merchant.contactPhone",
+      "originalFileName",
+      "sha256",
+    ],
+    contains: {
+      requestRef: "joinRequest.id",
+      merchantName: ["merchant.legalName", "merchant.tradeName"],
+    },
+    in: { status: "status", avStatus: "avStatus", docType: "docType", subjectType: "subjectType" },
+    equals: {
+      merchantId: "merchantId",
+      joinRequestId: "joinRequestId",
+      reviewedById: "reviewedById",
+    },
+    dates: {
+      createdAt: { path: "createdAt", fromKey: "uploadedFrom", toKey: "uploadedTo" },
+      expiresOn: { path: "expiresOn", fromKey: "expiryFrom", toKey: "expiryTo" },
+    },
+    sortable: {
+      createdAt: "createdAt",
+      expiresOn: "expiresOn",
+      status: "status",
+      avStatus: "avStatus",
+      docType: "docType",
+    },
+    defaultSort: { createdAt: "desc" },
+  });
+  const query = (request.query ?? {}) as Record<string, unknown>;
+  const conditions = ((built.where as Record<string, unknown>).AND as Record<string, unknown>[] | undefined) ?? [];
+  const and = [...conditions];
+  and.push({ OR: [{ joinRequestId: null }, { joinRequest: { status: { not: "DRAFT" } } }] });
+  const requestStatuses = typeof query.requestStatus === "string"
+    ? query.requestStatus.split(",").map((value) => value.trim()).filter(Boolean)
+    : [];
+  if (requestStatuses.length > 0) {
+    and.push({ joinRequest: { status: { in: requestStatuses } } });
+  }
+  if (query.duplicateOnly === "true") {
+    const duplicateHashes = (await client.$queryRawUnsafe(
+      "SELECT sha256 FROM kyb_documents GROUP BY sha256 HAVING COUNT(DISTINCT merchant_id) > 1",
+    )) as Array<{ sha256: string }>;
+    and.push({ sha256: { in: duplicateHashes.map((row) => row.sha256) } });
+  }
+  if (query.expiringSoon === "true") {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const thirtyDays = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
+    and.push({ expiresOn: { gte: today, lte: thirtyDays } });
+    and.push({ status: { in: ["UPLOADED", "ACCEPTED"] } });
+  }
+  const where = { AND: and };
+  const take = 5000;
+  const [documents, total] = await Promise.all([
+    client.kybDocument.findMany({
+      where: where as never,
+      orderBy: built.orderBy as never,
+      take,
+      select: {
+        id: true,
+        merchantId: true,
+        joinRequestId: true,
+        subjectType: true,
+        subjectId: true,
+        docType: true,
+        originalFileName: true,
+        mime: true,
+        sizeBytes: true,
+        sha256: true,
+        avStatus: true,
+        status: true,
+        expiresOn: true,
+        reviewedAt: true,
+        rejectionReasonCode: true,
+        createdAt: true,
+        merchant: { select: { tradeName: true, legalName: true, status: true, kybStatus: true } },
+        uploadedBy: { select: { email: true } },
+        reviewedBy: { select: { email: true } },
+        joinRequest: { select: { id: true, status: true } },
+      },
+    }),
+    client.kybDocument.count({ where: where as never }),
+  ]);
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "KYB_DOCUMENTS_EXPORTED",
+      entityType: "KYB_DOCUMENT",
+      entityId: "export",
+      beforeJson: {},
+      afterJson: { total, exported: documents.length, filters: JSON.stringify(query) },
+    },
+  });
+  response.json({
+    documents: documents.map((document) => ({
+      id: document.id,
+      merchantId: document.merchantId,
+      merchantName: document.merchant?.tradeName ?? document.merchant?.legalName ?? "",
+      merchantLegalName: document.merchant?.legalName ?? "",
+      merchantStatus: document.merchant?.status ?? null,
+      merchantKybStatus: document.merchant?.kybStatus ?? null,
+      joinRequestId: document.joinRequestId,
+      joinRequestStatus: document.joinRequest?.status ?? null,
+      subjectType: document.subjectType,
+      subjectId: document.subjectId,
+      docType: document.docType,
+      originalFileName: document.originalFileName,
+      mime: document.mime,
+      sizeBytes: document.sizeBytes,
+      sha256: document.sha256,
+      avStatus: document.avStatus,
+      status: document.status,
+      expiresOn: document.expiresOn,
+      expiryState: expiryState(document.expiresOn),
+      uploadedBy: document.uploadedBy?.email ?? "",
+      reviewedBy: document.reviewedBy?.email ?? "",
+      reviewedAt: document.reviewedAt,
+      rejectionReasonCode: document.rejectionReasonCode,
+      createdAt: document.createdAt,
+    })),
+    total,
+    exported: documents.length,
+    truncated: total > documents.length,
+  });
+});
+
+const buildKybDocumentSummary = async () => {
   const now = new Date();
   const inThirtyDays = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
   const documents = await client.kybDocument.findMany({
@@ -2848,7 +3358,7 @@ router.get("/kyb-documents/summary", async (request: Request, response: Response
       else if (doc.expiresOn.getTime() <= inThirtyDays.getTime()) expiringSoon += 1;
     }
   }
-  response.json({
+  return {
     summary: {
       total: documents.length,
       pending: byStatus.UPLOADED ?? 0,
@@ -2863,8 +3373,37 @@ router.get("/kyb-documents/summary", async (request: Request, response: Response
       byAvStatus,
       byDocType,
     },
-  });
+  };
+};
+
+router.get("/kyb-documents/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["kyb:read", "compliance:read"]);
+  response.json(await buildKybDocumentSummary());
 });
+
+router.get("/kyb-documents/summary/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["kyb:read", "compliance:read"]);
+  const snapshot = await buildKybDocumentSummary();
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "KYB_DOCUMENT_SUMMARY_EXPORTED",
+      entityType: "KYB_DOCUMENT",
+      entityId: "summary",
+      beforeJson: {},
+      afterJson: {
+        total: snapshot.summary.total,
+        pending: snapshot.summary.pending,
+        expired: snapshot.summary.expired,
+        duplicates: snapshot.summary.duplicates,
+      },
+    },
+  });
+  response.json({ ...snapshot, exportedAt: new Date().toISOString() });
+});
+
 
 router.get("/kyb-documents/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["kyb:read", "compliance:read"]);
@@ -2876,7 +3415,7 @@ router.get("/kyb-documents/:id", async (request: Request, response: Response) =>
   if (!document) {
     throw new ApiError(404, "KYB_DOCUMENT_NOT_FOUND", "The KYB document does not exist");
   }
-  const [availability, duplicateMatches, subjectName, readiness, openJoinRequest, openRevalidations] = await Promise.all([
+  const [availability, duplicateMatches, subjectName, readiness, openJoinRequest, openRevalidations, auditTrail] = await Promise.all([
     contentAvailabilityForIds([document.id]),
     duplicateDocumentsForHash(document),
     document.subjectType === "BENEFICIAL_OWNER"
@@ -2892,6 +3431,21 @@ router.get("/kyb-documents/:id", async (request: Request, response: Response) =>
     client.kybRevalidationRequest.findMany({
       where: { documentId: document.id, status: "OPEN" },
       orderBy: { requestedAt: "desc" },
+    }),
+    client.auditLog.findMany({
+      where: { entityType: "KYB_DOCUMENT", entityId: document.id },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      select: {
+        id: true,
+        createdAt: true,
+        action: true,
+        role: true,
+        beforeJson: true,
+        afterJson: true,
+        approvalRequestId: true,
+        actor: { select: { id: true, email: true } },
+      },
     }),
   ]);
   const linkedJoinRequest = document.joinRequest;
@@ -2923,6 +3477,7 @@ router.get("/kyb-documents/:id", async (request: Request, response: Response) =>
       ),
       openJoinRequest: openJoinRequest ? { id: openJoinRequest.id, status: openJoinRequest.status } : null,
       openRevalidations,
+      auditTrail,
       reviewReasonCodes: KYB_DOCUMENT_REJECTION_REASONS,
     },
   });
@@ -3560,6 +4115,44 @@ const approvalSubjectContext = async (subjectType: string, subjectId: string): P
       });
       return row ? { contextType: "GATEWAY_VERSION", ...row } : null;
     }
+    case "COMMISSION_PROFILE": {
+      const row = await client.commissionProfile.findUnique({
+        where: { id: subjectId },
+        select: {
+          id: true,
+          railCode: true,
+          calcType: true,
+          flatFee: true,
+          percentageRate: true,
+          feeBearerDefault: true,
+          effectiveFrom: true,
+          effectiveTo: true,
+          merchantId: true,
+          applicationId: true,
+          version: true,
+        },
+      });
+      return row ? { contextType: "COMMISSION_PROFILE", ...row } : null;
+    }
+    case "VELOCITY_RULE": {
+      const row = await client.velocityRule.findUnique({
+        where: { id: subjectId },
+        select: {
+          id: true,
+          scopeType: true,
+          scopeValue: true,
+          windowSeconds: true,
+          maxCount: true,
+          maxAmount: true,
+          action: true,
+          active: true,
+          effectiveFrom: true,
+          effectiveTo: true,
+          version: true,
+        },
+      });
+      return row ? { contextType: "VELOCITY_RULE", ...row } : null;
+    }
     case "USER": {
       const row = await client.user.findUnique({
         where: { id: subjectId },
@@ -3686,8 +4279,99 @@ router.get("/merchants", async (request: Request, response: Response) => {
   ));
 });
 
-router.get("/merchants/summary", async (request: Request, response: Response) => {
+router.get("/merchants/export", async (request: Request, response: Response) => {
   requireAuthorities(request, ["merchant:read"]);
+  const principal = principalOf(request);
+  const flags = merchantOperationalFlags(principal);
+  const built = buildListQuery(request.query, {
+    search: flags.canSensitive
+      ? ["legalName", "tradeName", "contactEmail", "contactPhone", "taxId", "registrationNo"]
+      : ["legalName", "tradeName", "contactEmail", "contactPhone"],
+    contains: {
+      merchantName: ["displayName", "tradeName"],
+      businessName: "legalName",
+    },
+    in: { status: "status", kybStatus: "kybStatus", riskTier: "riskTier", onboardingChannel: "onboardingChannel" },
+    equals: { country: "country" },
+    dates: {
+      createdAt: { path: "createdAt" },
+      activatedAt: { path: "activatedAt", fromKey: "activatedFrom", toKey: "activatedTo" },
+      nextKybReviewAt: { path: "nextKybReviewAt", fromKey: "reviewFrom", toKey: "reviewTo" },
+    },
+    sortable: {
+      legalName: "legalName",
+      tradeName: "tradeName",
+      status: "status",
+      riskTier: "riskTier",
+      kybStatus: "kybStatus",
+      createdAt: "createdAt",
+      activatedAt: "activatedAt",
+      nextKybReviewAt: "nextKybReviewAt",
+    },
+    defaultSort: { createdAt: "desc" },
+  });
+  const query = (request.query ?? {}) as Record<string, unknown>;
+  const and = [...(((built.where as Record<string, unknown>).AND as Record<string, unknown>[] | undefined) ?? [])];
+  const requestRef = typeof query.requestRef === "string" ? query.requestRef.trim() : "";
+  if (requestRef) and.push({ joinRequests: { some: { id: { contains: requestRef } } } });
+  if (query.hasOpenJoinRequest === "true") {
+    and.push({ joinRequests: { some: { status: { in: [...MERCHANT_OPEN_JOIN_STATUSES] } } } });
+  }
+  if (query.hasOpenAmlCase === "true") {
+    if (!flags.canAml) {
+      and.push({ id: { in: [] } });
+    } else {
+      const cases = await client.amlCase.findMany({
+        where: { subjectType: "MERCHANT", status: { in: [...MERCHANT_OPEN_AML_STATUSES] } },
+        select: { subjectId: true },
+        distinct: ["subjectId"],
+      });
+      and.push({ id: { in: cases.map((row) => row.subjectId) } });
+    }
+  }
+  const where = { AND: and };
+  const take = 5000;
+  const [merchants, total] = await Promise.all([
+    client.merchant.findMany({
+      where: where as never,
+      orderBy: built.orderBy as never,
+      take,
+      select: merchantListSelect,
+    }),
+    client.merchant.count({ where: where as never }),
+  ]);
+  const ids = merchants.map((merchant) => merchant.id);
+  const pendingApprovals = ids.length === 0
+    ? []
+    : await client.approvalRequest.findMany({
+        where: { subjectType: "MERCHANT", subjectId: { in: ids }, state: "PENDING_REVIEW" },
+        select: { subjectId: true },
+      });
+  const pendingCount = new Map<string, number>();
+  for (const approval of pendingApprovals) {
+    pendingCount.set(approval.subjectId, (pendingCount.get(approval.subjectId) ?? 0) + 1);
+  }
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "MERCHANTS_EXPORTED",
+      entityType: "MERCHANT",
+      entityId: "export",
+      beforeJson: {},
+      afterJson: { total, exported: merchants.length, filters: JSON.stringify(query) },
+    },
+  });
+  response.json({
+    merchants: merchants.map((merchant) => serializeMerchantSummary(merchant as never, flags, pendingCount.get(merchant.id) ?? 0)),
+    total,
+    exported: merchants.length,
+    truncated: total > merchants.length,
+  });
+});
+
+const buildMerchantSummary = async () => {
   const now = new Date();
   const merchants = await client.merchant.findMany({
     select: {
@@ -3719,7 +4403,7 @@ router.get("/merchants/summary", async (request: Request, response: Response) =>
       else if (merchant.nextKybReviewAt.getTime() - now.getTime() <= 30 * 24 * 60 * 60 * 1000) reviewDueSoon += 1;
     }
   }
-  response.json({
+  return {
     summary: {
       total: merchants.length,
       active: byStatus.ACTIVE ?? 0,
@@ -3738,6 +4422,101 @@ router.get("/merchants/summary", async (request: Request, response: Response) =>
       byRisk,
       byChannel,
     },
+  };
+};
+
+router.get("/merchants/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["merchant:read"]);
+  response.json(await buildMerchantSummary());
+});
+
+router.get("/merchants/summary/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["merchant:read"]);
+  const snapshot = await buildMerchantSummary();
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "MERCHANT_SUMMARY_EXPORTED",
+      entityType: "MERCHANT",
+      entityId: "summary",
+      beforeJson: {},
+      afterJson: {
+        total: snapshot.summary.total,
+        active: snapshot.summary.active,
+        pending: snapshot.summary.pending,
+        highRisk: snapshot.summary.highRisk,
+        reviewOverdue: snapshot.summary.reviewOverdue,
+      },
+    },
+  });
+  response.json({ ...snapshot, exportedAt: new Date().toISOString() });
+});
+
+
+router.get("/merchants/:id/summary/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["merchant:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const principal = principalOf(request);
+  const flags = merchantOperationalFlags(principal);
+  const merchant = await client.merchant.findUnique({
+    where: { id },
+    select: merchantListSelect,
+  });
+  if (!merchant) throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
+  const [pendingApprovalCount, metrics, balance, openDisputes, pendingCashouts, openAmlCases] = await Promise.all([
+    client.approvalRequest.count({ where: { subjectType: "MERCHANT", subjectId: id, state: { in: ["DRAFT", "PENDING_REVIEW"] } } }),
+    flags.canFinancial
+      ? client.paymentAttempt.groupBy({
+          by: ["status"],
+          where: { merchantId: id, createdAt: { gte: new Date(Date.now() - 30 * 86_400_000) } },
+          _count: { _all: true },
+          _sum: { totalChargedAmount: true },
+        })
+      : Promise.resolve([]),
+    flags.canFinancial ? merchantWalletBalance(client, id) : Promise.resolve(null),
+    flags.canFinancial
+      ? client.dispute.count({ where: { attempt: { merchantId: id }, status: { in: ["OPENED", "EVIDENCE_REQUESTED", "EVIDENCE_SUBMITTED"] } } })
+      : Promise.resolve(0),
+    flags.canFinancial
+      ? client.cashoutRequest.count({ where: { merchantId: id, state: { in: ["PENDING", "PROCESSING"] } } })
+      : Promise.resolve(0),
+    flags.canAml
+      ? client.amlCase.count({ where: { subjectType: "MERCHANT", subjectId: id, status: { in: [...AML_OPEN_STATUSES] as never } } })
+      : Promise.resolve(0),
+  ]);
+  const summary = serializeMerchantSummary(merchant as never, flags, pendingApprovalCount);
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "MERCHANT_360_SUMMARY_EXPORTED",
+      entityType: "MERCHANT",
+      entityId: id,
+      beforeJson: {},
+      afterJson: {
+        status: summary.status,
+        pendingApprovalCount,
+        openDisputes,
+        pendingCashouts,
+        openAmlCases,
+      },
+    },
+  });
+  response.json({
+    merchant: summary,
+    walletBalance: balance,
+    metrics: metrics.map((row) => ({
+      status: row.status,
+      count: row._count._all,
+      chargedAmount: row._sum.totalChargedAmount ?? "0.0000",
+    })),
+    openDisputes,
+    pendingCashouts,
+    openAmlCases,
+    generatedAt: new Date().toISOString(),
   });
 });
 
@@ -4593,6 +5372,12 @@ router.post("/merchants/:id/propose-edit", async (request: Request, response: Re
       reason: z.string().min(3).max(2000),
       baseVersion: z.number().int().min(1).optional(),
       patch: z.array(z.record(z.string().max(64), z.unknown())).min(1).max(200),
+      checklist: z.array(z.enum([
+        "PATCH_REVIEWED",
+        "SOURCE_DOCUMENT_VERIFIED",
+        "MAKER_REASON_DOCUMENTED",
+        "CHECKER_SCOPE_CONFIRMED",
+      ])).max(10).optional(),
     }).strict(),
     request.body,
   );
@@ -4612,6 +5397,7 @@ router.post("/merchants/:id/propose-edit", async (request: Request, response: Re
         patch: body.patch,
         reason: body.reason,
         baseVersion,
+        checklist: body.checklist ?? [],
       } as Prisma.InputJsonValue,
       makerReason: body.reason,
       mode: "STANDARD",
@@ -4634,6 +5420,12 @@ router.post("/merchants/:id/suspend", async (request: Request, response: Respons
       emergency: z.boolean().optional(),
       ratifyWithinHours: z.number().int().min(1).max(168).optional(),
       baseVersion: z.number().int().min(1).optional(),
+      checklist: z.array(z.enum([
+        "IMPACT_REVIEWED",
+        "REASON_DOCUMENTED",
+        "NOTIFICATION_PLANNED",
+        "WALLET_DISPUTE_CHECKED",
+      ])).max(10).optional(),
     }).strict(),
     request.body,
   );
@@ -4666,6 +5458,7 @@ router.post("/merchants/:id/suspend", async (request: Request, response: Respons
             reasonCode: body.reasonCode,
             notes: body.notes ?? null,
             baseVersion,
+            checklist: body.checklist ?? [],
           } as Prisma.InputJsonValue,
           makerReason: body.notes ?? `Emergency suspension: ${body.reasonCode}`,
           mode: "EMERGENCY_RATIFICATION",
@@ -4706,7 +5499,7 @@ router.post("/merchants/:id/suspend", async (request: Request, response: Respons
           entityType: "MERCHANT",
           entityId: id,
           beforeJson: { status: merchant.status },
-          afterJson: { status: "SUSPENDED", reasonCode: body.reasonCode, approvalRequestId: approval.id },
+          afterJson: { status: "SUSPENDED", reasonCode: body.reasonCode, approvalRequestId: approval.id, checklist: body.checklist ?? [] },
           approvalRequestId: approval.id,
         },
       });
@@ -4736,6 +5529,7 @@ router.post("/merchants/:id/suspend", async (request: Request, response: Respons
         reasonCode: body.reasonCode,
         notes: body.notes ?? null,
         baseVersion: body.baseVersion ?? merchantVersion(merchant),
+        checklist: body.checklist ?? [],
       } as Prisma.InputJsonValue,
       makerReason: body.notes ?? `Suspend merchant: ${body.reasonCode}`,
       mode: "STANDARD",
@@ -4752,7 +5546,16 @@ router.post("/merchants/:id/reinstate", async (request: Request, response: Respo
   requireAuthorities(request, ["merchant:write"]);
   const { id } = parseOrThrow(idSchema, request.params);
   const body = parseOrThrow(
-    z.object({ reason: z.string().min(3).max(2000), baseVersion: z.number().int().min(1).optional() }).strict(),
+    z.object({
+      reason: z.string().min(3).max(2000),
+      baseVersion: z.number().int().min(1).optional(),
+      checklist: z.array(z.enum([
+        "COMPLIANCE_CLEARANCE_VERIFIED",
+        "OUTSTANDING_ITEMS_RESOLVED",
+        "WALLET_DISPUTE_CHECKED",
+        "REASON_DOCUMENTED",
+      ])).max(10).optional(),
+    }).strict(),
     request.body,
   );
   const actor = actorFromRequest(request);
@@ -4770,6 +5573,7 @@ router.post("/merchants/:id/reinstate", async (request: Request, response: Respo
         reasonCode: "REINSTATEMENT",
         notes: body.reason,
         baseVersion,
+        checklist: body.checklist ?? [],
       } as Prisma.InputJsonValue,
       makerReason: body.reason,
       mode: "STANDARD",
@@ -4790,6 +5594,12 @@ router.post("/merchants/:id/close", async (request: Request, response: Response)
       reasonCode: z.enum(MERCHANT_CLOSE_REASON_CODES),
       notes: z.string().max(2000).optional(),
       baseVersion: z.number().int().min(1).optional(),
+      checklist: z.array(z.enum([
+        "BALANCE_ZERO_VERIFIED",
+        "OPEN_DISPUTES_CLEARED",
+        "CASHOUTS_CLEARED",
+        "IRREVERSIBLE_ACKNOWLEDGED",
+      ])).max(10).optional(),
     }).strict(),
     request.body,
   );
@@ -4826,6 +5636,7 @@ router.post("/merchants/:id/close", async (request: Request, response: Response)
         reasonCode: body.reasonCode,
         notes: body.notes ?? null,
         baseVersion,
+        checklist: body.checklist ?? [],
       } as Prisma.InputJsonValue,
       makerReason: body.notes ?? `Close merchant: ${body.reasonCode}`,
       mode: "STANDARD",
@@ -4979,8 +5790,82 @@ router.get("/approvals", async (request: Request, response: Response) => {
   response.json(listResponse("approvals", approvals.map((approval) => approvalListRow(approval as never)), total, built));
 });
 
-router.get("/approvals/summary", async (request: Request, response: Response) => {
+router.get("/approvals/export", async (request: Request, response: Response) => {
   requireAuthorities(request, ["approval:read"]);
+  const query = (request.query ?? {}) as Record<string, unknown>;
+  const built = buildListQuery(request.query, {
+    search: ["subjectId", "subjectType", "maker.email", "checker.email"],
+    in: { state: "state", mode: "mode" },
+    equals: { makerUserId: "makerUserId", checkerUserId: "checkerUserId" },
+    dates: {
+      createdAt: { path: "createdAt" },
+      expiresAt: { path: "expiresAt", fromKey: "expiresFrom", toKey: "expiresTo" },
+    },
+    sortable: {
+      subjectType: "subjectType",
+      subjectId: "subjectId",
+      state: "state",
+      mode: "mode",
+      createdAt: "createdAt",
+      expiresAt: "expiresAt",
+    },
+    defaultSort: { createdAt: "desc" },
+    defaultPageSize: 20,
+  });
+  const domain = typeof query.domain === "string" ? query.domain.trim().toUpperCase() : "";
+  const conditions: Record<string, unknown>[] = [built.where];
+  const requestedSubjectTypes = typeof query.subjectType === "string"
+    ? query.subjectType.split(",").map((value) => value.trim()).filter(Boolean)
+    : [];
+  if (requestedSubjectTypes.length > 0) {
+    conditions.push({
+      subjectType: { in: requestedSubjectTypes.flatMap((value) => approvalSubjectTypeVariants(value)) },
+    });
+  }
+  const domainSubjects = APPROVAL_DOMAIN_SUBJECT_TYPES[domain];
+  if (domainSubjects) {
+    conditions.push({
+      subjectType: { in: domainSubjects.flatMap((value) => approvalSubjectTypeVariants(value)) },
+    });
+  }
+  const expired = query.expired === "true" || query.expired === "false" ? query.expired : "";
+  if (expired === "true") {
+    conditions.push({ expiresAt: { lt: new Date() } });
+  } else if (expired === "false") {
+    conditions.push({ OR: [{ expiresAt: null }, { expiresAt: { gte: new Date() } }] });
+  }
+  const where = conditions.length === 1 ? conditions[0] : { AND: conditions };
+  const take = 5000;
+  const [approvals, total] = await Promise.all([
+    client.approvalRequest.findMany({
+      where: where as never,
+      orderBy: built.orderBy as never,
+      include: { maker: { select: { email: true } }, checker: { select: { email: true } } },
+      take,
+    }),
+    client.approvalRequest.count({ where: where as never }),
+  ]);
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "APPROVALS_EXPORTED",
+      entityType: "APPROVAL_REQUEST",
+      entityId: "export",
+      beforeJson: {},
+      afterJson: { total, exported: approvals.length, filters: JSON.stringify(query) },
+    },
+  });
+  response.json({
+    approvals: approvals.map((approval) => approvalListRow(approval as never)),
+    total,
+    exported: approvals.length,
+    truncated: total > approvals.length,
+  });
+});
+
+const buildApprovalSummary = async () => {
   const pending = await client.approvalRequest.findMany({
     where: { state: { in: [...APPROVAL_PENDING_STATES] } },
     select: { subjectType: true, mode: true, state: true, createdAt: true, expiresAt: true, ratifyDueAt: true },
@@ -5011,7 +5896,7 @@ router.get("/approvals/summary", async (request: Request, response: Response) =>
       emergencyDue += 1;
     }
   }
-  response.json({
+  return {
     totalPending: pending.length,
     byState,
     bySubjectType: Object.entries(bySubjectType).map(([subjectType, count]) => ({ subjectType, count })).sort((a, b) => b.count - a.count),
@@ -5020,8 +5905,48 @@ router.get("/approvals/summary", async (request: Request, response: Response) =>
     expiringSoon,
     emergencyDue,
     oldestAgeHours,
-  });
+  };
+};
+
+router.get("/approvals/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["approval:read"]);
+  response.json(await buildApprovalSummary());
 });
+
+router.get("/approvals/summary/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["approval:read"]);
+  const snapshot = await buildApprovalSummary();
+  const actor = actorFromRequest(request);
+  const allowedChecklist = new Set([
+    "PENDING_SCOPE_VERIFIED",
+    "EXPIRY_REVIEWED",
+    "DOMAIN_BREAKDOWN_REVIEWED",
+    "EXPORT_APPROVAL_CONFIRMED",
+  ]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "APPROVAL_SUMMARY_EXPORTED",
+      entityType: "APPROVAL_REQUEST",
+      entityId: "summary",
+      beforeJson: {},
+      afterJson: {
+        totalPending: snapshot.totalPending,
+        expired: snapshot.expired,
+        expiringSoon: snapshot.expiringSoon,
+        emergencyDue: snapshot.emergencyDue,
+        oldestAgeHours: snapshot.oldestAgeHours,
+        checklist,
+      },
+    },
+  });
+  response.json({ ...snapshot, exportedAt: new Date().toISOString() });
+});
+
 
 router.get("/approvals/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["approval:read"]);
@@ -5062,6 +5987,12 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
         notes: z.string().max(2000).optional(),
         riskAcceptanceNote: z.string().max(2000).optional(),
         outcome: z.enum(["WON", "LOST"]).optional(),
+        checklist: z.array(z.enum([
+          "DIFF_REVIEWED",
+          "SUBJECT_CONTEXT_REVIEWED",
+          "MAKER_CHECKER_SEPARATION_VERIFIED",
+          "RISK_ASSESSED",
+        ])).max(10).optional(),
       })
       .strict(),
     request.body ?? {},
@@ -5170,6 +6101,17 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
       await invalidationBus.invalidateGateway(version.gatewayId, "gateway-version-live");
     }
   }
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "APPROVAL_DECISION_CHECKLIST",
+      entityType: "APPROVAL_REQUEST",
+      entityId: id,
+      beforeJson: {},
+      afterJson: { decision: "APPROVED", checklist: body.checklist ?? [] },
+    },
+  });
   response.json({
     id: updated.id,
     state: updated.state,
@@ -5209,7 +6151,15 @@ export const activateGatewayVersion = async (
 router.post("/approvals/:id/reject", async (request: Request, response: Response) => {
   requireAuthorities(request, ["approval:check", "approval:write"]);
   const { id } = parseOrThrow(idSchema, request.params);
-  const body = parseOrThrow(z.object({ reason: z.string().min(2).max(2000) }).strict(), request.body);
+  const body = parseOrThrow(z.object({
+    reason: z.string().min(2).max(2000),
+    checklist: z.array(z.enum([
+      "DIFF_REVIEWED",
+      "SUBJECT_CONTEXT_REVIEWED",
+      "MAKER_CHECKER_SEPARATION_VERIFIED",
+      "RISK_ASSESSED",
+    ])).max(10).optional(),
+  }).strict(), request.body);
   const actor = actorFromRequest(request);
   assertCheckerAuthority(actor);
   const approval = await client.approvalRequest.findUnique({ where: { id } });
@@ -5301,6 +6251,17 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
     }
     return row;
   });
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "APPROVAL_DECISION_CHECKLIST",
+      entityType: "APPROVAL_REQUEST",
+      entityId: id,
+      beforeJson: {},
+      afterJson: { decision: "REJECTED", checklist: body.checklist ?? [] },
+    },
+  });
   response.json({ id: updated.id, state: updated.state });
 });
 
@@ -5368,8 +6329,49 @@ router.get("/aml/screenings", async (request: Request, response: Response) => {
   response.json(listResponse("screenings", screenings.map((screening) => amlScreeningRow(screening as never, maps)), total, built));
 });
 
-router.get("/aml/screenings/summary", async (request: Request, response: Response) => {
+router.get("/aml/screenings/export", async (request: Request, response: Response) => {
   assertConfidential(request);
+  const query = (request.query ?? {}) as Record<string, unknown>;
+  const built = buildListQuery(request.query, {
+    search: ["subjectId", "providerCode", "providerRequestRef"],
+    in: { result: "result", subjectType: "subjectType", trigger: "trigger" },
+    equals: { providerCode: "providerCode" },
+    ranges: { score: { path: "highestScore", kind: "decimal" } },
+    dates: {
+      createdAt: { path: "requestedAt" },
+      requestedAt: { path: "requestedAt", fromKey: "requestedFrom", toKey: "requestedTo" },
+    },
+    sortable: { result: "result", requestedAt: "requestedAt", score: "highestScore", matchCount: "matchCount" },
+    defaultSort: { requestedAt: "desc" },
+    defaultPageSize: 20,
+  });
+  const take = 5000;
+  const [screenings, total] = await Promise.all([
+    client.amlScreening.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { matches: true }, take }),
+    client.amlScreening.count({ where: built.where as never }),
+  ]);
+  const maps = await amlCaseSubjectMaps(screenings.map((screening) => ({ subjectType: screening.subjectType, subjectId: screening.subjectId })));
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "AML_SCREENINGS_EXPORTED",
+      entityType: "AML_SCREENING",
+      entityId: "export",
+      beforeJson: {},
+      afterJson: { total, exported: screenings.length, filters: JSON.stringify(query) },
+    },
+  });
+  response.json({
+    screenings: screenings.map((screening) => amlScreeningRow(screening as never, maps)),
+    total,
+    exported: screenings.length,
+    truncated: total > screenings.length,
+  });
+});
+
+const buildAmlScreeningSummary = async () => {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const [resultRows, triggerRows, total, screened24h, unresolvedMatches, latest] = await Promise.all([
     client.amlScreening.groupBy({ by: ["result"], _count: { _all: true } }),
@@ -5383,15 +6385,43 @@ router.get("/aml/screenings/summary", async (request: Request, response: Respons
   for (const row of resultRows) byResult[row.result] = row._count._all;
   const byTrigger: Record<string, number> = {};
   for (const row of triggerRows) byTrigger[row.trigger] = row._count._all;
-  response.json({
+  return {
     total,
     screened24h,
     unresolvedMatches,
     byResult,
     byTrigger,
     latestScreenedAt: latest?.requestedAt ?? null,
-  });
+  };
+};
+
+router.get("/aml/screenings/summary", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  response.json(await buildAmlScreeningSummary());
 });
+
+router.get("/aml/screenings/summary/export", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const summary = await buildAmlScreeningSummary();
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "AML_SCREENING_SUMMARY_EXPORTED",
+      entityType: "AML_SCREENING",
+      entityId: "summary",
+      beforeJson: {},
+      afterJson: {
+        total: summary.total,
+        screened24h: summary.screened24h,
+        unresolvedMatches: summary.unresolvedMatches,
+      },
+    },
+  });
+  response.json({ ...summary, exportedAt: new Date().toISOString() });
+});
+
 
 router.get("/aml/screenings/:id", async (request: Request, response: Response) => {
   assertConfidential(request);
@@ -5442,6 +6472,12 @@ router.post("/aml/matches/:id/disposition", async (request: Request, response: R
         notes: z.string().max(2000).optional(),
         suppressFuture: z.boolean().default(false),
         suppressUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        checklist: z.array(z.enum([
+          "MATCH_DETAILS_REVIEWED",
+          "IDENTITY_EVIDENCE_CHECKED",
+          "DISPOSITION_RATIONALE_DOCUMENTED",
+          "ESCALATION_PATH_CONFIRMED",
+        ])).max(10).optional(),
       })
       .strict(),
     request.body,
@@ -5470,7 +6506,7 @@ router.post("/aml/matches/:id/disposition", async (request: Request, response: R
         entityType: "AML_SCREENING_MATCH",
         entityId: id,
         beforeJson: { disposition: match.disposition },
-        afterJson: { disposition: row.disposition, notes: body.notes ?? null, suppressFuture: body.suppressFuture },
+        afterJson: { disposition: row.disposition, notes: body.notes ?? null, suppressFuture: body.suppressFuture, checklist: body.checklist ?? [] },
       },
     });
     return row;
@@ -5599,8 +6635,57 @@ router.get("/aml/cases", async (request: Request, response: Response) => {
   response.json(listResponse("cases", cases.map((entry) => amlCaseListRow(entry as never, maps)), total, built));
 });
 
-router.get("/aml/cases/summary", async (request: Request, response: Response) => {
+router.get("/aml/cases/export", async (request: Request, response: Response) => {
   assertConfidential(request);
+  const query = (request.query ?? {}) as Record<string, unknown>;
+  const built = buildListQuery(request.query, {
+    search: ["triggerReason", "subjectId", "rule.code", "rule.name", "assignedReviewer.email"],
+    in: { status: "status", severity: "severity", subjectType: "subjectType" },
+    equals: { ruleCode: "rule.code", assignedReviewerId: "assignedReviewerId" },
+    dates: {
+      createdAt: { path: "createdAt" },
+      slaDueAt: { path: "slaDueAt", fromKey: "dateFrom", toKey: "dateTo" },
+    },
+    sortable: { status: "status", severity: "severity", openedAt: "createdAt", slaDueAt: "slaDueAt" },
+    defaultSort: { createdAt: "desc" },
+    defaultPageSize: 20,
+  });
+  const take = 5000;
+  const [cases, total] = await Promise.all([
+    client.amlCase.findMany({
+      where: built.where as never,
+      orderBy: built.orderBy as never,
+      include: {
+        rule: { select: { code: true, name: true } },
+        screening: { select: { id: true, result: true, highestScore: true } },
+        assignedReviewer: { select: { email: true } },
+      },
+      take,
+    }),
+    client.amlCase.count({ where: built.where as never }),
+  ]);
+  const maps = await amlCaseSubjectMaps(cases.map((entry) => ({ subjectType: entry.subjectType, subjectId: entry.subjectId })));
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "AML_CASES_EXPORTED",
+      entityType: "AML_CASE",
+      entityId: "export",
+      beforeJson: {},
+      afterJson: { total, exported: cases.length, filters: JSON.stringify(query) },
+    },
+  });
+  response.json({
+    cases: cases.map((entry) => amlCaseListRow(entry as never, maps)),
+    total,
+    exported: cases.length,
+    truncated: total > cases.length,
+  });
+});
+
+const buildAmlCaseSummary = async () => {
   const now = new Date();
   const [statusRows, severityRows, openAggregate, oldest] = await Promise.all([
     client.amlCase.groupBy({ by: ["status"], _count: { _all: true } }),
@@ -5622,7 +6707,7 @@ router.get("/aml/cases/summary", async (request: Request, response: Response) =>
   for (const row of statusRows) byStatus[row.status] = row._count._all;
   const bySeverity: Record<string, number> = {};
   for (const row of severityRows) bySeverity[row.severity] = row._count._all;
-  response.json({
+  return {
     totalOpen: (openAggregate._count as { _all: number })._all,
     byStatus,
     bySeverity,
@@ -5631,8 +6716,38 @@ router.get("/aml/cases/summary", async (request: Request, response: Response) =>
     frozen,
     escalated,
     oldestOpenAgeHours: oldest ? approvalAgeHours(oldest.createdAt, now.getTime()) : 0,
-  });
+  };
+};
+
+router.get("/aml/cases/summary", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  response.json(await buildAmlCaseSummary());
 });
+
+router.get("/aml/cases/summary/export", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const summary = await buildAmlCaseSummary();
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "AML_CASE_SUMMARY_EXPORTED",
+      entityType: "AML_CASE",
+      entityId: "summary",
+      beforeJson: {},
+      afterJson: {
+        totalOpen: summary.totalOpen,
+        overdue: summary.overdue,
+        criticalOpen: summary.criticalOpen,
+        frozen: summary.frozen,
+        escalated: summary.escalated,
+      },
+    },
+  });
+  response.json({ ...summary, exportedAt: new Date().toISOString() });
+});
+
 
 router.get("/aml/cases/:id", async (request: Request, response: Response) => {
   assertConfidential(request);
@@ -5695,7 +6810,16 @@ router.post("/aml/cases/:id/propose", async (request: Request, response: Respons
   assertConfidential(request);
   const { id } = parseOrThrow(idSchema, request.params);
   const body = parseOrThrow(
-    z.object({ action: z.enum(["HOLD", "RELEASE", "REJECT", "ESCALATE"]), notes: z.string().max(2000).optional() }).strict(),
+    z.object({
+      action: z.enum(["HOLD", "RELEASE", "REJECT", "ESCALATE"]),
+      notes: z.string().max(2000).optional(),
+      checklist: z.array(z.enum([
+        "EVIDENCE_REVIEWED",
+        "SUBJECT_IDENTIFIED",
+        "REGULATORY_OBLIGATION_ASSESSED",
+        "CHECKER_INDEPENDENCE_CONFIRMED",
+      ])).max(10).optional(),
+    }).strict(),
     request.body,
   );
   const actor = actorFromRequest(request);
@@ -5758,8 +6882,61 @@ router.get("/aml/rules", async (request: Request, response: Response) => {
   ));
 });
 
-router.get("/aml/rules/summary", async (request: Request, response: Response) => {
+router.get("/aml/rules/export", async (request: Request, response: Response) => {
   assertConfidential(request);
+  const query = (request.query ?? {}) as Record<string, unknown>;
+  const built = buildListQuery(request.query, {
+    search: ["code", "name"],
+    equals: { ruleType: "ruleType", action: "action", baseSeverity: "baseSeverity" },
+    booleans: { active: "active" },
+    ranges: { version: { path: "version", kind: "number" } },
+    dates: { effectiveFrom: { path: "effectiveFrom" } },
+    sortable: { code: "code", name: "name", ruleType: "ruleType", baseSeverity: "baseSeverity", active: "active", effectiveFrom: "effectiveFrom" },
+    defaultSort: { code: "asc" },
+  });
+  const take = 5000;
+  const [rules, total] = await Promise.all([
+    client.amlRule.findMany({ where: built.where as never, orderBy: built.orderBy as never, take }),
+    client.amlRule.count({ where: built.where as never }),
+  ]);
+  const ruleIds = rules.map((rule) => rule.id);
+  const approvals = ruleIds.length === 0
+    ? []
+    : await client.approvalRequest.findMany({
+        where: { subjectType: { in: approvalSubjectTypeVariants("AML_RULE") as never }, subjectId: { in: ruleIds } },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, subjectId: true, state: true },
+      });
+  const approvalMap = new Map<string, { id: string; state: string }>();
+  for (const approval of approvals) {
+    if (!approvalMap.has(approval.subjectId)) approvalMap.set(approval.subjectId, { id: approval.id, state: approval.state });
+  }
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "AML_RULES_EXPORTED",
+      entityType: "AML_RULE",
+      entityId: "export",
+      beforeJson: {},
+      afterJson: { total, exported: rules.length, filters: JSON.stringify(query) },
+    },
+  });
+  response.json({
+    rules: rules.map((rule) => ({
+      ...rule,
+      approvalRequestId: approvalMap.get(rule.id)?.id ?? null,
+      approvalState: approvalMap.get(rule.id)?.state ?? null,
+      pendingApproval: approvalMap.get(rule.id)?.state === "PENDING_REVIEW",
+    })),
+    total,
+    exported: rules.length,
+    truncated: total > rules.length,
+  });
+});
+
+const buildAmlRuleSummary = async () => {
   const [active, pendingApprovals, severityRows, typeRows, actionRows] = await Promise.all([
     client.amlRule.count({ where: { active: true } }),
     client.approvalRequest.count({ where: { subjectType: { in: approvalSubjectTypeVariants("AML_RULE") as never }, state: "PENDING_REVIEW" } }),
@@ -5774,25 +6951,37 @@ router.get("/aml/rules/summary", async (request: Request, response: Response) =>
   const byAction: Record<string, number> = {};
   for (const row of actionRows) byAction[row.action] = row._count._all;
   const total = await client.amlRule.count();
-  response.json({ total, active, inactive: total - active, pendingApprovals, bySeverity, byType, byAction });
+  return { total, active, inactive: total - active, pendingApprovals, bySeverity, byType, byAction };
+};
+
+router.get("/aml/rules/summary", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  response.json(await buildAmlRuleSummary());
 });
 
-router.get("/aml/rules/:id", async (request: Request, response: Response) => {
+router.get("/aml/rules/summary/export", async (request: Request, response: Response) => {
   assertConfidential(request);
-  const { id } = parseOrThrow(idSchema, request.params);
-  const rule = await client.amlRule.findUnique({
-    where: { id },
-    include: { approvalRequest: { select: { id: true, state: true, makerUserId: true, checkerUserId: true, rejectionReason: true, createdAt: true } } },
-  });
-  if (!rule) throw new ApiError(404, "AML_RULE_NOT_FOUND", "The AML rule does not exist");
-  response.json({
-    rule: {
-      ...rule,
-      approvalState: rule.approvalRequest?.state ?? null,
-      approval: rule.approvalRequest,
+  const summary = await buildAmlRuleSummary();
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "AML_RULE_SUMMARY_EXPORTED",
+      entityType: "AML_RULE",
+      entityId: "summary",
+      beforeJson: {},
+      afterJson: {
+        total: summary.total,
+        active: summary.active,
+        inactive: summary.inactive,
+        pendingApprovals: summary.pendingApprovals,
+      },
     },
   });
+  response.json({ ...summary, exportedAt: new Date().toISOString() });
 });
+
 
 router.post("/aml/rules", async (request: Request, response: Response) => {
   assertConfidential(request);
@@ -5815,6 +7004,12 @@ router.post("/aml/rules", async (request: Request, response: Response) => {
         action: z.enum(["HOLD", "FLAG", "BLOCK", "CASE_ONLY"]),
         baseSeverity: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]),
         effectiveFrom: z.string().max(64).optional(),
+        checklist: z.array(z.enum([
+          "RULE_LOGIC_REVIEWED",
+          "THRESHOLDS_VERIFIED",
+          "REGULATORY_BASIS_DOCUMENTED",
+          "CHECKER_INDEPENDENCE_CONFIRMED",
+        ])).max(10).optional(),
       })
       .strict(),
     request.body,
@@ -5855,7 +7050,7 @@ router.post("/aml/rules", async (request: Request, response: Response) => {
           entityType: "AML_RULE",
           entityId: rule.id,
           beforeJson: {},
-          afterJson: { code: rule.code, state: "PENDING_REVIEW", approvalRequestId: approval.id },
+          afterJson: { code: rule.code, state: "PENDING_REVIEW", approvalRequestId: approval.id, checklist: body.checklist ?? [] },
           approvalRequestId: approval.id,
         },
       });
@@ -5874,6 +7069,22 @@ router.post("/aml/rules", async (request: Request, response: Response) => {
   });
 });
 
+router.get("/aml/rules/:id", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const rule = await client.amlRule.findUnique({
+    where: { id },
+    include: { approvalRequest: { select: { id: true, state: true, makerUserId: true, checkerUserId: true, rejectionReason: true, createdAt: true } } },
+  });
+  if (!rule) throw new ApiError(404, "AML_RULE_NOT_FOUND", "The AML rule does not exist");
+  response.json({
+    rule: {
+      ...rule,
+      approvalState: rule.approvalRequest?.state ?? null,
+      approval: rule.approvalRequest,
+    },
+  });
+});
 router.get("/aml/reporting-rules", async (request: Request, response: Response) => {
   assertConfidential(request);
   const rules = await client.reportingRule.findMany();
@@ -5996,8 +7207,64 @@ router.get("/aml/reports", async (request: Request, response: Response) => {
   ));
 });
 
-router.get("/aml/reports/summary", async (request: Request, response: Response) => {
+router.get("/aml/reports/export", async (request: Request, response: Response) => {
   assertConfidential(request);
+  const query = (request.query ?? {}) as Record<string, unknown>;
+  const built = buildListQuery(request.query, {
+    search: ["subjectId", "submissionRef", "amlCaseId"],
+    in: { status: "status", reportType: "reportType" },
+    equals: { authority: "authority", amlCaseId: "amlCaseId" },
+    dates: {
+      createdAt: { path: "createdAt" },
+      submittedAt: { path: "submittedAt", fromKey: "dateFrom", toKey: "dateTo" },
+      periodStart: { path: "periodStart", fromKey: "periodFrom", toKey: "periodTo" },
+    },
+    sortable: { reportType: "reportType", authority: "authority", status: "status", createdAt: "createdAt", submittedAt: "submittedAt" },
+    defaultSort: { createdAt: "desc" },
+    defaultPageSize: 20,
+  });
+  const take = 5000;
+  const [reports, total] = await Promise.all([
+    client.regulatoryReport.findMany({
+      where: built.where as never,
+      orderBy: built.orderBy as never,
+      include: {
+        amlCase: { select: { id: true, status: true, severity: true, subjectType: true, subjectId: true } },
+        approvalRequest: { select: { state: true } },
+      },
+      take,
+    }),
+    client.regulatoryReport.count({ where: built.where as never }),
+  ]);
+  const ruleIds = reports.filter((report) => report.subjectType === "REPORTING_RULE").map((report) => report.subjectId);
+  const rules = ruleIds.length === 0
+    ? []
+    : await client.reportingRule.findMany({
+        where: { id: { in: ruleIds } },
+        select: { id: true, sourceReference: true, reportType: true, status: true },
+      });
+  const ruleNames = new Map(rules.map((rule) => [rule.id, rule.sourceReference ?? `${rule.reportType} · ${rule.status}`]));
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "AML_REPORTS_EXPORTED",
+      entityType: "REGULATORY_REPORT",
+      entityId: "export",
+      beforeJson: {},
+      afterJson: { total, exported: reports.length, filters: JSON.stringify(query) },
+    },
+  });
+  response.json({
+    reports: reports.map((report) => regulatoryReportRow(report as never, ruleNames.get(report.subjectId) ?? null)),
+    total,
+    exported: reports.length,
+    truncated: total > reports.length,
+  });
+});
+
+const buildAmlReportSummary = async () => {
   const [statusRows, typeRows, submittedThisMonth, total] = await Promise.all([
     client.regulatoryReport.groupBy({ by: ["status"], _count: { _all: true } }),
     client.regulatoryReport.groupBy({ by: ["reportType"], _count: { _all: true } }),
@@ -6012,7 +7279,7 @@ router.get("/aml/reports/summary", async (request: Request, response: Response) 
   for (const row of statusRows) byStatus[row.status] = row._count._all;
   const byType: Record<string, number> = {};
   for (const row of typeRows) byType[row.reportType] = row._count._all;
-  response.json({
+  return {
     total,
     byStatus,
     byType,
@@ -6021,8 +7288,37 @@ router.get("/aml/reports/summary", async (request: Request, response: Response) 
     drafts: byStatus.DRAFT ?? 0,
     acknowledged: byStatus.ACKNOWLEDGED ?? 0,
     rejected: byStatus.REJECTED_BY_AUTHORITY ?? 0,
-  });
+  };
+};
+
+router.get("/aml/reports/summary", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  response.json(await buildAmlReportSummary());
 });
+
+router.get("/aml/reports/summary/export", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const summary = await buildAmlReportSummary();
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "AML_REPORT_SUMMARY_EXPORTED",
+      entityType: "REGULATORY_REPORT",
+      entityId: "summary",
+      beforeJson: {},
+      afterJson: {
+        total: summary.total,
+        submittedThisMonth: summary.submittedThisMonth,
+        pendingChecker: summary.pendingChecker,
+        drafts: summary.drafts,
+      },
+    },
+  });
+  response.json({ ...summary, exportedAt: new Date().toISOString() });
+});
+
 
 router.get("/aml/reports/:id", async (request: Request, response: Response) => {
   assertConfidential(request);
@@ -6065,6 +7361,12 @@ router.post("/aml/reports", async (request: Request, response: Response) => {
         subjectId: z.string().min(1).max(64),
         amlCaseId: z.string().min(1).max(64).optional(),
         payload: z.record(z.string().max(64), z.unknown()),
+        checklist: z.array(z.enum([
+          "REPORTING_RULE_VERIFIED",
+          "PERIOD_VERIFIED",
+          "CASE_LINKAGE_VERIFIED",
+          "NOTES_REVIEWED",
+        ])).max(10).optional(),
       })
       .strict(),
     request.body,
@@ -6079,6 +7381,7 @@ router.post("/aml/reports", async (request: Request, response: Response) => {
       subjectId: body.subjectId,
       amlCaseId: body.amlCaseId ?? null,
       payload: body.payload,
+      checklist: body.checklist ?? [],
     },
     { userId: actor.userId, role: actor.role },
   );
@@ -6093,6 +7396,12 @@ router.post("/aml/reports/:id/submit", async (request: Request, response: Respon
       .object({
         submissionRef: z.string().min(1).max(200),
         submittedAt: z.string().max(64).optional(),
+        checklist: z.array(z.enum([
+          "REPORT_APPROVED_VERIFIED",
+          "AUTHORITY_REFERENCE_VERIFIED",
+          "DEADLINE_VERIFIED",
+          "PAYLOAD_DIGEST_VERIFIED",
+        ])).max(10).optional(),
       })
       .strict(),
     request.body,
@@ -6108,6 +7417,17 @@ router.post("/aml/reports/:id/submit", async (request: Request, response: Respon
     submittedAt,
     actorUserId: actor.userId,
     actorRole: actor.role,
+  });
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "REGULATORY_REPORT_SUBMISSION_CHECKLIST",
+      entityType: "REGULATORY_REPORT",
+      entityId: id,
+      beforeJson: {},
+      afterJson: { submissionRef: body.submissionRef, checklist: body.checklist ?? [] },
+    },
   });
   response.json(report);
 });
@@ -6126,6 +7446,12 @@ router.post("/aml/reports/:id/acknowledge", async (request: Request, response: R
         rejected: z.boolean().optional(),
         reason: z.string().max(2000).optional(),
         rejectionReason: z.string().max(2000).optional(),
+        checklist: z.array(z.enum([
+          "AUTHORITY_RESPONSE_VERIFIED",
+          "DECISION_RECORDED",
+          "REJECTION_REASON_DOCUMENTED",
+          "REPORT_CLOSURE_CONFIRMED",
+        ])).max(10).optional(),
       })
       .strict(),
     request.body ?? {},
@@ -6143,6 +7469,17 @@ router.post("/aml/reports/:id/acknowledge", async (request: Request, response: R
     reason,
     actorUserId: actor.userId,
     actorRole: actor.role,
+  });
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "REGULATORY_REPORT_ACKNOWLEDGEMENT_CHECKLIST",
+      entityType: "REGULATORY_REPORT",
+      entityId: id,
+      beforeJson: {},
+      afterJson: { status, reason, checklist: body.checklist ?? [] },
+    },
   });
   response.json(report);
 });
@@ -6649,8 +7986,100 @@ router.get("/operator-cases", async (request: Request, response: Response) => {
   response.json(listResponse("cases", cases.map(flattenOperatorCase), total, built));
 });
 
-router.get("/operator-cases/summary", async (request: Request, response: Response) => {
+router.get("/operator-cases/export", async (request: Request, response: Response) => {
   requireAuthorities(request, ["case:read", "operator:read"]);
+  const built = buildListQuery(request.query, {
+    search: [
+      "id",
+      "attempt.reference",
+      "attempt.providerReference",
+      "attempt.merchant.tradeName",
+      "attempt.merchant.legalName",
+      "reconciliationItem.ourReference",
+      "reconciliationItem.providerReference",
+    ],
+    contains: {
+      caseRef: ["id", "attempt.reference", "reconciliationItem.ourReference", "reconciliationItem.providerReference"],
+      merchantName: ["attempt.merchant.tradeName", "attempt.merchant.legalName"],
+      providerReference: ["attempt.providerReference", "reconciliationItem.providerReference"],
+    },
+    in: { state: "state", kind: "kind", priority: "priority" },
+    equals: { assigneeUserId: "assigneeUserId" },
+    dates: {
+      createdAt: { path: "createdAt" },
+      slaDueAt: { path: "slaDueAt", fromKey: "dateFrom", toKey: "dateTo" },
+    },
+    sortable: {
+      priority: "priority",
+      state: "state",
+      kind: "kind",
+      openedAt: "createdAt",
+      slaDueAt: "slaDueAt",
+      caseRef: "attempt.reference",
+      merchantName: "attempt.merchant.tradeName",
+    },
+    defaultSort: [{ priority: "asc" }, { createdAt: "desc" }],
+  });
+  const take = 5000;
+  const [cases, total] = await Promise.all([
+    client.operatorCase.findMany({
+      where: built.where as never,
+      orderBy: built.orderBy as never,
+      include: operatorCaseListInclude,
+      take,
+    }),
+    client.operatorCase.count({ where: built.where as never }),
+  ]);
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "OPERATOR_CASES_EXPORTED",
+      entityType: "OPERATOR_CASE",
+      entityId: "export",
+      beforeJson: {},
+      afterJson: { total, exported: cases.length, filters: JSON.stringify(request.query ?? {}) },
+    },
+  });
+  response.json({
+    cases: cases.map((entry) => {
+      const row = flattenOperatorCase(entry);
+      const eligibility = row.inquiryEligibility as { eligible?: boolean; reason?: string } | null | undefined;
+      return {
+        id: row.id,
+        caseRef: row.caseRef,
+        caseType: row.caseType,
+        priority: row.priority,
+        state: row.state,
+        merchantName: row.merchantName,
+        merchantStatus: row.merchantStatus,
+        railCode: row.railCode,
+        railName: row.railNameEn,
+        gatewayCode: row.gatewayCode,
+        gatewayName: row.gatewayName,
+        attemptReference: row.attemptReference,
+        attemptStatus: row.attemptStatus,
+        amount: row.chargedAmount ?? row.statementAmount ?? null,
+        currency: row.currency,
+        providerReference: row.providerReference,
+        reconciliationResult: row.reconciliationResult,
+        approvalState: row.approvalState,
+        assigneeEmail: row.assigneeEmail,
+        openedAt: row.openedAt,
+        slaDueAt: row.slaDueAt,
+        inquiryEligible: eligibility?.eligible === true,
+        inquiryReason: eligibility?.reason ?? null,
+        resolutionNotes: row.resolutionNotes ?? null,
+      };
+    }),
+    total,
+    exported: cases.length,
+    truncated: total > cases.length,
+  });
+});
+
+const buildOperatorCaseSummary = async () => {
   const cases = await client.operatorCase.findMany({
     select: { state: true, priority: true, slaDueAt: true, assigneeUserId: true },
   });
@@ -6667,7 +8096,7 @@ router.get("/operator-cases/summary", async (request: Request, response: Respons
     if (item.state === "PENDING_CHECKER") pendingChecker += 1;
     if (item.state !== "RESOLVED" && item.slaDueAt.getTime() < now.getTime()) overdue += 1;
   }
-  response.json({
+  return {
     summary: {
       total: cases.length,
       open: byState.OPEN ?? 0,
@@ -6680,8 +8109,47 @@ router.get("/operator-cases/summary", async (request: Request, response: Respons
       byState,
       byPriority,
     },
-  });
+  };
+};
+
+router.get("/operator-cases/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["case:read", "operator:read"]);
+  response.json(await buildOperatorCaseSummary());
 });
+
+router.get("/operator-cases/summary/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["case:read", "operator:read"]);
+  const snapshot = await buildOperatorCaseSummary();
+  const actor = actorFromRequest(request);
+  const allowedChecklist = new Set([
+    "OPEN_SCOPE_VERIFIED",
+    "SLA_REVIEWED",
+    "PRIORITY_BREAKDOWN_REVIEWED",
+    "EXPORT_APPROVAL_CONFIRMED",
+  ]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "OPERATOR_CASE_SUMMARY_EXPORTED",
+      entityType: "OPERATOR_CASE",
+      entityId: "summary",
+      beforeJson: {},
+      afterJson: {
+        total: snapshot.summary.total,
+        overdue: snapshot.summary.overdue,
+        unassigned: snapshot.summary.unassigned,
+        p1Open: snapshot.summary.p1Open,
+        checklist,
+      },
+    },
+  });
+  response.json({ ...snapshot, exportedAt: new Date().toISOString() });
+});
+
 
 router.get("/operator-cases/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["case:read", "operator:read"]);
@@ -6725,6 +8193,12 @@ router.post("/operator-cases/bulk-inquire", async (request: Request, response: R
       .object({
         caseIds: z.array(z.string().min(1).max(64)).min(1).max(200),
         reason: z.string().max(500).optional(),
+        checklist: z.array(z.enum([
+          "ELIGIBILITY_REVIEWED",
+          "ATTEMPT_STATUS_VERIFIED",
+          "GATEWAY_SUPPORT_CONFIRMED",
+          "INQUIRY_SCOPE_CONFIRMED",
+        ])).max(10).optional(),
       })
       .strict(),
     request.body ?? {},
@@ -6811,12 +8285,178 @@ router.post("/operator-cases/bulk-inquire", async (request: Request, response: R
       });
     }
   }
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "OPERATOR",
+      action: "OPERATOR_CASE_BULK_INQUIRY",
+      entityType: "OPERATOR_CASE",
+      entityId: "bulk-inquiry",
+      beforeJson: {},
+      afterJson: { requested: requestedIds.length, scheduled, skipped, checklist: body.checklist ?? [] },
+    },
+  });
   response.json({
     requested: requestedIds.length,
     scheduled,
     skipped,
     results,
   });
+});
+
+router.post("/operator-cases/bulk-assign", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["case:write", "operator:write"]);
+  const body = parseOrThrow(
+    z
+      .object({
+        caseIds: z.array(z.string().min(1).max(64)).min(1).max(200),
+        assigneeUserId: z.string().min(1).max(64).nullable(),
+        reason: z.string().max(500).optional(),
+        checklist: z.array(z.enum([
+          "ASSIGNEE_VERIFIED",
+          "WORKLOAD_REVIEWED",
+          "NOTIFICATION_PLANNED",
+          "CASE_SCOPE_CONFIRMED",
+        ])).max(10).optional(),
+      })
+      .strict(),
+    request.body ?? {},
+  );
+  if (body.assigneeUserId) {
+    const user = await client.user.findUnique({
+      where: { id: body.assigneeUserId },
+      select: { id: true, status: true, merchantId: true },
+    });
+    if (!user || user.status !== "ACTIVE" || user.merchantId) {
+      throw new ApiError(400, "INVALID_ASSIGNEE", "The assignee must be an active platform user");
+    }
+  }
+  const caseIds = [...new Set(body.caseIds)];
+  const cases = await client.operatorCase.findMany({
+    where: { id: { in: caseIds } },
+    select: { id: true, state: true, assigneeUserId: true },
+  });
+  const found = new Map(cases.map((entry) => [entry.id, entry]));
+  const actor = actorFromRequest(request);
+  const results: Array<{ caseId: string; status: "ASSIGNED" | "SKIPPED"; reason?: string }> = [];
+  let assigned = 0;
+  let skipped = 0;
+  await client.$transaction(async (tx) => {
+    for (const caseId of caseIds) {
+      const current = found.get(caseId);
+      if (!current) {
+        skipped += 1;
+        results.push({ caseId, status: "SKIPPED", reason: "OPERATOR_CASE_NOT_FOUND" });
+        continue;
+      }
+      if (current.state === "RESOLVED" || current.state === "PENDING_CHECKER") {
+        skipped += 1;
+        results.push({ caseId, status: "SKIPPED", reason: "OPERATOR_CASE_NOT_EDITABLE" });
+        continue;
+      }
+      const nextState =
+        body.assigneeUserId && current.state === "OPEN" ? "IN_PROGRESS" : current.state;
+      const updated = await tx.operatorCase.update({
+        where: { id: caseId },
+        data: {
+          assigneeUserId: body.assigneeUserId,
+          ...(nextState !== current.state ? { state: nextState } : {}),
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorId: actor.userId,
+          role: actor.role ?? "OPERATOR",
+          action: "OPERATOR_CASE_ASSIGNED",
+          entityType: "OPERATOR_CASE",
+          entityId: caseId,
+          beforeJson: { state: current.state, assigneeUserId: current.assigneeUserId },
+          afterJson: {
+            state: updated.state,
+            assigneeUserId: updated.assigneeUserId,
+            reason: body.reason ?? null,
+            checklist: body.checklist ?? [],
+          },
+        },
+      });
+      assigned += 1;
+      results.push({ caseId, status: "ASSIGNED" });
+    }
+  });
+  response.json({ requested: caseIds.length, assigned, skipped, results });
+});
+
+router.post("/operator-cases/bulk-state", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["case:write", "operator:write"]);
+  const body = parseOrThrow(
+    z
+      .object({
+        caseIds: z.array(z.string().min(1).max(64)).min(1).max(200),
+        state: z.enum(["OPEN", "IN_PROGRESS"]),
+        reason: z.string().max(500).optional(),
+        checklist: z.array(z.enum([
+          "CASE_SCOPE_CONFIRMED",
+          "STATE_IMPACT_REVIEWED",
+          "SLA_IMPACT_REVIEWED",
+          "NOTIFICATION_PLANNED",
+        ])).max(10).optional(),
+      })
+      .strict(),
+    request.body ?? {},
+  );
+  const caseIds = [...new Set(body.caseIds)];
+  const cases = await client.operatorCase.findMany({
+    where: { id: { in: caseIds } },
+    select: { id: true, state: true, assigneeUserId: true },
+  });
+  const found = new Map(cases.map((entry) => [entry.id, entry]));
+  const actor = actorFromRequest(request);
+  const results: Array<{ caseId: string; status: "UPDATED" | "SKIPPED"; reason?: string }> = [];
+  let updated = 0;
+  let skipped = 0;
+  await client.$transaction(async (tx) => {
+    for (const caseId of caseIds) {
+      const current = found.get(caseId);
+      if (!current) {
+        skipped += 1;
+        results.push({ caseId, status: "SKIPPED", reason: "OPERATOR_CASE_NOT_FOUND" });
+        continue;
+      }
+      if (current.state === "RESOLVED" || current.state === "PENDING_CHECKER") {
+        skipped += 1;
+        results.push({ caseId, status: "SKIPPED", reason: "OPERATOR_CASE_NOT_EDITABLE" });
+        continue;
+      }
+      if (current.state === body.state) {
+        skipped += 1;
+        results.push({ caseId, status: "SKIPPED", reason: "ALREADY_IN_STATE" });
+        continue;
+      }
+      const row = await tx.operatorCase.update({
+        where: { id: caseId },
+        data: { state: body.state },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorId: actor.userId,
+          role: actor.role ?? "OPERATOR",
+          action: "OPERATOR_CASE_STATE_CHANGED",
+          entityType: "OPERATOR_CASE",
+          entityId: caseId,
+          beforeJson: { state: current.state, assigneeUserId: current.assigneeUserId },
+          afterJson: {
+            state: row.state,
+            assigneeUserId: row.assigneeUserId,
+            reason: body.reason ?? null,
+            checklist: body.checklist ?? [],
+          },
+        },
+      });
+      updated += 1;
+      results.push({ caseId, status: "UPDATED" });
+    }
+  });
+  response.json({ requested: caseIds.length, updated, skipped, results });
 });
 
 router.patch("/operator-cases/:id", async (request: Request, response: Response) => {
@@ -6896,6 +8536,12 @@ router.post("/operator-cases/:id/resolve", async (request: Request, response: Re
         notes: z.string().max(2000).optional(),
         providerReference: z.string().min(1).max(191).optional(),
         settledAmount: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).optional(),
+        checklist: z.array(z.enum([
+          "EVIDENCE_REVIEWED",
+          "ATTEMPT_STATUS_VERIFIED",
+          "OUTCOME_DOCUMENTED",
+          "CHECKER_REQUIREMENT_CONFIRMED",
+        ])).max(10).optional(),
       })
       .strict(),
     request.body ?? {},
@@ -6956,6 +8602,7 @@ router.post("/operator-cases/:id/resolve", async (request: Request, response: Re
     attemptId: operatorCase.attemptId,
     attemptReference: operatorCase.attempt?.reference ?? null,
     proposedAt: new Date().toISOString(),
+    checklist: body.checklist ?? [],
   };
   const approval = await client.$transaction(async (tx) => {
     const created = await tx.approvalRequest.create({
@@ -6981,7 +8628,7 @@ router.post("/operator-cases/:id/resolve", async (request: Request, response: Re
         entityType: "OPERATOR_CASE",
         entityId: operatorCase.id,
         beforeJson: { state: operatorCase.state },
-        afterJson: { state: "PENDING_CHECKER", approvalRequestId: created.id, action },
+        afterJson: { state: "PENDING_CHECKER", approvalRequestId: created.id, action, checklist: body.checklist ?? [] },
         approvalRequestId: created.id,
       },
     });
@@ -7143,6 +8790,12 @@ router.post("/gateways/spec-import", async (request: Request, response: Response
         credentialsValues: z.record(z.string().max(64), z.string().max(4096)).optional(),
         credentials_values: z.record(z.string().max(64), z.string().max(4096)).optional(),
         mode: z.enum(["CREATE_NEW", "NEW_VERSION"]).optional(),
+        checklist: z.array(z.enum([
+          "SPEC_VERIFIED",
+          "CREDENTIALS_VERIFIED",
+          "IMPORT_MODE_REVIEWED",
+          "NO_SECRET_EXPOSURE_CONFIRMED",
+        ])).max(10).optional(),
       })
       .strict(),
     request.body ?? {},
@@ -7175,6 +8828,17 @@ router.post("/gateways/spec-import", async (request: Request, response: Response
     }
   }
 
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "GATEWAY_SPEC_IMPORTED",
+      entityType: "GATEWAY",
+      entityId: result.gatewayId,
+      beforeJson: {},
+      afterJson: { gatewayVersionId: result.gatewayVersionId, mode: parsed.mode, checklist: body.checklist ?? [] },
+    },
+  });
   response.status(201).json({
     ...result,
     credentialCheck,
@@ -7241,8 +8905,88 @@ router.get("/gateways", async (request: Request, response: Response) => {
   ));
 });
 
-router.get("/gateways/summary", async (request: Request, response: Response) => {
+router.get("/gateways/export", async (request: Request, response: Response) => {
   requireAuthorities(request, ["gateway:read"]);
+  const built = buildListQuery(request.query, {
+    search: ["code", "name", "operator"],
+    in: { status: "status" }, equals: {kind: "kind", verificationState: "verificationState", riskClass: "riskClass", country: "country"},
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { code: "code", name: "name", operator: "operator", status: "status", kind: "kind", createdAt: "createdAt" },
+    defaultSort: { code: "asc" },
+  });
+  const take = 5000;
+  const [gateways, total] = await Promise.all([
+    client.gateway.findMany({
+      where: built.where as never,
+      orderBy: built.orderBy as never,
+      include: {
+        versions: { orderBy: { versionNumber: "desc" }, select: { id: true, versionNumber: true, state: true, createdAt: true } },
+        activeVersion: { select: { id: true, versionNumber: true, state: true } },
+        _count: { select: { credentialSets: true, railRoutes: true, statementSources: true } },
+      },
+      take,
+    }),
+    client.gateway.count({ where: built.where as never }),
+  ]);
+  const gatewayIds = gateways.map((gateway) => gateway.id);
+  const routeHealth = gatewayIds.length === 0
+    ? []
+    : await client.railRoute.groupBy({
+        by: ["gatewayId", "healthState"],
+        where: { gatewayId: { in: gatewayIds } },
+        _count: { _all: true },
+      });
+  const healthMap = new Map<string, Record<string, number>>();
+  for (const row of routeHealth) {
+    const current = healthMap.get(row.gatewayId) ?? {};
+    current[row.healthState] = row._count._all;
+    healthMap.set(row.gatewayId, current);
+  }
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "GATEWAYS_EXPORTED",
+      entityType: "GATEWAY",
+      entityId: "export",
+      beforeJson: {},
+      afterJson: { total, exported: gateways.length, filters: JSON.stringify(request.query ?? {}) },
+    },
+  });
+  response.json({
+    gateways: gateways.map((gateway) => ({
+      id: gateway.id,
+      code: gateway.code,
+      name: gateway.name,
+      operator: gateway.operator,
+      country: gateway.country,
+      kind: gateway.kind,
+      verificationState: gateway.verificationState,
+      riskClass: gateway.riskClass,
+      status: gateway.status,
+      aliases: gateway.aliases,
+      activeVersion: gateway.activeVersion,
+      pendingVersion: gateway.versions.find((version) => version.state === "PENDING_APPROVAL") ?? null,
+      versionCount: gateway.versions.length,
+      routeCount: gateway._count.railRoutes,
+      credentialSetCount: gateway._count.credentialSets,
+      statementSourceCount: gateway._count.statementSources,
+      routeHealth: {
+        healthy: healthMap.get(gateway.id)?.HEALTHY ?? 0,
+        degraded: healthMap.get(gateway.id)?.DEGRADED ?? 0,
+        openBreaker: healthMap.get(gateway.id)?.OPEN_BREAKER ?? 0,
+      },
+      createdAt: gateway.createdAt,
+      updatedAt: gateway.updatedAt,
+    })),
+    total,
+    exported: gateways.length,
+    truncated: total > gateways.length,
+  });
+});
+
+const buildGatewaySummary = async () => {
   const [statusRows, kindRows, verificationRows, riskRows, routeHealthRows, pendingVersions] = await Promise.all([
     client.gateway.groupBy({ by: ["status"], _count: { _all: true } }),
     client.gateway.groupBy({ by: ["kind"], _count: { _all: true } }),
@@ -7261,7 +9005,7 @@ router.get("/gateways/summary", async (request: Request, response: Response) => 
   for (const row of riskRows) byRisk[row.riskClass] = row._count._all;
   const routeHealth: Record<string, number> = {};
   for (const row of routeHealthRows) routeHealth[row.healthState] = row._count._all;
-  response.json({
+  return {
     total: statusRows.reduce((sum, row) => sum + row._count._all, 0),
     byStatus,
     byKind,
@@ -7273,8 +9017,46 @@ router.get("/gateways/summary", async (request: Request, response: Response) => 
       degraded: routeHealth.DEGRADED ?? 0,
       openBreaker: routeHealth.OPEN_BREAKER ?? 0,
     },
-  });
+  };
+};
+
+router.get("/gateways/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["gateway:read"]);
+  response.json(await buildGatewaySummary());
 });
+
+router.get("/gateways/summary/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["gateway:read"]);
+  const summary = await buildGatewaySummary();
+  const actor = actorFromRequest(request);
+  const allowedChecklist = new Set([
+    "PORTFOLIO_SCOPE_VERIFIED",
+    "STATUS_BREAKDOWN_REVIEWED",
+    "VERSION_RISK_REVIEWED",
+    "EXPORT_APPROVAL_CONFIRMED",
+  ]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "GATEWAY_SUMMARY_EXPORTED",
+      entityType: "GATEWAY",
+      entityId: "summary",
+      beforeJson: {},
+      afterJson: {
+        total: summary.total,
+        pendingVersions: summary.pendingVersions,
+        routes: summary.routes,
+        checklist,
+      },
+    },
+  });
+  response.json({ ...summary, exportedAt: new Date().toISOString() });
+});
+
 
 router.get("/gateways/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["gateway:read"]);
@@ -7400,6 +9182,270 @@ router.post("/gateways/:id/versions", async (request: Request, response: Respons
   response.status(201).json({ id: version.id, versionNumber: version.versionNumber, state: version.state });
 });
 
+const gatewayVersionCloneBodySchema = z
+  .object({ changelog: z.string().max(1000).optional() })
+  .strict();
+
+/**
+ * Clones a version's configuration into a brand-new DRAFT.
+ *
+ * Editing a LIVE row in place bypasses the go-live gates, so the wizard uses
+ * this endpoint whenever the gateway has no open draft. Evidence, attempt logs
+ * and inbound events are deliberately not copied: the new draft must earn its
+ * own evidence before a checker can activate it.
+ */
+router.post("/gateway-versions/:vid/clone", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["gateway:write"]);
+  const { vid } = parseOrThrow(versionParamsSchema, request.params);
+  const body = parseOrThrow(gatewayVersionCloneBodySchema, request.body ?? {});
+  const actor = actorFromRequest(request);
+  const source = await client.gatewayVersion.findUnique({
+    where: { id: vid },
+    include: {
+      environments: true,
+      auth: true,
+      setting: true,
+      cryptoProfiles: true,
+      flows: {
+        include: {
+          steps: {
+            include: { parameters: true, outputs: true },
+          },
+        },
+      },
+      statusRules: true,
+      errorMaps: true,
+      confirmationChannels: true,
+    },
+  });
+  if (!source) {
+    throw new ApiError(404, "GATEWAY_VERSION_NOT_FOUND", "The gateway version does not exist");
+  }
+  const latest = await client.gatewayVersion.findFirst({
+    where: { gatewayId: source.gatewayId },
+    orderBy: { versionNumber: "desc" },
+    select: { versionNumber: true },
+  });
+  const nextVersion = (latest?.versionNumber ?? 0) + 1;
+  const clone = await client.$transaction(async (tx) => {
+    const created = await tx.gatewayVersion.create({
+      data: {
+        gatewayId: source.gatewayId,
+        versionNumber: nextVersion,
+        snapshotCiphertext: JSON.stringify({
+          clonedFromVersionId: source.id,
+          clonedFromVersionNumber: source.versionNumber,
+          clonedAt: new Date().toISOString(),
+        }),
+        contentHash: createHash("sha256")
+          .update(`${source.id}:${nextVersion}:${randomBytes(16).toString("hex")}`)
+          .digest("hex"),
+        state: "DRAFT",
+        createdById: actor.userId,
+        changeNote: body.changelog ?? `Cloned from v${source.versionNumber}`,
+        rollbackVersionId: source.rollbackVersionId ?? source.id,
+      },
+    });
+
+    for (const environment of source.environments) {
+      await tx.gatewayEnvironment.create({
+        data: {
+          gatewayVersionId: created.id,
+          env: environment.env,
+          baseUrls: environment.baseUrls as Prisma.InputJsonValue,
+          allowedHosts: environment.allowedHosts as Prisma.InputJsonValue,
+          inboundIpAllowlist: environment.inboundIpAllowlist as Prisma.InputJsonValue,
+          outboundEgressIps: environment.outboundEgressIps as Prisma.InputJsonValue,
+          enabled: environment.enabled,
+        },
+      });
+    }
+    for (const auth of source.auth) {
+      await tx.gatewayAuth.create({
+        data: {
+          gatewayVersionId: created.id,
+          env: auth.env,
+          method: auth.method,
+          authApply: auth.authApply,
+          refreshConfigJson: auth.refreshConfigJson as Prisma.InputJsonValue | undefined,
+        },
+      });
+    }
+    if (source.setting) {
+      const setting = source.setting;
+      await tx.gatewaySetting.create({
+        data: {
+          gatewayVersionId: created.id,
+          amountScale: setting.amountScale,
+          amountPrecision: setting.amountPrecision,
+          amountRounding: setting.amountRounding,
+          amountFormat: setting.amountFormat,
+          referenceFormat: setting.referenceFormat as Prisma.InputJsonValue,
+          sessionTtlSeconds: setting.sessionTtlSeconds,
+          otpTtlSeconds: setting.otpTtlSeconds,
+          otpResendCooldownSeconds: setting.otpResendCooldownSeconds,
+          maxOtpAttempts: setting.maxOtpAttempts,
+          supportsStatusCheck: setting.supportsStatusCheck,
+          statusCheckMinAgeSeconds: setting.statusCheckMinAgeSeconds,
+          supportsIdempotencyKey: setting.supportsIdempotencyKey,
+          supportsCancel: setting.supportsCancel,
+          rateLimitPerSecond: setting.rateLimitPerSecond,
+          concurrencyCap: setting.concurrencyCap,
+          timeoutMs: setting.timeoutMs,
+          maxResponseBytes: setting.maxResponseBytes,
+          gatewayTimezone: setting.gatewayTimezone,
+        },
+      });
+    }
+
+    const profileIdMap = new Map<string, string>();
+    for (const profile of source.cryptoProfiles) {
+      const createdProfile = await tx.cryptoProfile.create({
+        data: {
+          gatewayVersionId: created.id,
+          name: profile.name,
+          purpose: profile.purpose,
+          algorithm: profile.algorithm,
+          secretKeyRef: profile.secretKeyRef,
+          secretKeyEncoding: profile.secretKeyEncoding,
+          canonicalizationMode: profile.canonicalizationMode,
+          templateString: profile.templateString,
+          includedFields: profile.includedFields as Prisma.InputJsonValue,
+          excludedFields: profile.excludedFields as Prisma.InputJsonValue,
+          outputEncoding: profile.outputEncoding,
+        },
+      });
+      profileIdMap.set(profile.id, createdProfile.id);
+    }
+
+    for (const flow of source.flows) {
+      await tx.flow.create({
+        data: {
+          gatewayVersionId: created.id,
+          railId: flow.railId,
+          subMode: flow.subMode,
+          phase: flow.phase,
+          steps: {
+            create: flow.steps.map((step) => ({
+              orderIndex: step.orderIndex,
+              type: step.type,
+              method: step.method,
+              urlTemplate: step.urlTemplate,
+              contentType: step.contentType,
+              xmlTemplate: step.xmlTemplate,
+              timeoutMs: step.timeoutMs,
+              successCheck: step.successCheck as Prisma.InputJsonValue | undefined,
+              sideEffect: step.sideEffect,
+              retryPolicy: step.retryPolicy,
+              idempotencyConfig: step.idempotencyConfig as Prisma.InputJsonValue,
+              pointOfNoReturn: step.pointOfNoReturn,
+              parameters: {
+                create: step.parameters.map((parameter) => ({
+                  place: parameter.place,
+                  key: parameter.key,
+                  source: parameter.source,
+                  selector: parameter.selector,
+                  constantValue: parameter.constantValue,
+                  cryptoProfileId: parameter.cryptoProfileId
+                    ? profileIdMap.get(parameter.cryptoProfileId) ?? null
+                    : null,
+                  transforms: parameter.transforms as Prisma.InputJsonValue,
+                })),
+              },
+              outputs: {
+                create: step.outputs.map((output) => ({
+                  name: output.name,
+                  selector: output.selector,
+                  transforms: output.transforms as Prisma.InputJsonValue,
+                  storeAs: output.storeAs,
+                  required: output.required,
+                })),
+              },
+            })),
+          },
+        },
+      });
+    }
+
+    for (const rule of source.statusRules) {
+      await tx.statusRule.create({
+        data: {
+          gatewayVersionId: created.id,
+          phase: rule.phase,
+          orderIndex: rule.orderIndex,
+          selector: rule.selector,
+          op: rule.op,
+          valueJson: rule.valueJson as Prisma.InputJsonValue,
+          canonicalStatus: rule.canonicalStatus,
+          canonicalSubstatus: rule.canonicalSubstatus,
+          canonicalError: rule.canonicalError,
+        },
+      });
+    }
+    for (const errorMap of source.errorMaps) {
+      await tx.errorMap.create({
+        data: {
+          gatewayVersionId: created.id,
+          gatewayCode: errorMap.gatewayCode,
+          canonicalError: errorMap.canonicalError,
+          classification: errorMap.classification,
+          retryable: errorMap.retryable,
+          countsTowardLockout: errorMap.countsTowardLockout,
+          countsTowardBreaker: errorMap.countsTowardBreaker,
+          customerMessageAr: errorMap.customerMessageAr,
+          customerMessageEn: errorMap.customerMessageEn,
+          operatorHint: errorMap.operatorHint,
+        },
+      });
+    }
+    for (const channel of source.confirmationChannels) {
+      await tx.confirmationChannel.create({
+        data: {
+          gatewayVersionId: created.id,
+          routeId: channel.routeId,
+          type: channel.type,
+          pathToken: randomBytes(16).toString("hex"),
+          cryptoProfileId: channel.cryptoProfileId
+            ? profileIdMap.get(channel.cryptoProfileId) ?? null
+            : null,
+          verifyMethod: channel.verifyMethod,
+          signatureHeader: channel.signatureHeader,
+          timestampSelector: channel.timestampSelector,
+          timestampToleranceSec: channel.timestampToleranceSec,
+          ipAllowlist: channel.ipAllowlist as Prisma.InputJsonValue | undefined,
+          bodyFormat: channel.bodyFormat,
+          correlationSelector: channel.correlationSelector,
+          dedupeKeySelector: channel.dedupeKeySelector,
+          eventMap: channel.eventMap as Prisma.InputJsonValue,
+          mustInquire: channel.mustInquire,
+          ackStatus: channel.ackStatus,
+          ackBodyTemplate: channel.ackBodyTemplate,
+        },
+      });
+    }
+
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role,
+        action: "GATEWAY_VERSION_CLONED",
+        entityType: "GATEWAY_VERSION",
+        entityId: created.id,
+        beforeJson: { sourceVersionId: source.id, sourceVersionNumber: source.versionNumber },
+        afterJson: { versionNumber: created.versionNumber, state: "DRAFT" },
+      },
+    });
+    return created;
+  });
+  response.status(201).json({
+    id: clone.id,
+    gatewayId: clone.gatewayId,
+    versionNumber: clone.versionNumber,
+    state: clone.state,
+    clonedFromVersionId: source.id,
+  });
+});
+
 /**
  * States a rollback target may have had before. Only a version that was
  * already promoted through the go-live gates can be rolled back to.
@@ -7454,11 +9500,31 @@ export const rollbackGatewayVersionInTransaction = async (
 router.post("/gateways/:id/rollback", async (request: Request, response: Response) => {
   requireAuthorities(request, ["gateway:write"]);
   const { id } = parseOrThrow(idSchema, request.params);
-  const body = parseOrThrow(z.object({ versionId: z.string().min(1).max(64) }).strict(), request.body);
+  const body = parseOrThrow(z.object({
+    versionId: z.string().min(1).max(64),
+    reason: z.string().min(3).max(500).optional(),
+    checklist: z.array(z.enum([
+      "TARGET_VERSION_VERIFIED",
+      "GATES_VERIFIED",
+      "IMPACT_REVIEWED",
+      "ROLLBACK_AUTHORITY_CONFIRMED",
+    ])).max(10).optional(),
+  }).strict(), request.body);
   const actor = actorFromRequest(request);
   const gateway = await client.$transaction(async (tx) =>
     rollbackGatewayVersionInTransaction(tx as never, id, body.versionId, actor.userId)
   );
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "GATEWAY_VERSION_ROLLED_BACK",
+      entityType: "GATEWAY",
+      entityId: id,
+      beforeJson: {},
+      afterJson: { targetVersionId: body.versionId, reason: body.reason ?? null, checklist: body.checklist ?? [] },
+    },
+  });
   // The outbound consumers of the gateway are now stale.
   await invalidationBus.invalidateGateway(id, "gateway-version-rolled-back");
   response.json({ id: gateway.id, activeVersionId: gateway.activeVersionId });
@@ -8554,6 +10620,12 @@ router.put("/gateway-versions/:vid/status-rules", async (request: Request, respo
           )
           .min(1)
           .max(50),
+        checklist: z.array(z.enum([
+          "KEY_SCOPE_VERIFIED",
+          "VALUE_SCHEMA_REVIEWED",
+          "EFFECTIVE_DATE_REVIEWED",
+          "IMMUTABLE_VERSION_ACKNOWLEDGED",
+        ])).max(10).optional(),
       })
       .strict(),
     request.body,
@@ -8645,6 +10717,16 @@ router.post("/gateway-versions/:vid/dry-run", async (request: Request, response:
         railCode: z.string().max(64).optional(),
         amount: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).optional(),
         currency: z.string().length(3).optional(),
+        checklist: z.array(z.enum([
+          "CREDENTIAL_REFS_VERIFIED",
+          "ENVIRONMENT_MATCH_REVIEWED",
+          "SECRET_STORAGE_VERIFIED",
+          "CREDENTIAL_CHECK_APPROVED",
+          "PHASE_SELECTED",
+          "SAMPLE_PAYLOAD_REVIEWED",
+          "CREDENTIAL_CONTEXT_READY",
+          "RESULT_INTERPRETATION_REVIEWED",
+        ])).max(10).optional(),
       })
       .strict(),
     request.body ?? {},
@@ -8652,6 +10734,18 @@ router.post("/gateway-versions/:vid/dry-run", async (request: Request, response:
   const flows = await client.flow.findMany({
     where: { gatewayVersionId: vid },
     include: { steps: { orderBy: { orderIndex: "asc" } } },
+  });
+  const credentialChecklist = (body.checklist ?? []).some((entry) => entry.startsWith("CREDENTIAL_") || entry === "ENVIRONMENT_MATCH_REVIEWED" || entry === "SECRET_STORAGE_VERIFIED");
+  await client.auditLog.create({
+    data: {
+      actorId: actorFromRequest(request).userId,
+      role: actorFromRequest(request).role,
+      action: credentialChecklist ? "GATEWAY_CREDENTIAL_CHECK" : "GATEWAY_VERSION_DRY_RUN",
+      entityType: "GATEWAY_VERSION",
+      entityId: version.id,
+      beforeJson: {},
+      afterJson: { checklist: body.checklist ?? [] },
+    },
   });
   response.json({
     gatewayVersionId: version.id,
@@ -8679,7 +10773,15 @@ router.post("/gateway-versions/:vid/run-suite", async (request: Request, respons
   const { vid } = parseOrThrow(versionParamsSchema, request.params);
   const version = await loadVersion(vid);
   const body = parseOrThrow(
-    z.object({ scenarios: z.array(z.string().max(64)).max(30).optional() }).strict(),
+    z.object({
+      scenarios: z.array(z.string().max(64)).max(30).optional(),
+      checklist: z.array(z.enum([
+        "SUITE_SELECTED",
+        "SANDBOX_ENV_VERIFIED",
+        "EVIDENCE_CAPTURE_READY",
+        "RESULTS_REVIEW_PLANNED",
+      ])).max(10).optional(),
+    }).strict(),
     request.body ?? {},
   );
   // The evidence is collected from the database and from the sandbox suite
@@ -8697,6 +10799,17 @@ router.post("/gateway-versions/:vid/run-suite", async (request: Request, respons
     checkerUserId: checker?.checkerUserId ?? "",
     ...evidence,
   });
+  await client.auditLog.create({
+    data: {
+      actorId: actorFromRequest(request).userId,
+      role: actorFromRequest(request).role,
+      action: "GATEWAY_SANDBOX_SUITE_RUN",
+      entityType: "GATEWAY_VERSION",
+      entityId: version.id,
+      beforeJson: {},
+      afterJson: { scenarios: body.scenarios ?? [], checklist: body.checklist ?? [] },
+    },
+  });
   response.json({
     gatewayVersionId: version.id,
     requestedScenarios: body.scenarios ?? [],
@@ -8708,13 +10821,25 @@ router.post("/gateway-versions/:vid/run-suite", async (request: Request, respons
 router.post("/gateway-versions/:vid/submit-approval", async (request: Request, response: Response) => {
   requireAuthorities(request, ["gateway:write"]);
   const { vid } = parseOrThrow(versionParamsSchema, request.params);
+  const body = parseOrThrow(
+    z.object({
+      reason: z.string().min(3).max(500).optional(),
+      checklist: z.array(z.enum([
+        "GATES_REVIEWED",
+        "EVIDENCE_VERIFIED",
+        "ROLLBACK_READY",
+        "CHECKER_INDEPENDENCE_CONFIRMED",
+      ])).max(10).optional(),
+    }).strict(),
+    request.body ?? {},
+  );
   const version = await loadVersion(vid);
   const actor = actorFromRequest(request);
   const approval = await client.approvalRequest.create({
     data: {
       subjectType: "GATEWAY_VERSION",
       subjectId: version.id,
-      payloadDiffJson: { gatewayVersionId: version.id },
+      payloadDiffJson: { gatewayVersionId: version.id, reason: body.reason ?? null, checklist: body.checklist ?? [] },
       mode: "STANDARD",
       makerUserId: actor.userId,
       state: "PENDING_REVIEW",
@@ -8724,6 +10849,18 @@ router.post("/gateway-versions/:vid/submit-approval", async (request: Request, r
   await client.gatewayVersion.update({
     where: { id: version.id },
     data: { state: "PENDING_APPROVAL", approvalRequestId: approval.id },
+  });
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "GATEWAY_VERSION_APPROVAL_SUBMITTED",
+      entityType: "GATEWAY_VERSION",
+      entityId: version.id,
+      beforeJson: { state: version.state },
+      afterJson: { state: "PENDING_APPROVAL", reason: body.reason ?? null, checklist: body.checklist ?? [] },
+      approvalRequestId: approval.id,
+    },
   });
   response.status(202).json({ status: "PENDING_APPROVAL", approvalRequestId: approval.id });
 });
@@ -9459,8 +11596,86 @@ router.get("/rails", async (request: Request, response: Response) => {
   ));
 });
 
-router.get("/rails/summary", async (request: Request, response: Response) => {
+router.get("/rails/export", async (request: Request, response: Response) => {
   requireAuthorities(request, ["gateway:read"]);
+  const built = buildListQuery(request.query, {
+    search: ["code", "nameEn", "nameAr"],
+    equals: { collectionMode: "collectionMode", currency: "currency" },
+    booleans: { blocked: "blocked" },
+    ranges: { amount: { path: "minAmount", kind: "decimal" } },
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { code: "code", nameEn: "nameEn", collectionMode: "collectionMode", currency: "currency", status: "blocked" },
+    defaultSort: { displayOrder: "asc" },
+  });
+  const take = 5000;
+  const [rails, total] = await Promise.all([
+    client.rail.findMany({
+      where: built.where as never,
+      orderBy: built.orderBy as never,
+      include: {
+        fields: true,
+        _count: { select: { routes: true, flows: true, paymentAttempts: true } },
+      },
+      take,
+    }),
+    client.rail.count({ where: built.where as never }),
+  ]);
+  const railIds = rails.map((rail) => rail.id);
+  const routeHealth = railIds.length === 0
+    ? []
+    : await client.railRoute.groupBy({
+        by: ["railId", "healthState", "status"],
+        where: { railId: { in: railIds } },
+        _count: { _all: true },
+      });
+  const healthMap = new Map<string, { healthy: number; degraded: number; openBreaker: number; active: number }>();
+  for (const row of routeHealth) {
+    const current = healthMap.get(row.railId) ?? { healthy: 0, degraded: 0, openBreaker: 0, active: 0 };
+    if (row.healthState === "HEALTHY") current.healthy += row._count._all;
+    else if (row.healthState === "DEGRADED") current.degraded += row._count._all;
+    else if (row.healthState === "OPEN_BREAKER") current.openBreaker += row._count._all;
+    if (row.status === "ACTIVE") current.active += row._count._all;
+    healthMap.set(row.railId, current);
+  }
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "RAILS_EXPORTED",
+      entityType: "RAIL",
+      entityId: "export",
+      beforeJson: {},
+      afterJson: { total, exported: rails.length, filters: JSON.stringify(request.query ?? {}) },
+    },
+  });
+  response.json({
+    rails: rails.map((rail) => ({
+      id: rail.id,
+      code: rail.code,
+      nameAr: rail.nameAr,
+      nameEn: rail.nameEn,
+      collectionMode: rail.collectionMode,
+      currency: rail.currency,
+      minAmount: merchantMoney(rail.minAmount),
+      maxAmount: merchantMoney(rail.maxAmount),
+      blocked: rail.blocked,
+      displayOrder: rail.displayOrder,
+      fieldCount: rail.fields.length,
+      routeCount: rail._count.routes,
+      flowCount: rail._count.flows,
+      paymentAttemptCount: rail._count.paymentAttempts,
+      routeHealth: healthMap.get(rail.id) ?? { healthy: 0, degraded: 0, openBreaker: 0, active: 0 },
+      createdAt: rail.createdAt,
+      updatedAt: rail.updatedAt,
+    })),
+    total,
+    exported: rails.length,
+    truncated: total > rails.length,
+  });
+});
+
+const buildRailSummary = async () => {
   const [total, blocked, modeRows, routeHealthRows] = await Promise.all([
     client.rail.count(),
     client.rail.count({ where: { blocked: true } }),
@@ -9471,7 +11686,7 @@ router.get("/rails/summary", async (request: Request, response: Response) => {
   for (const row of modeRows) byMode[row.collectionMode] = row._count._all;
   const routeHealth: Record<string, number> = {};
   for (const row of routeHealthRows) routeHealth[row.healthState] = row._count._all;
-  response.json({
+  return {
     total,
     active: total - blocked,
     blocked,
@@ -9481,8 +11696,47 @@ router.get("/rails/summary", async (request: Request, response: Response) => {
       degraded: routeHealth.DEGRADED ?? 0,
       openBreaker: routeHealth.OPEN_BREAKER ?? 0,
     },
-  });
+  };
+};
+
+router.get("/rails/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["gateway:read"]);
+  response.json(await buildRailSummary());
 });
+
+router.get("/rails/summary/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["gateway:read"]);
+  const summary = await buildRailSummary();
+  const actor = actorFromRequest(request);
+  const allowedChecklist = new Set([
+    "RAIL_SCOPE_VERIFIED",
+    "COLLECTION_MODE_REVIEWED",
+    "ROUTE_HEALTH_REVIEWED",
+    "EXPORT_APPROVAL_CONFIRMED",
+  ]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "RAIL_SUMMARY_EXPORTED",
+      entityType: "RAIL",
+      entityId: "summary",
+      beforeJson: {},
+      afterJson: {
+        total: summary.total,
+        active: summary.active,
+        blocked: summary.blocked,
+        routes: summary.routes,
+        checklist,
+      },
+    },
+  });
+  response.json({ ...summary, exportedAt: new Date().toISOString() });
+});
+
 
 router.get("/rails/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["gateway:read"]);
@@ -9561,6 +11815,12 @@ router.patch("/rails/:id", async (request: Request, response: Response) => {
         capabilities: z.record(z.string().max(40), z.boolean()).optional(),
         instructionsAr: z.string().max(2000).optional(),
         instructionsEn: z.string().max(2000).optional(),
+        checklist: z.array(z.enum([
+          "NAMES_VERIFIED",
+          "LIMITS_VERIFIED",
+          "INSTRUCTIONS_REVIEWED",
+          "AVAILABILITY_IMPACT_REVIEWED",
+        ])).max(10).optional(),
       })
       .strict(),
     request.body,
@@ -9581,6 +11841,17 @@ router.patch("/rails/:id", async (request: Request, response: Response) => {
       capabilities: body.capabilities,
       instructionsAr: body.instructionsAr,
       instructionsEn: body.instructionsEn,
+    },
+  });
+  await client.auditLog.create({
+    data: {
+      actorId: actorFromRequest(request).userId,
+      role: actorFromRequest(request).role,
+      action: "RAIL_UPDATED",
+      entityType: "RAIL",
+      entityId: updated.id,
+      beforeJson: { nameAr: rail.nameAr, nameEn: rail.nameEn, blocked: rail.blocked, minAmount: String(rail.minAmount), maxAmount: String(rail.maxAmount) },
+      afterJson: { nameAr: updated.nameAr, nameEn: updated.nameEn, blocked: updated.blocked, minAmount: String(updated.minAmount), maxAmount: String(updated.maxAmount), checklist: body.checklist ?? [] },
     },
   });
   response.json({ id: updated.id, blocked: updated.blocked });
@@ -9620,6 +11891,12 @@ router.put("/rails/:id/fields", async (request: Request, response: Response) => 
               }),
           )
           .max(40),
+        checklist: z.array(z.enum([
+          "FIELD_CODES_VERIFIED",
+          "VALIDATION_RULES_REVIEWED",
+          "SENSITIVITY_REVIEWED",
+          "CHECKOUT_IMPACT_REVIEWED",
+        ])).max(10).optional(),
       })
       .strict(),
     request.body,
@@ -9651,6 +11928,17 @@ router.put("/rails/:id/fields", async (request: Request, response: Response) => 
       }),
     ),
   );
+  await client.auditLog.create({
+    data: {
+      actorId: actorFromRequest(request).userId,
+      role: actorFromRequest(request).role,
+      action: "RAIL_FIELDS_UPDATED",
+      entityType: "RAIL",
+      entityId: id,
+      beforeJson: {},
+      afterJson: { fields: fields.map((field) => field.key), checklist: body.checklist ?? [] },
+    },
+  });
   response.json({ fields: fields.map((field) => ({ id: field.id, key: field.key })) });
 });
 
@@ -9691,8 +11979,56 @@ router.get("/routes", async (request: Request, response: Response) => {
   ));
 });
 
-router.get("/routes/summary", async (request: Request, response: Response) => {
+router.get("/routes/export", async (request: Request, response: Response) => {
   requireAuthorities(request, ["gateway:read"]);
+  const built = buildListQuery(request.query, {
+    search: ["rail.code", "gateway.code"],
+    in: { status: "status" }, equals: {railId: "railId", gatewayId: "gatewayId", credentialPolicy: "credentialPolicy", healthState: "healthState"},
+    ranges: { amount: { path: "minAmount", kind: "decimal" } },
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { railCode: "railId", gatewayCode: "gatewayId", priority: "priority", status: "status", healthState: "healthState", minAmount: "minAmount" },
+    defaultSort: [{ priority: "asc" }, { createdAt: "desc" }],
+  });
+  const take = 5000;
+  const [routes, total] = await Promise.all([
+    client.railRoute.findMany({
+      where: built.where as never,
+      orderBy: built.orderBy as never,
+      include: {
+        rail: { select: { id: true, code: true, nameEn: true } },
+        gateway: { select: { id: true, code: true, name: true } },
+      },
+      take,
+    }),
+    client.railRoute.count({ where: built.where as never }),
+  ]);
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "ROUTES_EXPORTED",
+      entityType: "RAIL_ROUTE",
+      entityId: "export",
+      beforeJson: {},
+      afterJson: { total, exported: routes.length, filters: JSON.stringify(request.query ?? {}) },
+    },
+  });
+  response.json({
+    routes: routes.map((route) => ({
+      ...route,
+      railCode: route.rail?.code ?? "",
+      railName: route.rail?.nameEn ?? "",
+      gatewayCode: route.gateway?.code ?? "",
+      gatewayName: route.gateway?.name ?? "",
+    })),
+    total,
+    exported: routes.length,
+    truncated: total > routes.length,
+  });
+});
+
+const buildRouteSummary = async () => {
   const [statusRows, healthRows, pairRows, total] = await Promise.all([
     client.railRoute.groupBy({ by: ["status"], _count: { _all: true } }),
     client.railRoute.groupBy({ by: ["healthState"], _count: { _all: true } }),
@@ -9703,7 +12039,7 @@ router.get("/routes/summary", async (request: Request, response: Response) => {
   for (const row of statusRows) byStatus[row.status] = row._count._all;
   const byHealth: Record<string, number> = {};
   for (const row of healthRows) byHealth[row.healthState] = row._count._all;
-  response.json({
+  return {
     total,
     byStatus,
     byHealth,
@@ -9712,8 +12048,48 @@ router.get("/routes/summary", async (request: Request, response: Response) => {
     paused: byStatus.PAUSED ?? 0,
     draining: byStatus.DRAINING ?? 0,
     openBreaker: byHealth.OPEN_BREAKER ?? 0,
-  });
+  };
+};
+
+router.get("/routes/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["gateway:read"]);
+  response.json(await buildRouteSummary());
 });
+
+router.get("/routes/summary/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["gateway:read"]);
+  const summary = await buildRouteSummary();
+  const actor = actorFromRequest(request);
+  const allowedChecklist = new Set([
+    "ROUTE_SCOPE_VERIFIED",
+    "STATUS_HEALTH_REVIEWED",
+    "PAIR_SCOPE_REVIEWED",
+    "EXPORT_APPROVAL_CONFIRMED",
+  ]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "ROUTE_SUMMARY_EXPORTED",
+      entityType: "RAIL_ROUTE",
+      entityId: "summary",
+      beforeJson: {},
+      afterJson: {
+        total: summary.total,
+        active: summary.active,
+        paused: summary.paused,
+        draining: summary.draining,
+        openBreaker: summary.openBreaker,
+        checklist,
+      },
+    },
+  });
+  response.json({ ...summary, exportedAt: new Date().toISOString() });
+});
+
 
 router.get("/routes/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["gateway:read"]);
@@ -9780,6 +12156,12 @@ router.patch("/routes/:id", async (request: Request, response: Response) => {
         dailyCapAmount: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).optional(),
         scope: z.record(z.string().max(64), z.unknown()).optional(),
         costModel: z.record(z.string().max(64), z.unknown()).optional(),
+        checklist: z.array(z.enum([
+          "PRIORITY_WEIGHT_REVIEWED",
+          "LIMITS_CAP_VERIFIED",
+          "SCOPE_COST_REVIEWED",
+          "ROUTING_IMPACT_REVIEWED",
+        ])).max(10).optional(),
       })
       .strict(),
     request.body,
@@ -9807,7 +12189,16 @@ router.post("/routes/:id/state", async (request: Request, response: Response) =>
   requireAuthorities(request, ["gateway:write"]);
   const { id } = parseOrThrow(idSchema, request.params);
   const body = parseOrThrow(
-    z.object({ status: z.enum(["ACTIVE", "PAUSED", "DRAINING"]), reason: z.string().max(500).optional() }).strict(),
+    z.object({
+      status: z.enum(["ACTIVE", "PAUSED", "DRAINING"]),
+      reason: z.string().max(500).optional(),
+      checklist: z.array(z.enum([
+        "PRIORITY_WEIGHT_REVIEWED",
+        "LIMITS_CAP_VERIFIED",
+        "SCOPE_COST_REVIEWED",
+        "ROUTING_IMPACT_REVIEWED",
+      ])).max(10).optional(),
+    }).strict(),
     request.body,
   );
   const route = await client.railRoute.findUnique({ where: { id } });
@@ -9815,6 +12206,17 @@ router.post("/routes/:id/state", async (request: Request, response: Response) =>
     throw new ApiError(404, "ROUTE_NOT_FOUND", "The route does not exist");
   }
   const updated = await client.railRoute.update({ where: { id }, data: { status: body.status } });
+  await client.auditLog.create({
+    data: {
+      actorId: actorFromRequest(request).userId,
+      role: actorFromRequest(request).role,
+      action: "ROUTE_UPDATED",
+      entityType: "RAIL_ROUTE",
+      entityId: updated.id,
+      beforeJson: { priority: route.priority, weight: route.weight, status: route.status },
+      afterJson: { priority: updated.priority, weight: updated.weight, status: updated.status, checklist: body.checklist ?? [] },
+    },
+  });
   response.json({ id: updated.id, status: updated.status });
 });
 
@@ -9876,7 +12278,7 @@ const reconciliationSourceRow = (source: Record<string, any>) => {
     scheduleCron: source.scheduleCron,
     settlementLagDays: source.settlementLagDays,
     dedupeKeyTemplate: source.dedupeKeyTemplate,
-    active: true,
+    active: parser.active !== false,
     columnMapping: parser.columns ?? parser.columnMapping ?? {},
     parserConfig: parser,
     createdAt: source.createdAt,
@@ -9925,6 +12327,89 @@ router.post("/reconciliation/sources", async (request: Request, response: Respon
     },
   });
   response.status(201).json({ id: source.id, type: source.type });
+});
+
+router.patch("/reconciliation/sources/:id", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["reconciliation:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z
+      .object({
+        scheduleCron: z.string().max(120).nullable().optional(),
+        settlementLagDays: z.number().int().min(0).max(365).optional(),
+        dedupeKeyTemplate: z.string().max(200).nullable().optional(),
+        parserConfig: z.record(z.string().max(64), z.unknown()).optional(),
+        active: z.boolean().optional(),
+        checklist: z.array(z.enum([
+          "PARSER_CONFIG_REVIEWED",
+          "SCHEDULE_LAG_VERIFIED",
+          "DEDUPE_TEMPLATE_REVIEWED",
+          "SOURCE_IMPACT_REVIEWED",
+        ])).max(10).optional(),
+      })
+      .strict()
+      .refine(
+        (value) =>
+          value.scheduleCron !== undefined ||
+          value.settlementLagDays !== undefined ||
+          value.dedupeKeyTemplate !== undefined ||
+          value.parserConfig !== undefined ||
+          value.active !== undefined,
+        { message: "At least one field is required" },
+      ),
+    request.body ?? {},
+  );
+  const source = await client.statementSource.findUnique({ where: { id } });
+  if (!source) throw new ApiError(404, "STATEMENT_SOURCE_NOT_FOUND", "The statement source does not exist");
+  const currentParser = source.parserConfig && typeof source.parserConfig === "object" && !Array.isArray(source.parserConfig)
+    ? source.parserConfig as Record<string, unknown>
+    : {};
+  const nextParser = {
+    ...currentParser,
+    ...(body.parserConfig ?? {}),
+    ...(body.active !== undefined ? { active: body.active } : {}),
+  };
+  const actor = actorFromRequest(request);
+  const updated = await client.$transaction(async (tx) => {
+    const row = await tx.statementSource.update({
+      where: { id },
+      data: {
+        ...(body.scheduleCron !== undefined ? { scheduleCron: body.scheduleCron } : {}),
+        ...(body.settlementLagDays !== undefined ? { settlementLagDays: body.settlementLagDays } : {}),
+        ...(body.dedupeKeyTemplate !== undefined ? { dedupeKeyTemplate: body.dedupeKeyTemplate } : {}),
+        parserConfig: json(nextParser),
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "OPERATOR",
+        action: "RECONCILIATION_SOURCE_UPDATED",
+        entityType: "STATEMENT_SOURCE",
+        entityId: id,
+        beforeJson: {
+          scheduleCron: source.scheduleCron,
+          settlementLagDays: source.settlementLagDays,
+          dedupeKeyTemplate: source.dedupeKeyTemplate,
+          active: currentParser.active !== false,
+        },
+        afterJson: {
+          scheduleCron: row.scheduleCron,
+          settlementLagDays: row.settlementLagDays,
+          dedupeKeyTemplate: row.dedupeKeyTemplate,
+          active: nextParser.active !== false,
+          checklist: body.checklist ?? [],
+        },
+      },
+    });
+    return row;
+  });
+  response.json({
+    id: updated.id,
+    active: (updated.parserConfig as Record<string, unknown> | null)?.active !== false,
+    settlementLagDays: updated.settlementLagDays,
+    scheduleCron: updated.scheduleCron,
+  });
 });
 
 const reconciliationRunRow = (run: Record<string, any>) => {
@@ -9996,8 +12481,7 @@ router.get("/reconciliation/runs", async (request: Request, response: Response) 
   response.json(listResponse("runs", runs.map((run) => reconciliationRunRow(run as never)), total, built));
 });
 
-router.get("/reconciliation/summary", async (request: Request, response: Response) => {
-  requireAuthorities(request, ["reconciliation:read"]);
+const buildReconciliationSummary = async () => {
   const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const [runs, resultRows, sourceCount] = await Promise.all([
     client.reconciliationRun.findMany({
@@ -10024,7 +12508,7 @@ router.get("/reconciliation/summary", async (request: Request, response: Respons
     matchedRows += Number(stats.matched ?? 0);
     mismatchedRows += Number(stats.mismatched ?? (Number(stats.amountMismatch ?? 0) + Number(stats.missingAtGateway ?? 0) + Number(stats.missingLocally ?? 0) + Number(stats.duplicates ?? 0)));
   }
-  response.json({
+  return {
     sources: sourceCount,
     runs: runs.length,
     completedRuns: runs.filter((run) => run.ingestedAt !== null).length,
@@ -10034,42 +12518,163 @@ router.get("/reconciliation/summary", async (request: Request, response: Respons
     mismatchedRows,
     matchRate: totalRows === 0 ? "0.0000" : ((matchedRows / totalRows) * 100).toFixed(4),
     resultCounts,
-  });
+  };
+};
+
+router.get("/reconciliation/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["reconciliation:read"]);
+  response.json(await buildReconciliationSummary());
 });
+
+router.get("/reconciliation/summary/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["reconciliation:read"]);
+  const summary = await buildReconciliationSummary();
+  const actor = actorFromRequest(request);
+  const allowedChecklist = new Set([
+    "RUN_SCOPE_VERIFIED",
+    "MATCH_RATE_REVIEWED",
+    "RESULT_BREAKDOWN_REVIEWED",
+    "EXPORT_APPROVAL_CONFIRMED",
+  ]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "RECONCILIATION_SUMMARY_EXPORTED",
+      entityType: "RECONCILIATION_RUN",
+      entityId: "summary",
+      beforeJson: {},
+      afterJson: {
+        sources: summary.sources,
+        runs: summary.runs,
+        processingRuns: summary.processingRuns,
+        matchedRows: summary.matchedRows,
+        mismatchedRows: summary.mismatchedRows,
+        matchRate: summary.matchRate,
+        checklist,
+      },
+    },
+  });
+  response.json({ ...summary, exportedAt: new Date().toISOString() });
+});
+
 
 router.get("/reconciliation/runs/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["reconciliation:read"]);
   const { id } = parseOrThrow(idSchema, request.params);
-  const run = await client.reconciliationRun.findUnique({
-    where: { id },
-    include: {
-      statementSource: { select: { type: true, gateway: { select: { code: true, name: true } } } },
-      items: {
-        take: 200,
-        orderBy: { createdAt: "asc" },
-        select: {
-          id: true,
-          ourReference: true,
-          providerReference: true,
-          batchReference: true,
-          statementAmount: true,
-          statementFee: true,
-          result: true,
-          attemptId: true,
-        },
+  const resultFilter = typeof request.query.result === "string" && request.query.result.trim()
+    ? request.query.result.trim()
+    : "";
+  const itemWhere = resultFilter ? { runId: id, result: resultFilter } : { runId: id };
+  const [run, items, itemsTotal, resultRows] = await Promise.all([
+    client.reconciliationRun.findUnique({
+      where: { id },
+      include: {
+        statementSource: { select: { type: true, gateway: { select: { code: true, name: true } } } },
       },
-    },
-  });
+    }),
+    client.reconciliationItem.findMany({
+      where: itemWhere as never,
+      take: 200,
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        ourReference: true,
+        providerReference: true,
+        batchReference: true,
+        statementAmount: true,
+        statementFee: true,
+        result: true,
+        attemptId: true,
+        operatorCaseId: true,
+        operatorCase: { select: { id: true, state: true, priority: true } },
+      },
+    }),
+    client.reconciliationItem.count({ where: itemWhere as never }),
+    client.reconciliationItem.groupBy({
+      by: ["result"],
+      where: { runId: id },
+      _count: { _all: true },
+    }),
+  ]);
   if (!run) throw new ApiError(404, "RECONCILIATION_RUN_NOT_FOUND", "The reconciliation run does not exist");
+  const itemResultCounts = Object.fromEntries(resultRows.map((row) => [row.result, row._count._all]));
   response.json({
     run: {
       ...reconciliationRunRow(run as never),
-      items: run.items.map((item) => ({
+      items: items.map((item) => ({
         ...item,
         statementAmount: merchantMoney(item.statementAmount),
         statementFee: merchantMoney(item.statementFee),
       })),
+      itemResultCounts,
+      itemsTotal,
+      itemsTruncated: itemsTotal > items.length,
+      itemResultFilter: resultFilter || null,
     },
+  });
+});
+
+router.get("/reconciliation/runs/:id/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["reconciliation:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const resultFilter = typeof request.query.result === "string" && request.query.result.trim()
+    ? request.query.result.trim()
+    : "";
+  const run = await client.reconciliationRun.findUnique({
+    where: { id },
+    include: {
+      statementSource: { select: { type: true, gateway: { select: { code: true, name: true } } } },
+    },
+  });
+  if (!run) throw new ApiError(404, "RECONCILIATION_RUN_NOT_FOUND", "The reconciliation run does not exist");
+  const where = resultFilter ? { runId: id, result: resultFilter } : { runId: id };
+  const take = 20000;
+  const [items, total] = await Promise.all([
+    client.reconciliationItem.findMany({
+      where: where as never,
+      orderBy: { createdAt: "asc" },
+      take,
+      select: {
+        id: true,
+        ourReference: true,
+        providerReference: true,
+        batchReference: true,
+        statementAmount: true,
+        statementFee: true,
+        result: true,
+        attemptId: true,
+        operatorCaseId: true,
+        operatorCase: { select: { id: true, state: true, priority: true } },
+      },
+    }),
+    client.reconciliationItem.count({ where: where as never }),
+  ]);
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "RECONCILIATION_RUN_EXPORTED",
+      entityType: "RECONCILIATION_RUN",
+      entityId: id,
+      beforeJson: {},
+      afterJson: { total, exported: items.length, result: resultFilter || null },
+    },
+  });
+  response.json({
+    run: reconciliationRunRow(run as never),
+    items: items.map((item) => ({
+      ...item,
+      statementAmount: merchantMoney(item.statementAmount),
+      statementFee: merchantMoney(item.statementFee),
+    })),
+    total,
+    exported: items.length,
+    truncated: total > items.length,
   });
 });
 
@@ -10184,8 +12789,78 @@ router.get("/disputes", async (request: Request, response: Response) => {
   response.json(listResponse("disputes", disputes.map((dispute) => disputeListRow(dispute as never)), total, built));
 });
 
-router.get("/disputes/summary", async (request: Request, response: Response) => {
+router.get("/disputes/export", async (request: Request, response: Response) => {
   requireAuthorities(request, ["dispute:read"]);
+  const query = (request.query ?? {}) as Record<string, unknown>;
+  const built = buildListQuery(request.query, {
+    search: ["externalDisputeRef", "reasonCode", "attempt.reference", "attempt.merchant.tradeName"],
+    in: { status: "status", source: "source" },
+    equals: { railId: "railId", gatewayId: "gatewayId" },
+    ranges: { amount: { path: "amount", kind: "decimal" } },
+    dates: {
+      createdAt: { path: "openedAt" },
+      openedAt: { path: "openedAt", fromKey: "openedFrom", toKey: "openedTo" },
+      evidenceDueAt: { path: "evidenceDueAt", fromKey: "dateFrom", toKey: "dateTo" },
+    },
+    sortable: {
+      externalDisputeRef: "externalDisputeRef",
+      status: "status",
+      source: "source",
+      amount: "amount",
+      openedAt: "openedAt",
+      evidenceDueAt: "evidenceDueAt",
+    },
+    defaultSort: { openedAt: "desc" },
+    defaultPageSize: 20,
+  });
+  const conditions: Record<string, unknown>[] = [built.where];
+  const merchantId = typeof query.merchantId === "string" && query.merchantId.trim() ? query.merchantId.trim() : "";
+  if (merchantId) conditions.push({ attempt: { merchantId } });
+  const where = conditions.length === 1 ? conditions[0] : { AND: conditions };
+  const take = 5000;
+  const [disputes, total] = await Promise.all([
+    client.dispute.findMany({
+      where: where as never,
+      orderBy: built.orderBy as never,
+      include: {
+        attempt: {
+          select: {
+            id: true,
+            reference: true,
+            status: true,
+            merchant: { select: { id: true, tradeName: true, legalName: true } },
+            rail: { select: { id: true, code: true, nameEn: true } },
+          },
+        },
+        gateway: { select: { id: true, code: true, name: true } },
+        rail: { select: { id: true, code: true, nameEn: true } },
+        adjustment: { select: { id: true, state: true, journalEntryId: true } },
+      },
+      take,
+    }),
+    client.dispute.count({ where: where as never }),
+  ]);
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "DISPUTES_EXPORTED",
+      entityType: "DISPUTE",
+      entityId: "export",
+      beforeJson: {},
+      afterJson: { total, exported: disputes.length, filters: JSON.stringify(query) },
+    },
+  });
+  response.json({
+    disputes: disputes.map((dispute) => disputeListRow(dispute as never)),
+    total,
+    exported: disputes.length,
+    truncated: total > disputes.length,
+  });
+});
+
+const buildDisputeSummary = async () => {
   const now = new Date();
   const soon = new Date(now.getTime() + 48 * 60 * 60 * 1000);
   const [statusRows, openAggregate, overdue, dueSoon, earliestDue] = await Promise.all([
@@ -10211,15 +12886,54 @@ router.get("/disputes/summary", async (request: Request, response: Response) => 
   for (const row of statusRows) byStatus[row.status] = row._count._all;
   const openCount = (openAggregate._count as { _all: number })._all;
   const openAmount = (openAggregate._sum as { amount: unknown } | undefined)?.amount;
-  response.json({
+  return {
     totalOpen: openCount,
     openAmount: merchantMoney(openAmount),
     byStatus,
     overdue,
     dueSoon,
     earliestEvidenceDueAt: earliestDue?.evidenceDueAt ?? null,
-  });
+  };
+};
+
+router.get("/disputes/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["dispute:read"]);
+  response.json(await buildDisputeSummary());
 });
+
+router.get("/disputes/summary/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["dispute:read"]);
+  const summary = await buildDisputeSummary();
+  const actor = actorFromRequest(request);
+  const allowedChecklist = new Set([
+    "OPEN_SCOPE_VERIFIED",
+    "DUE_DATE_REVIEWED",
+    "STATUS_BREAKDOWN_REVIEWED",
+    "EXPORT_APPROVAL_CONFIRMED",
+  ]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "DISPUTE_SUMMARY_EXPORTED",
+      entityType: "DISPUTE",
+      entityId: "summary",
+      beforeJson: {},
+      afterJson: {
+        totalOpen: summary.totalOpen,
+        openAmount: summary.openAmount,
+        overdue: summary.overdue,
+        dueSoon: summary.dueSoon,
+        checklist,
+      },
+    },
+  });
+  response.json({ ...summary, exportedAt: new Date().toISOString() });
+});
+
 
 router.get("/disputes/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["dispute:read"]);
@@ -10274,6 +12988,12 @@ router.post("/disputes/:id/evidence", async (request: Request, response: Respons
     z.object({
       evidence: z.record(z.string().max(64), z.unknown()),
       notes: z.string().max(2000).optional(),
+      checklist: z.array(z.enum([
+        "EVIDENCE_REFERENCE_VERIFIED",
+        "SUPPORTING_DOCUMENTS_ATTACHED",
+        "EVIDENCE_WINDOW_VERIFIED",
+        "SUMMARY_REVIEWED",
+      ])).max(10).optional(),
     }).strict(),
     request.body ?? {},
   );
@@ -10309,7 +13029,7 @@ router.post("/disputes/:id/evidence", async (request: Request, response: Respons
         entityType: "DISPUTE",
         entityId: id,
         beforeJson: { status: dispute.status, evidenceSubmittedAt: disputeEvidenceSubmittedAt(dispute.evidenceJson) },
-        afterJson: { status: row.status, submittedAt, keys: Object.keys(body.evidence) },
+        afterJson: { status: row.status, submittedAt, keys: Object.keys(body.evidence), checklist: body.checklist ?? [] },
       },
     });
     return row;
@@ -10470,8 +13190,83 @@ router.get("/adjustments", async (request: Request, response: Response) => {
   ));
 });
 
-router.get("/adjustments/summary", async (request: Request, response: Response) => {
+router.get("/adjustments/export", async (request: Request, response: Response) => {
   requireAuthorities(request, ["finance:read"]);
+  const query = (request.query ?? {}) as Record<string, unknown>;
+  const built = buildListQuery(request.query, {
+    search: ["reason", "externalDisputeRef", "providerRefundRef", "id", "sourceAttempt.reference", "dispute.externalDisputeRef"],
+    in: { state: "state", type: "type" },
+    booleans: { draftedBySystem: "draftedBySystem" },
+    equals: { sourceAttemptId: "sourceAttemptId", disputeId: "disputeId" },
+    ranges: { amount: { path: "amount", kind: "decimal" } },
+    dates: { createdAt: { path: "createdAt" }, updatedAt: { path: "updatedAt", fromKey: "updatedFrom", toKey: "updatedTo" } },
+    sortable: { type: "type", state: "state", amount: "amount", createdAt: "createdAt", updatedAt: "updatedAt" },
+    defaultSort: { createdAt: "desc" },
+    defaultPageSize: 20,
+  });
+  const conditions: Record<string, unknown>[] = [built.where];
+  const merchantId = typeof query.merchantId === "string" && query.merchantId.trim() ? query.merchantId.trim() : "";
+  if (merchantId) {
+    conditions.push({
+      OR: [
+        { sourceAttempt: { merchantId } },
+        { targetGlAccount: { ownerId: merchantId } },
+      ],
+    });
+  }
+  const where = conditions.length === 1 ? conditions[0] : { AND: conditions };
+  const take = 5000;
+  const [adjustments, total] = await Promise.all([
+    client.adjustment.findMany({
+      where: where as never,
+      orderBy: built.orderBy as never,
+      include: {
+        sourceAttempt: { select: { id: true, reference: true, status: true, currency: true, merchant: { select: { id: true, tradeName: true, legalName: true } } } },
+        dispute: { select: { id: true, externalDisputeRef: true, status: true } },
+        targetGlAccount: { select: { id: true, accountType: true, currency: true, ownerId: true } },
+      },
+      take,
+    }),
+    client.adjustment.count({ where: where as never }),
+  ]);
+  const ids = adjustments.map((adjustment) => adjustment.id);
+  const approvals = ids.length === 0
+    ? []
+    : await client.approvalRequest.findMany({
+        where: {
+          subjectType: { in: approvalSubjectTypeVariants("ADJUSTMENT") as never },
+          subjectId: { in: ids },
+        },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, subjectId: true, state: true, checkerUserId: true },
+      });
+  const approvalByAdjustment = new Map<string, { id: string; state: string; checkerUserId: string | null }>();
+  for (const approval of approvals) {
+    if (!approvalByAdjustment.has(approval.subjectId)) {
+      approvalByAdjustment.set(approval.subjectId, { id: approval.id, state: approval.state, checkerUserId: approval.checkerUserId });
+    }
+  }
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "ADJUSTMENTS_EXPORTED",
+      entityType: "ADJUSTMENT",
+      entityId: "export",
+      beforeJson: {},
+      afterJson: { total, exported: adjustments.length, filters: JSON.stringify(query) },
+    },
+  });
+  response.json({
+    adjustments: adjustments.map((adjustment) => adjustmentListRow(adjustment as never, approvalByAdjustment.get(adjustment.id) ?? null)),
+    total,
+    exported: adjustments.length,
+    truncated: total > adjustments.length,
+  });
+});
+
+const buildAdjustmentSummary = async () => {
   const [stateRows, typeRows, openAggregate, executedAggregate] = await Promise.all([
     client.adjustment.groupBy({ by: ["state"], _count: { _all: true }, _sum: { amount: true } }),
     client.adjustment.groupBy({ by: ["type"], _count: { _all: true }, _sum: { amount: true } }),
@@ -10498,7 +13293,7 @@ router.get("/adjustments/summary", async (request: Request, response: Response) 
     byType[row.type] = row._count._all;
     amountByType[row.type] = merchantMoney(row._sum.amount);
   }
-  response.json({
+  return {
     totalOpen: (openAggregate._count as { _all: number })._all,
     openAmount: merchantMoney((openAggregate._sum as { amount?: unknown } | undefined)?.amount),
     executedCount: (executedAggregate._count as { _all: number })._all,
@@ -10507,8 +13302,47 @@ router.get("/adjustments/summary", async (request: Request, response: Response) 
     amountByState,
     byType,
     amountByType,
-  });
+  };
+};
+
+router.get("/adjustments/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["finance:read"]);
+  response.json(await buildAdjustmentSummary());
 });
+
+router.get("/adjustments/summary/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["finance:read"]);
+  const summary = await buildAdjustmentSummary();
+  const actor = actorFromRequest(request);
+  const allowedChecklist = new Set([
+    "OPEN_SCOPE_VERIFIED",
+    "AMOUNT_TOTALS_REVIEWED",
+    "STATE_TYPE_BREAKDOWN_REVIEWED",
+    "EXPORT_APPROVAL_CONFIRMED",
+  ]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "ADJUSTMENT_SUMMARY_EXPORTED",
+      entityType: "ADJUSTMENT",
+      entityId: "summary",
+      beforeJson: {},
+      afterJson: {
+        totalOpen: summary.totalOpen,
+        openAmount: summary.openAmount,
+        executedCount: summary.executedCount,
+        executedAmount: summary.executedAmount,
+        checklist,
+      },
+    },
+  });
+  response.json({ ...summary, exportedAt: new Date().toISOString() });
+});
+
 
 router.get("/adjustments/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["finance:read"]);
@@ -10559,6 +13393,12 @@ router.post("/adjustments", async (request: Request, response: Response) => {
         reverseCommission: z.boolean().default(false),
         reason: z.string().min(2).max(1000),
         externalDisputeRef: z.string().max(120).optional(),
+        checklist: z.array(z.enum([
+          "TARGET_ACCOUNT_VERIFIED",
+          "AMOUNT_CURRENCY_VERIFIED",
+          "REASON_DOCUMENTED",
+          "SOURCE_LINKAGE_VERIFIED",
+        ])).max(10).optional(),
       })
       .strict(),
     request.body,
@@ -10604,6 +13444,7 @@ router.post("/adjustments", async (request: Request, response: Response) => {
         state: "PENDING_REVIEW",
         amount: body.amount,
         approvalRequestId: approvalRequest.id,
+        checklist: body.checklist ?? [],
       },
       approvalRequestId: approvalRequest.id,
     });
@@ -10665,8 +13506,53 @@ router.get("/cashouts", async (request: Request, response: Response) => {
   response.json(listResponse("cashouts", cashouts.map((cashout) => cashoutListRow(cashout as never)), total, built));
 });
 
-router.get("/cashouts/summary", async (request: Request, response: Response) => {
+router.get("/cashouts/export", async (request: Request, response: Response) => {
   requireAuthorities(request, ["cashout:read"]);
+  const built = buildListQuery(request.query, {
+    search: ["merchant.tradeName", "walletId", "id"],
+    in: { state: "state" },
+    equals: { merchantId: "merchantId", walletId: "walletId" },
+    ranges: { amount: { path: "amount", kind: "decimal" } },
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { state: "state", amount: "amount", requestedAt: "createdAt", createdAt: "createdAt", updatedAt: "updatedAt" },
+    defaultSort: { createdAt: "desc" },
+    defaultPageSize: 20,
+  });
+  const take = 5000;
+  const [cashouts, total] = await Promise.all([
+    client.cashoutRequest.findMany({
+      where: built.where as never,
+      orderBy: built.orderBy as never,
+      include: {
+        merchant: { select: { id: true, tradeName: true, legalName: true } },
+        wallet: { select: { id: true, currency: true, status: true } },
+        adjustment: { select: { id: true, state: true, journalEntryId: true } },
+      },
+      take,
+    }),
+    client.cashoutRequest.count({ where: built.where as never }),
+  ]);
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "CASHOUT_QUEUE_EXPORTED",
+      entityType: "CASHOUT_REQUEST",
+      entityId: "export",
+      beforeJson: {},
+      afterJson: { total, exported: cashouts.length, filters: JSON.stringify(request.query ?? {}) },
+    },
+  });
+  response.json({
+    cashouts: cashouts.map((cashout) => cashoutListRow(cashout as never)),
+    total,
+    exported: cashouts.length,
+    truncated: total > cashouts.length,
+  });
+});
+
+const buildCashoutSummary = async () => {
   const now = new Date();
   const [statusRows, openAggregate, oldestPending] = await Promise.all([
     client.cashoutRequest.groupBy({ by: ["state"], _count: { _all: true }, _sum: { amount: true } }),
@@ -10687,7 +13573,7 @@ router.get("/cashouts/summary", async (request: Request, response: Response) => 
     byState[row.state] = row._count._all;
     amountByState[row.state] = merchantMoney(row._sum.amount);
   }
-  response.json({
+  return {
     totalOpen: (openAggregate._count as { _all: number })._all,
     openAmount: merchantMoney((openAggregate._sum as { amount?: unknown } | undefined)?.amount),
     pendingCount: byState.PENDING ?? 0,
@@ -10698,8 +13584,46 @@ router.get("/cashouts/summary", async (request: Request, response: Response) => 
     oldestPendingAgeHours: oldestPending ? approvalAgeHours(oldestPending.createdAt, now.getTime()) : 0,
     byState,
     amountByState,
-  });
+  };
+};
+
+router.get("/cashouts/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["cashout:read"]);
+  response.json(await buildCashoutSummary());
 });
+
+router.get("/cashouts/summary/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["cashout:read"]);
+  const summary = await buildCashoutSummary();
+  const actor = actorFromRequest(request);
+  const allowedChecklist = new Set([
+    "OPEN_SCOPE_VERIFIED",
+    "AMOUNT_TOTALS_REVIEWED",
+    "STATE_BREAKDOWN_REVIEWED",
+    "EXPORT_APPROVAL_CONFIRMED",
+  ]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "CASHOUT_SUMMARY_EXPORTED",
+      entityType: "CASHOUT_REQUEST",
+      entityId: "summary",
+      beforeJson: {},
+      afterJson: {
+        totalOpen: summary.totalOpen,
+        openAmount: summary.openAmount,
+        oldestPendingAgeHours: summary.oldestPendingAgeHours,
+        checklist,
+      },
+    },
+  });
+  response.json({ ...summary, exportedAt: new Date().toISOString() });
+});
+
 
 router.get("/cashouts/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["cashout:read"]);
@@ -10733,7 +13657,16 @@ router.post("/cashouts/:id/process", async (request: Request, response: Response
   requireAuthorities(request, ["cashout:review", "finance:write"]);
   const { id } = parseOrThrow(idSchema, request.params);
   const body = parseOrThrow(
-    z.object({ decision: z.enum(["APPROVE", "REJECT"]), reason: z.string().max(1000).optional() }).strict(),
+    z.object({
+      decision: z.enum(["APPROVE", "REJECT"]),
+      reason: z.string().max(1000).optional(),
+      checklist: z.array(z.enum([
+        "BANK_DETAILS_VERIFIED",
+        "WALLET_BALANCE_VERIFIED",
+        "MERCHANT_ACTIVE",
+        "NO_AML_RESTRICTIONS",
+      ])).max(10).optional(),
+    }).strict(),
     request.body,
   );
   const actor = actorFromRequest(request);
@@ -10750,6 +13683,23 @@ router.post("/cashouts/:id/process", async (request: Request, response: Response
     }),
   );
   const cashout = await client.cashoutRequest.findUnique({ where: { id } });
+  if (result.idempotent !== true) {
+    await client.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "UNKNOWN",
+        action: "CASHOUT_PROCESS_CHECKLIST",
+        entityType: "CASHOUT_REQUEST",
+        entityId: id,
+        beforeJson: {},
+        afterJson: {
+          decision: body.decision,
+          checklist: body.checklist ?? [],
+          checklistComplete: (body.checklist?.length ?? 0) >= 4,
+        },
+      },
+    });
+  }
   response.json({
     id,
     state: cashout?.state ?? null,
@@ -10762,8 +13712,52 @@ router.post("/cashouts/:id/process", async (request: Request, response: Response
 
 router.get("/commission-profiles", async (request: Request, response: Response) => {
   requireAuthorities(request, ["commission:read", "finance:read"]);
-  const profiles = await client.commissionProfile.findMany({ orderBy: { railCode: "asc" } });
-  response.json({ profiles });
+  const [profiles, pendingApprovals] = await Promise.all([
+    client.commissionProfile.findMany({ orderBy: { railCode: "asc" } }),
+    client.approvalRequest.findMany({
+      where: { subjectType: "COMMISSION_PROFILE", state: { in: [...APPROVAL_PENDING_STATES] } },
+      select: { id: true, subjectId: true },
+    }),
+  ]);
+  const pendingByProfile = new Map(pendingApprovals.map((approval) => [approval.subjectId, approval.id]));
+  response.json({
+    profiles: profiles.map((profile) => ({
+      ...profile,
+      pendingApprovalId: pendingByProfile.get(profile.id) ?? null,
+    })),
+  });
+});
+
+router.get("/commission-profiles/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["commission:read", "finance:read"]);
+  const [profiles, pendingApprovals] = await Promise.all([
+    client.commissionProfile.findMany({
+      select: { railCode: true, calcType: true, merchantId: true, applicationId: true, maxFee: true, id: true },
+    }),
+    client.approvalRequest.findMany({
+      where: { subjectType: "COMMISSION_PROFILE", state: { in: [...APPROVAL_PENDING_STATES] } },
+      select: { subjectId: true },
+    }),
+  ]);
+  const pendingIds = new Set(pendingApprovals.map((approval) => approval.subjectId));
+  const byCalcType: Record<string, number> = {};
+  const byRail: Record<string, number> = {};
+  for (const profile of profiles) {
+    byCalcType[profile.calcType] = (byCalcType[profile.calcType] ?? 0) + 1;
+    byRail[profile.railCode] = (byRail[profile.railCode] ?? 0) + 1;
+  }
+  response.json({
+    summary: {
+      total: profiles.length,
+      merchantScoped: profiles.filter((profile) => profile.merchantId !== null).length,
+      applicationScoped: profiles.filter((profile) => profile.applicationId !== null).length,
+      globalScoped: profiles.filter((profile) => profile.merchantId === null && profile.applicationId === null).length,
+      withMaxFee: profiles.filter((profile) => profile.maxFee !== null).length,
+      pendingLifecycle: profiles.filter((profile) => pendingIds.has(profile.id)).length,
+      byCalcType,
+      byRail,
+    },
+  });
 });
 
 router.post("/commission-profiles", async (request: Request, response: Response) => {
@@ -10803,13 +13797,220 @@ router.post("/commission-profiles", async (request: Request, response: Response)
       effectiveFrom: body.effectiveFrom ? new Date(body.effectiveFrom) : new Date(),
     },
   });
+  await client.auditLog.create({
+    data: {
+      actorId: actorFromRequest(request).userId,
+      role: actorFromRequest(request).role,
+      action: "COMMISSION_PROFILE_CREATED",
+      entityType: "COMMISSION_PROFILE",
+      entityId: profile.id,
+      beforeJson: {},
+      afterJson: {
+        railCode: profile.railCode,
+        calcType: profile.calcType,
+        merchantId: profile.merchantId,
+        applicationId: profile.applicationId,
+        version: profile.version,
+      },
+    },
+  });
   response.status(201).json({ id: profile.id, version: profile.version });
+});
+
+router.get("/commission-profiles/:id/history", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["commission:read", "finance:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const profile = await client.commissionProfile.findUnique({ where: { id }, select: { id: true, railCode: true } });
+  if (!profile) throw new ApiError(404, "COMMISSION_PROFILE_NOT_FOUND", "The commission profile does not exist");
+  const history = await client.auditLog.findMany({
+    where: { entityType: "COMMISSION_PROFILE", entityId: id },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+    select: {
+      id: true,
+      createdAt: true,
+      action: true,
+      role: true,
+      beforeJson: true,
+      afterJson: true,
+      approvalRequestId: true,
+      actor: { select: { id: true, email: true } },
+    },
+  });
+  response.json({ history });
+});
+
+router.post("/commission-profiles/:id/expire", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["commission:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z
+      .object({
+        effectiveTo: z.string().max(64).optional(),
+        reason: z.string().max(500).optional(),
+      })
+      .strict(),
+    request.body ?? {},
+  );
+  const profile = await client.commissionProfile.findUnique({ where: { id } });
+  if (!profile) {
+    throw new ApiError(404, "COMMISSION_PROFILE_NOT_FOUND", "The commission profile does not exist");
+  }
+  const now = new Date();
+  if (profile.effectiveTo && profile.effectiveTo.getTime() <= now.getTime()) {
+    throw new ApiError(409, "COMMISSION_PROFILE_ALREADY_EXPIRED", "The commission profile is already expired");
+  }
+  const pendingCommissionApproval = await client.approvalRequest.findFirst({
+    where: {
+      subjectType: "COMMISSION_PROFILE",
+      subjectId: profile.id,
+      state: { in: [...APPROVAL_PENDING_STATES] },
+    },
+    select: { id: true },
+  });
+  if (pendingCommissionApproval) {
+    throw new ApiError(409, "COMMISSION_PROFILE_PENDING_CHECKER", "A lifecycle change is already awaiting a checker", {
+      approvalRequestId: pendingCommissionApproval.id,
+    });
+  }
+  const effectiveTo = body.effectiveTo ? new Date(body.effectiveTo) : now;
+  if (Number.isNaN(effectiveTo.getTime())) {
+    throw new ApiError(400, "INVALID_EFFECTIVE_TO", "effectiveTo must be a valid date");
+  }
+  const actor = actorFromRequest(request);
+  const approval = await client.approvalRequest.create({
+    data: {
+      subjectType: "COMMISSION_PROFILE",
+      subjectId: profile.id,
+      payloadDiffJson: {
+        action: "EXPIRE",
+        effectiveTo: effectiveTo.toISOString(),
+        reason: body.reason ?? null,
+      },
+      makerReason: body.reason ?? null,
+      mode: "STANDARD",
+      makerUserId: actor.userId,
+      state: "PENDING_REVIEW",
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    },
+  });
+  response.status(202).json({ status: "PENDING_REVIEW", approvalRequestId: approval.id });
 });
 
 router.get("/velocity-rules", async (request: Request, response: Response) => {
   requireAuthorities(request, ["velocity:read", "compliance:read"]);
-  const rules = await client.velocityRule.findMany({ orderBy: { createdAt: "desc" } });
-  response.json({ rules });
+  const [rules, pendingApprovals] = await Promise.all([
+    client.velocityRule.findMany({ orderBy: { createdAt: "desc" } }),
+    client.approvalRequest.findMany({
+      where: { subjectType: "VELOCITY_RULE", state: { in: [...APPROVAL_PENDING_STATES] } },
+      select: { id: true, subjectId: true },
+    }),
+  ]);
+  const pendingByRule = new Map(pendingApprovals.map((approval) => [approval.subjectId, approval.id]));
+  response.json({
+    rules: rules.map((rule) => ({
+      ...rule,
+      pendingApprovalId: pendingByRule.get(rule.id) ?? null,
+    })),
+  });
+});
+
+router.get("/velocity-rules/:id/history", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["velocity:read", "compliance:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const rule = await client.velocityRule.findUnique({ where: { id }, select: { id: true, scopeType: true } });
+  if (!rule) throw new ApiError(404, "VELOCITY_RULE_NOT_FOUND", "The velocity rule does not exist");
+  const history = await client.auditLog.findMany({
+    where: { entityType: "VELOCITY_RULE", entityId: id },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+    select: {
+      id: true,
+      createdAt: true,
+      action: true,
+      role: true,
+      beforeJson: true,
+      afterJson: true,
+      approvalRequestId: true,
+      actor: { select: { id: true, email: true } },
+    },
+  });
+  response.json({ history });
+});
+
+router.post("/velocity-rules/:id/deactivate", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["velocity:write", "compliance:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z.object({ reason: z.string().max(500).optional() }).strict(),
+    request.body ?? {},
+  );
+  const rule = await client.velocityRule.findUnique({ where: { id } });
+  if (!rule) {
+    throw new ApiError(404, "VELOCITY_RULE_NOT_FOUND", "The velocity rule does not exist");
+  }
+  if (!rule.active) {
+    throw new ApiError(409, "VELOCITY_RULE_ALREADY_INACTIVE", "The velocity rule is already inactive");
+  }
+  const pendingVelocityApproval = await client.approvalRequest.findFirst({
+    where: {
+      subjectType: "VELOCITY_RULE",
+      subjectId: rule.id,
+      state: { in: [...APPROVAL_PENDING_STATES] },
+    },
+    select: { id: true },
+  });
+  if (pendingVelocityApproval) {
+    throw new ApiError(409, "VELOCITY_RULE_PENDING_CHECKER", "A lifecycle change is already awaiting a checker", {
+      approvalRequestId: pendingVelocityApproval.id,
+    });
+  }
+  const actor = actorFromRequest(request);
+  const approval = await client.approvalRequest.create({
+    data: {
+      subjectType: "VELOCITY_RULE",
+      subjectId: rule.id,
+      payloadDiffJson: { action: "DEACTIVATE", reason: body.reason ?? null },
+      makerReason: body.reason ?? null,
+      mode: "STANDARD",
+      makerUserId: actor.userId,
+      state: "PENDING_REVIEW",
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    },
+  });
+  response.status(202).json({ status: "PENDING_REVIEW", approvalRequestId: approval.id });
+});
+
+router.get("/velocity-rules/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["velocity:read", "compliance:read"]);
+  const [rules, pendingApprovals] = await Promise.all([
+    client.velocityRule.findMany({
+      select: { id: true, scopeType: true, action: true, windowSeconds: true, maxAmount: true },
+    }),
+    client.approvalRequest.findMany({
+      where: { subjectType: "VELOCITY_RULE", state: { in: [...APPROVAL_PENDING_STATES] } },
+      select: { subjectId: true },
+    }),
+  ]);
+  const pendingIds = new Set(pendingApprovals.map((approval) => approval.subjectId));
+  const byScopeType: Record<string, number> = {};
+  const byAction: Record<string, number> = {};
+  for (const rule of rules) {
+    byScopeType[rule.scopeType] = (byScopeType[rule.scopeType] ?? 0) + 1;
+    byAction[rule.action] = (byAction[rule.action] ?? 0) + 1;
+  }
+  response.json({
+    summary: {
+      total: rules.length,
+      reject: rules.filter((rule) => rule.action === "REJECT").length,
+      flag: rules.filter((rule) => rule.action === "FLAG").length,
+      withAmountCap: rules.filter((rule) => rule.maxAmount !== null).length,
+      pendingLifecycle: rules.filter((rule) => pendingIds.has(rule.id)).length,
+      longestWindowSeconds: rules.reduce((max, rule) => Math.max(max, rule.windowSeconds), 0),
+      byScopeType,
+      byAction,
+    },
+  });
 });
 
 router.post("/velocity-rules", async (request: Request, response: Response) => {
@@ -10836,6 +14037,23 @@ router.post("/velocity-rules", async (request: Request, response: Response) => {
       maxAmount: body.maxAmount ? new Prisma.Decimal(body.maxAmount) : null,
       action: body.action,
       effectiveFrom: new Date(),
+    },
+  });
+  await client.auditLog.create({
+    data: {
+      actorId: actorFromRequest(request).userId,
+      role: actorFromRequest(request).role,
+      action: "VELOCITY_RULE_CREATED",
+      entityType: "VELOCITY_RULE",
+      entityId: rule.id,
+      beforeJson: {},
+      afterJson: {
+        scopeType: rule.scopeType,
+        action: rule.action,
+        windowSeconds: rule.windowSeconds,
+        maxCount: rule.maxCount,
+        version: rule.version,
+      },
     },
   });
   response.status(201).json({ id: rule.id, version: rule.version });
@@ -10877,9 +14095,8 @@ const profitabilityQuerySchema = z
   })
   .strict();
 
-router.get("/finance/profitability", async (request: Request, response: Response) => {
-  requireAuthorities(request, ["finance:read"]);
-  const query = parseOrThrow(profitabilityQuerySchema, request.query ?? {});
+const buildProfitabilitySnapshot = async (rawQuery: Request["query"]) => {
+  const query = parseOrThrow(profitabilityQuerySchema, rawQuery ?? {});
   const period = query.period ?? "last_30d";
   const periodDays = { today: 1, last_7d: 7, last_30d: 30, last_90d: 90 }[period];
   const now = new Date();
@@ -11011,7 +14228,7 @@ router.get("/finance/profitability", async (request: Request, response: Response
   const succeededAttempts = attempts.filter((attempt) => attempt.status === "SUCCEEDED").length;
   const percentage = (numerator: Decimal, denominator: Decimal): string =>
     denominator.isZero() ? "0.0000" : numerator.div(denominator).mul(100).toFixed(4);
-  response.json({
+  return {
     period,
     currency: query.currency?.toUpperCase() ?? "LYD",
     windowDays,
@@ -11040,8 +14257,38 @@ router.get("/finance/profitability", async (request: Request, response: Response
     byRail: toRows(byRail, "railCode"),
     byDay: toRows(byDay, "day"),
     byGateway: toRows(byGateway, "gatewayCode"),
-  });
+  };
+};
+
+router.get("/finance/profitability", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["finance:read"]);
+  response.json(await buildProfitabilitySnapshot(request.query));
 });
+
+router.get("/finance/profitability/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["finance:read"]);
+  const snapshot = await buildProfitabilitySnapshot(request.query);
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "PROFITABILITY_EXPORTED",
+      entityType: "PROFITABILITY",
+      entityId: "snapshot",
+      beforeJson: {},
+      afterJson: {
+        period: snapshot.period,
+        windowStart: snapshot.windowStart,
+        windowEnd: snapshot.windowEnd,
+        grossVolume: snapshot.grossVolume,
+        netContribution: snapshot.netContribution,
+      },
+    },
+  });
+  response.json({ ...snapshot, exportedAt: new Date().toISOString() });
+});
+
 
 /**
  * The operational reporting of the daily cap guard.
@@ -11101,8 +14348,7 @@ router.get("/finance/route-caps", async (request: Request, response: Response) =
   });
 });
 
-router.get("/finance/liquidity", async (request: Request, response: Response) => {
-  requireAuthorities(request, ["finance:read"]);
+const buildLiquiditySnapshot = async () => {
   const balances = await loadLedgerBalances();
   const debitPositive = (type: string): Decimal => balances.get(type) ?? decimal(0);
   const creditPositive = (type: string): Decimal => naturalBalance(type, balances.get(type) ?? decimal(0));
@@ -11208,7 +14454,7 @@ router.get("/finance/liquidity", async (request: Request, response: Response) =>
     };
   };
 
-  response.json({
+  return {
     currency: "LYD",
     checkedAt: new Date().toISOString(),
     treasuryBalance: treasury.toFixed(4),
@@ -11236,14 +14482,39 @@ router.get("/finance/liquidity", async (request: Request, response: Response) =>
       ageingBucket("31+ days", 31, 3650),
     ],
     clearingByGateway,
-  });
+  };
+};
+
+router.get("/finance/liquidity", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["finance:read"]);
+  response.json(await buildLiquiditySnapshot());
 });
 
-router.get("/finance/invariant-check", async (request: Request, response: Response) => {
+router.get("/finance/liquidity/export", async (request: Request, response: Response) => {
   requireAuthorities(request, ["finance:read"]);
-  // The invariant has exactly ONE implementation: the `InvariantVerifier`.
-  // A second copy of the formula in the admin API is how a sign error reaches
-  // the operator panel and halts the payouts for a ledger that is balanced.
+  const snapshot = await buildLiquiditySnapshot();
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "LIQUIDITY_EXPORTED",
+      entityType: "LIQUIDITY",
+      entityId: "snapshot",
+      beforeJson: {},
+      afterJson: {
+        coverRatio: snapshot.coverRatio,
+        treasuryBalance: snapshot.treasuryBalance,
+        clearingBalances: snapshot.clearingBalances,
+        gatewayCount: snapshot.clearingByGateway.length,
+      },
+    },
+  });
+  response.json({ ...snapshot, exportedAt: new Date().toISOString() });
+});
+
+
+const buildInvariantSnapshot = async () => {
   const verifier = new InvariantVerifier(client as never);
   const result = await verifier.verify();
   const sides = new Map<string, Decimal>();
@@ -11272,7 +14543,7 @@ router.get("/finance/invariant-check", async (request: Request, response: Respon
   const right = result.rightSide;
   const drift = result.drift;
 
-  response.json({
+  return {
     ok: drift.isZero(),
     drift: drift.toFixed(4),
     checkedAt: new Date().toISOString(),
@@ -11298,8 +14569,38 @@ router.get("/finance/invariant-check", async (request: Request, response: Respon
       naturalBalance: naturalBalance(account.accountType, account.liveBalance).toFixed(4),
       checkpointAt: account.checkpointAt ?? null,
     })),
-  });
+  };
+};
+
+router.get("/finance/invariant-check", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["finance:read"]);
+  response.json(await buildInvariantSnapshot());
 });
+
+router.get("/finance/invariant-check/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["finance:read"]);
+  const snapshot = await buildInvariantSnapshot();
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "INVARIANT_EXPORTED",
+      entityType: "INVARIANT",
+      entityId: "snapshot",
+      beforeJson: {},
+      afterJson: {
+        ok: snapshot.ok,
+        drift: snapshot.drift,
+        leftSide: snapshot.leftSide,
+        rightSide: snapshot.rightSide,
+        accounts: snapshot.accounts.length,
+      },
+    },
+  });
+  response.json({ ...snapshot, exportedAt: new Date().toISOString() });
+});
+
 
 /**
  * The checkout help & support configuration of the four portal guides.
@@ -11355,9 +14656,93 @@ router.get("/settings/checkout-support", async (request: Request, response: Resp
   });
 });
 
+router.get("/settings/checkout-support/history", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["settings:read"]);
+  const versions = await client.platformSetting.findMany({
+    where: { key: CHECKOUT_SUPPORT_KEY },
+    orderBy: { version: "desc" },
+    select: {
+      id: true,
+      version: true,
+      valueJson: true,
+      effectiveFrom: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+  response.json({ key: CHECKOUT_SUPPORT_KEY, versions });
+});
+
+const buildCheckoutSupportSummary = async () => {
+  const rows = await client.platformSetting.findMany({
+    where: { key: CHECKOUT_SUPPORT_KEY },
+    orderBy: { version: "desc" },
+    select: { version: true, valueJson: true, effectiveFrom: true, updatedAt: true },
+  });
+  const latest = rows[0];
+  const value = (latest?.valueJson ?? {}) as Record<string, unknown>;
+  const channels = ["support_phone", "support_whatsapp", "support_email"].filter((key) => {
+    const entry = value[key];
+    return typeof entry === "string" && entry.trim().length > 0;
+  });
+  const faqItems = Array.isArray(value.faq_items) ? value.faq_items.length : 0;
+  return {
+    summary: {
+      enabled: value.enabled === true,
+      showPlatformContact: value.show_platform_contact !== false,
+      showMerchantContact: value.show_merchant_contact !== false,
+      faqItems,
+      channels,
+      channelCount: channels.length,
+      versions: rows.length,
+      currentVersion: latest?.version ?? 0,
+      updatedAt: latest?.updatedAt ?? null,
+      effectiveFrom: latest?.effectiveFrom ?? null,
+      futureEffective: latest ? latest.effectiveFrom.getTime() > Date.now() : false,
+    },
+  };
+};
+
+router.get("/settings/checkout-support/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["settings:read"]);
+  response.json(await buildCheckoutSupportSummary());
+});
+
+router.get("/settings/checkout-support/summary/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["settings:read"]);
+  const snapshot = await buildCheckoutSupportSummary();
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "CHECKOUT_SUPPORT_SUMMARY_EXPORTED",
+      entityType: "PLATFORM_SETTING",
+      entityId: "checkout.support_config",
+      beforeJson: {},
+      afterJson: {
+        enabled: snapshot.summary.enabled,
+        versions: snapshot.summary.versions,
+        currentVersion: snapshot.summary.currentVersion,
+        faqItems: snapshot.summary.faqItems,
+        channelCount: snapshot.summary.channelCount,
+      },
+    },
+  });
+  response.json({ ...snapshot, exportedAt: new Date().toISOString() });
+});
+
 router.put("/settings/checkout-support", async (request: Request, response: Response) => {
   requireAuthorities(request, ["settings:write"]);
-  const body = parseOrThrow(z.strictObject({ value: checkoutSupportSchema }).strict(), request.body ?? {});
+  const body = parseOrThrow(z.strictObject({
+    value: checkoutSupportSchema,
+    checklist: z.array(z.enum([
+      "SUPPORT_CHANNELS_VERIFIED",
+      "FAQ_CONTENT_REVIEWED",
+      "WORKING_HOURS_VERIFIED",
+      "PAYER_VISIBILITY_REVIEWED",
+    ])).max(10).optional(),
+  }).strict(), request.body ?? {});
   const existing = await client.platformSetting.findFirst({
     where: { key: CHECKOUT_SUPPORT_KEY },
     orderBy: { version: "desc" },
@@ -11393,6 +14778,17 @@ router.put("/settings/checkout-support", async (request: Request, response: Resp
       entityId: created.id,
       beforeJson: json(existing?.valueJson ?? null),
       afterJson: value,
+    },
+  });
+  await client.auditLog.create({
+    data: {
+      actorId: actorFromRequest(request).userId,
+      role: actorFromRequest(request).role,
+      action: "CHECKOUT_SUPPORT_EDIT_CHECKLIST",
+      entityType: "PLATFORM_SETTING",
+      entityId: created.id,
+      beforeJson: {},
+      afterJson: { version: nextVersion, checklist: body.checklist ?? [] },
     },
   });
   response.json({ key: CHECKOUT_SUPPORT_KEY, value: body.value, version: nextVersion });
@@ -11463,6 +14859,96 @@ router.put("/academy/progress", async (request: Request, response: Response) => 
 });
 
 /** Management view: the academy progress of every admin user. */
+const buildAcademyOverviewSummary = async () => {
+  const users = await client.user.findMany({
+    where: { merchantId: null },
+    select: { role: true, academyProgressJson: true },
+  });
+  const since = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const byRole: Record<string, number> = {};
+  let usersWithProgress = 0;
+  let completedModules = 0;
+  let completedLessons = 0;
+  let completedLabs = 0;
+  let earnedBadges = 0;
+  let quizScores = 0;
+  let activeLast7d = 0;
+  for (const user of users) {
+    const progress = user.academyProgressJson && typeof user.academyProgressJson === "object" && !Array.isArray(user.academyProgressJson)
+      ? user.academyProgressJson as Record<string, unknown>
+      : null;
+    if (!progress) continue;
+    const hasProgress = (Array.isArray(progress.completedModules) && progress.completedModules.length > 0)
+      || (Array.isArray(progress.completedLessonIds) && progress.completedLessonIds.length > 0)
+      || (progress.completedLabIds && typeof progress.completedLabIds === "object" && Object.keys(progress.completedLabIds as object).length > 0)
+      || (Array.isArray(progress.earnedBadges) && progress.earnedBadges.length > 0)
+      || (progress.quizScores && typeof progress.quizScores === "object" && Object.keys(progress.quizScores as object).length > 0);
+    if (!hasProgress) continue;
+    usersWithProgress += 1;
+    byRole[user.role] = (byRole[user.role] ?? 0) + 1;
+    completedModules += Array.isArray(progress.completedModules) ? progress.completedModules.length : 0;
+    completedLessons += Array.isArray(progress.completedLessonIds) ? progress.completedLessonIds.length : 0;
+    completedLabs += progress.completedLabIds && typeof progress.completedLabIds === "object" ? Object.keys(progress.completedLabIds as object).length : 0;
+    earnedBadges += Array.isArray(progress.earnedBadges) ? progress.earnedBadges.length : 0;
+    quizScores += progress.quizScores && typeof progress.quizScores === "object" ? Object.keys(progress.quizScores as object).length : 0;
+    const updatedAt = typeof progress.updatedAt === "string" ? new Date(progress.updatedAt).getTime() : NaN;
+    if (Number.isFinite(updatedAt) && updatedAt >= since) activeLast7d += 1;
+  }
+  return {
+    summary: {
+      totalUsers: users.length,
+      usersWithProgress,
+      notStarted: users.length - usersWithProgress,
+      completedModules,
+      completedLessons,
+      completedLabs,
+      earnedBadges,
+      quizScores,
+      activeLast7d,
+      byRole,
+    },
+  };
+};
+
+router.get("/academy/progress/overview/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["user:read"]);
+  response.json(await buildAcademyOverviewSummary());
+});
+
+router.get("/academy/progress/overview/summary/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["user:read"]);
+  const snapshot = await buildAcademyOverviewSummary();
+  const actor = actorFromRequest(request);
+  const allowedChecklist = new Set([
+    "TEAM_SCOPE_VERIFIED",
+    "PRIVACY_REVIEWED",
+    "PROGRESS_DATA_REVIEWED",
+    "EXPORT_APPROVAL_CONFIRMED",
+  ]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "ACADEMY_SUMMARY_EXPORTED",
+      entityType: "USER",
+      entityId: "academy-summary",
+      beforeJson: {},
+      afterJson: {
+        totalUsers: snapshot.summary.totalUsers,
+        usersWithProgress: snapshot.summary.usersWithProgress,
+        completedModules: snapshot.summary.completedModules,
+        earnedBadges: snapshot.summary.earnedBadges,
+        activeLast7d: snapshot.summary.activeLast7d,
+        checklist,
+      },
+    },
+  });
+  response.json({ ...snapshot, exportedAt: new Date().toISOString() });
+});
+
 router.get("/academy/progress/overview", async (request: Request, response: Response) => {
   requireAuthorities(request, ["user:read"]);
   const users = await client.user.findMany({
@@ -11482,11 +14968,466 @@ router.get("/academy/progress/overview", async (request: Request, response: Resp
   });
 });
 
+router.get("/academy/progress/overview/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["user:read"]);
+  const users = await client.user.findMany({
+    where: { merchantId: null },
+    select: { id: true, email: true, role: true, academyProgressJson: true, isMaker: true, isChecker: true },
+    orderBy: { email: "asc" },
+    take: 5000,
+  });
+  const actor = actorFromRequest(request);
+  const allowedChecklist = new Set([
+    "TEAM_SCOPE_VERIFIED",
+    "PRIVACY_REVIEWED",
+    "PROGRESS_DATA_REVIEWED",
+    "EXPORT_APPROVAL_CONFIRMED",
+  ]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "ACADEMY_CERTIFICATIONS_EXPORTED",
+      entityType: "USER",
+      entityId: "academy-export",
+      beforeJson: {},
+      afterJson: { exported: users.length, checklist },
+    },
+  });
+  response.json({
+    users: users.map((user) => ({
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      isMaker: user.isMaker,
+      isChecker: user.isChecker,
+      progress: user.academyProgressJson ?? null,
+    })),
+    total: users.length,
+    exported: users.length,
+  });
+});
+
+router.get("/audit-logs", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["security:read"]);
+  const built = buildListQuery(request.query, {
+    search: ["action", "entityType", "entityId", "actor.email"],
+    contains: {
+      action: "action",
+      entityType: "entityType",
+      entityId: "entityId",
+    },
+    in: { role: "role" },
+    equals: { actorId: "actorId", approvalRequestId: "approvalRequestId" },
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { createdAt: "createdAt", action: "action", entityType: "entityType", role: "role" },
+    defaultSort: { createdAt: "desc" },
+    defaultPageSize: 20,
+  });
+  const [rows, total] = await Promise.all([
+    client.auditLog.findMany({
+      where: built.where as never,
+      orderBy: built.orderBy as never,
+      skip: built.skip,
+      take: built.take,
+      include: { actor: { select: { id: true, email: true, role: true } } },
+    }),
+    client.auditLog.count({ where: built.where as never }),
+  ]);
+  response.json(listResponse("auditLogs", rows.map((row) => ({
+    id: row.id,
+    createdAt: row.createdAt,
+    actorId: row.actorId,
+    actorEmail: row.actor?.email ?? "",
+    role: row.role,
+    action: row.action,
+    entityType: row.entityType,
+    entityId: row.entityId,
+    beforeJson: row.beforeJson,
+    afterJson: row.afterJson,
+    approvalRequestId: row.approvalRequestId,
+  })), total, built));
+});
+
+router.get("/audit-logs/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["security:read"]);
+  const built = buildListQuery(request.query, {
+    search: ["action", "entityType", "entityId", "actor.email"],
+    contains: {
+      action: "action",
+      entityType: "entityType",
+      entityId: "entityId",
+    },
+    in: { role: "role" },
+    equals: { actorId: "actorId", approvalRequestId: "approvalRequestId" },
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { createdAt: "createdAt", action: "action", entityType: "entityType", role: "role" },
+    defaultSort: { createdAt: "desc" },
+    defaultPageSize: 20,
+  });
+  const take = 5000;
+  const [rows, total] = await Promise.all([
+    client.auditLog.findMany({
+      where: built.where as never,
+      orderBy: built.orderBy as never,
+      take,
+      include: { actor: { select: { email: true } } },
+    }),
+    client.auditLog.count({ where: built.where as never }),
+  ]);
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "AUDIT_LOGS_EXPORTED",
+      entityType: "AUDIT_LOG",
+      entityId: "export",
+      beforeJson: {},
+      afterJson: { total, exported: rows.length, filters: JSON.stringify(request.query ?? {}) },
+    },
+  });
+  response.json({
+    auditLogs: rows.map((row) => ({
+      id: row.id,
+      createdAt: row.createdAt,
+      actorId: row.actorId,
+      actorEmail: row.actor?.email ?? "",
+      role: row.role,
+      action: row.action,
+      entityType: row.entityType,
+      entityId: row.entityId,
+      beforeJson: row.beforeJson,
+      afterJson: row.afterJson,
+      approvalRequestId: row.approvalRequestId,
+    })),
+    total,
+    exported: rows.length,
+    truncated: total > rows.length,
+  });
+});
+
+const buildAuditLogSummary = async () => {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const [total, last24h, actionRows, entityRows, actorRows] = await Promise.all([
+    client.auditLog.count(),
+    client.auditLog.count({ where: { createdAt: { gte: since } } }),
+    client.auditLog.groupBy({ by: ["action"], _count: { _all: true }, orderBy: { _count: { action: "desc" } }, take: 25 }),
+    client.auditLog.groupBy({ by: ["entityType"], _count: { _all: true } }),
+    client.auditLog.groupBy({ by: ["actorId"], _count: { _all: true } }),
+  ]);
+  const byAction: Record<string, number> = {};
+  for (const row of actionRows) byAction[row.action] = row._count._all;
+  const byEntityType: Record<string, number> = {};
+  for (const row of entityRows) byEntityType[row.entityType] = row._count._all;
+  return {
+    summary: {
+      total,
+      last24h,
+      actors: actorRows.length,
+      byAction,
+      byEntityType,
+    },
+  };
+};
+
+router.get("/audit-logs/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["security:read"]);
+  response.json(await buildAuditLogSummary());
+});
+
+router.get("/audit-logs/summary/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["security:read"]);
+  const snapshot = await buildAuditLogSummary();
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "AUDIT_LOG_SUMMARY_EXPORTED",
+      entityType: "AUDIT_LOG",
+      entityId: "summary",
+      beforeJson: {},
+      afterJson: {
+        total: snapshot.summary.total,
+        last24h: snapshot.summary.last24h,
+        actors: snapshot.summary.actors,
+      },
+    },
+  });
+  response.json({ ...snapshot, exportedAt: new Date().toISOString() });
+});
+
+
 router.get("/settings", async (request: Request, response: Response) => {
   requireAuthorities(request, ["settings:read"]);
   const settings = await client.platformSetting.findMany({ orderBy: [{ key: "asc" }, { version: "desc" }] });
   response.json({ settings });
 });
+
+router.post("/settings/restore-preview", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["settings:read"]);
+  const body = parseOrThrow(z.object({ backup: z.unknown() }).strict(), request.body ?? {});
+  const backup = body.backup && typeof body.backup === "object" && !Array.isArray(body.backup)
+    ? body.backup as Record<string, unknown>
+    : {};
+  const source = Array.isArray(backup.settings) ? backup.settings.slice(0, 500) : [];
+  if (source.length === 0) {
+    throw new ApiError(400, "EMPTY_SETTINGS_BACKUP", "The backup contains no settings");
+  }
+  const rows = await client.platformSetting.findMany({
+    orderBy: [{ key: "asc" }, { scope: "asc" }, { version: "desc" }],
+  });
+  const latest = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) {
+    const key = `${row.scope}:${row.key}`;
+    if (!latest.has(key)) latest.set(key, row);
+  }
+  const seen = new Set<string>();
+  const entries = source.map((raw, index) => {
+    const sourceEntry = raw && typeof raw === "object" && !Array.isArray(raw)
+      ? raw as Record<string, unknown>
+      : null;
+    if (!sourceEntry) {
+      return { index, key: "", scope: "PLATFORM", status: "INVALID" as const, reason: "Entry must be an object" };
+    }
+    const key = typeof sourceEntry.key === "string" ? sourceEntry.key.trim() : "";
+    const scope = typeof sourceEntry.scope === "string" && sourceEntry.scope.trim()
+      ? sourceEntry.scope.trim().toUpperCase()
+      : "PLATFORM";
+    if (!key || key.length > 120) {
+      return { index, key, scope, status: "INVALID" as const, reason: "key must be 1-120 characters" };
+    }
+    const value = sourceEntry.valueJson;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return { index, key, scope, status: "INVALID" as const, reason: "valueJson must be an object" };
+    }
+    if (sourceEntry.effectiveFrom !== undefined && typeof sourceEntry.effectiveFrom !== "string") {
+      return { index, key, scope, status: "INVALID" as const, reason: "effectiveFrom must be a string" };
+    }
+    if (typeof sourceEntry.effectiveFrom === "string" && Number.isNaN(new Date(sourceEntry.effectiveFrom).getTime())) {
+      return { index, key, scope, status: "INVALID" as const, reason: "effectiveFrom is not a valid date" };
+    }
+    const mapKey = `${scope}:${key}`;
+    seen.add(mapKey);
+    const current = latest.get(mapKey);
+    const unchanged = current ? JSON.stringify(current.valueJson) === JSON.stringify(value) : false;
+    return {
+      index,
+      key,
+      scope,
+      status: current ? (unchanged ? "UNCHANGED" as const : "CHANGED" as const) : "ADDED" as const,
+      currentVersion: current?.version ?? null,
+      nextVersion: (current?.version ?? 0) + 1,
+      currentValue: current?.valueJson ?? null,
+      backupValue: value,
+      effectiveFrom: typeof sourceEntry.effectiveFrom === "string" ? sourceEntry.effectiveFrom : null,
+    };
+  });
+  const summary = {
+    backupKeys: source.length,
+    added: entries.filter((entry) => entry.status === "ADDED").length,
+    changed: entries.filter((entry) => entry.status === "CHANGED").length,
+    unchanged: entries.filter((entry) => entry.status === "UNCHANGED").length,
+    invalid: entries.filter((entry) => entry.status === "INVALID").length,
+    missingInBackup: [...latest.keys()].filter((key) => !seen.has(key)).length,
+  };
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "PLATFORM_SETTINGS_RESTORE_PREVIEWED",
+      entityType: "PLATFORM_SETTING",
+      entityId: "restore-preview",
+      beforeJson: {},
+      afterJson: summary,
+    },
+  });
+  response.json({ summary, entries, missingInBackup: [...latest.keys()].filter((key) => !seen.has(key)) });
+});
+
+router.post("/settings/restore-apply", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["settings:write"]);
+  const body = parseOrThrow(
+    z
+      .object({
+        confirm: z.literal(true),
+        reason: z.string().min(3).max(500),
+        checklist: z.array(z.enum([
+          "BACKUP_REVIEWED",
+          "INVALID_ENTRIES_CLEARED",
+          "VERSION_CONFLICTS_REVIEWED",
+          "RESTORE_SCOPE_CONFIRMED",
+        ])).max(10).optional(),
+        backup: z
+          .object({
+            settings: z
+              .array(
+                z
+                  .object({
+                    key: z.string().min(1).max(120),
+                    scope: z.string().max(40).default("PLATFORM"),
+                    valueJson: z.record(z.string().max(64), z.unknown()),
+                    expectedCurrentVersion: z.number().int().min(0),
+                    effectiveFrom: z.string().max(64).optional(),
+                  })
+                  .strict(),
+              )
+              .min(1)
+              .max(100),
+          })
+          .strict(),
+      })
+      .strict(),
+    request.body ?? {},
+  );
+  const actor = actorFromRequest(request);
+  const applied = await client.$transaction(async (tx) => {
+    const written: Array<{ key: string; scope: string; version: number }> = [];
+    for (const entry of body.backup.settings) {
+      const key = entry.key.trim();
+      const scope = entry.scope.trim().toUpperCase() || "PLATFORM";
+      const current = await tx.platformSetting.findFirst({
+        where: { key, scope },
+        orderBy: { version: "desc" },
+      });
+      const actualVersion = current?.version ?? 0;
+      if (actualVersion !== entry.expectedCurrentVersion) {
+        throw new ApiError(
+          409,
+          "SETTING_VERSION_CONFLICT",
+          `The setting '${key}' changed after the preview was generated`,
+          { key, scope, expectedVersion: entry.expectedCurrentVersion, actualVersion },
+        );
+      }
+      const effectiveFrom = entry.effectiveFrom ? new Date(entry.effectiveFrom) : new Date();
+      if (Number.isNaN(effectiveFrom.getTime())) {
+        throw new ApiError(400, "INVALID_EFFECTIVE_FROM", `The setting '${key}' has an invalid effective date`, {
+          key,
+          scope,
+        });
+      }
+      const created = await tx.platformSetting.create({
+        data: {
+          key,
+          scope,
+          version: actualVersion + 1,
+          valueJson: json(entry.valueJson),
+          effectiveFrom,
+        },
+      });
+      written.push({ key, scope, version: created.version });
+    }
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "UNKNOWN",
+        action: "PLATFORM_SETTINGS_RESTORED",
+        entityType: "PLATFORM_SETTING",
+        entityId: "restore",
+        beforeJson: {},
+        afterJson: { reason: body.reason, settings: written, checklist: body.checklist ?? [] },
+      },
+    });
+    return written;
+  });
+  response.json({ applied: applied.length, settings: applied });
+});
+
+router.get("/settings/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["settings:read"]);
+  const rows = await client.platformSetting.findMany({
+    orderBy: [{ key: "asc" }, { scope: "asc" }, { version: "desc" }],
+  });
+  const latest = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) {
+    const key = `${row.scope}:${row.key}`;
+    if (!latest.has(key)) latest.set(key, row);
+  }
+  const exportedAt = new Date().toISOString();
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "PLATFORM_SETTINGS_EXPORTED",
+      entityType: "PLATFORM_SETTING",
+      entityId: "export",
+      beforeJson: {},
+      afterJson: { keys: latest.size, versions: rows.length, exportedAt },
+    },
+  });
+  response.json({
+    exportedAt,
+    keys: latest.size,
+    versions: rows.length,
+    settings: [...latest.values()].map((row) => ({
+      key: row.key,
+      scope: row.scope,
+      version: row.version,
+      valueJson: row.valueJson,
+      effectiveFrom: row.effectiveFrom,
+      updatedAt: row.updatedAt,
+    })),
+  });
+});
+
+const buildPlatformSettingsSummary = async () => {
+  const rows = await client.platformSetting.findMany({
+    select: { key: true, scope: true, version: true, effectiveFrom: true, updatedAt: true },
+    orderBy: [{ key: "asc" }, { version: "desc" }],
+  });
+  const now = new Date();
+  const latest = new Map<string, (typeof rows)[number]>();
+  const scopes: Record<string, number> = {};
+  for (const row of rows) {
+    scopes[row.scope] = (scopes[row.scope] ?? 0) + 1;
+    if (!latest.has(row.key)) latest.set(row.key, row);
+  }
+  const current = [...latest.values()];
+  return {
+    summary: {
+      keys: current.length,
+      versions: rows.length,
+      scopes,
+      futureEffective: current.filter((row) => row.effectiveFrom.getTime() > now.getTime()).length,
+      updatedLast24h: current.filter((row) => now.getTime() - row.updatedAt.getTime() <= 24 * 60 * 60 * 1000).length,
+    },
+  };
+};
+
+router.get("/settings/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["settings:read"]);
+  response.json(await buildPlatformSettingsSummary());
+});
+
+router.get("/settings/summary/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["settings:read"]);
+  const snapshot = await buildPlatformSettingsSummary();
+  const actor = actorFromRequest(request);
+  await client.auditLog.create({
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "PLATFORM_SETTINGS_SUMMARY_EXPORTED",
+      entityType: "PLATFORM_SETTING",
+      entityId: "summary",
+      beforeJson: {},
+      afterJson: {
+        keys: snapshot.summary.keys,
+        versions: snapshot.summary.versions,
+        futureEffective: snapshot.summary.futureEffective,
+        updatedLast24h: snapshot.summary.updatedLast24h,
+      },
+    },
+  });
+  response.json({ ...snapshot, exportedAt: new Date().toISOString() });
+});
+
 
 router.put("/settings", async (request: Request, response: Response) => {
   requireAuthorities(request, ["settings:write"]);
@@ -11500,10 +15441,17 @@ router.put("/settings", async (request: Request, response: Response) => {
                 key: z.string().min(1).max(120),
                 valueJson: z.record(z.string().max(64), z.unknown()),
                 effectiveFrom: z.string().max(64).optional(),
-              }),
+              })
+              .strict(),
           )
           .min(1)
           .max(50),
+        checklist: z.array(z.enum([
+          "KEY_SCOPE_VERIFIED",
+          "VALUE_SCHEMA_REVIEWED",
+          "EFFECTIVE_DATE_REVIEWED",
+          "IMMUTABLE_VERSION_ACKNOWLEDGED",
+        ])).max(10).optional(),
       })
       .strict(),
     request.body,
@@ -11535,7 +15483,7 @@ router.put("/settings", async (request: Request, response: Response) => {
       entityType: "PLATFORM_SETTING",
       entityId: written[0]?.key ?? "settings",
       beforeJson: {},
-      afterJson: { settings: written },
+      afterJson: { settings: written, checklist: body.checklist ?? [] },
     },
   });
   response.json({ settings: written });

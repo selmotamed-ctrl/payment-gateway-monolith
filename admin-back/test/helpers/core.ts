@@ -176,6 +176,12 @@ const isAcceptedAdminResponse = (
   ) {
     return true;
   }
+  if (
+    method === "POST" &&
+    /^\/internal\/admin\/(commission-profiles|velocity-rules)\/[^/]+\/(expire|deactivate)$/.test(path)
+  ) {
+    return true;
+  }
   return false;
 };
 

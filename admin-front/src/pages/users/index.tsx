@@ -1,11 +1,13 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
+import { useRouter } from "vue-router";
 import {
     VAlert,
     VBtn,
     VCard,
     VCardText,
+    VCheckbox,
     VChip,
     VDialog,
     VDivider,
@@ -25,6 +27,7 @@ import { buildFilterQuery, type FilterValues } from "@/components/Table/filters"
 import { tableRegistry } from "@/components/Table/tableRegistry";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
+import { user as currentUser } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
 import { ADMIN_ROLES } from "@/utils/authorities";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -114,14 +117,53 @@ const formatDateTime = (value: string | null | undefined): string => {
     }).format(date);
 };
 
+const SUMMARY_EXPORT_CHECKS = [
+    { key: "ACCESS_SCOPE_VERIFIED", label: "Access scope verified" },
+    { key: "ROLE_STATUS_REVIEWED", label: "Role and status breakdown reviewed" },
+    { key: "MAKER_CHECKER_REVIEWED", label: "Maker/checker coverage reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
+const USER_EDIT_CHECKS = [
+    { key: "SELECTION_REVIEWED", label: "User and requested changes reviewed" },
+    { key: "STATUS_IMPACT_REVIEWED", label: "Status and access impact reviewed" },
+    { key: "NOTIFICATION_PLANNED", label: "User notification planned" },
+    { key: "AUTHORITY_CONFIRMED", label: "Authority to make the change confirmed" },
+] as const;
+
+const BULK_STATUS_CHECKS = [
+    { key: "SELECTION_REVIEWED", label: "Selected users reviewed" },
+    { key: "STATUS_IMPACT_REVIEWED", label: "Status impact reviewed" },
+    { key: "NOTIFICATION_PLANNED", label: "User notification planned" },
+    { key: "AUTHORITY_CONFIRMED", label: "Authority to change status confirmed" },
+] as const;
+
+const INVITE_CHECKS = [
+    { key: "EMAIL_VERIFIED", label: "Email identity verified" },
+    { key: "ROLE_SCOPE_CONFIRMED", label: "Role scope confirmed" },
+    { key: "AUTHORITIES_REVIEWED", label: "Authorities reviewed" },
+    { key: "MFA_REQUIREMENT_CONFIRMED", label: "MFA requirement confirmed" },
+] as const;
+
 const UsersPage = dc(() => {
     const { t } = useLocale();
+    const router = useRouter();
     const rows = ref<UserRow[]>([]);
     const total = ref(0);
     const summary = ref<UserSummary | null>(null);
     const search = ref<string | null>(null);
     const filters = ref<FilterValues>({});
     const pageSize = ref(20);
+    const exportLoading = ref(false);
+    const summaryExportLoading = ref(false);
+    const summaryExportChecklist = ref<Record<string, boolean>>({});
+    const selectedUsers = ref<Record<string, UserRow>>({});
+    const bulkOpen = ref(false);
+    const bulkStatus = ref("SUSPENDED");
+    const bulkReason = ref("");
+    const bulkLoading = ref(false);
+    const bulkError = ref<string | null>(null);
+    const bulkStatusChecklist = ref<Record<string, boolean>>({});
     const refreshHook = ref<{
         reset: () => void;
         refresh: (props: { queryParams?: Record<string, unknown>; nextSkip?: number }) => Promise<void>;
@@ -134,9 +176,11 @@ const UsersPage = dc(() => {
     const detailError = ref<string | null>(null);
     const detail = ref<UserDetail | null>(null);
     const editForm = ref({ role: "OPERATOR", status: "ACTIVE", authorities: "" });
+    const detailChecklist = ref<Record<string, boolean>>({});
     const saving = ref(false);
 
     const createOpen = ref(false);
+    const inviteChecklist = ref<Record<string, boolean>>({});
     const creating = ref(false);
     const createError = ref<string | null>(null);
     const createForm = ref({
@@ -149,6 +193,74 @@ const UsersPage = dc(() => {
     });
 
     const filterDefinitions = computed(() => tableRegistry.Users?.filters ?? []);
+    const currentUserId = computed(() => String(currentUser.value?.userInfo?.id ?? ""));
+    const selectedList = computed(() => Object.values(selectedUsers.value));
+    const selectedCount = computed(() => selectedList.value.length);
+    const selectableRows = computed(() => rows.value.filter((row) => row.id !== currentUserId.value));
+    const allVisibleSelected = computed(
+        () => selectableRows.value.length > 0 && selectableRows.value.every((row) => Boolean(selectedUsers.value[row.id])),
+    );
+    const someVisibleSelected = computed(
+        () => selectableRows.value.some((row) => Boolean(selectedUsers.value[row.id])) && !allVisibleSelected.value,
+    );
+    const clearSelection = () => {
+        selectedUsers.value = {};
+    };
+    const toggleRow = (row: UserRow, value: boolean | null) => {
+        if (row.id === currentUserId.value) return;
+        if (value) selectedUsers.value = { ...selectedUsers.value, [row.id]: row };
+        else {
+            const next = { ...selectedUsers.value };
+            delete next[row.id];
+            selectedUsers.value = next;
+        }
+    };
+    const toggleVisible = (value: boolean | null) => {
+        if (!value) {
+            const next = { ...selectedUsers.value };
+            for (const row of rows.value) delete next[row.id];
+            selectedUsers.value = next;
+            return;
+        }
+        const next = { ...selectedUsers.value };
+        for (const row of selectableRows.value) next[row.id] = row;
+        selectedUsers.value = next;
+    };
+    const openBulk = () => {
+        if (selectedCount.value === 0) return;
+        bulkStatus.value = "SUSPENDED";
+        bulkReason.value = "";
+        bulkError.value = null;
+        bulkStatusChecklist.value = {};
+        bulkOpen.value = true;
+    };
+    const bulkStatusChecklistComplete = computed(() => BULK_STATUS_CHECKS.every((check) => bulkStatusChecklist.value[check.key] === true));
+
+    const applyBulkStatus = async () => {
+        if (selectedCount.value === 0 || bulkLoading.value) return;
+        if (!bulkStatusChecklistComplete.value) {
+            bulkError.value = t("Complete all status checklist items before applying");
+            return;
+        }
+        bulkLoading.value = true;
+        bulkError.value = null;
+        try {
+            await api.patch(urlsMap.usersList, {
+                userIds: Object.keys(selectedUsers.value),
+                status: bulkStatus.value,
+                ...(bulkReason.value.trim() ? { reason: bulkReason.value.trim() } : {}),
+                checklist: BULK_STATUS_CHECKS.filter((check) => bulkStatusChecklist.value[check.key]).map((check) => check.key),
+            });
+            showSnackBar({ type: "success", message: `${t("Users updated")}: ${selectedCount.value}` });
+            bulkOpen.value = false;
+            clearSelection();
+            refreshAll();
+        } catch (e) {
+            bulkError.value = extractApiErrorMessage(e);
+        } finally {
+            bulkLoading.value = false;
+        }
+    };
 
     const loadSummary = async () => {
         try {
@@ -161,6 +273,52 @@ const UsersPage = dc(() => {
     };
 
     void loadSummary();
+
+    const summaryExportChecklistComplete = computed(() => SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
+
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        if (!summaryExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all summary export checklist items before exporting") });
+            return;
+        }
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.usersSummaryExport, {
+                params: { checklist: SUMMARY_EXPORT_CHECKS.filter((check) => summaryExportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const snapshot = (payload.summary ?? payload) as UserSummary;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["total", snapshot.total],
+                ["active", snapshot.active],
+                ["invited", snapshot.invited],
+                ["suspended", snapshot.suspended],
+                ["disabled", snapshot.disabled],
+                ["makers", snapshot.makers],
+                ["checkers", snapshot.checkers],
+                ["four_eyes", snapshot.fourEyes],
+            ];
+            for (const [role, count] of Object.entries(snapshot.byRole ?? {})) rows.push([`role.${role}.count`, count]);
+            for (const [status, count] of Object.entries(snapshot.byStatus ?? {})) rows.push([`status.${status}.count`, count]);
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `admin-user-summary-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: t("Admin user summary exported") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            summaryExportLoading.value = false;
+        }
+    };
 
     const summaryItems = computed(() => {
         const data = summary.value;
@@ -186,6 +344,68 @@ const UsersPage = dc(() => {
         refreshHook.value?.reset();
     };
 
+    const exportCsv = async () => {
+        if (exportLoading.value) return;
+        exportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.usersExport, {
+                params: {
+                    scope: "admin",
+                    ...(search.value ? { search: search.value } : {}),
+                    ...buildFilterQuery(filterDefinitions.value, filters.value),
+                },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const rowsData = (payload.users ?? []) as UserRow[];
+            if (rowsData.length === 0) {
+                showSnackBar({ type: "warning", message: t("No users match the current filters.") });
+                return;
+            }
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const columns = ["id", "email", "phone", "role", "status", "isMaker", "isChecker", "mfaRequired", "authorities", "invitationExpiresAt", "createdAt", "updatedAt"];
+            const lines = [
+                columns.map(escape).join(","),
+                ...rowsData.map((row) =>
+                    [
+                        row.id,
+                        row.email,
+                        row.phone ?? "",
+                        row.role,
+                        row.status,
+                        row.isMaker,
+                        row.isChecker,
+                        row.mfaRequired,
+                        authorityKeys(row.authoritiesMap).join(";"),
+                        row.invitationExpiresAt ?? "",
+                        row.createdAt,
+                        row.updatedAt,
+                    ]
+                        .map(escape)
+                        .join(","),
+                ),
+            ];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `admin-users-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({
+                type: payload.truncated ? "warning" : "success",
+                message: payload.truncated
+                    ? `${t("Exported")} ${rowsData.length} / ${payload.total}`
+                    : `${t("Exported")} ${rowsData.length}`,
+            });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            exportLoading.value = false;
+        }
+    };
+
     const refreshAll = () => {
         refreshHook.value?.refreshAsIs();
         void loadSummary();
@@ -206,12 +426,15 @@ const UsersPage = dc(() => {
                 status: user.status,
                 authorities: authorityKeys(user.authoritiesMap).join(", "),
             };
+            detailChecklist.value = {};
         } catch (e) {
             detailError.value = extractApiErrorMessage(e);
         } finally {
             detailLoading.value = false;
         }
     };
+
+    const detailChecklistComplete = computed(() => USER_EDIT_CHECKS.every((check) => detailChecklist.value[check.key] === true));
 
     const saveDetail = async () => {
         const user = detail.value;
@@ -225,6 +448,10 @@ const UsersPage = dc(() => {
             detailOpen.value = false;
             return;
         }
+        if (!detailChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all edit checklist items before saving") });
+            return;
+        }
         saving.value = true;
         try {
             let pendingApproval = false;
@@ -234,6 +461,7 @@ const UsersPage = dc(() => {
                     ...(roleChanged ? { role: editForm.value.role } : {}),
                     ...(authoritiesChanged ? { authorities: authorityRecord(nextAuthorities) } : {}),
                     reason: "admin user update from users console",
+                    checklist: USER_EDIT_CHECKS.filter((check) => detailChecklist.value[check.key]).map((check) => check.key),
                 });
                 pendingApproval = response.status === 202;
             }
@@ -241,6 +469,7 @@ const UsersPage = dc(() => {
                 await api.patch(urlsMap.userDetail(user.id), {
                     status: editForm.value.status,
                     reason: "admin user status update from users console",
+                    checklist: USER_EDIT_CHECKS.filter((check) => detailChecklist.value[check.key]).map((check) => check.key),
                 });
             }
             showSnackBar({
@@ -268,11 +497,18 @@ const UsersPage = dc(() => {
             temporaryPassword: "",
             authorities: "",
         };
+        inviteChecklist.value = {};
         createOpen.value = true;
     };
 
+    const inviteChecklistComplete = computed(() => INVITE_CHECKS.every((check) => inviteChecklist.value[check.key] === true));
+
     const createUser = async () => {
         if (creating.value) return;
+        if (!inviteChecklistComplete.value) {
+            createError.value = t("Complete all invite checklist items before inviting");
+            return;
+        }
         creating.value = true;
         createError.value = null;
         try {
@@ -284,6 +520,7 @@ const UsersPage = dc(() => {
                 ...(createForm.value.phone.trim() ? { phone: createForm.value.phone.trim() } : {}),
                 ...(createForm.value.temporaryPassword ? { temporaryPassword: createForm.value.temporaryPassword } : {}),
                 ...(authorities.length > 0 ? { authorities: authorityRecord(authorities) } : {}),
+                checklist: INVITE_CHECKS.filter((check) => inviteChecklist.value[check.key]).map((check) => check.key),
             });
             createOpen.value = false;
             showSnackBar({ type: "success", message: t("User invited") });
@@ -296,6 +533,36 @@ const UsersPage = dc(() => {
     };
 
     const headers = computed<TableHeader<UserRow>[]>(() => [
+        {
+            key: "select",
+            label: "",
+            sortable: false,
+            headerCellStyle: { justifyContent: "center" },
+            Header: () => (
+                <span style={{ width: "28px", height: "40px", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                    <VCheckbox
+                        modelValue={allVisibleSelected.value}
+                        indeterminate={someVisibleSelected.value}
+                        onUpdate:modelValue={(value: boolean | null) => toggleVisible(value)}
+                        density="compact"
+                        hideDetails
+                        aria-label="Select all users on this page"
+                    />
+                </span>
+            ),
+            Value: ({ row }: { row: UserRow }) => (
+                <ThemedView style={{ width: "28px", height: "40px", alignItems: "center", justifyContent: "center" }}>
+                    <VCheckbox
+                        modelValue={Boolean(selectedUsers.value[row.id])}
+                        onUpdate:modelValue={(value: boolean | null) => toggleRow(row, value)}
+                        disabled={row.id === currentUserId.value}
+                        density="compact"
+                        hideDetails
+                        aria-label={`Select user ${row.email}`}
+                    />
+                </ThemedView>
+            ),
+        },
         {
             key: "user",
             label: "User",
@@ -378,6 +645,7 @@ const UsersPage = dc(() => {
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportCsv()}>{t("Export CSV")}</VBtn>
                             <VBtn color="primary" variant="flat" prependIcon="mdi-account-plus-outline" onClick={openCreate}>{t("Invite user")}</VBtn>
                         </ThemedView>
                     )}
@@ -390,8 +658,28 @@ const UsersPage = dc(() => {
                 {summary.value && (
                     <VCard variant="flat" style={{ borderRadius: "16px" }}>
                         <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Access governance")}</ThemedText>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Access governance")}</ThemedText>
+                                <div style={{ flex: 1 }} />
+                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
+                            </ThemedView>
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px" }}>
+                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
+                                    {SUMMARY_EXPORT_CHECKS.map((check) => (
+                                        <VCheckbox
+                                            key={check.key}
+                                            modelValue={summaryExportChecklist.value[check.key] === true}
+                                            onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
+                                            label={t(check.label)}
+                                            density="compact"
+                                            hideDetails
+                                        />
+                                    ))}
+                                    {!summaryExportChecklistComplete.value && (
+                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
+                                    )}
+                                </ThemedView>
                                 {summaryItems.value.map((item) => (
                                     <VCard key={item.label} variant="tonal">
                                         <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
@@ -408,6 +696,27 @@ const UsersPage = dc(() => {
                             </ThemedView>
                         </VCardText>
                     </VCard>
+                )}
+
+                {selectedCount.value > 0 && (
+                    <ThemedView
+                        style={{
+                            flexDirection: "row",
+                            gap: "10px",
+                            alignItems: "center",
+                            flexWrap: "wrap",
+                            padding: "10px 14px",
+                            borderRadius: "12px",
+                            border: "1px solid rgba(100,116,139,0.25)",
+                            background: "rgba(100,116,139,0.06)",
+                        }}
+                    >
+                        <ThemedText style={{ fontSize: "13px", fontWeight: 700 }}>{selectedCount.value} {t("selected")}</ThemedText>
+                        <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("Status-only changes apply immediately. Your own account cannot be selected.")}</ThemedText>
+                        <div style={{ flex: 1 }} />
+                        <VBtn size="small" variant="text" onClick={clearSelection}>{t("Clear selection")}</VBtn>
+                        <VBtn size="small" color="warning" variant="flat" prependIcon="mdi-account-cog-outline" onClick={openBulk}>{t("Change status")}</VBtn>
+                    </ThemedView>
                 )}
 
                 <ApiTable<UserRow>
@@ -464,6 +773,51 @@ const UsersPage = dc(() => {
                     )}
                 />
             </ThemedView>
+
+            <VDialog modelValue={bulkOpen.value} onUpdate:modelValue={(value: boolean) => (bulkOpen.value = value)} maxWidth="560px">
+                <VCard>
+                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{t("Change status for selected users")}</ThemedText>
+                        <VAlert type="info" variant="tonal">
+                            {t("This changes account status only. Role and authority changes still require checker approval.")}
+                        </VAlert>
+                        <VSelect
+                            label={t("Status")}
+                            items={["ACTIVE", "SUSPENDED", "DISABLED"]}
+                            modelValue={bulkStatus.value}
+                            onUpdate:modelValue={(value: string | null) => (bulkStatus.value = value ?? "SUSPENDED")}
+                        />
+                        <VTextField
+                            label={t("Reason (optional)")}
+                            modelValue={bulkReason.value}
+                            onUpdate:modelValue={(value: string) => (bulkReason.value = value)}
+                        />
+                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Status change checklist")}</ThemedText>
+                            {BULK_STATUS_CHECKS.map((check) => (
+                                <VCheckbox
+                                    key={check.key}
+                                    modelValue={bulkStatusChecklist.value[check.key] === true}
+                                    onUpdate:modelValue={(value: unknown) => (bulkStatusChecklist.value = { ...bulkStatusChecklist.value, [check.key]: Boolean(value) })}
+                                    label={t(check.label)}
+                                    density="compact"
+                                    hideDetails
+                                />
+                            ))}
+                            {!bulkStatusChecklistComplete.value && (
+                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all status checklist items before applying")}</ThemedText>
+                            )}
+                        </ThemedView>
+                        {bulkError.value && <VAlert type="error" variant="tonal" density="compact">{bulkError.value}</VAlert>}
+                        <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
+                            <VBtn variant="text" onClick={() => (bulkOpen.value = false)}>{t("Cancel")}</VBtn>
+                            <VBtn color="warning" loading={bulkLoading.value} disabled={!bulkStatusChecklistComplete.value} onClick={() => void applyBulkStatus()}>
+                                {t("Apply")} ({selectedCount.value})
+                            </VBtn>
+                        </ThemedView>
+                    </VCardText>
+                </VCard>
+            </VDialog>
 
             <VDialog modelValue={detailOpen.value} onUpdate:modelValue={(value: boolean) => (detailOpen.value = value)} maxWidth="760px">
                 <VCard>
@@ -533,13 +887,38 @@ const UsersPage = dc(() => {
                                     persistentHint
                                 />
 
+                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Edit checklist")}</ThemedText>
+                                    {USER_EDIT_CHECKS.map((check) => (
+                                        <VCheckbox
+                                            key={check.key}
+                                            modelValue={detailChecklist.value[check.key] === true}
+                                            onUpdate:modelValue={(value: unknown) => (detailChecklist.value = { ...detailChecklist.value, [check.key]: Boolean(value) })}
+                                            label={t(check.label)}
+                                            density="compact"
+                                            hideDetails
+                                        />
+                                    ))}
+                                    {!detailChecklistComplete.value && (
+                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all edit checklist items before saving")}</ThemedText>
+                                    )}
+                                </ThemedView>
                                 <VAlert type="warning" variant="tonal" density="compact">
                                     {t("You cannot approve your own change. A different checker must review role and authority updates.")}
                                 </VAlert>
 
                                 <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
+                                    <VBtn
+                                        variant="text"
+                                        onClick={() => {
+                                            detailOpen.value = false;
+                                            void router.push({ name: "AdminUserDetail", params: { id: detail.value?.id ?? "" } });
+                                        }}
+                                    >
+                                        {t("Full profile")}
+                                    </VBtn>
                                     <VBtn variant="text" onClick={() => (detailOpen.value = false)}>{t("Cancel")}</VBtn>
-                                    <VBtn color="primary" loading={saving.value} onClick={() => void saveDetail()}>{t("Save changes")}</VBtn>
+                                    <VBtn color="primary" loading={saving.value} disabled={!detailChecklistComplete.value} onClick={() => void saveDetail()}>{t("Save changes")}</VBtn>
                                 </ThemedView>
                             </>
                         ) : null}
@@ -572,12 +951,28 @@ const UsersPage = dc(() => {
                             hint={t("Optional. Comma-separated authority keys.")}
                             persistentHint
                         />
+                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Invite checklist")}</ThemedText>
+                            {INVITE_CHECKS.map((check) => (
+                                <VCheckbox
+                                    key={check.key}
+                                    modelValue={inviteChecklist.value[check.key] === true}
+                                    onUpdate:modelValue={(value: unknown) => (inviteChecklist.value = { ...inviteChecklist.value, [check.key]: Boolean(value) })}
+                                    label={t(check.label)}
+                                    density="compact"
+                                    hideDetails
+                                />
+                            ))}
+                            {!inviteChecklistComplete.value && (
+                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all invite checklist items before inviting")}</ThemedText>
+                            )}
+                        </ThemedView>
                         <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
                             <VBtn variant="text" onClick={() => (createOpen.value = false)}>{t("Cancel")}</VBtn>
                             <VBtn
                                 color="primary"
                                 loading={creating.value}
-                                disabled={!createForm.value.email.trim() || !createForm.value.email.includes("@")}
+                                disabled={!createForm.value.email.trim() || !createForm.value.email.includes("@") || !inviteChecklistComplete.value}
                                 onClick={() => void createUser()}
                             >
                                 {t("Invite")}

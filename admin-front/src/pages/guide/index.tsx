@@ -13,10 +13,12 @@ import {
     VExpansionPanelText,
     VExpansionPanelTitle,
     VExpansionPanels,
+    VFileInput,
     VIcon,
     VList,
     VListItem,
     VListSubheader,
+    VSwitch,
     VTextField,
 } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
@@ -24,6 +26,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StatusChip } from "@/components/StatusChip";
+import { showSnackBar } from "@/utils/snackBar";
 import { GuideMarkdown } from "@/components/guide/GuideMarkdown";
 import { GlobalGuideSearchModal } from "@/components/guide/GlobalGuideSearchModal";
 import { TermTooltip } from "@/components/guide/TermTooltip";
@@ -153,6 +156,11 @@ const AdminGuidePage = dc(() => {
     const searchDetailOpen = ref(false);
     const expandedChapters = ref<string[]>([]);
     const bookmarks = ref<string[]>(readJson<string[]>(BOOKMARK_KEY, []));
+    const importOpen = ref(false);
+    const importError = ref<string | null>(null);
+    const importLoading = ref(false);
+    const importResult = ref<{ imported: number; skipped: number; total: number } | null>(null);
+    const replaceBookmarks = ref(false);
     const checklistState = ref<Record<string, boolean>>(readJson<Record<string, boolean>>(CHECKLIST_KEY, {}));
     const glossaryFilter = ref("");
 
@@ -178,6 +186,156 @@ const AdminGuidePage = dc(() => {
         if (typeof window !== "undefined") {
             window.scrollTo({ top: 0, behavior: "smooth" });
         }
+    };
+
+    const importBookmarks = async (value: File | File[] | null) => {
+        const file = Array.isArray(value) ? value[0] : value;
+        if (!file) return;
+        importLoading.value = true;
+        importError.value = null;
+        importResult.value = null;
+        try {
+            const text = await file.text();
+            let parsed: unknown;
+            try {
+                parsed = JSON.parse(text);
+            } catch {
+                importError.value = isArabic.value ? "الملف ليس JSON صالحاً." : "The selected file is not valid JSON.";
+                return;
+            }
+            const raw = parsed && typeof parsed === "object" && !Array.isArray(parsed) && Array.isArray((parsed as Record<string, unknown>).bookmarks)
+                ? (parsed as Record<string, unknown>).bookmarks
+                : parsed;
+            if (!Array.isArray(raw)) {
+                importError.value = isArabic.value ? "صيغة النسخة غير صحيحة." : "The backup format is invalid.";
+                return;
+            }
+            const candidateIds = raw
+                .map((entry) => (typeof entry === "string" ? entry : entry && typeof entry === "object" && "id" in entry ? String((entry as Record<string, unknown>).id ?? "") : ""))
+                .filter(Boolean);
+            const known = new Set(GUIDE_BOOKS.map((book) => book.id));
+            const valid = candidateIds.filter((id) => known.has(id));
+            const skipped = candidateIds.length - valid.length;
+            const next = replaceBookmarks.value
+                ? [...new Set(valid)]
+                : [...new Set([...bookmarks.value, ...valid])];
+            bookmarks.value = next;
+            writeJson(BOOKMARK_KEY, next);
+            importResult.value = { imported: valid.length, skipped, total: candidateIds.length };
+            showSnackBar({
+                type: skipped > 0 ? "warning" : "success",
+                message: `${isArabic.value ? "تم استيراد العلامات" : "Bookmarks imported"}: ${valid.length}`,
+            });
+        } catch {
+            importError.value = isArabic.value ? "تعذر قراءة الملف." : "Could not read the selected file.";
+        } finally {
+            importLoading.value = false;
+        }
+    };
+
+    const exportBookmarks = () => {
+        const books = bookmarks.value
+            .map((id) => GUIDE_BOOKS.find((book) => book.id === id))
+            .filter((book): book is GuideBook => Boolean(book));
+        if (books.length === 0) {
+            showSnackBar({
+                type: "warning",
+                message: isArabic.value ? "لا توجد كتب محفوظة للتصدير." : "No bookmarked books to export.",
+            });
+            return;
+        }
+        const payload = {
+            exportedAt: new Date().toISOString(),
+            bookmarks: books.map((book) => ({
+                id: book.id,
+                number: book.number,
+                titleEn: book.titleEn,
+                titleAr: book.titleAr,
+                summaryEn: book.summaryEn,
+                summaryAr: book.summaryAr,
+                chapters: book.chapters.map((chapter) => ({
+                    id: chapter.id,
+                    number: chapter.number,
+                    titleEn: chapter.titleEn,
+                    titleAr: chapter.titleAr,
+                })),
+            })),
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `admin-guide-bookmarks-${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        showSnackBar({
+            type: "success",
+            message: `${isArabic.value ? "تم تصدير العلامات" : "Bookmarks exported"}: ${books.length}`,
+        });
+    };
+
+    const copyBookLink = async () => {
+        const url = new URL(window.location.href);
+        url.searchParams.set("book", selectedBook.value.id);
+        const chapter = expandedChapters.value[0];
+        if (chapter) url.searchParams.set("chapter", chapter);
+        else url.searchParams.delete("chapter");
+        const link = url.toString();
+        try {
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(link);
+            } else {
+                throw new Error("clipboard unavailable");
+            }
+        } catch {
+            const input = document.createElement("textarea");
+            input.value = link;
+            input.style.position = "fixed";
+            input.style.opacity = "0";
+            document.body.appendChild(input);
+            input.select();
+            document.execCommand("copy");
+            input.remove();
+        }
+        showSnackBar({
+            type: "success",
+            message: isArabic.value ? "تم نسخ رابط الكتاب" : "Book link copied",
+        });
+    };
+
+    const exportBook = (book: GuideBook) => {
+        const summary = isArabic.value && book.summaryAr ? book.summaryAr : book.summaryEn;
+        const lines: string[] = [
+            `# ${book.number}. ${bookTitle(book)}`,
+            "",
+            summary,
+            "",
+            `${isArabic.value ? "الوسوم" : "Tags"}: ${book.tags.join(", ")}`,
+            "",
+        ];
+        for (const chapter of book.chapters) {
+            lines.push(`## ${chapter.number}. ${chapterTitle(chapter)}`, "", chapterBody(chapter), "");
+        }
+        if (book.humanErrorWarning) lines.push(`> ${book.humanErrorWarning}`, "");
+        if (book.sopChecklist.length > 0) {
+            lines.push(`## ${isArabic.value ? "قائمة التحقق" : "SOP checklist"}`, "");
+            for (const step of book.sopChecklist) lines.push(`- ${step}`);
+        }
+        const blob = new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `admin-guide-book-${book.number}-${new Date().toISOString().slice(0, 10)}.md`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        showSnackBar({
+            type: "success",
+            message: isArabic.value ? "تم تنزيل الكتاب" : "Book downloaded",
+        });
     };
 
     const toggleBookmark = (book: GuideBook) => {
@@ -207,11 +365,19 @@ const AdminGuidePage = dc(() => {
 
     onMounted(() => {
         const entryId = typeof route.query.entry === "string" ? route.query.entry : "";
+        const bookId = typeof route.query.book === "string" ? route.query.book : "";
+        if (route.query.search === "1") searchOpen.value = true;
+        const chapterId = typeof route.query.chapter === "string" ? route.query.chapter : "";
         if (entryId) {
             const entry = buildGuideSearchIndex().find((candidate) => candidate.id === entryId);
             if (entry) {
                 handleSearchSelect(entry);
             }
+            return;
+        }
+        if (bookId) {
+            const book = GUIDE_BOOKS.find((candidate) => candidate.id === bookId);
+            if (book) openBook(book, chapterId || undefined);
         }
     });
 
@@ -455,6 +621,22 @@ const AdminGuidePage = dc(() => {
                         </ThemedText>
                         <VBtn
                             size="small"
+                            variant="tonal"
+                            prependIcon="mdi-download"
+                            onClick={() => exportBook(selectedBook.value)}
+                        >
+                            {isArabic.value ? "تنزيل الكتاب" : "Download book"}
+                        </VBtn>
+                        <VBtn
+                            size="small"
+                            variant="tonal"
+                            prependIcon="mdi-link-variant"
+                            onClick={() => void copyBookLink()}
+                        >
+                            {isArabic.value ? "نسخ الرابط" : "Copy link"}
+                        </VBtn>
+                        <VBtn
+                            size="small"
                             variant={bookmarks.value.includes(selectedBook.value.id) ? "flat" : "tonal"}
                             color={bookmarks.value.includes(selectedBook.value.id) ? "success" : undefined}
                             prependIcon="mdi-bookmark-outline"
@@ -679,6 +861,12 @@ const AdminGuidePage = dc(() => {
                                 {isArabic.value ? "بحث فوري" : "Instant search"}
                             </VBtn>
                             <StatusChip label="Ctrl / Cmd + K" tone="neutral" size="x-small" />
+                            <VBtn size="small" variant="tonal" prependIcon="mdi-download" onClick={exportBookmarks}>
+                                {isArabic.value ? "تصدير العلامات" : "Export bookmarks"}
+                            </VBtn>
+                            <VBtn size="small" variant="tonal" prependIcon="mdi-upload" onClick={() => { importError.value = null; importResult.value = null; importOpen.value = true; }}>
+                                {isArabic.value ? "استيراد العلامات" : "Import bookmarks"}
+                            </VBtn>
                         </ThemedView>
                     )}
                 />
@@ -763,6 +951,46 @@ const AdminGuidePage = dc(() => {
                     </ThemedView>
                 </ThemedView>
             </ThemedView>
+
+            <VDialog modelValue={importOpen.value} onUpdate:modelValue={(value: boolean) => (importOpen.value = value)} maxWidth="620px">
+                <VCard>
+                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
+                            {isArabic.value ? "استيراد العلامات" : "Import bookmarks"}
+                        </ThemedText>
+                        <VAlert type="info" variant="tonal" density="compact">
+                            {isArabic.value
+                                ? "اختر ملف نسخة العلامات الذي تم تصديره من هذا الدليل. سيتم تجاهل الكتب غير المعروفة."
+                                : "Choose a bookmark backup exported from this guide. Unknown books are skipped."}
+                        </VAlert>
+                        <VFileInput
+                            label={isArabic.value ? "ملف العلامات JSON" : "Bookmarks JSON"}
+                            {...{ accept: ".json,application/json" }}
+                            prependIcon="mdi-file-upload-outline"
+                            onUpdate:modelValue={(value: File | File[] | null) => void importBookmarks(value)}
+                        />
+                        <VSwitch
+                            label={isArabic.value ? "استبدال العلامات الحالية" : "Replace existing bookmarks"}
+                            modelValue={replaceBookmarks.value}
+                            onUpdate:modelValue={(value: boolean | null) => (replaceBookmarks.value = !!value)}
+                            color="primary"
+                            hideDetails
+                        />
+                        {importLoading.value && <StateView loading={true} minHeight="100px" />}
+                        {importError.value && <VAlert type="error" variant="tonal" density="compact">{importError.value}</VAlert>}
+                        {importResult.value && (
+                            <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
+                                <StatusChip label={`${isArabic.value ? "مستورد" : "Imported"}: ${importResult.value.imported}`} tone="success" />
+                                <StatusChip label={`${isArabic.value ? "متجاهل" : "Skipped"}: ${importResult.value.skipped}`} tone={importResult.value.skipped > 0 ? "warning" : "neutral"} />
+                                <StatusChip label={`${isArabic.value ? "إجمالي" : "Total"}: ${importResult.value.total}`} tone="info" />
+                            </ThemedView>
+                        )}
+                        <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end" }}>
+                            <VBtn variant="text" onClick={() => (importOpen.value = false)}>{isArabic.value ? "إغلاق" : "Close"}</VBtn>
+                        </ThemedView>
+                    </VCardText>
+                </VCard>
+            </VDialog>
 
             <GlobalGuideSearchModal
                 modelValue={searchOpen.value}

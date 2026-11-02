@@ -12,6 +12,7 @@ import { MoneyText } from "@/components/MoneyText";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
+import { showSnackBar } from "@/utils/snackBar";
 
 type InvariantResult = {
     ok?: boolean;
@@ -41,6 +42,7 @@ const InvariantPage = dc(() => {
     const data = ref<InvariantResult | null>(null);
     const loading = ref(true);
     const error = ref<string | null>(null);
+    const exportLoading = ref(false);
 
     const load = async () => {
         loading.value = true;
@@ -56,6 +58,48 @@ const InvariantPage = dc(() => {
     };
 
     void load();
+
+    const exportSnapshot = async () => {
+        if (exportLoading.value) return;
+        exportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.financeInvariantExport);
+            const snapshot = (response.data?.data ?? response.data ?? {}) as InvariantResult;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["checked_at", snapshot.checkedAt ?? ""],
+                ["ok", snapshot.ok === true],
+                ["drift", snapshot.drift ?? "0"],
+                ["currency", snapshot.currency ?? "LYD"],
+                ["left_side", snapshot.leftSide ?? "0"],
+                ["right_side", snapshot.rightSide ?? "0"],
+            ];
+            for (const [key, value] of Object.entries(snapshot.sides ?? {})) {
+                rows.push([`side.${key}`, value]);
+            }
+            for (const row of snapshot.accounts ?? []) {
+                rows.push([`account.${row.accountId}.type`, row.accountType]);
+                rows.push([`account.${row.accountId}.live_balance`, row.liveBalance]);
+                rows.push([`account.${row.accountId}.natural_balance`, row.naturalBalance]);
+                rows.push([`account.${row.accountId}.checkpoint_at`, row.checkpointAt ?? ""]);
+            }
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `invariant-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: t("Invariant snapshot exported") });
+        } catch (e) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+        } finally {
+            exportLoading.value = false;
+        }
+    };
 
     const currency = () => data.value?.currency ?? "LYD";
 
@@ -75,6 +119,7 @@ const InvariantPage = dc(() => {
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                             {data.value?.checkedAt && <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("Last run")} {new Date(data.value.checkedAt).toLocaleTimeString()}</ThemedText>}
                             <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSnapshot()}>{t("Export snapshot")}</VBtn>
                         </ThemedView>
                     )}
                 />

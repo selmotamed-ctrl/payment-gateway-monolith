@@ -14,6 +14,7 @@ import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { formatMoney, formatPlainNumber, toDecimal } from "@/utils/money";
+import { showSnackBar } from "@/utils/snackBar";
 
 type Profitability = {
     period?: string;
@@ -52,6 +53,7 @@ const ProfitabilityPage = dc(() => {
     const loading = ref(true);
     const error = ref<string | null>(null);
     const period = ref<string>("last_30d");
+    const exportLoading = ref(false);
 
     const load = async () => {
         loading.value = true;
@@ -67,6 +69,73 @@ const ProfitabilityPage = dc(() => {
     };
 
     void load();
+
+    const exportSnapshot = async () => {
+        if (exportLoading.value) return;
+        exportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.financeProfitabilityExport, { params: { period: period.value } });
+            const snapshot = (response.data?.data ?? response.data ?? {}) as Profitability;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["period", snapshot.period ?? period.value],
+                ["currency", snapshot.currency ?? "LYD"],
+                ["window_days", snapshot.windowDays ?? ""],
+                ["window_start", snapshot.windowStart ?? ""],
+                ["window_end", snapshot.windowEnd ?? ""],
+                ["succeeded_attempts", snapshot.succeededAttempts ?? 0],
+                ["gross_volume", snapshot.grossVolume ?? "0"],
+                ["gross_commission_revenue", snapshot.grossCommissionRevenue ?? "0"],
+                ["net_merchant_amount", snapshot.netMerchantAmount ?? "0"],
+                ["gateway_cost_period", snapshot.gatewayCostPeriod ?? "0"],
+                ["gateway_cost_realized", snapshot.gatewayCostRealized ?? "0"],
+                ["gateway_cost_accrued", snapshot.gatewayCostAccrued ?? "0"],
+                ["period_net_revenue", snapshot.periodNetRevenue ?? "0"],
+                ["chargeback_losses_period", snapshot.chargebackLossesPeriod ?? "0"],
+                ["period_net_contribution", snapshot.periodNetContribution ?? "0"],
+                ["refund_commission_reversed", snapshot.refundCommissionReversed ?? "0"],
+                ["commission_receivable", snapshot.commissionReceivable ?? "0"],
+                ["commission_margin_percent", snapshot.commissionMargin ?? "0"],
+                ["gateway_cost_ratio_percent", snapshot.gatewayCostRatio ?? "0"],
+                ["net_margin_percent", snapshot.netMargin ?? "0"],
+                ["average_ticket", snapshot.averageTicket ?? "0"],
+                ["average_commission", snapshot.averageCommission ?? "0"],
+            ];
+            for (const row of snapshot.byRail ?? []) {
+                rows.push([`rail.${row.railCode}.volume`, row.volume]);
+                rows.push([`rail.${row.railCode}.gross`, row.gross]);
+                rows.push([`rail.${row.railCode}.cost`, row.cost]);
+                rows.push([`rail.${row.railCode}.net`, row.net]);
+            }
+            for (const row of snapshot.byGateway ?? []) {
+                rows.push([`gateway.${row.gatewayCode}.volume`, row.volume]);
+                rows.push([`gateway.${row.gatewayCode}.gross`, row.gross]);
+                rows.push([`gateway.${row.gatewayCode}.cost`, row.cost]);
+                rows.push([`gateway.${row.gatewayCode}.net`, row.net]);
+            }
+            for (const row of snapshot.byDay ?? []) {
+                rows.push([`day.${row.day}.volume`, row.volume]);
+                rows.push([`day.${row.day}.gross`, row.gross]);
+                rows.push([`day.${row.day}.cost`, row.cost]);
+                rows.push([`day.${row.day}.net`, row.net]);
+            }
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `profitability-${period.value}-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: t("Profitability snapshot exported") });
+        } catch (e) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+        } finally {
+            exportLoading.value = false;
+        }
+    };
 
     const currency = () => data.value?.currency ?? "LYD";
 
@@ -174,6 +243,7 @@ const ProfitabilityPage = dc(() => {
                                 style={{ minWidth: "170px" }}
                             />
                             <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSnapshot()}>{t("Export snapshot")}</VBtn>
                         </ThemedView>
                     )}
                 />

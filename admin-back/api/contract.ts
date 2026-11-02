@@ -151,7 +151,13 @@ export const toCoreGatewayVersionCreate = (body: unknown): JsonRecord => {
 
 export const toCoreGatewayRollback = (body: unknown): JsonRecord => {
   const source = asRecord(body);
-  return { versionId: asString(source.targetVersionId) ?? "" };
+  const result: JsonRecord = { versionId: asString(source.targetVersionId) ?? "" };
+  const reason = asString(source.reason);
+  if (reason) result.reason = clamp(reason, 500);
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
+  return result;
 };
 
 const resolveEnvironment = (
@@ -654,6 +660,9 @@ export const toCoreGatewayVersionDryRun = (body: unknown): JsonRecord => {
   if (amount && DECIMAL_PATTERN.test(amount)) result.amount = amount;
   const currency = asString(payload.currency);
   if (currency && currency.length === 3) result.currency = currency;
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
   return result;
 };
 
@@ -664,7 +673,11 @@ export const toCoreGatewayVersionRunSuite = (body: unknown): JsonRecord => {
     .slice(0, 30);
   const suite = asString(source.suite);
   if (suite && suite.length <= 64) scenarios.unshift(suite);
-  return scenarios.length > 0 ? { scenarios } : {};
+  const result: JsonRecord = scenarios.length > 0 ? { scenarios } : {};
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
+  return result;
 };
 
 /* --------------------------------------------------------------------------- users */
@@ -737,6 +750,9 @@ export const toCoreUserCreate = (body: unknown): JsonRecord => {
   if (password) result.password = password;
   const authorities = flattenAuthorities(source.authorities).slice(0, 60);
   if (authorities.length > 0) result.authoritiesMap = authorities;
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
   return result;
 };
 
@@ -749,6 +765,9 @@ export const toCoreUserUpdate = (body: unknown): JsonRecord => {
   if (status) result.status = status;
   const authorities = flattenAuthorities(source.authorities).slice(0, 60);
   if (authorities.length > 0) result.authoritiesMap = authorities;
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
   return result;
 };
 
@@ -875,6 +894,9 @@ export const toCoreMerchantSuspend = (body: unknown): JsonRecord => {
   if (Number.isInteger(ratifyWithinHours) && ratifyWithinHours > 0) result.ratifyWithinHours = ratifyWithinHours;
   const baseVersion = Number(source.baseVersion);
   if (Number.isInteger(baseVersion) && baseVersion > 0) result.baseVersion = baseVersion;
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
   return result;
 };
 
@@ -883,6 +905,9 @@ export const toCoreMerchantReinstate = (body: unknown): JsonRecord => {
   const result: JsonRecord = { reason: clamp(asString(source.reason) ?? "", 2000) };
   const baseVersion = Number(source.baseVersion);
   if (Number.isInteger(baseVersion) && baseVersion > 0) result.baseVersion = baseVersion;
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
   return result;
 };
 
@@ -897,6 +922,9 @@ export const toCoreMerchantProposeEdit = (body: unknown): JsonRecord => {
   if (reason) result.reason = clamp(reason, 2000);
   const baseVersion = Number(source.baseVersion);
   if (Number.isInteger(baseVersion) && baseVersion > 0) result.baseVersion = baseVersion;
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
   return result;
 };
 
@@ -921,6 +949,9 @@ export const toCoreMerchantClose = (body: unknown): JsonRecord => {
   if (notes) result.notes = clamp(notes, 2000);
   const baseVersion = Number(source.baseVersion);
   if (Number.isInteger(baseVersion) && baseVersion > 0) result.baseVersion = baseVersion;
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
   return result;
 };
 
@@ -945,12 +976,19 @@ export const toCoreApprovalApprove = (body: unknown): JsonRecord => {
   if (outcome) result.outcome = outcome;
   const riskAcceptanceNote = asString(source.riskAcceptanceNote);
   if (riskAcceptanceNote) result.riskAcceptanceNote = clamp(riskAcceptanceNote, 2000);
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
   return result;
 };
 
 export const toCoreApprovalReject = (body: unknown): JsonRecord => {
   const source = asRecord(body);
-  return { reason: clamp(asString(source.reason) ?? "", 2000) };
+  const result: JsonRecord = { reason: clamp(asString(source.reason) ?? "", 2000) };
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
+  return result;
 };
 
 /* ------------------------------------------------------------------------------ aml */
@@ -976,6 +1014,9 @@ export const toCoreAmlMatchDisposition = (body: unknown): JsonRecord => {
   if (suppressFuture !== undefined) result.suppressFuture = suppressFuture;
   const suppressUntil = asString(source.suppressUntil);
   if (suppressUntil && DATE_PATTERN.test(suppressUntil)) result.suppressUntil = suppressUntil;
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
   return result;
 };
 
@@ -994,7 +1035,11 @@ export const toCoreAmlCasePropose = (body: unknown): JsonRecord => {
     coreAction = "ESCALATE";
   }
   const notes = asString(source.notes) ?? asString(source.reason);
-  return notes ? { action: coreAction, notes: clamp(notes, 2000) } : { action: coreAction };
+  const result: JsonRecord = notes ? { action: coreAction, notes: clamp(notes, 2000) } : { action: coreAction };
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
+  return result;
 };
 
 const AML_RULE_TYPES = [
@@ -1024,6 +1069,9 @@ export const toCoreAmlRule = (body: unknown): JsonRecord => {
   if (Object.keys(scope).length > 0) result.scope = scope;
   const effectiveFrom = asString(source.effectiveFrom);
   if (effectiveFrom) result.effectiveFrom = clamp(effectiveFrom, 64);
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
   return result;
 };
 
@@ -1080,6 +1128,9 @@ export const toCoreAmlReport = (body: unknown): JsonRecord => {
   if (caseId) result.amlCaseId = caseId;
   const authority = asString(source.authority);
   if (authority) result.authority = clamp(authority, 64);
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
   return result;
 };
 
@@ -1134,6 +1185,9 @@ export const toCoreRailCreate = (body: unknown): JsonRecord => {
   }
   const capabilities = toCapabilitiesRecord(source.capabilities);
   if (Object.keys(capabilities).length > 0) result.capabilities = capabilities;
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
   return result;
 };
 
@@ -1252,6 +1306,9 @@ export const toCoreRouteCreate = (body: unknown): JsonRecord => {
   if (Object.keys(costModel).length > 0) result.costModel = costModel;
   const limitAmount = asString(source.limitAmount);
   if (limitAmount && DECIMAL_PATTERN.test(limitAmount)) result.maxAmount = limitAmount;
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
   return result;
 };
 
@@ -1282,6 +1339,9 @@ export const toCoreRouteState = (body: unknown): JsonRecord => {
   };
   const reason = asString(source.reason);
   if (reason) result.reason = clamp(reason, 500);
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
   return result;
 };
 
@@ -1325,6 +1385,9 @@ export const toCoreOperatorCaseResolve = (body: unknown): JsonRecord => {
   if (providerReference) result.providerReference = clamp(providerReference, 191);
   const settledAmount = asString(source.settledAmount);
   if (settledAmount) result.settledAmount = settledAmount;
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
   return result;
 };
 
@@ -1376,6 +1439,9 @@ export const toCoreReconciliationUpload = (body: unknown): JsonRecord => {
   if (currency) result.currency = currency.toUpperCase();
   const autoPost = asBoolean(source.autoPost);
   if (autoPost !== undefined) result.autoPost = autoPost;
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
   return result;
 };
 
@@ -1437,6 +1503,11 @@ export const toCoreAdjustmentCreate = (body: unknown): JsonRecord => {
   if (externalDisputeRef) result.externalDisputeRef = clamp(externalDisputeRef, 120);
   const reverseCommission = asBoolean(source.reverseCommission);
   if (reverseCommission !== undefined) result.reverseCommission = reverseCommission;
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist
+      .filter((entry): entry is string => typeof entry === "string")
+      .slice(0, 10);
+  }
   return result;
 };
 
@@ -1454,6 +1525,11 @@ export const toCoreCashoutProcess = (body: unknown): JsonRecord => {
   const result: JsonRecord = { decision };
   const reason = asString(source.reason);
   if (reason) result.reason = clamp(reason, 1000);
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist
+      .filter((entry): entry is string => typeof entry === "string")
+      .slice(0, 10);
+  }
   return result;
 };
 
@@ -1553,5 +1629,9 @@ export const toCoreSettingsUpdate = (body: unknown): JsonRecord => {
     if (entries.length >= 50) break;
   }
   if (entries.length === 0) missingCanonical("settings");
-  return { settings: entries };
+  const result: JsonRecord = { settings: entries };
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
+  return result;
 };

@@ -45,6 +45,17 @@ export const disputeEvidenceSchema = z
   .object({
     evidence: zJsonObject,
     notes: z.string().max(2000).optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "EVIDENCE_REFERENCE_VERIFIED",
+          "SUPPORTING_DOCUMENTS_ATTACHED",
+          "EVIDENCE_WINDOW_VERIFIED",
+          "SUMMARY_REVIEWED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict();
 
@@ -62,6 +73,17 @@ export const adjustmentCreateSchema = z
     reverseCommission: z.boolean().optional(),
     draft: z.boolean().optional(),
     targetGlAccountId: zIdentifier,
+    checklist: z
+      .array(
+        z.enum([
+          "TARGET_ACCOUNT_VERIFIED",
+          "AMOUNT_CURRENCY_VERIFIED",
+          "REASON_DOCUMENTED",
+          "SOURCE_LINKAGE_VERIFIED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict()
   .refine((value) => Boolean(value.reason || value.reasonCode), {
@@ -76,6 +98,17 @@ export const cashoutProcessSchema = z
     amount: zAmount.optional(),
     currency: zCurrency.optional(),
     executedBy: zIdentifier.optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "BANK_DETAILS_VERIFIED",
+          "WALLET_BALANCE_VERIFIED",
+          "MERCHANT_ACTIVE",
+          "NO_AML_RESTRICTIONS",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict();
 
@@ -151,11 +184,28 @@ router.post(
 );
 
 router.get(
+  "/disputes/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/disputes/export",
+    querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
   "/disputes/summary",
   coreForward({
     method: "GET",
     path: () => "/internal/admin/disputes/summary",
     querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
+  "/disputes/summary/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/disputes/summary/export",
   }),
 );
 
@@ -188,11 +238,28 @@ router.get(
 );
 
 router.get(
+  "/adjustments/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/adjustments/export",
+    querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
   "/adjustments/summary",
   coreForward({
     method: "GET",
     path: () => "/internal/admin/adjustments/summary",
     querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
+  "/adjustments/summary/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/adjustments/summary/export",
   }),
 );
 
@@ -226,11 +293,28 @@ router.get(
 );
 
 router.get(
+  "/cashouts/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/cashouts/export",
+    querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
   "/cashouts/summary",
   coreForward({
     method: "GET",
     path: () => "/internal/admin/cashouts/summary",
     querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
+  "/cashouts/summary/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/cashouts/summary/export",
   }),
 );
 
@@ -262,6 +346,14 @@ router.get(
   }),
 );
 
+router.get(
+  "/commission-profiles/summary",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/commission-profiles/summary",
+  }),
+);
+
 router.post(
   "/commission-profiles",
   coreForward({
@@ -273,11 +365,70 @@ router.post(
   }),
 );
 
+export const commissionProfileExpireSchema = z
+  .object({
+    effectiveTo: z.string().max(64).optional(),
+    reason: z.string().max(500).optional(),
+  })
+  .strict();
+
+router.get(
+  "/commission-profiles/:id/history",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/commission-profiles/${encodeURIComponent(context.params.id ?? "")}/history`,
+    paramsSchema: idParamsSchema,
+  }),
+);
+
+router.post(
+  "/commission-profiles/:id/expire",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/commission-profiles/${encodeURIComponent(context.params.id ?? "")}/expire`,
+    paramsSchema: idParamsSchema,
+    schema: commissionProfileExpireSchema,
+    relayStatus: true,
+  }),
+);
+
 router.get(
   "/velocity-rules",
   coreForward({
     method: "GET",
     path: () => "/internal/admin/velocity-rules",
+  }),
+);
+
+export const velocityRuleDeactivateSchema = z
+  .object({ reason: z.string().max(500).optional() })
+  .strict();
+
+router.get(
+  "/velocity-rules/:id/history",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/velocity-rules/${encodeURIComponent(context.params.id ?? "")}/history`,
+    paramsSchema: idParamsSchema,
+  }),
+);
+
+router.post(
+  "/velocity-rules/:id/deactivate",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/velocity-rules/${encodeURIComponent(context.params.id ?? "")}/deactivate`,
+    paramsSchema: idParamsSchema,
+    schema: velocityRuleDeactivateSchema,
+    relayStatus: true,
+  }),
+);
+
+router.get(
+  "/velocity-rules/summary",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/velocity-rules/summary",
   }),
 );
 
@@ -302,11 +453,37 @@ router.get(
 );
 
 router.get(
+  "/finance/profitability/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/finance/profitability/export",
+    querySchema: financePeriodQuerySchema,
+  }),
+);
+
+router.get(
   "/finance/liquidity",
   coreForward({
     method: "GET",
     path: () => "/internal/admin/finance/liquidity",
     querySchema: financePeriodQuerySchema,
+  }),
+);
+
+router.get(
+  "/finance/liquidity/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/finance/liquidity/export",
+    querySchema: financePeriodQuerySchema,
+  }),
+);
+
+router.get(
+  "/finance/invariant-check/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/finance/invariant-check/export",
   }),
 );
 

@@ -36,6 +36,17 @@ export const uploadSchema = z
     periodEnd: z.string().max(64),
     currency: z.string().regex(/^[A-Z]{3}$/).optional(),
     autoPost: z.boolean().optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "SOURCE_VERIFIED",
+          "FILE_REVIEWED",
+          "PERIOD_VERIFIED",
+          "DUPLICATE_CHECK_ACKNOWLEDGED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict();
 
@@ -56,6 +67,46 @@ router.post(
     schema: sourceCreateSchema,
     bodyFrom: (_req, body) => toCoreReconciliationSourceCreate(body),
     status: 201,
+  }),
+);
+
+export const sourcePatchSchema = z
+  .object({
+    scheduleCron: z.string().max(120).nullable().optional(),
+    settlementLagDays: z.number().int().min(0).max(365).optional(),
+    dedupeKeyTemplate: z.string().max(200).nullable().optional(),
+    parserConfig: z.record(z.string().max(64), z.unknown()).optional(),
+    active: z.boolean().optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "PARSER_CONFIG_REVIEWED",
+          "SCHEDULE_LAG_VERIFIED",
+          "DEDUPE_TEMPLATE_REVIEWED",
+          "SOURCE_IMPACT_REVIEWED",
+        ]),
+      )
+      .max(10)
+      .optional(),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      value.scheduleCron !== undefined ||
+      value.settlementLagDays !== undefined ||
+      value.dedupeKeyTemplate !== undefined ||
+      value.parserConfig !== undefined ||
+      value.active !== undefined,
+    { message: "At least one field is required" },
+  );
+
+router.patch(
+  "/sources/:id",
+  coreForward({
+    method: "PATCH",
+    path: (context) => `/internal/admin/reconciliation/sources/${encodeURIComponent(context.params.id ?? "")}`,
+    paramsSchema: z.object({ id: zIdentifier }).strict(),
+    schema: sourcePatchSchema,
   }),
 );
 
@@ -87,11 +138,30 @@ router.get(
 );
 
 router.get(
+  "/runs/summary/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/reconciliation/summary/export",
+  }),
+);
+
+router.get(
+  "/runs/:id/export",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/reconciliation/runs/${encodeURIComponent(context.params.id ?? "")}/export`,
+    paramsSchema: z.object({ id: zIdentifier }).strict(),
+    querySchema: zListQuery,
+  }),
+);
+
+router.get(
   "/runs/:id",
   coreForward({
     method: "GET",
     path: (context) => `/internal/admin/reconciliation/runs/${encodeURIComponent(context.params.id ?? "")}`,
     paramsSchema: z.object({ id: zIdentifier }).strict(),
+    querySchema: zListQuery,
   }),
 );
 

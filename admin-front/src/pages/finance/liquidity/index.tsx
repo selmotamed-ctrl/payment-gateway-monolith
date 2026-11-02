@@ -12,6 +12,7 @@ import { MoneyText } from "@/components/MoneyText";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
+import { showSnackBar } from "@/utils/snackBar";
 
 type Liquidity = {
     currency?: string;
@@ -32,6 +33,7 @@ const LiquidityPage = dc(() => {
     const data = ref<Liquidity | null>(null);
     const loading = ref(true);
     const error = ref<string | null>(null);
+    const exportLoading = ref(false);
 
     const load = async () => {
         loading.value = true;
@@ -47,6 +49,59 @@ const LiquidityPage = dc(() => {
     };
 
     void load();
+
+    const exportSnapshot = async () => {
+        if (exportLoading.value) return;
+        exportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.financeLiquidityExport);
+            const snapshot = (response.data?.data ?? response.data ?? {}) as Liquidity;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["checked_at", snapshot.checkedAt ?? ""],
+                ["currency", snapshot.currency ?? "LYD"],
+                ["treasury_balance", snapshot.treasuryBalance ?? "0"],
+                ["clearing_balances", snapshot.clearingBalances ?? "0"],
+                ["wallet_obligations", snapshot.obligations ?? "0"],
+                ["cover_ratio", snapshot.coverRatio ?? "0"],
+                ["cashout_pending", snapshot.cashoutQueue?.pending ?? "0"],
+                ["cashout_processing", snapshot.cashoutQueue?.processing ?? "0"],
+                ["cashout_completed", snapshot.cashoutQueue?.completed ?? "0"],
+                ["cashout_next_day_demand", snapshot.cashoutQueue?.nextDayDemand ?? "0"],
+                ["aml_hold", snapshot.holdsAndReserves?.amlHold ?? "0"],
+                ["chargeback_reserve", snapshot.holdsAndReserves?.chargebackReserve ?? "0"],
+                ["suspense", snapshot.holdsAndReserves?.suspense ?? "0"],
+                ["oldest_item_age_days", snapshot.holdsAndReserves?.oldestItemAgeDays ?? 0],
+                ["commission_receivable", snapshot.receivables?.commissionReceivable ?? "0"],
+            ];
+            for (const row of snapshot.clearingAgeing ?? []) {
+                rows.push([`clearing_ageing.${row.bucket}.count`, row.count]);
+                rows.push([`clearing_ageing.${row.bucket}.amount`, row.amount]);
+            }
+            for (const row of snapshot.clearingByGateway ?? []) {
+                rows.push([`gateway.${row.gatewayCode}.balance`, row.balance]);
+                rows.push([`gateway.${row.gatewayCode}.t0`, row.t0]);
+                rows.push([`gateway.${row.gatewayCode}.t1`, row.t1]);
+                rows.push([`gateway.${row.gatewayCode}.t2`, row.t2]);
+                rows.push([`gateway.${row.gatewayCode}.older`, row.older]);
+            }
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `liquidity-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: t("Liquidity snapshot exported") });
+        } catch (e) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+        } finally {
+            exportLoading.value = false;
+        }
+    };
 
     const currency = () => data.value?.currency ?? "LYD";
 
@@ -66,6 +121,7 @@ const LiquidityPage = dc(() => {
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                             {data.value?.checkedAt && <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("Updated")} {new Date(data.value.checkedAt).toLocaleTimeString()}</ThemedText>}
                             <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSnapshot()}>{t("Export snapshot")}</VBtn>
                         </ThemedView>
                     )}
                 />

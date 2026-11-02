@@ -94,7 +94,48 @@ const JoinRequestNewPage = dc(() => {
     const inviteOpen = ref(false);
     let merchantTimer: ReturnType<typeof setTimeout> | undefined;
 
+    const emailInvalid = computed(
+        () => !!form.value.contactEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.value.contactEmail.trim()),
+    );
+    const phoneInvalid = computed(() => {
+        const digits = form.value.contactPhone.replace(/[^\d]/g, "");
+        return !!digits && (digits.length < 6 || digits.length > 15);
+    });
+    const websiteInvalid = computed(() => {
+        const value = form.value.websiteUrl.trim();
+        if (!value) return false;
+        try {
+            const url = new URL(value);
+            return !["http:", "https:"].includes(url.protocol);
+        } catch {
+            return true;
+        }
+    });
+    const countryInvalid = computed(
+        () => !!form.value.country.trim() && !/^[A-Za-z]{2}$/.test(form.value.country.trim()),
+    );
+    const currencyInvalid = computed(
+        () => !!form.value.currency.trim() && !/^[A-Za-z]{3}$/.test(form.value.currency.trim()),
+    );
+    const volumeInvalid = computed(
+        () => !!form.value.expectedMonthlyVolume.trim() && !/^\d+(?:\.\d{1,4})?$/.test(form.value.expectedMonthlyVolume.trim()),
+    );
+    const payoutIncomplete = computed(
+        () => Boolean(form.value.payoutBankName.trim()) !== Boolean(form.value.payoutAccount.trim()),
+    );
+    const formInvalid = computed(
+        () =>
+            emailInvalid.value ||
+            phoneInvalid.value ||
+            websiteInvalid.value ||
+            countryInvalid.value ||
+            currencyInvalid.value ||
+            volumeInvalid.value ||
+            payoutIncomplete.value,
+    );
+
     const canSubmit = computed(() => {
+        if (formInvalid.value) return false;
         if (mode.value === "EXISTING") return Boolean(merchantId.value);
         return Boolean(form.value.legalName.trim() && form.value.tradeName.trim())
             && Boolean(form.value.contactPhone.trim() || form.value.contactEmail.trim());
@@ -158,7 +199,12 @@ const JoinRequestNewPage = dc(() => {
 
     const create = async () => {
         if (!canSubmit.value) {
-            showSnackBar({ type: "warning", message: t("Complete the mandatory merchant and contact fields") });
+            showSnackBar({
+                type: "warning",
+                message: formInvalid.value
+                    ? t("Fix the highlighted fields before creating the draft")
+                    : t("Complete the mandatory merchant and contact fields"),
+            });
             return;
         }
         saving.value = true;
@@ -278,20 +324,20 @@ const JoinRequestNewPage = dc(() => {
                         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "14px" }}>
                             <VTextField v-model={form.value.legalName} label={`${t("Legal name")} *`} />
                             <VTextField v-model={form.value.tradeName} label={`${t("Trade name")} *`} />
-                            <VTextField v-model={form.value.country} label={t("Country code (2 letters)")} />
+                            <VTextField v-model={form.value.country} label={t("Country code (2 letters)")} error={countryInvalid.value} errorMessages={countryInvalid.value ? t("Use exactly 2 letters") : []} />
                             <VTextField v-model={form.value.businessCategory} label={t("Business category")} />
                             <VTextField v-model={form.value.registrationNumber} label={t("Registration number")} />
                             <VTextField v-model={form.value.taxId} label={t("Tax ID")} />
-                            <VTextField v-model={form.value.contactPhone} label={t("Contact phone")} />
-                            <VTextField v-model={form.value.contactEmail} label={t("Contact email")} />
-                            <VTextField v-model={form.value.expectedMonthlyVolume} label={t("Expected monthly volume")} />
-                            <VTextField v-model={form.value.currency} label={t("Currency (3 letters)")} />
+                            <VTextField v-model={form.value.contactPhone} label={t("Contact phone")} error={phoneInvalid.value} errorMessages={phoneInvalid.value ? t("Enter a phone number with 6-15 digits") : []} />
+                            <VTextField v-model={form.value.contactEmail} label={t("Contact email")} error={emailInvalid.value} errorMessages={emailInvalid.value ? t("Enter a valid email address") : []} />
+                            <VTextField v-model={form.value.expectedMonthlyVolume} label={t("Expected monthly volume")} error={volumeInvalid.value} errorMessages={volumeInvalid.value ? t("Use a number with up to 4 decimals") : []} />
+                            <VTextField v-model={form.value.currency} label={t("Currency (3 letters)")} error={currencyInvalid.value} errorMessages={currencyInvalid.value ? t("Use exactly 3 letters") : []} />
                             <VSelect
                                 v-model={form.value.riskTier}
                                 label={t("Proposed risk tier")}
                                 items={["LOW", "STANDARD", "HIGH"]}
                             />
-                            <VTextField v-model={form.value.websiteUrl} label={t("Website URL")} />
+                            <VTextField v-model={form.value.websiteUrl} label={t("Website URL")} error={websiteInvalid.value} errorMessages={websiteInvalid.value ? t("Enter a full http:// or https:// URL") : []} />
                         </div>
                         <VTextField v-model={form.value.registeredAddress} label={t("Registered address")} />
                         <VTextarea
@@ -309,8 +355,8 @@ const JoinRequestNewPage = dc(() => {
                             {t("Payout account")}
                         </ThemedText>
                         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "14px" }}>
-                            <VTextField v-model={form.value.payoutBankName} label={t("Bank name")} />
-                            <VTextField v-model={form.value.payoutAccount} label={t("IBAN / account number")} />
+                            <VTextField v-model={form.value.payoutBankName} label={t("Bank name")} error={payoutIncomplete.value} errorMessages={payoutIncomplete.value ? t("Enter both bank name and account number") : []} />
+                            <VTextField v-model={form.value.payoutAccount} label={t("IBAN / account number")} error={payoutIncomplete.value} errorMessages={payoutIncomplete.value ? t("Enter both bank name and account number") : []} />
                         </div>
                         <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
                             {t("The payout account is hashed for cross-merchant duplicate detection and reviewed before approval.")}

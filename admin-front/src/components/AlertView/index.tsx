@@ -18,7 +18,7 @@ export const AlertView = dc(
         const theme = useTheme();
         const { t } = useLocale();
         return () => {
-            if (!props.message || !props.type) {
+            if ((!props.message && !(props.messages?.length)) || !props.type) {
                 return <></>;
             }
 
@@ -56,6 +56,11 @@ export const AlertView = dc(
 
             return (
                 <ThemedView
+                    {...{
+                        role: props.type === "error" || props.type === "warning" ? "alert" : "status",
+                        "aria-live": props.type === "error" || props.type === "warning" ? "assertive" : "polite",
+                        "aria-atomic": "true",
+                    }}
                     style={[
                         {
                             backgroundColor: backgroundColor + "22",
@@ -76,20 +81,34 @@ export const AlertView = dc(
                         }}
                     >
                         {props.onClear && (
-                            <ThemedView onClick={props.onClear}>
-                                <VIcon icon={"mdi-close"}></VIcon>
+                            <ThemedView
+                                class="alert-view__dismiss"
+                                role="button"
+                                tabindex={0}
+                                aria-label={t("Dismiss")}
+                                onKeydown={(event: KeyboardEvent) => {
+                                    if (event.key === "Enter" || event.key === " ") {
+                                        event.preventDefault();
+                                        props.onClear?.();
+                                    }
+                                }}
+                                onClick={props.onClear}
+                            >
+                                <VIcon icon={"mdi-close"} aria-hidden="true"></VIcon>
                             </ThemedView>
                         )}
                     </ThemedView>
-                    <ThemedView
-                        style={{
-                            flexDirection: "row",
-                            alignItems: "center",
-                            justifyContent: "start",
-                        }}
-                    >
-                        <Field text={prefix} value={props.message}></Field>
-                    </ThemedView>
+                    {props.message && (
+                        <ThemedView
+                            style={{
+                                flexDirection: "row",
+                                alignItems: "center",
+                                justifyContent: "start",
+                            }}
+                        >
+                            <Field text={prefix} value={props.message}></Field>
+                        </ThemedView>
+                    )}
                     {props.messages && (
                         <ThemedView
                             style={{

@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
-import { VAlert, VBtn, VCard, VCardText, VDialog, VProgressCircular, VSelect, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VProgressCircular, VSelect, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -72,6 +72,13 @@ type ScreeningSummary = {
     latestScreenedAt: string | null;
 };
 
+const DISPOSITION_CHECKS = [
+    { key: "MATCH_DETAILS_REVIEWED", label: "Match details reviewed" },
+    { key: "IDENTITY_EVIDENCE_CHECKED", label: "Identity evidence checked" },
+    { key: "DISPOSITION_RATIONALE_DOCUMENTED", label: "Disposition rationale documented" },
+    { key: "ESCALATION_PATH_CONFIRMED", label: "Escalation path confirmed" },
+] as const;
+
 const DISPOSITIONS = [
     { title: "False positive", value: "FALSE_POSITIVE" },
     { title: "True match", value: "TRUE_MATCH" },
@@ -107,8 +114,11 @@ const AmlScreeningsPage = dc(() => {
     const detailLoading = ref(false);
     const selectedMatchId = ref("");
     const disposition = ref("FALSE_POSITIVE");
+    const dispositionChecklist = ref<Record<string, boolean>>({});
     const note = ref("");
     const actionLoading = ref(false);
+    const exportLoading = ref(false);
+    const summaryExportLoading = ref(false);
 
     const filterDefinitions = computed(() => tableRegistry.AmlScreenings?.filters ?? []);
     const unresolvedMatches = computed(() => selected.value?.matches.filter((match) => match.disposition === "UNREVIEWED") ?? []);
@@ -136,6 +146,71 @@ const AmlScreeningsPage = dc(() => {
         refreshHook.value?.reset();
     };
 
+    const exportCsv = async () => {
+        if (exportLoading.value) return;
+        exportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.amlScreeningsExport, {
+                params: {
+                    ...(search.value ? { search: search.value } : {}),
+                    ...buildFilterQuery(filterDefinitions.value, filters.value),
+                },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const rowsData = (payload.screenings ?? []) as Screening[];
+            if (rowsData.length === 0) {
+                showSnackBar({ type: "warning", message: t("No AML screenings match the current filters.") });
+                return;
+            }
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const columns = ["id", "subjectType", "subjectName", "merchantName", "provider", "providerRequestRef", "trigger", "result", "score", "matchCount", "unreviewed", "falsePositive", "trueMatch", "escalated", "requestedAt", "ageHours"];
+            const lines = [
+                columns.map(escape).join(","),
+                ...rowsData.map((row) =>
+                    [
+                        row.id,
+                        row.subjectType,
+                        row.subjectName,
+                        row.merchantName,
+                        row.provider,
+                        row.providerRequestRef ?? "",
+                        row.trigger,
+                        row.result,
+                        row.score ?? "",
+                        row.matchCount,
+                        row.dispositionSummary.unreviewed,
+                        row.dispositionSummary.falsePositive,
+                        row.dispositionSummary.trueMatch,
+                        row.dispositionSummary.escalated,
+                        row.requestedAt,
+                        row.ageHours,
+                    ]
+                        .map(escape)
+                        .join(","),
+                ),
+            ];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `aml-screenings-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({
+                type: payload.truncated ? "warning" : "success",
+                message: payload.truncated
+                    ? `${t("Exported")} ${rowsData.length} / ${payload.total}`
+                    : `${t("Exported")} ${rowsData.length}`,
+            });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            exportLoading.value = false;
+        }
+    };
+
     const refreshAll = () => {
         refreshHook.value?.refreshAsIs();
         void loadSummary();
@@ -145,6 +220,7 @@ const AmlScreeningsPage = dc(() => {
         selected.value = { ...row, matches: [], amlCases: [], canDisposition: false };
         selectedMatchId.value = row.matchId ?? "";
         disposition.value = "FALSE_POSITIVE";
+        dispositionChecklist.value = {};
         note.value = "";
         detailsOpen.value = true;
         detailLoading.value = true;
@@ -162,6 +238,8 @@ const AmlScreeningsPage = dc(() => {
         }
     };
 
+    const dispositionChecklistComplete = computed(() => DISPOSITION_CHECKS.every((check) => dispositionChecklist.value[check.key] === true));
+
     const submitDisposition = async () => {
         if (!selectedMatchId.value) {
             showSnackBar({ type: "warning", message: t("Select an unresolved match") });
@@ -171,11 +249,16 @@ const AmlScreeningsPage = dc(() => {
             showSnackBar({ type: "warning", message: t("Disposition notes are required") });
             return;
         }
+        if (!dispositionChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all disposition checklist items before saving") });
+            return;
+        }
         actionLoading.value = true;
         try {
             await api.post(urlsMap.amlMatchDisposition(selectedMatchId.value), {
                 disposition: disposition.value,
                 notes: note.value.trim(),
+                checklist: DISPOSITION_CHECKS.filter((check) => dispositionChecklist.value[check.key]).map((check) => check.key),
             });
             showSnackBar({ type: "success", message: t("Disposition saved") });
             if (selected.value) {
@@ -190,6 +273,39 @@ const AmlScreeningsPage = dc(() => {
             showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
         } finally {
             actionLoading.value = false;
+        }
+    };
+
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.amlScreeningsSummaryExport);
+            const snapshot = (response.data?.data ?? response.data ?? {}) as ScreeningSummary;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["total", snapshot.total],
+                ["screened_24h", snapshot.screened24h],
+                ["unresolved_matches", snapshot.unresolvedMatches],
+                ["latest_screened_at", snapshot.latestScreenedAt ?? ""],
+            ];
+            for (const [result, count] of Object.entries(snapshot.byResult ?? {})) rows.push([`result.${result}.count`, count]);
+            for (const [trigger, count] of Object.entries(snapshot.byTrigger ?? {})) rows.push([`trigger.${trigger}.count`, count]);
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `aml-screening-summary-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: t("AML screening summary exported") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            summaryExportLoading.value = false;
         }
     };
 
@@ -277,7 +393,12 @@ const AmlScreeningsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("AML Screenings")}
-                    end={() => <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>}
+                    end={() => (
+                        <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
+                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportCsv()}>{t("Export CSV")}</VBtn>
+                        </ThemedView>
+                    )}
                 />
 
                 <VAlert type="error" variant="tonal">
@@ -287,7 +408,11 @@ const AmlScreeningsPage = dc(() => {
                 {summary.value && (
                     <VCard variant="flat" style={{ borderRadius: "16px" }}>
                         <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Screening health")}</ThemedText>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Screening health")}</ThemedText>
+                                <div style={{ flex: 1 }} />
+                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
+                            </ThemedView>
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
                                 {summaryItems.value.map((item) => (
                                     <VCard key={item.label} variant="tonal">
@@ -455,6 +580,22 @@ const AmlScreeningsPage = dc(() => {
                                                 onUpdate:modelValue={(value: string) => (disposition.value = value)}
                                                 label={t("Disposition")}
                                             />
+                                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Disposition checklist")}</ThemedText>
+                                                {DISPOSITION_CHECKS.map((check) => (
+                                                    <VCheckbox
+                                                        key={check.key}
+                                                        modelValue={dispositionChecklist.value[check.key] === true}
+                                                        onUpdate:modelValue={(value: unknown) => (dispositionChecklist.value = { ...dispositionChecklist.value, [check.key]: Boolean(value) })}
+                                                        label={t(check.label)}
+                                                        density="compact"
+                                                        hideDetails
+                                                    />
+                                                ))}
+                                                {!dispositionChecklistComplete.value && (
+                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all disposition checklist items before saving")}</ThemedText>
+                                                )}
+                                            </ThemedView>
                                             <VTextarea
                                                 modelValue={note.value}
                                                 onUpdate:modelValue={(value: string) => (note.value = value)}
@@ -464,7 +605,7 @@ const AmlScreeningsPage = dc(() => {
                                                 rows={3}
                                             />
                                             <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
-                                                <VBtn color="primary" loading={actionLoading.value} onClick={() => void submitDisposition()}>{t("Save disposition")}</VBtn>
+                                                <VBtn color="primary" loading={actionLoading.value} disabled={!dispositionChecklistComplete.value} onClick={() => void submitDisposition()}>{t("Save disposition")}</VBtn>
                                                 <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
                                             </ThemedView>
                                         </VCardText>

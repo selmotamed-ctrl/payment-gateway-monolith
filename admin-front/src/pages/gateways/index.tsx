@@ -2,7 +2,7 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VCard, VCardText, VDialog, VSelect, VTextField } from "vuetify/components";
+import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VSelect, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -18,6 +18,20 @@ import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+
+const ROLLBACK_CHECKS = [
+    { key: "TARGET_VERSION_VERIFIED", label: "Target version verified" },
+    { key: "GATES_VERIFIED", label: "Rollback target gates verified" },
+    { key: "IMPACT_REVIEWED", label: "Merchant and route impact reviewed" },
+    { key: "ROLLBACK_AUTHORITY_CONFIRMED", label: "Rollback authority confirmed" },
+] as const;
+
+const SUMMARY_EXPORT_CHECKS = [
+    { key: "PORTFOLIO_SCOPE_VERIFIED", label: "Gateway portfolio scope verified" },
+    { key: "STATUS_BREAKDOWN_REVIEWED", label: "Status and kind breakdown reviewed" },
+    { key: "VERSION_RISK_REVIEWED", label: "Version and risk posture reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
 
 type Gateway = {
     id: string;
@@ -83,7 +97,17 @@ const GatewaysPage = dc(() => {
     let filterTimer: ReturnType<typeof setTimeout> | undefined;
 
     const createOpen = ref(false);
+    const rollbackOpen = ref(false);
+    const rollbackGateway = ref<Gateway | null>(null);
+    const rollbackTarget = ref("");
+    const rollbackReason = ref("");
+    const rollbackChecklist = ref<Record<string, boolean>>({});
+    const rollbackLoading = ref(false);
+    const rollbackError = ref<string | null>(null);
     const creating = ref(false);
+    const exportLoading = ref(false);
+    const summaryExportLoading = ref(false);
+    const summaryExportChecklist = ref<Record<string, boolean>>({});
     const form = ref({ code: "", name: "", operator: "", kind: "DIRECT", country: "LY", riskClass: "NORMAL" });
 
     const filterDefinitions = computed(() => tableRegistry.Gateways?.filters ?? []);
@@ -109,6 +133,74 @@ const GatewaysPage = dc(() => {
     const onFiltersCleared = () => {
         filters.value = {};
         refreshHook.value?.reset();
+    };
+
+    const exportCsv = async () => {
+        if (exportLoading.value) return;
+        exportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.gatewaysExport, {
+                params: {
+                    ...(search.value ? { search: search.value } : {}),
+                    ...buildFilterQuery(filterDefinitions.value, filters.value),
+                },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const rowsData = (payload.gateways ?? []) as Gateway[];
+            if (rowsData.length === 0) {
+                showSnackBar({ type: "warning", message: t("No gateways match the current filters.") });
+                return;
+            }
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const columns = ["id", "code", "name", "operator", "country", "kind", "verificationState", "riskClass", "status", "activeVersion", "pendingVersion", "versions", "routes", "healthyRoutes", "degradedRoutes", "openBreakers", "credentialSets", "statementSources", "createdAt"];
+            const lines = [
+                columns.map(escape).join(","),
+                ...rowsData.map((row) =>
+                    [
+                        row.id,
+                        row.code,
+                        row.name,
+                        row.operator,
+                        row.country,
+                        row.kind,
+                        row.verificationState,
+                        row.riskClass,
+                        row.status,
+                        row.activeVersion ? `v${row.activeVersion.versionNumber}` : "",
+                        row.pendingVersion ? `v${row.pendingVersion.versionNumber}` : "",
+                        row.versionCount,
+                        row.routeCount,
+                        row.routeHealth.healthy,
+                        row.routeHealth.degraded,
+                        row.routeHealth.openBreaker,
+                        row.credentialSetCount,
+                        row.statementSourceCount,
+                        row.createdAt,
+                    ]
+                        .map(escape)
+                        .join(","),
+                ),
+            ];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `gateways-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({
+                type: payload.truncated ? "warning" : "success",
+                message: payload.truncated
+                    ? `${t("Exported")} ${rowsData.length} / ${payload.total}`
+                    : `${t("Exported")} ${rowsData.length}`,
+            });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            exportLoading.value = false;
+        }
     };
 
     const refreshAll = () => {
@@ -144,6 +236,95 @@ const GatewaysPage = dc(() => {
             showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
         } finally {
             creating.value = false;
+        }
+    };
+
+    const rollbackTargets = (row: Gateway) => row.versions.filter((version) => version.id !== row.activeVersion?.id);
+
+    const openRollback = (row: Gateway) => {
+        rollbackGateway.value = row;
+        rollbackTarget.value = rollbackTargets(row)[0]?.id ?? "";
+        rollbackReason.value = "";
+        rollbackChecklist.value = {};
+        rollbackError.value = null;
+        rollbackOpen.value = true;
+    };
+
+    const rollbackChecklistComplete = computed(() => ROLLBACK_CHECKS.every((check) => rollbackChecklist.value[check.key] === true));
+
+    const applyRollback = async () => {
+        if (!rollbackGateway.value || rollbackLoading.value) return;
+        if (!rollbackTarget.value) {
+            rollbackError.value = t("Select a rollback target");
+            return;
+        }
+        if (rollbackReason.value.trim().length < 3) {
+            rollbackError.value = t("A rollback reason is required");
+            return;
+        }
+        if (!rollbackChecklistComplete.value) {
+            rollbackError.value = t("Complete all rollback checklist items before continuing");
+            return;
+        }
+        rollbackLoading.value = true;
+        rollbackError.value = null;
+        try {
+            await api.post(urlsMap.gatewayRollback(rollbackGateway.value.id), {
+                targetVersionId: rollbackTarget.value,
+                reason: rollbackReason.value.trim(),
+                checklist: ROLLBACK_CHECKS.filter((check) => rollbackChecklist.value[check.key]).map((check) => check.key),
+            });
+            rollbackOpen.value = false;
+            showSnackBar({ type: "success", message: t("Gateway rolled back") });
+            refreshAll();
+        } catch (error) {
+            rollbackError.value = extractApiErrorMessage(error);
+        } finally {
+            rollbackLoading.value = false;
+        }
+    };
+
+    const summaryExportChecklistComplete = computed(() => SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
+
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        if (!summaryExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all summary export checklist items before exporting") });
+            return;
+        }
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.gatewaysSummaryExport, {
+                params: { checklist: SUMMARY_EXPORT_CHECKS.filter((check) => summaryExportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
+            const snapshot = (response.data?.data ?? response.data ?? {}) as GatewaySummary;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["total", snapshot.total],
+                ["pending_versions", snapshot.pendingVersions],
+                ["routes_healthy", snapshot.routes.healthy],
+                ["routes_degraded", snapshot.routes.degraded],
+                ["routes_open_breaker", snapshot.routes.openBreaker],
+            ];
+            for (const [status, count] of Object.entries(snapshot.byStatus ?? {})) rows.push([`status.${status}.count`, count]);
+            for (const [kind, count] of Object.entries(snapshot.byKind ?? {})) rows.push([`kind.${kind}.count`, count]);
+            for (const [state, count] of Object.entries(snapshot.byVerification ?? {})) rows.push([`verification.${state}.count`, count]);
+            for (const [risk, count] of Object.entries(snapshot.byRisk ?? {})) rows.push([`risk.${risk}.count`, count]);
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `gateway-summary-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: t("Gateway summary exported") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            summaryExportLoading.value = false;
         }
     };
 
@@ -242,9 +423,16 @@ const GatewaysPage = dc(() => {
             label: "Actions",
             sortable: false,
             Value: ({ row }: { row: Gateway }) => (
-                <VBtn size="small" variant="tonal" color="primary" onClick={() => void router.push({ name: "GatewayWizard", params: { id: row.id } })}>
-                    {t("Open wizard")}
-                </VBtn>
+                <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                    <VBtn size="small" variant="tonal" color="primary" onClick={() => void router.push({ name: "GatewayWizard", params: { id: row.id } })}>
+                        {t("Open wizard")}
+                    </VBtn>
+                    {row.activeVersion && rollbackTargets(row).length > 0 && (
+                        <VBtn size="small" variant="text" color="warning" onClick={() => openRollback(row)}>
+                            {t("Rollback")}
+                        </VBtn>
+                    )}
+                </ThemedView>
             ),
         },
     ]);
@@ -257,6 +445,7 @@ const GatewaysPage = dc(() => {
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportCsv()}>{t("Export CSV")}</VBtn>
                             <VBtn color="primary" variant="tonal" prependIcon="mdi-robot-outline" onClick={() => void router.push({ name: "GatewayAiImport" })}>{t("Smart AI Integration")}</VBtn>
                             <VBtn color="primary" variant="flat" prependIcon="mdi-plus" onClick={openCreate}>{t("New Gateway")}</VBtn>
                         </ThemedView>
@@ -270,7 +459,27 @@ const GatewaysPage = dc(() => {
                 {summary.value && (
                     <VCard variant="flat" style={{ borderRadius: "16px" }}>
                         <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Gateway health")}</ThemedText>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Gateway health")}</ThemedText>
+                                <div style={{ flex: 1 }} />
+                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
+                            </ThemedView>
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
+                                {SUMMARY_EXPORT_CHECKS.map((check) => (
+                                    <VCheckbox
+                                        key={check.key}
+                                        modelValue={summaryExportChecklist.value[check.key] === true}
+                                        onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
+                                        label={t(check.label)}
+                                        density="compact"
+                                        hideDetails
+                                    />
+                                ))}
+                                {!summaryExportChecklistComplete.value && (
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
+                                )}
+                            </ThemedView>
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px" }}>
                                 {summaryItems.value.map((item) => (
                                     <VCard key={item.label} variant="tonal">
@@ -344,6 +553,52 @@ const GatewaysPage = dc(() => {
                     )}
                 />
             </ThemedView>
+
+            <VDialog modelValue={rollbackOpen.value} onUpdate:modelValue={(value: boolean) => (rollbackOpen.value = value)} maxWidth="620px">
+                <VCard>
+                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{t("Rollback gateway")}</ThemedText>
+                        <VAlert type="warning" variant="tonal">
+                            {t("Rollback changes the live version immediately. Verify the target version and operational impact first.")}
+                        </VAlert>
+                        <VSelect
+                            label={t("Target version")}
+                            items={(rollbackGateway.value ? rollbackTargets(rollbackGateway.value) : []).map((version) => ({
+                                title: `v${version.versionNumber} · ${version.state}`,
+                                value: version.id,
+                            }))}
+                            modelValue={rollbackTarget.value}
+                            onUpdate:modelValue={(value: string) => (rollbackTarget.value = value)}
+                        />
+                        <VTextField
+                            label={t("Rollback reason")}
+                            modelValue={rollbackReason.value}
+                            onUpdate:modelValue={(value: string) => (rollbackReason.value = value)}
+                        />
+                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Rollback checklist")}</ThemedText>
+                            {ROLLBACK_CHECKS.map((check) => (
+                                <VCheckbox
+                                    key={check.key}
+                                    modelValue={rollbackChecklist.value[check.key] === true}
+                                    onUpdate:modelValue={(value: unknown) => (rollbackChecklist.value = { ...rollbackChecklist.value, [check.key]: Boolean(value) })}
+                                    label={t(check.label)}
+                                    density="compact"
+                                    hideDetails
+                                />
+                            ))}
+                            {!rollbackChecklistComplete.value && (
+                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all rollback checklist items before continuing")}</ThemedText>
+                            )}
+                        </ThemedView>
+                        {rollbackError.value && <VAlert type="error" variant="tonal" density="compact">{rollbackError.value}</VAlert>}
+                        <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
+                            <VBtn variant="text" onClick={() => (rollbackOpen.value = false)}>{t("Cancel")}</VBtn>
+                            <VBtn color="warning" loading={rollbackLoading.value} disabled={!rollbackChecklistComplete.value} onClick={() => void applyRollback()}>{t("Rollback")}</VBtn>
+                        </ThemedView>
+                    </VCardText>
+                </VCard>
+            </VDialog>
 
             <VDialog modelValue={createOpen.value} onUpdate:modelValue={(value: boolean) => (createOpen.value = value)} maxWidth="560px">
                 <VCard>

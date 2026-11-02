@@ -1,6 +1,6 @@
 import { dc } from "kt-dc";
 import type { FieldProps } from "../Field";
-import { VCard, VCardActions, VCardText, VDialog } from "vuetify/components";
+import { VCard, VCardActions, VCardText, VCardTitle, VDialog } from "vuetify/components";
 import { useLocale } from "vuetify";
 
 export const DetailsFieldsDialog = dc<
@@ -23,6 +23,8 @@ export const DetailsFieldsDialog = dc<
     );
     const title = ref(null as null | string);
     const slot = ref(null as null | ((props: { close: () => void }) => JSX.Element));
+    const titleId = "pg-details-title";
+    const contentId = "pg-details-content";
     const show = (props: {
         title: string;
         sections?: {
@@ -50,12 +52,30 @@ export const DetailsFieldsDialog = dc<
                     }}
                     maxWidth={"1000px"}
                     width={"100%"}
+                    scrollable
                     style={{
                         zIndex: 99,
                     }}
+                    {...{
+                        role: "dialog",
+                        "aria-modal": "true",
+                        "aria-labelledby": titleId,
+                        "aria-describedby": contentId,
+                    }}
                 >
-                    <VCard title={title.value ? t(title.value) : undefined}>
+                    <VCard
+                        onKeydown={(event: KeyboardEvent) => {
+                            if (event.key === "Escape") {
+                                event.preventDefault();
+                                shown.value = false;
+                            }
+                        }}
+                    >
+                        <div id={titleId}>
+                            <VCardTitle>{title.value ? t(title.value) : undefined}</VCardTitle>
+                        </div>
                         <VCardText>
+                            <div id={contentId}>
                             <ThemedView
                                 style={{
                                     gap: "22px",
@@ -68,10 +88,12 @@ export const DetailsFieldsDialog = dc<
                                     },
                                 })}
                             </ThemedView>
+                            </div>
                         </VCardText>
 
                         <VCardActions>
                             <Button
+                                {...{ autofocus: true, "aria-label": t("Close") }}
                                 onClick={() => {
                                     shown.value = false;
                                 }}

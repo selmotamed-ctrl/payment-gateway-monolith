@@ -85,6 +85,16 @@ export const TableRowActions = defineComponent<{
                                                     let content = (
                                                         <ThemedView
                                                             key={`${index}`}
+                                                            role="button"
+                                                            tabindex={disabled ? -1 : 0}
+                                                            aria-disabled={disabled ? "true" : "false"}
+                                                            aria-label={t(typeof action.label == "function" ? action.label(row) : action.label ?? "")}
+                                                            onKeydown={(event: KeyboardEvent) => {
+                                                                if (event.key === "Enter" || event.key === " ") {
+                                                                    event.preventDefault();
+                                                                    (event.currentTarget as HTMLElement).click();
+                                                                }
+                                                            }}
                                                             style={{
                                                                 width: "100%",
                                                                 borderRadius: "8px",
@@ -205,6 +215,17 @@ export const TableRowActions = defineComponent<{
                                                 paddingBottom: "1px",
                                             }}
                                             {...slotProps?.props}
+                                            role="button"
+                                            tabindex={loading.value ? -1 : 0}
+                                            aria-haspopup="menu"
+                                            aria-expanded={open.value ? "true" : "false"}
+                                            aria-label={t("Row actions")}
+                                            onKeydown={(event: KeyboardEvent) => {
+                                                if (event.key === "Enter" || event.key === " ") {
+                                                    event.preventDefault();
+                                                    (event.currentTarget as HTMLElement).click();
+                                                }
+                                            }}
                                             noHoverable
                                             disabled={loading.value}
                                         >
@@ -248,6 +269,16 @@ export const TableRowActions = defineComponent<{
                                 <ThemedView
                                     class={disabled ? "" : `table-row-action-button hoverable`}
                                     key={`${index}`}
+                                    role="button"
+                                    tabindex={disabled ? -1 : 0}
+                                    aria-disabled={disabled ? "true" : "false"}
+                                    aria-label={t(typeof action.label == "function" ? action.label(row) : action.label ?? "")}
+                                    onKeydown={(event: KeyboardEvent) => {
+                                        if (event.key === "Enter" || event.key === " ") {
+                                            event.preventDefault();
+                                            (event.currentTarget as HTMLElement).click();
+                                        }
+                                    }}
                                     style={{
                                         borderRadius: "8px",
                                         padding: "8px 12px",
@@ -306,7 +337,6 @@ export const TableRowActions = defineComponent<{
                         let toolTipWrappedContent: JSX.Element;
                         const ToolTipContent = action.Tooltip?.({ row });
                         const toolTipContent = action.tooltip?.({ row });
-                        console.log("ToolTip", ToolTipContent);
                         if (ToolTipContent) {
                             toolTipWrappedContent = (
                                 <VTooltip>

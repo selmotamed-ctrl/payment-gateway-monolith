@@ -1,5 +1,5 @@
 import { dc } from "kt-dc";
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute, useRouter } from "vue-router";
 import { VAlert, VBtn, VChip, VStepper, VStepperHeader, VStepperItem, VStepperWindow, VStepperWindowItem } from "vuetify/components";
@@ -98,9 +98,23 @@ const GatewayWizardPage = dc(() => {
     const error = ref<string | null>(null);
     const saving = ref(false);
     const saveError = ref<string | null>(null);
+    const dirty = ref(false);
+    const gatewayCode = ref("");
+    const gatewayName = ref("");
+    const versionNumber = ref<number | null>(null);
+    const versionState = ref("");
 
     const gatewayId = computed(() => String(route.params.id ?? ""));
     const versionId = ref("");
+
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+        if (!dirty.value) return;
+        event.preventDefault();
+        event.returnValue = "";
+    };
+
+    onMounted(() => window.addEventListener("beforeunload", warnBeforeUnload));
+    onUnmounted(() => window.removeEventListener("beforeunload", warnBeforeUnload));
 
     const load = async () => {
         loading.value = true;
@@ -109,14 +123,27 @@ const GatewayWizardPage = dc(() => {
             const gatewayResponse = await api.get(urlsMap.gatewayDetail(gatewayId.value));
             const gatewayPayload = gatewayResponse.data?.data ?? gatewayResponse.data ?? {};
             const gateway = gatewayPayload.gateway ?? gatewayPayload;
+            gatewayCode.value = String(gateway.code ?? "");
+            gatewayName.value = String(gateway.name ?? "");
             const versions: any[] = Array.isArray(gateway.versions) ? gateway.versions : [];
             const newestFirst = [...versions].sort(
                 (left, right) => (right.versionNumber ?? 0) - (left.versionNumber ?? 0),
             );
-            let version =
-                newestFirst.find((entry) => entry.state === "DRAFT") ??
-                versions.find((entry) => entry.id === gateway.activeVersionId) ??
-                newestFirst[0];
+            let version = newestFirst.find((entry) => entry.state === "DRAFT");
+            const sourceVersion =
+                versions.find((entry) => entry.id === gateway.activeVersionId) ?? newestFirst[0];
+
+            if (!version?.id && sourceVersion?.id) {
+                const cloned = await api.post(urlsMap.gatewayVersionClone(String(sourceVersion.id)), {
+                    changelog: `Wizard draft cloned from v${sourceVersion.versionNumber ?? "?"}`,
+                });
+                const clonedPayload = cloned.data?.data ?? cloned.data ?? {};
+                version = {
+                    id: clonedPayload.id,
+                    versionNumber: clonedPayload.versionNumber,
+                    state: clonedPayload.state ?? "DRAFT",
+                };
+            }
 
             if (!version?.id) {
                 const created = await api.post(urlsMap.gatewayVersions(gatewayId.value), {
@@ -133,6 +160,8 @@ const GatewayWizardPage = dc(() => {
                 throw new Error("The gateway version could not be resolved");
             }
             versionId.value = String(version.id);
+            versionNumber.value = typeof version.versionNumber === "number" ? version.versionNumber : null;
+            versionState.value = String(version.state ?? "");
 
             const response = await api.get(urlsMap.gatewayVersionDetail(versionId.value));
             const payload = response.data?.data ?? response.data ?? {};
@@ -153,6 +182,7 @@ const GatewayWizardPage = dc(() => {
                 };
             }
             draft.value = merged;
+            dirty.value = false;
         } catch (e) {
             error.value = extractApiErrorMessage(e);
         } finally {
@@ -346,6 +376,7 @@ const GatewayWizardPage = dc(() => {
                     });
                 }
             }
+            dirty.value = false;
             showSnackBar({ type: "success", message: t("Saved") });
             return true;
         } catch (e) {
@@ -359,21 +390,21 @@ const GatewayWizardPage = dc(() => {
 
     const onChange = (next: WizardDraft) => {
         draft.value = next;
+        dirty.value = true;
+    };
+
+    const goToStep = async (target: number) => {
+        if (target === step.value) return;
+        if (dirty.value && !(await saveStep(step.value))) return;
+        step.value = target;
     };
 
     const goNext = async () => {
-        if (step.value < STEPS.length) {
-            const ok = await saveStep(step.value);
-            if (ok) {
-                step.value += 1;
-            }
-        }
+        if (step.value < STEPS.length) await goToStep(step.value + 1);
     };
 
-    const goBack = () => {
-        if (step.value > 1) {
-            step.value -= 1;
-        }
+    const goBack = async () => {
+        if (step.value > 1) await goToStep(step.value - 1);
     };
 
     const stepProps = () => ({
@@ -390,9 +421,13 @@ const GatewayWizardPage = dc(() => {
                 <PageHeader
                     title={t("Gateway Wizard")}
                     end={() => (
-                        <VChip color="primary" variant="tonal" size="small">
-                            {t("Step")} {step.value} {t("of Steps")} {STEPS.length}
-                        </VChip>
+                        <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                            {gatewayCode.value && <VChip variant="tonal" size="small">{gatewayCode.value}</VChip>}
+                            {versionNumber.value !== null && <VChip variant="tonal" size="small">v{versionNumber.value} · {versionState.value || t("Draft")}</VChip>}
+                            <VChip color={dirty.value ? "warning" : "primary"} variant="tonal" size="small">
+                                {dirty.value ? t("Unsaved changes") : `${t("Step")} ${step.value} ${t("of Steps")} ${STEPS.length}`}
+                            </VChip>
+                        </ThemedView>
                     )}
                 />
 
@@ -402,7 +437,12 @@ const GatewayWizardPage = dc(() => {
                     <StateView loading={true} />
                 ) : (
                     <>
-                        <VStepper modelValue={step.value} onUpdate:modelValue={(v: any) => (step.value = v)} flat style={{ background: "transparent" }}>
+                        {versionState.value === "LIVE" && (
+                            <VAlert type="warning" variant="tonal">
+                                {t("You are editing the version that is currently LIVE. Review each change carefully before saving.")}
+                            </VAlert>
+                        )}
+                        <VStepper modelValue={step.value} onUpdate:modelValue={(v: unknown) => void goToStep(Number(v))} flat style={{ background: "transparent" }}>
                             <VStepperHeader>
                                 {STEPS.map((item) => (
                                     <VStepperItem key={item.key} title={t(item.title)} value={STEPS.indexOf(item) + 1} />
@@ -443,7 +483,7 @@ const GatewayWizardPage = dc(() => {
                         )}
 
                         <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "12px" }}>
-                            <VBtn variant="tonal" disabled={step.value <= 1} onClick={goBack}>
+                            <VBtn variant="tonal" disabled={step.value <= 1 || saving.value} onClick={() => void goBack()}>
                                 {t("Back")}
                             </VBtn>
                             <ThemedView style={{ flexDirection: "row", gap: "10px" }}>

@@ -30,6 +30,7 @@ export const routesAuthorities: {
     MerchantDetail: ["merchants.read", "support.read_merchant"],
     Approvals: ["approvals.approve", "approvals.reject"],
     AdminUsers: [],
+    AuditLog: ["security:read"],
     AmlCases: ["aml.read_confidential"],
     AmlScreenings: ["aml.read_confidential"],
     AmlRules: ["aml.read_confidential"],
@@ -111,6 +112,12 @@ export const useSections = () => {
                     if: () => hasOneOfAuthorities(["approvals.approve", "approvals.reject"]),
                 },
                 {
+                    label: t("Audit Log"),
+                    name: "AuditLog",
+                    icon: "mdi-history",
+                    if: () => hasOneOfAuthorities(["security:read"]),
+                },
+                {
                     label: t("Admin Users"),
                     name: "AdminUsers",
                     icon: "mdi-account-cog-outline",
@@ -176,6 +183,11 @@ export const useSections = () => {
                     if: () => hasOneOfAuthorities(["reconciliation.run", "reconciliation.resolve"]),
                 },
                 {
+                    label: t("Platform Settings"),
+                    name: "AdminPlatformSettings",
+                    icon: "mdi-cog-transfer-outline",
+                },
+                {
                     label: t("Checkout Help"),
                     name: "AdminCheckoutHelp",
                     icon: "mdi-help-circle-outline",
@@ -186,6 +198,11 @@ export const useSections = () => {
             title: t("Finance"),
             icon: "mdi-finance",
             routes: [
+                {
+                    label: t("Pricing & Limits"),
+                    name: "PricingControls",
+                    icon: "mdi-tune-variant",
+                },
                 {
                     label: t("Profitability"),
                     name: "Profitability",

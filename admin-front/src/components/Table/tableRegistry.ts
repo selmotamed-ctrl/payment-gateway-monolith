@@ -94,6 +94,17 @@ export const tableRegistry: Record<string, TableServerConfig> = {
         ],
         defaultSort: { key: "code", direction: "asc" },
     },
+    AuditLogs: {
+        url: urlsMap.auditLogs,
+        listKey: "auditLogs",
+        filters: [
+            { key: "action", label: "Action", type: "text", placeholder: "e.g. APPROVAL" },
+            { key: "entityType", label: "Entity type", type: "text", placeholder: "e.g. MERCHANT" },
+            { key: "role", label: "Role", type: "data-autocomplete", options: options(["GATEWAY_ADMIN", "SECURITY_ADMIN", "FINANCE", "OPERATOR", "COMPLIANCE", "MLRO", "SUPPORT", "SYSTEM"]), multiple: true },
+            { key: "date", label: "Created", type: "date", queryFrom: "from", queryTo: "to" },
+        ],
+        defaultSort: { key: "createdAt", direction: "desc" },
+    },
     Users: {
         url: urlsMap.adminUsers,
         listKey: "users",

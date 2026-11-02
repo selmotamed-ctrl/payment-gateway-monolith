@@ -83,10 +83,27 @@ router.get(
 );
 
 router.get(
+  "/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/join-requests/export",
+    querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
   "/summary",
   coreForward({
     method: "GET",
     path: () => "/internal/admin/join-requests/summary",
+  }),
+);
+
+router.get(
+  "/summary/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/join-requests/summary/export",
   }),
 );
 

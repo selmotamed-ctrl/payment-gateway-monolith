@@ -7,6 +7,7 @@ import {
     VBtn,
     VCard,
     VCardText,
+    VCheckbox,
     VChip,
     VDivider,
     VExpansionPanel,
@@ -37,6 +38,13 @@ import { showSnackBar } from "@/utils/snackBar";
 type RailKind = "OTP_PULL" | "REDIRECT" | "EMBEDDED" | "QR_DISPLAY" | "PUSH_APPROVAL" | "HYBRID";
 
 const RAIL_KINDS: RailKind[] = ["OTP_PULL", "REDIRECT", "EMBEDDED", "QR_DISPLAY", "PUSH_APPROVAL", "HYBRID"];
+
+const IMPORT_CHECKS = [
+    { key: "SPEC_VERIFIED", label: "Spec verification passed" },
+    { key: "CREDENTIALS_VERIFIED", label: "Required credentials entered" },
+    { key: "IMPORT_MODE_REVIEWED", label: "Import mode reviewed" },
+    { key: "NO_SECRET_EXPOSURE_CONFIRMED", label: "No secret exposure in logs or files" },
+] as const;
 
 type ImportMode = "CREATE_NEW" | "NEW_VERSION";
 
@@ -243,8 +251,21 @@ const GatewayAiImportPage = dc(() => {
     const importError = ref<string | null>(null);
     const importRepairPrompt = ref<string | null>(null);
     const importResult = ref<ImportResponse | null>(null);
+    const importChecklist = ref<Record<string, boolean>>({});
 
-    const canImport = computed(() => !!report.value && spec.value !== null);
+    const missingRequiredCredentials = computed(() =>
+        (report.value?.requiredCredentials ?? [])
+            .filter((credential) => credential.is_secret)
+            .filter((credential) => !(credentialsValues.value[credential.key] ?? "").trim())
+            .map((credential) => credential.key),
+    );
+    const canImport = computed(
+        () =>
+            !!report.value &&
+            report.value.valid &&
+            spec.value !== null &&
+            missingRequiredCredentials.value.length === 0,
+    );
 
     const loadTranscript = async () => {
         transcriptLoading.value = true;
@@ -376,8 +397,14 @@ const GatewayAiImportPage = dc(() => {
         }
     };
 
+    const importChecklistComplete = computed(() => IMPORT_CHECKS.every((check) => importChecklist.value[check.key] === true));
+
     const runImport = async () => {
         if (!canImport.value) {
+            return;
+        }
+        if (!importChecklistComplete.value) {
+            importError.value = t("Complete all import checklist items before creating the draft");
             return;
         }
         importLoading.value = true;
@@ -388,6 +415,7 @@ const GatewayAiImportPage = dc(() => {
                 spec: spec.value,
                 credentialsValues: credentialsValues.value,
                 mode: importMode.value,
+                checklist: IMPORT_CHECKS.filter((check) => importChecklist.value[check.key]).map((check) => check.key),
             });
             const payload = (response.data?.data ?? response.data) as ImportResponse;
             importResult.value = payload;
@@ -418,6 +446,7 @@ const GatewayAiImportPage = dc(() => {
         credentialsValues.value = {};
         visibleSecrets.value = {};
         importMode.value = "CREATE_NEW";
+        importChecklist.value = {};
         importError.value = null;
         importRepairPrompt.value = null;
         importResult.value = null;
@@ -992,6 +1021,8 @@ const GatewayAiImportPage = dc(() => {
                                                 };
                                             }}
                                             type={credential.is_secret && !visible ? "password" : "text"}
+                                            error={credential.is_secret && !(credentialsValues.value[credential.key] ?? "").trim()}
+                                            errorMessages={credential.is_secret && !(credentialsValues.value[credential.key] ?? "").trim() ? t("Required before import") : []}
                                             autocomplete={credential.is_secret ? "new-password" : "off"}
                                             hint={hint || undefined}
                                             persistentHint={!!hint}
@@ -1169,6 +1200,35 @@ const GatewayAiImportPage = dc(() => {
 
                 {renderCredentials(report.value)}
 
+                {missingRequiredCredentials.value.length > 0 && (
+                    <VAlert type="warning" variant="tonal">
+                        {t("Enter all required secrets before creating the draft")}: {missingRequiredCredentials.value.join(", ")}
+                    </VAlert>
+                )}
+
+                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Import checklist")}</ThemedText>
+                    {IMPORT_CHECKS.map((check) => (
+                        <VCheckbox
+                            key={check.key}
+                            modelValue={importChecklist.value[check.key] === true}
+                            onUpdate:modelValue={(value: unknown) => (importChecklist.value = { ...importChecklist.value, [check.key]: Boolean(value) })}
+                            label={t(check.label)}
+                            density="compact"
+                            hideDetails
+                        />
+                    ))}
+                    {!importChecklistComplete.value && (
+                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all import checklist items before creating the draft")}</ThemedText>
+                    )}
+                </ThemedView>
+
+                {!report.value.valid && (
+                    <VAlert type="error" variant="tonal">
+                        {t("This spec has validation errors. Fix it and verify again before importing.")}
+                    </VAlert>
+                )}
+
                 {importError.value && (
                     <VAlert type="error" variant="tonal" prominent>
                         <ThemedView style={{ gap: "8px" }}>
@@ -1242,7 +1302,7 @@ const GatewayAiImportPage = dc(() => {
                         {step.value === 2 && (
                             <VBtn
                                 color="primary"
-                                disabled={!report.value || verifyLoading.value}
+                                disabled={!report.value?.valid || verifyLoading.value}
                                 onClick={() => (step.value = 3)}
                             >
                                 {t("Continue to Import")}
@@ -1253,7 +1313,7 @@ const GatewayAiImportPage = dc(() => {
                                 color="primary"
                                 prependIcon={"mdi-database-plus"}
                                 loading={importLoading.value}
-                                disabled={!canImport.value}
+                                disabled={!canImport.value || !importChecklistComplete.value}
                                 onClick={() => void runImport()}
                             >
                                 {t("Create Draft")}

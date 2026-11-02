@@ -2,7 +2,7 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VCard, VCardText, VDialog, VProgressCircular, VSelect, VTab, VTabs, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VProgressCircular, VSelect, VTab, VTabs, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -96,6 +96,27 @@ const formatDateTime = (value: string | null | undefined): string => {
     return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
 };
 
+const REPORT_CHECKS = [
+    { key: "REPORTING_RULE_VERIFIED", label: "Reporting rule verified" },
+    { key: "PERIOD_VERIFIED", label: "Reporting period verified" },
+    { key: "CASE_LINKAGE_VERIFIED", label: "Case linkage verified" },
+    { key: "NOTES_REVIEWED", label: "Draft notes reviewed" },
+] as const;
+
+const SUBMISSION_CHECKS = [
+    { key: "REPORT_APPROVED_VERIFIED", label: "Report approval verified" },
+    { key: "AUTHORITY_REFERENCE_VERIFIED", label: "Authority reference verified" },
+    { key: "DEADLINE_VERIFIED", label: "Submission deadline verified" },
+    { key: "PAYLOAD_DIGEST_VERIFIED", label: "Payload digest verified" },
+] as const;
+
+const ACK_CHECKS = [
+    { key: "AUTHORITY_RESPONSE_VERIFIED", label: "Authority response verified" },
+    { key: "DECISION_RECORDED", label: "Authority decision recorded" },
+    { key: "REJECTION_REASON_DOCUMENTED", label: "Rejection reason documented" },
+    { key: "REPORT_CLOSURE_CONFIRMED", label: "Report closure confirmed" },
+] as const;
+
 const AmlReportsPage = dc(() => {
     const { t } = useLocale();
     const router = useRouter();
@@ -125,10 +146,20 @@ const AmlReportsPage = dc(() => {
     });
     const rules = ref<ReportingRule[]>([]);
     const actionLoading = ref(false);
+    const reportChecklist = ref<Record<string, boolean>>({});
+    const exportLoading = ref(false);
+    const summaryExportLoading = ref(false);
 
     const detailsOpen = ref(false);
     const selected = ref<RegulatoryReportDetail | null>(null);
     const detailLoading = ref(false);
+    const submissionRef = ref("");
+    const submissionChecklist = ref<Record<string, boolean>>({});
+    const submissionLoading = ref(false);
+    const ackStatus = ref<"ACKNOWLEDGED" | "REJECTED_BY_AUTHORITY">("ACKNOWLEDGED");
+    const ackReason = ref("");
+    const ackChecklist = ref<Record<string, boolean>>({});
+    const ackLoading = ref(false);
 
     const filterDefinitions = computed(() => tableRegistry.AmlReports?.filters ?? []);
 
@@ -180,6 +211,69 @@ const AmlReportsPage = dc(() => {
         refreshHook.value?.reset();
     };
 
+    const exportCsv = async () => {
+        if (exportLoading.value) return;
+        exportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.amlReportsExport, {
+                params: {
+                    ...(search.value ? { search: search.value } : {}),
+                    ...buildFilterQuery(filterDefinitions.value, filters.value),
+                },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const rowsData = (payload.reports ?? []) as RegulatoryReport[];
+            if (rowsData.length === 0) {
+                showSnackBar({ type: "warning", message: t("No AML reports match the current filters.") });
+                return;
+            }
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const columns = ["id", "reportRef", "reportType", "authority", "status", "subjectType", "subjectName", "amlCaseId", "periodStart", "periodEnd", "submissionRef", "submittedAt", "createdAt", "ageHours"];
+            const lines = [
+                columns.map(escape).join(","),
+                ...rowsData.map((row) =>
+                    [
+                        row.id,
+                        row.reportRef,
+                        row.reportType,
+                        row.authority,
+                        row.status,
+                        row.subjectType,
+                        row.subjectName,
+                        row.amlCaseId ?? "",
+                        row.periodStart ?? "",
+                        row.periodEnd ?? "",
+                        row.submissionRef ?? "",
+                        row.submittedAt ?? "",
+                        row.createdAt,
+                        row.ageHours,
+                    ]
+                        .map(escape)
+                        .join(","),
+                ),
+            ];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `aml-reports-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({
+                type: payload.truncated ? "warning" : "success",
+                message: payload.truncated
+                    ? `${t("Exported")} ${rowsData.length} / ${payload.total}`
+                    : `${t("Exported")} ${rowsData.length}`,
+            });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            exportLoading.value = false;
+        }
+    };
+
     const refreshAll = () => {
         refreshHook.value?.refreshAsIs();
         void loadSummary();
@@ -208,9 +302,15 @@ const AmlReportsPage = dc(() => {
         }
     };
 
+    const reportChecklistComplete = computed(() => REPORT_CHECKS.every((check) => reportChecklist.value[check.key] === true));
+
     const submit = async () => {
         if (!form.value.reportingRuleId || !form.value.periodStart || !form.value.periodEnd) {
             showSnackBar({ type: "warning", message: t("Reporting rule and period are required") });
+            return;
+        }
+        if (!reportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all report checklist items before drafting") });
             return;
         }
         actionLoading.value = true;
@@ -223,6 +323,7 @@ const AmlReportsPage = dc(() => {
                 periodEnd: form.value.periodEnd,
                 ...(form.value.caseId.trim() ? { caseId: form.value.caseId.trim() } : {}),
                 ...(form.value.notes.trim() ? { notes: form.value.notes.trim() } : {}),
+                checklist: REPORT_CHECKS.filter((check) => reportChecklist.value[check.key]).map((check) => check.key),
             });
             const payload = response.data?.data ?? response.data ?? {};
             createOpen.value = false;
@@ -241,6 +342,11 @@ const AmlReportsPage = dc(() => {
     };
 
     const openDetails = async (row: RegulatoryReport) => {
+        submissionRef.value = "";
+        submissionChecklist.value = {};
+        ackStatus.value = "ACKNOWLEDGED";
+        ackReason.value = "";
+        ackChecklist.value = {};
         selected.value = { ...row, approval: null, amlCase: null };
         detailsOpen.value = true;
         detailLoading.value = true;
@@ -254,6 +360,104 @@ const AmlReportsPage = dc(() => {
             showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
         } finally {
             detailLoading.value = false;
+        }
+    };
+
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.amlReportsSummaryExport);
+            const snapshot = (response.data?.data ?? response.data ?? {}) as ReportSummary;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["total", snapshot.total],
+                ["submitted_this_month", snapshot.submittedThisMonth],
+                ["pending_checker", snapshot.pendingChecker],
+                ["drafts", snapshot.drafts],
+                ["acknowledged", snapshot.acknowledged],
+                ["rejected", snapshot.rejected],
+            ];
+            for (const [status, count] of Object.entries(snapshot.byStatus ?? {})) rows.push([`status.${status}.count`, count]);
+            for (const [type, count] of Object.entries(snapshot.byType ?? {})) rows.push([`type.${type}.count`, count]);
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `aml-report-summary-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: t("AML report summary exported") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            summaryExportLoading.value = false;
+        }
+    };
+
+    const canSubmitReport = computed(() => selected.value?.status === "APPROVED");
+    const submissionChecklistComplete = computed(() => SUBMISSION_CHECKS.every((check) => submissionChecklist.value[check.key] === true));
+
+    const submitReport = async () => {
+        if (!selected.value) return;
+        if (submissionRef.value.trim().length < 3) {
+            showSnackBar({ type: "warning", message: t("Submission reference is required") });
+            return;
+        }
+        if (!submissionChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all submission checklist items before submitting") });
+            return;
+        }
+        submissionLoading.value = true;
+        try {
+            const response = await api.post(urlsMap.amlReportSubmit(selected.value.id), {
+                submissionRef: submissionRef.value.trim(),
+                checklist: SUBMISSION_CHECKS.filter((check) => submissionChecklist.value[check.key]).map((check) => check.key),
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            selected.value = { ...selected.value, status: payload.status ?? selected.value.status, submissionRef: payload.submissionRef ?? submissionRef.value.trim() };
+            detailsOpen.value = false;
+            showSnackBar({ type: "success", message: t("Regulatory report submitted") });
+            refreshAll();
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            submissionLoading.value = false;
+        }
+    };
+
+    const canAcknowledgeReport = computed(() => selected.value?.status === "SUBMITTED");
+    const ackChecklistComplete = computed(() => ACK_CHECKS.every((check) => ackChecklist.value[check.key] === true));
+
+    const acknowledgeReport = async () => {
+        if (!selected.value) return;
+        if (!ackChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all acknowledgement checklist items before saving") });
+            return;
+        }
+        if (ackStatus.value === "REJECTED_BY_AUTHORITY" && ackReason.value.trim().length < 3) {
+            showSnackBar({ type: "warning", message: t("A rejection reason is required") });
+            return;
+        }
+        ackLoading.value = true;
+        try {
+            const response = await api.post(urlsMap.amlReportAcknowledge(selected.value.id), {
+                status: ackStatus.value,
+                ...(ackReason.value.trim() ? { reason: ackReason.value.trim() } : {}),
+                checklist: ACK_CHECKS.filter((check) => ackChecklist.value[check.key]).map((check) => check.key),
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            selected.value = { ...selected.value, status: payload.status ?? ackStatus.value };
+            detailsOpen.value = false;
+            showSnackBar({ type: "success", message: t("Authority decision recorded") });
+            refreshAll();
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            ackLoading.value = false;
         }
     };
 
@@ -341,6 +545,7 @@ const AmlReportsPage = dc(() => {
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportCsv()}>{t("Export CSV")}</VBtn>
                             <VBtn color="primary" prependIcon="mdi-plus" onClick={openCreate}>{t("Draft report")}</VBtn>
                         </ThemedView>
                     )}
@@ -353,7 +558,11 @@ const AmlReportsPage = dc(() => {
                 {summary.value && (
                     <VCard variant="flat" style={{ borderRadius: "16px" }}>
                         <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Reporting health")}</ThemedText>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Reporting health")}</ThemedText>
+                                <div style={{ flex: 1 }} />
+                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
+                            </ThemedView>
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
                                 {summaryItems.value.map((item) => (
                                     <VCard key={item.label} variant="tonal">
@@ -506,9 +715,93 @@ const AmlReportsPage = dc(() => {
                                     {t("The report payload is frozen and encrypted. Its SHA-256 digest proves the submitted content was not changed.")}
                                 </VAlert>
 
-                                <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end" }}>
-                                    <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
-                                </ThemedView>
+                                {canAcknowledgeReport.value && (
+                                    <VCard variant="tonal">
+                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                            <ThemedText type="defaultSemiBold">{t("Record authority decision")}</ThemedText>
+                                            <VAlert type="info" variant="tonal">
+                                                {t("Record the authority response exactly. A rejection requires a documented reason.")}
+                                            </VAlert>
+                                            <VSelect
+                                                items={[
+                                                    { title: t("Acknowledged"), value: "ACKNOWLEDGED" },
+                                                    { title: t("Rejected by authority"), value: "REJECTED_BY_AUTHORITY" },
+                                                ]}
+                                                modelValue={ackStatus.value}
+                                                onUpdate:modelValue={(value: string) => (ackStatus.value = value as "ACKNOWLEDGED" | "REJECTED_BY_AUTHORITY")}
+                                                label={t("Authority decision")}
+                                            />
+                                            <VTextarea
+                                                rows={2}
+                                                label={t("Rejection reason")}
+                                                modelValue={ackReason.value}
+                                                onUpdate:modelValue={(value: string) => (ackReason.value = value)}
+                                            />
+                                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Acknowledgement checklist")}</ThemedText>
+                                                {ACK_CHECKS.map((check) => (
+                                                    <VCheckbox
+                                                        key={check.key}
+                                                        modelValue={ackChecklist.value[check.key] === true}
+                                                        onUpdate:modelValue={(value: unknown) => (ackChecklist.value = { ...ackChecklist.value, [check.key]: Boolean(value) })}
+                                                        label={t(check.label)}
+                                                        density="compact"
+                                                        hideDetails
+                                                    />
+                                                ))}
+                                                {!ackChecklistComplete.value && (
+                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all acknowledgement checklist items before saving")}</ThemedText>
+                                                )}
+                                            </ThemedView>
+                                            <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
+                                                <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
+                                                <VBtn color="primary" loading={ackLoading.value} disabled={!ackChecklistComplete.value || (ackStatus.value === "REJECTED_BY_AUTHORITY" && ackReason.value.trim().length < 3)} onClick={() => void acknowledgeReport()}>{t("Save authority decision")}</VBtn>
+                                            </ThemedView>
+                                        </VCardText>
+                                    </VCard>
+                                )}
+
+                                {canSubmitReport.value && (
+                                    <VCard variant="tonal">
+                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                            <ThemedText type="defaultSemiBold">{t("Submit regulatory report")}</ThemedText>
+                                            <VAlert type="warning" variant="tonal">
+                                                {t("Submission freezes the report and records the authority reference. Verify the deadline and payload digest first.")}
+                                            </VAlert>
+                                            <VTextField
+                                                label={t("Submission reference")}
+                                                modelValue={submissionRef.value}
+                                                onUpdate:modelValue={(value: string) => (submissionRef.value = value)}
+                                            />
+                                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Submission checklist")}</ThemedText>
+                                                {SUBMISSION_CHECKS.map((check) => (
+                                                    <VCheckbox
+                                                        key={check.key}
+                                                        modelValue={submissionChecklist.value[check.key] === true}
+                                                        onUpdate:modelValue={(value: unknown) => (submissionChecklist.value = { ...submissionChecklist.value, [check.key]: Boolean(value) })}
+                                                        label={t(check.label)}
+                                                        density="compact"
+                                                        hideDetails
+                                                    />
+                                                ))}
+                                                {!submissionChecklistComplete.value && (
+                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all submission checklist items before submitting")}</ThemedText>
+                                                )}
+                                            </ThemedView>
+                                            <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
+                                                <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
+                                                <VBtn color="primary" loading={submissionLoading.value} disabled={!submissionChecklistComplete.value || submissionRef.value.trim().length < 3} onClick={() => void submitReport()}>{t("Submit report")}</VBtn>
+                                            </ThemedView>
+                                        </VCardText>
+                                    </VCard>
+                                )}
+
+                                {!canSubmitReport.value && !canAcknowledgeReport.value && (
+                                    <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end" }}>
+                                        <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
+                                    </ThemedView>
+                                )}
                             </>
                         )}
                     </VCardText>
@@ -539,9 +832,25 @@ const AmlReportsPage = dc(() => {
                         </ThemedView>
                         <VTextField label={t("AML case ID (optional)")} modelValue={form.value.caseId} onUpdate:modelValue={(value: string) => (form.value.caseId = value)} />
                         <VTextarea label={t("Notes")} modelValue={form.value.notes} onUpdate:modelValue={(value: string) => (form.value.notes = value)} rows={3} />
+                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Report checklist")}</ThemedText>
+                            {REPORT_CHECKS.map((check) => (
+                                <VCheckbox
+                                    key={check.key}
+                                    modelValue={reportChecklist.value[check.key] === true}
+                                    onUpdate:modelValue={(value: unknown) => (reportChecklist.value = { ...reportChecklist.value, [check.key]: Boolean(value) })}
+                                    label={t(check.label)}
+                                    density="compact"
+                                    hideDetails
+                                />
+                            ))}
+                            {!reportChecklistComplete.value && (
+                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all report checklist items before drafting")}</ThemedText>
+                            )}
+                        </ThemedView>
                         <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end", flexWrap: "wrap" }}>
                             <VBtn variant="text" onClick={() => (createOpen.value = false)}>{t("Cancel")}</VBtn>
-                            <VBtn color="primary" loading={actionLoading.value} disabled={!form.value.reportingRuleId || !form.value.periodStart || !form.value.periodEnd} onClick={() => void submit()}>{t("Create draft")}</VBtn>
+                            <VBtn color="primary" loading={actionLoading.value} disabled={!form.value.reportingRuleId || !form.value.periodStart || !form.value.periodEnd || !reportChecklistComplete.value} onClick={() => void submit()}>{t("Create draft")}</VBtn>
                         </ThemedView>
                     </VCardText>
                 </VCard>

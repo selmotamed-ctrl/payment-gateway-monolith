@@ -25,6 +25,17 @@ export const dispositionSchema = z
     disposition: z.enum(["FALSE_POSITIVE", "CONFIRMED_MATCH", "PENDING", "ESCALATED"]),
     notes: z.string().min(3).max(2000),
     caseId: zIdentifier.optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "MATCH_DETAILS_REVIEWED",
+          "IDENTITY_EVIDENCE_CHECKED",
+          "DISPOSITION_RATIONALE_DOCUMENTED",
+          "ESCALATION_PATH_CONFIRMED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict();
 
@@ -38,6 +49,17 @@ export const caseProposeSchema = z
     reason: zReason,
     notes: z.string().max(2000).optional(),
     reportingRuleId: zIdentifier.optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "EVIDENCE_REVIEWED",
+          "SUBJECT_IDENTIFIED",
+          "REGULATORY_OBLIGATION_ASSESSED",
+          "CHECKER_INDEPENDENCE_CONFIRMED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict();
 
@@ -59,6 +81,17 @@ export const ruleSchema = z
     scope: zJsonObject.optional(),
     params: zJsonObject.optional(),
     effectiveFrom: z.string().max(64).optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "RULE_LOGIC_REVIEWED",
+          "THRESHOLDS_VERIFIED",
+          "REGULATORY_BASIS_DOCUMENTED",
+          "CHECKER_INDEPENDENCE_CONFIRMED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict();
 
@@ -84,6 +117,17 @@ export const reportSchema = z
     notes: z.string().max(2000).optional(),
     reportType: z.enum(["LARGE_TRANSACTION", "SUSPICIOUS_ACTIVITY", "PERIODIC_RETURN"]).optional(),
     authority: z.string().min(2).max(64).optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "REPORTING_RULE_VERIFIED",
+          "PERIOD_VERIFIED",
+          "CASE_LINKAGE_VERIFIED",
+          "NOTES_REVIEWED",
+        ]),
+      )
+      .max(10)
+      .optional(),
   })
   .strict();
 
@@ -99,11 +143,28 @@ router.get(
 );
 
 router.get(
+  "/screenings/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/aml/screenings/export",
+    querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
   "/screenings/summary",
   coreForward({
     method: "GET",
     path: () => "/internal/admin/aml/screenings/summary",
     querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
+  "/screenings/summary/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/aml/screenings/summary/export",
   }),
 );
 
@@ -138,11 +199,28 @@ router.get(
 );
 
 router.get(
+  "/cases/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/aml/cases/export",
+    querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
   "/cases/summary",
   coreForward({
     method: "GET",
     path: () => "/internal/admin/aml/cases/summary",
     querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
+  "/cases/summary/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/aml/cases/summary/export",
   }),
 );
 
@@ -178,11 +256,28 @@ router.get(
 );
 
 router.get(
+  "/rules/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/aml/rules/export",
+    querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
   "/rules/summary",
   coreForward({
     method: "GET",
     path: () => "/internal/admin/aml/rules/summary",
     querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
+  "/rules/summary/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/aml/rules/summary/export",
   }),
 );
 
@@ -235,11 +330,84 @@ router.get(
 );
 
 router.get(
+  "/reports/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/aml/reports/export",
+    querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
   "/reports/summary",
   coreForward({
     method: "GET",
     path: () => "/internal/admin/aml/reports/summary",
     querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
+  "/reports/summary/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/aml/reports/summary/export",
+  }),
+);
+
+const reportSubmitSchema = z
+  .object({
+    submissionRef: z.string().min(1).max(200),
+    submittedAt: z.string().max(64).optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "REPORT_APPROVED_VERIFIED",
+          "AUTHORITY_REFERENCE_VERIFIED",
+          "DEADLINE_VERIFIED",
+          "PAYLOAD_DIGEST_VERIFIED",
+        ]),
+      )
+      .max(10)
+      .optional(),
+  })
+  .strict();
+
+router.post(
+  "/reports/:id/submit",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/aml/reports/${encodeURIComponent(context.params.id ?? "")}/submit`,
+    paramsSchema: idParamsSchema,
+    schema: reportSubmitSchema,
+  }),
+);
+
+const reportAcknowledgeSchema = z
+  .object({
+    status: z.enum(["ACKNOWLEDGED", "REJECTED_BY_AUTHORITY"]),
+    reason: z.string().max(2000).optional(),
+    checklist: z
+      .array(
+        z.enum([
+          "AUTHORITY_RESPONSE_VERIFIED",
+          "DECISION_RECORDED",
+          "REJECTION_REASON_DOCUMENTED",
+          "REPORT_CLOSURE_CONFIRMED",
+        ]),
+      )
+      .max(10)
+      .optional(),
+  })
+  .strict();
+
+router.post(
+  "/reports/:id/acknowledge",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/aml/reports/${encodeURIComponent(context.params.id ?? "")}/acknowledge`,
+    paramsSchema: idParamsSchema,
+    schema: reportAcknowledgeSchema,
   }),
 );
 

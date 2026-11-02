@@ -2,6 +2,7 @@ import { routesAuthorities, routesRoles } from "@/layouts/sections";
 import { hasOneOfAuthorities, isAuthenticated, user } from "@/state/user";
 import { showSnackBar } from "@/utils/snackBar";
 import { createRouter, createWebHistory } from "vue-router";
+import { routeError, routeLoading } from "@/state/route";
 
 const router = createRouter({
     history: createWebHistory(import.meta.env.BASE_URL),
@@ -69,6 +70,17 @@ const router = createRouter({
                     component: () => import("@/pages/users/index"),
                 },
                 {
+                    path: "users/:id",
+                    name: "AdminUserDetail",
+                    component: () => import("@/pages/users/[id]"),
+                    meta: { parentName: "AdminUsers" },
+                },
+                {
+                    path: "audit-logs",
+                    name: "AuditLog",
+                    component: () => import("@/pages/audit-logs/index"),
+                },
+                {
                     path: "aml/cases",
                     name: "AmlCases",
                     component: () => import("@/pages/aml/cases/index"),
@@ -118,6 +130,11 @@ const router = createRouter({
                     path: "reconciliation",
                     name: "Reconciliation",
                     component: () => import("@/pages/reconciliation/index"),
+                },
+                {
+                    path: "finance/pricing",
+                    name: "PricingControls",
+                    component: () => import("@/pages/finance/pricing/index"),
                 },
                 {
                     path: "finance/profitability",
@@ -170,6 +187,11 @@ const router = createRouter({
                     component: () => import("@/pages/academy/index"),
                 },
                 {
+                    path: "settings/platform",
+                    name: "AdminPlatformSettings",
+                    component: () => import("@/pages/settings/platform/index"),
+                },
+                {
                     path: "settings/checkout-help",
                     name: "AdminCheckoutHelp",
                     component: () => import("@/pages/settings/checkout-help/index"),
@@ -201,6 +223,9 @@ export const defaultRoute = {
 
 router.beforeEach((to, from) => {
     const authenticated = isAuthenticated();
+    if (to.fullPath !== from.fullPath) {
+        routeLoading.value = true;
+    }
 
     const forceRedirect = (props: { path?: string; name: string }) => {
         if (from.name == props.name) {
@@ -213,7 +238,11 @@ router.beforeEach((to, from) => {
     };
 
     if (!authenticated && to.matched.some((r) => r.meta?.requiresAuth)) {
-        return forceRedirect({ name: "Login" });
+        const redirect = to.fullPath && to.fullPath !== "/" ? to.fullPath : undefined;
+        return {
+            name: "Login",
+            ...(redirect ? { query: { redirect } } : {}),
+        };
     }
 
     if (to.matched.some((r) => r.meta?.requiresVisitor) && authenticated) {
@@ -245,21 +274,38 @@ router.beforeEach((to, from) => {
     return true;
 });
 
+router.afterEach(() => {
+    routeLoading.value = false;
+    routeError.value = null;
+    sessionStorage.removeItem("vuetify:dynamic-import-attempts");
+});
+
 router.onError((err, to) => {
-    if (err?.message?.includes?.("Failed to fetch dynamically imported module")) {
-        if (!localStorage.getItem("vuetify:dynamic-reload")) {
-            localStorage.setItem("vuetify:dynamic-reload", "true");
+    routeLoading.value = false;
+    const message = String(err?.message ?? "");
+    if (message.includes("Failed to fetch dynamically imported module")) {
+        const attempts = Number(sessionStorage.getItem("vuetify:dynamic-import-attempts") ?? "0");
+        if (attempts < 1) {
+            sessionStorage.setItem("vuetify:dynamic-import-attempts", String(attempts + 1));
             location.assign(to.fullPath);
-        } else {
-            console.error("Dynamic import error, reloading page did not fix it", err);
+            return;
         }
+        sessionStorage.removeItem("vuetify:dynamic-import-attempts");
+        routeError.value = {
+            path: to.fullPath,
+            message: "The page module failed to load. Check your connection and try again.",
+        };
     } else {
-        console.error(err);
+        routeError.value = {
+            path: to.fullPath,
+            message: message || "The page could not be loaded.",
+        };
     }
+    console.error(err);
 });
 
 router.isReady().then(() => {
-    localStorage.removeItem("vuetify:dynamic-reload");
+    sessionStorage.removeItem("vuetify:dynamic-import-attempts");
 });
 
 export default router;

@@ -1,11 +1,12 @@
 import { dc } from "kt-dc";
-import { computed, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useLocale } from "vuetify";
 import {
     VAlert,
     VBtn,
     VCard,
     VCardText,
+    VCheckbox,
     VChip,
     VDivider,
     VIcon,
@@ -28,6 +29,13 @@ type FaqItem = {
     q_en: string;
     a_en: string;
 };
+
+const CHECKOUT_EDIT_CHECKS = [
+    { key: "SUPPORT_CHANNELS_VERIFIED", en: "Support channels verified", ar: "تم التحقق من قنوات الدعم" },
+    { key: "FAQ_CONTENT_REVIEWED", en: "FAQ content reviewed", ar: "تمت مراجعة محتوى الأسئلة الشائعة" },
+    { key: "WORKING_HOURS_VERIFIED", en: "Working hours verified", ar: "تم التحقق من ساعات العمل" },
+    { key: "PAYER_VISIBILITY_REVIEWED", en: "Payer visibility reviewed", ar: "تمت مراجعة ظهور الدافعين" },
+] as const;
 
 type CheckoutSupportConfig = {
     enabled: boolean;
@@ -82,6 +90,38 @@ const trimmed = (value: string | null | undefined): string =>
 
 const digitsOnly = (value: string): string => value.replace(/[^\d]/g, "");
 
+type DiffRow = { path: string; before: string; after: string; kind: "ADDED" | "REMOVED" | "CHANGED" };
+
+type CheckoutSupportSummary = {
+    enabled: boolean;
+    showPlatformContact: boolean;
+    showMerchantContact: boolean;
+    faqItems: number;
+    channels: string[];
+    channelCount: number;
+    versions: number;
+    currentVersion: number;
+    updatedAt: string | null;
+    effectiveFrom: string | null;
+    futureEffective: boolean;
+};
+
+const flattenJson = (value: unknown, prefix = "", out: Record<string, string> = {}): Record<string, string> => {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+        out[prefix || "(root)"] = typeof value === "string" ? value : JSON.stringify(value);
+        return out;
+    }
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+        const path = prefix ? `${prefix}.${key}` : key;
+        if (entry !== null && typeof entry === "object" && !Array.isArray(entry)) {
+            flattenJson(entry, path, out);
+        } else {
+            out[path] = typeof entry === "string" ? entry : JSON.stringify(entry);
+        }
+    }
+    return out;
+};
+
 const AdminCheckoutHelpPage = dc(() => {
     const { t, current } = useLocale();
 
@@ -91,6 +131,38 @@ const AdminCheckoutHelpPage = dc(() => {
     const loading = ref(true);
     const saving = ref(false);
     const error = ref<string | null>(null);
+    const savedSnapshot = ref("");
+    const editChecklist = ref<Record<string, boolean>>({});
+    const history = ref<Array<{ id: string; version: number; valueJson: CheckoutSupportConfig; effectiveFrom: string; createdAt: string; updatedAt: string }>>([]);
+    const historyLoading = ref(false);
+    const summary = ref<CheckoutSupportSummary | null>(null);
+    const summaryExportLoading = ref(false);
+    const compareVersion = ref<(typeof history.value)[number] | null>(null);
+
+    const formSnapshot = () => JSON.stringify(form.value);
+    const isDirty = computed(() => savedSnapshot.value !== "" && formSnapshot() !== savedSnapshot.value);
+
+    const phoneDigits = (value: string) => value.replace(/[^\d]/g, "");
+    const emailInvalid = computed(
+        () => !!trimmed(form.value.support_email) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed(form.value.support_email)),
+    );
+    const phoneInvalid = computed(() => {
+        const digits = phoneDigits(form.value.support_phone);
+        return !!digits && (digits.length < 6 || digits.length > 15);
+    });
+    const whatsappInvalid = computed(() => {
+        const digits = phoneDigits(form.value.support_whatsapp);
+        return !!digits && (digits.length < 6 || digits.length > 15);
+    });
+    const hasValidationError = computed(() => emailInvalid.value || phoneInvalid.value || whatsappInvalid.value);
+
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+        if (!isDirty.value) return;
+        event.preventDefault();
+        event.returnValue = "";
+    };
+    onMounted(() => window.addEventListener("beforeunload", warnBeforeUnload));
+    onUnmounted(() => window.removeEventListener("beforeunload", warnBeforeUnload));
 
     const isArabic = computed(() => current.value === "ar");
     const tr = (ar: string, en: string): string => (isArabic.value ? ar : en);
@@ -122,6 +194,8 @@ const AdminCheckoutHelpPage = dc(() => {
             const response = await api.get(urlsMap.checkoutSupport);
             const payload = (response.data?.data ?? response.data ?? {}) as CheckoutSupportResponse;
             applyValue(payload.value ?? null);
+            savedSnapshot.value = formSnapshot();
+            editChecklist.value = {};
             version.value = typeof payload.version === "number" ? payload.version : null;
             updatedAt.value = payload.updatedAt ?? null;
         } catch (e) {
@@ -131,7 +205,93 @@ const AdminCheckoutHelpPage = dc(() => {
         }
     };
 
+    const loadSummary = async () => {
+        try {
+            const response = await api.get(urlsMap.checkoutSupportSummary);
+            const payload = response.data?.data ?? response.data ?? {};
+            summary.value = (payload.summary ?? payload) as CheckoutSupportSummary;
+        } catch {
+            summary.value = null;
+        }
+    };
+
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.checkoutSupportSummaryExport);
+            const payload = response.data?.data ?? response.data ?? {};
+            const snapshot = (payload.summary ?? payload) as CheckoutSupportSummary;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["enabled", snapshot.enabled],
+                ["show_platform_contact", snapshot.showPlatformContact],
+                ["show_merchant_contact", snapshot.showMerchantContact],
+                ["faq_items", snapshot.faqItems],
+                ["channel_count", snapshot.channelCount],
+                ["channels", (snapshot.channels ?? []).join(";")],
+                ["versions", snapshot.versions],
+                ["current_version", snapshot.currentVersion],
+                ["updated_at", snapshot.updatedAt ?? ""],
+                ["effective_from", snapshot.effectiveFrom ?? ""],
+                ["future_effective", snapshot.futureEffective],
+            ];
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `checkout-help-summary-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: tr("تم تصدير الملخص", "Summary exported") });
+        } catch (e) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+        } finally {
+            summaryExportLoading.value = false;
+        }
+    };
+
+    const loadHistory = async () => {
+        historyLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.checkoutSupportHistory);
+            const payload = response.data?.data ?? response.data ?? {};
+            history.value = (payload.versions ?? []) as typeof history.value;
+        } catch {
+            history.value = [];
+        } finally {
+            historyLoading.value = false;
+        }
+    };
+
     void load();
+    void loadHistory();
+    void loadSummary();
+
+    const diffRows = computed<DiffRow[]>(() => {
+        const oldRow = compareVersion.value;
+        const current = history.value[0];
+        if (!oldRow || !current) return [];
+        const before = flattenJson(oldRow.valueJson ?? {});
+        const after = flattenJson(current.valueJson ?? {});
+        const paths = Array.from(new Set([...Object.keys(before), ...Object.keys(after)])).sort();
+        const rows: DiffRow[] = [];
+        for (const path of paths) {
+            const oldValue = before[path];
+            const newValue = after[path];
+            if (oldValue === newValue) continue;
+            rows.push({
+                path,
+                before: oldValue ?? "—",
+                after: newValue ?? "—",
+                kind: oldValue === undefined ? "ADDED" : newValue === undefined ? "REMOVED" : "CHANGED",
+            });
+        }
+        return rows;
+    });
 
     const addFaq = () => {
         form.value.faq_items.push({ q_ar: "", a_ar: "", q_en: "", a_en: "" });
@@ -141,8 +301,24 @@ const AdminCheckoutHelpPage = dc(() => {
         form.value.faq_items.splice(index, 1);
     };
 
+    const editChecklistComplete = computed(() => CHECKOUT_EDIT_CHECKS.every((check) => editChecklist.value[check.key] === true));
+
     const save = async () => {
         if (saving.value) {
+            return;
+        }
+        if (hasValidationError.value) {
+            showSnackBar({
+                type: "error",
+                message: tr("تحقق من بيانات التواصل قبل الحفظ", "Fix the contact details before saving"),
+            });
+            return;
+        }
+        if (!editChecklistComplete.value) {
+            showSnackBar({
+                type: "error",
+                message: tr("أكمل قائمة التحقق قبل الحفظ", "Complete the edit checklist before saving"),
+            });
             return;
         }
         saving.value = true;
@@ -165,6 +341,7 @@ const AdminCheckoutHelpPage = dc(() => {
                         a_en: item.a_en.trim(),
                     }))
                     .filter((item) => item.q_ar || item.a_ar || item.q_en || item.a_en),
+                checklist: CHECKOUT_EDIT_CHECKS.filter((check) => editChecklist.value[check.key]).map((check) => check.key),
             });
             showSnackBar({
                 type: "success",
@@ -218,7 +395,17 @@ const AdminCheckoutHelpPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Checkout Help")} />
+                <PageHeader
+                    title={t("Checkout Help")}
+                    end={() => (
+                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                            <VChip size="small" variant="tonal" color={isDirty.value ? "warning" : "success"}>
+                                {isDirty.value ? tr("تغييرات غير محفوظة", "Unsaved changes") : tr("محفوظ", "Saved")}
+                            </VChip>
+                            <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{tr("تصدير الملخص", "Export summary")}</VBtn>
+                        </ThemedView>
+                    )}
+                />
 
                 <VAlert type="warning" variant="tonal" density="comfortable">
                     <ThemedView style={{ gap: "4px" }}>
@@ -233,6 +420,30 @@ const AdminCheckoutHelpPage = dc(() => {
                         </ThemedText>
                     </ThemedView>
                 </VAlert>
+
+                {summary.value && (
+                    <VCard variant="flat" style={{ borderRadius: "16px" }}>
+                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{tr("صحة إعدادات المساعدة", "Checkout help health")}</ThemedText>
+                            <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px" }}>
+                                {[
+                                    [tr("الحالة", "State"), summary.value.enabled ? tr("مفعّل", "Enabled") : tr("متوقف", "Disabled")],
+                                    [tr("الأسئلة", "FAQ items"), String(summary.value.faqItems)],
+                                    [tr("القنوات", "Channels"), String(summary.value.channelCount)],
+                                    [tr("الإصدار", "Version"), String(summary.value.currentVersion)],
+                                    [tr("التحديثات", "Versions"), String(summary.value.versions)],
+                                ].map(([label, value]) => (
+                                    <VCard key={label} variant="tonal">
+                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
+                                            <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{label}</ThemedText>
+                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{value}</ThemedText>
+                                        </VCardText>
+                                    </VCard>
+                                ))}
+                            </ThemedView>
+                        </VCardText>
+                    </VCard>
+                )}
 
                 <ThemedView
                     style={{
@@ -314,6 +525,8 @@ const AdminCheckoutHelpPage = dc(() => {
                                     modelValue={form.value.support_phone}
                                     onUpdate:modelValue={(value: string) => (form.value.support_phone = value)}
                                     placeholder="+218..."
+                                    error={phoneInvalid.value}
+                                    errorMessages={phoneInvalid.value ? tr("أدخل رقماً بين 6 و15 رقماً", "Enter a phone number with 6-15 digits") : []}
                                     style={{ flex: "1 1 260px", minWidth: "220px" }}
                                 />
                                 <VTextField
@@ -321,6 +534,8 @@ const AdminCheckoutHelpPage = dc(() => {
                                     modelValue={form.value.support_whatsapp}
                                     onUpdate:modelValue={(value: string) => (form.value.support_whatsapp = value)}
                                     placeholder="+218..."
+                                    error={whatsappInvalid.value}
+                                    errorMessages={whatsappInvalid.value ? tr("أدخل رقماً بين 6 و15 رقماً", "Enter a phone number with 6-15 digits") : []}
                                     style={{ flex: "1 1 260px", minWidth: "220px" }}
                                 />
                             </ThemedView>
@@ -331,6 +546,8 @@ const AdminCheckoutHelpPage = dc(() => {
                                 onUpdate:modelValue={(value: string) => (form.value.support_email = value)}
                                 placeholder="support@example.com"
                                 type="email"
+                                error={emailInvalid.value}
+                                errorMessages={emailInvalid.value ? tr("أدخل بريداً إلكترونياً صحيحاً", "Enter a valid email address") : []}
                             />
 
                             <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "12px" }}>
@@ -443,6 +660,22 @@ const AdminCheckoutHelpPage = dc(() => {
                                 ))}
                             </ThemedView>
 
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{tr("قائمة التحقق من التعديل", "Edit checklist")}</ThemedText>
+                                {CHECKOUT_EDIT_CHECKS.map((check) => (
+                                    <VCheckbox
+                                        key={check.key}
+                                        modelValue={editChecklist.value[check.key] === true}
+                                        onUpdate:modelValue={(value: unknown) => (editChecklist.value = { ...editChecklist.value, [check.key]: Boolean(value) })}
+                                        label={tr(check.ar, check.en)}
+                                        density="compact"
+                                        hideDetails
+                                    />
+                                ))}
+                                {!editChecklistComplete.value && (
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{tr("أكمل قائمة التحقق قبل الحفظ", "Complete the edit checklist before saving")}</ThemedText>
+                                )}
+                            </ThemedView>
                             <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
                                 <VBtn
                                     variant="tonal"
@@ -451,7 +684,7 @@ const AdminCheckoutHelpPage = dc(() => {
                                 >
                                     {tr("إعادة تحميل", "Reload")}
                                 </VBtn>
-                                <VBtn color="primary" loading={saving.value} onClick={() => void save()}>
+                                <VBtn color="primary" loading={saving.value} disabled={saving.value || !isDirty.value || hasValidationError.value || !editChecklistComplete.value} onClick={() => void save()}>
                                     {tr("حفظ", "Save")}
                                 </VBtn>
                             </ThemedView>
@@ -620,6 +853,89 @@ const AdminCheckoutHelpPage = dc(() => {
                         </VCardText>
                     </VCard>
                 </ThemedView>
+
+                <VCard>
+                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
+                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px", flex: 1 }}>
+                                {tr("سجل إصدارات الإعدادات", "Configuration version history")}
+                            </ThemedText>
+                            <VChip size="x-small" variant="tonal">{history.value.length}</VChip>
+                            <VBtn size="small" variant="text" loading={historyLoading.value} onClick={() => void loadHistory()}>
+                                {tr("تحديث", "Refresh")}
+                            </VBtn>
+                        </ThemedView>
+                        {history.value.length === 0 && (
+                            <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>
+                                {tr("لا يوجد سجل بعد.", "No history yet.")}
+                            </ThemedText>
+                        )}
+                        {history.value.map((version, index) => (
+                            <ThemedView
+                                key={version.id}
+                                style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap", padding: "8px 10px", borderRadius: "8px", border: "1px solid rgba(100,116,139,0.2)" }}
+                            >
+                                <VChip size="x-small" variant="tonal" color="primary">v{version.version}</VChip>
+                                {index === 0 && <VChip size="x-small" variant="tonal" color="success">{tr("الحالي", "Current")}</VChip>}
+                                <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>
+                                    {tr("ساري من", "Effective")}: {new Date(version.effectiveFrom).toLocaleString()}
+                                </ThemedText>
+                                <ThemedText style={{ fontSize: "11px", opacity: 0.45 }}>
+                                    {tr("أُنشئ", "Created")}: {new Date(version.createdAt).toLocaleString()}
+                                </ThemedText>
+                                <div style={{ flex: 1 }} />
+                                {index !== 0 && (
+                                    <VBtn
+                                        size="x-small"
+                                        variant="text"
+                                        onClick={() => (compareVersion.value = version)}
+                                    >
+                                        {tr("مقارنة مع الحالي", "Compare with current")}
+                                    </VBtn>
+                                )}
+                                <VBtn
+                                    size="x-small"
+                                    variant="text"
+                                    disabled={index === 0}
+                                    onClick={() => {
+                                        applyValue(version.valueJson);
+                                        showSnackBar({ type: "success", message: tr("تم تحميل الإصدار في المحرر", "Version loaded into the editor") });
+                                    }}
+                                >
+                                    {tr("تحميل في المحرر", "Load into editor")}
+                                </VBtn>
+                            </ThemedView>
+                        ))}
+                        {compareVersion.value && (
+                            <VCard variant="tonal">
+                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                                    <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
+                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "13px", flex: 1 }}>
+                                            {tr("مقارنة", "Comparing")} v{compareVersion.value.version} → v{history.value[0]?.version}
+                                        </ThemedText>
+                                        <VBtn size="x-small" variant="text" onClick={() => (compareVersion.value = null)}>
+                                            {tr("مسح المقارنة", "Clear comparison")}
+                                        </VBtn>
+                                    </ThemedView>
+                                    {diffRows.value.length === 0 && (
+                                        <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
+                                            {tr("لا توجد فروقات بين الإصدارين.", "No differences in this version pair.")}
+                                        </ThemedText>
+                                    )}
+                                    {diffRows.value.map((row) => (
+                                        <ThemedView key={row.path} style={{ gap: "3px", padding: "6px 8px", borderRadius: "8px", background: "rgba(100,116,139,0.08)" }}>
+                                            <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center" }}>
+                                                <ThemedText style={{ fontSize: "11px", fontWeight: 700, direction: "ltr" }}>{row.path}</ThemedText>
+                                                <VChip size="x-small" variant="tonal" color={row.kind === "ADDED" ? "success" : row.kind === "REMOVED" ? "error" : "warning"}>{row.kind}</VChip>
+                                            </ThemedView>
+                                            <ThemedText style={{ fontSize: "11px", direction: "ltr", opacity: 0.75 }}>{row.before} → {row.after}</ThemedText>
+                                        </ThemedView>
+                                    ))}
+                                </VCardText>
+                            </VCard>
+                        )}
+                    </VCardText>
+                </VCard>
             </ThemedView>
         </ScreenContainer>
     );

@@ -2,6 +2,7 @@ import { dc } from "kt-dc";
 import { VAlert, VBtn, VCard, VCardText, VTextField } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { ref } from "vue";
+import { useRoute } from "vue-router";
 import LogoSvg from "@/assets/images/logo.svg";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
@@ -12,6 +13,7 @@ import router from "@/router";
 
 const LoginPage = dc(() => {
     const { t } = useLocale();
+    const route = useRoute();
     const username = ref("");
     const password = ref("");
     const mfaCode = ref("");
@@ -19,6 +21,7 @@ const LoginPage = dc(() => {
     const loading = ref(false);
     const error = ref<string | null>(null);
     const showPassword = ref(false);
+    const capsLock = ref(false);
 
     const applySession = async (payload: any) => {
         const session: UserState = {
@@ -40,7 +43,19 @@ const LoginPage = dc(() => {
             throw new Error("The server did not return a session token");
         }
         setUserState(session);
-        await router.push({ name: "Dashboard" });
+        const redirect = typeof route.query.redirect === "string" ? route.query.redirect : "";
+        const safeRedirect = redirect.startsWith("/") && !redirect.startsWith("//") ? redirect : "";
+        await router.push(safeRedirect || { name: "Dashboard" });
+    };
+
+    const onKeyState = (event: KeyboardEvent) => {
+        capsLock.value = event.getModifierState?.("CapsLock") ?? false;
+    };
+
+    const submitOnEnter = (event: KeyboardEvent) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        void submit();
     };
 
     const submit = async () => {
@@ -101,9 +116,21 @@ const LoginPage = dc(() => {
                         <div style={{ fontSize: "13px", opacity: 0.6 }}>{t("Sign in to continue")}</div>
                     </div>
 
+                    {typeof route.query.redirect === "string" && route.query.redirect.startsWith("/") && !route.query.redirect.startsWith("//") && (
+                        <VAlert type="info" variant="tonal" density="compact">
+                            {t("Sign in to continue to your previous page.")}
+                        </VAlert>
+                    )}
+
                     {error.value && (
                         <VAlert type="error" variant="tonal" density="compact">
                             {error.value}
+                        </VAlert>
+                    )}
+
+                    {capsLock.value && !mfaChallengeId.value && (
+                        <VAlert type="warning" variant="tonal" density="compact">
+                            {t("Caps Lock is on. Password letters may be entered in the wrong case.")}
                         </VAlert>
                     )}
 
@@ -116,8 +143,10 @@ const LoginPage = dc(() => {
                                 label={t("MFA code")}
                                 prependInnerIcon="mdi-shield-key-outline"
                                 autocomplete="one-time-code"
+                                {...{ inputmode: "numeric", maxlength: "6", autofocus: true }}
                                 modelValue={mfaCode.value}
-                                onUpdate:modelValue={(v: string) => (mfaCode.value = v)}
+                                onUpdate:modelValue={(v: string) => (mfaCode.value = v.replace(/\D/g, "").slice(0, 6))}
+                                onKeydown={submitOnEnter}
                                 hideDetails
                             />
                             <VBtn
@@ -147,8 +176,10 @@ const LoginPage = dc(() => {
                                 label={t("Email or phone")}
                                 prependInnerIcon="mdi-account-outline"
                                 autocomplete="username"
+                                {...{ autofocus: true }}
                                 modelValue={username.value}
                                 onUpdate:modelValue={(v: string) => (username.value = v)}
+                                onKeydown={submitOnEnter}
                                 hideDetails
                             />
                             <VTextField
@@ -160,6 +191,11 @@ const LoginPage = dc(() => {
                                 onUpdate:modelValue={(v: string) => (password.value = v)}
                                 appendInnerIcon={showPassword.value ? "mdi-eye-off-outline" : "mdi-eye-outline"}
                                 onClick:append-inner={() => (showPassword.value = !showPassword.value)}
+                                onKeydown={(event: KeyboardEvent) => {
+                                    onKeyState(event);
+                                    submitOnEnter(event);
+                                }}
+                                onKeyup={onKeyState}
                                 hideDetails
                             />
                             <VBtn
