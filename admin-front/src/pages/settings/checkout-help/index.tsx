@@ -1,6 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useLocale } from "vuetify";
+import { areChecklistsVisible } from "@/constants/env";
 import {
     VAlert,
     VBtn,
@@ -124,6 +125,7 @@ const flattenJson = (value: unknown, prefix = "", out: Record<string, string> = 
 
 const AdminCheckoutHelpPage = dc(() => {
     const { t, current } = useLocale();
+    const showChecklists = areChecklistsVisible();
 
     const form = ref<CheckoutSupportForm>(emptyForm());
     const version = ref<number | null>(null);
@@ -301,7 +303,7 @@ const AdminCheckoutHelpPage = dc(() => {
         form.value.faq_items.splice(index, 1);
     };
 
-    const editChecklistComplete = computed(() => CHECKOUT_EDIT_CHECKS.every((check) => editChecklist.value[check.key] === true));
+    const editChecklistComplete = computed(() => !showChecklists || CHECKOUT_EDIT_CHECKS.every((check) => editChecklist.value[check.key] === true));
 
     const save = async () => {
         if (saving.value) {
@@ -660,22 +662,24 @@ const AdminCheckoutHelpPage = dc(() => {
                                 ))}
                             </ThemedView>
 
-                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{tr("قائمة التحقق من التعديل", "Edit checklist")}</ThemedText>
-                                {CHECKOUT_EDIT_CHECKS.map((check) => (
-                                    <VCheckbox
-                                        key={check.key}
-                                        modelValue={editChecklist.value[check.key] === true}
-                                        onUpdate:modelValue={(value: unknown) => (editChecklist.value = { ...editChecklist.value, [check.key]: Boolean(value) })}
-                                        label={tr(check.ar, check.en)}
-                                        density="compact"
-                                        hideDetails
-                                    />
-                                ))}
-                                {!editChecklistComplete.value && (
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{tr("أكمل قائمة التحقق قبل الحفظ", "Complete the edit checklist before saving")}</ThemedText>
-                                )}
-                            </ThemedView>
+                            {showChecklists && (
+                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{tr("قائمة التحقق من التعديل", "Edit checklist")}</ThemedText>
+                                    {CHECKOUT_EDIT_CHECKS.map((check) => (
+                                        <VCheckbox
+                                            key={check.key}
+                                            modelValue={editChecklist.value[check.key] === true}
+                                            onUpdate:modelValue={(value: unknown) => (editChecklist.value = { ...editChecklist.value, [check.key]: Boolean(value) })}
+                                            label={tr(check.ar, check.en)}
+                                            density="compact"
+                                            hideDetails
+                                        />
+                                    ))}
+                                    {!editChecklistComplete.value && (
+                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{tr("أكمل قائمة التحقق قبل الحفظ", "Complete the edit checklist before saving")}</ThemedText>
+                                    )}
+                                </ThemedView>
+                            )}
                             <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
                                 <VBtn
                                     variant="tonal"

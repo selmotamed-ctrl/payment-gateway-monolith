@@ -1,6 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
+import { areChecklistsVisible } from "@/constants/env";
 import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VProgressCircular, VSelect, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
@@ -96,6 +97,7 @@ const resultTone = (result: string) => statusTone(result);
 
 const AmlScreeningsPage = dc(() => {
     const { t } = useLocale();
+    const showChecklists = areChecklistsVisible();
     const rows = ref<Screening[]>([]);
     const total = ref(0);
     const summary = ref<ScreeningSummary | null>(null);
@@ -238,7 +240,7 @@ const AmlScreeningsPage = dc(() => {
         }
     };
 
-    const dispositionChecklistComplete = computed(() => DISPOSITION_CHECKS.every((check) => dispositionChecklist.value[check.key] === true));
+    const dispositionChecklistComplete = computed(() => !showChecklists || DISPOSITION_CHECKS.every((check) => dispositionChecklist.value[check.key] === true));
 
     const submitDisposition = async () => {
         if (!selectedMatchId.value) {
@@ -580,22 +582,24 @@ const AmlScreeningsPage = dc(() => {
                                                 onUpdate:modelValue={(value: string) => (disposition.value = value)}
                                                 label={t("Disposition")}
                                             />
-                                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Disposition checklist")}</ThemedText>
-                                                {DISPOSITION_CHECKS.map((check) => (
-                                                    <VCheckbox
-                                                        key={check.key}
-                                                        modelValue={dispositionChecklist.value[check.key] === true}
-                                                        onUpdate:modelValue={(value: unknown) => (dispositionChecklist.value = { ...dispositionChecklist.value, [check.key]: Boolean(value) })}
-                                                        label={t(check.label)}
-                                                        density="compact"
-                                                        hideDetails
-                                                    />
-                                                ))}
-                                                {!dispositionChecklistComplete.value && (
-                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all disposition checklist items before saving")}</ThemedText>
-                                                )}
-                                            </ThemedView>
+                                            {showChecklists && (
+                                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Disposition checklist")}</ThemedText>
+                                                    {DISPOSITION_CHECKS.map((check) => (
+                                                        <VCheckbox
+                                                            key={check.key}
+                                                            modelValue={dispositionChecklist.value[check.key] === true}
+                                                            onUpdate:modelValue={(value: unknown) => (dispositionChecklist.value = { ...dispositionChecklist.value, [check.key]: Boolean(value) })}
+                                                            label={t(check.label)}
+                                                            density="compact"
+                                                            hideDetails
+                                                        />
+                                                    ))}
+                                                    {!dispositionChecklistComplete.value && (
+                                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all disposition checklist items before saving")}</ThemedText>
+                                                    )}
+                                                </ThemedView>
+                                            )}
                                             <VTextarea
                                                 modelValue={note.value}
                                                 onUpdate:modelValue={(value: string) => (note.value = value)}

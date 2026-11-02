@@ -1,6 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
+import { areChecklistsVisible } from "@/constants/env";
 import {
     VAlert,
     VBtn,
@@ -106,6 +107,7 @@ const RESTORE_CHECKS = [
 
 const PlatformSettingsPage = dc(() => {
     const { t } = useLocale();
+    const showChecklists = areChecklistsVisible();
     const settings = ref<PlatformSetting[]>([]);
     const summary = ref<SettingsSummary | null>(null);
     const loading = ref(true);
@@ -178,7 +180,7 @@ const PlatformSettingsPage = dc(() => {
             .sort((left, right) => left.key.localeCompare(right.key));
     });
 
-    const summaryExportChecklistComplete = computed(() => SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
+    const summaryExportChecklistComplete = computed(() => !showChecklists || SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
 
     const exportSummary = async () => {
         if (summaryExportLoading.value) return;
@@ -289,7 +291,7 @@ const PlatformSettingsPage = dc(() => {
         }
     };
 
-    const restoreChecklistComplete = computed(() => RESTORE_CHECKS.every((check) => restoreChecklist.value[check.key] === true));
+    const restoreChecklistComplete = computed(() => !showChecklists || RESTORE_CHECKS.every((check) => restoreChecklist.value[check.key] === true));
 
     const applyRestore = async () => {
         const preview = restorePreview.value;
@@ -387,7 +389,7 @@ const PlatformSettingsPage = dc(() => {
         editError.value = null;
     };
 
-    const editChecklistComplete = computed(() => SETTING_EDIT_CHECKS.every((check) => editChecklist.value[check.key] === true));
+    const editChecklistComplete = computed(() => !showChecklists || SETTING_EDIT_CHECKS.every((check) => editChecklist.value[check.key] === true));
 
     const save = async () => {
         if (saving.value) return;
@@ -470,22 +472,24 @@ const PlatformSettingsPage = dc(() => {
                                         <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
                                     </ThemedView>
                                     <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
-                                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
-                                            {SUMMARY_EXPORT_CHECKS.map((check) => (
-                                                <VCheckbox
-                                                    key={check.key}
-                                                    modelValue={summaryExportChecklist.value[check.key] === true}
-                                                    onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
-                                                    label={t(check.label)}
-                                                    density="compact"
-                                                    hideDetails
-                                                />
-                                            ))}
-                                            {!summaryExportChecklistComplete.value && (
-                                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
-                                            )}
-                                        </ThemedView>
+                                        {showChecklists && (
+                                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
+                                                {SUMMARY_EXPORT_CHECKS.map((check) => (
+                                                    <VCheckbox
+                                                        key={check.key}
+                                                        modelValue={summaryExportChecklist.value[check.key] === true}
+                                                        onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
+                                                        label={t(check.label)}
+                                                        density="compact"
+                                                        hideDetails
+                                                    />
+                                                ))}
+                                                {!summaryExportChecklistComplete.value && (
+                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
+                                                )}
+                                            </ThemedView>
+                                        )}
                                         {summaryItems.value.map((item) => (
                                             <VCard key={item.label} variant="tonal">
                                                 <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
@@ -620,22 +624,24 @@ const PlatformSettingsPage = dc(() => {
                                     hint={t("Required. Recorded in the audit log.")}
                                     persistentHint
                                 />
-                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Restore checklist")}</ThemedText>
-                                    {RESTORE_CHECKS.map((check) => (
-                                        <VCheckbox
-                                            key={check.key}
-                                            modelValue={restoreChecklist.value[check.key] === true}
-                                            onUpdate:modelValue={(value: unknown) => (restoreChecklist.value = { ...restoreChecklist.value, [check.key]: Boolean(value) })}
-                                            label={t(check.label)}
-                                            density="compact"
-                                            hideDetails
-                                        />
-                                    ))}
-                                    {!restoreChecklistComplete.value && (
-                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all restore checklist items before applying.")}</ThemedText>
-                                    )}
-                                </ThemedView>
+                                {showChecklists && (
+                                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Restore checklist")}</ThemedText>
+                                        {RESTORE_CHECKS.map((check) => (
+                                            <VCheckbox
+                                                key={check.key}
+                                                modelValue={restoreChecklist.value[check.key] === true}
+                                                onUpdate:modelValue={(value: unknown) => (restoreChecklist.value = { ...restoreChecklist.value, [check.key]: Boolean(value) })}
+                                                label={t(check.label)}
+                                                density="compact"
+                                                hideDetails
+                                            />
+                                        ))}
+                                        {!restoreChecklistComplete.value && (
+                                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all restore checklist items before applying.")}</ThemedText>
+                                        )}
+                                    </ThemedView>
+                                )}
                                 <VCheckbox
                                     modelValue={restoreConfirm.value}
                                     onUpdate:modelValue={(value: boolean | null) => (restoreConfirm.value = !!value)}
@@ -689,22 +695,24 @@ const PlatformSettingsPage = dc(() => {
                             style={{ fontFamily: "ui-monospace, monospace", direction: "ltr" }}
                         />
                         {editError.value && <VAlert type="error" variant="tonal" density="compact">{editError.value}</VAlert>}
-                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Setting checklist")}</ThemedText>
-                            {SETTING_EDIT_CHECKS.map((check) => (
-                                <VCheckbox
-                                    key={check.key}
-                                    modelValue={editChecklist.value[check.key] === true}
-                                    onUpdate:modelValue={(value: unknown) => (editChecklist.value = { ...editChecklist.value, [check.key]: Boolean(value) })}
-                                    label={t(check.label)}
-                                    density="compact"
-                                    hideDetails
-                                />
-                            ))}
-                            {!editChecklistComplete.value && (
-                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all setting checklist items before saving.")}</ThemedText>
-                            )}
-                        </ThemedView>
+                        {showChecklists && (
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Setting checklist")}</ThemedText>
+                                {SETTING_EDIT_CHECKS.map((check) => (
+                                    <VCheckbox
+                                        key={check.key}
+                                        modelValue={editChecklist.value[check.key] === true}
+                                        onUpdate:modelValue={(value: unknown) => (editChecklist.value = { ...editChecklist.value, [check.key]: Boolean(value) })}
+                                        label={t(check.label)}
+                                        density="compact"
+                                        hideDetails
+                                    />
+                                ))}
+                                {!editChecklistComplete.value && (
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all setting checklist items before saving.")}</ThemedText>
+                                )}
+                            </ThemedView>
+                        )}
 
                         {history.value.length > 0 && (
                             <>

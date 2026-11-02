@@ -67,6 +67,15 @@ describe("deploy config validation", () => {
     expect(config.LAN_ALLOWED_CIDRS).toContain("10.0.0.0/8");
     expect(config.RUN_PRISMA_SEED).toBe(false);
     expect(config.REDIS_URL).toBeUndefined();
+    expect(config.ADMIN_SHOW_CHECKLISTS).toBeUndefined();
+    expect(config.ADMIN_SHOW_SNAPSHOT_EXPORT_CHECKLIST).toBe(true);
+  });
+
+  test("parses the admin checklist visibility flags", () => {
+    const legacy = requireConfig(withOverrides(`ADMIN_SHOW_SNAPSHOT_EXPORT_CHECKLIST="false"`));
+    expect(legacy.ADMIN_SHOW_SNAPSHOT_EXPORT_CHECKLIST).toBe(false);
+    const master = requireConfig(withOverrides(`ADMIN_SHOW_CHECKLISTS="false"`));
+    expect(master.ADMIN_SHOW_CHECKLISTS).toBe(false);
   });
 
   test("rejects a DATABASE_URL that disagrees with DB_ENGINE", () => {

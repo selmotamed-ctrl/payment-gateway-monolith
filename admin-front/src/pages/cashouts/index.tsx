@@ -1,6 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
+import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
 import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VProgressCircular, VSelect, VTab, VTabs, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
@@ -104,6 +105,7 @@ const destinationText = (destination: Record<string, unknown> | null | undefined
 
 const CashoutsPage = dc(() => {
     const { t } = useLocale();
+    const showChecklists = areChecklistsVisible();
     const router = useRouter();
     const rows = ref<Cashout[]>([]);
     const total = ref(0);
@@ -228,7 +230,7 @@ const CashoutsPage = dc(() => {
         }
     };
 
-    const summaryExportChecklistComplete = computed(() => SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
+    const summaryExportChecklistComplete = computed(() => !showChecklists || SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
 
     const exportSummary = async () => {
         if (summaryExportLoading.value) return;
@@ -309,7 +311,7 @@ const CashoutsPage = dc(() => {
         }
     };
 
-    const checklistComplete = computed(() => PROCESS_CHECKS.every((check) => checklist.value[check.key] === true));
+    const checklistComplete = computed(() => !showChecklists || PROCESS_CHECKS.every((check) => checklist.value[check.key] === true));
 
     const process = async () => {
         if (!selected.value) return;
@@ -449,22 +451,24 @@ const CashoutsPage = dc(() => {
                                 <div style={{ flex: 1 }} />
                                 <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
                             </ThemedView>
-                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
-                                {SUMMARY_EXPORT_CHECKS.map((check) => (
-                                    <VCheckbox
-                                        key={check.key}
-                                        modelValue={summaryExportChecklist.value[check.key] === true}
-                                        onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
-                                        label={t(check.label)}
-                                        density="compact"
-                                        hideDetails
-                                    />
-                                ))}
-                                {!summaryExportChecklistComplete.value && (
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
-                                )}
-                            </ThemedView>
+                            {showChecklists && (
+                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
+                                    {SUMMARY_EXPORT_CHECKS.map((check) => (
+                                        <VCheckbox
+                                            key={check.key}
+                                            modelValue={summaryExportChecklist.value[check.key] === true}
+                                            onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
+                                            label={t(check.label)}
+                                            density="compact"
+                                            hideDetails
+                                        />
+                                    ))}
+                                    {!summaryExportChecklistComplete.value && (
+                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
+                                    )}
+                                </ThemedView>
+                            )}
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "10px" }}>
                                 {summaryItems.value.map((item) => (
                                     <VCard key={item.label} variant="tonal">
@@ -618,22 +622,24 @@ const CashoutsPage = dc(() => {
                                     <VCard variant="tonal">
                                         <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                             <ThemedText type="defaultSemiBold">{t("Finance decision")}</ThemedText>
-                                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Process checklist")}</ThemedText>
-                                                {PROCESS_CHECKS.map((check) => (
-                                                    <VCheckbox
-                                                        key={check.key}
-                                                        modelValue={checklist.value[check.key] === true}
-                                                        onUpdate:modelValue={(value: unknown) => (checklist.value = { ...checklist.value, [check.key]: Boolean(value) })}
-                                                        label={t(check.label)}
-                                                        density="compact"
-                                                        hideDetails
-                                                    />
-                                                ))}
-                                                {!checklistComplete.value && (
-                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all checklist items before processing")}</ThemedText>
-                                                )}
-                                            </ThemedView>
+                                            {showChecklists && (
+                                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Process checklist")}</ThemedText>
+                                                    {PROCESS_CHECKS.map((check) => (
+                                                        <VCheckbox
+                                                            key={check.key}
+                                                            modelValue={checklist.value[check.key] === true}
+                                                            onUpdate:modelValue={(value: unknown) => (checklist.value = { ...checklist.value, [check.key]: Boolean(value) })}
+                                                            label={t(check.label)}
+                                                            density="compact"
+                                                            hideDetails
+                                                        />
+                                                    ))}
+                                                    {!checklistComplete.value && (
+                                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all checklist items before processing")}</ThemedText>
+                                                    )}
+                                                </ThemedView>
+                                            )}
                                             <VSelect
                                                 items={[
                                                     { title: t("Approve and execute"), value: "APPROVE" },

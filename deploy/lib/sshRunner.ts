@@ -251,13 +251,18 @@ export class SshRunner {
   }
 
   /** Runs a local command (the frontend builds) and returns its stdout. */
-  local(command: string, cwd: string): string {
+  local(command: string, cwd: string, env: Record<string, string> = {}): string {
     if (this.options.dryRun) {
       this.logger(`[dry-run] local: ${command} (cwd ${cwd})`);
       return "";
     }
     this.logger(`[local] ${command}`);
-    const result = spawnSync("bash", ["-lc", command], { cwd, encoding: "utf8", timeout: this.options.timeoutMs ?? 30 * 60_000 });
+    const result = spawnSync("bash", ["-lc", command], {
+      cwd,
+      env: { ...process.env, ...env },
+      encoding: "utf8",
+      timeout: this.options.timeoutMs ?? 30 * 60_000,
+    });
     if (result.error) {
       throw new Error(`local command failed: ${result.error.message}`);
     }
@@ -268,14 +273,18 @@ export class SshRunner {
   }
 
   /** Runs a local command and streams its output (used for the SPA builds). */
-  async localStreaming(command: string, cwd: string): Promise<void> {
+  async localStreaming(command: string, cwd: string, env: Record<string, string> = {}): Promise<void> {
     if (this.options.dryRun) {
       this.logger(`[dry-run] local: ${command} (cwd ${cwd})`);
       return;
     }
     this.logger(`[local] ${command}`);
     await new Promise<void>((resolvePromise, reject) => {
-      const child = spawn("bash", ["-lc", command], { cwd, stdio: ["ignore", "inherit", "inherit"] });
+      const child = spawn("bash", ["-lc", command], {
+        cwd,
+        env: { ...process.env, ...env },
+        stdio: ["ignore", "inherit", "inherit"],
+      });
       child.on("error", reject);
       child.on("exit", (code) => (code === 0 ? resolvePromise() : reject(new Error(`local command failed (exit ${code}): ${command}`))));
     });

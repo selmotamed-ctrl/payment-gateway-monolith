@@ -34,6 +34,16 @@ server {
     root {{STATIC_ROOT}};
     index index.html;
 
+    # index.html and the runtime config are replaced on every deploy; never let
+    # a browser reuse them across releases.
+    location = /index.html {
+        expires -1;
+    }
+
+    location = /runtime-config.js {
+        expires -1;
+    }
+
     location /api/ {
         proxy_pass http://127.0.0.1:{{BACKEND_PORT}};
         proxy_http_version 1.1;

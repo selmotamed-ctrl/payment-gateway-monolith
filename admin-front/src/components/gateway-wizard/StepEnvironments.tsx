@@ -1,6 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
+import { areChecklistsVisible } from "@/constants/env";
 import { VAlert, VBtn, VCard, VCardText, VCheckbox, VSelect, VTextField, VSwitch } from "vuetify/components";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
@@ -27,6 +28,7 @@ const stringToList = (value: string) =>
 export const StepEnvironments = dc(
     (props: WizardStepProps) => {
         const { t } = useLocale();
+        const showChecklists = areChecklistsVisible();
         const checking = ref(false);
         const credentialChecklist = ref<Record<string, boolean>>({});
         const checkResult = ref<string | null>(null);
@@ -67,7 +69,7 @@ export const StepEnvironments = dc(
             });
         };
 
-        const credentialChecklistComplete = computed(() => CREDENTIAL_CHECKLIST.every((check) => credentialChecklist.value[check.key] === true));
+        const credentialChecklistComplete = computed(() => !showChecklists || CREDENTIAL_CHECKLIST.every((check) => credentialChecklist.value[check.key] === true));
 
         const runCredentialCheck = async () => {
             checking.value = true;
@@ -271,22 +273,24 @@ export const StepEnvironments = dc(
                             </ThemedView>
                         ))}
 
-                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Credential check checklist")}</ThemedText>
-                            {CREDENTIAL_CHECKLIST.map((check) => (
-                                <VCheckbox
-                                    key={check.key}
-                                    modelValue={credentialChecklist.value[check.key] === true}
-                                    onUpdate:modelValue={(value: unknown) => (credentialChecklist.value = { ...credentialChecklist.value, [check.key]: Boolean(value) })}
-                                    label={t(check.label)}
-                                    density="compact"
-                                    hideDetails
-                                />
-                            ))}
-                            {!credentialChecklistComplete.value && (
-                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all credential check items before running the check")}</ThemedText>
-                            )}
-                        </ThemedView>
+                        {showChecklists && (
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Credential check checklist")}</ThemedText>
+                                {CREDENTIAL_CHECKLIST.map((check) => (
+                                    <VCheckbox
+                                        key={check.key}
+                                        modelValue={credentialChecklist.value[check.key] === true}
+                                        onUpdate:modelValue={(value: unknown) => (credentialChecklist.value = { ...credentialChecklist.value, [check.key]: Boolean(value) })}
+                                        label={t(check.label)}
+                                        density="compact"
+                                        hideDetails
+                                    />
+                                ))}
+                                {!credentialChecklistComplete.value && (
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all credential check items before running the check")}</ThemedText>
+                                )}
+                            </ThemedView>
+                        )}
                         <ThemedView style={{ flexDirection: "row", gap: "12px", alignItems: "center" }}>
                             <VBtn color="primary" loading={checking.value} disabled={!credentialChecklistComplete.value} onClick={() => void runCredentialCheck()}>
                                 {t("Credential Check")}

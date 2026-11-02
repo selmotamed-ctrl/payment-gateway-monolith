@@ -28,6 +28,7 @@ import { buildFilterQuery, type FilterValues } from "@/components/Table/filters"
 import { tableRegistry } from "@/components/Table/tableRegistry";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
+import { areChecklistsVisible } from "@/constants/env";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
@@ -101,6 +102,7 @@ const ApprovalsPage = dc(() => {
     const { t } = useLocale();
     const theme = useTheme();
     const router = useRouter();
+    const showChecklists = areChecklistsVisible();
     const rows = ref<ApprovalRow[]>([]);
     const total = ref(0);
     const selectedApprovals = ref<Record<string, ApprovalRow>>({});
@@ -174,7 +176,7 @@ const ApprovalsPage = dc(() => {
         bulkRejectChecklist.value = {};
         bulkRejectOpen.value = true;
     };
-    const bulkRejectChecklistComplete = computed(() => BULK_REJECT_CHECKS.every((check) => bulkRejectChecklist.value[check.key] === true));
+    const bulkRejectChecklistComplete = computed(() => !showChecklists || BULK_REJECT_CHECKS.every((check) => bulkRejectChecklist.value[check.key] === true));
 
     const runBulkReject = async () => {
         if (selectedCount.value === 0 || bulkRejectLoading.value) return;
@@ -397,7 +399,7 @@ const ApprovalsPage = dc(() => {
         return APPROVAL_BLOCK_REASON_HELP[reason] ?? reason.replaceAll("_", " ");
     });
 
-    const decisionChecklistComplete = computed(() => APPROVAL_CHECKS.every((check) => decisionChecklist.value[check.key] === true));
+    const decisionChecklistComplete = computed(() => !showChecklists || APPROVAL_CHECKS.every((check) => decisionChecklist.value[check.key] === true));
 
     const decide = async (approve: boolean) => {
         if (!selected.value) return;
@@ -445,7 +447,7 @@ const ApprovalsPage = dc(() => {
         }
     };
 
-    const summaryExportChecklistComplete = computed(() => SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
+    const summaryExportChecklistComplete = computed(() => !showChecklists || SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
 
     const exportSummary = async () => {
         if (summaryExportLoading.value) return;
@@ -691,22 +693,24 @@ const ApprovalsPage = dc(() => {
                                 <div style={{ flex: 1 }} />
                                 <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
                             </ThemedView>
-                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
-                                {SUMMARY_EXPORT_CHECKS.map((check) => (
-                                    <VCheckbox
-                                        key={check.key}
-                                        modelValue={summaryExportChecklist.value[check.key] === true}
-                                        onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
-                                        label={t(check.label)}
-                                        density="compact"
-                                        hideDetails
-                                    />
-                                ))}
-                                {!summaryExportChecklistComplete.value && (
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
-                                )}
-                            </ThemedView>
+                            {showChecklists && (
+                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
+                                    {SUMMARY_EXPORT_CHECKS.map((check) => (
+                                        <VCheckbox
+                                            key={check.key}
+                                            modelValue={summaryExportChecklist.value[check.key] === true}
+                                            onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
+                                            label={t(check.label)}
+                                            density="compact"
+                                            hideDetails
+                                        />
+                                    ))}
+                                    {!summaryExportChecklistComplete.value && (
+                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
+                                    )}
+                                </ThemedView>
+                            )}
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
                                 {summaryItems.value.map((item) => (
                                     <VCard key={item.label} variant="tonal">
@@ -842,22 +846,24 @@ const ApprovalsPage = dc(() => {
                             hint={t("At least 2 characters. Applied to every selected request.")}
                             persistentHint
                         />
-                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Bulk rejection checklist")}</ThemedText>
-                            {BULK_REJECT_CHECKS.map((check) => (
-                                <VCheckbox
-                                    key={check.key}
-                                    modelValue={bulkRejectChecklist.value[check.key] === true}
-                                    onUpdate:modelValue={(value: unknown) => (bulkRejectChecklist.value = { ...bulkRejectChecklist.value, [check.key]: Boolean(value) })}
-                                    label={t(check.label)}
-                                    density="compact"
-                                    hideDetails
-                                />
-                            ))}
-                            {!bulkRejectChecklistComplete.value && (
-                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all bulk rejection checklist items before continuing.")}</ThemedText>
-                            )}
-                        </ThemedView>
+                        {showChecklists && (
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Bulk rejection checklist")}</ThemedText>
+                                {BULK_REJECT_CHECKS.map((check) => (
+                                    <VCheckbox
+                                        key={check.key}
+                                        modelValue={bulkRejectChecklist.value[check.key] === true}
+                                        onUpdate:modelValue={(value: unknown) => (bulkRejectChecklist.value = { ...bulkRejectChecklist.value, [check.key]: Boolean(value) })}
+                                        label={t(check.label)}
+                                        density="compact"
+                                        hideDetails
+                                    />
+                                ))}
+                                {!bulkRejectChecklistComplete.value && (
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all bulk rejection checklist items before continuing.")}</ThemedText>
+                                )}
+                            </ThemedView>
+                        )}
                         {bulkRejectError.value && <VAlert type="error" variant="tonal" density="compact">{bulkRejectError.value}</VAlert>}
                         <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
                             <VBtn variant="text" onClick={() => (bulkRejectOpen.value = false)}>{t("Cancel")}</VBtn>
@@ -967,22 +973,24 @@ const ApprovalsPage = dc(() => {
                                                 onUpdate:modelValue={(value: string | null) => (outcome.value = (value as "WON" | "LOST" | null) ?? "")}
                                             />
                                         )}
-                                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Decision checklist")}</ThemedText>
-                                            {APPROVAL_CHECKS.map((check) => (
-                                                <VCheckbox
-                                                    key={check.key}
-                                                    modelValue={decisionChecklist.value[check.key] === true}
-                                                    onUpdate:modelValue={(value: unknown) => (decisionChecklist.value = { ...decisionChecklist.value, [check.key]: Boolean(value) })}
-                                                    label={t(check.label)}
-                                                    density="compact"
-                                                    hideDetails
-                                                />
-                                            ))}
-                                            {!decisionChecklistComplete.value && (
-                                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all decision checklist items before deciding")}</ThemedText>
-                                            )}
-                                        </ThemedView>
+                                        {showChecklists && (
+                                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Decision checklist")}</ThemedText>
+                                                {APPROVAL_CHECKS.map((check) => (
+                                                    <VCheckbox
+                                                        key={check.key}
+                                                        modelValue={decisionChecklist.value[check.key] === true}
+                                                        onUpdate:modelValue={(value: unknown) => (decisionChecklist.value = { ...decisionChecklist.value, [check.key]: Boolean(value) })}
+                                                        label={t(check.label)}
+                                                        density="compact"
+                                                        hideDetails
+                                                    />
+                                                ))}
+                                                {!decisionChecklistComplete.value && (
+                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all decision checklist items before deciding")}</ThemedText>
+                                                )}
+                                            </ThemedView>
+                                        )}
                                         <VTextarea
                                             modelValue={decisionReason.value}
                                             onUpdate:modelValue={(value: string) => (decisionReason.value = value)}

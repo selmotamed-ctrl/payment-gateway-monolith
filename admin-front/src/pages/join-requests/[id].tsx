@@ -1,6 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
+import { areChecklistsVisible } from "@/constants/env";
 import { useRoute, useRouter } from "vue-router";
 import {
     VAlert,
@@ -144,6 +145,7 @@ const auditChangeSummary = (entry: JoinAuditEntry): string => {
 
 const JoinRequestDetailPage = dc(() => {
     const { t } = useLocale();
+    const showChecklists = areChecklistsVisible();
     const route = useRoute();
     const router = useRouter();
 
@@ -262,7 +264,7 @@ const JoinRequestDetailPage = dc(() => {
     const activeOwners = computed(() => (detail.value?.beneficialOwners ?? []).filter((owner) => owner.active));
     const duplicateFlags = computed(() => detail.value?.readiness?.duplicateFlags ?? detail.value?.duplicateFlagsJson ?? []);
     const checklistComplete = computed(() =>
-        (detail.value?.checklistKeys ?? []).every((key) => Boolean(checklist.value[key])),
+        !showChecklists || (detail.value?.checklistKeys ?? []).every((key) => Boolean(checklist.value[key])),
     );
 
     const run = async (task: () => Promise<void>, success: string) => {
@@ -1011,34 +1013,36 @@ const JoinRequestDetailPage = dc(() => {
                         </VCardText>
                     </VCard>
 
-                    <VCard>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-                                <ThemedView style={{ gap: "3px" }}>
-                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Review checklist")}</ThemedText>
-                                    <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
-                                        {t("Every item must be checked before approval. Checklist is stored on the join request.")}
-                                    </ThemedText>
+                    {showChecklists && (
+                        <VCard>
+                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                                <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                                    <ThemedView style={{ gap: "3px" }}>
+                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Review checklist")}</ThemedText>
+                                        <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
+                                            {t("Every item must be checked before approval. Checklist is stored on the join request.")}
+                                        </ThemedText>
+                                    </ThemedView>
+                                    {canChecklist.value && (
+                                        <VBtn size="small" color="primary" loading={actionLoading.value} disabled={!checklistComplete.value} onClick={saveChecklist}>
+                                            {t("Save checklist")}
+                                        </VBtn>
+                                    )}
                                 </ThemedView>
-                                {canChecklist.value && (
-                                    <VBtn size="small" color="primary" loading={actionLoading.value} disabled={!checklistComplete.value} onClick={saveChecklist}>
-                                        {t("Save checklist")}
-                                    </VBtn>
-                                )}
-                            </ThemedView>
-                            {(entry.checklistKeys ?? []).map((key) => (
-                                <VCheckbox
-                                    key={key}
-                                    label={t(key)}
-                                    modelValue={Boolean(checklist.value[key])}
-                                    onUpdate:modelValue={(value: boolean | null) => (checklist.value[key] = Boolean(value))}
-                                    density="compact"
-                                    hideDetails
-                                    disabled={!canChecklist.value}
-                                />
-                            ))}
-                        </VCardText>
-                    </VCard>
+                                {(entry.checklistKeys ?? []).map((key) => (
+                                    <VCheckbox
+                                        key={key}
+                                        label={t(key)}
+                                        modelValue={Boolean(checklist.value[key])}
+                                        onUpdate:modelValue={(value: boolean | null) => (checklist.value[key] = Boolean(value))}
+                                        density="compact"
+                                        hideDetails
+                                        disabled={!canChecklist.value}
+                                    />
+                                ))}
+                            </VCardText>
+                        </VCard>
+                    )}
 
                     {canWrite.value && !isFinal.value && (
                         <VCard>

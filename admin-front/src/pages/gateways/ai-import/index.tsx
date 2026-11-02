@@ -1,6 +1,7 @@
 import { dc } from "kt-dc";
 import { Fragment, computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
+import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
 import {
     VAlert,
@@ -226,6 +227,7 @@ const extractRepairPrompt = (error: unknown): string | null => {
 
 const GatewayAiImportPage = dc(() => {
     const { t } = useLocale();
+    const showChecklists = areChecklistsVisible();
     const router = useRouter();
 
     const step = ref(1);
@@ -397,7 +399,7 @@ const GatewayAiImportPage = dc(() => {
         }
     };
 
-    const importChecklistComplete = computed(() => IMPORT_CHECKS.every((check) => importChecklist.value[check.key] === true));
+    const importChecklistComplete = computed(() => !showChecklists || IMPORT_CHECKS.every((check) => importChecklist.value[check.key] === true));
 
     const runImport = async () => {
         if (!canImport.value) {
@@ -1206,22 +1208,24 @@ const GatewayAiImportPage = dc(() => {
                     </VAlert>
                 )}
 
-                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Import checklist")}</ThemedText>
-                    {IMPORT_CHECKS.map((check) => (
-                        <VCheckbox
-                            key={check.key}
-                            modelValue={importChecklist.value[check.key] === true}
-                            onUpdate:modelValue={(value: unknown) => (importChecklist.value = { ...importChecklist.value, [check.key]: Boolean(value) })}
-                            label={t(check.label)}
-                            density="compact"
-                            hideDetails
-                        />
-                    ))}
-                    {!importChecklistComplete.value && (
-                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all import checklist items before creating the draft")}</ThemedText>
-                    )}
-                </ThemedView>
+                {showChecklists && (
+                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Import checklist")}</ThemedText>
+                        {IMPORT_CHECKS.map((check) => (
+                            <VCheckbox
+                                key={check.key}
+                                modelValue={importChecklist.value[check.key] === true}
+                                onUpdate:modelValue={(value: unknown) => (importChecklist.value = { ...importChecklist.value, [check.key]: Boolean(value) })}
+                                label={t(check.label)}
+                                density="compact"
+                                hideDetails
+                            />
+                        ))}
+                        {!importChecklistComplete.value && (
+                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all import checklist items before creating the draft")}</ThemedText>
+                        )}
+                    </ThemedView>
+                )}
 
                 {!report.value.valid && (
                     <VAlert type="error" variant="tonal">

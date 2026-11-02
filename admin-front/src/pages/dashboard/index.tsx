@@ -12,6 +12,7 @@ import { StatusChip } from "@/components/StatusChip";
 import { MiniStats, type StatItem } from "@/components/MiniStats";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities } from "@/state/user";
+import { areChecklistsVisible } from "@/constants/env";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { formatPlainNumber } from "@/utils/money";
@@ -119,6 +120,7 @@ const DashboardPage = dc(() => {
     const activityExportLoading = ref(false);
     const activityExportChecklist = ref<Record<string, boolean>>({});
     const canViewActivity = computed(() => hasOneOfAuthorities(["security:read"]));
+    const showChecklists = areChecklistsVisible();
 
     const loadRecentActivity = async () => {
         if (!canViewActivity.value) return;
@@ -134,9 +136,9 @@ const DashboardPage = dc(() => {
         }
     };
 
-    const exportChecklistComplete = computed(() => EXPORT_CHECKS.every((check) => exportChecklist.value[check.key] === true));
+    const exportChecklistComplete = computed(() => !showChecklists || EXPORT_CHECKS.every((check) => exportChecklist.value[check.key] === true));
 
-    const activityExportChecklistComplete = computed(() => ACTIVITY_EXPORT_CHECKS.every((check) => activityExportChecklist.value[check.key] === true));
+    const activityExportChecklistComplete = computed(() => !showChecklists || ACTIVITY_EXPORT_CHECKS.every((check) => activityExportChecklist.value[check.key] === true));
 
     const exportActivity = async () => {
         if (activityExportLoading.value) return;
@@ -392,24 +394,26 @@ const DashboardPage = dc(() => {
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : (
                     <>
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Snapshot export checklist")}</ThemedText>
-                                {EXPORT_CHECKS.map((check) => (
-                                    <VCheckbox
-                                        key={check.key}
-                                        modelValue={exportChecklist.value[check.key] === true}
-                                        onUpdate:modelValue={(value: unknown) => (exportChecklist.value = { ...exportChecklist.value, [check.key]: Boolean(value) })}
-                                        label={t(check.label)}
-                                        density="compact"
-                                        hideDetails
-                                    />
-                                ))}
-                                {!exportChecklistComplete.value && (
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all export checklist items before exporting")}</ThemedText>
-                                )}
-                            </VCardText>
-                        </VCard>
+                        {showChecklists && (
+                            <VCard>
+                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Snapshot export checklist")}</ThemedText>
+                                    {EXPORT_CHECKS.map((check) => (
+                                        <VCheckbox
+                                            key={check.key}
+                                            modelValue={exportChecklist.value[check.key] === true}
+                                            onUpdate:modelValue={(value: unknown) => (exportChecklist.value = { ...exportChecklist.value, [check.key]: Boolean(value) })}
+                                            label={t(check.label)}
+                                            density="compact"
+                                            hideDetails
+                                        />
+                                    ))}
+                                    {!exportChecklistComplete.value && (
+                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all export checklist items before exporting")}</ThemedText>
+                                    )}
+                                </VCardText>
+                            </VCard>
+                        )}
 
                         <MiniStats stats={stats()} loading={loading.value} />
 
@@ -501,22 +505,24 @@ const DashboardPage = dc(() => {
                                             <VBtn size="small" variant="text" prependIcon="mdi-history" onClick={() => void router.push({ name: "AuditLog" })}>{t("Open audit log")}</VBtn>
                                         </ThemedView>
                                     </ThemedView>
-                                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Activity export checklist")}</ThemedText>
-                                        {ACTIVITY_EXPORT_CHECKS.map((check) => (
-                                            <VCheckbox
-                                                key={check.key}
-                                                modelValue={activityExportChecklist.value[check.key] === true}
-                                                onUpdate:modelValue={(value: unknown) => (activityExportChecklist.value = { ...activityExportChecklist.value, [check.key]: Boolean(value) })}
-                                                label={t(check.label)}
-                                                density="compact"
-                                                hideDetails
-                                            />
-                                        ))}
-                                        {!activityExportChecklistComplete.value && (
-                                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all activity export checklist items before exporting")}</ThemedText>
-                                        )}
-                                    </ThemedView>
+                                    {showChecklists && (
+                                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Activity export checklist")}</ThemedText>
+                                            {ACTIVITY_EXPORT_CHECKS.map((check) => (
+                                                <VCheckbox
+                                                    key={check.key}
+                                                    modelValue={activityExportChecklist.value[check.key] === true}
+                                                    onUpdate:modelValue={(value: unknown) => (activityExportChecklist.value = { ...activityExportChecklist.value, [check.key]: Boolean(value) })}
+                                                    label={t(check.label)}
+                                                    density="compact"
+                                                    hideDetails
+                                                />
+                                            ))}
+                                            {!activityExportChecklistComplete.value && (
+                                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all activity export checklist items before exporting")}</ThemedText>
+                                            )}
+                                        </ThemedView>
+                                    )}
                                     {activityLoading.value ? (
                                         <VProgressLinear indeterminate color="primary" />
                                     ) : recentActivity.value.length === 0 ? (

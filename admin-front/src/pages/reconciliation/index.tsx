@@ -1,6 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
+import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
 import {
     VAlert,
@@ -169,6 +170,7 @@ const parseCsvPreview = (text: string, delimiter = ","): { columns: string[]; ro
 
 const ReconciliationPage = dc(() => {
     const { t } = useLocale();
+    const showChecklists = areChecklistsVisible();
     const router = useRouter();
     const sources = ref<StatementSource[]>([]);
     const runs = ref<ReconciliationRun[]>([]);
@@ -281,7 +283,7 @@ const ReconciliationPage = dc(() => {
         }
     };
 
-    const uploadChecklistComplete = computed(() => UPLOAD_CHECKS.every((check) => uploadChecklist.value[check.key] === true));
+    const uploadChecklistComplete = computed(() => !showChecklists || UPLOAD_CHECKS.every((check) => uploadChecklist.value[check.key] === true));
 
     const upload = async () => {
         if (!file.value || !selectedSourceId.value) {
@@ -406,7 +408,7 @@ const ReconciliationPage = dc(() => {
         sourceEditOpen.value = true;
     };
 
-    const sourceEditChecklistComplete = computed(() => SOURCE_EDIT_CHECKS.every((check) => sourceEditChecklist.value[check.key] === true));
+    const sourceEditChecklistComplete = computed(() => !showChecklists || SOURCE_EDIT_CHECKS.every((check) => sourceEditChecklist.value[check.key] === true));
 
     const saveSourceEdit = async () => {
         if (!editingSource.value || sourceSaving.value) return;
@@ -480,7 +482,7 @@ const ReconciliationPage = dc(() => {
         if (selectedRun.value) await loadRunDetail(selectedRun.value.id, next);
     };
 
-    const summaryExportChecklistComplete = computed(() => SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
+    const summaryExportChecklistComplete = computed(() => !showChecklists || SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
 
     const exportSummary = async () => {
         if (summaryExportLoading.value) return;
@@ -675,22 +677,24 @@ const ReconciliationPage = dc(() => {
                                 <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Reconciliation health")}</ThemedText>
                                     <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
-                                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
-                                            {SUMMARY_EXPORT_CHECKS.map((check) => (
-                                                <VCheckbox
-                                                    key={check.key}
-                                                    modelValue={summaryExportChecklist.value[check.key] === true}
-                                                    onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
-                                                    label={t(check.label)}
-                                                    density="compact"
-                                                    hideDetails
-                                                />
-                                            ))}
-                                            {!summaryExportChecklistComplete.value && (
-                                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
-                                            )}
-                                        </ThemedView>
+                                        {showChecklists && (
+                                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
+                                                {SUMMARY_EXPORT_CHECKS.map((check) => (
+                                                    <VCheckbox
+                                                        key={check.key}
+                                                        modelValue={summaryExportChecklist.value[check.key] === true}
+                                                        onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
+                                                        label={t(check.label)}
+                                                        density="compact"
+                                                        hideDetails
+                                                    />
+                                                ))}
+                                                {!summaryExportChecklistComplete.value && (
+                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
+                                                )}
+                                            </ThemedView>
+                                        )}
                                         {summaryItems.value.map((item) => (
                                             <VCard key={item.label} variant="tonal">
                                                 <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
@@ -726,22 +730,24 @@ const ReconciliationPage = dc(() => {
                                     <VTextField type="date" label={t("Period start")} modelValue={periodStart.value} onUpdate:modelValue={(value: string) => (periodStart.value = value)} style={{ minWidth: "170px" }} />
                                     <VTextField type="date" label={t("Period end")} modelValue={periodEnd.value} onUpdate:modelValue={(value: string) => (periodEnd.value = value)} style={{ minWidth: "170px" }} />
                                     <VFileInput label={t("Statement file")} modelValue={file.value} onUpdate:modelValue={(value: File | File[] | null) => void onFileChanged(value)} style={{ minWidth: "260px" }} />
-                                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Upload checklist")}</ThemedText>
-                                        {UPLOAD_CHECKS.map((check) => (
-                                            <VCheckbox
-                                                key={check.key}
-                                                modelValue={uploadChecklist.value[check.key] === true}
-                                                onUpdate:modelValue={(value: unknown) => (uploadChecklist.value = { ...uploadChecklist.value, [check.key]: Boolean(value) })}
-                                                label={t(check.label)}
-                                                density="compact"
-                                                hideDetails
-                                            />
-                                        ))}
-                                        {!uploadChecklistComplete.value && (
-                                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all upload checklist items before uploading")}</ThemedText>
-                                        )}
-                                    </ThemedView>
+                                    {showChecklists && (
+                                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Upload checklist")}</ThemedText>
+                                            {UPLOAD_CHECKS.map((check) => (
+                                                <VCheckbox
+                                                    key={check.key}
+                                                    modelValue={uploadChecklist.value[check.key] === true}
+                                                    onUpdate:modelValue={(value: unknown) => (uploadChecklist.value = { ...uploadChecklist.value, [check.key]: Boolean(value) })}
+                                                    label={t(check.label)}
+                                                    density="compact"
+                                                    hideDetails
+                                                />
+                                            ))}
+                                            {!uploadChecklistComplete.value && (
+                                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all upload checklist items before uploading")}</ThemedText>
+                                            )}
+                                        </ThemedView>
+                                    )}
                                     <VBtn color="primary" loading={uploadLoading.value} disabled={!selectedSourceId.value || !file.value || !uploadChecklistComplete.value} onClick={() => void upload()}>{t("Upload")}</VBtn>
                                 </ThemedView>
                             </VCardText>
@@ -868,22 +874,24 @@ const ReconciliationPage = dc(() => {
                             rows={8}
                             style={{ fontFamily: "ui-monospace, monospace", direction: "ltr" }}
                         />
-                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Source edit checklist")}</ThemedText>
-                            {SOURCE_EDIT_CHECKS.map((check) => (
-                                <VCheckbox
-                                    key={check.key}
-                                    modelValue={sourceEditChecklist.value[check.key] === true}
-                                    onUpdate:modelValue={(value: unknown) => (sourceEditChecklist.value = { ...sourceEditChecklist.value, [check.key]: Boolean(value) })}
-                                    label={t(check.label)}
-                                    density="compact"
-                                    hideDetails
-                                />
-                            ))}
-                            {!sourceEditChecklistComplete.value && (
-                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all source checklist items before saving.")}</ThemedText>
-                            )}
-                        </ThemedView>
+                        {showChecklists && (
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Source edit checklist")}</ThemedText>
+                                {SOURCE_EDIT_CHECKS.map((check) => (
+                                    <VCheckbox
+                                        key={check.key}
+                                        modelValue={sourceEditChecklist.value[check.key] === true}
+                                        onUpdate:modelValue={(value: unknown) => (sourceEditChecklist.value = { ...sourceEditChecklist.value, [check.key]: Boolean(value) })}
+                                        label={t(check.label)}
+                                        density="compact"
+                                        hideDetails
+                                    />
+                                ))}
+                                {!sourceEditChecklistComplete.value && (
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all source checklist items before saving.")}</ThemedText>
+                                )}
+                            </ThemedView>
+                        )}
                         {sourceError.value && <VAlert type="error" variant="tonal" density="compact">{sourceError.value}</VAlert>}
                         <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
                             <VBtn variant="text" onClick={() => (sourceEditOpen.value = false)}>{t("Cancel")}</VBtn>

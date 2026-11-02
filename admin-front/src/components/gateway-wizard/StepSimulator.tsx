@@ -1,6 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
+import { areChecklistsVisible } from "@/constants/env";
 import { VAlert, VBtn, VCard, VCardText, VCheckbox, VSelect, VTextField, VTextarea } from "vuetify/components";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
@@ -63,6 +64,7 @@ type GateResult = {
 export const StepSimulator = dc(
     (props: WizardStepProps) => {
         const { t } = useLocale();
+        const showChecklists = areChecklistsVisible();
         const phase = ref("INITIATE");
         const formData = ref('{"customer_mobile":"0912345678"}');
         const sampleAmount = ref("100");
@@ -86,7 +88,7 @@ export const StepSimulator = dc(
         const submitting = ref(false);
         const submitChecklist = ref<Record<string, boolean>>({});
 
-        const dryRunChecklistComplete = computed(() => DRY_RUN_CHECKS.every((check) => dryRunChecklist.value[check.key] === true));
+        const dryRunChecklistComplete = computed(() => !showChecklists || DRY_RUN_CHECKS.every((check) => dryRunChecklist.value[check.key] === true));
 
         const runDryRun = async () => {
             dryRunning.value = true;
@@ -117,7 +119,7 @@ export const StepSimulator = dc(
             }
         };
 
-        const suiteChecklistComplete = computed(() => SUITE_CHECKS.every((check) => suiteChecklist.value[check.key] === true));
+        const suiteChecklistComplete = computed(() => !showChecklists || SUITE_CHECKS.every((check) => suiteChecklist.value[check.key] === true));
 
         const runSuite = async () => {
             suiteRunning.value = true;
@@ -150,7 +152,7 @@ export const StepSimulator = dc(
             }
         };
 
-        const submitChecklistComplete = computed(() => SUBMIT_CHECKS.every((check) => submitChecklist.value[check.key] === true));
+        const submitChecklistComplete = computed(() => !showChecklists || SUBMIT_CHECKS.every((check) => submitChecklist.value[check.key] === true));
 
         const submitForApproval = async () => {
             submitting.value = true;
@@ -212,22 +214,24 @@ export const StepSimulator = dc(
                             onUpdate:modelValue={(v: string) => (formData.value = v)}
                             rows={4}
                         />
-                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Dry-run checklist")}</ThemedText>
-                            {DRY_RUN_CHECKS.map((check) => (
-                                <VCheckbox
-                                    key={check.key}
-                                    modelValue={dryRunChecklist.value[check.key] === true}
-                                    onUpdate:modelValue={(value: unknown) => (dryRunChecklist.value = { ...dryRunChecklist.value, [check.key]: Boolean(value) })}
-                                    label={t(check.label)}
-                                    density="compact"
-                                    hideDetails
-                                />
-                            ))}
-                            {!dryRunChecklistComplete.value && (
-                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all dry-run checklist items before running")}</ThemedText>
-                            )}
-                        </ThemedView>
+                        {showChecklists && (
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Dry-run checklist")}</ThemedText>
+                                {DRY_RUN_CHECKS.map((check) => (
+                                    <VCheckbox
+                                        key={check.key}
+                                        modelValue={dryRunChecklist.value[check.key] === true}
+                                        onUpdate:modelValue={(value: unknown) => (dryRunChecklist.value = { ...dryRunChecklist.value, [check.key]: Boolean(value) })}
+                                        label={t(check.label)}
+                                        density="compact"
+                                        hideDetails
+                                    />
+                                ))}
+                                {!dryRunChecklistComplete.value && (
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all dry-run checklist items before running")}</ThemedText>
+                                )}
+                            </ThemedView>
+                        )}
                         <VBtn color="primary" loading={dryRunning.value} disabled={!dryRunChecklistComplete.value} onClick={() => void runDryRun()}>
                             {t("Dry Run")}
                         </VBtn>
@@ -267,22 +271,24 @@ export const StepSimulator = dc(
                             </ThemedView>
                         </ThemedView>
 
-                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Test suite checklist")}</ThemedText>
-                            {SUITE_CHECKS.map((check) => (
-                                <VCheckbox
-                                    key={check.key}
-                                    modelValue={suiteChecklist.value[check.key] === true}
-                                    onUpdate:modelValue={(value: unknown) => (suiteChecklist.value = { ...suiteChecklist.value, [check.key]: Boolean(value) })}
-                                    label={t(check.label)}
-                                    density="compact"
-                                    hideDetails
-                                />
-                            ))}
-                            {!suiteChecklistComplete.value && (
-                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all test suite checklist items before running")}</ThemedText>
-                            )}
-                        </ThemedView>
+                        {showChecklists && (
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Test suite checklist")}</ThemedText>
+                                {SUITE_CHECKS.map((check) => (
+                                    <VCheckbox
+                                        key={check.key}
+                                        modelValue={suiteChecklist.value[check.key] === true}
+                                        onUpdate:modelValue={(value: unknown) => (suiteChecklist.value = { ...suiteChecklist.value, [check.key]: Boolean(value) })}
+                                        label={t(check.label)}
+                                        density="compact"
+                                        hideDetails
+                                    />
+                                ))}
+                                {!suiteChecklistComplete.value && (
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all test suite checklist items before running")}</ThemedText>
+                                )}
+                            </ThemedView>
+                        )}
 
                         {suiteError.value && (
                             <VAlert type="error" variant="tonal" density="compact">
@@ -335,22 +341,24 @@ export const StepSimulator = dc(
                             onUpdate:modelValue={(v: string) => (submitReason.value = v)}
                             rows={3}
                         />
-                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Go-live checklist")}</ThemedText>
-                            {SUBMIT_CHECKS.map((check) => (
-                                <VCheckbox
-                                    key={check.key}
-                                    modelValue={submitChecklist.value[check.key] === true}
-                                    onUpdate:modelValue={(value: unknown) => (submitChecklist.value = { ...submitChecklist.value, [check.key]: Boolean(value) })}
-                                    label={t(check.label)}
-                                    density="compact"
-                                    hideDetails
-                                />
-                            ))}
-                            {!submitChecklistComplete.value && (
-                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all go-live checklist items before submitting")}</ThemedText>
-                            )}
-                        </ThemedView>
+                        {showChecklists && (
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Go-live checklist")}</ThemedText>
+                                {SUBMIT_CHECKS.map((check) => (
+                                    <VCheckbox
+                                        key={check.key}
+                                        modelValue={submitChecklist.value[check.key] === true}
+                                        onUpdate:modelValue={(value: unknown) => (submitChecklist.value = { ...submitChecklist.value, [check.key]: Boolean(value) })}
+                                        label={t(check.label)}
+                                        density="compact"
+                                        hideDetails
+                                    />
+                                ))}
+                                {!submitChecklistComplete.value && (
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all go-live checklist items before submitting")}</ThemedText>
+                                )}
+                            </ThemedView>
+                        )}
                         <VBtn color="primary" loading={submitting.value} disabled={!submitChecklistComplete.value} onClick={() => void submitForApproval()}>
                             {t("Submit For Approval")}
                         </VBtn>

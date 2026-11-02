@@ -1,6 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
+import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
 import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VProgressCircular, VTab, VTabs, VTextarea, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
@@ -109,6 +110,7 @@ const formatHours = (hours: number | null): string => {
 
 const DisputesPage = dc(() => {
     const { t } = useLocale();
+    const showChecklists = areChecklistsVisible();
     const router = useRouter();
     const rows = ref<Dispute[]>([]);
     const total = ref(0);
@@ -271,7 +273,7 @@ const DisputesPage = dc(() => {
         }
     };
 
-    const evidenceChecklistComplete = computed(() => EVIDENCE_CHECKS.every((check) => evidenceChecklist.value[check.key] === true));
+    const evidenceChecklistComplete = computed(() => !showChecklists || EVIDENCE_CHECKS.every((check) => evidenceChecklist.value[check.key] === true));
 
     const submitEvidence = async () => {
         if (!selected.value) return;
@@ -304,7 +306,7 @@ const DisputesPage = dc(() => {
         }
     };
 
-    const summaryExportChecklistComplete = computed(() => SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
+    const summaryExportChecklistComplete = computed(() => !showChecklists || SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
 
     const exportSummary = async () => {
         if (summaryExportLoading.value) return;
@@ -479,22 +481,24 @@ const DisputesPage = dc(() => {
                                 <div style={{ flex: 1 }} />
                                 <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
                             </ThemedView>
-                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
-                                {SUMMARY_EXPORT_CHECKS.map((check) => (
-                                    <VCheckbox
-                                        key={check.key}
-                                        modelValue={summaryExportChecklist.value[check.key] === true}
-                                        onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
-                                        label={t(check.label)}
-                                        density="compact"
-                                        hideDetails
-                                    />
-                                ))}
-                                {!summaryExportChecklistComplete.value && (
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
-                                )}
-                            </ThemedView>
+                            {showChecklists && (
+                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
+                                    {SUMMARY_EXPORT_CHECKS.map((check) => (
+                                        <VCheckbox
+                                            key={check.key}
+                                            modelValue={summaryExportChecklist.value[check.key] === true}
+                                            onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
+                                            label={t(check.label)}
+                                            density="compact"
+                                            hideDetails
+                                        />
+                                    ))}
+                                    {!summaryExportChecklistComplete.value && (
+                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
+                                    )}
+                                </ThemedView>
+                            )}
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "10px" }}>
                                 {summaryItems.value.map((item) => (
                                     <VCard key={item.label} variant="tonal">
@@ -676,22 +680,24 @@ const DisputesPage = dc(() => {
                                                 onUpdate:modelValue={(value: string) => (evidenceDocumentUrl.value = value)}
                                                 placeholder="https://"
                                             />
-                                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Evidence checklist")}</ThemedText>
-                                                {EVIDENCE_CHECKS.map((check) => (
-                                                    <VCheckbox
-                                                        key={check.key}
-                                                        modelValue={evidenceChecklist.value[check.key] === true}
-                                                        onUpdate:modelValue={(value: unknown) => (evidenceChecklist.value = { ...evidenceChecklist.value, [check.key]: Boolean(value) })}
-                                                        label={t(check.label)}
-                                                        density="compact"
-                                                        hideDetails
-                                                    />
-                                                ))}
-                                                {!evidenceChecklistComplete.value && (
-                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all evidence checklist items before submitting")}</ThemedText>
-                                                )}
-                                            </ThemedView>
+                                            {showChecklists && (
+                                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Evidence checklist")}</ThemedText>
+                                                    {EVIDENCE_CHECKS.map((check) => (
+                                                        <VCheckbox
+                                                            key={check.key}
+                                                            modelValue={evidenceChecklist.value[check.key] === true}
+                                                            onUpdate:modelValue={(value: unknown) => (evidenceChecklist.value = { ...evidenceChecklist.value, [check.key]: Boolean(value) })}
+                                                            label={t(check.label)}
+                                                            density="compact"
+                                                            hideDetails
+                                                        />
+                                                    ))}
+                                                    {!evidenceChecklistComplete.value && (
+                                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all evidence checklist items before submitting")}</ThemedText>
+                                                    )}
+                                                </ThemedView>
+                                            )}
                                             <VTextarea
                                                 label={t("Evidence notes")}
                                                 modelValue={evidenceNotes.value}

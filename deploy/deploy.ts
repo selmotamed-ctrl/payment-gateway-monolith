@@ -294,6 +294,20 @@ const deployService = (input: {
       remote: `${releaseDir}/${frontend}/dist`,
       excludes: [],
     });
+    // Deployment-specific UI visibility is resolved when the release is
+    // assembled, so it can be changed without rebuilding the SPA. The file is
+    // loaded by index.html before the application module.
+    const runtimeConfig = frontendRuntimeConfig(frontend, config);
+    if (runtimeConfig) {
+      runner.writeRemoteFile({
+        target: host.ssh,
+        path: `${releaseDir}/${frontend}/dist/runtime-config.js`,
+        content: `window.__PG_RUNTIME_CONFIG__ = ${JSON.stringify(runtimeConfig)};\n`,
+        mode: 0o644,
+        sudo: false,
+      });
+      log(`  ${frontend} runtime config -> ${releaseDir}/${frontend}/dist/runtime-config.js`);
+    }
   }
 
   // 3. The least-privilege certificates of this host.
@@ -428,11 +442,46 @@ const backupDatabase = (input: { runner: SshRunner; config: DeployConfig; host: 
   log(`  pre-migration backup -> ${target}`);
 };
 
+/**
+ * Build-time constants injected into each SPA. The deploy engine is the single
+ * source of truth for deployment-specific UI visibility, so Vite never reads a
+ * committed `.env` default for these values.
+ */
+export const adminChecklistsVisible = (config: DeployConfig): boolean =>
+  config.ADMIN_SHOW_CHECKLISTS ?? config.ADMIN_SHOW_SNAPSHOT_EXPORT_CHECKLIST;
+
+const frontendBuildEnv = (frontend: string, config: DeployConfig): Record<string, string> => {
+  if (frontend === "admin-front") {
+    const visible = String(adminChecklistsVisible(config));
+    return {
+      VITE_SHOW_CHECKLISTS: visible,
+      VITE_SHOW_SNAPSHOT_EXPORT_CHECKLIST: visible,
+    };
+  }
+  return {};
+};
+
+/**
+ * Runtime settings written into the deployed release. These are the values
+ * the SPA reads at boot and take precedence over build-time defaults.
+ */
+const frontendRuntimeConfig = (frontend: string, config: DeployConfig): Record<string, unknown> | null => {
+  if (frontend === "admin-front") {
+    const visible = adminChecklistsVisible(config);
+    return {
+      showChecklists: visible,
+      // Legacy key read by releases built before the master checklist flag.
+      showSnapshotExportChecklist: visible,
+    };
+  }
+  return null;
+};
+
 const buildFrontends = async (runner: SshRunner, config: DeployConfig): Promise<void> => {
   const frontends = ["admin-front", "merchant-front", "checkout-front"];
   if (config.FAKE_RAILS_ENABLED) frontends.push("fake-rails-front");
   for (const frontend of frontends) {
-    await runner.localStreaming("bun run build", join(REPO_ROOT, frontend));
+    await runner.localStreaming("bun run build", join(REPO_ROOT, frontend), frontendBuildEnv(frontend, config));
     log(`  built ${frontend}/dist`);
   }
 };
@@ -648,7 +697,7 @@ const main = async (): Promise<void> => {
   log("Deployment complete.");
 };
 
-export { parseArgs, absoluteEnv, renderEnvFile, pm2Ecosystem };
+export { parseArgs, absoluteEnv, renderEnvFile, pm2Ecosystem, frontendRuntimeConfig };
 
 if (import.meta.main) {
   main().catch((error: unknown) => {

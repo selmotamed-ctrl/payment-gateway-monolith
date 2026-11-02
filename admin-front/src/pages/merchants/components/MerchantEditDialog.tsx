@@ -1,6 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
+import { areChecklistsVisible } from "@/constants/env";
 import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VSelect, VTextField, VTextarea } from "vuetify/components";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
@@ -76,6 +77,7 @@ const MerchantEditDialog = dc(
         onDone: () => void;
     }) => {
         const { t } = useLocale();
+        const showChecklists = areChecklistsVisible();
         const form = ref<EditForm>(emptyForm());
         const original = ref<EditForm>(emptyForm());
         const error = ref<string | null>(null);
@@ -160,7 +162,7 @@ const MerchantEditDialog = dc(
             return patch;
         };
 
-        const checklistComplete = computed(() => EDIT_CHECKS.every((check) => checklist.value[check.key] === true));
+        const checklistComplete = computed(() => !showChecklists || EDIT_CHECKS.every((check) => checklist.value[check.key] === true));
 
         const submit = async () => {
             if (!props.merchant) return;
@@ -249,7 +251,7 @@ const MerchantEditDialog = dc(
                                 </div>
                             </>
                         )}
-                        {!isDescriptive.value && (
+                        {showChecklists && !isDescriptive.value && (
                             <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                                 <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Edit checklist")}</ThemedText>
                                 {EDIT_CHECKS.map((check) => (

@@ -1,6 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
+import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
 import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VProgressCircular, VSelect, VTab, VTabs, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
@@ -119,6 +120,7 @@ const ACK_CHECKS = [
 
 const AmlReportsPage = dc(() => {
     const { t } = useLocale();
+    const showChecklists = areChecklistsVisible();
     const router = useRouter();
     const rows = ref<RegulatoryReport[]>([]);
     const total = ref(0);
@@ -302,7 +304,7 @@ const AmlReportsPage = dc(() => {
         }
     };
 
-    const reportChecklistComplete = computed(() => REPORT_CHECKS.every((check) => reportChecklist.value[check.key] === true));
+    const reportChecklistComplete = computed(() => !showChecklists || REPORT_CHECKS.every((check) => reportChecklist.value[check.key] === true));
 
     const submit = async () => {
         if (!form.value.reportingRuleId || !form.value.periodStart || !form.value.periodEnd) {
@@ -399,7 +401,7 @@ const AmlReportsPage = dc(() => {
     };
 
     const canSubmitReport = computed(() => selected.value?.status === "APPROVED");
-    const submissionChecklistComplete = computed(() => SUBMISSION_CHECKS.every((check) => submissionChecklist.value[check.key] === true));
+    const submissionChecklistComplete = computed(() => !showChecklists || SUBMISSION_CHECKS.every((check) => submissionChecklist.value[check.key] === true));
 
     const submitReport = async () => {
         if (!selected.value) return;
@@ -430,7 +432,7 @@ const AmlReportsPage = dc(() => {
     };
 
     const canAcknowledgeReport = computed(() => selected.value?.status === "SUBMITTED");
-    const ackChecklistComplete = computed(() => ACK_CHECKS.every((check) => ackChecklist.value[check.key] === true));
+    const ackChecklistComplete = computed(() => !showChecklists || ACK_CHECKS.every((check) => ackChecklist.value[check.key] === true));
 
     const acknowledgeReport = async () => {
         if (!selected.value) return;
@@ -737,22 +739,24 @@ const AmlReportsPage = dc(() => {
                                                 modelValue={ackReason.value}
                                                 onUpdate:modelValue={(value: string) => (ackReason.value = value)}
                                             />
-                                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Acknowledgement checklist")}</ThemedText>
-                                                {ACK_CHECKS.map((check) => (
-                                                    <VCheckbox
-                                                        key={check.key}
-                                                        modelValue={ackChecklist.value[check.key] === true}
-                                                        onUpdate:modelValue={(value: unknown) => (ackChecklist.value = { ...ackChecklist.value, [check.key]: Boolean(value) })}
-                                                        label={t(check.label)}
-                                                        density="compact"
-                                                        hideDetails
-                                                    />
-                                                ))}
-                                                {!ackChecklistComplete.value && (
-                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all acknowledgement checklist items before saving")}</ThemedText>
-                                                )}
-                                            </ThemedView>
+                                            {showChecklists && (
+                                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Acknowledgement checklist")}</ThemedText>
+                                                    {ACK_CHECKS.map((check) => (
+                                                        <VCheckbox
+                                                            key={check.key}
+                                                            modelValue={ackChecklist.value[check.key] === true}
+                                                            onUpdate:modelValue={(value: unknown) => (ackChecklist.value = { ...ackChecklist.value, [check.key]: Boolean(value) })}
+                                                            label={t(check.label)}
+                                                            density="compact"
+                                                            hideDetails
+                                                        />
+                                                    ))}
+                                                    {!ackChecklistComplete.value && (
+                                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all acknowledgement checklist items before saving")}</ThemedText>
+                                                    )}
+                                                </ThemedView>
+                                            )}
                                             <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
                                                 <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
                                                 <VBtn color="primary" loading={ackLoading.value} disabled={!ackChecklistComplete.value || (ackStatus.value === "REJECTED_BY_AUTHORITY" && ackReason.value.trim().length < 3)} onClick={() => void acknowledgeReport()}>{t("Save authority decision")}</VBtn>
@@ -773,22 +777,24 @@ const AmlReportsPage = dc(() => {
                                                 modelValue={submissionRef.value}
                                                 onUpdate:modelValue={(value: string) => (submissionRef.value = value)}
                                             />
-                                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Submission checklist")}</ThemedText>
-                                                {SUBMISSION_CHECKS.map((check) => (
-                                                    <VCheckbox
-                                                        key={check.key}
-                                                        modelValue={submissionChecklist.value[check.key] === true}
-                                                        onUpdate:modelValue={(value: unknown) => (submissionChecklist.value = { ...submissionChecklist.value, [check.key]: Boolean(value) })}
-                                                        label={t(check.label)}
-                                                        density="compact"
-                                                        hideDetails
-                                                    />
-                                                ))}
-                                                {!submissionChecklistComplete.value && (
-                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all submission checklist items before submitting")}</ThemedText>
-                                                )}
-                                            </ThemedView>
+                                            {showChecklists && (
+                                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Submission checklist")}</ThemedText>
+                                                    {SUBMISSION_CHECKS.map((check) => (
+                                                        <VCheckbox
+                                                            key={check.key}
+                                                            modelValue={submissionChecklist.value[check.key] === true}
+                                                            onUpdate:modelValue={(value: unknown) => (submissionChecklist.value = { ...submissionChecklist.value, [check.key]: Boolean(value) })}
+                                                            label={t(check.label)}
+                                                            density="compact"
+                                                            hideDetails
+                                                        />
+                                                    ))}
+                                                    {!submissionChecklistComplete.value && (
+                                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all submission checklist items before submitting")}</ThemedText>
+                                                    )}
+                                                </ThemedView>
+                                            )}
                                             <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
                                                 <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
                                                 <VBtn color="primary" loading={submissionLoading.value} disabled={!submissionChecklistComplete.value || submissionRef.value.trim().length < 3} onClick={() => void submitReport()}>{t("Submit report")}</VBtn>
@@ -832,22 +838,24 @@ const AmlReportsPage = dc(() => {
                         </ThemedView>
                         <VTextField label={t("AML case ID (optional)")} modelValue={form.value.caseId} onUpdate:modelValue={(value: string) => (form.value.caseId = value)} />
                         <VTextarea label={t("Notes")} modelValue={form.value.notes} onUpdate:modelValue={(value: string) => (form.value.notes = value)} rows={3} />
-                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Report checklist")}</ThemedText>
-                            {REPORT_CHECKS.map((check) => (
-                                <VCheckbox
-                                    key={check.key}
-                                    modelValue={reportChecklist.value[check.key] === true}
-                                    onUpdate:modelValue={(value: unknown) => (reportChecklist.value = { ...reportChecklist.value, [check.key]: Boolean(value) })}
-                                    label={t(check.label)}
-                                    density="compact"
-                                    hideDetails
-                                />
-                            ))}
-                            {!reportChecklistComplete.value && (
-                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all report checklist items before drafting")}</ThemedText>
-                            )}
-                        </ThemedView>
+                        {showChecklists && (
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Report checklist")}</ThemedText>
+                                {REPORT_CHECKS.map((check) => (
+                                    <VCheckbox
+                                        key={check.key}
+                                        modelValue={reportChecklist.value[check.key] === true}
+                                        onUpdate:modelValue={(value: unknown) => (reportChecklist.value = { ...reportChecklist.value, [check.key]: Boolean(value) })}
+                                        label={t(check.label)}
+                                        density="compact"
+                                        hideDetails
+                                    />
+                                ))}
+                                {!reportChecklistComplete.value && (
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all report checklist items before drafting")}</ThemedText>
+                                )}
+                            </ThemedView>
+                        )}
                         <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end", flexWrap: "wrap" }}>
                             <VBtn variant="text" onClick={() => (createOpen.value = false)}>{t("Cancel")}</VBtn>
                             <VBtn color="primary" loading={actionLoading.value} disabled={!form.value.reportingRuleId || !form.value.periodStart || !form.value.periodEnd || !reportChecklistComplete.value} onClick={() => void submit()}>{t("Create draft")}</VBtn>

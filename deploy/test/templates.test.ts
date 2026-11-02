@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { absoluteEnv, parseArgs, pm2Ecosystem, renderEnvFile, renderNginxTemplate } from "../deploy";
+import { absoluteEnv, frontendRuntimeConfig, parseArgs, pm2Ecosystem, renderEnvFile, renderNginxTemplate } from "../deploy";
 
 const TEMPLATES = join(import.meta.dirname, "..", "templates");
 const template = (name: string): string => readFileSync(join(TEMPLATES, name), "utf8");
@@ -51,6 +51,31 @@ describe("environment rendering", () => {
     expect(env.MTLS_CA_CERT_PATH).toBe("/var/www/pg-core/shared/certs/internal-ca.crt");
     expect(env.MTLS_SERVER_CERT_PATH).toBe("/var/www/pg-core/shared/certs/core-back.crt");
     expect(env.DATABASE_URL).toBe("mysql://user:pass@host/db");
+  });
+});
+
+describe("frontend runtime config", () => {
+  test("writes the admin checklist visibility flag", () => {
+    const config = {
+      ADMIN_SHOW_CHECKLISTS: undefined,
+      ADMIN_SHOW_SNAPSHOT_EXPORT_CHECKLIST: false,
+    } as unknown as Parameters<typeof frontendRuntimeConfig>[1];
+    expect(frontendRuntimeConfig("admin-front", config)).toEqual({
+      showChecklists: false,
+      showSnapshotExportChecklist: false,
+    });
+    expect(frontendRuntimeConfig("merchant-front", config)).toBeNull();
+  });
+
+  test("the master flag overrides the legacy snapshot flag", () => {
+    const config = {
+      ADMIN_SHOW_CHECKLISTS: true,
+      ADMIN_SHOW_SNAPSHOT_EXPORT_CHECKLIST: false,
+    } as unknown as Parameters<typeof frontendRuntimeConfig>[1];
+    expect(frontendRuntimeConfig("admin-front", config)).toEqual({
+      showChecklists: true,
+      showSnapshotExportChecklist: true,
+    });
   });
 });
 

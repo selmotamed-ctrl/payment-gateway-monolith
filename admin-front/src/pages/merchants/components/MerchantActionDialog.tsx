@@ -1,6 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
+import { areChecklistsVisible } from "@/constants/env";
 import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
@@ -43,6 +44,7 @@ const MerchantActionDialog = dc(
         onDone: () => void;
     }) => {
         const { t } = useLocale();
+        const showChecklists = areChecklistsVisible();
         const reasonCode = ref("MERCHANT_REQUEST");
         const notes = ref("");
         const emergency = ref(false);
@@ -79,7 +81,7 @@ const MerchantActionDialog = dc(
                     ? CLOSE_CHECKS
                     : [],
         );
-        const checklistComplete = computed(() => checks.value.every((check) => checklist.value[check.key] === true));
+        const checklistComplete = computed(() => !showChecklists || checks.value.every((check) => checklist.value[check.key] === true));
 
         const submit = async () => {
             if (!props.merchant) return;
@@ -162,7 +164,7 @@ const MerchantActionDialog = dc(
                                 <VSelect v-model={reasonCode.value} label={t("Reason code")} items={CLOSE_REASONS} />
                             </>
                         )}
-                        {checks.value.length > 0 && (
+                        {showChecklists && checks.value.length > 0 && (
                             <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                                 <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Action checklist")}</ThemedText>
                                 {checks.value.map((check) => (

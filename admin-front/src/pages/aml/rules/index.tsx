@@ -1,6 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
+import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
 import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VProgressCircular, VSelect, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
@@ -109,6 +110,7 @@ const RULE_CHECKS = [
 
 const AmlRulesPage = dc(() => {
     const { t } = useLocale();
+    const showChecklists = areChecklistsVisible();
     const router = useRouter();
     const rows = ref<AmlRule[]>([]);
     const total = ref(0);
@@ -271,7 +273,7 @@ const AmlRulesPage = dc(() => {
         }
     };
 
-    const ruleChecklistComplete = computed(() => RULE_CHECKS.every((check) => ruleChecklist.value[check.key] === true));
+    const ruleChecklistComplete = computed(() => !showChecklists || RULE_CHECKS.every((check) => ruleChecklist.value[check.key] === true));
 
     const submit = async () => {
         const scope = parseJsonObject(form.value.scopeText);
@@ -624,22 +626,24 @@ const AmlRulesPage = dc(() => {
                         <VTextField type="date" label={t("Effective from (optional)")} modelValue={form.value.effectiveFrom} onUpdate:modelValue={(value: string) => (form.value.effectiveFrom = value)} />
                         <VTextarea label={t("Scope JSON")} modelValue={form.value.scopeText} onUpdate:modelValue={(value: string) => (form.value.scopeText = value)} rows={3} hint={t("Use {} for all merchants and rails.")} persistentHint />
                         <VTextarea label={t("Params JSON")} modelValue={form.value.paramsText} onUpdate:modelValue={(value: string) => (form.value.paramsText = value)} rows={4} hint={PARAM_HELP[form.value.ruleType] ?? ""} persistentHint />
-                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Rule checklist")}</ThemedText>
-                            {RULE_CHECKS.map((check) => (
-                                <VCheckbox
-                                    key={check.key}
-                                    modelValue={ruleChecklist.value[check.key] === true}
-                                    onUpdate:modelValue={(value: unknown) => (ruleChecklist.value = { ...ruleChecklist.value, [check.key]: Boolean(value) })}
-                                    label={t(check.label)}
-                                    density="compact"
-                                    hideDetails
-                                />
-                            ))}
-                            {!ruleChecklistComplete.value && (
-                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all rule checklist items before drafting")}</ThemedText>
-                            )}
-                        </ThemedView>
+                        {showChecklists && (
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Rule checklist")}</ThemedText>
+                                {RULE_CHECKS.map((check) => (
+                                    <VCheckbox
+                                        key={check.key}
+                                        modelValue={ruleChecklist.value[check.key] === true}
+                                        onUpdate:modelValue={(value: unknown) => (ruleChecklist.value = { ...ruleChecklist.value, [check.key]: Boolean(value) })}
+                                        label={t(check.label)}
+                                        density="compact"
+                                        hideDetails
+                                    />
+                                ))}
+                                {!ruleChecklistComplete.value && (
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all rule checklist items before drafting")}</ThemedText>
+                                )}
+                            </ThemedView>
+                        )}
                         <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end", flexWrap: "wrap" }}>
                             <VBtn variant="text" onClick={() => (createOpen.value = false)}>{t("Cancel")}</VBtn>
                             <VBtn color="primary" loading={actionLoading.value} disabled={!form.value.code.trim() || !form.value.name.trim() || !ruleChecklistComplete.value} onClick={() => void submit()}>{t("Create draft")}</VBtn>

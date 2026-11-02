@@ -1,6 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
+import { areChecklistsVisible } from "@/constants/env";
 import {
     VAlert,
     VBtn,
@@ -139,6 +140,7 @@ type AcademyOverviewSummary = {
 
 const AcademyPage = dc(() => {
     const { t, current } = useLocale();
+    const showChecklists = areChecklistsVisible();
     const isArabic = computed(() => current.value === "ar");
 
     const progress = ref<EmployeeAcademyProgress>(emptyAcademyProgress());
@@ -436,7 +438,7 @@ const AcademyPage = dc(() => {
             .sort((left, right) => right.percent - left.percent || left.email.localeCompare(right.email));
     });
 
-    const teamExportChecklistComplete = computed(() => TEAM_EXPORT_CHECKS.every((check) => teamExportChecklist.value[check.key] === true));
+    const teamExportChecklistComplete = computed(() => !showChecklists || TEAM_EXPORT_CHECKS.every((check) => teamExportChecklist.value[check.key] === true));
 
     const exportCertifications = async () => {
         if (exportLoading.value) return;
@@ -524,24 +526,26 @@ const AcademyPage = dc(() => {
                     )}
                 />
 
-                <VCard variant="tonal">
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{isArabic.value ? "قائمة التحقق من تصدير الفريق" : "Team export checklist"}</ThemedText>
-                        {TEAM_EXPORT_CHECKS.map((check) => (
-                            <VCheckbox
-                                key={check.key}
-                                modelValue={teamExportChecklist.value[check.key] === true}
-                                onUpdate:modelValue={(value: unknown) => (teamExportChecklist.value = { ...teamExportChecklist.value, [check.key]: Boolean(value) })}
-                                label={isArabic.value ? check.ar : check.en}
-                                density="compact"
-                                hideDetails
-                            />
-                        ))}
-                        {!teamExportChecklistComplete.value && (
-                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{isArabic.value ? "أكمل قائمة التحقق قبل التصدير" : "Complete the export checklist before exporting"}</ThemedText>
-                        )}
-                    </VCardText>
-                </VCard>
+                {showChecklists && (
+                    <VCard variant="tonal">
+                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{isArabic.value ? "قائمة التحقق من تصدير الفريق" : "Team export checklist"}</ThemedText>
+                            {TEAM_EXPORT_CHECKS.map((check) => (
+                                <VCheckbox
+                                    key={check.key}
+                                    modelValue={teamExportChecklist.value[check.key] === true}
+                                    onUpdate:modelValue={(value: unknown) => (teamExportChecklist.value = { ...teamExportChecklist.value, [check.key]: Boolean(value) })}
+                                    label={isArabic.value ? check.ar : check.en}
+                                    density="compact"
+                                    hideDetails
+                                />
+                            ))}
+                            {!teamExportChecklistComplete.value && (
+                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{isArabic.value ? "أكمل قائمة التحقق قبل التصدير" : "Complete the export checklist before exporting"}</ThemedText>
+                            )}
+                        </VCardText>
+                    </VCard>
+                )}
 
                 {summary.value && (
                     <VCard variant="flat" style={{ borderRadius: "16px" }}>

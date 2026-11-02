@@ -1,6 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
+import { areChecklistsVisible } from "@/constants/env";
 import { useRoute, useRouter } from "vue-router";
 import {
     VAlert,
@@ -97,6 +98,7 @@ const RESOLVE_CHECKS = [
 
 const OperatorCaseDetailPage = dc(() => {
     const { t } = useLocale();
+    const showChecklists = areChecklistsVisible();
     const route = useRoute();
     const router = useRouter();
 
@@ -272,7 +274,7 @@ const OperatorCaseDetailPage = dc(() => {
         }
     };
 
-    const resolveChecklistComplete = computed(() => RESOLVE_CHECKS.every((check) => resolveChecklist.value[check.key] === true));
+    const resolveChecklistComplete = computed(() => !showChecklists || RESOLVE_CHECKS.every((check) => resolveChecklist.value[check.key] === true));
 
     const proposeResolution = async () => {
         if (!detail.value || resolveReason.value.trim().length < 3) return;
@@ -1045,22 +1047,24 @@ const OperatorCaseDetailPage = dc(() => {
                             hint={t("Optional evidence notes for the checker.")}
                             persistentHint
                         />
-                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Resolution checklist")}</ThemedText>
-                            {RESOLVE_CHECKS.map((check) => (
-                                <VCheckbox
-                                    key={check.key}
-                                    modelValue={resolveChecklist.value[check.key] === true}
-                                    onUpdate:modelValue={(value: unknown) => (resolveChecklist.value = { ...resolveChecklist.value, [check.key]: Boolean(value) })}
-                                    label={t(check.label)}
-                                    density="compact"
-                                    hideDetails
-                                />
-                            ))}
-                            {!resolveChecklistComplete.value && (
-                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all resolution checklist items before submitting")}</ThemedText>
-                            )}
-                        </ThemedView>
+                        {showChecklists && (
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Resolution checklist")}</ThemedText>
+                                {RESOLVE_CHECKS.map((check) => (
+                                    <VCheckbox
+                                        key={check.key}
+                                        modelValue={resolveChecklist.value[check.key] === true}
+                                        onUpdate:modelValue={(value: unknown) => (resolveChecklist.value = { ...resolveChecklist.value, [check.key]: Boolean(value) })}
+                                        label={t(check.label)}
+                                        density="compact"
+                                        hideDetails
+                                    />
+                                ))}
+                                {!resolveChecklistComplete.value && (
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all resolution checklist items before submitting")}</ThemedText>
+                                )}
+                            </ThemedView>
+                        )}
                         <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
                             <VBtn variant="text" onClick={() => (resolveOpen.value = false)}>
                                 {t("Cancel")}

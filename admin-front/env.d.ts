@@ -20,7 +20,21 @@ interface String {
     ): string;
 }
 
+interface ImportMetaEnv {
+    readonly VITE_SEND_NOT_FOUND_TRANSLATIONS?: string;
+    readonly VITE_SHOW_CHECKLISTS?: string;
+    readonly VITE_SHOW_SNAPSHOT_EXPORT_CHECKLIST?: string;
+}
+
+interface ImportMeta {
+    readonly env: ImportMetaEnv;
+}
+
 interface Window {
+    __PG_RUNTIME_CONFIG__?: {
+        showChecklists?: boolean;
+        showSnapshotExportChecklist?: boolean;
+    };
     $confirmDialog: {
         show: (opts: ConfirmOptions) => Promise<boolean>;
     };

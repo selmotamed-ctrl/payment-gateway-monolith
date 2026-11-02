@@ -276,7 +276,11 @@ which is the fastest way to confirm that your deduplication is what you meant.
 
 `ADMIN_SSH_*`, `ADMIN_SUDO_PASSWORD`, `ADMIN_PRIVATE_IP`,
 `ADMIN_BACK_PORT` (4101), `ADMIN_NGINX_LAN_PORT` (8443), `ADMIN_DOMAIN`,
-`ADMIN_REMOTE_DIR`.
+`ADMIN_REMOTE_DIR`, `ADMIN_SHOW_CHECKLISTS` (`true` by default; set `false` to
+hide every action/export checklist in the admin portal). The legacy
+`ADMIN_SHOW_SNAPSHOT_EXPORT_CHECKLIST` key is still honored when the master key
+is omitted. The value is written into the release as `runtime-config.js`, so it
+takes effect on the next deploy without rebuilding the SPA.
 
 ### Merchant (`MERCHANT_*`) and Checkout (`CHECKOUT_*`)
 

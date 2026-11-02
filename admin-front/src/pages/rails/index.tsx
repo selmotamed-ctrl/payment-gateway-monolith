@@ -1,6 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
+import { areChecklistsVisible } from "@/constants/env";
 import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/PageHeader";
@@ -156,6 +157,7 @@ type RailSummary = {
 
 const RailsPage = dc(() => {
     const { t } = useLocale();
+    const showChecklists = areChecklistsVisible();
     const summary = ref<RailSummary | null>(null);
     const search = ref<string | null>(null);
     const filters = ref<FilterValues>({});
@@ -342,7 +344,7 @@ const RailsPage = dc(() => {
         editOpen.value = true;
     };
 
-    const railEditChecklistComplete = computed(() => RAIL_EDIT_CHECKS.every((check) => railEditChecklist.value[check.key] === true));
+    const railEditChecklistComplete = computed(() => !showChecklists || RAIL_EDIT_CHECKS.every((check) => railEditChecklist.value[check.key] === true));
 
     const saveRail = async () => {
         if (!editingRail.value || savingRail.value) {
@@ -405,7 +407,7 @@ const RailsPage = dc(() => {
         editingFieldIndex.value = index;
     };
 
-    const railFieldChecklistComplete = computed(() => RAIL_FIELD_CHECKS.every((check) => railFieldChecklist.value[check.key] === true));
+    const railFieldChecklistComplete = computed(() => !showChecklists || RAIL_FIELD_CHECKS.every((check) => railFieldChecklist.value[check.key] === true));
 
     const persistFields = async (next: PublicField[]): Promise<void> => {
         if (!selected.value) {
@@ -466,7 +468,7 @@ const RailsPage = dc(() => {
         await persistFields(next);
     };
 
-    const summaryExportChecklistComplete = computed(() => SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
+    const summaryExportChecklistComplete = computed(() => !showChecklists || SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
 
     const exportSummary = async () => {
         if (summaryExportLoading.value) return;
@@ -581,22 +583,24 @@ const RailsPage = dc(() => {
                                 <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
                             </ThemedView>
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
-                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
-                                    {SUMMARY_EXPORT_CHECKS.map((check) => (
-                                        <VCheckbox
-                                            key={check.key}
-                                            modelValue={summaryExportChecklist.value[check.key] === true}
-                                            onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
-                                            label={t(check.label)}
-                                            density="compact"
-                                            hideDetails
-                                        />
-                                    ))}
-                                    {!summaryExportChecklistComplete.value && (
-                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
-                                    )}
-                                </ThemedView>
+                                {showChecklists && (
+                                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
+                                        {SUMMARY_EXPORT_CHECKS.map((check) => (
+                                            <VCheckbox
+                                                key={check.key}
+                                                modelValue={summaryExportChecklist.value[check.key] === true}
+                                                onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
+                                                label={t(check.label)}
+                                                density="compact"
+                                                hideDetails
+                                            />
+                                        ))}
+                                        {!summaryExportChecklistComplete.value && (
+                                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
+                                        )}
+                                    </ThemedView>
+                                )}
                                 {[
                                     { label: t("Rails"), value: String(summary.value.total), tone: "info" as const },
                                     { label: t("Active"), value: String(summary.value.active), tone: "success" as const },
@@ -771,22 +775,24 @@ const RailsPage = dc(() => {
                             />
                         </ThemedView>
                         <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Rail field checklist")}</ThemedText>
-                                {RAIL_FIELD_CHECKS.map((check) => (
-                                    <VCheckbox
-                                        key={check.key}
-                                        modelValue={railFieldChecklist.value[check.key] === true}
-                                        onUpdate:modelValue={(value: unknown) => (railFieldChecklist.value = { ...railFieldChecklist.value, [check.key]: Boolean(value) })}
-                                        label={t(check.label)}
-                                        density="compact"
-                                        hideDetails
-                                    />
-                                ))}
-                                {!railFieldChecklistComplete.value && (
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all rail field checklist items before saving")}</ThemedText>
-                                )}
-                            </ThemedView>
+                            {showChecklists && (
+                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Rail field checklist")}</ThemedText>
+                                    {RAIL_FIELD_CHECKS.map((check) => (
+                                        <VCheckbox
+                                            key={check.key}
+                                            modelValue={railFieldChecklist.value[check.key] === true}
+                                            onUpdate:modelValue={(value: unknown) => (railFieldChecklist.value = { ...railFieldChecklist.value, [check.key]: Boolean(value) })}
+                                            label={t(check.label)}
+                                            density="compact"
+                                            hideDetails
+                                        />
+                                    ))}
+                                    {!railFieldChecklistComplete.value && (
+                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all rail field checklist items before saving")}</ThemedText>
+                                    )}
+                                </ThemedView>
+                            )}
                             {editingFieldIndex.value !== null && (
                                 <VBtn variant="text" onClick={() => resetFieldForm()}>
                                     {t("Cancel")}
@@ -864,22 +870,24 @@ const RailsPage = dc(() => {
                             </div>
                         </div>
                         <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Rail edit checklist")}</ThemedText>
-                                {RAIL_EDIT_CHECKS.map((check) => (
-                                    <VCheckbox
-                                        key={check.key}
-                                        modelValue={railEditChecklist.value[check.key] === true}
-                                        onUpdate:modelValue={(value: unknown) => (railEditChecklist.value = { ...railEditChecklist.value, [check.key]: Boolean(value) })}
-                                        label={t(check.label)}
-                                        density="compact"
-                                        hideDetails
-                                    />
-                                ))}
-                                {!railEditChecklistComplete.value && (
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all rail checklist items before saving")}</ThemedText>
-                                )}
-                            </ThemedView>
+                            {showChecklists && (
+                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Rail edit checklist")}</ThemedText>
+                                    {RAIL_EDIT_CHECKS.map((check) => (
+                                        <VCheckbox
+                                            key={check.key}
+                                            modelValue={railEditChecklist.value[check.key] === true}
+                                            onUpdate:modelValue={(value: unknown) => (railEditChecklist.value = { ...railEditChecklist.value, [check.key]: Boolean(value) })}
+                                            label={t(check.label)}
+                                            density="compact"
+                                            hideDetails
+                                        />
+                                    ))}
+                                    {!railEditChecklistComplete.value && (
+                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all rail checklist items before saving")}</ThemedText>
+                                    )}
+                                </ThemedView>
+                            )}
                             <VBtn variant="text" onClick={() => (editOpen.value = false)}>
                                 {t("Cancel")}
                             </VBtn>
