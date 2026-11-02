@@ -5,3 +5,4 @@
 **/dist
 # local all-in-one deployment
 .local/
+**/*.Identifier
