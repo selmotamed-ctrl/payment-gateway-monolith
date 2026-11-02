@@ -46,7 +46,7 @@ export const rowTone = (row: Record<string, unknown>): StatusTone => {
     return "neutral";
 };
 
-export type CriticalRowTone = "danger" | "warning" | null;
+export type CriticalRowTone = "danger" | "warning" | "info" | "success" | null;
 
 const CRITICAL_VALUES = new Set([
     "P1",
@@ -92,6 +92,8 @@ const OVERDUE_FLAGS = ["slaOverdue", "isOverdue", "evidenceOverdue", "expired", 
 
 const DANGER_COLORS = ["#dc2626", "#ef4444", "#b91c1c", "#e11d48", "#f87171"];
 const WARNING_COLORS = ["#d97706", "#f59e0b", "#b45309", "#fbbf24", "#eab308"];
+const INFO_COLORS = ["#2563eb", "#3b82f6", "#0f6bff", "#1d4ed8", "#60a5fa"];
+const SUCCESS_COLORS = ["#059669", "#16a34a", "#22c55e", "#15803d", "#4ade80"];
 
 const isDangerColor = (value: string): boolean =>
     DANGER_COLORS.some((color) => value.includes(color)) || value.includes("danger") || value.includes("error");
@@ -105,12 +107,28 @@ const isWarningColor = (value: string): boolean =>
  * when they resolve to a danger or warning token.
  */
 export const criticalRowTone = (row: Record<string, unknown>, rowColor?: string): CriticalRowTone => {
+    const color = String(rowColor ?? "").trim().toLowerCase();
+    if (color) {
+        if (DANGER_COLORS.some((entry) => color.includes(entry)) || color.includes("danger") || color.includes("error") || color.includes("red")) {
+            return "danger";
+        }
+        if (WARNING_COLORS.some((entry) => color.includes(entry)) || color.includes("warning") || color.includes("amber") || color.includes("orange")) {
+            return "warning";
+        }
+        if (INFO_COLORS.some((entry) => color.includes(entry)) || color.includes("info") || color.includes("primary") || color.includes("blue")) {
+            return "info";
+        }
+        if (SUCCESS_COLORS.some((entry) => color.includes(entry)) || color.includes("success") || color.includes("green")) {
+            return "success";
+        }
+    }
+
     for (const key of CRITICAL_KEYS) {
         const value = row[key];
         if (typeof value !== "string" || !value) continue;
         const normalized = value.trim().toUpperCase();
-        if (CRITICAL_VALUES.has(normalized)) return "danger";
-        if (OVERDUE_VALUES.has(normalized)) return "danger";
+        if (CRITICAL_VALUES.has(normalized) || OVERDUE_VALUES.has(normalized)) return "danger";
+        if (WARNING_VALUES.has(normalized)) return "warning";
     }
 
     if (OVERDUE_FLAGS.some((key) => row[key] === true)) {
@@ -122,8 +140,5 @@ export const criticalRowTone = (row: Record<string, unknown>, rowColor?: string)
         return "danger";
     }
 
-    // Legacy page-level color hints are intentionally ignored. Only P1,
-    // critical, breaker, and overdue semantics may paint the hairline stripe.
-    void rowColor;
     return null;
 };

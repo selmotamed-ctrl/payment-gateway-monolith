@@ -529,7 +529,7 @@ html[dir="rtl"] .pg-unified-table table > thead > tr > th {
 .pg-unified-table table > tbody > tr > td {
   height: 40px !important;
   max-height: 40px !important;
-  padding: 0 14px !important;
+  padding: 6px 14px !important;
   font-size: 13px !important;
   line-height: 1.35 !important;
   color: var(--pg-ink-primary);
@@ -1162,4 +1162,36 @@ html[dir="rtl"] .pg-filter-label {
   width: 100%;
   min-width: 0;
   overflow-x: hidden;
+}
+
+/* Inline-start row indicator, subtle 2px semantic stripe */
+.pg-row-indicator > td:first-child {
+  box-shadow: inset 2px 0 0 var(--pg-status-neutral-dot);
+}
+.pg-row-indicator--danger > td:first-child {
+  box-shadow: inset 2px 0 0 var(--pg-status-danger-dot);
+}
+.pg-row-indicator--warning > td:first-child {
+  box-shadow: inset 2px 0 0 var(--pg-status-warning-dot);
+}
+.pg-row-indicator--info > td:first-child {
+  box-shadow: inset 2px 0 0 var(--pg-status-info-dot);
+}
+.pg-row-indicator--success > td:first-child {
+  box-shadow: inset 2px 0 0 var(--pg-status-success-dot);
+}
+html[dir="rtl"] .pg-row-indicator > td:first-child {
+  box-shadow: inset -2px 0 0 var(--pg-status-neutral-dot);
+}
+html[dir="rtl"] .pg-row-indicator--danger > td:first-child {
+  box-shadow: inset -2px 0 0 var(--pg-status-danger-dot);
+}
+html[dir="rtl"] .pg-row-indicator--warning > td:first-child {
+  box-shadow: inset -2px 0 0 var(--pg-status-warning-dot);
+}
+html[dir="rtl"] .pg-row-indicator--info > td:first-child {
+  box-shadow: inset -2px 0 0 var(--pg-status-info-dot);
+}
+html[dir="rtl"] .pg-row-indicator--success > td:first-child {
+  box-shadow: inset -2px 0 0 var(--pg-status-success-dot);
 }

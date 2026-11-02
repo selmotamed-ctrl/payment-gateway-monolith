@@ -1,5 +1,6 @@
 import "./styling.css";
 import { readCell, type BaseTableProps, type IconProps, type RefreshMethodData, type RefreshMethodWithNextSkip, type TableHeader } from "./types";
+import { criticalRowTone } from "./statusTone";
 import { ThemedView } from "../ThemedView";
 import { useLocale } from "vuetify";
 import Icon from "@/components/Icon/index.vue";
@@ -271,11 +272,22 @@ export const Table = defineComponent(
                                         return <props.Row key={`${index}`} items={row}></props.Row>;
                                     }
 
+                                    let rowColor: string | undefined;
+                                    try {
+                                        rowColor = props.rowColor?.(row);
+                                    } catch {
+                                        rowColor = undefined;
+                                    }
+                                    const indicatorTone = criticalRowTone(row as Record<string, unknown>, rowColor);
+
                                     return (
                                         <>
                                             <tr
                                                 key={`${index + props.skip}`}
-                                                class="table-data-row"
+                                                class={[
+                                                    "table-data-row",
+                                                    indicatorTone ? `pg-row-indicator pg-row-indicator--${indicatorTone}` : "",
+                                                ]}
                                             >
                                                 {props.headers.map((header, headerIndex) => {
                                                     const cellKey = `${index}${headerIndex}`;
