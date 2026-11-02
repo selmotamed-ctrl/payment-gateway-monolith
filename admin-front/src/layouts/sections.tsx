@@ -37,6 +37,7 @@ export const routesAuthorities: {
     AmlReports: ["aml.read_confidential"],
     OperatorCases: ["case:read", "operator:read"],
     OperatorCaseDetail: ["case:read", "operator:read"],
+    GatewayInquirySchedules: ["case:read", "operator:read"],
     Disputes: ["dispute:read"],
     Adjustments: ["adjustments.propose"],
     CashOuts: ["cashout.process"],
@@ -156,6 +157,12 @@ export const useSections = () => {
                     label: t("Operator Cases"),
                     name: "OperatorCases",
                     icon: "mdi-lifebuoy",
+                    if: () => hasOneOfAuthorities(["case:read", "operator:read"]),
+                },
+                {
+                    label: t("Inquiry Schedule"),
+                    name: "GatewayInquirySchedules",
+                    icon: "mdi-radar",
                     if: () => hasOneOfAuthorities(["case:read", "operator:read"]),
                 },
                 {

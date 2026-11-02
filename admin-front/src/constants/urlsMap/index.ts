@@ -117,6 +117,12 @@ export const urlsMap = {
     operatorCaseUpdate: (id: string) => `v1/admin/operator-cases/${id}`,
     operatorCaseResolve: (id: string) => `v1/admin/operator-cases/${id}/resolve`,
     operatorCasesBulkInquire: "v1/admin/operator-cases/bulk-inquire",
+    gatewayInquiries: "v1/admin/gateway-inquiries",
+    gatewayInquiriesSummary: "v1/admin/gateway-inquiries/summary",
+    gatewayInquiryDetail: (id: string) => `v1/admin/gateway-inquiries/${id}`,
+    gatewayInquiryCancel: (id: string) => `v1/admin/gateway-inquiries/${id}/cancel`,
+    gatewayInquiryRunNow: (id: string) => `v1/admin/gateway-inquiries/${id}/run-now`,
+    gatewayInquiryRetry: (id: string) => `v1/admin/gateway-inquiries/${id}/retry`,
     attemptInquire: (id: string) => `v1/admin/attempts/${id}/inquire`,
 
     reconciliationSources: "v1/admin/reconciliation/sources",

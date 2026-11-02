@@ -153,6 +153,17 @@ export const INQUIRY_REASON_HELP: Record<string, string> = {
     ATTEMPT_NOT_INQUIRABLE: "Only UNKNOWN or VERIFYING attempts can be inquired.",
     GATEWAY_HAS_NO_STATUS_INQUIRY:
         "The pinned gateway version has supports_status_check = false. Use the statement or a Maker-Checker manual outcome instead.",
+    INQUIRY_ALREADY_RUNNING: "An inquiry is already running for this attempt.",
+};
+
+export const GATEWAY_INQUIRY_STATUS_HELP: Record<string, string> = {
+    SCHEDULED: "The inquiry is waiting for its next run time. The poll worker will execute it automatically.",
+    RUNNING: "The poll worker is currently asking the gateway for the attempt status.",
+    RETRYING: "The inquiry returned a non-terminal result or a transient error. It will run again automatically.",
+    COMPLETED: "The inquiry finished or the attempt reached a terminal state.",
+    FAILED: "The inquiry ended with a technical failure and is not scheduled to run again.",
+    CANCELLED: "An operator cancelled the schedule before it ran.",
+    EXPIRED: "The route polling window elapsed before a definitive result was reached.",
 };
 
 export const COLUMN_HELP = {

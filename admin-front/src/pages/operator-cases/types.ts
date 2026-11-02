@@ -27,6 +27,72 @@ export type OperatorCaseApproval = {
     checker?: { id: string; email: string; role: string } | null;
 };
 
+export type GatewayInquiryScheduleStatus =
+    | "SCHEDULED"
+    | "RUNNING"
+    | "RETRYING"
+    | "COMPLETED"
+    | "FAILED"
+    | "CANCELLED"
+    | "EXPIRED";
+
+export type GatewayInquirySchedule = {
+    id: string;
+    status: GatewayInquiryScheduleStatus;
+    source: string;
+    operatorCaseId: string | null;
+    caseRef: string | null;
+    caseState: string | null;
+    casePriority: string | null;
+    caseType: string | null;
+    attemptId: string;
+    attemptReference: string | null;
+    attemptStatus: string | null;
+    attemptSubstatus: string | null;
+    attemptTerminal: boolean;
+    merchantId: string | null;
+    merchantName: string;
+    railCode: string | null;
+    railName: string | null;
+    gatewayId: string | null;
+    gatewayCode: string | null;
+    gatewayName: string | null;
+    gatewaySupportsStatusCheck: boolean;
+    amount: string | null;
+    currency: string | null;
+    providerReference: string | null;
+    scheduledByEmail: string | null;
+    scheduledAt: string;
+    previousNextCheckAt: string | null;
+    windowStartedAt: string | null;
+    nextRunAt: string;
+    lastRunAt: string | null;
+    attempts: number;
+    lastResult: string | null;
+    lastError: string | null;
+    completedAt: string | null;
+    cancelledAt: string | null;
+    cancelledByEmail: string | null;
+    cancelReason: string | null;
+    isOverdue: boolean;
+    canCancel: boolean;
+    canRunNow: boolean;
+    canRetry: boolean;
+};
+
+export type GatewayInquiryScheduleSummary = {
+    total: number;
+    scheduled: number;
+    running: number;
+    retrying: number;
+    completed: number;
+    failed: number;
+    cancelled: number;
+    expired: number;
+    overdue: number;
+    byStatus: Record<string, number>;
+};
+
 export type OperatorCaseSummary = {
     id: string;
     caseId: string;
@@ -74,6 +140,7 @@ export type OperatorCaseSummary = {
     gatewaySupportsStatusCheck: boolean;
     inquiryEligibility: InquiryEligibility;
     resolutionNotes?: string | null;
+    latestInquirySchedule?: (Partial<GatewayInquirySchedule> & { createdAt?: string }) | null;
 };
 
 export type OperatorCaseAttempt = {
@@ -210,6 +277,7 @@ export type OperatorCaseAttempt = {
 
 export type OperatorCaseDetail = OperatorCaseSummary & {
     updatedAt: string;
+    inquirySchedules?: Array<Partial<GatewayInquirySchedule> & { createdAt?: string }>;
     assignee?: { id: string; email: string; role: string } | null;
     attempt?: OperatorCaseAttempt | null;
     approvalRequest?: OperatorCaseApproval | null;
@@ -261,6 +329,7 @@ export type BulkInquiryResult = {
         caseRef?: string;
         attemptId?: string | null;
         attemptReference?: string | null;
+        scheduleId?: string;
         status: "SCHEDULED" | "SKIPPED";
         reason: string;
         message: string;

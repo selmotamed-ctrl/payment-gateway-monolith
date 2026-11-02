@@ -7561,10 +7561,35 @@ const operatorCaseListInclude = {
       runId: true,
     },
   },
+  inquirySchedules: {
+    orderBy: { createdAt: "desc" },
+    take: 1,
+    select: {
+      id: true,
+      status: true,
+      source: true,
+      nextRunAt: true,
+      lastRunAt: true,
+      attempts: true,
+      lastResult: true,
+      lastError: true,
+      createdAt: true,
+      completedAt: true,
+      cancelledAt: true,
+    },
+  },
 } as const;
 
 const operatorCaseDetailInclude = {
   ...operatorCaseListInclude,
+  inquirySchedules: {
+    orderBy: { createdAt: "desc" },
+    take: 20,
+    include: {
+      scheduledBy: { select: { id: true, email: true, role: true } },
+      cancelledBy: { select: { id: true, email: true, role: true } },
+    },
+  },
   approvalRequest: {
     include: {
       maker: { select: { id: true, email: true, role: true } },
@@ -7890,14 +7915,146 @@ const flattenOperatorCase = (entry: any): Record<string, unknown> => {
     assigneeEmail: entry.assignee?.email ?? null,
     gatewaySupportsStatusCheck: supportsStatusCheck,
     inquiryEligibility: eligibility,
+    latestInquirySchedule: entry?.inquirySchedules?.[0] ?? null,
   };
+};
+
+const gatewayInquiryListInclude = {
+  operatorCase: {
+    select: {
+      id: true,
+      state: true,
+      priority: true,
+      kind: true,
+      slaDueAt: true,
+      attempt: { select: { reference: true } },
+      reconciliationItem: { select: { ourReference: true, providerReference: true } },
+    },
+  },
+  scheduledBy: { select: { id: true, email: true, role: true } },
+  cancelledBy: { select: { id: true, email: true, role: true } },
+  attempt: {
+    select: {
+      id: true,
+      reference: true,
+      status: true,
+      substatus: true,
+      terminalAt: true,
+      nextCheckAt: true,
+      createdAt: true,
+      totalChargedAmount: true,
+      currency: true,
+      providerReference: true,
+      merchant: { select: { id: true, tradeName: true, legalName: true } },
+      rail: { select: { id: true, code: true, nameEn: true } },
+      route: {
+        select: {
+          id: true,
+          gateway: { select: { id: true, code: true, name: true } },
+        },
+      },
+      gatewayVersion: {
+        select: {
+          id: true,
+          versionNumber: true,
+          setting: { select: { supportsStatusCheck: true } },
+        },
+      },
+    },
+  },
+} as const;
+
+const gatewayInquiryDetailInclude = {
+  ...gatewayInquiryListInclude,
+} as const;
+
+const flattenGatewayInquiry = (entry: any): Record<string, unknown> => {
+  const attempt = entry?.attempt ?? null;
+  const operatorCase = entry?.operatorCase ?? null;
+  const gateway = attempt?.route?.gateway ?? null;
+  const now = Date.now();
+  const active = ["SCHEDULED", "RUNNING", "RETRYING"].includes(String(entry.status ?? ""));
+  const nextRunAt = entry.nextRunAt ?? null;
+  const attemptTerminal = Boolean(attempt?.terminalAt)
+    || ["SUCCEEDED", "FAILED", "EXPIRED", "CANCELLED", "BLOCKED"].includes(String(attempt?.status ?? ""));
+  return {
+    id: entry.id,
+    status: entry.status,
+    source: entry.source,
+    operatorCaseId: entry.operatorCaseId ?? null,
+    caseRef: operatorCase?.attempt?.reference
+      ?? operatorCase?.reconciliationItem?.ourReference
+      ?? operatorCase?.reconciliationItem?.providerReference
+      ?? entry.operatorCaseId
+      ?? null,
+    caseState: operatorCase?.state ?? null,
+    casePriority: operatorCase?.priority ?? null,
+    caseType: operatorCase?.kind ?? null,
+    attemptId: entry.attemptId,
+    attemptReference: attempt?.reference ?? null,
+    attemptStatus: attempt?.status ?? null,
+    attemptSubstatus: attempt?.substatus ?? null,
+    attemptTerminal,
+    merchantId: attempt?.merchant?.id ?? null,
+    merchantName: attempt?.merchant?.tradeName || attempt?.merchant?.legalName || "",
+    railCode: attempt?.rail?.code ?? null,
+    railName: attempt?.rail?.nameEn ?? null,
+    gatewayId: gateway?.id ?? null,
+    gatewayCode: gateway?.code ?? null,
+    gatewayName: gateway?.name ?? null,
+    gatewaySupportsStatusCheck: attempt?.gatewayVersion?.setting?.supportsStatusCheck === true,
+    amount: attempt?.totalChargedAmount ?? null,
+    currency: attempt?.currency ?? null,
+    providerReference: attempt?.providerReference ?? null,
+    scheduledByEmail: entry.scheduledBy?.email ?? null,
+    scheduledAt: entry.createdAt,
+    previousNextCheckAt: entry.previousNextCheckAt ?? null,
+    windowStartedAt: entry.windowStartedAt ?? null,
+    nextRunAt,
+    lastRunAt: entry.lastRunAt ?? null,
+    attempts: entry.attempts ?? 0,
+    lastResult: entry.lastResult ?? null,
+    lastError: entry.lastError ?? null,
+    completedAt: entry.completedAt ?? null,
+    cancelledAt: entry.cancelledAt ?? null,
+    cancelledByEmail: entry.cancelledBy?.email ?? null,
+    cancelReason: entry.cancelReason ?? null,
+    isOverdue: active && nextRunAt !== null && new Date(nextRunAt).getTime() <= now,
+    canCancel: ["SCHEDULED", "RETRYING"].includes(String(entry.status ?? "")) && !attemptTerminal,
+    canRunNow: ["SCHEDULED", "RETRYING"].includes(String(entry.status ?? "")) && !attemptTerminal,
+    canRetry: ["FAILED", "EXPIRED", "CANCELLED"].includes(String(entry.status ?? "")) && !attemptTerminal,
+  };
+};
+
+const writeGatewayInquiryAudit = async (
+  target: typeof client,
+  input: {
+    actor: { userId: string; role: string | null };
+    scheduleId: string;
+    action: string;
+    beforeJson?: unknown;
+    afterJson?: unknown;
+  },
+) => {
+  await target.auditLog.create({
+    data: {
+      actorId: input.actor.userId,
+      role: input.actor.role ?? "OPERATOR",
+      action: input.action,
+      entityType: "GATEWAY_INQUIRY",
+      entityId: input.scheduleId,
+      beforeJson: (input.beforeJson ?? {}) as never,
+      afterJson: (input.afterJson ?? {}) as never,
+    },
+  });
 };
 
 const scheduleOperatorCaseInquiry = async (
   target: typeof client,
   operatorCase: any,
   actor: { userId: string; role: string | null },
-): Promise<{ status: "SCHEDULED" | "SKIPPED"; reason?: string }> => {
+  input: { reason?: string; checklist?: string[] } = {},
+): Promise<{ status: "SCHEDULED" | "SKIPPED"; reason?: string; scheduleId?: string }> => {
   const attempt = operatorCase.attempt;
   const supportsStatusCheck = attempt?.gatewayVersion?.setting?.supportsStatusCheck === true;
   const eligibility = operatorCaseInquiryEligibility({
@@ -7909,7 +8066,19 @@ const scheduleOperatorCaseInquiry = async (
   if (!eligibility.eligible) {
     return { status: "SKIPPED", reason: eligibility.reason };
   }
+  const existing = await target.gatewayInquirySchedule.findFirst({
+    where: {
+      attemptId: operatorCase.attemptId,
+      status: { in: ["SCHEDULED", "RUNNING", "RETRYING"] },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  if (existing?.status === "RUNNING") {
+    throw new ApiError(409, "INQUIRY_ALREADY_RUNNING", "An inquiry is already running for this attempt");
+  }
   const nextCheckAt = new Date(Date.now() + 1000);
+  const previousNextCheckAt = attempt?.nextCheckAt ?? null;
+  let scheduleId = existing?.id ?? "";
   await target.$transaction(async (tx) => {
     const updated = await tx.paymentAttempt.updateMany({
       where: {
@@ -7930,6 +8099,38 @@ const scheduleOperatorCaseInquiry = async (
       where: { id: operatorCase.id, state: { in: ["OPEN", "IN_PROGRESS"] } },
       data: { state: "IN_PROGRESS" },
     });
+    if (existing) {
+      await tx.gatewayInquirySchedule.update({
+        where: { id: existing.id },
+        data: {
+          operatorCaseId: operatorCase.id,
+          status: "SCHEDULED",
+          scheduledByUserId: actor.userId,
+          reason: input.reason ?? existing.reason ?? null,
+          checklist: input.checklist ?? existing.checklist ?? undefined,
+          windowStartedAt: nextCheckAt,
+          nextRunAt: nextCheckAt,
+          lastError: null,
+        },
+      });
+      scheduleId = existing.id;
+    } else {
+      const created = await tx.gatewayInquirySchedule.create({
+        data: {
+          attemptId: operatorCase.attemptId,
+          operatorCaseId: operatorCase.id,
+          source: "OPERATOR_CASE",
+          status: "SCHEDULED",
+          scheduledByUserId: actor.userId,
+          reason: input.reason ?? null,
+          checklist: input.checklist ?? undefined,
+          previousNextCheckAt,
+          windowStartedAt: nextCheckAt,
+          nextRunAt: nextCheckAt,
+        },
+      });
+      scheduleId = created.id;
+    }
     await tx.auditLog.create({
       data: {
         actorId: actor.userId,
@@ -7941,12 +8142,13 @@ const scheduleOperatorCaseInquiry = async (
         afterJson: {
           state: "IN_PROGRESS",
           attemptId: operatorCase.attemptId,
+          scheduleId,
           nextCheckAt: nextCheckAt.toISOString(),
         },
       },
     });
   });
-  return { status: "SCHEDULED" };
+  return { status: "SCHEDULED", scheduleId };
 };
 
 router.get("/operator-cases", async (request: Request, response: Response) => {
@@ -8161,6 +8363,263 @@ router.get("/operator-cases/summary/export", async (request: Request, response: 
 });
 
 
+router.get("/gateway-inquiries", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["case:read", "operator:read"]);
+  const built = buildListQuery(request.query, {
+    search: [
+      "id",
+      "attempt.reference",
+      "attempt.providerReference",
+      "attempt.merchant.tradeName",
+      "attempt.merchant.legalName",
+      "operatorCaseId",
+    ],
+    contains: {
+      attemptReference: "attempt.reference",
+      merchantName: ["attempt.merchant.tradeName", "attempt.merchant.legalName"],
+      providerReference: "attempt.providerReference",
+    },
+    in: { status: "status", source: "source" },
+    equals: {
+      attemptId: "attemptId",
+      operatorCaseId: "operatorCaseId",
+      gatewayId: "attempt.route.gateway.id",
+    },
+    dates: {
+      createdAt: { path: "createdAt" },
+      nextRunAt: { path: "nextRunAt", fromKey: "nextRunFrom", toKey: "nextRunTo" },
+    },
+    sortable: {
+      status: "status",
+      source: "source",
+      scheduledAt: "createdAt",
+      nextRunAt: "nextRunAt",
+      lastRunAt: "lastRunAt",
+      attempts: "attempts",
+    },
+    defaultSort: [{ status: "asc" }, { createdAt: "desc" }],
+  });
+  const [schedules, total] = await Promise.all([
+    client.gatewayInquirySchedule.findMany({
+      where: built.where as never,
+      orderBy: built.orderBy as never,
+      include: gatewayInquiryListInclude,
+      skip: built.skip,
+      take: built.take,
+    }),
+    client.gatewayInquirySchedule.count({ where: built.where as never }),
+  ]);
+  response.json(listResponse("schedules", schedules.map(flattenGatewayInquiry), total, built));
+});
+
+router.get("/gateway-inquiries/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["case:read", "operator:read"]);
+  const now = new Date();
+  const grouped = await client.gatewayInquirySchedule.groupBy({
+    by: ["status"],
+    _count: { _all: true },
+  });
+  const byStatus: Record<string, number> = {};
+  for (const row of grouped) {
+    byStatus[row.status] = row._count._all;
+  }
+  const overdue = await client.gatewayInquirySchedule.count({
+    where: {
+      status: { in: ["SCHEDULED", "RETRYING"] },
+      nextRunAt: { lte: now },
+    },
+  });
+  response.json({
+    summary: {
+      total: Object.values(byStatus).reduce((sum, count) => sum + count, 0),
+      scheduled: byStatus.SCHEDULED ?? 0,
+      running: byStatus.RUNNING ?? 0,
+      retrying: byStatus.RETRYING ?? 0,
+      completed: byStatus.COMPLETED ?? 0,
+      failed: byStatus.FAILED ?? 0,
+      cancelled: byStatus.CANCELLED ?? 0,
+      expired: byStatus.EXPIRED ?? 0,
+      overdue,
+      byStatus,
+    },
+  });
+});
+
+router.get("/gateway-inquiries/:id", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["case:read", "operator:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const schedule = await client.gatewayInquirySchedule.findUnique({
+    where: { id },
+    include: gatewayInquiryDetailInclude,
+  });
+  if (!schedule) {
+    throw new ApiError(404, "GATEWAY_INQUIRY_NOT_FOUND", "The gateway inquiry schedule does not exist");
+  }
+  const auditTrail = await client.auditLog.findMany({
+    where: { entityType: "GATEWAY_INQUIRY", entityId: id },
+    orderBy: { createdAt: "desc" },
+    take: 200,
+    include: { actor: { select: { id: true, email: true, role: true } } },
+  });
+  response.json({ schedule: flattenGatewayInquiry(schedule), auditTrail });
+});
+
+router.post("/gateway-inquiries/:id/cancel", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["attempt:inquire", "case:write", "operator:write"]);
+  const actor = actorFromRequest(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z.object({
+      reason: z.string().trim().min(3).max(500),
+      checklist: z.array(z.string().min(1).max(64)).max(10).optional(),
+    }).strict(),
+    request.body ?? {},
+  );
+  const schedule = await client.gatewayInquirySchedule.findUnique({
+    where: { id },
+    include: { attempt: { select: { id: true, status: true, terminalAt: true } } },
+  });
+  if (!schedule) {
+    throw new ApiError(404, "GATEWAY_INQUIRY_NOT_FOUND", "The gateway inquiry schedule does not exist");
+  }
+  if (!["SCHEDULED", "RETRYING"].includes(schedule.status)) {
+    throw new ApiError(409, "INQUIRY_NOT_CANCELLABLE", "Only a scheduled or retrying inquiry can be cancelled");
+  }
+  const now = new Date();
+  await client.$transaction(async (tx) => {
+    const updated = await tx.gatewayInquirySchedule.updateMany({
+      where: { id, status: { in: ["SCHEDULED", "RETRYING"] } },
+      data: {
+        status: "CANCELLED",
+        cancelledAt: now,
+        cancelledByUserId: actor.userId,
+        cancelReason: body.reason,
+      },
+    });
+    if (updated.count === 0) {
+      throw new ApiError(409, "INQUIRY_NOT_CANCELLABLE", "The inquiry changed state before it could be cancelled");
+    }
+    if (!schedule.attempt.terminalAt && ["UNKNOWN", "VERIFYING"].includes(String(schedule.attempt.status))) {
+      await tx.paymentAttempt.updateMany({
+        where: { id: schedule.attemptId, terminalAt: null },
+        data: { nextCheckAt: schedule.previousNextCheckAt },
+      });
+    }
+  });
+  await writeGatewayInquiryAudit(client, {
+    actor,
+    scheduleId: id,
+    action: "GATEWAY_INQUIRY_CANCELLED",
+    beforeJson: { status: schedule.status, nextRunAt: schedule.nextRunAt },
+    afterJson: { status: "CANCELLED", reason: body.reason, checklist: body.checklist ?? [] },
+  });
+  const updated = await client.gatewayInquirySchedule.findUnique({ where: { id }, include: gatewayInquiryDetailInclude });
+  response.json({ schedule: updated ? flattenGatewayInquiry(updated) : null });
+});
+
+router.post("/gateway-inquiries/:id/run-now", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["attempt:inquire", "case:write", "operator:write"]);
+  const actor = actorFromRequest(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z.object({
+      reason: z.string().trim().max(500).optional(),
+      checklist: z.array(z.string().min(1).max(64)).max(10).optional(),
+    }).strict(),
+    request.body ?? {},
+  );
+  const schedule = await client.gatewayInquirySchedule.findUnique({
+    where: { id },
+    include: { attempt: { select: { id: true, status: true, terminalAt: true } } },
+  });
+  if (!schedule) {
+    throw new ApiError(404, "GATEWAY_INQUIRY_NOT_FOUND", "The gateway inquiry schedule does not exist");
+  }
+  if (!["SCHEDULED", "RETRYING"].includes(schedule.status)) {
+    throw new ApiError(409, "INQUIRY_NOT_RUNNABLE", "Only a scheduled or retrying inquiry can run now");
+  }
+  if (schedule.attempt.terminalAt || !["UNKNOWN", "VERIFYING"].includes(String(schedule.attempt.status))) {
+    throw new ApiError(409, "ATTEMPT_NOT_INQUIRABLE", "The payment attempt is no longer inquirable");
+  }
+  const now = new Date();
+  await client.$transaction(async (tx) => {
+    await tx.gatewayInquirySchedule.update({
+      where: { id },
+      data: { status: "SCHEDULED", windowStartedAt: now, nextRunAt: now, lastError: null },
+    });
+    await tx.paymentAttempt.update({
+      where: { id: schedule.attemptId },
+      data: { status: "VERIFYING", nextCheckAt: now },
+    });
+  });
+  await writeGatewayInquiryAudit(client, {
+    actor,
+    scheduleId: id,
+    action: "GATEWAY_INQUIRY_RUN_NOW",
+    beforeJson: { status: schedule.status, nextRunAt: schedule.nextRunAt },
+    afterJson: { status: "SCHEDULED", nextRunAt: now.toISOString(), reason: body.reason ?? null, checklist: body.checklist ?? [] },
+  });
+  const updated = await client.gatewayInquirySchedule.findUnique({ where: { id }, include: gatewayInquiryDetailInclude });
+  response.json({ schedule: updated ? flattenGatewayInquiry(updated) : null });
+});
+
+router.post("/gateway-inquiries/:id/retry", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["attempt:inquire", "case:write", "operator:write"]);
+  const actor = actorFromRequest(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z.object({
+      reason: z.string().trim().max(500).optional(),
+      checklist: z.array(z.string().min(1).max(64)).max(10).optional(),
+    }).strict(),
+    request.body ?? {},
+  );
+  const schedule = await client.gatewayInquirySchedule.findUnique({
+    where: { id },
+    include: { attempt: { select: { id: true, status: true, terminalAt: true } } },
+  });
+  if (!schedule) {
+    throw new ApiError(404, "GATEWAY_INQUIRY_NOT_FOUND", "The gateway inquiry schedule does not exist");
+  }
+  if (!["FAILED", "EXPIRED", "CANCELLED"].includes(schedule.status)) {
+    throw new ApiError(409, "INQUIRY_NOT_RETRYABLE", "Only a failed, expired or cancelled inquiry can be retried");
+  }
+  if (schedule.attempt.terminalAt || !["UNKNOWN", "VERIFYING"].includes(String(schedule.attempt.status))) {
+    throw new ApiError(409, "ATTEMPT_NOT_INQUIRABLE", "The payment attempt is no longer inquirable");
+  }
+  const now = new Date();
+  await client.$transaction(async (tx) => {
+    await tx.gatewayInquirySchedule.update({
+      where: { id },
+      data: {
+        status: "SCHEDULED",
+        windowStartedAt: now,
+        nextRunAt: now,
+        attempts: 0,
+        lastError: null,
+        lastResult: null,
+        completedAt: null,
+        cancelledAt: null,
+        cancelledByUserId: null,
+        cancelReason: null,
+      },
+    });
+    await tx.paymentAttempt.update({
+      where: { id: schedule.attemptId },
+      data: { status: "VERIFYING", nextCheckAt: now },
+    });
+  });
+  await writeGatewayInquiryAudit(client, {
+    actor,
+    scheduleId: id,
+    action: "GATEWAY_INQUIRY_RETRIED",
+    beforeJson: { status: schedule.status, nextRunAt: schedule.nextRunAt },
+    afterJson: { status: "SCHEDULED", nextRunAt: now.toISOString(), reason: body.reason ?? null, checklist: body.checklist ?? [] },
+  });
+  const updated = await client.gatewayInquirySchedule.findUnique({ where: { id }, include: gatewayInquiryDetailInclude });
+  response.json({ schedule: updated ? flattenGatewayInquiry(updated) : null });
+});
+
 router.get("/operator-cases/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["case:read", "operator:read"]);
   const { id } = parseOrThrow(idSchema, request.params);
@@ -8224,6 +8683,7 @@ router.post("/operator-cases/bulk-inquire", async (request: Request, response: R
           reference: true,
           status: true,
           terminalAt: true,
+          nextCheckAt: true,
           gatewayVersion: {
             select: { setting: { select: { supportsStatusCheck: true } } },
           },
@@ -8271,13 +8731,17 @@ router.post("/operator-cases/bulk-inquire", async (request: Request, response: R
         });
         continue;
       }
-      await scheduleOperatorCaseInquiry(client, entry, actor);
+      const scheduledResult = await scheduleOperatorCaseInquiry(client, entry, actor, {
+        reason: body.reason,
+        checklist: body.checklist,
+      });
       scheduled += 1;
       results.push({
         caseId,
         caseRef: ref.value,
         attemptId: entry.attemptId,
         attemptReference: entry.attempt?.reference ?? null,
+        scheduleId: scheduledResult.scheduleId,
         status: "SCHEDULED",
         reason: "ELIGIBLE",
         message: "Gateway inquiry scheduled",

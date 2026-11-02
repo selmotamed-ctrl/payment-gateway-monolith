@@ -576,6 +576,30 @@ enum ReconciliationResult {
   DUPLICATE
 }
 
+/// Why a gateway status-inquiry schedule was created.
+enum GatewayInquiryScheduleSource {
+  OPERATOR_CASE
+  AUTOMATIC
+}
+
+/// The lifecycle of one persisted gateway status-inquiry schedule.
+enum GatewayInquiryScheduleStatus {
+  /// Waiting for its `next_run_at` timer.
+  SCHEDULED
+  /// The poll worker is currently asking the gateway.
+  RUNNING
+  /// The inquiry returned a non-terminal result or a transient error and will run again.
+  RETRYING
+  /// The attempt reached a terminal state or the inquiry finished.
+  COMPLETED
+  /// The inquiry ended with a technical failure and will not run again.
+  FAILED
+  /// An operator cancelled the schedule before it could run.
+  CANCELLED
+  /// The route polling window elapsed before a definitive result was reached.
+  EXPIRED
+}
+
 /// The kind of work a durable background job carries.
 enum BackgroundJobType {
   /// Parses and matches an uploaded statement file against the local attempts.
@@ -889,24 +913,26 @@ model User {
    */
   academyProgressJson Json?      @map("academy_progress_json")
 
-  merchant                 Merchant?                @relation("MerchantUsers", fields: [merchantId], references: [id], onDelete: SetNull)
-  identities               UserIdentity[]
-  createdGatewayVersions   GatewayVersion[]         @relation("GatewayVersionCreatedBy")
-  makerApprovalRequests    ApprovalRequest[]        @relation("ApprovalMaker")
-  checkerApprovalRequests  ApprovalRequest[]        @relation("ApprovalChecker")
-  amlCases                 AmlCase[]                @relation("AmlCaseReviewer")
-  amlScreeningDispositions AmlScreeningMatch[]      @relation("AmlScreeningDispositionBy")
-  submittedJoinRequests    JoinRequest[]            @relation("JoinRequestSubmitter")
-  assignedJoinRequests     JoinRequest[]            @relation("JoinRequestReviewer")
-  reviewedKybDocuments     KybDocument[]            @relation("KybDocumentReviewer")
-  uploadedKybDocuments     KybDocument[]            @relation("KybDocumentUploader")
-  kybRevalidationRequests  KybRevalidationRequest[] @relation("KybRevalidationRequester")
-  invitedUsers             User[]                   @relation("UserInvitedBy")
-  invitedBy                User?                    @relation("UserInvitedBy", fields: [invitedById], references: [id], onDelete: SetNull)
-  assignedOperatorCases    OperatorCase[]           @relation("OperatorCaseAssignee")
-  detailChangeLogs         DetailChangeLog[]        @relation("DetailChangeLogActor")
-  auditLogs                AuditLog[]               @relation("AuditLogActor")
-  notifications            Notification[]           @relation("NotificationRecipient")
+  merchant                  Merchant?                @relation("MerchantUsers", fields: [merchantId], references: [id], onDelete: SetNull)
+  identities                UserIdentity[]
+  createdGatewayVersions    GatewayVersion[]         @relation("GatewayVersionCreatedBy")
+  makerApprovalRequests     ApprovalRequest[]        @relation("ApprovalMaker")
+  checkerApprovalRequests   ApprovalRequest[]        @relation("ApprovalChecker")
+  amlCases                  AmlCase[]                @relation("AmlCaseReviewer")
+  amlScreeningDispositions  AmlScreeningMatch[]      @relation("AmlScreeningDispositionBy")
+  submittedJoinRequests     JoinRequest[]            @relation("JoinRequestSubmitter")
+  assignedJoinRequests      JoinRequest[]            @relation("JoinRequestReviewer")
+  reviewedKybDocuments      KybDocument[]            @relation("KybDocumentReviewer")
+  uploadedKybDocuments      KybDocument[]            @relation("KybDocumentUploader")
+  kybRevalidationRequests   KybRevalidationRequest[] @relation("KybRevalidationRequester")
+  invitedUsers              User[]                   @relation("UserInvitedBy")
+  invitedBy                 User?                    @relation("UserInvitedBy", fields: [invitedById], references: [id], onDelete: SetNull)
+  assignedOperatorCases     OperatorCase[]           @relation("OperatorCaseAssignee")
+  scheduledGatewayInquiries GatewayInquirySchedule[] @relation("GatewayInquiryScheduledBy")
+  cancelledGatewayInquiries GatewayInquirySchedule[] @relation("GatewayInquiryCancelledBy")
+  detailChangeLogs          DetailChangeLog[]        @relation("DetailChangeLogActor")
+  auditLogs                 AuditLog[]               @relation("AuditLogActor")
+  notifications             Notification[]           @relation("NotificationRecipient")
 
   @@index([merchantId])
   @@index([role])
@@ -1939,20 +1965,21 @@ model PaymentAttempt {
   ledgerEntryId            String?                @unique @map("ledger_entry_id")
   terminalAt               DateTime?              @map("terminal_at")
 
-  link                PaymentLink          @relation(fields: [linkId], references: [id], onDelete: Restrict)
-  attemptGroup        AttemptGroup         @relation(fields: [attemptGroupId], references: [id], onDelete: Restrict)
-  application         Application          @relation("ApplicationPaymentAttempts", fields: [applicationId], references: [id], onDelete: Restrict)
-  merchant            Merchant             @relation("MerchantPaymentAttempts", fields: [merchantId], references: [id], onDelete: Restrict)
-  rail                Rail                 @relation(fields: [railId], references: [id], onDelete: Restrict)
-  route               RailRoute            @relation(fields: [routeId], references: [id], onDelete: Restrict)
-  credentialSet       CredentialSet        @relation(fields: [credentialSetId], references: [id], onDelete: Restrict)
-  gatewayVersion      GatewayVersion       @relation(fields: [gatewayVersionId], references: [id], onDelete: Restrict)
-  commissionProfile   CommissionProfile    @relation(fields: [commissionProfileId], references: [id], onDelete: Restrict)
-  ledgerEntry         JournalEntry?        @relation("PaymentAttemptLedgerEntry", fields: [ledgerEntryId], references: [id], onDelete: SetNull)
+  link                PaymentLink              @relation(fields: [linkId], references: [id], onDelete: Restrict)
+  attemptGroup        AttemptGroup             @relation(fields: [attemptGroupId], references: [id], onDelete: Restrict)
+  application         Application              @relation("ApplicationPaymentAttempts", fields: [applicationId], references: [id], onDelete: Restrict)
+  merchant            Merchant                 @relation("MerchantPaymentAttempts", fields: [merchantId], references: [id], onDelete: Restrict)
+  rail                Rail                     @relation(fields: [railId], references: [id], onDelete: Restrict)
+  route               RailRoute                @relation(fields: [routeId], references: [id], onDelete: Restrict)
+  credentialSet       CredentialSet            @relation(fields: [credentialSetId], references: [id], onDelete: Restrict)
+  gatewayVersion      GatewayVersion           @relation(fields: [gatewayVersionId], references: [id], onDelete: Restrict)
+  commissionProfile   CommissionProfile        @relation(fields: [commissionProfileId], references: [id], onDelete: Restrict)
+  ledgerEntry         JournalEntry?            @relation("PaymentAttemptLedgerEntry", fields: [ledgerEntryId], references: [id], onDelete: SetNull)
   stepLogs            AttemptStepLog[]
-  adjustments         Adjustment[]         @relation("AdjustmentSourceAttempt")
+  adjustments         Adjustment[]             @relation("AdjustmentSourceAttempt")
   disputes            Dispute[]
   operatorCases       OperatorCase[]
+  inquirySchedules    GatewayInquirySchedule[]
   inboundEvents       InboundEvent[]
   reconciliationItems ReconciliationItem[]
 
@@ -2036,10 +2063,11 @@ model OperatorCase {
   resolutionNotes      String?              @map("resolution_notes") @db.Text
   approvalRequestId    String?              @map("approval_request_id")
 
-  attempt            PaymentAttempt?     @relation(fields: [attemptId], references: [id], onDelete: SetNull)
-  reconciliationItem ReconciliationItem? @relation("OperatorCaseReconciliationItem", fields: [reconciliationItemId], references: [id], onDelete: SetNull)
-  assignee           User?               @relation("OperatorCaseAssignee", fields: [assigneeUserId], references: [id], onDelete: SetNull)
-  approvalRequest    ApprovalRequest?    @relation("OperatorCaseApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
+  attempt            PaymentAttempt?          @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+  reconciliationItem ReconciliationItem?      @relation("OperatorCaseReconciliationItem", fields: [reconciliationItemId], references: [id], onDelete: SetNull)
+  assignee           User?                    @relation("OperatorCaseAssignee", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  approvalRequest    ApprovalRequest?         @relation("OperatorCaseApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
+  inquirySchedules   GatewayInquirySchedule[]
 
   @@index([state, priority])
   @@index([state, createdAt])
@@ -2049,6 +2077,46 @@ model OperatorCase {
   @@index([assigneeUserId])
   @@index([attemptId])
   @@map("operator_cases")
+}
+
+/// A persisted gateway status-inquiry schedule.
+///
+/// `payment_attempts.next_check_at` remains the durable timer that the poll
+/// worker uses; this row records why the inquiry was requested, who requested
+/// it, the latest status and the action history for the operator portal.
+model GatewayInquirySchedule {
+  id                  String                       @id @default(uuid(7))
+  createdAt           DateTime                     @default(now()) @map("created_at")
+  updatedAt           DateTime                     @updatedAt @map("updated_at")
+  attemptId           String                       @map("attempt_id")
+  operatorCaseId      String?                      @map("operator_case_id")
+  source              GatewayInquiryScheduleSource @default(OPERATOR_CASE)
+  status              GatewayInquiryScheduleStatus @default(SCHEDULED)
+  scheduledByUserId   String?                      @map("scheduled_by_user_id")
+  reason              String?                      @db.Text
+  checklist           Json?
+  previousNextCheckAt DateTime?                    @map("previous_next_check_at")
+  windowStartedAt     DateTime?                    @map("window_started_at")
+  nextRunAt           DateTime                     @map("next_run_at")
+  lastRunAt           DateTime?                    @map("last_run_at")
+  attempts            Int                          @default(0)
+  lastResult          String?                      @map("last_result") @db.Text
+  lastError           String?                      @map("last_error") @db.Text
+  completedAt         DateTime?                    @map("completed_at")
+  cancelledAt         DateTime?                    @map("cancelled_at")
+  cancelledByUserId   String?                      @map("cancelled_by_user_id")
+  cancelReason        String?                      @map("cancel_reason") @db.Text
+
+  attempt      PaymentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  operatorCase OperatorCase?  @relation(fields: [operatorCaseId], references: [id], onDelete: SetNull)
+  scheduledBy  User?          @relation("GatewayInquiryScheduledBy", fields: [scheduledByUserId], references: [id], onDelete: SetNull)
+  cancelledBy  User?          @relation("GatewayInquiryCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
+
+  @@index([status, nextRunAt])
+  @@index([attemptId, status])
+  @@index([operatorCaseId])
+  @@index([source, status])
+  @@map("gateway_inquiry_schedules")
 }
 
 model ReconciliationRun {

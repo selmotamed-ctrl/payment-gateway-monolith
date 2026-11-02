@@ -2,6 +2,12 @@ import { toCamelRows, mysqlPlaceholders } from "../db/rawRows";
 import type { PaymentAttemptRow, Tx } from "../db/ports";
 import { BaseWorker, type WorkerOptions } from "./workerRuntime";
 import type { InquiryOutcome, InquiryPort } from "./ExpirySweeperWorker";
+import {
+  findActiveGatewayInquiry,
+  markGatewayInquiryRunning,
+  reconcileGatewayInquiries,
+  updateGatewayInquiry,
+} from "./GatewayInquirySchedules";
 
 export interface PollWorkerDeps extends WorkerOptions {
   inquiry?: InquiryPort;
@@ -56,6 +62,7 @@ export class PollWorker extends BaseWorker {
 
   protected async tick(): Promise<void> {
     const now = this.clock();
+    await reconcileGatewayInquiries(this.db as Tx, now);
     const attempts = await this.lockDueAttempts(now);
     if (attempts.length === 0) return;
     await this.refreshPolicies();
@@ -105,24 +112,60 @@ export class PollWorker extends BaseWorker {
 
   private async pollAttempt(attempt: PaymentAttemptRow, now: Date): Promise<void> {
     const policy = this.policyFor(attempt);
+    const schedule = await findActiveGatewayInquiry(this.db as Tx, attempt.id);
 
     if (policy.stopOnStates.includes(attempt.status)) {
       await this.repositories.payments.updateAttempt(this.db as Tx, attempt.id, { nextCheckAt: null });
+      if (schedule) {
+        await updateGatewayInquiry(this.db as Tx, schedule.id, {
+          status: "COMPLETED",
+          completedAt: now,
+          lastResult: attempt.status,
+        });
+      }
       return;
     }
 
-    const createdAt = attempt.createdAt ?? attempt.createdAt ?? now;
-    const elapsedSeconds = Math.max(0, Math.floor((now.getTime() - new Date(createdAt).getTime()) / 1000));
+    // A manual inquiry schedule owns its own polling window. Using the
+    // attempt's original creation time would immediately expire a schedule
+    // created for an old UNKNOWN attempt, so the schedule start time is the
+    // reference while one is active.
+    const referenceAt = schedule?.windowStartedAt ?? schedule?.createdAt ?? attempt.createdAt ?? now;
+    const elapsedSeconds = Math.max(0, Math.floor((now.getTime() - new Date(referenceAt).getTime()) / 1000));
     const delaySeconds = computeBackoffDelaySeconds(policy, elapsedSeconds);
 
     if (delaySeconds === null) {
       await this.repositories.payments.updateAttempt(this.db as Tx, attempt.id, { nextCheckAt: null });
+      if (schedule) {
+        await updateGatewayInquiry(this.db as Tx, schedule.id, {
+          status: "EXPIRED",
+          completedAt: now,
+          lastResult: attempt.status,
+          lastError: "The polling window elapsed before a definitive result",
+        });
+      }
       return;
+    }
+
+    if (schedule) {
+      const marked = await markGatewayInquiryRunning(this.db as Tx, schedule.id, now);
+      if (!marked) {
+        // The schedule was cancelled or superseded after the attempt was
+        // claimed. Do not perform an inquiry the operator no longer wants.
+        return;
+      }
     }
 
     if (!this.inquiry) {
       const nextCheckAt = new Date(now.getTime() + delaySeconds * 1000);
       await this.repositories.payments.updateAttempt(this.db as Tx, attempt.id, { nextCheckAt: nextCheckAt });
+      if (schedule) {
+        await updateGatewayInquiry(this.db as Tx, schedule.id, {
+          status: "RETRYING",
+          nextRunAt: nextCheckAt,
+          lastError: "The gateway inquiry runtime is not configured",
+        });
+      }
       return;
     }
 
@@ -136,12 +179,26 @@ export class PollWorker extends BaseWorker {
         status: "UNKNOWN",
         nextCheckAt: nextCheckAt,
       });
+      if (schedule) {
+        await updateGatewayInquiry(this.db as Tx, schedule.id, {
+          status: "RETRYING",
+          nextRunAt: nextCheckAt,
+          lastError: (error as Error).message,
+        });
+      }
       return;
     }
 
     if (!outcome) {
       const nextCheckAt = new Date(now.getTime() + delaySeconds * 1000);
       await this.repositories.payments.updateAttempt(this.db as Tx, attempt.id, { nextCheckAt: nextCheckAt });
+      if (schedule) {
+        await updateGatewayInquiry(this.db as Tx, schedule.id, {
+          status: "RETRYING",
+          nextRunAt: nextCheckAt,
+          lastError: "The gateway inquiry returned no result",
+        });
+      }
       return;
     }
 
@@ -158,12 +215,27 @@ export class PollWorker extends BaseWorker {
           settledAmount: outcome.settledAmount,
         });
       }
+      if (schedule) {
+        await updateGatewayInquiry(this.db as Tx, schedule.id, {
+          status: "COMPLETED",
+          completedAt: now,
+          lastResult: outcome.status,
+        });
+      }
     } else {
+      const nextCheckAt = new Date(now.getTime() + delaySeconds * 1000);
       await this.repositories.payments.updateAttempt(this.db as Tx, attempt.id, {
         status: outcome.status,
         substatus: outcome.substatus ?? attempt.substatus ?? null,
-        nextCheckAt: new Date(now.getTime() + delaySeconds * 1000),
+        nextCheckAt: nextCheckAt,
       });
+      if (schedule) {
+        await updateGatewayInquiry(this.db as Tx, schedule.id, {
+          status: "RETRYING",
+          nextRunAt: nextCheckAt,
+          lastResult: outcome.status,
+        });
+      }
     }
 
     if (terminal && (outcome.status === "FAILED" || outcome.status === "CANCELLED")) {

@@ -791,6 +791,27 @@ const OperatorCasesPage = dc(() => {
             ),
         },
         {
+            key: "inquirySchedule",
+            label: "Inquiry schedule",
+            sortable: false,
+            headerTooltip: "The latest persisted gateway inquiry schedule for this case.",
+            value: (row) => row.latestInquirySchedule?.status ?? "",
+            Value: ({ row }) => {
+                const schedule = row.latestInquirySchedule;
+                if (!schedule) {
+                    return <ThemedText style={{ fontSize: "11px", opacity: 0.5 }}>—</ThemedText>;
+                }
+                return (
+                    <ThemedView style={{ gap: "3px" }}>
+                        <StatusChip label={String(schedule.status ?? "").replaceAll("_", " ")} tone={statusTone(schedule.status)} size="x-small" />
+                        {schedule.nextRunAt && (
+                            <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{formatDateTime(schedule.nextRunAt)}</ThemedText>
+                        )}
+                    </ThemedView>
+                );
+            },
+        },
+        {
             key: "actions",
             label: "Actions",
             sortable: false,
@@ -847,6 +868,7 @@ const OperatorCasesPage = dc(() => {
                                 size="small"
                             />
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-radar" onClick={() => void router.push({ name: "GatewayInquirySchedules" })}>{t("Inquiry Schedule")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
                         </ThemedView>
                     )}

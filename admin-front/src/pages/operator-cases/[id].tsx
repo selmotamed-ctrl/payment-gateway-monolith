@@ -696,6 +696,32 @@ const OperatorCaseDetailPage = dc(() => {
                             </VCardText>
                         </VCard>
 
+                        {detail.value.inquirySchedules && detail.value.inquirySchedules.length > 0 && (
+                            <VCard>
+                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                    <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Gateway inquiry schedule")}</ThemedText>
+                                        <VBtn size="small" variant="text" prependIcon="mdi-radar" onClick={() => void router.push({ name: "GatewayInquirySchedules" })}>
+                                            {t("Open inquiry schedule")}
+                                        </VBtn>
+                                    </ThemedView>
+                                    {detail.value.inquirySchedules.slice(0, 3).map((schedule) => (
+                                        <ThemedView key={schedule.id} style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", alignItems: "center", flexWrap: "wrap", borderBottom: "1px solid rgba(100,116,139,0.12)", paddingBottom: "7px" }}>
+                                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "7px", flexWrap: "wrap" }}>
+                                                <StatusChip label={String(schedule.status).replaceAll("_", " ")} tone={statusTone(schedule.status)} size="small" />
+                                                <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{t("Scheduled")}: {formatDateTime(schedule.scheduledAt ?? schedule.createdAt)}</ThemedText>
+                                                {(schedule.isOverdue ?? (["SCHEDULED", "RETRYING", "RUNNING"].includes(String(schedule.status)) && Boolean(schedule.nextRunAt) && new Date(String(schedule.nextRunAt)).getTime() <= Date.now())) && <StatusChip label={t("Overdue")} tone="warning" size="x-small" />}
+                                            </ThemedView>
+                                            <ThemedView style={{ gap: "2px", alignItems: "flex-end" }}>
+                                                <ThemedText style={{ fontSize: "11px", opacity: 0.7 }}>{t("Next run")}: {formatDateTime(schedule.nextRunAt)}</ThemedText>
+                                                <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{schedule.attempts} {t("attempts")}</ThemedText>
+                                            </ThemedView>
+                                        </ThemedView>
+                                    ))}
+                                </VCardText>
+                            </VCard>
+                        )}
+
                         <MiniStats stats={stats.value} />
 
                         {isPendingChecker.value && (

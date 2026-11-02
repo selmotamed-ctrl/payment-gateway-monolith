@@ -76,6 +76,8 @@ export const operatorCaseInquirySkipMessage = (reason: string): string => {
       return "Only UNKNOWN or VERIFYING attempts can be inquired";
     case "GATEWAY_HAS_NO_STATUS_INQUIRY":
       return "The pinned gateway version does not support status inquiry";
+    case "INQUIRY_ALREADY_RUNNING":
+      return "An inquiry is already running for this attempt";
     case "CASE_NOT_FOUND":
       return "The operator case does not exist";
     default:

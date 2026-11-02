@@ -9,8 +9,12 @@ const SUCCESS = new Set([
 const WARNING = new Set([
     "PENDING", "PENDING_REVIEW", "PENDING_CHECKER", "IN_REVIEW", "IN_PROGRESS", "PROCESSING",
     "DRAFT", "INFO_REQUESTED", "UNVERIFIED", "UNKNOWN", "PARTIAL", "DEGRADED", "MEDIUM",
-    "EVIDENCE_REQUESTED", "POTENTIAL_MATCH", "P2", "SUBMITTED", "QUEUED",
+    "EVIDENCE_REQUESTED", "POTENTIAL_MATCH", "P2", "SUBMITTED", "QUEUED", "RETRYING",
     "AMOUNT_MISMATCH", "MISSING_LOCALLY", "DUPLICATE",
+]);
+
+const INFO = new Set([
+    "SCHEDULED", "RUNNING", "OPERATOR_CASE", "AUTOMATIC",
 ]);
 
 const ERROR = new Set([
@@ -25,6 +29,7 @@ export const statusTone = (value: string | null | undefined): StatusTone => {
     if (!normalized) return "neutral";
     if (SUCCESS.has(normalized)) return "success";
     if (WARNING.has(normalized)) return "warning";
+    if (INFO.has(normalized)) return "info";
     if (ERROR.has(normalized)) return "error";
     return "neutral";
 };

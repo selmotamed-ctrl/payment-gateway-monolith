@@ -70,6 +70,8 @@ const ADJUSTMENT_TYPE = ["CHARGEBACK", "REFUND", "MANUAL_CREDIT", "MANUAL_DEBIT"
 const CASHOUT_STATE = ["PENDING", "REJECTED", "PROCESSING", "COMPLETE", "SUBTRACTED"];
 const OPERATOR_STATE = ["OPEN", "IN_PROGRESS", "PENDING_CHECKER", "RESOLVED"];
 const OPERATOR_KIND = ["UNKNOWN", "HELD", "CONFLICT", "MISMATCH", "LATE_SUCCESS", "MANUAL_REVIEW", "UNMATCHED_STATEMENT"];
+const INQUIRY_STATUS = ["SCHEDULED", "RUNNING", "RETRYING", "COMPLETED", "FAILED", "CANCELLED", "EXPIRED"];
+const INQUIRY_SOURCE = ["OPERATOR_CASE", "AUTOMATIC"];
 const REPORT_TYPE = ["LARGE_TRANSACTION", "SUSPICIOUS_ACTIVITY", "PERIODIC_RETURN"];
 const REPORT_STATUS = ["DRAFT", "PENDING_CHECKER", "APPROVED", "SUBMITTED", "ACKNOWLEDGED", "REJECTED_BY_AUTHORITY"];
 const RULE_TYPES = ["SINGLE_AMOUNT", "CUMULATIVE_WINDOW", "STRUCTURING", "RISK_TIER", "COUNTERPARTY_COUNTRY", "RAIL", "MERCHANT_DIRECT_AMOUNT"];
@@ -312,6 +314,21 @@ export const tableRegistry: Record<string, TableServerConfig> = {
             { key: "sla", label: "SLA due", type: "date", queryFrom: "dateFrom", queryTo: "dateTo" },
         ],
         defaultSort: { key: "priority", direction: "asc" },
+    },
+    GatewayInquiries: {
+        url: urlsMap.gatewayInquiries,
+        listKey: "schedules",
+        filters: [
+            { key: "status", label: "Status", type: "data-autocomplete", options: options(INQUIRY_STATUS), multiple: true },
+            { key: "source", label: "Source", type: "data-autocomplete", options: options(INQUIRY_SOURCE), multiple: true },
+            { key: "attemptReference", label: "Attempt reference", type: "text", placeholder: "PA-…" },
+            { key: "merchantName", label: "Merchant name", type: "text", placeholder: "Trade or legal name" },
+            { key: "providerReference", label: "Provider reference", type: "text", placeholder: "Gateway reference" },
+            { key: "gatewayId", label: "Gateway", type: "api-autocomplete", load: gateways },
+            { key: "from", label: "Scheduled", type: "date", queryFrom: "from", queryTo: "to" },
+            { key: "nextRun", label: "Next run", type: "date", queryFrom: "nextRunFrom", queryTo: "nextRunTo" },
+        ],
+        defaultSort: { key: "scheduledAt", direction: "desc" },
     },
     Reconciliation: {
         url: urlsMap.reconciliationSources,

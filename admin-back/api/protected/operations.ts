@@ -85,6 +85,20 @@ export const bulkStateSchema = z
   })
   .strict();
 
+export const gatewayInquiryCancelSchema = z
+  .object({
+    reason: z.string().trim().min(3).max(500),
+    checklist: z.array(z.string().min(1).max(64)).max(10).optional(),
+  })
+  .strict();
+
+export const gatewayInquiryActionSchema = z
+  .object({
+    reason: z.string().trim().max(500).optional(),
+    checklist: z.array(z.string().min(1).max(64)).max(10).optional(),
+  })
+  .strict();
+
 export const operatorCasePatchSchema = z
   .object({
     assigneeUserId: zIdentifier.nullable().optional(),
@@ -99,6 +113,65 @@ const inquireSchema = z
     metadata: zJsonObject.optional(),
   })
   .strict();
+
+router.get(
+  "/gateway-inquiries",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/gateway-inquiries",
+    querySchema: zPaginationQuery,
+  }),
+);
+
+router.get(
+  "/gateway-inquiries/summary",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/gateway-inquiries/summary",
+  }),
+);
+
+router.get(
+  "/gateway-inquiries/:id",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/gateway-inquiries/${encodeURIComponent(context.params.id ?? "")}`,
+    paramsSchema: idParamsSchema,
+  }),
+);
+
+router.post(
+  "/gateway-inquiries/:id/cancel",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/gateway-inquiries/${encodeURIComponent(context.params.id ?? "")}/cancel`,
+    paramsSchema: idParamsSchema,
+    schema: gatewayInquiryCancelSchema,
+    relayStatus: true,
+  }),
+);
+
+router.post(
+  "/gateway-inquiries/:id/run-now",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/gateway-inquiries/${encodeURIComponent(context.params.id ?? "")}/run-now`,
+    paramsSchema: idParamsSchema,
+    schema: gatewayInquiryActionSchema,
+    relayStatus: true,
+  }),
+);
+
+router.post(
+  "/gateway-inquiries/:id/retry",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/gateway-inquiries/${encodeURIComponent(context.params.id ?? "")}/retry`,
+    paramsSchema: idParamsSchema,
+    schema: gatewayInquiryActionSchema,
+    relayStatus: true,
+  }),
+);
 
 router.get(
   "/operator-cases",

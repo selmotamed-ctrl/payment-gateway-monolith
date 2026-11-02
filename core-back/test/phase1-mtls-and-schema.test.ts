@@ -64,6 +64,7 @@ const designModelNames = [
   "AttemptStepLog",
   "InboundEvent",
   "OperatorCase",
+  "GatewayInquirySchedule",
   "ReconciliationRun",
   "ReconciliationItem",
   "GatewayHealthSample",
@@ -92,11 +93,11 @@ const designModelNames = [
 describe("prisma schema", () => {
   const schema = fs.readFileSync(schemaPath, "utf8");
 
-  test("declares exactly the 67 design models", () => {
+  test("declares exactly the 68 design models", () => {
     const modelNames = [...schema.matchAll(/^model\s+(\w+)\s*\{/gm)].map(
       (match) => match[1] as string,
     );
-    expect(modelNames.length).toBe(67);
+    expect(modelNames.length).toBe(68);
     expect([...modelNames].sort()).toEqual([...designModelNames].sort());
   });
 

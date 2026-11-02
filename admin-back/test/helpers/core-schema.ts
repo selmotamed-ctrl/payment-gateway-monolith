@@ -704,6 +704,24 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
       sha256: z.string().length(64).regex(/^[a-f0-9]{64}$/),
     })
     .strict(),
+  "POST /gateway-inquiries/:id/cancel": z
+    .object({
+      reason: z.string().trim().min(3).max(500),
+      checklist: z.array(z.string().min(1).max(64)).max(10).optional(),
+    })
+    .strict(),
+  "POST /gateway-inquiries/:id/run-now": z
+    .object({
+      reason: z.string().trim().max(500).optional(),
+      checklist: z.array(z.string().min(1).max(64)).max(10).optional(),
+    })
+    .strict(),
+  "POST /gateway-inquiries/:id/retry": z
+    .object({
+      reason: z.string().trim().max(500).optional(),
+      checklist: z.array(z.string().min(1).max(64)).max(10).optional(),
+    })
+    .strict(),
   "POST /operator-cases/bulk-inquire": z
     .object({
       caseIds: z.array(z.string().min(1).max(64)).min(1).max(200),
