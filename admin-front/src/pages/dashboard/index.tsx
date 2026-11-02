@@ -324,6 +324,7 @@ const DashboardPage = dc(() => {
         grid: { left: "6%", right: "4%", top: "10%", bottom: "18%" },
         xAxis: {
             type: "category",
+            boundaryGap: false,
             data: attemptRows.value.map((row) => row.state),
             axisLabel: { color: CHART_TEXT, fontSize: 10, interval: 0, rotate: attemptRows.value.length > 5 ? 28 : 0 },
             axisLine: { lineStyle: { color: CHART_GRID } },
@@ -336,10 +337,15 @@ const DashboardPage = dc(() => {
         series: [
             {
                 name: t("Attempts"),
-                type: "bar",
+                type: "line",
+                smooth: true,
+                symbol: "circle",
+                symbolSize: 4,
+                showSymbol: false,
                 data: attemptRows.value.map((row) => row.count),
-                barMaxWidth: 28,
-                itemStyle: { color: CHART_INDIGO, borderRadius: [4, 4, 0, 0] },
+                lineStyle: { color: CHART_INDIGO, width: 2 },
+                itemStyle: { color: CHART_INDIGO },
+                areaStyle: { color: CHART_INDIGO, opacity: 0.14 },
             },
         ],
     });
@@ -350,6 +356,7 @@ const DashboardPage = dc(() => {
         grid: { left: "8%", right: "4%", top: "10%", bottom: "18%" },
         xAxis: {
             type: "category",
+            boundaryGap: false,
             data: attemptRows.value.map((row) => row.state),
             axisLabel: { color: CHART_TEXT, fontSize: 10, interval: 0, rotate: attemptRows.value.length > 5 ? 28 : 0 },
             axisLine: { lineStyle: { color: CHART_GRID } },
@@ -362,10 +369,15 @@ const DashboardPage = dc(() => {
         series: [
             {
                 name: t("Volume"),
-                type: "bar",
+                type: "line",
+                smooth: true,
+                symbol: "circle",
+                symbolSize: 4,
+                showSymbol: false,
                 data: attemptRows.value.map((row) => Number(row.amount)),
-                barMaxWidth: 28,
-                itemStyle: { color: CHART_EMERALD, borderRadius: [4, 4, 0, 0] },
+                lineStyle: { color: CHART_EMERALD, width: 2 },
+                itemStyle: { color: CHART_EMERALD },
+                areaStyle: { color: CHART_EMERALD, opacity: 0.14 },
             },
         ],
     });
