@@ -17,6 +17,7 @@ import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues, type TableFilter } from "@/components/Table/filters";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
+import { useOpenQuery } from "@/composables/useOpenQuery";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -478,6 +479,28 @@ const ReconciliationPage = dc(() => {
         await loadRunDetail(row.id, "ALL");
     };
 
+    const fetchReconciliationRunDetail = async (id: string): Promise<ReconciliationRunDetail | null> => {
+        await loadRunDetail(id, "ALL");
+        return selectedRun.value;
+    };
+
+    const presentRunDetail = (detail: ReconciliationRunDetail) => {
+        selectedRun.value = detail;
+        runResultFilter.value = "ALL";
+        detailsOpen.value = true;
+    };
+
+    const { clearOpenQueryParam } = useOpenQuery<ReconciliationRunDetail>({
+        alwaysFetchDetail: true,
+        fetchById: fetchReconciliationRunDetail,
+        onOpenRecord: presentRunDetail,
+    });
+
+    const closeRunDetails = () => {
+        detailsOpen.value = false;
+        void clearOpenQueryParam();
+    };
+
     const changeRunResult = async (value: string | null) => {
         const next = value || "ALL";
         runResultFilter.value = next;
@@ -924,7 +947,10 @@ const ReconciliationPage = dc(() => {
 
             <SlideOverDrawer
                 modelValue={detailsOpen.value}
-                onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)}
+                onUpdate:modelValue={(value: boolean) => {
+                    detailsOpen.value = value;
+                    if (!value) void clearOpenQueryParam();
+                }}
                 title={selectedRun.value?.fileName ?? t("Reconciliation run")}
                 subtitle={selectedRun.value?.sourceName ?? ""}
                 width={820}
@@ -932,7 +958,7 @@ const ReconciliationPage = dc(() => {
                     footer: () => (
                         <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportRunItems()}>{t("Export items")}</VBtn>
-                            <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
+                            <VBtn variant="text" onClick={closeRunDetails}>{t("Close")}</VBtn>
                         </ThemedView>
                     ),
                 }}

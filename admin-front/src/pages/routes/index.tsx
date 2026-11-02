@@ -19,6 +19,7 @@ import { tableRegistry } from "@/components/Table/tableRegistry";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
+import { useOpenQuery } from "@/composables/useOpenQuery";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
@@ -79,6 +80,7 @@ const RoutesPage = dc(() => {
     const toneColor = (tone: "error" | "warning"): string =>
         (theme.current.value.colors as Record<string, string>)[tone] ?? "";
     const summary = ref<RouteSummary | null>(null);
+    const routes = ref<GatewayRoute[]>([]);
     const search = ref<string | null>(null);
     const filters = ref<FilterValues>({});
     const pageSize = ref(20);
@@ -269,6 +271,31 @@ const RoutesPage = dc(() => {
         dialogOpen.value = true;
     };
 
+    const fetchRouteById = async (id: string): Promise<GatewayRoute | null> => {
+        const response = await api.get(urlsMap.routeDetail(id));
+        const payload = response.data?.data ?? response.data ?? {};
+        const detail = payload.route ?? payload;
+        if (!detail?.id) return null;
+        return {
+            ...detail,
+            railCode: detail.railCode ?? detail.rail?.code ?? "",
+            railName: detail.railName ?? detail.rail?.nameEn ?? "",
+            gatewayCode: detail.gatewayCode ?? detail.gateway?.code ?? "",
+            gatewayName: detail.gatewayName ?? detail.gateway?.name ?? "",
+        } as GatewayRoute;
+    };
+
+    const { clearOpenQueryParam } = useOpenQuery<GatewayRoute>({
+        loadedRows: routes,
+        fetchById: fetchRouteById,
+        onOpenRecord: openEditRoute,
+    });
+
+    const closeRouteEditDialog = () => {
+        dialogOpen.value = false;
+        void clearOpenQueryParam();
+    };
+
     const routeEditChecklistComplete = computed(() => !showChecklists || ROUTE_EDIT_CHECKS.every((check) => routeEditChecklist.value[check.key] === true));
 
     const saveRoute = async () => {
@@ -307,7 +334,7 @@ const RoutesPage = dc(() => {
                     checklist: ROUTE_EDIT_CHECKS.filter((check) => routeEditChecklist.value[check.key]).map((check) => check.key),
                 });
             }
-            dialogOpen.value = false;
+            closeRouteEditDialog();
             showSnackBar({ type: "success", message: t("Update") });
             refreshAll();
         } catch (e) {
@@ -402,7 +429,7 @@ const RoutesPage = dc(() => {
             label: "Amount",
             value: (row) => `${row.minAmount ?? ""} - ${row.maxAmount ?? ""}`,
             Value: ({ row }: { row: GatewayRoute }) => (
-                <div style={{ display: "flex", gap: "4px", alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: "4px", alignItems: "center", flexWrap: "nowrap" }}>
                     <MoneyDisplay amount={row.minAmount ?? "0"} currency={"LYD"} size="sm" />
                     <span style={{ color: "var(--pg-ink-faint)" }}>–</span>
                     <MoneyDisplay amount={row.maxAmount ?? "0"} currency={"LYD"} size="sm" />
@@ -499,6 +526,7 @@ const RoutesPage = dc(() => {
                         return payload.routes ?? payload.rows ?? [];
                     }}
                     apiTotalExtractor={(data) => Number((data as { total?: number }).total ?? 0)}
+                    onData={(rows) => (routes.value = rows)}
                     setRefreshHook={(hook) => {
                         refreshHook.value = hook as typeof refreshHook.value;
                     }}
@@ -529,7 +557,10 @@ const RoutesPage = dc(() => {
 
             <FormModal
                 modelValue={dialogOpen.value}
-                onUpdate:modelValue={(v: any) => (dialogOpen.value = v)}
+                onUpdate:modelValue={(v: any) => {
+                    dialogOpen.value = v;
+                    if (!v) void clearOpenQueryParam();
+                }}
                 title={[t("Edit route"), editingRoute.value?.railCode, "→", editingRoute.value?.gatewayCode].filter(Boolean).join(" · ")}
                 size="md"
                 onSubmit={() => void saveRoute()}
@@ -538,7 +569,7 @@ const RoutesPage = dc(() => {
                 v-slots={{
                     footer: () => (
                         <>
-                            <VBtn variant="outlined" disabled={actionLoading.value} onClick={() => (dialogOpen.value = false)}>
+                            <VBtn variant="outlined" disabled={actionLoading.value} onClick={closeRouteEditDialog}>
                                 {t("Cancel")}
                             </VBtn>
                             <VBtn

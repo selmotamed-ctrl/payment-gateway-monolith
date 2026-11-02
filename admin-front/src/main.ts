@@ -11,6 +11,7 @@ import App from "./App";
 import "@/assets/fonts/fonts.css";
 import '@vuepic/vue-datepicker/dist/main.css';
 import "@/styles/fintech-minimal.css";
+import "@/styles/command-palette.css";
 
 
 import { VueDatePicker } from '@vuepic/vue-datepicker';

@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useLocale, useTheme } from "vuetify";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { VAlert, VBtn, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -125,13 +125,21 @@ type ScheduleDetail = {
     }>;
 };
 
+const readSearchQuery = (value: unknown): string | null => {
+    const raw = Array.isArray(value) ? value[0] : value;
+    if (typeof raw !== "string") return null;
+    const term = raw.trim();
+    return term.length > 0 ? term : null;
+};
+
 const GatewayInquirySchedulesPage = dc(() => {
     const { t } = useLocale();
     const theme = useTheme();
     const router = useRouter();
+    const route = useRoute();
     const asBadgeTone = (tone: ReturnType<typeof statusTone>): BadgeTone =>
         tone === "error" ? "danger" : tone === "primary" ? "info" : tone;
-    const search = ref<string | null>(null);
+    const search = ref<string | null>(readSearchQuery(route.query.search));
     const filters = ref<FilterValues>({});
     const total = ref(0);
     const summary = ref<GatewayInquiryScheduleSummary | null>(null);
@@ -184,6 +192,17 @@ const GatewayInquirySchedulesPage = dc(() => {
     const onSearch = () => {
         refreshHook.value?.reset();
     };
+
+    watch(
+        () => route.query.search,
+        (value) => {
+            const term = readSearchQuery(value);
+            if (term === search.value) return;
+            search.value = term;
+            onSearch();
+        },
+        { immediate: true },
+    );
 
     const onFiltersChanged = () => {
         if (filterTimer) clearTimeout(filterTimer);

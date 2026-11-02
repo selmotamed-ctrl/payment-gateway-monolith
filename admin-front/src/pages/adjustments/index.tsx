@@ -16,6 +16,7 @@ import { buildFilterQuery, type FilterValues } from "@/components/Table/filters"
 import { tableRegistry } from "@/components/Table/tableRegistry";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
+import { useOpenQuery } from "@/composables/useOpenQuery";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -297,6 +298,18 @@ const AdjustmentsPage = dc(() => {
         void loadSummary();
     };
 
+    const presentAdjustmentDetail = (detail: AdjustmentDetail) => {
+        selected.value = detail;
+        detailsOpen.value = true;
+        detailLoading.value = false;
+    };
+
+    const fetchAdjustmentDetail = async (id: string): Promise<AdjustmentDetail | null> => {
+        const response = await api.get(urlsMap.adjustmentDetail(id));
+        const payload = response.data?.data ?? response.data ?? {};
+        return (payload.adjustment ?? payload) as AdjustmentDetail;
+    };
+
     const openDetails = async (row: Adjustment) => {
         selected.value = {
             ...row,
@@ -308,9 +321,8 @@ const AdjustmentsPage = dc(() => {
         detailsOpen.value = true;
         detailLoading.value = true;
         try {
-            const response = await api.get(urlsMap.adjustmentDetail(row.id));
-            const payload = response.data?.data ?? response.data ?? {};
-            selected.value = (payload.adjustment ?? payload) as AdjustmentDetail;
+            const detail = await fetchAdjustmentDetail(row.id);
+            if (detail) presentAdjustmentDetail(detail);
         } catch (error) {
             detailsOpen.value = false;
             selected.value = null;
@@ -318,6 +330,18 @@ const AdjustmentsPage = dc(() => {
         } finally {
             detailLoading.value = false;
         }
+    };
+
+    const { clearOpenQueryParam } = useOpenQuery<AdjustmentDetail>({
+        alwaysFetchDetail: true,
+        fetchById: fetchAdjustmentDetail,
+        onOpenRecord: presentAdjustmentDetail,
+        onNotFound: () => showSnackBar({ type: "error", message: t("Adjustment not found.") }),
+    });
+
+    const closeDetails = () => {
+        detailsOpen.value = false;
+        void clearOpenQueryParam();
     };
 
     const openCreate = () => {
@@ -633,13 +657,16 @@ const AdjustmentsPage = dc(() => {
 
             <SlideOverDrawer
                 modelValue={detailsOpen.value}
-                onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)}
+                onUpdate:modelValue={(value: boolean) => {
+                    detailsOpen.value = value;
+                    if (!value) void clearOpenQueryParam();
+                }}
                 title={[selected.value?.type, "·", formatMoney(selected.value?.amount, selected.value?.currency)].filter(Boolean).join(" · ")}
                 subtitle={selected.value ? selected.value.merchantName || selected.value.merchantId || "" : ""}
                 width={660}
                 v-slots={{
                     footer: () => (
-                        <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
+                        <VBtn variant="text" onClick={closeDetails}>{t("Close")}</VBtn>
                     ),
                 }}
             >

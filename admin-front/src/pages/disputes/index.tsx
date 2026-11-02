@@ -16,6 +16,7 @@ import { buildFilterQuery, type FilterValues } from "@/components/Table/filters"
 import { tableRegistry } from "@/components/Table/tableRegistry";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
+import { useOpenQuery } from "@/composables/useOpenQuery";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -252,6 +253,28 @@ const DisputesPage = dc(() => {
         void loadSummary();
     };
 
+    const resetEvidenceState = () => {
+        evidenceReference.value = "";
+        evidenceDocumentUrl.value = "";
+        evidenceNotes.value = "";
+        evidenceChecklist.value = {};
+        evidenceOpen.value = false;
+        actionError.value = "";
+    };
+
+    const presentDisputeDetail = (detail: DisputeDetail) => {
+        selected.value = detail;
+        resetEvidenceState();
+        detailsOpen.value = true;
+        detailLoading.value = false;
+    };
+
+    const fetchDisputeDetail = async (id: string): Promise<DisputeDetail | null> => {
+        const response = await api.get(urlsMap.disputeDetail(id));
+        const payload = response.data?.data ?? response.data ?? {};
+        return (payload.dispute ?? payload) as DisputeDetail;
+    };
+
     const openDetails = async (row: Dispute) => {
         selected.value = {
             ...row,
@@ -261,18 +284,12 @@ const DisputesPage = dc(() => {
             canSubmitEvidence: false,
             evidenceBlockedReason: null,
         };
-        evidenceReference.value = "";
-        evidenceDocumentUrl.value = "";
-        evidenceNotes.value = "";
-        evidenceChecklist.value = {};
-        evidenceOpen.value = false;
-        actionError.value = "";
+        resetEvidenceState();
         detailsOpen.value = true;
         detailLoading.value = true;
         try {
-            const response = await api.get(urlsMap.disputeDetail(row.id));
-            const payload = response.data?.data ?? response.data ?? {};
-            selected.value = (payload.dispute ?? payload) as DisputeDetail;
+            const detail = await fetchDisputeDetail(row.id);
+            if (detail) presentDisputeDetail(detail);
         } catch (error) {
             detailsOpen.value = false;
             selected.value = null;
@@ -280,6 +297,18 @@ const DisputesPage = dc(() => {
         } finally {
             detailLoading.value = false;
         }
+    };
+
+    const { clearOpenQueryParam } = useOpenQuery<DisputeDetail>({
+        alwaysFetchDetail: true,
+        fetchById: fetchDisputeDetail,
+        onOpenRecord: presentDisputeDetail,
+        onNotFound: () => showSnackBar({ type: "error", message: t("Dispute not found.") }),
+    });
+
+    const closeDetails = () => {
+        detailsOpen.value = false;
+        void clearOpenQueryParam();
     };
 
     const evidenceChecklistComplete = computed(() => !showChecklists || EVIDENCE_CHECKS.every((check) => evidenceChecklist.value[check.key] === true));
@@ -308,7 +337,7 @@ const DisputesPage = dc(() => {
             });
             showSnackBar({ type: "success", message: t("Evidence submitted") });
             evidenceOpen.value = false;
-            detailsOpen.value = false;
+            closeDetails();
             refreshAll();
         } catch (error) {
             actionError.value = extractApiErrorMessage(error);
@@ -583,7 +612,10 @@ const DisputesPage = dc(() => {
 
             <SlideOverDrawer
                 modelValue={detailsOpen.value}
-                onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)}
+                onUpdate:modelValue={(value: boolean) => {
+                    detailsOpen.value = value;
+                    if (!value) void clearOpenQueryParam();
+                }}
                 title={selected.value?.externalDisputeRef ?? t("Dispute")}
                 subtitle={selected.value ? selected.value.source : ""}
                 width={660}
@@ -593,7 +625,7 @@ const DisputesPage = dc(() => {
                             {selected.value?.canSubmitEvidence && (
                                 <VBtn color="primary" onClick={() => { actionError.value = ""; evidenceOpen.value = true; }}>{t("Submit evidence")}</VBtn>
                             )}
-                            <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
+                            <VBtn variant="text" onClick={closeDetails}>{t("Close")}</VBtn>
                         </ThemedView>
                     ),
                 }}

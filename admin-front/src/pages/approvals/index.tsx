@@ -16,6 +16,7 @@ import { buildFilterQuery, type FilterValues } from "@/components/Table/filters"
 import { tableRegistry } from "@/components/Table/tableRegistry";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
+import { useOpenQuery } from "@/composables/useOpenQuery";
 import { areChecklistsVisible, areHelpPanelsVisible } from "@/constants/env";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
@@ -358,6 +359,26 @@ const ApprovalsPage = dc(() => {
         if (target) void router.push(target);
     };
 
+    const resetDecisionState = () => {
+        decisionReason.value = "";
+        outcome.value = "";
+        riskAcceptanceNote.value = "";
+        decisionChecklist.value = {};
+    };
+
+    const presentApprovalDetail = (detail: ApprovalDetail) => {
+        selected.value = detail;
+        resetDecisionState();
+        detailsOpen.value = true;
+        detailLoading.value = false;
+    };
+
+    const fetchApprovalDetail = async (id: string): Promise<ApprovalDetail | null> => {
+        const response = await api.get(urlsMap.approvalDetail(id));
+        const payload = response.data?.data ?? response.data ?? {};
+        return (payload.approval ?? payload) as ApprovalDetail;
+    };
+
     const openDetails = async (row: ApprovalRow) => {
         selected.value = {
             ...row,
@@ -366,16 +387,12 @@ const ApprovalsPage = dc(() => {
             canApprove: false,
             checkBlockedReason: null,
         };
-        decisionReason.value = "";
-        outcome.value = "";
-        riskAcceptanceNote.value = "";
-        decisionChecklist.value = {};
+        resetDecisionState();
         detailsOpen.value = true;
         detailLoading.value = true;
         try {
-            const response = await api.get(urlsMap.approvalDetail(row.id));
-            const payload = response.data?.data ?? response.data ?? {};
-            selected.value = (payload.approval ?? payload) as ApprovalDetail;
+            const detail = await fetchApprovalDetail(row.id);
+            if (detail) presentApprovalDetail(detail);
         } catch (error) {
             detailsOpen.value = false;
             selected.value = null;
@@ -383,6 +400,18 @@ const ApprovalsPage = dc(() => {
         } finally {
             detailLoading.value = false;
         }
+    };
+
+    const { clearOpenQueryParam } = useOpenQuery<ApprovalDetail>({
+        alwaysFetchDetail: true,
+        fetchById: fetchApprovalDetail,
+        onOpenRecord: presentApprovalDetail,
+        onNotFound: () => showSnackBar({ type: "error", message: t("Approval not found.") }),
+    });
+
+    const closeDetails = () => {
+        detailsOpen.value = false;
+        void clearOpenQueryParam();
     };
 
     const requiresOutcome = computed(() =>
@@ -428,7 +457,7 @@ const ApprovalsPage = dc(() => {
                 },
             );
             const payload = response.data?.data ?? response.data ?? {};
-            detailsOpen.value = false;
+            closeDetails();
             showSnackBar({
                 type: "success",
                 message: approve
@@ -903,7 +932,10 @@ const ApprovalsPage = dc(() => {
 
             <SlideOverDrawer
                 modelValue={detailsOpen.value}
-                onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)}
+                onUpdate:modelValue={(value: boolean) => {
+                    detailsOpen.value = value;
+                    if (!value) void clearOpenQueryParam();
+                }}
                 title={selected.value ? subjectTypeLabel(selected.value.subjectType) : t("Approval")}
                 subtitle={selected.value ? `${selected.value.domain} · ${kindLabel(selected.value.kind)}` : ""}
                 width={680}
@@ -1062,7 +1094,7 @@ const ApprovalsPage = dc(() => {
                                             >
                                                 {t("Reject")}
                                             </VBtn>
-                                            <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
+                                            <VBtn variant="text" onClick={closeDetails}>{t("Close")}</VBtn>
                                         </ThemedView>
                                     </SurfaceCardText>
                                 </SurfaceCard>

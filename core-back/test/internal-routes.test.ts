@@ -58,6 +58,17 @@ describe("core internal channel routers", () => {
     expect(response.body.code).toBe("AUTH_REQUIRED");
   });
 
+  test("global search and audit detail are protected endpoints", async () => {
+    for (const [path, init] of [
+      ["/internal/admin/search", { method: "POST", body: JSON.stringify({ query: "acme" }) }],
+      ["/internal/admin/audit-logs/audit-1", {}],
+    ] as const) {
+      const response = await call(path, init);
+      expect(response.status).toBe(401);
+      expect(response.body.code).toBe("AUTH_REQUIRED");
+    }
+  });
+
   test("protected merchant routes refuse an unauthenticated caller", async () => {
     const response = await call("/internal/merchant/links");
     expect(response.status).toBe(401);

@@ -16,6 +16,7 @@ import { buildFilterQuery, type FilterValues } from "@/components/Table/filters"
 import { tableRegistry } from "@/components/Table/tableRegistry";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
+import { useOpenQuery } from "@/composables/useOpenQuery";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -246,14 +247,25 @@ const AmlRulesPage = dc(() => {
         form.value.ruleType = type;
         form.value.paramsText = PARAM_HELP[type]?.match(/\{.*\}/)?.[0] ?? "{}";
     };
+    const presentRuleDetail = (detail: AmlRuleDetail) => {
+        selected.value = detail;
+        detailsOpen.value = true;
+        detailLoading.value = false;
+    };
+
+    const fetchAmlRuleDetail = async (id: string): Promise<AmlRuleDetail | null> => {
+        const response = await api.get(urlsMap.amlRuleDetail(id));
+        const payload = response.data?.data ?? response.data ?? {};
+        return (payload.rule ?? payload) as AmlRuleDetail;
+    };
+
     const openDetails = async (row: AmlRule) => {
         selected.value = { ...row, approval: null };
         detailsOpen.value = true;
         detailLoading.value = true;
         try {
-            const response = await api.get(urlsMap.amlRuleDetail(row.id));
-            const payload = response.data?.data ?? response.data ?? {};
-            selected.value = (payload.rule ?? payload) as AmlRuleDetail;
+            const detail = await fetchAmlRuleDetail(row.id);
+            if (detail) presentRuleDetail(detail);
         } catch (error) {
             detailsOpen.value = false;
             selected.value = null;
@@ -261,6 +273,18 @@ const AmlRulesPage = dc(() => {
         } finally {
             detailLoading.value = false;
         }
+    };
+
+    const { clearOpenQueryParam } = useOpenQuery<AmlRuleDetail>({
+        alwaysFetchDetail: true,
+        fetchById: fetchAmlRuleDetail,
+        onOpenRecord: presentRuleDetail,
+        onNotFound: () => showSnackBar({ type: "error", message: t("AML rule not found.") }),
+    });
+
+    const closeDetails = () => {
+        detailsOpen.value = false;
+        void clearOpenQueryParam();
     };
     const ruleChecklistComplete = computed(() => !showChecklists || RULE_CHECKS.every((check) => ruleChecklist.value[check.key] === true));
     const submit = async () => {
@@ -507,13 +531,16 @@ const AmlRulesPage = dc(() => {
             </ThemedView>
             <SlideOverDrawer
                 modelValue={detailsOpen.value}
-                onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)}
+                onUpdate:modelValue={(value: boolean) => {
+                    detailsOpen.value = value;
+                    if (!value) void clearOpenQueryParam();
+                }}
                 title={selected.value?.code ?? t("AML rule")}
                 subtitle={selected.value ? `${selected.value.name} · v${selected.value.version}` : ""}
                 width={620}
                 v-slots={{
                     footer: () => (
-                        <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
+                        <VBtn variant="text" onClick={closeDetails}>{t("Close")}</VBtn>
                     ),
                 }}
             >

@@ -15,6 +15,7 @@ import { buildFilterQuery, type FilterValues } from "@/components/Table/filters"
 import { tableRegistry } from "@/components/Table/tableRegistry";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
+import { useOpenQuery } from "@/composables/useOpenQuery";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -239,6 +240,24 @@ const AuditLogsPage = dc(() => {
         detailOpen.value = true;
     };
 
+    const fetchAuditLogDetail = async (id: string): Promise<AuditLog | null> => {
+        const response = await api.get(urlsMap.auditLogDetail(id));
+        const payload = response.data?.data ?? response.data ?? {};
+        return (payload.auditLog ?? payload.data ?? payload) as AuditLog;
+    };
+
+    const { clearOpenQueryParam } = useOpenQuery<AuditLog>({
+        alwaysFetchDetail: true,
+        fetchById: fetchAuditLogDetail,
+        onOpenRecord: openDetails,
+        onNotFound: () => showSnackBar({ type: "error", message: t("Audit log not found.") }),
+    });
+
+    const closeDetails = () => {
+        detailOpen.value = false;
+        void clearOpenQueryParam();
+    };
+
     const headers = computed<TableHeader<AuditLog>[]>(() => [
         {
             key: "createdAt",
@@ -412,12 +431,15 @@ const AuditLogsPage = dc(() => {
 
             <FormModal
                 modelValue={detailOpen.value}
-                onUpdate:modelValue={(value: boolean) => (detailOpen.value = value)}
+                onUpdate:modelValue={(value: boolean) => {
+                    detailOpen.value = value;
+                    if (!value) void clearOpenQueryParam();
+                }}
                 title={selected.value?.action ?? t("Audit event")}
                 size="lg"
                 v-slots={{
                     footer: () => (
-                        <VBtn variant="outlined" onClick={() => (detailOpen.value = false)}>{t("Close")}</VBtn>
+                        <VBtn variant="outlined" onClick={closeDetails}>{t("Close")}</VBtn>
                     ),
                 }}
             >

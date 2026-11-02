@@ -87,6 +87,8 @@ import {
   verifyPassword,
 } from "../../lib/auth";
 import { buildAdminUserInfo } from "../../lib/auth/uiAuthorities";
+import { hasConfidentialAmlAccess } from "../../lib/auth/confidentialAccess";
+import { executeGlobalSearch } from "../../lib/globalSearch";
 import type { Decimal } from "decimal.js";
 import { decimal } from "../../engine/ledger/LedgerPoster";
 import { LedgerPoster } from "../../engine/ledger/LedgerPoster";
@@ -171,7 +173,6 @@ router.get("/health", (_request, response) => {
 });
 
 
-const CONFIDENTIAL_ROLES = ["COMPLIANCE", "MLRO"];
 const idSchema = z.object({ id: z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/) });
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -192,11 +193,11 @@ const contentTypeEnum = (value: string | undefined): ContentType | null => {
 
 const roleHasConfidentialAccess = (request: Request): boolean => {
   const principal = principalOf(request);
-  const role = principal.role ?? "";
-  if (CONFIDENTIAL_ROLES.includes(role)) {
-    return true;
-  }
-  return principal.authorities.includes("aml:read") || principal.authorities.includes("aml:write");
+  return hasConfidentialAmlAccess({
+    id: principal.userId ?? principal.tokenId ?? "system",
+    role: principal.role ?? "",
+    authorities: principal.authorities,
+  });
 };
 
 const assertConfidential = (request: Request): void => {
@@ -672,6 +673,25 @@ router.get("/auth/me", (_request: Request, response: Response) => {
 
 
 router.use(requireAuthentication);
+
+router.post("/search", async (request: Request, response: Response) => {
+  response.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  const principal = principalOf(request);
+  const result = await executeGlobalSearch(request.body ?? {}, {
+    prisma: client,
+    actor: {
+      id: principal.userId ?? principal.tokenId ?? "system",
+      role: principal.role ?? "",
+      authorities: principal.authorities,
+    },
+    requestId: request.requestId,
+    logger: {
+      warn: (message, meta) => request.logger?.warn(`${message} ${JSON.stringify(meta ?? {})}`),
+      error: (message, meta) => request.logger?.error(`${message} ${JSON.stringify(meta ?? {})}`),
+    },
+  });
+  response.json(result);
+});
 
 const recentActivityRows = async (limit: number) => {
   const rows = await client.auditLog.findMany({
@@ -15645,6 +15665,33 @@ router.get("/audit-logs/summary/export", async (request: Request, response: Resp
   response.json({ ...snapshot, exportedAt: new Date().toISOString() });
 });
 
+router.get("/audit-logs/:id", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["security:read"]);
+  response.setHeader("Cache-Control", "no-store");
+  const { id } = parseOrThrow(idSchema, request.params);
+  const row = await client.auditLog.findUnique({
+    where: { id },
+    include: { actor: { select: { id: true, email: true, role: true } } },
+  });
+  if (!row) {
+    throw new ApiError(404, "AUDIT_LOG_NOT_FOUND", "The audit log entry does not exist");
+  }
+  response.json({
+    auditLog: {
+      id: row.id,
+      createdAt: row.createdAt,
+      actorId: row.actorId,
+      actorEmail: row.actor?.email ?? "",
+      role: row.role,
+      action: row.action,
+      entityType: row.entityType,
+      entityId: row.entityId,
+      beforeJson: row.beforeJson,
+      afterJson: row.afterJson,
+      approvalRequestId: row.approvalRequestId,
+    },
+  });
+});
 
 router.get("/settings", async (request: Request, response: Response) => {
   requireAuthorities(request, ["settings:read"]);

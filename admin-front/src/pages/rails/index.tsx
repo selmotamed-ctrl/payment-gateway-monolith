@@ -19,6 +19,7 @@ import { tableRegistry } from "@/components/Table/tableRegistry";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
+import { useOpenQuery } from "@/composables/useOpenQuery";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
@@ -173,6 +174,7 @@ const RailsPage = dc(() => {
     const toneColor = (tone: "error" | "warning"): string =>
         (theme.current.value.colors as Record<string, string>)[tone] ?? "";
     const summary = ref<RailSummary | null>(null);
+    const rails = ref<Rail[]>([]);
     const search = ref<string | null>(null);
     const filters = ref<FilterValues>({});
     const pageSize = ref(20);
@@ -405,6 +407,35 @@ const RailsPage = dc(() => {
         } catch (e) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
         }
+    };
+
+    const fetchRailById = async (id: string): Promise<Rail | null> => {
+        const response = await api.get(urlsMap.railDetail(id));
+        const payload = response.data?.data ?? response.data ?? {};
+        const detail = payload.rail ?? payload;
+        return detail?.id ? (detail as Rail) : null;
+    };
+
+    const openRailRecord = (rail: Rail) => {
+        if (Array.isArray(rail.fields) && rail.fields.length > 0) {
+            selected.value = rail;
+            fields.value = rail.fields.map(toPublicField);
+            resetFieldForm();
+            dialogOpen.value = true;
+            return;
+        }
+        void openRail(rail);
+    };
+
+    const { clearOpenQueryParam } = useOpenQuery<Rail>({
+        loadedRows: rails,
+        fetchById: fetchRailById,
+        onOpenRecord: openRailRecord,
+    });
+
+    const closeRailConfigDialog = () => {
+        dialogOpen.value = false;
+        void clearOpenQueryParam();
     };
 
     const editField = (index: number) => {
@@ -651,6 +682,7 @@ const RailsPage = dc(() => {
                         return payload.rails ?? payload.rows ?? [];
                     }}
                     apiTotalExtractor={(data) => Number((data as { total?: number }).total ?? 0)}
+                    onData={(rows) => (rails.value = rows)}
                     setRefreshHook={(hook) => {
                         refreshHook.value = hook as typeof refreshHook.value;
                     }}
@@ -682,7 +714,10 @@ const RailsPage = dc(() => {
             {/* Customer catalog: list + add/edit/delete fields */}
             <FormModal
                 modelValue={dialogOpen.value}
-                onUpdate:modelValue={(v: any) => (dialogOpen.value = v)}
+                onUpdate:modelValue={(v: any) => {
+                    dialogOpen.value = v;
+                    if (!v) void clearOpenQueryParam();
+                }}
                 title={[selected.value?.nameEn, selected.value?.code ? `(${selected.value.code})` : ""].filter(Boolean).join(" ")}
                 size="lg"
                 onSubmit={() => void saveField()}
@@ -696,7 +731,7 @@ const RailsPage = dc(() => {
                                     {t("Cancel")}
                                 </VBtn>
                             )}
-                            <VBtn variant="outlined" disabled={actionLoading.value} onClick={() => (dialogOpen.value = false)}>
+                            <VBtn variant="outlined" disabled={actionLoading.value} onClick={closeRailConfigDialog}>
                                 {t("Close")}
                             </VBtn>
                             <VBtn

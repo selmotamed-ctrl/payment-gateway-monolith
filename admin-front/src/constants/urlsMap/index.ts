@@ -1,4 +1,6 @@
 export const urlsMap = {
+    globalSearch: "v1/admin/search",
+    auditLogDetail: (id: string) => `v1/admin/audit-logs/${encodeURIComponent(id)}`,
     options: (kind: string) => `v1/admin/options/${kind}`,
     authLogin: "v1/admin/auth/login",
     authMfa: "v1/admin/auth/mfa",

@@ -112,6 +112,13 @@ const jsonText = (value: unknown): string => {
     }
 };
 
+const readQueryString = (value: unknown): string | null => {
+    const raw = Array.isArray(value) ? value[0] : value;
+    if (typeof raw !== "string") return null;
+    const text = raw.trim();
+    return text.length > 0 ? text : null;
+};
+
 type MerchantDetailTab = "all" | "details" | "transactions" | "wallets" | "applications" | "finance" | "compliance" | "access";
 
 const MerchantDetailPage = dc(() => {
@@ -142,7 +149,15 @@ const MerchantDetailPage = dc(() => {
     const summaryExportLoading = ref(false);
     const sectionCommand = ref<SectionCommand | null>(null);
     const sectionCommandSeq = ref(0);
-    const activeTab = ref<MerchantDetailTab>("all");
+    const activeTab = ref<MerchantDetailTab>(readQueryString(route.query.tab) === "transactions" ? "transactions" : "all");
+    const reference = computed(() => readQueryString(route.query.reference));
+
+    watch(
+        () => readQueryString(route.query.tab),
+        (tab) => {
+            if (tab === "transactions") activeTab.value = "transactions";
+        },
+    );
 
     const merchantId = computed(() => String(route.params.id ?? ""));
     const currentUserId = computed(() => user.value?.userInfo?.id ?? null);
@@ -807,6 +822,9 @@ const MerchantDetailPage = dc(() => {
                             filters={transactionFilters(entry.applications ?? [])}
                             pageSize={10}
                             noElevation={true}
+                            initialSearch={reference.value}
+                            focusReference={reference.value}
+                            onFocusReference={(transaction) => openTransaction(transaction)}
                             onRefreshReady={(refresh) => (transactionRefresh.value = refresh)}
                         />
                     </CollapsibleSection>

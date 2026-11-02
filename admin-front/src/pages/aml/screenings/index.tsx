@@ -15,6 +15,7 @@ import { buildFilterQuery, type FilterValues } from "@/components/Table/filters"
 import { tableRegistry } from "@/components/Table/tableRegistry";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
+import { useOpenQuery } from "@/composables/useOpenQuery";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -213,21 +214,37 @@ const AmlScreeningsPage = dc(() => {
         refreshHook.value?.refreshAsIs();
         void loadSummary();
     };
-    const openDetails = async (row: Screening) => {
-        selected.value = { ...row, matches: [], amlCases: [], canDisposition: false };
-        selectedMatchId.value = row.matchId ?? "";
+    const resetDispositionState = () => {
         disposition.value = "FALSE_POSITIVE";
         dispositionChecklist.value = {};
         note.value = "";
         dispositionOpen.value = false;
         actionError.value = "";
+    };
+
+    const presentScreeningDetail = (detail: ScreeningDetail) => {
+        selected.value = detail;
+        selectedMatchId.value = detail.matches.find((match) => match.disposition === "UNREVIEWED")?.id ?? "";
+        resetDispositionState();
+        detailsOpen.value = true;
+        detailLoading.value = false;
+    };
+
+    const fetchAmlScreeningDetail = async (id: string): Promise<ScreeningDetail | null> => {
+        const response = await api.get(urlsMap.amlScreeningDetail(id));
+        const payload = response.data?.data ?? response.data ?? {};
+        return (payload.screening ?? payload) as ScreeningDetail;
+    };
+
+    const openDetails = async (row: Screening) => {
+        selected.value = { ...row, matches: [], amlCases: [], canDisposition: false };
+        selectedMatchId.value = row.matchId ?? "";
+        resetDispositionState();
         detailsOpen.value = true;
         detailLoading.value = true;
         try {
-            const response = await api.get(urlsMap.amlScreeningDetail(row.id));
-            const payload = response.data?.data ?? response.data ?? {};
-            selected.value = (payload.screening ?? payload) as ScreeningDetail;
-            selectedMatchId.value = selected.value.matches.find((match) => match.disposition === "UNREVIEWED")?.id ?? "";
+            const detail = await fetchAmlScreeningDetail(row.id);
+            if (detail) presentScreeningDetail(detail);
         } catch (error) {
             detailsOpen.value = false;
             selected.value = null;
@@ -235,6 +252,18 @@ const AmlScreeningsPage = dc(() => {
         } finally {
             detailLoading.value = false;
         }
+    };
+
+    const { clearOpenQueryParam } = useOpenQuery<ScreeningDetail>({
+        alwaysFetchDetail: true,
+        fetchById: fetchAmlScreeningDetail,
+        onOpenRecord: presentScreeningDetail,
+        onNotFound: () => showSnackBar({ type: "error", message: t("AML screening not found.") }),
+    });
+
+    const closeDetails = () => {
+        detailsOpen.value = false;
+        void clearOpenQueryParam();
     };
     const dispositionChecklistComplete = computed(() => !showChecklists || DISPOSITION_CHECKS.every((check) => dispositionChecklist.value[check.key] === true));
     const submitDisposition = async () => {
@@ -478,7 +507,10 @@ const AmlScreeningsPage = dc(() => {
             </ThemedView>
             <SlideOverDrawer
                 modelValue={detailsOpen.value}
-                onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)}
+                onUpdate:modelValue={(value: boolean) => {
+                    detailsOpen.value = value;
+                    if (!value) void clearOpenQueryParam();
+                }}
                 title={selected.value?.subjectName ?? t("AML screening")}
                 subtitle={selected.value ? `${selected.value.subjectType} · ${selected.value.subjectReference}` : ""}
                 width={640}
@@ -488,7 +520,7 @@ const AmlScreeningsPage = dc(() => {
                             {unresolvedMatches.value.length > 0 && (
                                 <VBtn color="primary" onClick={() => { actionError.value = ""; dispositionOpen.value = true; }}>{t("Disposition an unresolved match")}</VBtn>
                             )}
-                            <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
+                            <VBtn variant="text" onClick={closeDetails}>{t("Close")}</VBtn>
                         </ThemedView>
                     ),
                 }}

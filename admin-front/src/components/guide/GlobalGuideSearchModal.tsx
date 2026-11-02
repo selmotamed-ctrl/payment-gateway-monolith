@@ -87,7 +87,6 @@ export const GlobalGuideSearchModal = dc(
                                 {`${results.value.length} ${isArabic() ? "نتيجة" : "results"}`}
                             </ThemedText>
                             <ThemedView style={{ flexDirection: "row", gap: "6px", alignItems: "center" }}>
-                                <StatusChip label="Ctrl / Cmd + K" tone="neutral" size="x-small" />
                                 <StatusChip label="↑ ↓" tone="neutral" size="x-small" />
                                 <StatusChip label="Enter" tone="neutral" size="x-small" />
                                 <StatusChip label="Esc" tone="neutral" size="x-small" />

@@ -16,6 +16,7 @@ import { buildFilterQuery, type FilterValues } from "@/components/Table/filters"
 import { tableRegistry } from "@/components/Table/tableRegistry";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
+import { useOpenQuery } from "@/composables/useOpenQuery";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -291,8 +292,28 @@ const CashoutsPage = dc(() => {
         void loadSummary();
     };
 
-    const openDetails = async (row: Cashout) => {
+    const resetProcessState = () => {
         checklist.value = {};
+        decision.value = "APPROVE";
+        reason.value = "";
+        processOpen.value = false;
+        actionError.value = "";
+    };
+
+    const presentCashoutDetail = (detail: CashoutDetail) => {
+        selected.value = detail;
+        resetProcessState();
+        detailsOpen.value = true;
+        detailLoading.value = false;
+    };
+
+    const fetchCashoutDetail = async (id: string): Promise<CashoutDetail | null> => {
+        const response = await api.get(urlsMap.cashoutDetail(id));
+        const payload = response.data?.data ?? response.data ?? {};
+        return (payload.cashout ?? payload) as CashoutDetail;
+    };
+
+    const openDetails = async (row: Cashout) => {
         selected.value = {
             ...row,
             merchantLegalName: "",
@@ -303,16 +324,12 @@ const CashoutsPage = dc(() => {
             canProcess: row.state === "PENDING",
             processBlockedReason: row.state === "PENDING" ? null : "CASHOUT_NOT_PENDING",
         };
-        decision.value = "APPROVE";
-        reason.value = "";
-        processOpen.value = false;
-        actionError.value = "";
+        resetProcessState();
         detailsOpen.value = true;
         detailLoading.value = true;
         try {
-            const response = await api.get(urlsMap.cashoutDetail(row.id));
-            const payload = response.data?.data ?? response.data ?? {};
-            selected.value = (payload.cashout ?? payload) as CashoutDetail;
+            const detail = await fetchCashoutDetail(row.id);
+            if (detail) presentCashoutDetail(detail);
         } catch (error) {
             detailsOpen.value = false;
             selected.value = null;
@@ -320,6 +337,18 @@ const CashoutsPage = dc(() => {
         } finally {
             detailLoading.value = false;
         }
+    };
+
+    const { clearOpenQueryParam } = useOpenQuery<CashoutDetail>({
+        alwaysFetchDetail: true,
+        fetchById: fetchCashoutDetail,
+        onOpenRecord: presentCashoutDetail,
+        onNotFound: () => showSnackBar({ type: "error", message: t("Cash-out not found.") }),
+    });
+
+    const closeDetails = () => {
+        detailsOpen.value = false;
+        void clearOpenQueryParam();
     };
 
     const checklistComplete = computed(() => !showChecklists || PROCESS_CHECKS.every((check) => checklist.value[check.key] === true));
@@ -345,7 +374,7 @@ const CashoutsPage = dc(() => {
             });
             showSnackBar({ type: "success", message: decision.value === "APPROVE" ? t("Cash-out approved") : t("Cash-out rejected") });
             processOpen.value = false;
-            detailsOpen.value = false;
+            closeDetails();
             refreshAll();
         } catch (error) {
             actionError.value = extractApiErrorMessage(error);
@@ -552,7 +581,10 @@ const CashoutsPage = dc(() => {
 
             <SlideOverDrawer
                 modelValue={detailsOpen.value}
-                onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)}
+                onUpdate:modelValue={(value: boolean) => {
+                    detailsOpen.value = value;
+                    if (!value) void clearOpenQueryParam();
+                }}
                 title={formatMoney(selected.value?.amount, selected.value?.currency)}
                 subtitle={selected.value ? selected.value.merchantName || selected.value.merchantId : ""}
                 width={640}
@@ -562,7 +594,7 @@ const CashoutsPage = dc(() => {
                             {selected.value?.canProcess && (
                                 <VBtn color="primary" onClick={() => { actionError.value = ""; processOpen.value = true; }}>{t("Process")}</VBtn>
                             )}
-                            <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
+                            <VBtn variant="text" onClick={closeDetails}>{t("Close")}</VBtn>
                         </ThemedView>
                     ),
                 }}

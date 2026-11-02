@@ -16,6 +16,7 @@ import { buildFilterQuery, type FilterValues } from "@/components/Table/filters"
 import { tableRegistry } from "@/components/Table/tableRegistry";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
+import { useOpenQuery } from "@/composables/useOpenQuery";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -291,6 +292,27 @@ const AmlCasesPage = dc(() => {
         void loadSummary();
     };
 
+    const resetCaseActionState = () => {
+        resolution.value = "RELEASE";
+        rationale.value = "";
+        caseChecklist.value = {};
+        proposeOpen.value = false;
+        actionError.value = "";
+    };
+
+    const presentCaseDetail = (detail: AmlCaseDetail) => {
+        selected.value = detail;
+        resetCaseActionState();
+        detailsOpen.value = true;
+        detailLoading.value = false;
+    };
+
+    const fetchAmlCaseDetail = async (id: string): Promise<AmlCaseDetail | null> => {
+        const response = await api.get(urlsMap.amlCaseDetail(id));
+        const payload = response.data?.data ?? response.data ?? {};
+        return (payload.case ?? payload) as AmlCaseDetail;
+    };
+
     const openDetails = async (row: AmlCase) => {
         selected.value = {
             ...row,
@@ -299,17 +321,12 @@ const AmlCasesPage = dc(() => {
             regulatoryReport: null,
             approval: null,
         };
-        resolution.value = "RELEASE";
-        rationale.value = "";
-        caseChecklist.value = {};
-        proposeOpen.value = false;
-        actionError.value = "";
+        resetCaseActionState();
         detailsOpen.value = true;
         detailLoading.value = true;
         try {
-            const response = await api.get(urlsMap.amlCaseDetail(row.id));
-            const payload = response.data?.data ?? response.data ?? {};
-            selected.value = (payload.case ?? payload) as AmlCaseDetail;
+            const detail = await fetchAmlCaseDetail(row.id);
+            if (detail) presentCaseDetail(detail);
         } catch (error) {
             detailsOpen.value = false;
             selected.value = null;
@@ -317,6 +334,18 @@ const AmlCasesPage = dc(() => {
         } finally {
             detailLoading.value = false;
         }
+    };
+
+    const { clearOpenQueryParam } = useOpenQuery<AmlCaseDetail>({
+        alwaysFetchDetail: true,
+        fetchById: fetchAmlCaseDetail,
+        onOpenRecord: presentCaseDetail,
+        onNotFound: () => showSnackBar({ type: "error", message: t("AML case not found.") }),
+    });
+
+    const closeDetails = () => {
+        detailsOpen.value = false;
+        void clearOpenQueryParam();
     };
 
     const canPropose = computed(() => selected.value && ["OPEN", "IN_REVIEW"].includes(selected.value.status));
@@ -344,7 +373,7 @@ const AmlCasesPage = dc(() => {
             });
             const payload = response.data?.data ?? response.data ?? {};
             proposeOpen.value = false;
-            detailsOpen.value = false;
+            closeDetails();
             showSnackBar({
                 type: "success",
                 message: payload.approvalRequestId
@@ -610,7 +639,10 @@ const AmlCasesPage = dc(() => {
 
             <SlideOverDrawer
                 modelValue={detailsOpen.value}
-                onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)}
+                onUpdate:modelValue={(value: boolean) => {
+                    detailsOpen.value = value;
+                    if (!value) void clearOpenQueryParam();
+                }}
                 title={selected.value?.caseRef ?? t("AML case")}
                 subtitle={selected.value ? `${selected.value.subjectName} · ${selected.value.triggerReason}` : ""}
                 width={640}
@@ -620,7 +652,7 @@ const AmlCasesPage = dc(() => {
                             {canPropose.value && (
                                 <VBtn color="primary" onClick={() => { actionError.value = ""; proposeOpen.value = true; }}>{t("Propose resolution")}</VBtn>
                             )}
-                            <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
+                            <VBtn variant="text" onClick={closeDetails}>{t("Close")}</VBtn>
                         </ThemedView>
                     ),
                 }}

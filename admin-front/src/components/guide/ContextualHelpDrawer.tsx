@@ -69,8 +69,8 @@ export const ContextualHelpDrawer = dc(
                     ) : (
                         <ThemedText style={{ opacity: 0.7 }}>
                             {isArabic()
-                                ? "لا يوجد فصل مرتبط بهذه الشاشة بعد. استخدم البحث Ctrl+K للوصول إلى كل الكتب."
-                                : "No chapter is mapped to this screen yet. Use Ctrl+K to search every book."}
+                                ? "لا يوجد فصل مرتبط بهذه الشاشة بعد. استخدم Ctrl+K للبحث في السجلات والصفحات والدليل."
+                                : "No chapter is mapped to this screen yet. Use Ctrl+K to search records, pages, and the guide."}
                         </ThemedText>
                     )}
 

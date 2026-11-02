@@ -16,6 +16,7 @@ import { buildFilterQuery, type FilterValues } from "@/components/Table/filters"
 import { tableRegistry } from "@/components/Table/tableRegistry";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
+import { useOpenQuery } from "@/composables/useOpenQuery";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -335,7 +336,7 @@ const AmlReportsPage = dc(() => {
             actionLoading.value = false;
         }
     };
-    const openDetails = async (row: RegulatoryReport) => {
+    const resetReportActionState = () => {
         submitOpen.value = false;
         ackOpen.value = false;
         submissionError.value = "";
@@ -345,13 +346,29 @@ const AmlReportsPage = dc(() => {
         ackStatus.value = "ACKNOWLEDGED";
         ackReason.value = "";
         ackChecklist.value = {};
+    };
+
+    const presentReportDetail = (detail: RegulatoryReportDetail) => {
+        selected.value = detail;
+        resetReportActionState();
+        detailsOpen.value = true;
+        detailLoading.value = false;
+    };
+
+    const fetchAmlReportDetail = async (id: string): Promise<RegulatoryReportDetail | null> => {
+        const response = await api.get(urlsMap.amlReportDetail(id));
+        const payload = response.data?.data ?? response.data ?? {};
+        return (payload.report ?? payload) as RegulatoryReportDetail;
+    };
+
+    const openDetails = async (row: RegulatoryReport) => {
+        resetReportActionState();
         selected.value = { ...row, approval: null, amlCase: null };
         detailsOpen.value = true;
         detailLoading.value = true;
         try {
-            const response = await api.get(urlsMap.amlReportDetail(row.id));
-            const payload = response.data?.data ?? response.data ?? {};
-            selected.value = (payload.report ?? payload) as RegulatoryReportDetail;
+            const detail = await fetchAmlReportDetail(row.id);
+            if (detail) presentReportDetail(detail);
         } catch (error) {
             detailsOpen.value = false;
             selected.value = null;
@@ -359,6 +376,18 @@ const AmlReportsPage = dc(() => {
         } finally {
             detailLoading.value = false;
         }
+    };
+
+    const { clearOpenQueryParam } = useOpenQuery<RegulatoryReportDetail>({
+        alwaysFetchDetail: true,
+        fetchById: fetchAmlReportDetail,
+        onOpenRecord: presentReportDetail,
+        onNotFound: () => showSnackBar({ type: "error", message: t("AML report not found.") }),
+    });
+
+    const closeDetails = () => {
+        detailsOpen.value = false;
+        void clearOpenQueryParam();
     };
     const exportSummary = async () => {
         if (summaryExportLoading.value) return;
@@ -411,7 +440,7 @@ const AmlReportsPage = dc(() => {
             const payload = response.data?.data ?? response.data ?? {};
             selected.value = { ...selected.value, status: payload.status ?? selected.value.status, submissionRef: payload.submissionRef ?? submissionRef.value.trim() };
             submitOpen.value = false;
-            detailsOpen.value = false;
+            closeDetails();
             showSnackBar({ type: "success", message: t("Regulatory report submitted") });
             refreshAll();
         } catch (error) {
@@ -444,7 +473,7 @@ const AmlReportsPage = dc(() => {
             const payload = response.data?.data ?? response.data ?? {};
             selected.value = { ...selected.value, status: payload.status ?? ackStatus.value };
             ackOpen.value = false;
-            detailsOpen.value = false;
+            closeDetails();
             showSnackBar({ type: "success", message: t("Authority decision recorded") });
             refreshAll();
         } catch (error) {
@@ -637,7 +666,10 @@ const AmlReportsPage = dc(() => {
             </ThemedView>
             <SlideOverDrawer
                 modelValue={detailsOpen.value}
-                onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)}
+                onUpdate:modelValue={(value: boolean) => {
+                    detailsOpen.value = value;
+                    if (!value) void clearOpenQueryParam();
+                }}
                 title={selected.value?.reportRef ?? t("AML report")}
                 subtitle={selected.value ? `${selected.value.reportType} · ${selected.value.authority}` : ""}
                 width={660}
@@ -650,7 +682,7 @@ const AmlReportsPage = dc(() => {
                             {canAcknowledgeReport.value && (
                                 <VBtn color="primary" onClick={() => { ackError.value = ""; ackOpen.value = true; }}>{t("Record authority decision")}</VBtn>
                             )}
-                            <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
+                            <VBtn variant="text" onClick={closeDetails}>{t("Close")}</VBtn>
                         </ThemedView>
                     ),
                 }}

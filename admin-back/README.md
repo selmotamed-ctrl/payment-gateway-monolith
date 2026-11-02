@@ -15,6 +15,7 @@ Mounted under `/api/v1/admin`:
 | Area | Routes |
 | :--- | :--- |
 | Auth | `POST /auth/login`, `POST /auth/mfa` |
+| Deep search | `POST /search` (token-hashed 120 req/min limiter; forwards to core) |
 | Users | `GET, POST, PATCH /users`, `PATCH /users/:id` |
 | Join requests and KYB | `GET /join-requests`, `GET /join-requests/:id`, `POST /join-requests/:id/assign`, `POST /join-requests/:id/request-info`, `POST /join-requests/:id/decide`, `POST /kyb-documents/:id/review` |
 | Merchants | `GET /merchants`, `GET /merchants/:id`, `POST /merchants/:id/suspend`, `POST /merchants/:id/reinstate`, `POST /merchants/:id/propose-edit`, `GET /merchants/:id/detail-changes` |
@@ -27,6 +28,7 @@ Mounted under `/api/v1/admin`:
 | Reconciliation | `GET, POST /reconciliation/sources`, `POST /reconciliation/upload`, `GET /reconciliation/runs` |
 | Finance | `GET, POST /disputes`, `GET, POST /adjustments`, `GET /cashouts`, `POST /cashouts/:id/process`, `GET, POST /commission-profiles`, `GET, POST /velocity-rules`, `GET /finance/profitability`, `GET /finance/liquidity`, `GET /finance/invariant-check` |
 | Settings | `GET, PUT /settings` |
+| Audit | `GET /audit-logs`, `GET /audit-logs/:id` |
 
 ## Environment
 

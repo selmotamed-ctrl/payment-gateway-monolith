@@ -20,6 +20,7 @@ import { optionsRouter } from "./options";
 import { statsRouter } from "./stats";
 import { auditLogsRouter } from "./auditLogs";
 import { usersRouter } from "./users";
+import { searchRouter } from "./search";
 
 const router = express.Router();
 
@@ -39,6 +40,7 @@ const adminLimiter = rateLimiter({
 router.use(adminLimiter);
 router.use(requireSession);
 
+router.use("/search", searchRouter);
 router.use("/academy", academyRouter);
 router.use("/users", usersRouter);
 router.use("/join-requests", joinRequestsRouter);

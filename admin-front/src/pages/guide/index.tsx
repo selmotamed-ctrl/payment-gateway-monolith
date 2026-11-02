@@ -873,7 +873,6 @@ const AdminGuidePage = dc(() => {
                             <VBtn size="small" variant="tonal" prependIcon="mdi-magnify" onClick={() => (searchOpen.value = true)}>
                                 {isArabic.value ? "بحث فوري" : "Instant search"}
                             </VBtn>
-                            <StatusBadge status="KEYBOARD" label="Ctrl / Cmd + K" showDot={false} />
                             <VBtn size="small" variant="tonal" prependIcon="mdi-download" onClick={exportBookmarks}>
                                 {isArabic.value ? "تصدير العلامات" : "Export bookmarks"}
                             </VBtn>

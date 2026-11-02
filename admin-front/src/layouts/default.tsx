@@ -24,8 +24,12 @@ import { toggleTheme } from "@/state/app/index";
 import { setLocale } from "@/plugins/localization";
 import { showSnackBar } from "@/utils/snackBar";
 import { GlobalGuideSearchModal } from "@/components/guide/GlobalGuideSearchModal";
+import { GlobalSearchPalette } from "@/components/search/GlobalSearchPalette";
+import { clearGlobalSearchCache } from "@/components/search/api";
+import type { NavigationSectionItem } from "@/components/search/localCommands";
+import { searchGuide } from "@/content/guide/search";
 import { ContextualHelpDrawer } from "@/components/guide/ContextualHelpDrawer";
-import { useSections } from "./sections";
+import { routesAuthorities, routesRoles, useSections } from "./sections";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import { api } from "@/state/api";
@@ -39,6 +43,12 @@ const DefaultLayout = dc(() => {
     const router = useRouter();
     const sections = useSections();
     const guideSearchOpen = ref(false);
+    const globalSearchOpen = ref(false);
+    const globalSearchFocusSignal = ref(0);
+    const globalSearchTrigger = ref<HTMLButtonElement | null>(null);
+    const isMacPlatform = /Mac|iPhone|iPad/i.test(navigator.platform || "");
+    const searchShortcutLabel = isMacPlatform ? "⌘ K" : "Ctrl K";
+    const searchShortcutAria = isMacPlatform ? "⌘K" : "Ctrl+K";
     const helpDrawerOpen = ref(false);
     const collapsedSections = ref<number[]>([]);
 
@@ -96,6 +106,37 @@ const DefaultLayout = dc(() => {
     const isMaker = computed(() => Boolean(user.value?.userInfo?.isMaker));
     const isChecker = computed(() => Boolean(user.value?.userInfo?.isChecker));
     const canViewLedger = computed(() => hasOneOfAuthorities(["profit.read", "liquidity.read"]));
+    const navigationItems = computed<NavigationSectionItem[]>(() =>
+        sections.value.map((section) => ({
+            title: section.title,
+            routes: section.routes.map((item) => ({
+                title: item.label,
+                routeName: item.name,
+                icon: item.icon,
+                sectionTitle: section.title,
+            })),
+        })),
+    );
+    const searchAccessContext = computed(() => ({
+        role: String(user.value?.userInfo?.role ?? ""),
+        authorities: new Set(
+            Object.entries(user.value?.userInfo?.authoritiesMap ?? {})
+                .filter(([, enabled]) => enabled === true)
+                .map(([authority]) => authority),
+        ),
+        visibleRouteNames: new Set(
+            sections.value.flatMap((section) => section.routes.map((item) => item.name)),
+        ),
+        routesAuthorities: routesAuthorities as unknown as Record<string, readonly string[] | null | undefined>,
+        routesRoles: routesRoles as unknown as Record<string, readonly string[] | null | undefined>,
+    }));
+    const openGlobalSearch = () => {
+        if (globalSearchOpen.value) {
+            globalSearchFocusSignal.value += 1;
+            return;
+        }
+        globalSearchOpen.value = true;
+    };
     const ledgerInvariant = ref<{ drift: string; currency: string; ok: boolean } | null>(null);
     let invariantTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -135,10 +176,16 @@ const DefaultLayout = dc(() => {
     const onGlobalKeydown = (event: KeyboardEvent) => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
             event.preventDefault();
-            guideSearchOpen.value = true;
+            openGlobalSearch();
         }
         if (event.key === "Escape") {
-            guideSearchOpen.value = false;
+            if (globalSearchOpen.value) {
+                globalSearchOpen.value = false;
+            } else if (guideSearchOpen.value) {
+                guideSearchOpen.value = false;
+            } else if (helpDrawerOpen.value) {
+                helpDrawerOpen.value = false;
+            }
         }
         const target = event.target as HTMLElement | null;
         const typing =
@@ -153,6 +200,7 @@ const DefaultLayout = dc(() => {
     };
 
     onMounted(() => {
+        clearGlobalSearchCache();
         window.addEventListener("keydown", onGlobalKeydown);
         void loadLedgerInvariant();
         invariantTimer = setInterval(() => void loadLedgerInvariant(), 60_000);
@@ -223,14 +271,17 @@ const DefaultLayout = dc(() => {
                     </RouterLink>
                 )}
 
-                <VBtn
-                    icon
-                    variant="text"
-                    aria-label={t("Instant guide search (Ctrl+K)")}
-                    onClick={() => (guideSearchOpen.value = true)}
+                <button
+                    ref={globalSearchTrigger}
+                    type="button"
+                    class="pg-global-search-trigger"
+                    aria-label={`${t("Search everything")} (${searchShortcutAria})`}
+                    onClick={openGlobalSearch}
                 >
-                    <VIcon icon="mdi-magnify" />
-                </VBtn>
+                    <VIcon icon="mdi-magnify" size={18} />
+                    <span class="pg-global-search-trigger__label">{t("Search everything…")}</span>
+                    <kbd class="pg-command-kbd">{searchShortcutLabel}</kbd>
+                </button>
 
                 <VBtn
                     variant="text"
@@ -352,9 +403,8 @@ const DefaultLayout = dc(() => {
                 </div>
                 <div class="pg-drawer__search">
                     <button type="button" class="pg-search-pill" onClick={() => (guideSearchOpen.value = true)}>
-                        <VIcon icon="mdi-magnify" size={16} />
-                        <span class="pg-search-pill__label">{t("Search guide, rails, cases…")}</span>
-                        <span class="pg-search-pill__kbd">Ctrl K</span>
+                        <VIcon icon="mdi-book-search-outline" size={16} />
+                        <span class="pg-search-pill__label">{t("Search guide…")}</span>
                     </button>
                 </div>
                 <VDivider />
@@ -448,6 +498,17 @@ const DefaultLayout = dc(() => {
             >
                 <RouterView />
             </VMain>
+
+            <GlobalSearchPalette
+                modelValue={globalSearchOpen.value}
+                onUpdate:modelValue={(value: boolean) => (globalSearchOpen.value = value)}
+                locale={locale.value === "ar" ? "ar" : "en"}
+                accessContext={searchAccessContext.value}
+                navigationItems={navigationItems.value}
+                searchGuideFn={(query: string) => searchGuide(query, 5)}
+                triggerElement={globalSearchTrigger.value}
+                focusSignal={globalSearchFocusSignal.value}
+            />
 
             <GlobalGuideSearchModal
                 modelValue={guideSearchOpen.value}
