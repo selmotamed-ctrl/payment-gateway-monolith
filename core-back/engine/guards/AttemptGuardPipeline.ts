@@ -1,5 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { ApiError } from "../../lib/error";
+import {
+  readVelocityWindowTotals,
+  recordAttemptLifecycle,
+  velocityBucketEpoch,
+  velocityScopeHash,
+} from "../../lib/counters/materializedCounters";
 import { moneyFromDecimal, moneyToString, type Money } from "../db/money";
 import type {
   AmlAction,
@@ -8,6 +14,7 @@ import type {
   Environment,
   MerchantRow,
   PaymentAttemptRow,
+  PaymentLinkRow,
   PaymentRepository,
   PrismaLike,
   Repositories,
@@ -366,7 +373,7 @@ export class AttemptGuardPipeline {
         }
       }
 
-      const link = await this.repositories.payments.lockLinkByKey(tx, request.linkKey);
+      const link = await this.loadGuardLink(tx, request.linkKey);
       if (!link) {
         throw new ApiError(404, "PAYMENT_LINK_NOT_FOUND", "Payment link not found");
       }
@@ -668,7 +675,34 @@ export class AttemptGuardPipeline {
         );
       }
 
-      await this.repositories.payments.updateLinkSlotCount(tx, link.id, 1);
+      const slotClaimed = await this.claimLinkSlot(tx, link.id, now);
+      if (!slotClaimed) {
+        const blocked = await this.createBlockedAttempt(tx, {
+          link,
+          merchant,
+          request,
+          route,
+          amounts,
+          currency,
+          reason: "PAYMENT_LINK_SLOT_UNAVAILABLE",
+          velocityRuleIds: flaggedVelocityRuleIds,
+          clientIp,
+          clientPhone,
+          now,
+        });
+        return blockDecision(
+          "PAYMENT_LINK_SLOT_UNAVAILABLE",
+          "PAYMENT_IN_PROGRESS",
+          flaggedVelocityRuleIds,
+          blocked.id,
+          blocked.reference,
+          amounts.totalCharged,
+          currency,
+          null,
+          null,
+          settlementTarget,
+        );
+      }
       const attemptGroupId = await this.resolveAttemptGroup(tx, link.id, customer, clientIp, clientPhone);
       // A held attempt waits for the resolution of its case, so it outlives
       // the session of the payment: the slot of the link stays reserved
@@ -685,6 +719,9 @@ export class AttemptGuardPipeline {
         : new Date(attemptExpiresAt.getTime() + 24 * 60 * 60 * 1000);
       const attemptData: Parameters<PaymentRepository["createAttempt"]>[1] & {
         settlementTarget?: SettlementTarget;
+        endClientIp?: string | null;
+        endClientPhoneHash?: string | null;
+        endClientCardAlias?: string | null;
       } = {
         reference: this.buildReference(),
         idempotencyKey: request.idempotencyKey ?? null,
@@ -711,6 +748,11 @@ export class AttemptGuardPipeline {
         feeBearer: link.feeBearer,
         settlementTarget,
         clientIp: clientIp,
+        endClientIp: clientIp,
+        endClientPhoneHash: clientPhone
+          ? velocityScopeHash("END_CLIENT_PHONE", clientPhone)
+          : null,
+        endClientCardAlias: cardAlias ? cardAlias.slice(0, 64) : null,
         userAgent: request.userAgent ?? null,
         customerFieldsMasked: {
           phone: clientPhone,
@@ -726,6 +768,7 @@ export class AttemptGuardPipeline {
         nextCheckAt: request.nextCheckAt ?? null,
       };
       const attempt = await this.repositories.payments.createAttempt(tx, attemptData);
+      await recordAttemptLifecycle(tx, { attemptId: attempt.id, event: "INITIATED", at: now });
 
       let amlCaseId: string | null = null;
       let severity: Severity | null = amlResult.severity;
@@ -828,6 +871,32 @@ export class AttemptGuardPipeline {
     return transaction
       ? run(transaction)
       : (this.db.$transaction(run) as Promise<GuardDecision>);
+  }
+
+  private async loadGuardLink(tx: Tx, key: string): Promise<PaymentLinkRow | null> {
+    const link = await this.repositories.payments.findLinkByKey(tx, key);
+    if (link) {
+      return link;
+    }
+    // Compatibility with in-memory repositories that only implement the older
+    // locking port. The production repository always resolves through the
+    // non-locking read.
+    return this.repositories.payments.lockLinkByKey
+      ? this.repositories.payments.lockLinkByKey(tx, key)
+      : null;
+  }
+
+  private async claimLinkSlot(tx: Tx, linkId: string, now: Date): Promise<boolean> {
+    const payments = this.repositories.payments as PaymentRepository & {
+      claimPaymentLinkSlotAtomic?: (tx: Tx, linkId: string, now: Date) => Promise<boolean>;
+    };
+    if (typeof payments.claimPaymentLinkSlotAtomic === "function") {
+      return payments.claimPaymentLinkSlotAtomic(tx, linkId, now);
+    }
+    // In-memory tests keep the legacy unconditional increment; the atomic
+    // conditional UPDATE is used by the production repository.
+    await payments.updateLinkSlotCount(tx, linkId, 1);
+    return true;
   }
 
   private async resolveMerchant(
@@ -1164,8 +1233,7 @@ export class AttemptGuardPipeline {
         continue;
       }
       const since = new Date(input.now.getTime() - Math.max(1, rule.windowSeconds) * 1000);
-      const stats = await this.collectScopedWindowStats(tx, {
-        scopeType: rule.scopeType,
+      const scopeHash = this.velocityScopeHashForRule(rule.scopeType, {
         merchantId: input.merchant.id,
         applicationId: input.link.applicationId,
         linkId: input.link.id,
@@ -1173,8 +1241,31 @@ export class AttemptGuardPipeline {
         clientIp: input.clientIp,
         clientPhone: input.clientPhone,
         cardAlias: input.cardAlias,
-        since,
       });
+      const materialized = scopeHash
+        ? await readVelocityWindowTotals(tx, {
+          scopeType: rule.scopeType,
+          scopeHash,
+          sinceBucketEpoch: velocityBucketEpoch(since),
+        })
+        : null;
+      const stats: AttemptWindowStats = materialized
+        ? {
+          count: materialized.attemptCount,
+          totalAmount: materialized.totalAmount,
+          amounts: [],
+        }
+        : await this.collectScopedWindowStats(tx, {
+          scopeType: rule.scopeType,
+          merchantId: input.merchant.id,
+          applicationId: input.link.applicationId,
+          linkId: input.link.id,
+          railId: input.route.railId,
+          clientIp: input.clientIp,
+          clientPhone: input.clientPhone,
+          cardAlias: input.cardAlias,
+          since,
+        });
       const maxCount = rule.maxCount === null || rule.maxCount === undefined ? null : Number(rule.maxCount);
       const maxAmount = rule.maxAmount === null || rule.maxAmount === undefined ? null : moneyFromDecimal(rule.maxAmount);
       const countExceeded = maxCount !== null && stats.count >= maxCount;
@@ -1187,6 +1278,38 @@ export class AttemptGuardPipeline {
       });
     }
     return results;
+  }
+
+  private velocityScopeHashForRule(
+    scopeType: VelocityRuleRow["scopeType"],
+    context: {
+      merchantId: string;
+      applicationId: string;
+      linkId: string;
+      railId: string | null;
+      clientIp: string | null;
+      clientPhone: string | null;
+      cardAlias: string | null;
+    },
+  ): string | null {
+    switch (scopeType) {
+      case "MERCHANT":
+        return velocityScopeHash("MERCHANT", context.merchantId);
+      case "APPLICATION":
+        return velocityScopeHash("APPLICATION", context.applicationId);
+      case "LINK":
+        return velocityScopeHash("LINK", context.linkId);
+      case "RAIL":
+        return context.railId ? velocityScopeHash("RAIL", context.railId) : null;
+      case "END_CLIENT_IP":
+        return context.clientIp ? velocityScopeHash("END_CLIENT_IP", context.clientIp) : null;
+      case "END_CLIENT_PHONE":
+        return context.clientPhone ? velocityScopeHash("END_CLIENT_PHONE", context.clientPhone) : null;
+      case "END_CLIENT_CARD":
+        return context.cardAlias ? velocityScopeHash("END_CLIENT_CARD", context.cardAlias) : null;
+      default:
+        return null;
+    }
   }
 
   /**
@@ -1302,6 +1425,13 @@ export class AttemptGuardPipeline {
       subMode: input.request.subMode ?? null,
       status: "BLOCKED",
       substatus: input.reason,
+      endClientIp: input.clientIp,
+      endClientPhoneHash: input.clientPhone
+        ? velocityScopeHash("END_CLIENT_PHONE", input.clientPhone)
+        : null,
+      endClientCardAlias: input.request.customer?.cardAlias
+        ? input.request.customer.cardAlias.slice(0, 64)
+        : null,
       requestedAmount: moneyToString(input.amounts.requested),
       totalChargedAmount: moneyToString(input.amounts.totalCharged),
       surchargeAmount: moneyToString(input.amounts.surcharge),
@@ -1312,6 +1442,16 @@ export class AttemptGuardPipeline {
       customerFieldsMasked: {},
       contextCiphertext: "",
       terminalAt: input.now,
+    } as Parameters<PaymentRepository["createAttempt"]>[1] & {
+      endClientIp?: string | null;
+      endClientPhoneHash?: string | null;
+      endClientCardAlias?: string | null;
+    });
+    await recordAttemptLifecycle(tx, {
+      attemptId: attempt.id,
+      event: "INITIATED",
+      at: input.now,
+      countVelocity: false,
     });
     if (input.request.requestedByUserId) {
       await this.repositories.governance.writeAuditLog(tx, {

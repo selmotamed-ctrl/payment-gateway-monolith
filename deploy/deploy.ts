@@ -251,6 +251,29 @@ const renderNginx = (host: HostPlan, config: DeployConfig, runner: SshRunner, ro
   }
 };
 
+const withDatabasePoolEnv = (service: ServicePlan, config: DeployConfig): ServicePlan => {
+  if (service.role !== "core") {
+    return service;
+  }
+  const env = { ...service.env };
+  if (config.DB_TRANSACTIONAL_POOL_SIZE) {
+    env.DB_TRANSACTIONAL_POOL_SIZE = String(config.DB_TRANSACTIONAL_POOL_SIZE);
+  }
+  if (config.DB_TRANSACTIONAL_ACQUIRE_TIMEOUT_MS) {
+    env.DB_TRANSACTIONAL_ACQUIRE_TIMEOUT_MS = String(config.DB_TRANSACTIONAL_ACQUIRE_TIMEOUT_MS);
+  }
+  if (config.DB_BACKGROUND_POOL_SIZE) {
+    env.DB_BACKGROUND_POOL_SIZE = String(config.DB_BACKGROUND_POOL_SIZE);
+  }
+  if (config.DB_BACKGROUND_ACQUIRE_TIMEOUT_MS) {
+    env.DB_BACKGROUND_ACQUIRE_TIMEOUT_MS = String(config.DB_BACKGROUND_ACQUIRE_TIMEOUT_MS);
+  }
+  if (config.DATABASE_BACKGROUND_URL) {
+    env.DATABASE_BACKGROUND_URL = config.DATABASE_BACKGROUND_URL;
+  }
+  return { ...service, env };
+};
+
 const deployService = (input: {
   runner: SshRunner;
   host: HostPlan;
@@ -366,6 +389,97 @@ const deployService = (input: {
   return releaseDir;
 };
 
+type MysqlFlavor = "mariadb" | "mysql" | "unknown";
+
+const detectMysqlFlavor = (
+  runner: SshRunner,
+  host: HostPlan,
+  config: DeployConfig,
+): MysqlFlavor => {
+  if (config.DB_FLAVOR !== "auto") {
+    return config.DB_FLAVOR;
+  }
+  if (runner.dryRun) {
+    return "unknown";
+  }
+  try {
+    const version = runner
+      .capture(host.ssh, `mysql --protocol=socket -N -e "SELECT VERSION()"`, { sudo: true })
+      .toLowerCase();
+    if (version.includes("mariadb")) {
+      return "mariadb";
+    }
+    if (version.trim().length > 0) {
+      return "mysql";
+    }
+  } catch {
+    // The SQL keeps working without flavour detection; use the shared options.
+  }
+  return "unknown";
+};
+
+/**
+ * Renders the production InnoDB/server settings. The MariaDB thread-pool
+ * options are emitted only for MariaDB; on MySQL they are either unknown or
+ * unsafe, so the shared settings are used instead.
+ */
+export const renderMysqlTuningConfig = (
+  config: DeployConfig,
+  flavor: MysqlFlavor,
+): string => {
+  const lines = [
+    "[mysqld]",
+    "# Functions & triggers",
+    "log_bin_trust_function_creators = 1",
+    "character_set_server            = utf8mb4",
+    "collation_server                = utf8mb4_unicode_ci",
+    "",
+    "# InnoDB buffer pool & temporary memory",
+    `innodb_buffer_pool_size         = ${config.DB_BUFFER_POOL_SIZE ?? config.DB_INNODB_BUFFER_POOL_SIZE}`,
+    `innodb_buffer_pool_instances    = ${config.DB_INNODB_BUFFER_POOL_INSTANCES}`,
+    `innodb_log_file_size            = ${config.DB_INNODB_LOG_FILE_SIZE}`,
+    `innodb_log_buffer_size          = ${config.DB_INNODB_LOG_BUFFER_SIZE}`,
+    `tmp_table_size                  = ${config.DB_TMP_TABLE_SIZE}`,
+    `max_heap_table_size             = ${config.DB_MAX_HEAP_TABLE_SIZE}`,
+    "",
+    "# Durable financial writes and direct I/O",
+    "innodb_flush_log_at_trx_commit  = 1",
+    "sync_binlog                     = 1",
+    "innodb_flush_method             = O_DIRECT",
+    "innodb_doublewrite              = 1",
+    "",
+    "# Connections, locks and table cache",
+    `max_connections                 = ${config.DB_MAX_CONNECTIONS}`,
+    `thread_cache_size               = ${config.DB_THREAD_CACHE_SIZE}`,
+    `table_open_cache                = ${config.DB_TABLE_OPEN_CACHE}`,
+    `table_definition_cache          = ${config.DB_TABLE_DEFINITION_CACHE}`,
+    `innodb_lock_wait_timeout        = ${config.DB_INNODB_LOCK_WAIT_TIMEOUT}`,
+    "innodb_deadlock_detect          = ON",
+  ];
+  if (flavor === "mariadb") {
+    lines.push(
+      "thread_handling                 = pool-of-threads",
+      `thread_pool_size                = ${config.DB_THREAD_POOL_SIZE}`,
+    );
+  }
+  lines.push(
+    "",
+    "# SSD/NVMe I/O capacity",
+    `innodb_io_capacity              = ${config.DB_IO_CAPACITY ?? config.DB_INNODB_IO_CAPACITY}`,
+    `innodb_io_capacity_max          = ${config.DB_IO_CAPACITY_MAX ?? config.DB_INNODB_IO_CAPACITY_MAX}`,
+    `innodb_read_io_threads          = ${config.DB_INNODB_READ_IO_THREADS}`,
+    `innodb_write_io_threads         = ${config.DB_INNODB_WRITE_IO_THREADS}`,
+    "",
+    "# Slow-query telemetry",
+    "slow_query_log                  = ON",
+    `slow_query_log_file             = ${config.DB_SLOW_QUERY_LOG_FILE}`,
+    `long_query_time                 = ${config.DB_SLOW_QUERY_TIME}`,
+    "log_slow_admin_statements       = ON",
+    "",
+  );
+  return lines.join("\n");
+};
+
 const provisionDatabase = (input: {
   runner: SshRunner;
   config: DeployConfig;
@@ -414,14 +528,22 @@ const provisionDatabase = (input: {
   // SUPER, so raise the flag here (and persist it for the next restart).
   if (config.DB_ENGINE === "mysql") {
     runner.run(host.ssh, `mysql --protocol=socket -e "SET GLOBAL log_bin_trust_function_creators = 1"`, { sudo: true });
+    const flavor = detectMysqlFlavor(runner, host, config);
     runner.writeRemoteFile({
       target: host.ssh,
       path: "/etc/mysql/conf.d/zz-payment-gateway.cnf",
-      content: "[mysqld]\nlog_bin_trust_function_creators = 1\n",
+      content: renderMysqlTuningConfig(config, flavor),
       mode: 0o644,
       sudo: true,
     });
-    log("  log_bin_trust_function_creators=1 (required for the maker≠checker trigger)");
+    log(
+      `  log_bin_trust_function_creators=1 and production InnoDB tuning written ` +
+        `(flavour: ${flavor}; buffer pool ${config.DB_BUFFER_POOL_SIZE ?? config.DB_INNODB_BUFFER_POOL_SIZE}, ` +
+        `max_connections ${config.DB_MAX_CONNECTIONS}, io capacity ${config.DB_IO_CAPACITY ?? config.DB_INNODB_IO_CAPACITY})`,
+    );
+    if (!runner.dryRun) {
+      log("  restart MySQL/MariaDB during the maintenance window to apply the file");
+    }
   }
   log(`  database ${config.DB_NAME} and user ${config.DB_USER} ready on ${config.DB_PRIVATE_IP ?? host.ssh.host}`);
 };
@@ -617,7 +739,8 @@ const main = async (): Promise<void> => {
     if (!host) {
       throw new Error(`The plan has no ${target.role} host`);
     }
-    for (const service of host.services.filter((candidate) => candidate.role === target.role)) {
+    for (const plannedService of host.services.filter((candidate) => candidate.role === target.role)) {
+      const service = withDatabasePoolEnv(plannedService, config);
       deployService({
         runner,
         host,

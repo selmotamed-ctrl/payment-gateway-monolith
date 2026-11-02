@@ -14,7 +14,7 @@ import { env } from "./lib/env";
 import { isApiError, toErrorEnvelope } from "./lib/error";
 import { requestLoggerMiddleware } from "./lib/requestLogger";
 import { rawBodyMiddleware } from "./lib/rawBody";
-import { client } from "./prisma/client";
+import { client, dbBackground } from "./prisma/client";
 
 declare global {
   namespace Express {
@@ -205,7 +205,7 @@ export const start = async () => {
   const server = createHttpsServer();
   const workers = env.WORKER_ENABLED
     ? createProductionWorkerRuntime({
-        db: client as never,
+        db: dbBackground as never,
         intervalMs: env.WORKER_POLL_INTERVAL_MS,
         batchSize: env.WORKER_BATCH_SIZE,
         maxAttempts: env.WORKER_MAX_ATTEMPTS,

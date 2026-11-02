@@ -25,6 +25,33 @@ export interface MariaDbPoolConfig {
   timezone: string;
 }
 
+export interface MariaDbPoolOverrides {
+  connectionLimit?: number;
+  acquireTimeout?: number;
+  /** Alias used by the high-scale plan pseudocode. */
+  defaultConnectionLimit?: number;
+  /** Alias used by the high-scale plan pseudocode. */
+  defaultAcquireTimeoutMs?: number;
+}
+
+export interface MariaDbPoolSettings extends MariaDbPoolOverrides {
+  connectionLimit: number;
+  acquireTimeout: number;
+}
+
+export const DEFAULT_TRANSACTIONAL_POOL_SIZE = 40;
+export const DEFAULT_TRANSACTIONAL_ACQUIRE_TIMEOUT_MS = 3_000;
+export const DEFAULT_BACKGROUND_POOL_SIZE = 15;
+export const DEFAULT_BACKGROUND_ACQUIRE_TIMEOUT_MS = 15_000;
+
+const positiveInteger = (value: string | undefined, fallback: number): number => {
+  if (!value) {
+    return fallback;
+  }
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+};
+
 export const isMysqlUrl = (databaseUrl: string): boolean => {
   try {
     const { protocol } = new URL(databaseUrl);
@@ -34,13 +61,20 @@ export const isMysqlUrl = (databaseUrl: string): boolean => {
   }
 };
 
-export const buildMariaDbPoolConfig = (databaseUrl: string): MariaDbPoolConfig => {
+export const buildMariaDbPoolConfig = (
+  databaseUrl: string,
+  overrides: MariaDbPoolOverrides = {},
+): MariaDbPoolConfig => {
   const url = new URL(databaseUrl);
   const database = decodeURIComponent(url.pathname.replace(/^\//, ""));
   if (!database) {
     throw new Error("DATABASE_URL is missing a database name");
   }
   const limit = url.searchParams.get("connectionLimit") ?? url.searchParams.get("connection_limit");
+  const connectionLimit = overrides.connectionLimit
+    ?? overrides.defaultConnectionLimit
+    ?? (limit ? positiveInteger(limit, DEFAULT_TRANSACTIONAL_POOL_SIZE) : undefined);
+  const acquireTimeout = overrides.acquireTimeout ?? overrides.defaultAcquireTimeoutMs;
   return {
     host: url.hostname,
     port: url.port ? Number(url.port) : 3306,
@@ -49,6 +83,37 @@ export const buildMariaDbPoolConfig = (databaseUrl: string): MariaDbPoolConfig =
     database,
     allowPublicKeyRetrieval: true,
     timezone: "Z",
-    ...(limit ? { connectionLimit: Number(limit) } : {}),
+    ...(connectionLimit !== undefined ? { connectionLimit } : {}),
+    ...(acquireTimeout !== undefined ? { acquireTimeout } : {}),
   };
 };
+
+/**
+ * The hot checkout/API pool. A stuck statement fails fast so a saturated
+ * database never turns into an unbounded API queue.
+ */
+export const transactionalPoolSettings = (): MariaDbPoolSettings => ({
+  connectionLimit: positiveInteger(
+    process.env.DB_TRANSACTIONAL_POOL_SIZE,
+    DEFAULT_TRANSACTIONAL_POOL_SIZE,
+  ),
+  acquireTimeout: positiveInteger(
+    process.env.DB_TRANSACTIONAL_ACQUIRE_TIMEOUT_MS,
+    DEFAULT_TRANSACTIONAL_ACQUIRE_TIMEOUT_MS,
+  ),
+});
+
+/**
+ * The worker, reconciliation and export pool. It waits longer because a
+ * statement import or retention purge may briefly occupy every connection.
+ */
+export const backgroundPoolSettings = (): MariaDbPoolSettings => ({
+  connectionLimit: positiveInteger(
+    process.env.DB_BACKGROUND_POOL_SIZE,
+    DEFAULT_BACKGROUND_POOL_SIZE,
+  ),
+  acquireTimeout: positiveInteger(
+    process.env.DB_BACKGROUND_ACQUIRE_TIMEOUT_MS,
+    DEFAULT_BACKGROUND_ACQUIRE_TIMEOUT_MS,
+  ),
+});

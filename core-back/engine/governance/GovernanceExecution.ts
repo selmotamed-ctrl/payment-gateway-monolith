@@ -1,5 +1,6 @@
 import { Decimal } from "decimal.js";
 import { ApiError } from "../../lib/error";
+import { recordAttemptLifecycle } from "../../lib/counters/materializedCounters";
 import { nextKybReviewAt, parseKybRefreshPolicy } from "../../lib/kybReview";
 import {
   MERCHANT_CLOSE_REASON_CODES,
@@ -507,7 +508,8 @@ export const evaluateCommissionReceivableCeiling = async (
 };
 
 /**
- * The merchant wallet balance, computed from the posted journal lines.
+ * The merchant wallet balance, materialised on the GL accounts and returned
+ * credit-positive to preserve the governance contract.
  */
 const resolveMerchantWalletBalance = async (tx: Tx, merchantId: string): Promise<Decimal> => {
   const glAccounts = modelOf(tx, "glAccount");
@@ -515,6 +517,15 @@ const resolveMerchantWalletBalance = async (tx: Tx, merchantId: string): Promise
   const accounts = await glAccounts.findMany({ where: { accountType: "MERCHANT_WALLET", ownerId: merchantId } });
   if (!accounts.length) {
     return new Decimal(0);
+  }
+  const hasCurrentBalance = accounts.every(
+    (account: any) => account.currentBalance !== undefined && account.currentBalance !== null,
+  );
+  if (hasCurrentBalance) {
+    return accounts.reduce(
+      (balance: Decimal, account: any) => balance.plus(toDecimal(account.currentBalance).negated()),
+      new Decimal(0),
+    );
   }
   const ids = accounts.map((account: any) => String(account.id));
   const lines = await journalLines.findMany({ where: { glAccountId: { in: ids } } });
@@ -1438,6 +1449,12 @@ const finalizeAmlAttempt = async (
   if (affected === 0) {
     return false;
   }
+  await recordAttemptLifecycle(tx, {
+    attemptId: String(attempt.id),
+    event: input.status === "SUCCEEDED" ? "SUCCEEDED" : "FAILED",
+    previousStatus: attempt.status ? String(attempt.status) : null,
+    at: new Date(),
+  });
   const linkId = attempt.linkId ? String(attempt.linkId) : null;
   if (linkId) {
     if (input.status === "SUCCEEDED") {
@@ -2078,6 +2095,17 @@ const finalizeRefundAdjustment = async (
       where: { id: String(adjustment.id) },
       data: { state: "EXECUTED", journalEntryId: posted.entry.id },
     });
+    if (sourceAttempt) {
+      // The engine normally transitioned the attempt to REFUNDED already; in
+      // that case the lifecycle hook skips this refund. A custom refund engine
+      // that only returns the gateway answer is covered here.
+      await recordAttemptLifecycle(tx, {
+        attemptId: String(sourceAttempt.id),
+        event: "REFUNDED",
+        previousStatus: sourceAttempt.status ? String(sourceAttempt.status) : null,
+        at: new Date(),
+      });
+    }
     await writeAudit(ctx, tx, {
       actorId: input.checkerUserId,
       role: input.checkerRole,
@@ -2885,6 +2913,12 @@ export async function executeOperatorCaseResolution(
         idempotent: true,
       };
     }
+    await recordAttemptLifecycle(tx, {
+      attemptId: String(attempt.id),
+      event: "SUCCEEDED",
+      previousStatus: status,
+      at: new Date(),
+    });
 
     const commit = await ctx.slots.commitSlot(dynamicAttempt, tx);
     let ledgerEntryId: string | null = null;
@@ -3013,6 +3047,12 @@ export async function executeOperatorCaseResolution(
       idempotent: true,
     };
   }
+  await recordAttemptLifecycle(tx, {
+    attemptId: String(attempt.id),
+    event: "FAILED",
+    previousStatus: status,
+    at: new Date(),
+  });
   await ctx.slots.releaseSlot(dynamicAttempt, "OPERATOR_RESOLVED_FAILED", tx);
   if (ctx.transitionBus) {
     await ctx.transitionBus.publish(ATTEMPT_TRANSITION_TOPIC, {

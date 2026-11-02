@@ -112,6 +112,18 @@ export class InvariantVerifier {
     const balances: AccountBalance[] = [];
     for (const account of accounts) {
       const checkpointBalance = decimal(account.checkpointBalance ?? 0);
+      if (account.currentBalance !== undefined && account.currentBalance !== null) {
+        const liveBalance = decimal(account.currentBalance);
+        balances.push({
+          accountId: account.id,
+          accountType: account.accountType,
+          checkpointBalance,
+          delta: liveBalance.minus(checkpointBalance),
+          liveBalance,
+          checkpointAt: account.checkpointAt ?? undefined,
+        });
+        continue;
+      }
       const lines = await this.client.journalLine.findMany({
         where: account.checkpointAt
           ? { glAccountId: account.id, createdAt: { gt: account.checkpointAt } }

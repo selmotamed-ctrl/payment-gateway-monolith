@@ -9,7 +9,19 @@ import { getPlatformRuntime } from "../../engine/runtime";
 import { InvariantVerifier, naturalBalance } from "../../engine/ledger/InvariantVerifier";
 import { moneyToString } from "../../engine/db/money";
 import { ApiError, parseOrThrow } from "../../lib/error";
-import { buildListQuery, listResponse } from "../../lib/listQuery";
+import {
+  boundedCount,
+  buildKeysetWhere,
+  buildListQuery,
+  decodeKeysetCursor,
+  encodeKeysetCursorFromRow,
+  listResponse,
+} from "../../lib/listQuery";
+import {
+  safeDeleteEntitySearchTokens,
+  safeRecomputeKybDocumentHashStat,
+  safeUpsertEntitySearchTokens,
+} from "../../lib/search/tokenIndex";
 import {
   APPROVAL_DOMAIN_SUBJECT_TYPES,
   APPROVAL_PENDING_STATES,
@@ -1568,6 +1580,18 @@ const duplicateDocumentsForHash = async (document: {
   return matches;
 };
 
+const duplicateKybDocumentHashes = async (): Promise<string[]> => {
+  if (!client.kybDocumentHashStat) {
+    return [];
+  }
+  const rows = await client.kybDocumentHashStat.findMany({
+    where: { merchantCount: { gt: 1 } },
+    select: { sha256: true },
+    orderBy: { updatedAt: "desc" },
+  });
+  return rows.map((row) => row.sha256);
+};
+
 const openJoinRequestForDocument = async (document: {
   merchantId: string;
   joinRequestId: string | null;
@@ -2108,7 +2132,7 @@ router.post("/join-requests/admin-assisted", async (request: Request, response: 
       });
     }
     const result = await client.$transaction(async (tx) => {
-      await tx.merchant.update({
+      const updatedMerchant = await tx.merchant.update({
         where: { id: merchant.id },
         data: {
           ...merchantData,
@@ -2131,6 +2155,8 @@ router.post("/join-requests/admin-assisted", async (request: Request, response: 
           profileJson: profileJson as Prisma.InputJsonValue,
         },
       });
+      await safeUpsertEntitySearchTokens(tx, "merchant", updatedMerchant);
+      await safeUpsertEntitySearchTokens(tx, "join_request", joinRequest);
       await tx.auditLog.create({
         data: {
           actorId: actor.userId,
@@ -2251,6 +2277,8 @@ router.post("/join-requests/admin-assisted", async (request: Request, response: 
         profileJson: profileJson as Prisma.InputJsonValue,
       },
     });
+    await safeUpsertEntitySearchTokens(tx, "merchant", merchant);
+    await safeUpsertEntitySearchTokens(tx, "join_request", joinRequest);
     await tx.auditLog.create({
       data: {
         actorId: actor.userId,
@@ -2296,7 +2324,8 @@ router.patch("/join-requests/:id/profile", async (request: Request, response: Re
   const merchantData = merchantDataOf(body);
   await client.$transaction(async (tx) => {
     if (Object.keys(merchantData).length > 0) {
-      await tx.merchant.update({ where: { id: joinRequest.merchantId }, data: merchantData });
+      const updatedMerchant = await tx.merchant.update({ where: { id: joinRequest.merchantId }, data: merchantData });
+      await safeUpsertEntitySearchTokens(tx, "merchant", updatedMerchant);
     }
     await tx.joinRequest.update({
       where: { id },
@@ -2526,24 +2555,29 @@ router.post("/join-requests/:id/kyb-documents", async (request: Request, respons
   const avStatus = scanKybBytes(raw);
   const infected = avStatus === "INFECTED";
   const storageKey = `kyb/${joinRequest.merchantId}/${sha256}`;
-  const document = await client.kybDocument.create({
-    data: {
-      merchantId: joinRequest.merchantId,
-      joinRequestId: id,
-      subjectType: "MERCHANT",
-      subjectId: joinRequest.merchantId,
-      docType,
-      storageKey,
-      originalFileName,
-      contentCiphertext: await vault.encryptSecret(raw.toString("base64"), "kyb-document"),
-      sha256,
-      mime,
-      sizeBytes: raw.byteLength,
-      avStatus,
-      status: infected ? "REJECTED" : "UPLOADED",
-      uploadedById: actor.userId,
-      expiresOn,
-    },
+  const document = await client.$transaction(async (tx) => {
+    const created = await tx.kybDocument.create({
+      data: {
+        merchantId: joinRequest.merchantId,
+        joinRequestId: id,
+        subjectType: "MERCHANT",
+        subjectId: joinRequest.merchantId,
+        docType,
+        storageKey,
+        originalFileName,
+        contentCiphertext: await vault.encryptSecret(raw.toString("base64"), "kyb-document"),
+        sha256,
+        mime,
+        sizeBytes: raw.byteLength,
+        avStatus,
+        status: infected ? "REJECTED" : "UPLOADED",
+        uploadedById: actor.userId,
+        expiresOn,
+      },
+    });
+    await safeRecomputeKybDocumentHashStat(tx, sha256);
+    await safeUpsertEntitySearchTokens(tx, "kyb_document", created);
+    return created;
   });
   const duplicateFlags = await refreshJoinDuplicateFlags(id);
   await client.auditLog.create({
@@ -2600,7 +2634,11 @@ router.delete("/join-requests/:id/kyb-documents/:docId", async (request: Request
   if (!document) {
     throw new ApiError(404, "KIB_DOCUMENT_NOT_FOUND", "The KYB document does not exist");
   }
-  await client.kybDocument.delete({ where: { id: document.id } });
+  await client.$transaction(async (tx) => {
+    await tx.kybDocument.delete({ where: { id: document.id } });
+    await safeRecomputeKybDocumentHashStat(tx, document.sha256);
+    await safeDeleteEntitySearchTokens(tx, "kyb_document", document.id);
+  });
   await client.auditLog.create({
     data: {
       actorId: actor.userId,
@@ -3037,9 +3075,10 @@ router.post("/join-requests/:id/decide", async (request: Request, response: Resp
         decisionNotes: body.notes,
       },
     });
+    await safeUpsertEntitySearchTokens(tx, "join_request", row);
     const merchant = await tx.merchant.findUnique({ where: { id: joinRequest.merchantId } });
     if (merchant?.status === "PENDING") {
-      await tx.merchant.update({
+      const rejectedMerchant = await tx.merchant.update({
         where: { id: merchant.id },
         data: {
           status: "REJECTED",
@@ -3047,6 +3086,7 @@ router.post("/join-requests/:id/decide", async (request: Request, response: Resp
           version: merchantVersion(merchant) + 1,
         },
       });
+      await safeUpsertEntitySearchTokens(tx, "merchant", rejectedMerchant);
     }
     await tx.auditLog.create({
       data: {
@@ -3110,14 +3150,12 @@ router.get("/kyb-documents", async (request: Request, response: Response) => {
     and.push({ joinRequest: { status: { in: requestStatuses } } });
   }
   if (query.duplicateOnly === "true") {
-    const duplicateHashes = (await client.$queryRawUnsafe(
-      "SELECT sha256 FROM kyb_documents GROUP BY sha256 HAVING COUNT(DISTINCT merchant_id) > 1",
-    )) as Array<{ sha256: string }>;
+    const duplicateHashes = await duplicateKybDocumentHashes();
     if (duplicateHashes.length === 0) {
       response.json(listResponse("kybDocuments", [], 0, built));
       return;
     }
-    and.push({ sha256: { in: duplicateHashes.map((row) => row.sha256) } });
+    and.push({ sha256: { in: duplicateHashes } });
   }
   if (query.expiringSoon === "true") {
     const today = new Date();
@@ -3126,17 +3164,32 @@ router.get("/kyb-documents", async (request: Request, response: Response) => {
     and.push({ expiresOn: { gte: today, lte: thirtyDays } });
     and.push({ status: { in: ["UPLOADED", "ACCEPTED"] } });
   }
-  const where = { AND: and };
-  const [documents, total] = await Promise.all([
+  const baseWhere = { AND: and };
+  const cursor = decodeKeysetCursor(typeof query.cursor === "string" ? query.cursor : undefined);
+  const firstOrder = built.orderBy[0] ?? {};
+  const canUseKeyset =
+    Object.keys(firstOrder)[0] === "createdAt" &&
+    Object.values(firstOrder)[0] === "desc";
+  const keysetWhere = cursor && canUseKeyset ? buildKeysetWhere(cursor, "desc") : {};
+  const where = cursor && canUseKeyset ? { AND: [...and, keysetWhere] } : baseWhere;
+  const [documents, countResult] = await Promise.all([
     client.kybDocument.findMany({
       where: where as never,
       orderBy: built.orderBy as never,
-      skip: built.skip,
+      skip: cursor && canUseKeyset ? 0 : built.skip,
       take: built.take,
       select: kybDocumentContextSelect,
     }),
-    client.kybDocument.count({ where: where as never }),
+    boundedCount(
+      { findMany: (args) => client.kybDocument.findMany(args as never) },
+      baseWhere,
+      { modelName: "kybDocument", key: "admin:kyb-documents" },
+    ),
   ]);
+  const total = countResult.total;
+  const nextCursor = canUseKeyset && documents.length === built.take
+    ? encodeKeysetCursorFromRow(documents[documents.length - 1] as unknown as Record<string, unknown>)
+    : null;
   const ids = documents.map((document) => document.id);
   const merchantIds = [...new Set(documents.map((document) => document.merchantId))];
   const hashes = [...new Set(documents.map((document) => document.sha256))];
@@ -3214,7 +3267,10 @@ router.get("/kyb-documents", async (request: Request, response: Response) => {
       openJoinRequest: openRequest ? { id: openRequest.id, status: openRequest.status } : null,
     };
   });
-  response.json(listResponse("kybDocuments", rows, total, built));
+  response.json(listResponse("kybDocuments", rows, total, built, {
+    nextCursor,
+    totalIsCapped: countResult.totalIsCapped,
+  }));
 });
 
 router.get("/kyb-documents/export", async (request: Request, response: Response) => {
@@ -3262,10 +3318,8 @@ router.get("/kyb-documents/export", async (request: Request, response: Response)
     and.push({ joinRequest: { status: { in: requestStatuses } } });
   }
   if (query.duplicateOnly === "true") {
-    const duplicateHashes = (await client.$queryRawUnsafe(
-      "SELECT sha256 FROM kyb_documents GROUP BY sha256 HAVING COUNT(DISTINCT merchant_id) > 1",
-    )) as Array<{ sha256: string }>;
-    and.push({ sha256: { in: duplicateHashes.map((row) => row.sha256) } });
+    const duplicateHashes = await duplicateKybDocumentHashes();
+    and.push({ sha256: { in: duplicateHashes } });
   }
   if (query.expiringSoon === "true") {
     const today = new Date();
@@ -3358,10 +3412,7 @@ const buildKybDocumentSummary = async () => {
     where: { OR: [{ joinRequestId: null }, { joinRequest: { status: { not: "DRAFT" } } }] },
     select: { status: true, avStatus: true, docType: true, expiresOn: true, sha256: true, merchantId: true },
   });
-  const duplicateRows = (await client.$queryRawUnsafe(
-    "SELECT sha256 FROM kyb_documents GROUP BY sha256 HAVING COUNT(DISTINCT merchant_id) > 1",
-  )) as Array<{ sha256: string }>;
-  const duplicateHashes = new Set(duplicateRows.map((row) => row.sha256));
+  const duplicateHashes = new Set(await duplicateKybDocumentHashes());
   const byStatus: Record<string, number> = {};
   const byAvStatus: Record<string, number> = {};
   const byDocType: Record<string, number> = {};
@@ -4269,17 +4320,32 @@ router.get("/merchants", async (request: Request, response: Response) => {
     }
     and.push({ id: { in: cases.map((row) => row.subjectId) } });
   }
-  const where = { AND: and };
-  const [merchants, total] = await Promise.all([
+  const baseWhere = { AND: and };
+  const cursor = decodeKeysetCursor(typeof query.cursor === "string" ? query.cursor : undefined);
+  const firstOrder = built.orderBy[0] ?? {};
+  const canUseKeyset =
+    Object.keys(firstOrder)[0] === "createdAt" &&
+    Object.values(firstOrder)[0] === "desc";
+  const keysetWhere = cursor && canUseKeyset ? buildKeysetWhere(cursor, "desc") : {};
+  const where = cursor && canUseKeyset ? { AND: [...and, keysetWhere] } : baseWhere;
+  const [merchants, countResult] = await Promise.all([
     client.merchant.findMany({
       where: where as never,
       orderBy: built.orderBy as never,
-      skip: built.skip,
+      skip: cursor && canUseKeyset ? 0 : built.skip,
       take: built.take,
       select: merchantListSelect,
     }),
-    client.merchant.count({ where: where as never }),
+    boundedCount(
+      { findMany: (args) => client.merchant.findMany(args as never) },
+      baseWhere,
+      { modelName: "merchant", key: "admin:merchants" },
+    ),
   ]);
+  const total = countResult.total;
+  const nextCursor = canUseKeyset && merchants.length === built.take
+    ? encodeKeysetCursorFromRow(merchants[merchants.length - 1] as unknown as Record<string, unknown>)
+    : null;
   const ids = merchants.map((merchant) => merchant.id);
   const pendingApprovals = ids.length === 0
     ? []
@@ -4296,6 +4362,7 @@ router.get("/merchants", async (request: Request, response: Response) => {
     merchants.map((merchant) => serializeMerchantSummary(merchant as never, flags, pendingCount.get(merchant.id) ?? 0)),
     total,
     built,
+    { nextCursor, totalIsCapped: countResult.totalIsCapped },
   ));
 });
 
@@ -5352,6 +5419,7 @@ router.patch("/merchants/:id/descriptive", async (request: Request, response: Re
     const data: Record<string, unknown> = { version: merchantVersion(merchant) + 1 };
     for (const field of fields) data[field] = body[field];
     const row = await tx.merchant.update({ where: { id }, data });
+    await safeUpsertEntitySearchTokens(tx, "merchant", row);
     for (const field of fields) {
       await tx.detailChangeLog.create({
         data: {
@@ -5469,6 +5537,7 @@ router.post("/merchants/:id/suspend", async (request: Request, response: Respons
           version: merchantVersion(merchant) + 1,
         },
       });
+      await safeUpsertEntitySearchTokens(tx, "merchant", updated);
       const approval = await tx.approvalRequest.create({
         data: {
           subjectType: "MERCHANT",
@@ -14561,19 +14630,32 @@ router.post("/velocity-rules", async (request: Request, response: Response) => {
  * window the checkpoint already covers.
  */
 const loadLedgerBalances = async (): Promise<Map<string, Decimal>> => {
-  const accounts = await client.glAccount.findMany();
+  const accounts = await client.glAccount.findMany({
+    select: {
+      id: true,
+      accountType: true,
+      checkpointBalance: true,
+      checkpointAt: true,
+      currentBalance: true,
+    },
+  });
   const balances = new Map<string, Decimal>();
   for (const account of accounts) {
-    const lines = await client.journalLine.findMany({
-      where: account.checkpointAt
-        ? { glAccountId: account.id, createdAt: { gt: account.checkpointAt } }
-        : { glAccountId: account.id },
-      select: { direction: true, amount: true },
-    });
-    let balance = decimal(account.checkpointBalance ?? 0);
-    for (const line of lines) {
-      const value = decimal(line.amount);
-      balance = line.direction === "DEBIT" ? balance.plus(value) : balance.minus(value);
+    let balance: Decimal;
+    if (account.currentBalance !== undefined && account.currentBalance !== null) {
+      balance = decimal(account.currentBalance);
+    } else {
+      const lines = await client.journalLine.findMany({
+        where: account.checkpointAt
+          ? { glAccountId: account.id, createdAt: { gt: account.checkpointAt } }
+          : { glAccountId: account.id },
+        select: { direction: true, amount: true },
+      });
+      balance = decimal(account.checkpointBalance ?? 0);
+      for (const line of lines) {
+        const value = decimal(line.amount);
+        balance = line.direction === "DEBIT" ? balance.plus(value) : balance.minus(value);
+      }
     }
     balances.set(account.accountType, (balances.get(account.accountType) ?? decimal(0)).plus(balance));
   }
@@ -14881,7 +14963,14 @@ const buildLiquiditySnapshot = async () => {
   );
   const clearingAccounts = await client.glAccount.findMany({
     where: { accountType: "GATEWAY_CLEARING" },
-    select: { id: true, gatewayId: true, checkpointAt: true, checkpointBalance: true, gateway: { select: { code: true, name: true } } },
+    select: {
+      id: true,
+      gatewayId: true,
+      checkpointAt: true,
+      checkpointBalance: true,
+      currentBalance: true,
+      gateway: { select: { code: true, name: true } },
+    },
   });
   const clearingAccountIds = clearingAccounts.map((account) => account.id);
   const clearingLines = clearingAccountIds.length === 0
@@ -14894,14 +14983,19 @@ const buildLiquiditySnapshot = async () => {
   const clearingBucketsByGateway = new Map<string, { t0: Decimal; t1: Decimal; t2: Decimal; older: Decimal }>();
   for (const account of clearingAccounts) {
     if (!account.gatewayId) continue;
-    let balance = decimal(account.checkpointBalance ?? 0);
+    const hasCurrentBalance = account.currentBalance !== undefined && account.currentBalance !== null;
+    let balance = hasCurrentBalance
+      ? decimal(account.currentBalance)
+      : decimal(account.checkpointBalance ?? 0);
     const buckets = { t0: decimal(0), t1: decimal(0), t2: decimal(0), older: decimal(0) };
     for (const line of clearingLines) {
       if (line.glAccountId !== account.id) continue;
       if (account.checkpointAt && line.createdAt <= account.checkpointAt) continue;
       const value = decimal(line.amount);
-      if (line.direction === "DEBIT") balance = balance.plus(value);
-      else balance = balance.minus(value);
+      if (!hasCurrentBalance) {
+        if (line.direction === "DEBIT") balance = balance.plus(value);
+        else balance = balance.minus(value);
+      }
       const ageDays = Math.floor((Date.now() - line.createdAt.getTime()) / (24 * 60 * 60 * 1000));
       const key = ageDays <= 0 ? "t0" : ageDays <= 1 ? "t1" : ageDays <= 2 ? "t2" : "older";
       buckets[key] = buckets[key].plus(value);

@@ -82,7 +82,9 @@ describe("expiry sweeper and AML holds", () => {
     await worker.runOnce();
 
     const update = calls.find((call) =>
-      call.kind === "execute" && call.sql.includes("UPDATE payment_attempts")
+      call.kind === "execute"
+      && call.sql.includes("UPDATE payment_attempts")
+      && call.sql.includes("status = ?")
     );
     expect(update?.args[0]).toBe("EXPIRED");
     expect(releases).toEqual([{ linkId: "link-1", delta: -1 }]);

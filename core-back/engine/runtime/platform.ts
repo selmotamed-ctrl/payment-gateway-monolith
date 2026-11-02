@@ -23,6 +23,10 @@ import { VaultContextCipher } from "./contextCipher";
 import { PrismaOperatorCaseSink } from "../compliance/OperatorCaseSink";
 import { PrismaReportingRuleSource, ReportingRuleEvaluator } from "../compliance/ReportingRuleEvaluator";
 import { invalidationBus } from "../../lib/invalidationBus";
+import {
+  ConfigCacheRegistry,
+  applyConfigCachesToRepositories,
+} from "../../lib/cache/ConfigCacheRegistry";
 import { ApiError } from "../../lib/error";
 import { ApiConsumerError } from "../apiConsumer/ApiConsumer";
 import type { DynamicAttempt } from "../flow/DynamicRailEngine";
@@ -40,6 +44,7 @@ export interface PlatformRuntime {
   repositories: PrismaRepositories;
   credentialCheck: CredentialCheckService;
   slots: PrismaSlotReservationStore;
+  configCache: ConfigCacheRegistry;
 }
 
 interface CredentialRow {
@@ -70,7 +75,11 @@ export interface ConsumerConfigKey {
 export const createPlatformRuntime = (db: PrismaLike): PlatformRuntime => {
   const vault = new Vault();
   const crypto = new CryptoEngine();
-  const repositories = new PrismaRepositories(db);
+  const configCache = new ConfigCacheRegistry(db as never);
+  const repositories = applyConfigCachesToRepositories(
+    new PrismaRepositories(db),
+    configCache,
+  );
 
   const consumerRegistry = new ConsumerRegistry({
     loadConfig: async (key) => loadConsumerConfig(db, vault, key),
@@ -174,6 +183,7 @@ export const createPlatformRuntime = (db: PrismaLike): PlatformRuntime => {
     repositories,
     credentialCheck,
     slots,
+    configCache,
   };
 };
 

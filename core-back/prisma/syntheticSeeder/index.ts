@@ -50,7 +50,7 @@ export const runSyntheticSeeder = async (): Promise<void> => {
     throw new Error("No seeded gateways/rails found. Run seedFakeRails.ts (and the blueprint seed) first.");
   }
 
-  const phases: Array<[string, () => void]> = [
+  const phases: Array<[string, () => void | Promise<void>]> = [
     ["admin & staff", () => generateAdminAndStaff(ctx)],
     ["merchants, KYB & owners", () => generateMerchantCohort(ctx)],
     ["gateway lifecycle & health", () => generateGatewayLifecycle(ctx)],
@@ -63,7 +63,7 @@ export const runSyntheticSeeder = async (): Promise<void> => {
   ];
   for (const [label, run] of phases) {
     const phaseStart = Date.now();
-    run();
+    await run();
     console.log(`[synthetic-seeder] ${label}: ${Date.now() - phaseStart}ms`);
   }
 
@@ -81,7 +81,7 @@ export const runSyntheticSeeder = async (): Promise<void> => {
   const writeReport = await bulkMysqlWriter(client, ctx);
   console.log(`[synthetic-seeder] wrote ${writeReport.reduce((sum, row) => sum + row.rows, 0)} rows across ${writeReport.length} tables`);
 
-  const kyb = await enrichKybDocuments(client);
+  const kyb = await enrichKybDocuments(client, ctx);
   console.log(
     `[synthetic-seeder] KYB enrichment: ${kyb.documents} document payloads, ${kyb.ownerDocuments} owner documents, ` +
       `${kyb.revalidations} re-verification requests, ${kyb.merchantsScheduled} review dates`,

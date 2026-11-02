@@ -70,6 +70,14 @@ afterAll(async () => {
   }
   if (accountIds.length > 0) {
     await db.$executeRawUnsafe(
+      `DELETE FROM adjustments WHERE target_gl_account_id IN (${accountIds.map(() => "?").join(",")})`,
+      ...accountIds,
+    ).catch(() => undefined);
+    await db.$executeRawUnsafe(
+      `DELETE FROM journal_lines WHERE gl_account_id IN (${accountIds.map(() => "?").join(",")})`,
+      ...accountIds,
+    ).catch(() => undefined);
+    await db.$executeRawUnsafe(
       `DELETE FROM gl_accounts WHERE id IN (${accountIds.map(() => "?").join(",")})`,
       ...accountIds,
     );
@@ -80,7 +88,7 @@ afterAll(async () => {
 
 const makeLink = async (): Promise<string> => {
   const row = await createRow("payment_links", {
-    key: `${PREFIX}-link-${crypto.randomUUID()}`,
+    key: `${PREFIX}-link-${crypto.randomUUID()}`.slice(0, 64),
     use_count: 1,
     infinite_use: 0,
     confirmed_count: 0,
@@ -93,7 +101,7 @@ const makeLink = async (): Promise<string> => {
 const makeAttempt = async (linkId: string, status = "AWAITING_CUSTOMER"): Promise<DynamicAttempt> => {
   const row = await createRow("payment_attempts", {
     link_id: linkId,
-    reference: `${PREFIX}-PA-${crypto.randomUUID()}`,
+    reference: `${PREFIX}-PA-${crypto.randomUUID()}`.slice(0, 64),
     status,
   });
   attemptIds.push(String(row.id));

@@ -1,5 +1,5 @@
 import { assertNoTippingOff, redactAmlPayload, renderTemplate } from "../compliance/tippingOff";
-import { toCamelRows } from "../db/rawRows";
+import { mysqlPlaceholders, toCamelRows } from "../db/rawRows";
 import type { NotificationRow, Tx } from "../db/ports";
 import type { RenderedNotification } from "../notifications/NotificationTransport";
 import { BaseWorker, backoffDelayMs, type WorkerOptions } from "./workerRuntime";
@@ -13,6 +13,14 @@ export interface NotificationSendResult {
 export interface NotificationSender {
   send(notification: NotificationRow, rendered: RenderedNotification): Promise<NotificationSendResult>;
 }
+
+const NOTIFICATION_CLAIM_LEASE_MS = 5 * 60 * 1000;
+const NOTIFICATION_CLAIM_COLUMNS = [
+  "id", "created_at", "updated_at", "event_id", "recipient_user_id",
+  "recipient_merchant_id", "address_masked", "address_ciphertext",
+  "template_code", "channel", "lang", "payload_json", "status",
+  "provider_message_id", "attempts", "next_attempt_at",
+].join(", ");
 
 export interface OutboxNotificationWorkerDeps extends WorkerOptions {
   sender?: NotificationSender;
@@ -45,14 +53,31 @@ export class OutboxNotificationWorker extends BaseWorker {
 
   private async lockQueuedNotifications(now: Date): Promise<NotificationRow[]> {
     const sql =
-      "SELECT * FROM notifications" +
+      `SELECT ${NOTIFICATION_CLAIM_COLUMNS} FROM notifications` +
       " WHERE status = 'QUEUED'" +
       " AND (next_attempt_at IS NULL OR next_attempt_at <= ?)" +
       " ORDER BY next_attempt_at ASC" +
       " LIMIT ?" +
       " FOR UPDATE SKIP LOCKED";
-    const result = await this.db.$queryRawUnsafe(sql, now, this.batchSize);
-    return toCamelRows<NotificationRow>(result);
+    // Selection and claim commit together; the provider call happens after
+    // the transaction. The existing `next_attempt_at` column is the lease, so
+    // a crashed node's notification becomes claimable again after the lease.
+    return this.db.$transaction(async (tx: Tx) => {
+      const result = await tx.$queryRawUnsafe(sql, now, this.batchSize);
+      const notifications = toCamelRows<NotificationRow>(result);
+      if (notifications.length === 0) {
+        return notifications;
+      }
+      const leaseUntil = new Date(now.getTime() + NOTIFICATION_CLAIM_LEASE_MS);
+      const idPlaceholders = mysqlPlaceholders(notifications.length);
+      await tx.$executeRawUnsafe(
+        `UPDATE notifications SET next_attempt_at = ?, updated_at = NOW()
+          WHERE id IN (${idPlaceholders}) AND status = 'QUEUED'`,
+        leaseUntil,
+        ...notifications.map((notification) => notification.id),
+      );
+      return notifications;
+    });
   }
 
   private async deliver(notification: NotificationRow, now: Date): Promise<void> {

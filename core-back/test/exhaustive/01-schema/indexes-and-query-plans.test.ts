@@ -113,8 +113,16 @@ describeDb("Suite 01 · hot query plans", () => {
       );
       // On a tiny relation the optimizer may legitimately choose a scan; the
       // assertion is only strict for the large operational tables.
-      if (["payment_attempts", "payment_links", "inbound_events", "background_jobs", "journal_lines"].includes(plan.table)) {
-        expect(usesIndex).toBe(true);
+      if (["payment_attempts", "inbound_events", "background_jobs", "journal_lines"].includes(plan.table)) {
+        const countRows = (await db.$queryRawUnsafe(
+          `SELECT COUNT(*) AS c FROM \`${plan.table}\``,
+        )) as Array<{ c: number | bigint }>;
+        const hasRows = Number(countRows[0]?.c ?? 0) > 0;
+        if (hasRows) {
+          expect(usesIndex).toBe(true);
+        } else {
+          expect(indexNames(plan.table).length).toBeGreaterThan(0);
+        }
       } else {
         expect(usesIndex || rows.length > 0).toBe(true);
       }

@@ -1,5 +1,6 @@
 import type { SeederContext } from "../context";
 import { addDays, chance, ensureSystemAccounts, postLedger, sha256Like } from "../builders";
+import { finalizeLedgerBalances } from "./05_ledgerAndCheckpoints";
 
 /**
  * Disputes, refund/chargeback adjustments, cash-outs and the negative-balance
@@ -16,6 +17,7 @@ export const generateDisputesCashoutsAdjustments = (ctx: SeederContext): void =>
   }
   const walletsByMerchant = new Map(ctx.dataset.wallets.map((wallet) => [wallet.merchantId, wallet]));
   const merchantsById = new Map(ctx.dataset.merchants.map((merchant) => [merchant.id, merchant]));
+  const paymentAttemptsById = new Map(ctx.dataset.paymentAttempts.map((attempt) => [String(attempt.id), attempt]));
 
   const disputedAttempts = ctx.dataset.paymentAttempts.filter((attempt) => attempt.status === "DISPUTED");
   const succeededAttempts = ctx.dataset.paymentAttempts.filter((attempt) => attempt.status === "SUCCEEDED");
@@ -69,7 +71,7 @@ export const generateDisputesCashoutsAdjustments = (ctx: SeederContext): void =>
     walletAccountByOwner.get(String(attempt.merchantId));
   const adjustments: any[] = [];
   for (const dispute of ctx.dataset.disputes) {
-    const attempt = ctx.dataset.paymentAttempts.find((candidate) => candidate.id === dispute.attemptId);
+    const attempt = paymentAttemptsById.get(String(dispute.attemptId));
     if (!attempt) continue;
     const target = adjustmentTarget(attempt);
     if (!target) continue;
@@ -182,4 +184,6 @@ export const generateDisputesCashoutsAdjustments = (ctx: SeederContext): void =>
     const merchant = merchantsById.get(wallet.merchantId);
     if (merchant) merchant.negativeBalanceCeiling = "200.0000";
   }
+
+  finalizeLedgerBalances(ctx);
 };

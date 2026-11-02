@@ -336,7 +336,11 @@ const checks: Record<string, Check> = {
     });
     await worker.runOnce();
     expect(patches.some((patch) => patch.settledAmount === "100.0000")).toBe(true);
-    const terminal = calls.find((call) => call.kind === "execute" && call.sql.includes("UPDATE payment_attempts"));
+    const terminal = calls.find((call) =>
+      call.kind === "execute"
+      && call.sql.includes("UPDATE payment_attempts")
+      && call.sql.includes("status = ?")
+    );
     expect(terminal?.args[0]).toBe("SUCCEEDED");
     const select = calls.find((call) => call.kind === "query" && call.sql.includes("FROM payment_attempts"));
     expect(select?.sql).toContain("expires_at <= ?");
@@ -460,7 +464,11 @@ const checks: Record<string, Check> = {
       repositories: createFakeRepositories({}),
       clock: () => new Date("2026-06-01T00:00:00Z"),
     }).runOnce();
-    const update = terminate.calls.find((call) => call.kind === "execute" && call.sql.includes("UPDATE payment_attempts"));
+    const update = terminate.calls.find((call) =>
+      call.kind === "execute"
+      && call.sql.includes("UPDATE payment_attempts")
+      && call.sql.includes("status = ?")
+    );
     expect(update?.sql).toContain("terminal_at IS NULL");
   },
 
@@ -473,9 +481,11 @@ const checks: Record<string, Check> = {
       "PAYMENT_LINK_SLOT_UNAVAILABLE",
     );
     const select = harness.statements.find((entry) => entry.sql.includes("SELECT id FROM payment_links"));
-    expect(select?.sql).toContain("FOR UPDATE");
-    expect(select?.sql).toContain("confirmed_count + active_locked_count < use_count");
-    const update = harness.statements.find((entry) => entry.sql.includes("active_locked_count = active_locked_count + 1"));
+    expect(select).toBeUndefined();
+    const update = harness.statements.find((entry) =>
+      entry.sql.includes("active_locked_count = active_locked_count + 1")
+    );
+    expect(update?.sql).toContain("(confirmed_count + active_locked_count) < use_count");
     expect(update?.sql).toContain("WHERE id = ?");
     expect(harness.link.active_locked_count).toBe(1);
   },

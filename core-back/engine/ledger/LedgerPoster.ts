@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { Decimal } from "decimal.js";
 import { ApiError } from "../../lib/error";
 
@@ -42,6 +43,8 @@ export interface LedgerAccountRecord {
   checkpointBalance?: DecimalInput;
   checkpointAt?: Date | null;
   lastCheckpointId?: string | null;
+  currentBalance?: DecimalInput | null;
+  linesSinceCheckpoint?: number | null;
 }
 
 export interface JournalEntryRecord {
@@ -58,12 +61,16 @@ export interface JournalLineRecord {
   glAccountId: string;
   direction: LedgerDirection;
   amount: DecimalInput;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export interface LedgerPrismaClient {
   glAccount: {
     findFirst(args: { where: Record<string, unknown>; select?: Record<string, boolean> }): Promise<LedgerAccountRecord | null>;
     findUnique?(args: { where: { id: string } }): Promise<LedgerAccountRecord | null>;
+    update?(args: { where: { id: string }; data: Record<string, unknown> }): Promise<unknown>;
+    updateMany?(args: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<unknown>;
   };
   journalEntry: {
     findFirst(args: { where: Record<string, unknown> }): Promise<JournalEntryRecord | null>;
@@ -71,8 +78,11 @@ export interface LedgerPrismaClient {
   };
   journalLine: {
     create(args: { data: Record<string, unknown> }): Promise<JournalLineRecord>;
+    createMany?(args: { data: Array<Record<string, unknown>> }): Promise<unknown>;
   };
   $transaction?<R>(callback: (transaction: LedgerPrismaClient) => Promise<R>): Promise<R>;
+  $executeRaw?(query: TemplateStringsArray | unknown, ...values: unknown[]): Promise<unknown>;
+  $executeRawUnsafe?(query: string, ...values: unknown[]): Promise<unknown>;
 }
 
 export interface LedgerTransactionRunner {
@@ -187,6 +197,39 @@ export function decimal(value: DecimalInput): Decimal {
 
 export function decimalString(value: DecimalInput, places = 4): string {
   return decimal(value).toFixed(places);
+}
+
+let lastUuidV7Timestamp = -1;
+let uuidV7Sequence = 0;
+
+function uuidv7(): string {
+  let timestamp = Date.now();
+  if (timestamp < lastUuidV7Timestamp) {
+    timestamp = lastUuidV7Timestamp;
+  }
+  if (timestamp === lastUuidV7Timestamp) {
+    uuidV7Sequence += 1;
+    if (uuidV7Sequence > 0x0fff) {
+      lastUuidV7Timestamp += 1;
+      timestamp = lastUuidV7Timestamp;
+      uuidV7Sequence = 0;
+    }
+  } else {
+    lastUuidV7Timestamp = timestamp;
+    uuidV7Sequence = 0;
+  }
+  const bytes = randomBytes(16);
+  bytes[0] = Math.floor(timestamp / 2 ** 40) & 0xff;
+  bytes[1] = Math.floor(timestamp / 2 ** 32) & 0xff;
+  bytes[2] = Math.floor(timestamp / 2 ** 24) & 0xff;
+  bytes[3] = Math.floor(timestamp / 2 ** 16) & 0xff;
+  bytes[4] = Math.floor(timestamp / 2 ** 8) & 0xff;
+  bytes[5] = timestamp & 0xff;
+  bytes[6] = 0x70 | ((uuidV7Sequence >> 8) & 0x0f);
+  bytes[7] = uuidV7Sequence & 0xff;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function moneyError(code: string, message: string): ApiError {
@@ -645,22 +688,169 @@ export class LedgerPoster {
         }
         throw error;
       }
+      if (this.canUseFastPath(runner)) {
+        return this.writeFast(runner, template, context, entry);
+      }
       const lines: JournalLineRecord[] = [];
+      const fallbackDeltas = new Map<string, { delta: Decimal; count: number }>();
       for (const line of template.lines) {
         const accountId = await this.resolveAccountId(runner, line.account, context);
+        const amount = decimal(line.amount);
         const created = await runner.journalLine.create({
           data: {
             entryId: entry.id,
             glAccountId: accountId,
             direction: line.direction,
-            amount: decimal(line.amount),
+            amount,
           },
         });
         lines.push(created);
+        const current = fallbackDeltas.get(accountId) ?? { delta: new Decimal(0), count: 0 };
+        fallbackDeltas.set(accountId, {
+          delta: current.delta.plus(line.direction === "DEBIT" ? amount : amount.negated()),
+          count: current.count + 1,
+        });
+      }
+      if (fallbackDeltas.size > 0 && typeof runner.journalLine.createMany === "function") {
+        await this.applyBalanceDeltas(runner, fallbackDeltas, new Date());
       }
       return { entry, lines, created: true, idempotent: false };
     };
     return transaction ? write(transaction) : this.transactionRunner(write);
+  }
+
+  private canUseFastPath(transaction: LedgerPrismaClient): boolean {
+    return typeof transaction.journalLine.createMany === "function"
+      && (
+        typeof transaction.$executeRawUnsafe === "function"
+        || typeof transaction.$executeRaw === "function"
+        || typeof transaction.glAccount.update === "function"
+        || typeof transaction.glAccount.updateMany === "function"
+      );
+  }
+
+  /**
+   * Batched posting for clients that expose `createMany` and raw/update
+   * capabilities. Journal lines are inserted in one statement and every
+   * touched GL account receives its net signed delta plus its line count.
+   * The account ids are processed in sorted order so concurrent postings
+   * acquire the same GL rows in the same order (no AB-BA deadlocks).
+   */
+  private async writeFast(
+    transaction: LedgerPrismaClient,
+    template: JournalTemplate,
+    context: LedgerPostContext,
+    entry: JournalEntryRecord,
+  ): Promise<LedgerPostResult> {
+    const now = new Date();
+    const resolved: Array<{ line: LedgerLineTemplate; accountId: string; lineId: string }> = [];
+    for (const line of template.lines) {
+      const accountId = await this.resolveAccountId(transaction, line.account, context);
+      resolved.push({ line, accountId, lineId: uuidv7() });
+    }
+
+    const deltas = new Map<string, { delta: Decimal; count: number }>();
+    const rows = resolved.map(({ line, accountId, lineId }) => {
+      const amount = decimal(line.amount);
+      const signed = line.direction === "DEBIT" ? amount : amount.negated();
+      const current = deltas.get(accountId) ?? { delta: new Decimal(0), count: 0 };
+      deltas.set(accountId, {
+        delta: current.delta.plus(signed),
+        count: current.count + 1,
+      });
+      return {
+        id: lineId,
+        entryId: entry.id,
+        glAccountId: accountId,
+        direction: line.direction,
+        amount,
+        createdAt: now,
+        updatedAt: now,
+      };
+    });
+
+    await transaction.journalLine.createMany!({ data: rows });
+    await this.applyBalanceDeltas(transaction, deltas, now);
+
+    return {
+      entry,
+      lines: rows.map((row) => ({ ...row })),
+      created: true,
+      idempotent: false,
+    };
+  }
+
+  private async applyBalanceDeltas(
+    transaction: LedgerPrismaClient,
+    deltas: Map<string, { delta: Decimal; count: number }>,
+    now: Date,
+  ): Promise<void> {
+    if (deltas.size === 0) {
+      return;
+    }
+    const sorted = [...deltas.entries()].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+
+    const update = transaction.glAccount.update;
+    if (typeof update === "function") {
+      for (const [accountId, { delta, count }] of sorted) {
+        await update.call(transaction.glAccount, {
+          where: { id: accountId },
+          data: {
+            currentBalance: { increment: delta },
+            linesSinceCheckpoint: { increment: count },
+            updatedAt: now,
+          },
+        });
+      }
+      return;
+    }
+
+    if (typeof transaction.$executeRawUnsafe === "function") {
+      const balanceCases: string[] = [];
+      const countCases: string[] = [];
+      const params: unknown[] = [];
+      for (const [accountId, { delta, count }] of sorted) {
+        balanceCases.push("WHEN ? THEN ?");
+        params.push(accountId, delta.toFixed(4));
+        countCases.push("WHEN ? THEN ?");
+        params.push(accountId, count);
+      }
+      const placeholders = sorted.map(() => "?").join(", ");
+      params.push(now, ...sorted.map(([accountId]) => accountId));
+      await transaction.$executeRawUnsafe(
+        `UPDATE gl_accounts
+            SET current_balance = current_balance + CASE id ${balanceCases.join(" ")} ELSE 0 END,
+                lines_since_checkpoint = lines_since_checkpoint + CASE id ${countCases.join(" ")} ELSE 0 END,
+                updated_at = ?
+          WHERE id IN (${placeholders})`,
+        ...params,
+      );
+      return;
+    }
+
+    const updateMany = transaction.glAccount.updateMany;
+    if (typeof updateMany === "function") {
+      for (const [accountId, { delta, count }] of sorted) {
+        await updateMany.call(transaction.glAccount, {
+          where: { id: accountId },
+          data: {
+            currentBalance: { increment: delta },
+            linesSinceCheckpoint: { increment: count },
+            updatedAt: now,
+          },
+        });
+      }
+      return;
+    }
+
+    if (typeof transaction.$executeRaw === "function") {
+      for (const [accountId, { delta, count }] of sorted) {
+        const sql = "UPDATE gl_accounts SET current_balance = current_balance + ?, lines_since_checkpoint = lines_since_checkpoint + ?, updated_at = ? WHERE id = ?";
+        const strings = [sql] as unknown as TemplateStringsArray;
+        (strings as unknown as { raw: string[] }).raw = [sql];
+        await transaction.$executeRaw.call(transaction, strings, delta.toFixed(4), count, now, accountId);
+      }
+    }
   }
 
   async postScenario(

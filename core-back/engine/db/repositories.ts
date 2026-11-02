@@ -1,4 +1,21 @@
+import {
+  applyMerchantDailyStatDelta,
+  applyVelocityWindowDelta,
+  claimPaymentLinkSlotAtomic as claimSlotAtomic,
+  incrementRouteDailyVolume,
+  readMerchantDailyStats,
+  readRouteDailyVolumeTotals,
+  readVelocityWindowTotals,
+  type MerchantDailyStatDelta,
+  type MerchantDailyStatSnapshot,
+  type VelocityScopeKey,
+  type VelocityWindowTotals,
+} from "../../lib/counters/materializedCounters";
 import { moneyFromDecimal, type Money } from "./money";
+import {
+  safeRecomputeKybDocumentHashStat,
+  safeUpsertEntitySearchTokens,
+} from "../../lib/search/tokenIndex";
 import type {
   AdjustmentRow,
   AmlCaseRow,
@@ -77,6 +94,52 @@ const mapRawRows = <T>(value: unknown): T[] => rows<unknown>(value).map((entry) 
 
 export const SYSTEM_AUDIT_ACTOR_EMAIL = "system-automation@payment-gateway.internal";
 
+/**
+ * The materialized-counter methods are attached to the production payment
+ * repository only. They are deliberately not added to the `PaymentRepository`
+ * port: the in-memory fakes of the engine tests stay valid and the callers
+ * probe for the capability before using it. The deprecated exact SUM remains
+ * on the port as the fallback.
+ */
+export interface MaterializedCounterRepository {
+  claimPaymentLinkSlotAtomic(tx: Tx, linkId: string, now: Date): Promise<boolean>;
+  readRouteDailyVolumes(tx: Tx, dayBucket: string): Promise<Map<string, Money> | null>;
+  incrementRouteDailyVolume(
+    tx: Tx,
+    input: { routeId: string | null | undefined; amount: Money; at?: Date; timeZone?: string },
+  ): Promise<void>;
+  readVelocityWindowTotals(
+    tx: Tx,
+    filter: { scopeType: VelocityScopeKey["scopeType"]; scopeHash: string; sinceBucketEpoch: number },
+  ): Promise<VelocityWindowTotals | null>;
+  applyVelocityWindowDelta(
+    tx: Tx,
+    input: {
+      scopes: VelocityScopeKey[];
+      bucketEpoch: number;
+      attemptCountDelta?: number;
+      succeededCountDelta?: number;
+      totalAmountDelta?: Money;
+      now?: Date;
+    },
+  ): Promise<void>;
+  applyMerchantDailyStat(
+    tx: Tx,
+    input: {
+      merchantId: string | null | undefined;
+      railCode: string | null | undefined;
+      delta: MerchantDailyStatDelta;
+      at?: Date;
+      dayBucket?: string;
+      timeZone?: string;
+    },
+  ): Promise<void>;
+  readMerchantDailyStats(
+    tx: Tx,
+    filter?: { merchantId?: string; dayBucket?: string; railCode?: string },
+  ): Promise<MerchantDailyStatSnapshot[]>;
+}
+
 export class PrismaRepositories implements Repositories {
   private readonly db: PrismaLike;
 
@@ -120,7 +183,9 @@ export class PrismaRepositories implements Repositories {
 
   merchants: MerchantRepository = {
     createMerchant: async (tx, data) => {
-      return model(tx, "merchant").create({ data }) as Promise<MerchantRow>;
+      const merchant = (await model(tx, "merchant").create({ data })) as MerchantRow;
+      await safeUpsertEntitySearchTokens(tx, "merchant", merchant);
+      return merchant;
     },
     findMerchantById: async (tx, id) => {
       return (await model(tx, "merchant").findUnique({ where: { id } })) as MerchantRow | null;
@@ -135,7 +200,9 @@ export class PrismaRepositories implements Repositories {
       }));
     },
     updateMerchant: async (tx, id, patch) => {
-      return model(tx, "merchant").update({ where: { id }, data: patch }) as Promise<MerchantRow>;
+      const merchant = (await model(tx, "merchant").update({ where: { id }, data: patch })) as MerchantRow;
+      await safeUpsertEntitySearchTokens(tx, "merchant", merchant);
+      return merchant;
     },
     lockMerchantById: async (tx, id) => {
       const result = await tx.$queryRaw`
@@ -230,7 +297,9 @@ export class PrismaRepositories implements Repositories {
 
   onboarding: OnboardingRepository = {
     createJoinRequest: async (tx, data) => {
-      return model(tx, "joinRequest").create({ data }) as Promise<JoinRequestRow>;
+      const joinRequest = (await model(tx, "joinRequest").create({ data })) as JoinRequestRow;
+      await safeUpsertEntitySearchTokens(tx, "join_request", joinRequest);
+      return joinRequest;
     },
     findJoinRequestById: async (tx, id) => {
       return (await model(tx, "joinRequest").findUnique({ where: { id } })) as JoinRequestRow | null;
@@ -260,7 +329,12 @@ export class PrismaRepositories implements Repositories {
       return model(tx, "joinRequest").update({ where: { id }, data: patch }) as Promise<JoinRequestRow>;
     },
     createKybDocument: async (tx, data) => {
-      return model(tx, "kybDocument").create({ data }) as Promise<KybDocumentRow>;
+      const document = (await model(tx, "kybDocument").create({ data })) as KybDocumentRow;
+      if (data.sha256) {
+        await safeRecomputeKybDocumentHashStat(tx, String(data.sha256));
+      }
+      await safeUpsertEntitySearchTokens(tx, "kyb_document", document);
+      return document;
     },
     findKybDocumentById: async (tx, id) => {
       return (await model(tx, "kybDocument").findUnique({ where: { id } })) as KybDocumentRow | null;
@@ -396,11 +470,13 @@ export class PrismaRepositories implements Repositories {
       return model(tx, "regulatoryReport").update({ where: { id }, data: patch }) as Promise<RegulatoryReportRow>;
     },
     createOperatorCase: async (tx, data) => {
-      return model(tx, "operatorCase").create({ data }) as Promise<OperatorCaseRow>;
+      const operatorCase = (await model(tx, "operatorCase").create({ data })) as OperatorCaseRow;
+      await safeUpsertEntitySearchTokens(tx, "operator_case", operatorCase);
+      return operatorCase;
     },
   };
 
-  payments: PaymentRepository = {
+  payments: PaymentRepository & MaterializedCounterRepository = {
     lockLinkByKey: async (tx, key) => {
       const result = await tx.$queryRaw`
         SELECT * FROM payment_links WHERE \`key\` = ${key} LIMIT 1 FOR UPDATE
@@ -424,6 +500,13 @@ export class PrismaRepositories implements Repositories {
         WHERE id = ${linkId}
       `;
     },
+    claimPaymentLinkSlotAtomic: async (tx, linkId, now) => claimSlotAtomic(tx, { linkId, now }),
+    readRouteDailyVolumes: async (tx, dayBucket) => readRouteDailyVolumeTotals(tx, dayBucket),
+    incrementRouteDailyVolume: async (tx, input) => incrementRouteDailyVolume(tx, input),
+    readVelocityWindowTotals: async (tx, filter) => readVelocityWindowTotals(tx, filter),
+    applyVelocityWindowDelta: async (tx, input) => applyVelocityWindowDelta(tx, input),
+    applyMerchantDailyStat: async (tx, input) => applyMerchantDailyStatDelta(tx, input),
+    readMerchantDailyStats: async (tx, filter = {}) => readMerchantDailyStats(tx, filter),
     resolveSettlementTarget: async (tx, input) => {
       const result = await tx.$queryRaw`
         SELECT cs.settlement_target AS settlement_target
@@ -443,7 +526,9 @@ export class PrismaRepositories implements Repositories {
       return "PLATFORM_CLEARING";
     },
     createAttempt: async (tx, data) => {
-      return model(tx, "paymentAttempt").create({ data }) as Promise<PaymentAttemptRow>;
+      const attempt = (await model(tx, "paymentAttempt").create({ data })) as PaymentAttemptRow;
+      await safeUpsertEntitySearchTokens(tx, "payment_attempt", attempt);
+      return attempt;
     },
     findAttemptById: async (tx, id) => {
       return (await model(tx, "paymentAttempt").findUnique({ where: { id } })) as PaymentAttemptRow | null;

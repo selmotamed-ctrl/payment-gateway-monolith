@@ -3,10 +3,13 @@ import {
   addDays, createWalletAccount, formatMoney, randomAddress, randomBank, randomBusinessName,
   randomCategory, randomName, randomPhone, randomTaxId, sha256Like,
 } from "../builders";
+import { Vault } from "../../../engine/crypto/Vault";
+import { DEFAULT_KYB_REFRESH_POLICY, nextKybReviewAt, startOfUtcDay } from "../../../lib/kybReview";
 import {
   JOIN_REQUEST_CHECKLIST_KEYS,
   nationalIdHash,
   payoutAccountHash,
+  requiredDocumentsFromSetting,
 } from "../../../lib/joinRequestOnboarding";
 
 const MERCHANT_STATUS_WEIGHTS = {
@@ -39,11 +42,54 @@ const OWNER_ROLES = ["OWNER", "DIRECTOR", "SIGNATORY", "CONTROLLER"] as const;
 const SUSPENSION_REASONS = ["AML", "FRAUD", "KYB_EXPIRED", "COMMISSION_CEILING", "MERCHANT_REQUEST", "OTHER"] as const;
 const REJECTION_REASONS = ["UNVERIFIABLE_BUSINESS", "INCOMPLETE_DOCUMENTS", "PROHIBITED_ACTIVITY", "POLICY"] as const;
 
-export const generateMerchantCohort = (ctx: SeederContext): void => {
+const previewPdf = (documentId: string): Buffer =>
+  Buffer.from(
+    `%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 200]>>endobj\ntrailer<</Size 4/Root 1 0 R>>\n% synthetic KYB preview ${documentId}\n%%EOF\n`,
+    "utf8",
+  );
+
+export const generateMerchantCohort = async (ctx: SeederContext): Promise<void> => {
   const total = ctx.config.volumes.merchants;
   const start = ctx.timeline.start;
   const end = ctx.timeline.end;
   const spanDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86_400_000));
+  const now = ctx.timeline.end;
+  const today = startOfUtcDay(now);
+  const vault = new Vault();
+
+  let existingUploader: { id: string; createdAt: Date } | null = null;
+  try {
+    existingUploader = await ctx.prisma.user.findFirst({
+      where: { merchantId: null },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, createdAt: true },
+    });
+  } catch {
+    existingUploader = null;
+  }
+  let uploaderId = existingUploader?.id ?? null;
+  let uploaderAt = existingUploader?.createdAt?.getTime() ?? Number.POSITIVE_INFINITY;
+  for (const user of ctx.dataset.users) {
+    if (user.merchantId !== null) continue;
+    const createdAt = new Date(user.createdAt as Date).getTime();
+    if (createdAt < uploaderAt) {
+      uploaderId = user.id;
+      uploaderAt = createdAt;
+    }
+  }
+
+  let requiredDocumentsSetting: { valueJson: unknown } | null = null;
+  try {
+    requiredDocumentsSetting = await ctx.prisma.platformSetting.findFirst({
+      where: { key: "onboarding.required_documents" },
+      orderBy: { version: "desc" },
+      select: { valueJson: true },
+    });
+  } catch {
+    requiredDocumentsSetting = null;
+  }
+  const requiredDocumentsFor = (businessCategory: string | null): string[] =>
+    requiredDocumentsFromSetting(requiredDocumentsSetting?.valueJson, businessCategory);
 
   // The three deliberate duplicate-document pairs (compliance alert showcase).
   const duplicateHashes = Array.from({ length: 3 }, (_, index) => sha256Like(ctx, `duplicate-doc-${index}`));
@@ -56,7 +102,6 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
       ? addDays(end, -ctx.rng.int(0, 20))
       : addDays(start, ctx.rng.int(0, Math.max(1, spanDays - 20)));
     const business = randomBusinessName(ctx);
-    const name = randomName(ctx);
     const address = randomAddress(ctx);
     const city = ctx.rng.pick(["Tripoli", "Benghazi", "Misrata", "Zawiya", "Sabha", "Tobruk"]);
     const merchantId = ctx.nextId("merchant");
@@ -75,7 +120,8 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
       holder: business.en,
       address: address.en,
     };
-    ctx.dataset.merchants.push({
+    const businessCategory = randomCategory(ctx).en;
+    const merchant = {
       id: merchantId,
       createdAt,
       updatedAt: suspendedAt ?? closedAt ?? activatedAt ?? createdAt,
@@ -87,7 +133,7 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
       supportPhone: randomPhone(ctx),
       taxId: randomTaxId(ctx),
       registrationNo: `${ctx.rng.int(100000, 999999)}-${city.slice(0, 2).toUpperCase()}`,
-      businessCategory: randomCategory(ctx).en,
+      businessCategory,
       status,
       kybStatus,
       riskTier: ctx.rng.weighted({ LOW: 25, STANDARD: 60, HIGH: 15 }),
@@ -106,7 +152,9 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
       negativeBalanceCeiling: ctx.rng.chance(12) ? ctx.rng.decimal(100, 500, 4) : "0.0000",
       payoutBankDetailsJson: payoutBankDetails,
       payoutAccountHash: payoutAccountHash(payoutBankDetails),
-    });
+      nextKybReviewAt: null as Date | null,
+    };
+    ctx.dataset.merchants.push(merchant);
 
     // Wallet + GL account for every merchant that reached onboarding.
     const walletAt = activatedAt ?? createdAt;
@@ -257,6 +305,7 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
 
     // KYB documents (4-7) with the four statuses and expiring/duplicate cases.
     const docCount = ctx.rng.int(4, 7);
+    const merchantDocuments: any[] = [];
     for (let docIndex = 0; docIndex < docCount; docIndex += 1) {
       const docType = KYB_DOC_TYPES[docIndex % KYB_DOC_TYPES.length]!;
       const isDuplicatePair = index === duplicateMerchantIndexes[0] || index === duplicateMerchantIndexes[1] || index === duplicateMerchantIndexes[2];
@@ -265,8 +314,10 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
         : ctx.rng.weighted({ UPLOADED: 45, ACCEPTED: 30, REJECTED: 15, EXPIRED: 10 });
       const expiresOn = addDays(ctx.timeline.end, ctx.rng.chance(6) ? ctx.rng.int(1, 30) : -ctx.rng.int(0, 900));
       const uploadedBy = ctx.rng.pick(ctx.refs.adminUsers.filter((user) => ["OPERATOR", "COMPLIANCE"].includes(user.role)));
-      ctx.dataset.kybDocuments.push({
-        id: ctx.nextId("kyb-doc"),
+      const documentId = ctx.nextId("kyb-doc");
+      const pdf = previewPdf(documentId);
+      const document = {
+        id: documentId,
         createdAt: addDays(createdAt, ctx.rng.int(0, 20)),
         updatedAt: ctx.timeline.end,
         merchantId,
@@ -276,7 +327,7 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
         docType,
         storageKey: `synthetic/${ctx.config.namespace}/merchants/${merchantId}/${docType}.pdf`,
         originalFileName: `${docType.toLowerCase()}.pdf`,
-        contentCiphertext: null,
+        contentCiphertext: await vault.encryptSecret(pdf.toString("base64"), "kyb-document"),
         sha256: isDuplicatePair && docIndex === 0
           ? duplicateHashes[duplicateMerchantIndexes.indexOf(index)]!
           : sha256Like(ctx, `${merchantId}:${docType}:${docIndex}`),
@@ -284,7 +335,7 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
         sizeBytes: ctx.rng.int(80_000, 3_500_000),
         avStatus: ctx.rng.chance(2) ? "INFECTED" : ctx.rng.chance(8) ? "PENDING" : "CLEAN",
         status: docStatus,
-        uploadedById: uploadedBy?.id ?? null,
+        uploadedById: uploadedBy?.id ?? uploaderId,
         reviewedById: docStatus === "ACCEPTED" || docStatus === "REJECTED"
           ? ctx.rng.pick(ctx.refs.adminUsers.filter((user) => user.role === "COMPLIANCE" || user.role === "OPERATOR"))?.id ?? null
           : null,
@@ -292,7 +343,49 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
         expiresOn,
         rejectionReasonCode: docStatus === "REJECTED" ? "BLURRY_OR_EXPIRED" : null,
         reviewNotes: docStatus === "REJECTED" ? "The scan is not readable; request a fresh copy." : null,
-      });
+      };
+      merchantDocuments.push(document);
+      ctx.dataset.kybDocuments.push(document);
+    }
+
+    if (status === "ACTIVE") {
+      const validTypes = new Set(
+        merchantDocuments
+          .filter((document) => document.status === "ACCEPTED"
+            && (!document.expiresOn || new Date(document.expiresOn as Date).getTime() >= today.getTime()))
+          .map((document) => String(document.docType)),
+      );
+      for (const requiredType of requiredDocumentsFor(businessCategory)) {
+        if (validTypes.has(requiredType)) continue;
+        const documentId = ctx.nextId("kyb-doc");
+        const pdf = previewPdf(documentId);
+        ctx.dataset.kybDocuments.push({
+          id: documentId,
+          createdAt: now,
+          updatedAt: now,
+          merchantId,
+          joinRequestId,
+          subjectType: "MERCHANT",
+          subjectId: merchantId,
+          docType: requiredType as never,
+          storageKey: `synthetic/kyb/merchants/${merchantId}/${requiredType}.pdf`,
+          originalFileName: `${requiredType.toLowerCase()}.pdf`,
+          contentCiphertext: await vault.encryptSecret(pdf.toString("base64"), "kyb-document"),
+          sha256: `seed-valid-${merchantId}-${requiredType}`.padEnd(64, "0").slice(0, 64),
+          mime: "application/pdf",
+          sizeBytes: pdf.byteLength,
+          avStatus: "CLEAN",
+          status: "ACCEPTED",
+          uploadedById: uploaderId,
+          reviewedById: uploaderId,
+          reviewedAt: now,
+          expiresOn: addDays(now, 365),
+          statusChangedAt: now,
+        });
+      }
+      if (!merchant.nextKybReviewAt) {
+        merchant.nextKybReviewAt = nextKybReviewAt(merchant.riskTier, now, DEFAULT_KYB_REFRESH_POLICY);
+      }
     }
 
     // Beneficial owners (1-4), including historical owner changes.
@@ -423,8 +516,44 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
         }
       }
     }
-
-    void name;
-    void formatMoney;
   }
+
+  const joinRequestByMerchant = new Map(
+    ctx.dataset.joinRequests.map((joinRequest) => [String(joinRequest.merchantId), joinRequest]),
+  );
+  const activeOwners = ctx.dataset.beneficialOwners.filter((owner) => owner.active).slice(0, 24);
+  for (const owner of activeOwners) {
+    const exists = ctx.dataset.kybDocuments.some(
+      (document) => document.subjectType === "BENEFICIAL_OWNER"
+        && String(document.subjectId) === String(owner.id)
+        && document.docType === "OWNER_ID",
+    );
+    if (exists) continue;
+    const joinRequest = joinRequestByMerchant.get(String(owner.merchantId));
+    const documentId = ctx.nextId("kyb-doc");
+    const pdf = previewPdf(documentId);
+    ctx.dataset.kybDocuments.push({
+      id: documentId,
+      createdAt: now,
+      updatedAt: now,
+      merchantId: owner.merchantId,
+      joinRequestId: joinRequest?.id ?? null,
+      subjectType: "BENEFICIAL_OWNER",
+      subjectId: owner.id,
+      docType: "OWNER_ID",
+      storageKey: `synthetic/kyb/owners/${owner.id}/OWNER_ID.pdf`,
+      originalFileName: `${String(owner.fullNameAr).replaceAll(/\s+/g, "-")}-identity.pdf`,
+      contentCiphertext: await vault.encryptSecret(pdf.toString("base64"), "kyb-document"),
+      sha256: `seed-owner-${owner.id}`.padEnd(64, "0").slice(0, 64),
+      mime: "application/pdf",
+      sizeBytes: pdf.byteLength,
+      avStatus: "CLEAN",
+      status: "UPLOADED",
+      uploadedById: uploaderId,
+      expiresOn: addDays(now, 365),
+      statusChangedAt: now,
+    });
+  }
+
+  void formatMoney;
 };

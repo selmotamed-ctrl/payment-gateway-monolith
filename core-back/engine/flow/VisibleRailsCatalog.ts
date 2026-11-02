@@ -55,8 +55,9 @@ export interface VisibleRailsQuery {
  * commission profiles.
  *
  * Every route carries the processed volume of the current business day. The
- * volume is derived from the succeeded attempts, so the daily cap is always
- * evaluated against the attempts it actually books.
+ * read uses the materialized `route_daily_volumes` counter and falls back to
+ * the exact succeeded-attempt SUM while the counter table is empty or the
+ * high-scale counters are disabled.
  */
 export const loadRailCatalog = async (
   db: PrismaLike,

@@ -1,5 +1,6 @@
 import { ApiError } from "./error";
 import type { PrismaClient } from "../generated/prisma/client";
+import type { Decimal } from "decimal.js";
 import { decimal } from "../engine/ledger/LedgerPoster";
 
 export const MERCHANT_DESCRIPTIVE_FIELDS = [
@@ -189,22 +190,34 @@ export const merchantWalletBalance = async (
   if (wallets.length === 0) return { balance: "0.0000", wallets: [] };
   const accounts = await db.glAccount.findMany({
     where: { id: { in: wallets.map((wallet) => wallet.glAccountId) } },
-    select: { id: true, checkpointBalance: true },
+    select: { id: true, checkpointBalance: true, currentBalance: true },
   });
-  const accountBalance = new Map(
-    accounts.map((account) => [account.id, decimal(account.checkpointBalance ?? 0)]),
-  );
-  const lines = await db.journalLine.findMany({
-    where: { glAccountId: { in: wallets.map((wallet) => wallet.glAccountId) } },
-    select: { glAccountId: true, direction: true, amount: true },
-  });
-  for (const line of lines) {
-    const current = accountBalance.get(line.glAccountId) ?? decimal(0);
-    const value = decimal(line.amount);
-    accountBalance.set(
-      line.glAccountId,
-      line.direction === "CREDIT" ? current.plus(value) : current.minus(value),
-    );
+  const accountBalance = new Map<string, Decimal>();
+  const legacyAccountIds = new Set<string>();
+  for (const account of accounts) {
+    if (account.currentBalance !== undefined && account.currentBalance !== null) {
+      accountBalance.set(account.id, decimal(account.currentBalance).negated());
+    } else {
+      accountBalance.set(account.id, decimal(account.checkpointBalance ?? 0));
+      legacyAccountIds.add(account.id);
+    }
+  }
+  if (legacyAccountIds.size > 0) {
+    const lines = await db.journalLine.findMany({
+      where: { glAccountId: { in: [...legacyAccountIds] } },
+      select: { glAccountId: true, direction: true, amount: true },
+    });
+    for (const line of lines) {
+      if (!legacyAccountIds.has(line.glAccountId)) {
+        continue;
+      }
+      const current = accountBalance.get(line.glAccountId) ?? decimal(0);
+      const value = decimal(line.amount);
+      accountBalance.set(
+        line.glAccountId,
+        line.direction === "CREDIT" ? current.plus(value) : current.minus(value),
+      );
+    }
   }
   const rows = wallets.map((wallet) => ({
     id: wallet.id,

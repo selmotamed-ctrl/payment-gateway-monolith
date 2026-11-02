@@ -9,7 +9,18 @@ import { detectDuplicateFlags, nationalIdHash, payoutAccountHash } from "../../l
 import { payoutOwnerMismatch } from "../../lib/kybReview";
 import { queueKybNotification } from "../../lib/kybNotifications";
 import { scanKybBytes } from "../../lib/kybScan";
-import { buildListQuery, listResponse } from "../../lib/listQuery";
+import {
+  boundedCount,
+  buildKeysetWhere,
+  buildListQuery,
+  decodeKeysetCursor,
+  encodeKeysetCursorFromRow,
+  listResponse,
+} from "../../lib/listQuery";
+import {
+  safeRecomputeKybDocumentHashStat,
+  safeUpsertEntitySearchTokens,
+} from "../../lib/search/tokenIndex";
 import { buildMerchantUserInfo } from "../../lib/auth/uiAuthorities";
 import {
   generateAccessToken,
@@ -685,7 +696,7 @@ router.post("/auth/register", async (request: Request, response: Response) => {
     const wallet = await tx.wallet.create({
       data: { merchantId: merchant.id, glAccountId: glAccount.id, currency: "LYD", status: "PENDING" },
     });
-    await tx.joinRequest.create({
+    const joinRequest = await tx.joinRequest.create({
       data: {
         merchantId: merchant.id,
         submittedByUserId: user.id,
@@ -700,6 +711,9 @@ router.post("/auth/register", async (request: Request, response: Response) => {
         fourEyesReasons: [],
       },
     });
+    await safeUpsertEntitySearchTokens(tx, "merchant", merchant);
+    await safeUpsertEntitySearchTokens(tx, "user", user);
+    await safeUpsertEntitySearchTokens(tx, "join_request", joinRequest);
     return { merchant, user, wallet };
   });
 
@@ -976,7 +990,7 @@ router.put("/onboarding/join-request", async (request: Request, response: Respon
       .strict(),
     request.body,
   );
-  await client.merchant.update({
+  const updatedMerchant = await client.merchant.update({
     where: { id: merchantId },
     data: {
       legalName: body.legalName,
@@ -989,6 +1003,7 @@ router.put("/onboarding/join-request", async (request: Request, response: Respon
       contactEmail: body.email,
     },
   });
+  await safeUpsertEntitySearchTokens(client, "merchant", updatedMerchant);
   const existing = await client.joinRequest.findFirst({
     where: { merchantId, status: { in: ["DRAFT", "SUBMITTED", "IN_REVIEW", "INFO_REQUESTED", "PENDING_CHECKER"] } },
     orderBy: { createdAt: "desc" },
@@ -1091,6 +1106,8 @@ router.post("/onboarding/kyb-documents", async (request: Request, response: Resp
         statusChangedAt: now,
       },
     });
+    await safeRecomputeKybDocumentHashStat(tx, sha256);
+    await safeUpsertEntitySearchTokens(tx, "kyb_document", created);
     if (revalidation && avStatus !== "INFECTED") {
       await tx.kybRevalidationRequest.update({
         where: { id: revalidation.id },
@@ -1295,6 +1312,7 @@ router.post("/onboarding/submit", async (request: Request, response: Response) =
       fourEyesReasons: fourEyes.reasons,
     },
   });
+  await safeUpsertEntitySearchTokens(client, "join_request", submitted);
 
   response.json({
     id: joinRequest.id,
@@ -1318,7 +1336,38 @@ router.get("/wallets", async (request: Request, response: Response) => {
   });
   const where = { merchantId, ...built.where } as never;
   const [wallets, total] = await Promise.all([
-    client.wallet.findMany({ where, orderBy: built.orderBy as never, include: { glAccount: true }, skip: built.skip, take: built.take }),
+    client.wallet.findMany({
+      where,
+      orderBy: built.orderBy as never,
+      select: {
+        id: true,
+        createdAt: true,
+        updatedAt: true,
+        merchantId: true,
+        glAccountId: true,
+        currency: true,
+        status: true,
+        glAccount: {
+          select: {
+            id: true,
+            createdAt: true,
+            updatedAt: true,
+            accountType: true,
+            ownerId: true,
+            gatewayId: true,
+            credentialSetId: true,
+            env: true,
+            currency: true,
+            lastCheckpointId: true,
+            checkpointBalance: true,
+            checkpointAt: true,
+            seedKey: true,
+          },
+        },
+      },
+      skip: built.skip,
+      take: built.take,
+    }),
     client.wallet.count({ where }),
   ]);
   response.json(listResponse("wallets", wallets, total, built));
@@ -1349,7 +1398,35 @@ router.post("/wallets", async (request: Request, response: Response) => {
 router.get("/wallets/:id", async (request: Request, response: Response) => {
   const merchantId = merchantIdOf(request);
   const { id } = parseOrThrow(idSchema, request.params);
-  const wallet = await client.wallet.findFirst({ where: { id, merchantId }, include: { glAccount: true } });
+  const wallet = await client.wallet.findFirst({
+    where: { id, merchantId },
+    select: {
+      id: true,
+      createdAt: true,
+      updatedAt: true,
+      merchantId: true,
+      glAccountId: true,
+      currency: true,
+      status: true,
+      glAccount: {
+        select: {
+          id: true,
+          createdAt: true,
+          updatedAt: true,
+          accountType: true,
+          ownerId: true,
+          gatewayId: true,
+          credentialSetId: true,
+          env: true,
+          currency: true,
+          lastCheckpointId: true,
+          checkpointBalance: true,
+          checkpointAt: true,
+          seedKey: true,
+        },
+      },
+    },
+  });
   if (!wallet) {
     throw new ApiError(404, "WALLET_NOT_FOUND", "The wallet does not exist");
   }
@@ -1359,18 +1436,31 @@ router.get("/wallets/:id", async (request: Request, response: Response) => {
 router.get("/wallets/:id/balance", async (request: Request, response: Response) => {
   const merchantId = merchantIdOf(request);
   const { id } = parseOrThrow(idSchema, request.params);
-  const wallet = await client.wallet.findFirst({ where: { id, merchantId }, include: { glAccount: true } });
+  const wallet = await client.wallet.findFirst({
+    where: { id, merchantId },
+    select: {
+      id: true,
+      currency: true,
+      glAccountId: true,
+      glAccount: { select: { checkpointBalance: true, currentBalance: true } },
+    },
+  });
   if (!wallet) {
     throw new ApiError(404, "WALLET_NOT_FOUND", "The wallet does not exist");
   }
-  const lines = await client.journalLine.findMany({
-    where: { glAccountId: wallet.glAccountId },
-    select: { direction: true, amount: true },
-  });
-  let balance = decimal(0);
-  for (const line of lines) {
-    const value = decimal(line.amount);
-    balance = line.direction === "CREDIT" ? balance.plus(value) : balance.minus(value);
+  let balance: ReturnType<typeof decimal>;
+  if (wallet.glAccount.currentBalance !== undefined && wallet.glAccount.currentBalance !== null) {
+    balance = decimal(wallet.glAccount.currentBalance).negated();
+  } else {
+    const lines = await client.journalLine.findMany({
+      where: { glAccountId: wallet.glAccountId },
+      select: { direction: true, amount: true },
+    });
+    balance = decimal(0);
+    for (const line of lines) {
+      const value = decimal(line.amount);
+      balance = line.direction === "CREDIT" ? balance.plus(value) : balance.minus(value);
+    }
   }
   response.json({
     walletId: wallet.id,
@@ -1716,12 +1806,37 @@ router.get("/payments", async (request: Request, response: Response) => {
     sortable: { reference: "reference", amount: "totalChargedAmount", status: "status", createdAt: "createdAt", confirmedAt: "confirmedAt" },
     defaultSort: { createdAt: "desc" },
   });
-  const where = { merchantId, ...built.where } as never;
-  const [payments, total] = await Promise.all([
-    client.paymentAttempt.findMany({ where, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
-    client.paymentAttempt.count({ where }),
+  const query = (request.query ?? {}) as Record<string, unknown>;
+  const baseWhere = { merchantId, ...built.where } as Record<string, unknown>;
+  const cursor = decodeKeysetCursor(typeof query.cursor === "string" ? query.cursor : undefined);
+  const firstOrder = built.orderBy[0] ?? {};
+  const canUseKeyset =
+    Object.keys(firstOrder)[0] === "createdAt" &&
+    Object.values(firstOrder)[0] === "desc";
+  const keysetWhere = cursor && canUseKeyset ? buildKeysetWhere(cursor, "desc") : {};
+  const where = cursor && canUseKeyset
+    ? ({ AND: [baseWhere, keysetWhere] } as never)
+    : (baseWhere as never);
+  const [payments, countResult] = await Promise.all([
+    client.paymentAttempt.findMany({
+      where,
+      orderBy: built.orderBy as never,
+      skip: cursor && canUseKeyset ? 0 : built.skip,
+      take: built.take,
+    }),
+    boundedCount(
+      { findMany: (args) => client.paymentAttempt.findMany(args as never) },
+      baseWhere,
+      { modelName: "paymentAttempt", key: "merchant:payments" },
+    ),
   ]);
-  response.json(listResponse("payments", payments, total, built));
+  const nextCursor = canUseKeyset && payments.length === built.take
+    ? encodeKeysetCursorFromRow(payments[payments.length - 1] as unknown as Record<string, unknown>)
+    : null;
+  response.json(listResponse("payments", payments, countResult.total, built, {
+    nextCursor,
+    totalIsCapped: countResult.totalIsCapped,
+  }));
 });
 
 router.get("/disputes", async (request: Request, response: Response) => {
@@ -2456,13 +2571,22 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
   const [wallets, pendingCashouts] = await Promise.all([
     client.wallet.findMany({
       where: { merchantId },
-      select: { currency: true, glAccount: { select: { checkpointBalance: true } } },
+      select: {
+        currency: true,
+        glAccount: { select: { checkpointBalance: true, currentBalance: true } },
+      },
     }),
     client.cashoutRequest.count({ where: { merchantId, state: { in: ["PENDING", "PROCESSING"] } } }),
   ]);
 
   const walletBalance = wallets.reduce(
-    (total, wallet) => total.plus(decimal(wallet.glAccount?.checkpointBalance ?? 0)),
+    (total, wallet) => {
+      const glAccount = wallet.glAccount;
+      if (glAccount?.currentBalance !== undefined && glAccount.currentBalance !== null) {
+        return total.minus(decimal(glAccount.currentBalance));
+      }
+      return total.plus(decimal(glAccount?.checkpointBalance ?? 0));
+    },
     decimal(0),
   );
   const currency = wallets[0]?.currency ?? attempts[0]?.currency ?? "LYD";

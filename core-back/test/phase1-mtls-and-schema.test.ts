@@ -88,16 +88,38 @@ const designModelNames = [
   "BackgroundJob",
   // The persisted evidence the 12 go-live gates are evaluated against.
   "GatewayVersionEvidence",
+  // High-scale materialized counters, search index, cache ring and cold blobs.
+  "RouteDailyVolume",
+  "VelocityWindowBucket",
+  "MerchantDailyStat",
+  "KybDocumentHashStat",
+  "EntitySearchToken",
+  "CacheInvalidationEvent",
+  "InboundEventPayload",
+  "ReconciliationRunFile",
+  "AuditLogPayload",
 ];
+
+const highScaleModelsWithoutStandardIds = new Set([
+  "RouteDailyVolume",
+  "VelocityWindowBucket",
+  "MerchantDailyStat",
+  "KybDocumentHashStat",
+  "EntitySearchToken",
+  "CacheInvalidationEvent",
+  "InboundEventPayload",
+  "ReconciliationRunFile",
+  "AuditLogPayload",
+]);
 
 describe("prisma schema", () => {
   const schema = fs.readFileSync(schemaPath, "utf8");
 
-  test("declares exactly the 68 design models", () => {
+  test("declares exactly the 77 design models", () => {
     const modelNames = [...schema.matchAll(/^model\s+(\w+)\s*\{/gm)].map(
       (match) => match[1] as string,
     );
-    expect(modelNames.length).toBe(68);
+    expect(modelNames.length).toBe(77);
     expect([...modelNames].sort()).toEqual([...designModelNames].sort());
   });
 
@@ -105,9 +127,11 @@ describe("prisma schema", () => {
     const modelBlocks = schema.split(/^model\s+/m).slice(1);
     for (const block of modelBlocks) {
       const modelName = block.split(/\s/)[0] as string;
-      expect(block).toMatch(/^\s*id\s+\S+\s+@id/m);
-      expect(block).toMatch(/^\s*createdAt\s+DateTime\s+@default\(now\(\)\)/m);
-      expect(block).toMatch(/^\s*updatedAt\s+DateTime\s+@updatedAt/m);
+      if (!highScaleModelsWithoutStandardIds.has(modelName)) {
+        expect(block).toMatch(/^\s*id\s+\S+\s+@id/m);
+        expect(block).toMatch(/^\s*createdAt\s+DateTime\s+@default\(now\(\)\)/m);
+        expect(block).toMatch(/^\s*updatedAt\s+DateTime\s+@updatedAt/m);
+      }
       expect(modelName.length).toBeGreaterThan(0);
     }
   });

@@ -1,16 +1,15 @@
 import type { PrismaClient } from "../../generated/prisma/client";
 import { REQUIRED_SCHEMA_VERSION } from "../schemaVersion";
-import { getBaseClient } from "./base";
+import {
+  createBaseClient,
+  dbBackground,
+  dbTransactional,
+  getBaseClient,
+  getDbBackground,
+  getDbTransactional,
+} from "./base";
 
-const clientProxy = new Proxy({} as PrismaClient, {
-  get: (_target, property) => {
-    const instance = getBaseClient();
-    const value = Reflect.get(instance, property);
-    return typeof value === "function" ? value.bind(instance) : value;
-  },
-});
-
-export const client = clientProxy;
+export const client = dbTransactional;
 
 let schemaVersionCheck: Promise<void> | undefined;
 
@@ -42,4 +41,12 @@ export const ensureSchemaVersion = async (): Promise<void> => {
 type TransactionCallback = Parameters<PrismaClient["$transaction"]>[0];
 export type CtxClient = TransactionCallback extends (tx: infer T, ...args: any[]) => any ? T : never;
 
+export {
+  createBaseClient,
+  dbBackground,
+  dbTransactional,
+  getBaseClient,
+  getDbBackground,
+  getDbTransactional,
+};
 export { getBaseClient as baseClient };

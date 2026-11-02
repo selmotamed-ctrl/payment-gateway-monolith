@@ -12,11 +12,16 @@ export interface CheckpointRecord {
 export interface CheckpointPrismaClient {
   glAccount: {
     findUnique(args: { where: { id: string } }): Promise<LedgerAccountRecord | null>;
-    findMany(args?: { select?: Record<string, boolean> }): Promise<LedgerAccountRecord[]>;
+    findMany(args?: { where?: Record<string, unknown>; select?: Record<string, boolean> }): Promise<LedgerAccountRecord[]>;
     update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<LedgerAccountRecord>;
   };
   journalLine: {
     findMany(args: { where: Record<string, unknown> }): Promise<JournalLineRecord[]>;
+    findFirst?(args: {
+      where: Record<string, unknown>;
+      orderBy?: Record<string, unknown> | Array<Record<string, unknown>>;
+      select?: Record<string, boolean>;
+    }): Promise<Pick<JournalLineRecord, "id" | "createdAt"> | null>;
   };
   journalEntry?: {
     findFirst(args: { where: Record<string, unknown>; orderBy?: Record<string, unknown> }): Promise<{ id: string } | null>;
@@ -34,6 +39,10 @@ export interface AccountBalance {
   checkpointAt?: Date;
 }
 
+function hasCurrentBalance(account: LedgerAccountRecord): boolean {
+  return account.currentBalance !== undefined && account.currentBalance !== null;
+}
+
 export class CheckpointService {
   private readonly client: CheckpointPrismaClient;
 
@@ -49,26 +58,68 @@ export class CheckpointService {
     if (!account) {
       throw new Error(`GL account '${accountId}' does not exist`);
     }
-    const lines = await this.client.journalLine.findMany({ where: { glAccountId: accountId } });
-    const balance = sumLines(lines, undefined, asOf);
-    let id = checkpointId;
-    if (!id && this.client.journalEntry) {
-      const entry = await this.client.journalEntry.findFirst({
-        where: {},
-        orderBy: { createdAt: "desc" },
+
+    const nearNow = asOf.getTime() >= Date.now() - 1_000;
+    let latestLine: Pick<JournalLineRecord, "id" | "createdAt"> | null | undefined;
+    if (hasCurrentBalance(account) && this.client.journalLine.findFirst) {
+      latestLine = await this.client.journalLine.findFirst({
+        where: { glAccountId: accountId },
+        orderBy: { id: "desc" },
+        select: { id: true, createdAt: true },
       });
-      id = entry?.id;
     }
-    if (!id) {
-      id = `checkpoint:${accountId}:${asOf.toISOString()}`;
+    const latestIsCovered = latestLine
+      ? latestLine.createdAt
+        ? latestLine.createdAt.getTime() <= asOf.getTime()
+        : nearNow
+      : true;
+    const useCurrentBalance = hasCurrentBalance(account)
+      && nearNow
+      && (this.client.journalLine.findFirst ? latestIsCovered : true);
+
+    let balance: Decimal;
+    let id = checkpointId;
+
+    if (useCurrentBalance) {
+      // The materialised balance already contains every committed line.
+      balance = decimal(account.currentBalance ?? 0);
+      if (!id) {
+        id = latestLine?.id ?? account.lastCheckpointId ?? `checkpoint:${accountId}:${asOf.toISOString()}`;
+      }
+    } else {
+      const lines = await this.client.journalLine.findMany({ where: { glAccountId: accountId } });
+      balance = sumLines(lines, undefined, asOf);
+      if (!id && this.client.journalLine.findFirst) {
+        const atOrBefore = await this.client.journalLine.findFirst({
+          where: { glAccountId: accountId, createdAt: { lte: asOf } },
+          orderBy: { id: "desc" },
+          select: { id: true },
+        });
+        id = atOrBefore?.id ?? account.lastCheckpointId ?? undefined;
+      }
+      if (!id && this.client.journalEntry) {
+        const entry = await this.client.journalEntry.findFirst({
+          where: {},
+          orderBy: { createdAt: "desc" },
+        });
+        id = entry?.id;
+      }
+      if (!id) {
+        id = `checkpoint:${accountId}:${asOf.toISOString()}`;
+      }
+    }
+
+    const data: Record<string, unknown> = {
+      checkpointBalance: balance,
+      checkpointAt: asOf,
+      lastCheckpointId: id,
+    };
+    if (useCurrentBalance) {
+      data.linesSinceCheckpoint = 0;
     }
     await this.client.glAccount.update({
       where: { id: accountId },
-      data: {
-        checkpointBalance: balance,
-        checkpointAt: asOf,
-        lastCheckpointId: id,
-      },
+      data,
     });
     return { id, glAccountId: accountId, asOf, balance };
   }
@@ -85,7 +136,15 @@ export class CheckpointService {
       )) as Array<Record<string, unknown>> | null;
       const locked = Array.isArray(rows) ? rows[0] : undefined;
       if (locked) {
-        return locked as unknown as LedgerAccountRecord;
+        return {
+          ...(locked as unknown as LedgerAccountRecord),
+          accountType: (locked.accountType ?? locked.account_type) as LedgerAccountRecord["accountType"],
+          checkpointBalance: locked.checkpointBalance ?? locked.checkpoint_balance,
+          checkpointAt: (locked.checkpointAt ?? locked.checkpoint_at ?? null) as Date | null,
+          lastCheckpointId: (locked.lastCheckpointId ?? locked.last_checkpoint_id ?? null) as string | null,
+          currentBalance: locked.currentBalance ?? locked.current_balance,
+          linesSinceCheckpoint: locked.linesSinceCheckpoint ?? locked.lines_since_checkpoint,
+        } as LedgerAccountRecord;
       }
     }
     return this.client.glAccount.findUnique({ where: { id: accountId } });
@@ -96,28 +155,55 @@ export class CheckpointService {
     if (!account) {
       throw new Error(`GL account '${accountId}' does not exist`);
     }
-    const lines = await this.client.journalLine.findMany({ where: { glAccountId: accountId } });
+    return this.balanceForAccount(account);
+  }
+
+  async getLiveBalances(accountIds?: readonly string[]): Promise<AccountBalance[]> {
+    if (accountIds) {
+      const accounts = await this.client.glAccount.findMany({
+        where: { id: { in: [...accountIds] } },
+      });
+      const byId = new Map(accounts.map((account) => [account.id, account]));
+      const balances: AccountBalance[] = [];
+      for (const accountId of accountIds) {
+        const account = byId.get(accountId);
+        if (!account) {
+          throw new Error(`GL account '${accountId}' does not exist`);
+        }
+        balances.push(await this.balanceForAccount(account));
+      }
+      return balances;
+    }
+    const balances: AccountBalance[] = [];
+    for (const account of await this.client.glAccount.findMany()) {
+      balances.push(await this.balanceForAccount(account));
+    }
+    return balances;
+  }
+
+  private async balanceForAccount(account: LedgerAccountRecord): Promise<AccountBalance> {
     const checkpointBalance = decimal(account.checkpointBalance ?? 0);
+    if (hasCurrentBalance(account)) {
+      const liveBalance = decimal(account.currentBalance ?? 0);
+      return {
+        accountId: account.id,
+        accountType: account.accountType,
+        checkpointBalance,
+        delta: liveBalance.minus(checkpointBalance),
+        liveBalance,
+        checkpointAt: account.checkpointAt ?? undefined,
+      };
+    }
+    const lines = await this.client.journalLine.findMany({ where: { glAccountId: account.id } });
     const delta = sumLines(lines, account.checkpointAt ?? undefined, undefined, true);
     return {
-      accountId,
+      accountId: account.id,
       accountType: account.accountType,
       checkpointBalance,
       delta,
       liveBalance: checkpointBalance.plus(delta),
       checkpointAt: account.checkpointAt ?? undefined,
     };
-  }
-
-  async getLiveBalances(accountIds?: readonly string[]): Promise<AccountBalance[]> {
-    if (accountIds) {
-      return Promise.all(accountIds.map((accountId) => this.getLiveBalance(accountId)));
-    }
-    const balances: AccountBalance[] = [];
-    for (const account of await this.client.glAccount.findMany({ select: { id: true } })) {
-      balances.push(await this.getLiveBalance(account.id));
-    }
-    return balances;
   }
 }
 

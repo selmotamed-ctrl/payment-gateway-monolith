@@ -1,5 +1,9 @@
 import { toCamelRows, mysqlPlaceholders } from "../db/rawRows";
 import type { PaymentAttemptRow, Tx } from "../db/ports";
+import {
+  recordAttemptLifecycle,
+  type AttemptLifecycleEvent,
+} from "../../lib/counters/materializedCounters";
 import { BaseWorker, type WorkerOptions } from "./workerRuntime";
 import type { InquiryOutcome, InquiryPort } from "./ExpirySweeperWorker";
 import {
@@ -26,6 +30,27 @@ export interface PollPolicy {
 
 const POLLABLE_STATUSES = ["CREATED", "INITIATING", "AWAITING_CUSTOMER", "AUTHORIZING", "VERIFYING", "UNKNOWN"];
 const TERMINAL_STATUSES = ["SUCCEEDED", "FAILED", "EXPIRED", "CANCELLED", "BLOCKED"];
+const POLL_CLAIM_LEASE_MS = 5 * 60 * 1000;
+const lifecycleEventForTerminal = (status: string): AttemptLifecycleEvent | null => {
+  if (status === "SUCCEEDED") return "SUCCEEDED";
+  if (status === "FAILED" || status === "BLOCKED") return "FAILED";
+  if (status === "EXPIRED") return "EXPIRED";
+  if (status === "CANCELLED") return "CANCELLED";
+  return null;
+};
+const ATTEMPT_CLAIM_COLUMNS = [
+  "id", "reference", "idempotency_key", "link_id", "attempt_group_id",
+  "application_id", "merchant_id", "rail_id", "route_id", "credential_set_id",
+  "gateway_version_id", "commission_profile_id", "env", "mode", "sub_mode",
+  "status", "substatus", "gateway_reference", "provider_reference",
+  "network_reference", "requested_amount", "surcharge_amount",
+  "total_charged_amount", "gateway_amount_wire", "settled_amount",
+  "gateway_fee_amount", "platform_commission_amount", "net_merchant_amount",
+  "fee_bearer", "currency", "point_of_no_return", "otp_attempts",
+  "last_otp_sent_at", "client_ip", "end_client_ip", "end_client_phone_hash",
+  "end_client_card_alias", "expires_at", "grace_expires_at", "next_check_at",
+  "ledger_entry_id", "terminal_at", "created_at", "updated_at",
+].join(", ");
 
 export const computeBackoffDelaySeconds = (
   policy: Pick<PollPolicy, "firstAfterSeconds" | "backoffSeconds" | "maxDurationSeconds">,
@@ -98,7 +123,7 @@ export class PollWorker extends BaseWorker {
   private async lockDueAttempts(now: Date): Promise<PaymentAttemptRow[]> {
     const statusPlaceholders = mysqlPlaceholders(POLLABLE_STATUSES.length);
     const sql =
-      "SELECT * FROM payment_attempts" +
+      `SELECT ${ATTEMPT_CLAIM_COLUMNS} FROM payment_attempts` +
       " WHERE next_check_at IS NOT NULL" +
       " AND next_check_at <= ?" +
       " AND terminal_at IS NULL" +
@@ -106,8 +131,24 @@ export class PollWorker extends BaseWorker {
       " ORDER BY next_check_at ASC" +
       " LIMIT ?" +
       " FOR UPDATE SKIP LOCKED";
-    const result = await this.db.$queryRawUnsafe(sql, now, ...POLLABLE_STATUSES, this.batchSize);
-    return toCamelRows<PaymentAttemptRow>(result);
+    // The selection and the claim transition share one short transaction. The
+    // lease is written to the existing `next_check_at` column, so no new
+    // column is required. The gateway inquiry runs after the commit.
+    return this.db.$transaction(async (tx: Tx) => {
+      const result = await tx.$queryRawUnsafe(sql, now, ...POLLABLE_STATUSES, this.batchSize);
+      const attempts = toCamelRows<PaymentAttemptRow>(result);
+      if (attempts.length === 0) {
+        return attempts;
+      }
+      const leaseUntil = new Date(now.getTime() + POLL_CLAIM_LEASE_MS);
+      const idPlaceholders = mysqlPlaceholders(attempts.length);
+      await tx.$executeRawUnsafe(
+        `UPDATE payment_attempts SET next_check_at = ?, updated_at = NOW() WHERE id IN (${idPlaceholders})`,
+        leaseUntil,
+        ...attempts.map((attempt) => attempt.id),
+      );
+      return attempts;
+    });
   }
 
   private async pollAttempt(attempt: PaymentAttemptRow, now: Date): Promise<void> {
@@ -206,7 +247,7 @@ export class PollWorker extends BaseWorker {
     if (terminal) {
       // The terminal transition is conditional on the attempt still being
       // open, so two cluster nodes can never terminate it twice.
-      const transitioned = await this.terminate(attempt.id, outcome.status, now);
+      const transitioned = await this.terminate(attempt, outcome.status, now);
       if (!transitioned) {
         return;
       }
@@ -248,14 +289,28 @@ export class PollWorker extends BaseWorker {
    * it is still non-terminal, which makes the worker safe to run on several
    * nodes at the same time.
    */
-  private async terminate(attemptId: string, status: string, now: Date): Promise<boolean> {
-    const result = await this.db.$executeRawUnsafe(
-      "UPDATE payment_attempts SET status = ?, terminal_at = ?, next_check_at = NULL, updated_at = NOW() WHERE id = ? AND terminal_at IS NULL",
-      status,
-      now,
-      attemptId,
-    );
-    return Number(result ?? 0) > 0;
+  private async terminate(attempt: PaymentAttemptRow, status: string, now: Date): Promise<boolean> {
+    return this.db.$transaction(async (tx: Tx) => {
+      const result = await tx.$executeRawUnsafe(
+        "UPDATE payment_attempts SET status = ?, terminal_at = ?, next_check_at = NULL, updated_at = NOW() WHERE id = ? AND terminal_at IS NULL",
+        status,
+        now,
+        attempt.id,
+      );
+      if (Number(result ?? 0) <= 0) {
+        return false;
+      }
+      const event = lifecycleEventForTerminal(status);
+      if (event) {
+        await recordAttemptLifecycle(tx, {
+          attemptId: attempt.id,
+          event,
+          previousStatus: attempt.status,
+          at: now,
+        });
+      }
+      return true;
+    });
   }
 
   private async releaseSlot(attempt: PaymentAttemptRow): Promise<void> {

@@ -10,7 +10,8 @@ import { OTP_CODES } from "../libyanDataCatalog";
  * emulator and receive a coherent answer.
  */
 
-const BATCH = 5000;
+const BATCH = 10_000;
+const CONCURRENCY = 4;
 
 const STATUS_MAP: Record<string, string> = {
   SUCCEEDED: "PAID",
@@ -32,23 +33,21 @@ const STATUS_MAP: Record<string, string> = {
 const toIso = (value: unknown): string =>
   value instanceof Date ? value.toISOString() : new Date(String(value)).toISOString();
 
-export const fakeRailsBulkSync = async (ctx: SeederContext): Promise<{ transactions: number; events: number }> => {
-  const baseUrl = process.env.FAKE_RAILS_PUBLIC_BASE_URL;
-  const token = process.env.FAKE_RAILS_SEEDER_TOKEN;
-  if (!baseUrl || !token) {
-    throw new Error("FAKE_RAILS_PUBLIC_BASE_URL and FAKE_RAILS_SEEDER_TOKEN are required for the bulk sync");
-  }
-  const endpoint = new URL("/portal-api/internal/bulk-seed", baseUrl).toString();
-  const attemptById = new Map(ctx.dataset.paymentAttempts.map((attempt) => [String(attempt.id), attempt]));
+interface Batch {
+  kind: "transactions" | "events";
+  rows: any[];
+}
+
+function* transactionBatches(ctx: SeederContext): Generator<Batch> {
   const routeInfo = new Map(ctx.refs.routes.map((route) => [route.id, route]));
   const railById = new Map(ctx.refs.rails.map((rail) => [rail.id, rail]));
-
-  const transactions = ctx.dataset.paymentAttempts.map((attempt) => {
+  let batch: any[] = [];
+  for (const attempt of ctx.dataset.paymentAttempts) {
     const route = routeInfo.get(String(attempt.routeId));
     const rail = route ? railById.get(route.railId) : undefined;
     const providerReference = attempt.providerReference
       ?? `FK-SEED-${String(attempt.id).slice(-12).toUpperCase()}`;
-    return {
+    batch.push({
       id: String(attempt.id),
       gateway_code: route?.gatewayCode ?? "neompay",
       rail_code: route?.railCode ?? rail?.code ?? "neompay",
@@ -75,13 +74,23 @@ export const fakeRailsBulkSync = async (ctx: SeederContext): Promise<{ transacti
       is_seeded_historical: 1,
       created_at: toIso(attempt.createdAt),
       updated_at: toIso(attempt.updatedAt),
-    };
-  });
+    });
+    if (batch.length >= BATCH) {
+      yield { kind: "transactions", rows: batch };
+      batch = [];
+    }
+  }
+  if (batch.length > 0) yield { kind: "transactions", rows: batch };
+};
 
-  const events = ctx.dataset.attemptStepLogs.map((log) => {
+function* eventBatches(ctx: SeederContext): Generator<Batch> {
+  const attemptById = new Map(ctx.dataset.paymentAttempts.map((attempt) => [String(attempt.id), attempt]));
+  const routeInfo = new Map(ctx.refs.routes.map((route) => [route.id, route]));
+  let batch: any[] = [];
+  for (const log of ctx.dataset.attemptStepLogs) {
     const attempt = attemptById.get(String(log.attemptId));
     const route = attempt ? routeInfo.get(String(attempt.routeId)) : undefined;
-    return {
+    batch.push({
       id: String(log.id),
       transaction_id: String(log.attemptId),
       gateway_code: route?.gatewayCode ?? "neompay",
@@ -95,40 +104,59 @@ export const fakeRailsBulkSync = async (ctx: SeederContext): Promise<{ transacti
       injected_fault: null,
       duration_ms: Number(log.durationMs ?? 0),
       created_at: toIso(log.createdAt),
-    };
-  });
+    });
+    if (batch.length >= BATCH) {
+      yield { kind: "events", rows: batch };
+      batch = [];
+    }
+  }
+  if (batch.length > 0) yield { kind: "events", rows: batch };
+};
 
+export const fakeRailsBulkSync = async (ctx: SeederContext): Promise<{ transactions: number; events: number }> => {
+  const baseUrl = process.env.FAKE_RAILS_PUBLIC_BASE_URL;
+  const token = process.env.FAKE_RAILS_SEEDER_TOKEN;
+  if (!baseUrl || !token) {
+    throw new Error("FAKE_RAILS_PUBLIC_BASE_URL and FAKE_RAILS_SEEDER_TOKEN are required for the bulk sync");
+  }
+  const endpoint = new URL("/portal-api/internal/bulk-seed", baseUrl).toString();
   let syncedTransactions = 0;
   let syncedEvents = 0;
-  for (let offset = 0; offset < transactions.length; offset += BATCH) {
+
+  const send = async (batch: Batch): Promise<void> => {
+    const payload = batch.kind === "transactions"
+      ? { transactions: batch.rows, events: [] }
+      : { transactions: [], events: batch.rows };
     const response = await fetch(endpoint, {
       method: "POST",
       headers: {
         "content-type": "application/json",
         "x-fake-rails-seeder-token": token,
       },
-      body: JSON.stringify({ transactions: transactions.slice(offset, offset + BATCH), events: [] }),
+      body: JSON.stringify(payload),
       signal: AbortSignal.timeout(60_000),
     });
     if (!response.ok) {
-      throw new Error(`Fake Rails bulk sync failed (transactions): HTTP ${response.status} ${await response.text()}`);
+      throw new Error(`Fake Rails bulk sync failed (${batch.kind}): HTTP ${response.status} ${await response.text()}`);
     }
-    syncedTransactions += transactions.slice(offset, offset + BATCH).length;
-  }
-  for (let offset = 0; offset < events.length; offset += BATCH) {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-fake-rails-seeder-token": token,
-      },
-      body: JSON.stringify({ transactions: [], events: events.slice(offset, offset + BATCH) }),
-      signal: AbortSignal.timeout(60_000),
+    if (batch.kind === "transactions") syncedTransactions += batch.rows.length;
+    else syncedEvents += batch.rows.length;
+  };
+
+  const runPool = async (batches: Generator<Batch>): Promise<void> => {
+    const workers = Array.from({ length: CONCURRENCY }, async () => {
+      for (const batch of batches) {
+        await send(batch);
+      }
     });
-    if (!response.ok) {
-      throw new Error(`Fake Rails bulk sync failed (events): HTTP ${response.status} ${await response.text()}`);
-    }
-    syncedEvents += events.slice(offset, offset + BATCH).length;
-  }
+    const results = await Promise.allSettled(workers);
+    const failure = results.find((result) => result.status === "rejected");
+    if (failure && failure.status === "rejected") throw failure.reason;
+  };
+
+  // Transactions must exist before the events that reference them, so the two
+  // streams are drained in order while each still uses four HTTP workers.
+  await runPool(transactionBatches(ctx));
+  await runPool(eventBatches(ctx));
   return { transactions: syncedTransactions, events: syncedEvents };
 };

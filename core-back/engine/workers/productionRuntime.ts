@@ -19,7 +19,6 @@ import {
   createFeeVariancePoster,
   createReconciliationJobHandler,
 } from "./BackgroundJobHandlers";
-import { PrismaRepositories } from "../db/repositories";
 import { toCamelRows } from "../db/rawRows";
 import { Vault } from "../crypto/Vault";
 import {
@@ -199,7 +198,7 @@ export const createProductionWorkerRuntime = (
   options: ProductionWorkerRuntimeOptions,
 ): ProductionWorkerRuntime => {
   const platform = getPlatformRuntime(options.db);
-  const repositories = new PrismaRepositories(options.db);
+  const repositories = platform.repositories;
 
   const inquiry: InquiryPort = {
     inquire: async (attempt): Promise<InquiryOutcome> => {

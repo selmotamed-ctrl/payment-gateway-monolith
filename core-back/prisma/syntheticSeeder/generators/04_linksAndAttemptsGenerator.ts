@@ -51,11 +51,23 @@ export const generateLinksAndAttempts = (ctx: SeederContext): void => {
 
   const applications = ctx.dataset.applications.filter((application) => application.status !== "CLOSED");
   if (applications.length === 0) return;
+  const applicationsById = new Map(applications.map((application) => [String(application.id), application]));
   const walletsById = new Map(ctx.dataset.wallets.map((wallet) => [wallet.id, wallet]));
   const commissionsByMerchant = new Map(ctx.dataset.commissionProfiles.map((profile) => [profile.merchantId, profile.id]));
+  const versionsByGateway = new Map<string, any>();
+  for (const version of ctx.refs.versions) {
+    if (!versionsByGateway.has(version.gatewayId)) versionsByGateway.set(version.gatewayId, version);
+  }
   const routes = ctx.refs.routes;
   const credentials = ctx.refs.credentials.filter((credential) => credential.ownerType === "PLATFORM");
   if (routes.length === 0 || credentials.length === 0) return;
+  const credentialsByGatewayEnv = new Map<string, any>();
+  const credentialsByGateway = new Map<string, any>();
+  for (const credential of credentials) {
+    const envKey = `${credential.gatewayId}:${credential.env}`;
+    if (!credentialsByGatewayEnv.has(envKey)) credentialsByGatewayEnv.set(envKey, credential);
+    if (!credentialsByGateway.has(credential.gatewayId)) credentialsByGateway.set(credential.gatewayId, credential);
+  }
   const channelsByVersion = new Map<string, any>();
   for (const channel of ctx.dataset.confirmationChannels) {
     if (!channelsByVersion.has(channel.gatewayVersionId)) {
@@ -105,7 +117,7 @@ export const generateLinksAndAttempts = (ctx: SeederContext): void => {
   for (let index = 0; index < ctx.config.volumes.paymentAttempts; index += 1) {
     const link = ctx.rng.pick(links);
     if (!link) break;
-    const application = applications.find((candidate) => candidate.id === link.applicationId);
+    const application = applicationsById.get(String(link.applicationId));
     if (!application) continue;
     const wallet = walletsById.get(link.walletId);
     if (!wallet) continue;
@@ -124,11 +136,11 @@ export const generateLinksAndAttempts = (ctx: SeederContext): void => {
     const status = ctx.rng.weighted(ATTEMPT_STATUS_WEIGHTS);
     const inFlight = IN_FLIGHT.has(status);
     const route = ctx.rng.pick(routes);
-    const version = ctx.refs.versions.find((candidate) => candidate.gatewayId === route.gatewayId);
+    const version = versionsByGateway.get(route.gatewayId);
     if (!version) continue;
     const env = ctx.rng.chance(82) ? "LIVE" : "SANDBOX";
-    const credential = credentials.find((candidate) => candidate.gatewayId === route.gatewayId && candidate.env === env)
-      ?? credentials.find((candidate) => candidate.gatewayId === route.gatewayId)
+    const credential = credentialsByGatewayEnv.get(`${route.gatewayId}:${env}`)
+      ?? credentialsByGateway.get(route.gatewayId)
       ?? credentials[0]!;
     const commissionProfileId = commissionsByMerchant.get(application.merchantId);
     if (!commissionProfileId) continue;
@@ -172,6 +184,11 @@ export const generateLinksAndAttempts = (ctx: SeederContext): void => {
       ? `FK-${route.gatewayCode.toUpperCase()}-${ctx.config.namespace}-${index.toString(36)}`
       : null;
     const otpAttempts = status === "FAILED" && ctx.rng.chance(20) ? 3 : ctx.rng.int(0, 2);
+    const endClientIp = `203.0.113.${ctx.rng.int(1, 250)}`;
+    const endClientPhoneHash = sha256Like(ctx, `phone:${attemptId}`);
+    const endClientCardAlias = index % 3 === 0
+      ? sha256Like(ctx, `card:${attemptId}`).slice(0, 64)
+      : null;
 
     ctx.dataset.paymentAttempts.push({
       id: attemptId,
@@ -213,14 +230,17 @@ export const generateLinksAndAttempts = (ctx: SeederContext): void => {
       currency: "LYD",
       customerFieldsMasked: {
         phone: `*******${ctx.rng.int(1000, 9999)}`,
-        ip: `203.0.113.${ctx.rng.int(1, 250)}`,
+        ip: endClientIp,
       },
       publicOutputs: { reference },
       contextCiphertext: Buffer.from(`synthetic-context:${attemptId}`).toString("base64"),
       pointOfNoReturn: ["SUCCEEDED", "FAILED", "EXPIRED", "CANCELLED", "REFUNDED", "PARTIALLY_REFUNDED", "DISPUTED", "UNKNOWN"].includes(status),
       otpAttempts,
       lastOtpSentAt: status === "AWAITING_CUSTOMER" ? addMinutes(createdAt, 1) : null,
-      clientIp: `203.0.113.${ctx.rng.int(1, 250)}`,
+      clientIp: endClientIp,
+      endClientIp,
+      endClientPhoneHash,
+      endClientCardAlias,
       userAgent: ctx.rng.pick([
         "Mozilla/5.0 (Linux; Android 14) Chrome/126",
         "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5) Safari/605",

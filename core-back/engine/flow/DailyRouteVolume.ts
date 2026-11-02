@@ -1,5 +1,9 @@
 import { moneyToString, type Money } from "../db/money";
 import type { PaymentRepository, Tx } from "../db/ports";
+import {
+  counterDayBucket,
+  readRouteDailyVolumeTotals,
+} from "../../lib/counters/materializedCounters";
 
 /**
  * The timezone the gateway books its business day in. It is the timezone
@@ -89,6 +93,13 @@ export const dayWindowInTimeZone = (now: Date, timeZone: string): DayWindow => {
 };
 
 /**
+ * The business day of `at`, as the `YYYY-MM-DD` key of the materialized
+ * daily counters.
+ */
+export const dayBucketInTimeZone = (at: Date, timeZone: string): string =>
+  counterDayBucket(at, timeZone);
+
+/**
  * The timezone the gateway books its business day in. It is read from the
  * gateway settings, so an operator can move the business day without a code
  * change.
@@ -112,9 +123,10 @@ export const resolveGatewayTimezone = async (tx: Tx): Promise<string> => {
 /**
  * The processed volume of the current business day, per route.
  *
- * The volume is derived from the succeeded attempts themselves: there is no
- * denormalised counter that could drift away from the attempts it claims to
- * summarise.
+ * The materialized `route_daily_volumes` row is the primary source. While the
+ * table is empty (or the high-scale counters are disabled), the old exact SUM
+ * over the succeeded attempts remains the fallback, so a deployment can turn
+ * the counters on without a backfill window that under-reports the cap.
  */
 export const dailyProcessedAmountByRoute = async (
   payments: Pick<PaymentRepository, "sumSucceededAmountByRouteInWindow">,
@@ -123,6 +135,10 @@ export const dailyProcessedAmountByRoute = async (
 ): Promise<Map<string, Money>> => {
   const now = options.now ?? new Date();
   const timeZone = options.timeZone ?? (await resolveGatewayTimezone(tx));
+  const materialized = await readRouteDailyVolumeTotals(tx, dayBucketInTimeZone(now, timeZone));
+  if (materialized !== null) {
+    return materialized;
+  }
   const window = dayWindowInTimeZone(now, timeZone);
   return payments.sumSucceededAmountByRouteInWindow(tx, window);
 };

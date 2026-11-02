@@ -31,9 +31,11 @@ import {
   defineSearchProvider,
   parseSearchQuery,
   rankAndSliceCandidates,
+  sanitizeResultItem,
   type ParsedSearchQuery,
   type SearchProviderPlugin,
 } from "./search/engine";
+import { extractSearchQueryTokens } from "./search/tokenIndex";
 import type {
   GlobalSearchResponse,
   SearchResultGroup,
@@ -1630,6 +1632,173 @@ defaultSearchRegistry
   .register(userProvider)
   .register(auditLogProvider);
 
+interface FastPathTokenRow {
+  entityType: string;
+  entityId: string;
+  merchantId: string | null;
+  isSensitive: boolean;
+  baseWeight: number;
+  token: string;
+  title: string;
+  subtitle: string | null;
+  reference: string | null;
+  status: string | null;
+  operatorCaseId: string | null;
+  entityCreatedAt: Date;
+}
+
+export interface GlobalSearchFastPathDeps {
+  prisma: PrismaClient;
+  actor: AuthenticatedAdminActor;
+  parsed: ParsedSearchQuery;
+  providers: Array<SearchProviderPlugin<unknown>>;
+  limit: number;
+}
+
+export interface GlobalSearchFastPathResult {
+  groups: SearchResultGroup[];
+  total: number;
+  scannedRows: number;
+}
+
+/**
+ * Single-query indexed fan-out over `entity_search_tokens`. Returns null when
+ * the query is not tokenizable (multi-word/free-text), so the caller can use
+ * the legacy provider registry unchanged.
+ */
+export async function executeGlobalSearchFastPath(
+  deps: GlobalSearchFastPathDeps,
+): Promise<GlobalSearchFastPathResult | null> {
+  const queryTokens = extractSearchQueryTokens(deps.parsed.term);
+  if (queryTokens.length === 0 || deps.providers.length === 0) {
+    return null;
+  }
+  const tokenDelegate = (
+    deps.prisma as unknown as {
+      entitySearchToken?: { findMany?: unknown };
+    }
+  ).entitySearchToken;
+  if (!tokenDelegate || typeof tokenDelegate.findMany !== "function") {
+    return null;
+  }
+
+  const entityTypes = deps.providers.map((provider) => provider.type);
+  const queryTokenSet = new Set(queryTokens);
+  const allowSensitive = hasMerchantSensitiveAccess(deps.actor);
+  const where = {
+    AND: [
+      { entityType: { in: entityTypes } },
+      { OR: queryTokens.map((token) => ({ token: { startsWith: token } })) },
+      ...(deps.parsed.scopedStatus
+        ? [{ status: deps.parsed.scopedStatus }]
+        : []),
+      ...(deps.parsed.scopedMerchantId
+        ? [{ merchantId: deps.parsed.scopedMerchantId }]
+        : []),
+      ...(allowSensitive ? [] : [{ isSensitive: false }]),
+    ],
+  };
+
+  const rows = (await deps.prisma.entitySearchToken.findMany({
+    where: where as never,
+    select: {
+      entityType: true,
+      entityId: true,
+      merchantId: true,
+      isSensitive: true,
+      baseWeight: true,
+      token: true,
+      title: true,
+      subtitle: true,
+      reference: true,
+      status: true,
+      operatorCaseId: true,
+      entityCreatedAt: true,
+    },
+    orderBy: [{ baseWeight: "desc" }, { entityCreatedAt: "desc" }] as never,
+    take: 150,
+  })) as FastPathTokenRow[];
+
+  if (rows.length === 0) {
+    return { groups: [], total: 0, scannedRows: 0 };
+  }
+
+  const providerByType = new Map(
+    deps.providers.map((provider, index) => [provider.type, { provider, index }] as const),
+  );
+  const candidates = new Map<
+    string,
+    { type: SearchType; item: ReturnType<typeof sanitizeResultItem>; score: number; timeMs: number }
+  >();
+
+  for (const row of rows) {
+    if (!providerByType.has(row.entityType)) {
+      continue;
+    }
+    const key = `${row.entityType}\u0000${row.entityId}`;
+    const score =
+      row.baseWeight + (queryTokenSet.has(row.token) ? 200 : 0);
+    const timeMs =
+      row.entityCreatedAt instanceof Date
+        ? row.entityCreatedAt.getTime()
+        : new Date(row.entityCreatedAt).getTime();
+    const existing = candidates.get(key);
+    if (existing && (existing.score > score || (existing.score === score && existing.timeMs >= timeMs))) {
+      continue;
+    }
+    candidates.set(key, {
+      type: row.entityType,
+      score,
+      timeMs: Number.isFinite(timeMs) ? timeMs : 0,
+      item: sanitizeResultItem({
+        id: row.entityId,
+        title: row.title,
+        subtitle: row.subtitle ?? undefined,
+        reference: row.reference ?? undefined,
+        status: row.status ?? undefined,
+        merchantId: row.merchantId ?? undefined,
+        operatorCaseId: row.operatorCaseId ?? undefined,
+      }),
+    });
+  }
+
+  const grouped = new Map<string, Array<{ item: ReturnType<typeof sanitizeResultItem>; score: number; timeMs: number }>>();
+  for (const candidate of candidates.values()) {
+    const list = grouped.get(candidate.type) ?? [];
+    list.push({ item: candidate.item, score: candidate.score, timeMs: candidate.timeMs });
+    grouped.set(candidate.type, list);
+  }
+
+  const groups: SearchResultGroup[] = [];
+  let total = 0;
+  for (const provider of deps.providers) {
+    const list = grouped.get(provider.type);
+    if (!list || list.length === 0) {
+      continue;
+    }
+    list.sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+      if (right.timeMs !== left.timeMs) {
+        return right.timeMs - left.timeMs;
+      }
+      return left.item.id.localeCompare(right.item.id);
+    });
+    const items = list.slice(0, deps.limit).map((entry) => entry.item);
+    if (items.length > 0) {
+      groups.push({
+        type: provider.type,
+        items,
+        truncated: list.length > deps.limit,
+      });
+      total += items.length;
+    }
+  }
+
+  return { groups, total, scannedRows: rows.length };
+}
+
 export const globalSearchRequestSchema = z
   .object({
     query: z
@@ -1723,57 +1892,117 @@ export async function executeGlobalSearch(
     return true;
   });
 
-  const settledResults = await Promise.allSettled(
-    authorizedProviders.map(async (plugin) => {
-      const rows = await plugin.fetchCandidates({
-        prisma: deps.prisma,
-        parsed,
-        actor: deps.actor,
-        take,
-      });
-      const ranked = rankAndSliceCandidates(
-        rows,
-        plugin,
-        parsed,
-        deps.actor,
-        limit,
-      );
-      return {
-        type: plugin.type,
-        items: ranked.items,
-        truncated: ranked.truncated,
-      } satisfies SearchResultGroup;
-    }),
-  );
+  const runProviderGroups = async (
+    providers: Array<SearchProviderPlugin<unknown>>,
+  ): Promise<{ groups: SearchResultGroup[]; total: number; partial: boolean }> => {
+    const settledResults = await Promise.allSettled(
+      providers.map(async (plugin) => {
+        const rows = await plugin.fetchCandidates({
+          prisma: deps.prisma,
+          parsed,
+          actor: deps.actor,
+          take,
+        });
+        const ranked = rankAndSliceCandidates(
+          rows,
+          plugin,
+          parsed,
+          deps.actor,
+          limit,
+        );
+        return {
+          type: plugin.type,
+          items: ranked.items,
+          truncated: ranked.truncated,
+        } satisfies SearchResultGroup;
+      }),
+    );
 
-  const groups: SearchResultGroup[] = [];
-  let total = 0;
-  let partial = false;
+    const groups: SearchResultGroup[] = [];
+    let total = 0;
+    let partial = false;
 
-  settledResults.forEach((result, index) => {
-    const plugin = authorizedProviders[index];
-    if (!plugin) {
-      return;
-    }
-    if (result.status === "fulfilled") {
-      if (result.value.items.length > 0) {
-        groups.push(result.value);
-        total += result.value.items.length;
+    settledResults.forEach((result, index) => {
+      const plugin = providers[index];
+      if (!plugin) {
+        return;
       }
-      return;
-    }
+      if (result.status === "fulfilled") {
+        if (result.value.items.length > 0) {
+          groups.push(result.value);
+          total += result.value.items.length;
+        }
+        return;
+      }
 
-    partial = true;
-    deps.logger?.error("Global search provider failed", {
-      requestId: deps.requestId,
-      providerType: plugin.type,
-      actorId: deps.actor.id,
-      error:
-        result.reason instanceof Error
-          ? result.reason.message
-          : String(result.reason),
+      partial = true;
+      deps.logger?.error("Global search provider failed", {
+        requestId: deps.requestId,
+        providerType: plugin.type,
+        actorId: deps.actor.id,
+        error:
+          result.reason instanceof Error
+            ? result.reason.message
+            : String(result.reason),
+      });
     });
-  });
+
+    return { groups, total, partial };
+  };
+
+  if (authorizedProviders.length > 0) {
+    try {
+      const fastPath = await executeGlobalSearchFastPath({
+        prisma: deps.prisma,
+        actor: deps.actor,
+        parsed,
+        providers: authorizedProviders,
+        limit,
+      });
+      if (fastPath && fastPath.total > 0) {
+        // Once the token index has a hit it is the authoritative search index.
+        // Fanning out to the twenty `LIKE '%q%'` providers for the groups that
+        // did not emit a token would reintroduce the scans this table replaces.
+        // A zero-hit query still falls through to the legacy provider path.
+        const tookMs = Math.max(1, Math.round(performance.now() - startedAt));
+        if (tookMs > 750) {
+          deps.logger?.warn("Slow global search execution detected", {
+            requestId: deps.requestId,
+            tookMs,
+            providerCount: authorizedProviders.length,
+            totalReturned: fastPath.total,
+            partial: false,
+            source: "token_index",
+          });
+        }
+        return {
+          query: validated.query,
+          groups: fastPath.groups,
+          total: fastPath.total,
+          tookMs,
+          partial: false,
+        };
+      }
+    } catch (error) {
+      deps.logger?.warn("Global search token index failed; falling back to providers", {
+        requestId: deps.requestId,
+        actorId: deps.actor.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  const tokenKindProviderTypes: Partial<Record<ParsedSearchQuery["tokenKind"], readonly SearchType[]>> = {
+    PHONE: ["merchant", "join_request", "user"],
+    EMAIL: ["merchant", "join_request", "user"],
+    SHA256_HEX: ["kyb_document"],
+  };
+  const narrowedTypes = tokenKindProviderTypes[parsed.tokenKind];
+  const fallbackProviders = narrowedTypes
+    ? authorizedProviders.filter((provider) => narrowedTypes.includes(provider.type))
+    : authorizedProviders;
+  const providerResult = await runProviderGroups(fallbackProviders);
+  const { groups, total, partial } = providerResult;
 
   const tookMs = Math.max(1, Math.round(performance.now() - startedAt));
   if (tookMs > 750) {

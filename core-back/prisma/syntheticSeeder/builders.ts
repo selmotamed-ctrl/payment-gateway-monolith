@@ -158,6 +158,8 @@ export const ensureSystemAccounts = (ctx: SeederContext): SystemAccounts => {
       lastCheckpointId: null,
       checkpointBalance: "0.0000",
       checkpointAt: null,
+      currentBalance: "0.0000",
+      linesSinceCheckpoint: 0,
       seedKey: `synthetic:${ctx.config.namespace}:${type}:${gatewayId ?? "platform"}:${env ?? "all"}`,
     });
     ctx.refs.glAccounts.push({ id, accountType: type, gatewayId, env, ownerId });
@@ -204,6 +206,8 @@ export const createWalletAccount = (
     lastCheckpointId: null,
     checkpointBalance: "0.0000",
     checkpointAt: null,
+    currentBalance: "0.0000",
+    linesSinceCheckpoint: 0,
     seedKey: `synthetic:${ctx.config.namespace}:wallet:${merchantId}`,
   });
   ctx.refs.glAccounts.push({ id, accountType: "MERCHANT_WALLET", gatewayId: null, env: null, ownerId: merchantId });

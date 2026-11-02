@@ -10,6 +10,8 @@ export const generateAmlAndGovernanceQueues = (ctx: SeederContext): void => {
   const operators = ctx.refs.adminUsers.filter((user) => ["OPERATOR", "COMPLIANCE", "MLRO", "FINANCE"].includes(user.role));
   const pickOperator = () => ctx.rng.pick(operators.length > 0 ? operators : ctx.refs.adminUsers).id;
 
+  const merchantsById = new Map(ctx.dataset.merchants.map((merchant) => [String(merchant.id), merchant]));
+  const amlCasesById = new Map<string, any>();
   const merchantSubjects = ctx.dataset.merchants.map((merchant) => ({ type: "MERCHANT", id: merchant.id, at: merchant.createdAt as Date }));
   const ownerSubjects = ctx.dataset.beneficialOwners.map((owner) => ({ type: "BENEFICIAL_OWNER", id: owner.id, at: owner.createdAt as Date }));
   const attemptSubjects = ctx.dataset.paymentAttempts.slice(0, Math.max(1, Math.floor(ctx.dataset.paymentAttempts.length / 20)))
@@ -69,7 +71,7 @@ export const generateAmlAndGovernanceQueues = (ctx: SeederContext): void => {
         OPEN: 25, IN_REVIEW: 20, PENDING_CHECKER: 15, RELEASED: 20, REJECTED_VOID: 10, FROZEN: 5, ESCALATED_STR: 5,
       });
       const caseId = ctx.nextId("aml-case");
-      ctx.dataset.amlCases.push({
+      const amlCase = {
         id: caseId,
         createdAt: addDays(requestedAt, 1),
         updatedAt: ctx.timeline.end,
@@ -88,7 +90,9 @@ export const generateAmlAndGovernanceQueues = (ctx: SeederContext): void => {
         regulatoryReportId: null,
         confidential: true,
         reviewerNotes: status === "PENDING_CHECKER" ? "Proposed release; awaiting MLRO." : null,
-      });
+      };
+      ctx.dataset.amlCases.push(amlCase);
+      amlCasesById.set(caseId, amlCase);
 
       if (status === "ESCALATED_STR" || (status === "PENDING_CHECKER" && chance(ctx, 50))) {
         const reportId = ctx.nextId("report");
@@ -111,8 +115,8 @@ export const generateAmlAndGovernanceQueues = (ctx: SeederContext): void => {
           confidential: true,
           approvalRequestId: null,
         });
-        const amlCase = ctx.dataset.amlCases.find((candidate) => candidate.id === caseId);
-        if (amlCase) amlCase.regulatoryReportId = reportId;
+        const linkedCase = amlCasesById.get(caseId);
+        if (linkedCase) linkedCase.regulatoryReportId = reportId;
       }
     }
   }
@@ -122,7 +126,7 @@ export const generateAmlAndGovernanceQueues = (ctx: SeederContext): void => {
   // approved request must never look like it skipped screening.
   for (const joinRequest of ctx.dataset.joinRequests) {
     if (["DRAFT", "WITHDRAWN", "EXPIRED"].includes(String(joinRequest.status))) continue;
-    const merchant = ctx.dataset.merchants.find((row) => row.id === joinRequest.merchantId);
+    const merchant = merchantsById.get(String(joinRequest.merchantId));
     if (!merchant) continue;
     const requestedAt = joinRequest.submittedAt instanceof Date
       ? joinRequest.submittedAt
@@ -178,7 +182,11 @@ export const generateAmlAndGovernanceQueues = (ctx: SeederContext): void => {
   const genericMaker = () => ctx.rng.pick(activeMakers.length > 0 ? activeMakers : ctx.dataset.users.filter((user) => user.merchantId === null));
   const genericChecker = (makerId: string) => {
     const pool = activeCheckers.filter((user) => user.id !== makerId);
-    return pool.length > 0 ? ctx.rng.pick(pool) : activeMakers.find((user) => user.id !== makerId);
+    if (pool.length > 0) return ctx.rng.pick(pool);
+    for (const candidate of activeMakers) {
+      if (String(candidate.id) !== makerId) return candidate;
+    }
+    return undefined;
   };
   for (let index = 0; index < ctx.config.volumes.approvalRequests; index += 1) {
     const pending = index < Math.min(24, ctx.config.volumes.approvalRequests);

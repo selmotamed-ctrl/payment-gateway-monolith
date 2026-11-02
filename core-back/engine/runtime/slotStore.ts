@@ -7,28 +7,19 @@ import type {
   SlotReservationStore,
 } from "../flow/DynamicRailEngine";
 import { buildLedgerTemplate, decimal, LedgerPoster, type LedgerPostContext } from "../ledger/LedgerPoster";
+import { claimPaymentLinkSlotAtomic } from "../../lib/counters/materializedCounters";
 import { ApiError } from "../../lib/error";
+
+export { claimPaymentLinkSlotAtomic };
 
 /**
  * Prisma-backed slot reservation store.
  *
- * MySQL/MariaDB has no `UPDATE ... RETURNING`, so the reservation is a pair
- * of statements that run in a single transaction:
- *
- *   SELECT id FROM payment_links
- *    WHERE id = ?
- *      AND (infinite_use = 1 OR confirmed_count + active_locked_count < use_count)
- *    FOR UPDATE
- *
- *   UPDATE payment_links
- *      SET active_locked_count = active_locked_count + 1, updated_at = NOW()
- *    WHERE id = ?
- *      AND (infinite_use = 1 OR confirmed_count + active_locked_count < use_count)
- *
- * The row lock is taken before the counter is incremented, so two cluster
- * nodes can never both take the last slot: the second one waits for the lock
- * and then finds no free slot anymore. When the update affects no row the
- * reservation failed.
+ * MySQL/MariaDB has no `UPDATE ... RETURNING`, so the reservation is a single
+ * conditional UPDATE that checks the state, the expiry and the capacity while
+ * incrementing `active_locked_count`. The row lock is held only for that
+ * statement, so two cluster nodes can never both take the last slot and no
+ * link lock is held while the guard pipeline evaluates the payment.
  *
  * The slot is released on a terminal non-successful outcome and committed
  * (converted into a confirmed slot) when the attempt succeeds.
@@ -46,20 +37,8 @@ export class PrismaSlotReservationStore implements SlotReservationStore {
     if (!linkId) {
       throw new ApiError(409, "SLOT_RESERVATION_FAILED", "The attempt is not bound to a payment link");
     }
-    const reserve = async (tx: PrismaLike): Promise<boolean> => {
-      const locked = (await tx.$queryRawUnsafe(
-        "SELECT id FROM payment_links WHERE id = ? AND (infinite_use = 1 OR confirmed_count + active_locked_count < use_count) FOR UPDATE",
-        linkId,
-      )) as Array<{ id: string }>;
-      if (!Array.isArray(locked) || locked.length === 0) {
-        return false;
-      }
-      const updated = await tx.$executeRawUnsafe(
-        "UPDATE payment_links SET active_locked_count = active_locked_count + 1, updated_at = NOW() WHERE id = ? AND (infinite_use = 1 OR confirmed_count + active_locked_count < use_count)",
-        linkId,
-      );
-      return Number(updated ?? 0) > 0;
-    };
+    const reserve = async (tx: PrismaLike): Promise<boolean> =>
+      claimPaymentLinkSlotAtomic(tx, { linkId, now: new Date() });
     const reserved = transaction
       ? await reserve(target)
       : await this.client.$transaction((tx: Tx) => reserve(tx as PrismaLike));

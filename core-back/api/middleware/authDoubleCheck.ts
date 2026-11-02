@@ -67,6 +67,8 @@ export const ipAllowed = (address: string | null, cidrList: readonly string[]): 
   return cidrList.some((cidr) => ipWithinCidr(address, cidr));
 };
 
+export const ACCESS_TOKEN_LAST_USED_THROTTLE_MS = 5 * 60_000;
+
 const bearerToken = (request: Request): string | null => {
   const header = request.headers.authorization;
   if (typeof header !== "string") {
@@ -103,10 +105,22 @@ const resolveApiTokenPrincipal = async (token: string, request: Request): Promis
       throw new ApiError(403, "ACCESS_TOKEN_IP_NOT_ALLOWED", "The request origin is not allowed for this access token");
     }
   }
-  await client.accessToken.update({
-    where: { id: record.id },
-    data: { lastUsedAt: new Date() },
-  });
+  // The last-used timestamp is telemetry, not authorization. Writing it on
+  // every authenticated request turns a read-heavy API into a write amplifier,
+  // so the row is touched at most once per five minutes. Revocation and the IP
+  // whitelist checks above remain unconditional and authoritative.
+  const now = new Date();
+  const staleBefore = new Date(now.getTime() - ACCESS_TOKEN_LAST_USED_THROTTLE_MS);
+  const lastUsedAt = record.lastUsedAt ? new Date(record.lastUsedAt).getTime() : null;
+  if (lastUsedAt === null || lastUsedAt <= staleBefore.getTime()) {
+    await client.accessToken.updateMany({
+      where: {
+        id: record.id,
+        OR: [{ lastUsedAt: null }, { lastUsedAt: { lt: staleBefore } }],
+      },
+      data: { lastUsedAt: now },
+    });
+  }
   return {
     kind: "apiToken",
     userId: null,

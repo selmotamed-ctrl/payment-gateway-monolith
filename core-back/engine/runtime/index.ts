@@ -1,42 +1,73 @@
 import type { PrismaLike } from "../db/ports";
 import { createPlatformRuntime, type PlatformRuntime } from "./platform";
 
-let runtime: PlatformRuntime | undefined;
-let runtimePromise: Promise<PlatformRuntime> | undefined;
+const runtimes = new Map<PrismaLike, PlatformRuntime>();
+const runtimePromises = new Map<PrismaLike, Promise<PlatformRuntime>>();
+const runtimeTokens = new Map<PrismaLike, object>();
 
 /**
- * Lazily builds the production runtime of `core-back`.
+ * Lazily builds one production runtime per database client.
  *
- * The runtime owns the outbound consumer registry, the ledger poster, the
- * attempt repository and the universal rail engine, so the HTTP routes and the
- * durable workers always share the same instances (and therefore the same
- * caches and the same invalidation bus).
+ * The HTTP tier runs on the transactional pool and the workers run on the
+ * background pool. They must not share a runtime: sharing one would send worker
+ * queries, including their ledger posts, back through the transactional client
+ * that the runtime captured first.
  */
 export const getPlatformRuntime = (db: PrismaLike): PlatformRuntime => {
-  if (!runtime) {
-    runtime = createPlatformRuntime(db);
+  const existing = runtimes.get(db);
+  if (existing) {
+    return existing;
   }
-  return runtime;
+  const built = createPlatformRuntime(db);
+  runtimes.set(db, built);
+  return built;
 };
 
 export const getPlatformRuntimeAsync = async (db: PrismaLike): Promise<PlatformRuntime> => {
-  if (runtime) {
-    return runtime;
+  const existing = runtimes.get(db);
+  if (existing) {
+    return existing;
   }
-  runtimePromise ??= (async () => {
-    const built = createPlatformRuntime(db);
-    runtime = built;
-    return built;
-  })().finally(() => {
-    runtimePromise = undefined;
+  const pending = runtimePromises.get(db);
+  if (pending) {
+    return pending;
+  }
+  const token = {};
+  const built = (async () => {
+    const runtime = createPlatformRuntime(db);
+    if (runtimeTokens.get(db) === token) {
+      runtimes.set(db, runtime);
+    }
+    return runtime;
+  })();
+  const promise = built.finally(() => {
+    if (runtimeTokens.get(db) === token) {
+      runtimePromises.delete(db);
+      runtimeTokens.delete(db);
+    }
   });
-  return runtimePromise;
+  runtimeTokens.set(db, token);
+  runtimePromises.set(db, promise);
+  return promise;
 };
 
-export const resetPlatformRuntime = (): void => {
-  runtime?.consumerRegistry.close();
-  runtime = undefined;
-  runtimePromise = undefined;
+export const resetPlatformRuntime = (db?: PrismaLike): void => {
+  if (db) {
+    const runtime = runtimes.get(db);
+    runtime?.consumerRegistry.close();
+    runtime?.configCache.close();
+    runtimes.delete(db);
+    runtimePromises.delete(db);
+    runtimeTokens.delete(db);
+    return;
+  }
+  for (const runtime of runtimes.values()) {
+    runtime.consumerRegistry.close();
+    runtime.configCache.close();
+  }
+  runtimes.clear();
+  runtimePromises.clear();
+  runtimeTokens.clear();
 };
 
 export type { PlatformRuntime };

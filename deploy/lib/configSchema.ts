@@ -45,6 +45,15 @@ const serverName = z.union([domain, z.literal("_"), ipv4]);
 
 const port = z.coerce.number().int().min(1).max(65535);
 const positive = z.coerce.number().int().min(1);
+const memorySize = z
+  .string()
+  .trim()
+  .regex(/^[1-9]\d*(K|M|G)$/i, "must be an integer followed by K, M or G (e.g. 4G)")
+  .transform((value) => value.toUpperCase());
+const positiveInt = (min: number, max: number, fallback: number) =>
+  z.coerce.number().int().min(min).max(max).default(fallback);
+const optionalPositiveInt = (min: number, max: number) =>
+  z.coerce.number().int().min(min).max(max).optional();
 const booleanish = z
   .string()
   .trim()
@@ -91,6 +100,43 @@ const base = z.strictObject({
     .regex(/^[A-Za-z0-9_]+$/, "must be an identifier"),
   DB_PASSWORD: z.string().min(2).max(256),
   DATABASE_URL: z.string().trim().min(1).max(1000),
+
+  // InnoDB / server tuning. The deploy writes these into
+  // /etc/mysql/conf.d/zz-payment-gateway.cnf. MariaDB-only options are gated
+  // on the detected flavour; the shared options are safe on MySQL too.
+  DB_FLAVOR: z.enum(["auto", "mariadb", "mysql"]).default("auto"),
+  DB_INNODB_BUFFER_POOL_SIZE: memorySize.default("4G"),
+  DB_BUFFER_POOL_SIZE: memorySize.optional(),
+  DB_INNODB_BUFFER_POOL_INSTANCES: positiveInt(1, 64, 4),
+  DB_INNODB_LOG_FILE_SIZE: memorySize.default("1G"),
+  DB_INNODB_LOG_BUFFER_SIZE: memorySize.default("64M"),
+  DB_TMP_TABLE_SIZE: memorySize.default("128M"),
+  DB_MAX_HEAP_TABLE_SIZE: memorySize.default("128M"),
+  DB_MAX_CONNECTIONS: positiveInt(10, 100_000, 200),
+  DB_THREAD_POOL_SIZE: positiveInt(1, 256, 16),
+  DB_THREAD_CACHE_SIZE: positiveInt(0, 4096, 32),
+  DB_TABLE_OPEN_CACHE: positiveInt(100, 1_000_000, 6000),
+  DB_TABLE_DEFINITION_CACHE: positiveInt(100, 1_000_000, 2000),
+  DB_INNODB_LOCK_WAIT_TIMEOUT: positiveInt(1, 3600, 10),
+  DB_INNODB_IO_CAPACITY: positiveInt(100, 1_000_000, 2000),
+  DB_INNODB_IO_CAPACITY_MAX: positiveInt(100, 1_000_000, 4000),
+  DB_IO_CAPACITY: optionalPositiveInt(100, 1_000_000),
+  DB_IO_CAPACITY_MAX: optionalPositiveInt(100, 1_000_000),
+  DB_INNODB_READ_IO_THREADS: positiveInt(1, 64, 8),
+  DB_INNODB_WRITE_IO_THREADS: positiveInt(1, 64, 8),
+  DB_SLOW_QUERY_TIME: z.coerce.number().min(0).max(60).default(0.2),
+  DB_SLOW_QUERY_LOG_FILE: z
+    .string()
+    .trim()
+    .min(1)
+    .max(300)
+    .regex(/^\/[^\r\n]*$/, "must be an absolute path without control characters")
+    .default("/var/log/mysql/slow.log"),
+  DB_TRANSACTIONAL_POOL_SIZE: optionalPositiveInt(1, 1000),
+  DB_TRANSACTIONAL_ACQUIRE_TIMEOUT_MS: optionalPositiveInt(100, 600_000),
+  DB_BACKGROUND_POOL_SIZE: optionalPositiveInt(1, 1000),
+  DB_BACKGROUND_ACQUIRE_TIMEOUT_MS: optionalPositiveInt(100, 600_000),
+  DATABASE_BACKGROUND_URL: z.string().trim().min(1).max(1000).optional(),
 
   // 2. Core
   CORE_SSH_HOST: ipv4,
@@ -217,6 +263,14 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
   }
   if (config.DB_PRIVATE_IP && !config.DATABASE_URL.includes(config.DB_PRIVATE_IP)) {
     problems.push("DATABASE_URL should point at DB_PRIVATE_IP");
+  }
+  if (config.DATABASE_BACKGROUND_URL && !config.DATABASE_BACKGROUND_URL.startsWith(enginePrefix)) {
+    problems.push(`DATABASE_BACKGROUND_URL must start with ${enginePrefix} (DB_ENGINE=${config.DB_ENGINE})`);
+  }
+  const ioCapacity = config.DB_IO_CAPACITY ?? config.DB_INNODB_IO_CAPACITY;
+  const ioCapacityMax = config.DB_IO_CAPACITY_MAX ?? config.DB_INNODB_IO_CAPACITY_MAX;
+  if (ioCapacityMax < ioCapacity) {
+    problems.push("the IO capacity maximum must be greater than or equal to the IO capacity");
   }
   // A single-box installation legitimately co-locates the database with the
   // core (the database binds to 127.0.0.1 and is never exposed); on separate

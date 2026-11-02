@@ -1,6 +1,90 @@
 import type { SeederContext } from "../context";
 import { addDays, ensureSystemAccounts, postLedger } from "../builders";
 
+const monthKey = (date: Date): string =>
+  `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+
+interface AccountLedgerState {
+  total: number;
+  postDelta: number;
+  postLines: number;
+  lineCount: number;
+  lastHistoricId: string;
+}
+
+/**
+ * Rebuilds the O(1) ledger fields after all journal lines have been posted.
+ *
+ * Journal-line ids are re-keyed in chronological order first so the
+ * collision-free id cursor (`l.id > g.last_checkpoint_id`) and the historical
+ * balance window (`l.created_at > g.checkpoint_at`) always describe exactly
+ * the same set of lines.
+ */
+export const finalizeLedgerBalances = (ctx: SeederContext): void => {
+  const lines = ctx.dataset.journalLines;
+  lines.sort((left, right) => {
+    const delta = new Date(left.createdAt as Date).getTime() - new Date(right.createdAt as Date).getTime();
+    return delta !== 0 ? delta : String(left.id).localeCompare(String(right.id));
+  });
+  for (const line of lines) {
+    line.id = ctx.nextId("journal-line");
+  }
+
+  const startMonth = monthKey(ctx.timeline.start);
+  const endMonth = monthKey(ctx.timeline.end);
+  const checkpointAt = startMonth < endMonth
+    ? new Date(Date.UTC(ctx.timeline.end.getUTCFullYear(), ctx.timeline.end.getUTCMonth(), 0, 23, 59, 59, 0))
+    : null;
+
+  const accountIds = new Set<string>();
+  for (const account of ctx.refs.glAccounts) accountIds.add(String(account.id));
+  for (const account of ctx.dataset.glAccounts) accountIds.add(String(account.id));
+
+  const states = new Map<string, AccountLedgerState>();
+  for (const accountId of accountIds) {
+    states.set(accountId, { total: 0, postDelta: 0, postLines: 0, lineCount: 0, lastHistoricId: "" });
+  }
+
+  for (const line of lines) {
+    const accountId = String(line.glAccountId);
+    const state = states.get(accountId);
+    if (!state) continue;
+    const at = new Date(line.createdAt as Date);
+    const delta = line.direction === "DEBIT" ? Number(line.amount) : -Number(line.amount);
+    state.total += delta;
+    state.lineCount += 1;
+    if (checkpointAt && at.getTime() > checkpointAt.getTime()) {
+      state.postDelta += delta;
+      state.postLines += 1;
+    } else if (checkpointAt) {
+      state.lastHistoricId = String(line.id);
+    }
+  }
+
+  ctx.checkpoints.clear();
+  if (checkpointAt) {
+    for (const [accountId, state] of states) {
+      ctx.checkpoints.set(accountId, {
+        balance: (state.total - state.postDelta).toFixed(4),
+        at: checkpointAt,
+        lastCheckpointId: state.lastHistoricId,
+      });
+    }
+  }
+
+  const datasetAccounts = new Map(ctx.dataset.glAccounts.map((account) => [String(account.id), account]));
+  for (const [accountId, state] of states) {
+    const account = datasetAccounts.get(accountId);
+    if (!account) continue;
+    const checkpoint = checkpointAt ? ctx.checkpoints.get(accountId) : undefined;
+    account.checkpointBalance = checkpoint?.balance ?? "0.0000";
+    account.checkpointAt = checkpointAt;
+    account.lastCheckpointId = checkpoint?.lastCheckpointId || null;
+    account.currentBalance = state.total.toFixed(4);
+    account.linesSinceCheckpoint = checkpointAt ? state.postLines : state.lineCount;
+  }
+};
+
 /**
  * Posts every financial event through balanced double-entry templates and
  * snapshots the historical months into `gl_accounts.checkpoint_balance`.
@@ -91,49 +175,5 @@ export const generateLedgerAndCheckpoints = (ctx: SeederContext): void => {
     }
   }
 
-  // ---- monthly checkpoints -------------------------------------------------
-  const monthKeys: string[] = [];
-  const cursor = new Date(ctx.timeline.start);
-  cursor.setUTCDate(1);
-  cursor.setUTCHours(0, 0, 0, 0);
-  while (cursor <= ctx.timeline.end) {
-    monthKeys.push(`${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, "0")}`);
-    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
-  }
-  const currentMonth = `${ctx.timeline.end.getUTCFullYear()}-${String(ctx.timeline.end.getUTCMonth() + 1).padStart(2, "0")}`;
-
-  const balances = new Map<string, number>();
-  for (const line of ctx.dataset.journalLines) {
-    const at = new Date(line.createdAt as Date);
-    const key = `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, "0")}`;
-    const delta = line.direction === "DEBIT" ? Number(line.amount) : -Number(line.amount);
-    balances.set(`${key}:${line.glAccountId}`, (balances.get(`${key}:${line.glAccountId}`) ?? 0) + delta);
-  }
-
-  const running = new Map<string, number>();
-  for (const month of monthKeys) {
-    if (month === currentMonth) break;
-    for (const account of ctx.refs.glAccounts) {
-      const delta = balances.get(`${month}:${account.id}`) ?? 0;
-      const next = (running.get(account.id) ?? 0) + delta;
-      running.set(account.id, next);
-      const at = new Date(`${month}-01T23:59:59.000Z`);
-      at.setUTCMonth(at.getUTCMonth() + 1);
-      at.setUTCDate(0);
-      ctx.checkpoints.set(account.id, {
-        balance: next.toFixed(4),
-        at,
-        lastCheckpointId: `checkpoint-${month}`,
-      });
-    }
-  }
-
-  for (const account of ctx.dataset.glAccounts) {
-    const checkpoint = ctx.checkpoints.get(account.id);
-    if (checkpoint) {
-      account.checkpointBalance = checkpoint.balance;
-      account.checkpointAt = checkpoint.at;
-      account.lastCheckpointId = checkpoint.lastCheckpointId;
-    }
-  }
+  finalizeLedgerBalances(ctx);
 };

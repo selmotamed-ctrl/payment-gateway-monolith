@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Prisma } from "../generated/prisma/client";
 
 /**
@@ -220,9 +221,194 @@ export const buildListQuery = (raw: unknown, spec: ListSpec): BuiltListQuery => 
   return { where, orderBy, page, pageSize, skip: (page - 1) * pageSize, take: pageSize };
 };
 
+export interface KeysetCursorPayload {
+  /** ISO timestamp of the last row's sortable createdAt. */
+  c: string;
+  /** UUID of the last row (tie breaker). */
+  i: string;
+}
+
+export function encodeKeysetCursor(row: { createdAt: Date | string; id: string }): string {
+  const c = row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt);
+  return Buffer.from(JSON.stringify({ c, i: row.id }), "utf8").toString("base64url");
+}
+
+export function decodeKeysetCursor(raw?: string | null): KeysetCursorPayload | null {
+  if (!raw) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) as Partial<KeysetCursorPayload>;
+    if (typeof parsed?.c === "string" && typeof parsed?.i === "string") {
+      return { c: parsed.c, i: parsed.i };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function buildKeysetWhere(
+  cursor: KeysetCursorPayload | null,
+  direction: "desc" | "asc" = "desc",
+  field = "createdAt",
+): Record<string, unknown> {
+  if (!cursor) {
+    return {};
+  }
+  const date = new Date(cursor.c);
+  if (Number.isNaN(date.getTime())) {
+    return {};
+  }
+  const operator = direction === "desc" ? "lt" : "gt";
+  return {
+    OR: [
+      { [field]: { [operator]: date } },
+      { [field]: date, id: { [operator]: cursor.i } },
+    ],
+  };
+}
+
+export function encodeKeysetCursorFromRow(
+  row: Record<string, unknown>,
+  field = "createdAt",
+): string | null {
+  const createdAt = row[field];
+  const id = row.id;
+  if (
+    (typeof createdAt !== "string" && !(createdAt instanceof Date)) ||
+    typeof id !== "string" ||
+    !id
+  ) {
+    return null;
+  }
+  return encodeKeysetCursor({ createdAt, id });
+}
+
+const stableValue = (value: unknown): unknown => {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
+  if (Array.isArray(value)) {
+    return value.map(stableValue);
+  }
+  if (value && typeof value === "object") {
+    const withJson = value as { toJSON?: () => unknown };
+    if (typeof withJson.toJSON === "function") {
+      return stableValue(withJson.toJSON());
+    }
+    const record = value as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.keys(record)
+        .sort()
+        .map((key) => [key, stableValue(record[key])]),
+    );
+  }
+  return value;
+};
+
+export const stableWhereHash = (where: unknown): string =>
+  createHash("sha256")
+    .update(JSON.stringify(stableValue(where ?? {})))
+    .digest("hex")
+    .slice(0, 40);
+
+export const BOUNDED_COUNT_CAP = 10001;
+const BOUNDED_COUNT_CACHE_LIMIT = 1000;
+const boundedCountCache = new Map<
+  string,
+  { expiresAt: number; value: { total: number; totalIsCapped: boolean } }
+>();
+
+export interface BoundedCountModel {
+  findMany: (args: Record<string, unknown>) => Promise<unknown[]>;
+}
+
+export interface BoundedCountOptions {
+  modelName?: string;
+  key?: string;
+  /** Maximum rows to inspect; defaults to 10001 so the API can render "10,000+". */
+  cap?: number;
+  ttlMs?: number;
+  select?: Record<string, boolean>;
+}
+
+export interface BoundedCountResult {
+  total: number;
+  totalIsCapped: boolean;
+}
+
+export const clearBoundedCountCache = (): void => {
+  boundedCountCache.clear();
+};
+
+/**
+ * Bounded window count: never scans more than `cap` index entries. The result
+ * is cached for a short TTL because list pages are reloaded frequently, and a
+ * count that is a few seconds stale is acceptable for a "10,000+" indicator.
+ */
+export async function boundedCount(
+  model: BoundedCountModel,
+  where: unknown,
+  options: BoundedCountOptions = {},
+): Promise<BoundedCountResult> {
+  const cap = Math.max(1, Math.trunc(options.cap ?? BOUNDED_COUNT_CAP));
+  const ttlMs = Math.max(0, options.ttlMs ?? 15_000);
+  const cacheKey = `${options.modelName ?? "model"}:${options.key ?? ""}:${stableWhereHash(where)}`;
+  const now = Date.now();
+
+  if (ttlMs > 0) {
+    const cached = boundedCountCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      return cached.value;
+    }
+  }
+
+  const rows = await model.findMany({
+    where: where ?? {},
+    select: options.select ?? { id: true },
+    take: cap,
+  });
+
+  const value: BoundedCountResult =
+    rows.length >= cap
+      ? { total: cap - 1, totalIsCapped: true }
+      : { total: rows.length, totalIsCapped: false };
+
+  if (ttlMs > 0) {
+    for (const [key, entry] of boundedCountCache) {
+      if (entry.expiresAt <= now) {
+        boundedCountCache.delete(key);
+      }
+    }
+    if (boundedCountCache.size >= BOUNDED_COUNT_CACHE_LIMIT) {
+      boundedCountCache.clear();
+    }
+    boundedCountCache.set(cacheKey, { expiresAt: now + ttlMs, value });
+  }
+
+  return value;
+}
+
+export interface ListResponseExtras {
+  nextCursor?: string | null;
+  totalIsCapped?: boolean;
+}
+
 export const listResponse = <T>(
   key: string,
   rows: T[],
   total: number,
   built: Pick<BuiltListQuery, "page" | "pageSize">,
-): Record<string, unknown> => ({ [key]: rows, total, page: built.page, pageSize: built.pageSize });
+  extras: ListResponseExtras = {},
+): Record<string, unknown> => ({
+  [key]: rows,
+  total,
+  page: built.page,
+  pageSize: built.pageSize,
+  ...(extras.nextCursor ? { nextCursor: extras.nextCursor } : {}),
+  ...(extras.totalIsCapped !== undefined ? { totalIsCapped: extras.totalIsCapped } : {}),
+});

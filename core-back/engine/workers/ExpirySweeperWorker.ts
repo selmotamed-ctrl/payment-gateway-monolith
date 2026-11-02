@@ -1,6 +1,10 @@
 import { moneyToString, type Money } from "../db/money";
 import { toCamelRows, mysqlPlaceholders } from "../db/rawRows";
 import type { PaymentAttemptRow, Tx } from "../db/ports";
+import {
+  recordAttemptLifecycle,
+  type AttemptLifecycleEvent,
+} from "../../lib/counters/materializedCounters";
 import { BaseWorker, type WorkerOptions } from "./workerRuntime";
 
 export interface InquiryOutcome {
@@ -27,6 +31,27 @@ const RELEASE_SLOT_STATUSES = ["FAILED", "EXPIRED", "CANCELLED"];
  * must never expire it (and must never release its reserved slot).
  */
 const AML_HOLD_SUBSTATUS = "AML_HOLD";
+const EXPIRY_CLAIM_LEASE_MS = 5 * 60 * 1000;
+const lifecycleEventForTerminal = (status: string): AttemptLifecycleEvent | null => {
+  if (status === "SUCCEEDED") return "SUCCEEDED";
+  if (status === "FAILED" || status === "BLOCKED") return "FAILED";
+  if (status === "EXPIRED") return "EXPIRED";
+  if (status === "CANCELLED") return "CANCELLED";
+  return null;
+};
+const ATTEMPT_CLAIM_COLUMNS = [
+  "id", "reference", "idempotency_key", "link_id", "attempt_group_id",
+  "application_id", "merchant_id", "rail_id", "route_id", "credential_set_id",
+  "gateway_version_id", "commission_profile_id", "env", "mode", "sub_mode",
+  "status", "substatus", "gateway_reference", "provider_reference",
+  "network_reference", "requested_amount", "surcharge_amount",
+  "total_charged_amount", "gateway_amount_wire", "settled_amount",
+  "gateway_fee_amount", "platform_commission_amount", "net_merchant_amount",
+  "fee_bearer", "currency", "point_of_no_return", "otp_attempts",
+  "last_otp_sent_at", "client_ip", "end_client_ip", "end_client_phone_hash",
+  "end_client_card_alias", "expires_at", "grace_expires_at", "next_check_at",
+  "ledger_entry_id", "terminal_at", "created_at", "updated_at",
+].join(", ");
 
 export class ExpirySweeperWorker extends BaseWorker {
   private readonly inquiry: InquiryPort | undefined;
@@ -61,23 +86,42 @@ export class ExpirySweeperWorker extends BaseWorker {
   private async lockExpiredAttempts(now: Date): Promise<PaymentAttemptRow[]> {
     const statusPlaceholders = mysqlPlaceholders(EXPIRABLE_STATUSES.length);
     const sql =
-      "SELECT * FROM payment_attempts" +
+      `SELECT ${ATTEMPT_CLAIM_COLUMNS} FROM payment_attempts` +
       " WHERE expires_at IS NOT NULL" +
       " AND expires_at <= ?" +
       " AND terminal_at IS NULL" +
       ` AND status IN (${statusPlaceholders})` +
       " AND (substatus IS NULL OR substatus <> ?)" +
+      " AND (next_check_at IS NULL OR next_check_at <= ?)" +
       " ORDER BY expires_at ASC" +
       " LIMIT ?" +
       " FOR UPDATE SKIP LOCKED";
-    const result = await this.db.$queryRawUnsafe(
-      sql,
-      now,
-      ...EXPIRABLE_STATUSES,
-      AML_HOLD_SUBSTATUS,
-      this.batchSize,
-    );
-    return toCamelRows<PaymentAttemptRow>(result);
+    // Selection and claim share one short transaction. The gateway inquiry is
+    // made only after the claim commits, and the existing `next_check_at`
+    // column carries the short lease.
+    return this.db.$transaction(async (tx: Tx) => {
+      const result = await tx.$queryRawUnsafe(
+        sql,
+        now,
+        ...EXPIRABLE_STATUSES,
+        AML_HOLD_SUBSTATUS,
+        now,
+        this.batchSize,
+      );
+      const attempts = toCamelRows<PaymentAttemptRow>(result)
+        .filter((attempt) => attempt.substatus !== AML_HOLD_SUBSTATUS);
+      if (attempts.length === 0) {
+        return attempts;
+      }
+      const leaseUntil = new Date(now.getTime() + EXPIRY_CLAIM_LEASE_MS);
+      const idPlaceholders = mysqlPlaceholders(attempts.length);
+      await tx.$executeRawUnsafe(
+        `UPDATE payment_attempts SET next_check_at = ?, updated_at = NOW() WHERE id IN (${idPlaceholders})`,
+        leaseUntil,
+        ...attempts.map((attempt) => attempt.id),
+      );
+      return attempts;
+    });
   }
 
   private async handleAttempt(attempt: PaymentAttemptRow, now: Date): Promise<void> {
@@ -114,7 +158,7 @@ export class ExpirySweeperWorker extends BaseWorker {
   private async applyInquiryOutcome(attempt: PaymentAttemptRow, outcome: InquiryOutcome, now: Date): Promise<void> {
     const terminal = ["SUCCEEDED", "FAILED", "EXPIRED", "CANCELLED"].includes(outcome.status);
     if (terminal) {
-      const transitioned = await this.terminate(attempt.id, {
+      const transitioned = await this.terminate(attempt, {
         status: outcome.status,
         terminal_at: now,
         next_check_at: null,
@@ -162,7 +206,7 @@ export class ExpirySweeperWorker extends BaseWorker {
   private async expireAttempt(attempt: PaymentAttemptRow, now: Date): Promise<void> {
     // The terminal transition is conditional, so two cluster nodes can never
     // expire the same attempt twice (and can never release its slot twice).
-    const transitioned = await this.terminate(attempt.id, {
+    const transitioned = await this.terminate(attempt, {
       status: "EXPIRED",
       terminal_at: now,
       next_check_at: null,
@@ -187,16 +231,30 @@ export class ExpirySweeperWorker extends BaseWorker {
    * nodes at the same time.
    */
   private async terminate(
-    attemptId: string,
+    attempt: PaymentAttemptRow,
     columns: { status: string; terminal_at: Date; next_check_at: null },
   ): Promise<boolean> {
-    const result = await this.db.$executeRawUnsafe(
-      "UPDATE payment_attempts SET status = ?, terminal_at = ?, next_check_at = NULL, updated_at = NOW() WHERE id = ? AND terminal_at IS NULL",
-      columns.status,
-      columns.terminal_at,
-      attemptId,
-    );
-    return Number(result ?? 0) > 0;
+    return this.db.$transaction(async (tx: Tx) => {
+      const result = await tx.$executeRawUnsafe(
+        "UPDATE payment_attempts SET status = ?, terminal_at = ?, next_check_at = NULL, updated_at = NOW() WHERE id = ? AND terminal_at IS NULL",
+        columns.status,
+        columns.terminal_at,
+        attempt.id,
+      );
+      if (Number(result ?? 0) <= 0) {
+        return false;
+      }
+      const event = lifecycleEventForTerminal(columns.status);
+      if (event) {
+        await recordAttemptLifecycle(tx, {
+          attemptId: attempt.id,
+          event,
+          previousStatus: attempt.status,
+          at: columns.terminal_at,
+        });
+      }
+      return true;
+    });
   }
 
   private async releaseSlot(attempt: PaymentAttemptRow): Promise<void> {

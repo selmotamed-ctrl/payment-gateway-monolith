@@ -1,5 +1,10 @@
 import { Decimal } from "decimal.js";
 import { invalidationBus, type InvalidationBus } from "../../lib/invalidationBus";
+import {
+  recordAttemptLifecycle,
+  type AttemptLifecycleEvent,
+} from "../../lib/counters/materializedCounters";
+import type { PrismaLike } from "../db/ports";
 import { decimal, type DecimalInput, type LedgerPostContext, type LedgerScenario, type LedgerScenarioInput, type PaymentConfirmationInput } from "../ledger/LedgerPoster";
 import { StepExecutor, type FlowStep, type StepExecutionContext, type StepExecutionResult } from "./StepExecutor";
 import type {
@@ -677,8 +682,10 @@ export class DynamicRailEngine {
         409,
       );
     }
+    const previousStatus = attempt.status;
     attempt.status = nextStatus;
     const updated = await this.options.attempts.updateAttempt(attempt.id, { status: nextStatus, ...patch });
+    await this.recordTransitionCounters(attempt.id, nextStatus, previousStatus);
     await this.transitionBus.publish(ATTEMPT_TRANSITION_TOPIC, {
       attemptId: attempt.id,
       status: nextStatus,
@@ -1018,6 +1025,12 @@ export class DynamicRailEngine {
           substatus: "SUSPENSE_SETTLEMENT",
           ...(commit.journalEntryId ? { ledgerEntryId: commit.journalEntryId } : {}),
         }, transaction);
+        await this.recordLifecycleCounters(
+          attempt.id,
+          "SUCCEEDED",
+          previousStatus,
+          transaction,
+        );
         return commit;
       }
       const ledgerEntryId = await post(transaction);
@@ -1025,6 +1038,12 @@ export class DynamicRailEngine {
         status: "SUCCEEDED",
         ledgerEntryId,
       }, transaction);
+      await this.recordLifecycleCounters(
+        attempt.id,
+        "SUCCEEDED",
+        previousStatus,
+        transaction,
+      );
       return { outcome: "COMMITTED", journalEntryId: ledgerEntryId };
     };
 
@@ -1165,6 +1184,63 @@ export class DynamicRailEngine {
       return decrypted && typeof decrypted === "object" ? decrypted as Record<string, unknown> : {};
     }
     return { ...attempt.context };
+  }
+
+  private counterDatabase(transaction?: unknown): PrismaLike | null {
+    if (transaction) {
+      return transaction as PrismaLike;
+    }
+    const attempts = this.options.attempts as unknown as {
+      client?: PrismaLike;
+      db?: PrismaLike;
+    };
+    return attempts?.client ?? attempts?.db ?? null;
+  }
+
+  private lifecycleEventFor(status: AdapterAttemptStatus): AttemptLifecycleEvent | null {
+    if (status === "SUCCEEDED") return "SUCCEEDED";
+    if (status === "FAILED" || status === "BLOCKED") return "FAILED";
+    if (status === "EXPIRED") return "EXPIRED";
+    if (status === "CANCELLED") return "CANCELLED";
+    if (status === "REFUNDED" || status === "PARTIALLY_REFUNDED") return "REFUNDED";
+    return null;
+  }
+
+  private async recordLifecycleCounters(
+    attemptId: string,
+    event: AttemptLifecycleEvent,
+    previousStatus: string | null | undefined,
+    transaction?: unknown,
+  ): Promise<void> {
+    const db = this.counterDatabase(transaction);
+    if (!db) {
+      return;
+    }
+    await recordAttemptLifecycle(db, {
+      attemptId,
+      event,
+      previousStatus,
+      at: this.now(),
+    });
+  }
+
+  private async recordTransitionCounters(
+    attemptId: string,
+    nextStatus: AdapterAttemptStatus,
+    previousStatus: AdapterAttemptStatus,
+  ): Promise<void> {
+    const event = this.lifecycleEventFor(nextStatus);
+    if (!event) {
+      return;
+    }
+    try {
+      await this.recordLifecycleCounters(attemptId, event, previousStatus);
+    } catch {
+      // Counter maintenance is auxiliary to the attempt state machine. A
+      // transient counter failure must not strand an attempt after its
+      // authoritative status was already persisted; the hook is retried by
+      // the next lifecycle transition and the tables can be rebuilt.
+    }
   }
 
   private async releaseSlot(attempt: DynamicAttempt, reason: string): Promise<void> {

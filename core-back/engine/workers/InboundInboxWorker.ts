@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { ApiError } from "../../lib/error";
-import { toCamelRows } from "../db/rawRows";
+import { mysqlPlaceholders, toCamelRows } from "../db/rawRows";
 import type { Tx } from "../db/ports";
 import { BaseWorker, type WorkerOptions } from "./workerRuntime";
 
@@ -40,6 +40,11 @@ export class RetryableInboundError extends Error {
 }
 
 const ATTEMPT_PATTERN = /RETRY\((\d+)\)/;
+const INBOUND_EVENT_CLAIM_COLUMNS = [
+  "id", "created_at", "updated_at", "channel_id", "gateway_id", "env",
+  "source_ip", "verified", "verification_error", "dedupe_key", "attempt_id",
+  "received_at", "processed_at", "processing_result",
+].join(", ");
 
 export class InboundInboxWorker extends BaseWorker {
   private readonly handler: InboundEventHandler | undefined;
@@ -64,13 +69,75 @@ export class InboundInboxWorker extends BaseWorker {
 
   private async lockUnprocessedEvents(): Promise<InboundEventRow[]> {
     const sql =
-      "SELECT * FROM inbound_events" +
+      `SELECT ${INBOUND_EVENT_CLAIM_COLUMNS} FROM inbound_events` +
       " WHERE processed_at IS NULL" +
       " ORDER BY received_at ASC" +
       " LIMIT ?" +
       " FOR UPDATE SKIP LOCKED";
-    const result = await this.db.$queryRawUnsafe(sql, this.batchSize);
-    return toCamelRows<InboundEventRow>(result);
+    // The claim never selects the LONGBLOB / JSON payload. The selection is
+    // kept in one transaction; the payload is then loaded only for the
+    // claimed ids, and the handler still runs outside any transaction.
+    const events = await this.db.$transaction(async (tx: Tx) => {
+      const result = await tx.$queryRawUnsafe(sql, this.batchSize);
+      return toCamelRows<InboundEventRow>(result);
+    });
+    return this.attachPayloads(events);
+  }
+
+  private async attachPayloads(events: InboundEventRow[]): Promise<InboundEventRow[]> {
+    if (events.length === 0) {
+      return events;
+    }
+    const payloads = new Map<string, Record<string, unknown>>();
+    const collect = (value: unknown, idKeys: string[]): void => {
+      for (const row of toCamelRows<Record<string, unknown>>(value)) {
+        const id = idKeys.map((key) => row[key]).find((candidate) => typeof candidate === "string");
+        if (typeof id !== "string") continue;
+        if (row.rawBodyBytes === undefined && row.redactedHeadersJson === undefined) continue;
+        payloads.set(id, row);
+      }
+    };
+    // The split payload may already be offloaded to `inbound_event_payloads`.
+    try {
+      const placeholders = mysqlPlaceholders(events.length);
+      const split = await this.db.$queryRawUnsafe(
+        `SELECT event_id, raw_body_bytes, redacted_headers_json
+           FROM inbound_event_payloads WHERE event_id IN (${placeholders})`,
+        ...events.map((event) => event.id),
+      );
+      collect(split, ["eventId", "event_id"]);
+    } catch {
+      // A deployment that has not created the offload table yet keeps the
+      // inline payload below.
+    }
+    const missing = events.filter((event) => !payloads.has(event.id));
+    if (missing.length > 0) {
+      try {
+        const placeholders = mysqlPlaceholders(missing.length);
+        const inline = await this.db.$queryRawUnsafe(
+          `SELECT id, raw_body_bytes, redacted_headers_json
+             FROM inbound_events WHERE id IN (${placeholders})`,
+          ...missing.map((event) => event.id),
+        );
+        collect(inline, ["id"]);
+      } catch {
+        // The handler still receives the row headers and reports its own
+        // result when the payload cannot be read.
+      }
+    }
+    return events.map((event) => {
+      const payload = payloads.get(event.id);
+      if (!payload) {
+        return event;
+      }
+      return {
+        ...event,
+        ...(payload.rawBodyBytes !== undefined ? { rawBodyBytes: payload.rawBodyBytes } : {}),
+        ...(payload.redactedHeadersJson !== undefined
+          ? { redactedHeadersJson: payload.redactedHeadersJson }
+          : {}),
+      };
+    });
   }
 
   private async processEvent(event: InboundEventRow): Promise<void> {

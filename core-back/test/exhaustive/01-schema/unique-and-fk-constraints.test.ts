@@ -61,13 +61,18 @@ for (const model of schema.models) {
   if (model.tableName === "journal_lines") {
     continue;
   }
+  const primaryBlock = /@@id\(\[([^\]]+)\]\)/.exec(model.block)?.[1]
+    ?.split(",")
+    .map((field) => field.trim()) ?? [];
   for (const fields of model.uniqueBlocks) {
+    const isPrimary = fields.length === primaryBlock.length
+      && fields.every((field, index) => field === primaryBlock[index]);
     uniqueConstraints.push({
       model: model.name,
       table: model.tableName,
       fields,
       dbColumns: fields.map((field) => dbColumnFor(model.tableName, field)),
-      kind: "unique",
+      kind: isPrimary ? "primary" : "unique",
       label: `${model.tableName}(${fields.join(",")})`,
     });
   }
@@ -75,7 +80,7 @@ for (const model of schema.models) {
     if (field.isRelation || field.isList) {
       continue;
     }
-    if (field.isId || field.isUnique) {
+    if ((field.isId && !model.block.includes("@default(autoincrement())")) || field.isUnique) {
       uniqueConstraints.push({
         model: model.name,
         table: model.tableName,
@@ -157,7 +162,8 @@ describeDb("Suite 01 · unique constraint enforcement", () => {
 
     test(`${constraint.label} [5/5] a distinct row is accepted`, async () => {
       const row = await createRow(constraint.table, {}, { forceNonNull: constraint.fields });
-      expect(row.id).toBeDefined();
+      expect(row).toBeDefined();
+      expect(Object.keys(row).length).toBeGreaterThan(0);
     });
   }
 });
