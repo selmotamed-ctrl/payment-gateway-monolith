@@ -225,8 +225,6 @@ const KybReviewDetailPage = dc(() => {
                     <PageHeader
                         title={`${typeHelp.label} · ${entry.merchantName}`}
                         subtitle={t("Inspect document identity, scanning status, expiry evidence and duplicate-document risk.")}
-                        badge={statusHelp.label}
-                        badgeTone={asBadgeTone(statusHelp.tone)}
                         end={() => (
                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                                 <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "KybReview" })}>
@@ -270,7 +268,9 @@ const KybReviewDetailPage = dc(() => {
                         <span title={avHelp.meaning}>
                             <StatusBadge status={entry.avStatus} label={avHelp.label} toneOverride={asBadgeTone(avHelp.tone)} />
                         </span>
-                        <StatusBadge status={entry.expiryState} label={expiry.label} toneOverride={asBadgeTone(expiry.tone)} />
+                        {entry.expiryState !== entry.status && (
+                            <StatusBadge status={entry.expiryState} label={expiry.label} toneOverride={asBadgeTone(expiry.tone)} />
+                        )}
                         {entry.duplicateMerchantCount > 0 && (
                             <StatusBadge status="duplicate" label={`${entry.duplicateMerchantCount} duplicate merchants`} toneOverride="warning" />
                         )}

@@ -162,6 +162,7 @@ export const StatusBadge = defineComponent({
             const displayLabel = props.label || formatHumanStatus(props.status);
             return (
                 <span
+                    class="pg-status-badge"
                     style={{
                         display: "inline-flex",
                         alignItems: "center",

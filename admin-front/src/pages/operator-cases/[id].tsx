@@ -614,8 +614,6 @@ const OperatorCaseDetailPage = dc(() => {
                 <PageHeader
                     title={`${t("Operator Case")} ${caseRef.value}`}
                     subtitle={t("Inspect the case, evidence, identifiers and maker-checker resolution path.")}
-                    badge={detail.value?.priority ?? ""}
-                    badgeTone={asBadgeTone(statusTone(detail.value?.priority))}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => router.push({ name: "OperatorCases" })}>

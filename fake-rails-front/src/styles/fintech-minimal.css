@@ -1186,3 +1186,10 @@ html[dir="rtl"] .pg-row-indicator--info > td:first-child {
 html[dir="rtl"] .pg-row-indicator--success > td:first-child {
   box-shadow: inset -2px 0 0 var(--pg-status-success-dot);
 }
+
+/* Keep title-wrapped status badges aligned with unwrapped chips */
+span[title]:has(> .pg-status-badge),
+div[title]:has(> .pg-status-badge) {
+  display: inline-flex;
+  align-items: center;
+}

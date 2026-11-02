@@ -678,8 +678,6 @@ const MerchantDetailPage = dc(() => {
                     <PageHeader
                         title={entry.displayName || entry.tradeName || t("Merchant")}
                         subtitle={t("Inspect the merchant profile, payment activity, compliance evidence and governed change history.")}
-                        badge={statusHelp.value.label}
-                        badgeTone={asBadgeTone(statusHelp.value.tone)}
                         end={() => (
                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                                 <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "Merchants" })}>{t("Queue")}</VBtn>
