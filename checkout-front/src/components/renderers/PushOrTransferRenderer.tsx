@@ -4,6 +4,7 @@ import { useLocale } from "vuetify";
 import { VAlert, VFileInput } from "vuetify/components";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
+import { DescriptionList, FormField, MonoRef, type DescriptionItem } from "@/components/ui";
 import type { PushOrTransferClientAction } from "./types";
 
 export type PushOrTransferRendererProps = {
@@ -21,68 +22,69 @@ export const PushOrTransferRenderer = dc(
             current.value === "ar" ? props.action.instructions_ar : props.action.instructions_en,
         );
 
-        return () => (
-            <ThemedView style={{ gap: "16px", width: "100%" }}>
-                <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                    {t("Instructions")}
-                </ThemedText>
+        return () => {
+            const referenceItems: DescriptionItem[] = [
+                {
+                    label: t("Transfer To"),
+                    value: <MonoRef value={props.action.destination_account} />,
+                },
+                {
+                    label: t("Payment Reference"),
+                    value: <MonoRef value={props.action.payment_reference} />,
+                },
+            ];
+            if (props.action.wallet_hint) {
+                referenceItems.push({
+                    label: t("Wallet Balance"),
+                    value: props.action.wallet_hint,
+                });
+            }
 
-                {props.error && (
-                    <VAlert type="error" variant="tonal" density="compact">
-                        {props.error}
-                    </VAlert>
-                )}
+            return (
+                <ThemedView style={{ gap: "16px", width: "100%" }}>
+                    <ThemedText
+                        type="defaultSemiBold"
+                        style={{ fontSize: "17px", color: "var(--pg-ink-primary)" }}
+                    >
+                        {t("Instructions")}
+                    </ThemedText>
 
-                <ThemedView style={{ gap: "8px" }}>
-                    <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "12px" }}>
-                        <ThemedText style={{ fontSize: "13px" }}>{t("Transfer To")}</ThemedText>
+                    {props.error && (
+                        <VAlert type="error" variant="tonal" density="compact">
+                            {props.error}
+                        </VAlert>
+                    )}
+
+                    <DescriptionList ariaLabel={t("Instructions")} items={referenceItems} />
+
+                    {instructions.value && (
                         <ThemedText
-                            type="defaultSemiBold"
-                            style={{ fontSize: "14px", direction: "ltr", textAlign: "end" }}
+                            style={{ fontSize: "13px", color: "var(--pg-ink-secondary)", lineHeight: 1.8 }}
                         >
-                            {props.action.destination_account}
+                            {instructions.value}
                         </ThemedText>
-                    </ThemedView>
-                    <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "12px" }}>
-                        <ThemedText style={{ fontSize: "13px" }}>{t("Payment Reference")}</ThemedText>
-                        <ThemedText
-                            type="defaultSemiBold"
-                            style={{ fontSize: "14px", direction: "ltr", textAlign: "end" }}
-                        >
-                            {props.action.payment_reference}
+                    )}
+
+                    {props.action.proof_upload_allowed && (
+                        <FormField label={t("Submit Proof")}>
+                            <VFileInput
+                                aria-label={t("Submit Proof")}
+                                modelValue={null}
+                                onUpdate:modelValue={(v: File | File[] | null) => {
+                                    props.onProof?.(Array.isArray(v) ? (v[0] ?? null) : v);
+                                }}
+                            />
+                        </FormField>
+                    )}
+
+                    {props.action.expires_at && (
+                        <ThemedText style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>
+                            {t("Expires At")}: {props.action.expires_at}
                         </ThemedText>
-                    </ThemedView>
-                    {props.action.wallet_hint && (
-                        <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "12px" }}>
-                            <ThemedText style={{ fontSize: "13px" }}>{t("Wallet Balance")}</ThemedText>
-                            <ThemedText style={{ fontSize: "14px" }}>{props.action.wallet_hint}</ThemedText>
-                        </ThemedView>
                     )}
                 </ThemedView>
-
-                {instructions.value && (
-                    <ThemedText style={{ fontSize: "13px", opacity: 0.8, lineHeight: "1.8" }}>
-                        {instructions.value}
-                    </ThemedText>
-                )}
-
-                {props.action.proof_upload_allowed && (
-                    <VFileInput
-                        label={t("Submit Proof")}
-                        modelValue={null}
-                        onUpdate:modelValue={(v: File | File[] | null) => {
-                            props.onProof?.(Array.isArray(v) ? (v[0] ?? null) : v);
-                        }}
-                    />
-                )}
-
-                {props.action.expires_at && (
-                    <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>
-                        {t("Expires At")}: {props.action.expires_at}
-                    </ThemedText>
-                )}
-            </ThemedView>
-        );
+            );
+        };
     },
     {
         props: ["action", "error", "onProof", "onCancel"],

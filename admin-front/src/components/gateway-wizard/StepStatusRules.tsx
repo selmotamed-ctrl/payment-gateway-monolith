@@ -1,10 +1,12 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VCard, VCardText, VSelect, VTextField } from "vuetify/components";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
+import { VBtn, VSelect, VTextField } from "vuetify/components";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { DescriptionList } from "@/components/ui/DescriptionList";
+import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import { WizardSection } from "./WizardSection";
 import { Decimal } from "decimal.js";
 import { formatMoney, toDecimal } from "@/utils/money";
 import type { WizardErrorMap, WizardStatusRule } from "./types";
@@ -26,6 +28,18 @@ const CANONICAL_STATUSES = [
     "REFUNDED",
     "DISPUTED",
 ];
+
+const gridStyle = {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+    gap: "14px",
+} as const;
+
+const errorTone = (entry: WizardErrorMap): BadgeTone => {
+    if (entry.otpRetryable) return "warning";
+    if (entry.retryable) return "info";
+    return "danger";
+};
 
 export const StepStatusRules = dc(
     (props: WizardStepProps) => {
@@ -107,311 +121,345 @@ export const StepStatusRules = dc(
         };
 
         return () => (
-            <ThemedView style={{ gap: "16px" }}>
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <ThemedView
-                            style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
-                        >
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                                {t("Status Rule")}
-                            </ThemedText>
-                            <VBtn variant="tonal" size="small" onClick={addStatusRule}>
-                                {t("Add")}
-                            </VBtn>
-                        </ThemedView>
-
+            <SurfaceCard title={t("Status Rules & Costs")}>
+                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+                    <WizardSection
+                        title={t("Status Rule")}
+                        v-slots={{
+                            actions: () => (
+                                <VBtn variant="tonal" size="small" onClick={addStatusRule}>
+                                    {t("Add")}
+                                </VBtn>
+                            ),
+                        }}
+                    >
                         {props.model.statusRules.map((rule, index) => (
-                            <ThemedView
+                            <WizardSection
                                 key={index}
-                                style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap", alignItems: "center" }}
+                                title={rule.gatewayCode || `${t("Status Rule")} ${index + 1}`}
+                                divider={index > 0}
+                                v-slots={{
+                                    actions: () => (
+                                        <StatusBadge status={rule.canonicalStatus} toneOverride="info" showDot={false} />
+                                    ),
+                                }}
                             >
-                                <VTextField
-                                    label="gateway_code"
-                                    modelValue={rule.gatewayCode}
-                                    onUpdate:modelValue={(v: string) => updateStatusRule(index, { gatewayCode: v })}
-                                    style={{ minWidth: "160px" }}
-                                />
-                                <VSelect
-                                    items={CANONICAL_STATUSES}
-                                    modelValue={rule.canonicalStatus}
-                                    onUpdate:modelValue={(v: any) => updateStatusRule(index, { canonicalStatus: v })}
-                                    label={t("Status")}
-                                    style={{ minWidth: "200px" }}
-                                />
-                                <VTextField
-                                    label="message_ar"
-                                    modelValue={rule.messageAr}
-                                    onUpdate:modelValue={(v: string) => updateStatusRule(index, { messageAr: v })}
-                                    style={{ minWidth: "220px" }}
-                                />
-                                <VTextField
-                                    label="message_en"
-                                    modelValue={rule.messageEn}
-                                    onUpdate:modelValue={(v: string) => updateStatusRule(index, { messageEn: v })}
-                                    style={{ minWidth: "220px" }}
-                                />
-                                <StatusChip label={rule.canonicalStatus} tone="info" />
-                            </ThemedView>
+                                <div style={gridStyle}>
+                                    <FormField label="gateway_code">
+                                        <VTextField
+                                            modelValue={rule.gatewayCode}
+                                            onUpdate:modelValue={(v: string) => updateStatusRule(index, { gatewayCode: v })}
+                                        />
+                                    </FormField>
+                                    <FormField label={t("Status")}>
+                                        <VSelect
+                                            items={CANONICAL_STATUSES}
+                                            modelValue={rule.canonicalStatus}
+                                            onUpdate:modelValue={(v: any) => updateStatusRule(index, { canonicalStatus: v })}
+                                        />
+                                    </FormField>
+                                    <FormField label="message_ar">
+                                        <VTextField
+                                            modelValue={rule.messageAr}
+                                            onUpdate:modelValue={(v: string) => updateStatusRule(index, { messageAr: v })}
+                                        />
+                                    </FormField>
+                                    <FormField label="message_en">
+                                        <VTextField
+                                            modelValue={rule.messageEn}
+                                            onUpdate:modelValue={(v: string) => updateStatusRule(index, { messageEn: v })}
+                                        />
+                                    </FormField>
+                                </div>
+                            </WizardSection>
                         ))}
-                    </VCardText>
-                </VCard>
+                    </WizardSection>
 
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <ThemedView
-                            style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
-                        >
-                            <ThemedText type="defaultSemiBold">{t("Error Map")}</ThemedText>
-                            <VBtn variant="tonal" size="small" onClick={addErrorMap}>
-                                {t("Add")}
-                            </VBtn>
-                        </ThemedView>
-
+                    <WizardSection
+                        title={t("Error Map")}
+                        divider
+                        v-slots={{
+                            actions: () => (
+                                <VBtn variant="tonal" size="small" onClick={addErrorMap}>
+                                    {t("Add")}
+                                </VBtn>
+                            ),
+                        }}
+                    >
                         {props.model.errorMaps.map((entry, index) => (
-                            <ThemedView
+                            <WizardSection
                                 key={index}
-                                style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap", alignItems: "center" }}
+                                title={entry.gatewayCode || `${t("Error Map")} ${index + 1}`}
+                                divider={index > 0}
+                                v-slots={{
+                                    actions: () => (
+                                        <StatusBadge
+                                            status={entry.otpRetryable ? "RETRYABLE_OTP" : entry.retryable ? "RETRYABLE" : "FAILED"}
+                                            label={entry.otpRetryable ? "RETRYABLE_OTP" : entry.retryable ? t("Retry") : t("Failed")}
+                                            toneOverride={errorTone(entry)}
+                                        />
+                                    ),
+                                }}
                             >
-                                <VTextField
-                                    label="gateway_code"
-                                    modelValue={entry.gatewayCode}
-                                    onUpdate:modelValue={(v: string) => updateErrorMap(index, { gatewayCode: v })}
-                                    style={{ minWidth: "150px" }}
-                                />
-                                <VSelect
-                                    items={CANONICAL_STATUSES}
-                                    modelValue={entry.canonicalStatus}
-                                    onUpdate:modelValue={(v: any) => updateErrorMap(index, { canonicalStatus: v })}
-                                    label={t("Status")}
-                                    style={{ minWidth: "190px" }}
-                                />
-                                <VTextField
-                                    label="message_ar"
-                                    modelValue={entry.messageAr}
-                                    onUpdate:modelValue={(v: string) => updateErrorMap(index, { messageAr: v })}
-                                    style={{ minWidth: "210px" }}
-                                />
-                                <VTextField
-                                    label="message_en"
-                                    modelValue={entry.messageEn}
-                                    onUpdate:modelValue={(v: string) => updateErrorMap(index, { messageEn: v })}
-                                    style={{ minWidth: "210px" }}
-                                />
-                                <StatusChip
-                                    label={entry.otpRetryable ? "RETRYABLE_OTP" : entry.retryable ? t("Retry") : t("Failed")}
-                                    tone={entry.otpRetryable ? "warning" : entry.retryable ? "info" : "error"}
-                                />
-                            </ThemedView>
+                                <div style={gridStyle}>
+                                    <FormField label="gateway_code">
+                                        <VTextField
+                                            modelValue={entry.gatewayCode}
+                                            onUpdate:modelValue={(v: string) => updateErrorMap(index, { gatewayCode: v })}
+                                        />
+                                    </FormField>
+                                    <FormField label={t("Status")}>
+                                        <VSelect
+                                            items={CANONICAL_STATUSES}
+                                            modelValue={entry.canonicalStatus}
+                                            onUpdate:modelValue={(v: any) => updateErrorMap(index, { canonicalStatus: v })}
+                                        />
+                                    </FormField>
+                                    <FormField label="message_ar">
+                                        <VTextField
+                                            modelValue={entry.messageAr}
+                                            onUpdate:modelValue={(v: string) => updateErrorMap(index, { messageAr: v })}
+                                        />
+                                    </FormField>
+                                    <FormField label="message_en">
+                                        <VTextField
+                                            modelValue={entry.messageEn}
+                                            onUpdate:modelValue={(v: string) => updateErrorMap(index, { messageEn: v })}
+                                        />
+                                    </FormField>
+                                </div>
+                            </WizardSection>
                         ))}
-                    </VCardText>
-                </VCard>
+                    </WizardSection>
 
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <ThemedText type="defaultSemiBold">{t("Amount Pipeline")}</ThemedText>
-                        <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
-                            <VTextField
-                                label={t("Amount Scale")}
-                                type="number"
-                                modelValue={props.model.amountPipeline.scale}
-                                onUpdate:modelValue={(v: any) =>
-                                    props.onChange({
-                                        ...props.model,
-                                        amountPipeline: { ...props.model.amountPipeline, scale: Number(v) },
-                                    })
-                                }
-                                style={{ minWidth: "150px" }}
-                            />
-                            <VTextField
-                                label={t("Amount Precision")}
-                                type="number"
-                                modelValue={props.model.amountPipeline.precision}
-                                onUpdate:modelValue={(v: any) =>
-                                    props.onChange({
-                                        ...props.model,
-                                        amountPipeline: { ...props.model.amountPipeline, precision: Number(v) },
-                                    })
-                                }
-                                style={{ minWidth: "160px" }}
-                            />
-                            <VSelect
-                                items={["NONE", "NEAREST", "UP", "DOWN"]}
-                                modelValue={props.model.amountPipeline.rounding}
-                                onUpdate:modelValue={(v: any) =>
-                                    props.onChange({
-                                        ...props.model,
-                                        amountPipeline: { ...props.model.amountPipeline, rounding: v },
-                                    })
-                                }
-                                label={t("Amount Rounding")}
-                                style={{ minWidth: "180px" }}
-                            />
-                            <VTextField
-                                label={t("Currency")}
-                                modelValue={props.model.amountPipeline.currency}
-                                onUpdate:modelValue={(v: string) =>
-                                    props.onChange({
-                                        ...props.model,
-                                        amountPipeline: { ...props.model.amountPipeline, currency: v.toUpperCase() },
-                                    })
-                                }
-                                style={{ minWidth: "130px" }}
-                            />
-                            <VTextField
-                                label={t("Amount")}
-                                modelValue={sampleAmount.value}
-                                onUpdate:modelValue={(v: string) => (sampleAmount.value = v)}
-                                style={{ minWidth: "150px" }}
-                            />
-                        </ThemedView>
+                    <WizardSection title={t("Amount Pipeline")} divider>
+                        <div style={gridStyle}>
+                            <FormField label={t("Amount Scale")}>
+                                <VTextField
+                                    type="number"
+                                    modelValue={props.model.amountPipeline.scale}
+                                    onUpdate:modelValue={(v: any) =>
+                                        props.onChange({
+                                            ...props.model,
+                                            amountPipeline: { ...props.model.amountPipeline, scale: Number(v) },
+                                        })
+                                    }
+                                />
+                            </FormField>
+                            <FormField label={t("Amount Precision")}>
+                                <VTextField
+                                    type="number"
+                                    modelValue={props.model.amountPipeline.precision}
+                                    onUpdate:modelValue={(v: any) =>
+                                        props.onChange({
+                                            ...props.model,
+                                            amountPipeline: { ...props.model.amountPipeline, precision: Number(v) },
+                                        })
+                                    }
+                                />
+                            </FormField>
+                            <FormField label={t("Amount Rounding")}>
+                                <VSelect
+                                    items={["NONE", "NEAREST", "UP", "DOWN"]}
+                                    modelValue={props.model.amountPipeline.rounding}
+                                    onUpdate:modelValue={(v: any) =>
+                                        props.onChange({
+                                            ...props.model,
+                                            amountPipeline: { ...props.model.amountPipeline, rounding: v },
+                                        })
+                                    }
+                                />
+                            </FormField>
+                            <FormField label={t("Currency")}>
+                                <VTextField
+                                    modelValue={props.model.amountPipeline.currency}
+                                    onUpdate:modelValue={(v: string) =>
+                                        props.onChange({
+                                            ...props.model,
+                                            amountPipeline: { ...props.model.amountPipeline, currency: v.toUpperCase() },
+                                        })
+                                    }
+                                />
+                            </FormField>
+                            <FormField label={t("Amount")}>
+                                <VTextField
+                                    modelValue={sampleAmount.value}
+                                    onUpdate:modelValue={(v: string) => (sampleAmount.value = v)}
+                                />
+                            </FormField>
+                        </div>
 
-                        <ThemedView style={{ flexDirection: "row", gap: "18px", flexWrap: "wrap" }}>
-                            <ThemedText style={{ fontSize: "13px" }}>
-                                {t("Amount Scale")}: {pipeline().scaled.toString()}
-                            </ThemedText>
-                            <ThemedText style={{ fontSize: "13px", fontWeight: "700" }}>
-                                {t("Amount Due")}: {pipeline().rounded.toString()}
-                            </ThemedText>
-                        </ThemedView>
-                    </VCardText>
-                </VCard>
+                        <DescriptionList
+                            columns={2}
+                            items={[
+                                { label: t("Amount Scale"), value: pipeline().scaled.toString(), mono: true },
+                                { label: t("Amount Due"), value: pipeline().rounded.toString(), mono: true },
+                            ]}
+                        />
+                    </WizardSection>
 
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <ThemedText type="defaultSemiBold">{t("Cost Model")}</ThemedText>
-                        <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
-                            <VSelect
-                                items={["FLAT", "PERCENT", "FLAT_PLUS_PERCENT"]}
-                                modelValue={props.model.costModel.model}
-                                onUpdate:modelValue={(v: any) =>
-                                    props.onChange({
-                                        ...props.model,
-                                        costModel: { ...props.model.costModel, model: v },
-                                    })
-                                }
-                                label={t("Cost Model")}
-                                style={{ minWidth: "200px" }}
-                            />
-                            <VTextField
-                                label="flat_fee"
-                                modelValue={props.model.costModel.flatFee}
-                                onUpdate:modelValue={(v: string) =>
-                                    props.onChange({
-                                        ...props.model,
-                                        costModel: { ...props.model.costModel, flatFee: v },
-                                    })
-                                }
-                                style={{ minWidth: "140px" }}
-                            />
-                            <VTextField
-                                label="percent_fee"
-                                modelValue={props.model.costModel.percentFee}
-                                onUpdate:modelValue={(v: string) =>
-                                    props.onChange({
-                                        ...props.model,
-                                        costModel: { ...props.model.costModel, percentFee: v },
-                                    })
-                                }
-                                style={{ minWidth: "140px" }}
-                            />
-                            <VTextField
-                                label="min_fee"
-                                modelValue={props.model.costModel.minFee}
-                                onUpdate:modelValue={(v: string) =>
-                                    props.onChange({
-                                        ...props.model,
-                                        costModel: { ...props.model.costModel, minFee: v },
-                                    })
-                                }
-                                style={{ minWidth: "130px" }}
-                            />
-                            <VTextField
-                                label="max_fee"
-                                modelValue={props.model.costModel.maxFee}
-                                onUpdate:modelValue={(v: string) =>
-                                    props.onChange({
-                                        ...props.model,
-                                        costModel: { ...props.model.costModel, maxFee: v },
-                                    })
-                                }
-                                style={{ minWidth: "130px" }}
-                            />
-                            <VTextField
-                                label={t("Currency")}
-                                modelValue={props.model.costModel.currency}
-                                onUpdate:modelValue={(v: string) =>
-                                    props.onChange({
-                                        ...props.model,
-                                        costModel: { ...props.model.costModel, currency: v.toUpperCase() },
-                                    })
-                                }
-                                style={{ minWidth: "130px" }}
-                            />
-                            <VTextField
-                                label="gateway_fee"
-                                modelValue={sampleGatewayFee.value}
-                                onUpdate:modelValue={(v: string) => (sampleGatewayFee.value = v)}
-                                style={{ minWidth: "150px" }}
-                            />
-                        </ThemedView>
+                    <WizardSection title={t("Cost Model")} divider>
+                        <div style={gridStyle}>
+                            <FormField label={t("Cost Model")}>
+                                <VSelect
+                                    items={["FLAT", "PERCENT", "FLAT_PLUS_PERCENT"]}
+                                    modelValue={props.model.costModel.model}
+                                    onUpdate:modelValue={(v: any) =>
+                                        props.onChange({
+                                            ...props.model,
+                                            costModel: { ...props.model.costModel, model: v },
+                                        })
+                                    }
+                                />
+                            </FormField>
+                            <FormField label="flat_fee">
+                                <VTextField
+                                    modelValue={props.model.costModel.flatFee}
+                                    onUpdate:modelValue={(v: string) =>
+                                        props.onChange({
+                                            ...props.model,
+                                            costModel: { ...props.model.costModel, flatFee: v },
+                                        })
+                                    }
+                                />
+                            </FormField>
+                            <FormField label="percent_fee">
+                                <VTextField
+                                    modelValue={props.model.costModel.percentFee}
+                                    onUpdate:modelValue={(v: string) =>
+                                        props.onChange({
+                                            ...props.model,
+                                            costModel: { ...props.model.costModel, percentFee: v },
+                                        })
+                                    }
+                                />
+                            </FormField>
+                            <FormField label="min_fee">
+                                <VTextField
+                                    modelValue={props.model.costModel.minFee}
+                                    onUpdate:modelValue={(v: string) =>
+                                        props.onChange({
+                                            ...props.model,
+                                            costModel: { ...props.model.costModel, minFee: v },
+                                        })
+                                    }
+                                />
+                            </FormField>
+                            <FormField label="max_fee">
+                                <VTextField
+                                    modelValue={props.model.costModel.maxFee}
+                                    onUpdate:modelValue={(v: string) =>
+                                        props.onChange({
+                                            ...props.model,
+                                            costModel: { ...props.model.costModel, maxFee: v },
+                                        })
+                                    }
+                                />
+                            </FormField>
+                            <FormField label={t("Currency")}>
+                                <VTextField
+                                    modelValue={props.model.costModel.currency}
+                                    onUpdate:modelValue={(v: string) =>
+                                        props.onChange({
+                                            ...props.model,
+                                            costModel: { ...props.model.costModel, currency: v.toUpperCase() },
+                                        })
+                                    }
+                                />
+                            </FormField>
+                            <FormField label="gateway_fee">
+                                <VTextField
+                                    modelValue={sampleGatewayFee.value}
+                                    onUpdate:modelValue={(v: string) => (sampleGatewayFee.value = v)}
+                                />
+                            </FormField>
+                        </div>
 
-                        <ThemedText style={{ fontSize: "13px" }}>
-                            {t("Cost Model")}: {formatMoney(cost(), { currency: props.model.costModel.currency })} ·{" "}
-                            {t("Net")}:{" "}
-                            {formatMoney(
-                                toDecimal(sampleAmount.value).minus(cost()).minus(toDecimal(sampleFee.value)),
-                                { currency: props.model.costModel.currency },
-                            )}
-                        </ThemedText>
-                    </VCardText>
-                </VCard>
+                        <DescriptionList
+                            columns={2}
+                            items={[
+                                {
+                                    label: t("Cost Model"),
+                                    value: formatMoney(cost(), { currency: props.model.costModel.currency }),
+                                },
+                                {
+                                    label: t("Net"),
+                                    value: formatMoney(
+                                        toDecimal(sampleAmount.value).minus(cost()).minus(toDecimal(sampleFee.value)),
+                                        { currency: props.model.costModel.currency },
+                                    ),
+                                },
+                            ]}
+                        />
+                    </WizardSection>
 
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <ThemedText type="defaultSemiBold">{t("Statement Source")}</ThemedText>
-                        <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
-                            <VTextField
-                                label="source_id"
-                                modelValue={props.model.statementMapping.sourceId}
-                                onUpdate:modelValue={(v: string) =>
-                                    props.onChange({
-                                        ...props.model,
-                                        statementMapping: { ...props.model.statementMapping, sourceId: v },
-                                    })
-                                }
-                                style={{ minWidth: "180px" }}
-                            />
-                            <VSelect
-                                items={["CSV", "XLSX", "JSON"]}
-                                modelValue={props.model.statementMapping.format}
-                                onUpdate:modelValue={(v: any) =>
-                                    props.onChange({
-                                        ...props.model,
-                                        statementMapping: { ...props.model.statementMapping, format: v },
-                                    })
-                                }
-                                label={t("Type")}
-                                style={{ minWidth: "160px" }}
-                            />
-                            <VTextField
-                                label="delimiter"
-                                modelValue={props.model.statementMapping.delimiter}
-                                onUpdate:modelValue={(v: string) =>
-                                    props.onChange({
-                                        ...props.model,
-                                        statementMapping: { ...props.model.statementMapping, delimiter: v },
-                                    })
-                                }
-                                style={{ minWidth: "130px" }}
-                            />
-                        </ThemedView>
+                    <WizardSection
+                        title={t("Statement Source")}
+                        divider
+                        v-slots={{
+                            actions: () => (
+                                <VBtn
+                                    variant="tonal"
+                                    size="small"
+                                    onClick={() =>
+                                        props.onChange({
+                                            ...props.model,
+                                            statementMapping: {
+                                                ...props.model.statementMapping,
+                                                columnMapping: [
+                                                    ...props.model.statementMapping.columnMapping,
+                                                    { source: "", target: "" },
+                                                ],
+                                            },
+                                        })
+                                    }
+                                >
+                                    {t("Add")}
+                                </VBtn>
+                            ),
+                        }}
+                    >
+                        <div style={gridStyle}>
+                            <FormField label="source_id">
+                                <VTextField
+                                    modelValue={props.model.statementMapping.sourceId}
+                                    onUpdate:modelValue={(v: string) =>
+                                        props.onChange({
+                                            ...props.model,
+                                            statementMapping: { ...props.model.statementMapping, sourceId: v },
+                                        })
+                                    }
+                                />
+                            </FormField>
+                            <FormField label={t("Type")}>
+                                <VSelect
+                                    items={["CSV", "XLSX", "JSON"]}
+                                    modelValue={props.model.statementMapping.format}
+                                    onUpdate:modelValue={(v: any) =>
+                                        props.onChange({
+                                            ...props.model,
+                                            statementMapping: { ...props.model.statementMapping, format: v },
+                                        })
+                                    }
+                                />
+                            </FormField>
+                            <FormField label="delimiter">
+                                <VTextField
+                                    modelValue={props.model.statementMapping.delimiter}
+                                    onUpdate:modelValue={(v: string) =>
+                                        props.onChange({
+                                            ...props.model,
+                                            statementMapping: { ...props.model.statementMapping, delimiter: v },
+                                        })
+                                    }
+                                />
+                            </FormField>
+                        </div>
 
-                        <ThemedView style={{ flexDirection: "column", gap: "8px" }}>
-                            {props.model.statementMapping.columnMapping.map((mapping, index) => (
-                                <ThemedView key={index} style={{ flexDirection: "row", gap: "10px", alignItems: "center" }}>
+                        {props.model.statementMapping.columnMapping.map((mapping, index) => (
+                            <div key={index} style={gridStyle}>
+                                <FormField label={t("Column")}>
                                     <VTextField
-                                        label={t("Column")}
                                         modelValue={mapping.source}
                                         onUpdate:modelValue={(v: string) => {
                                             const columnMapping = props.model.statementMapping.columnMapping.map(
@@ -423,10 +471,10 @@ export const StepStatusRules = dc(
                                                 statementMapping: { ...props.model.statementMapping, columnMapping },
                                             });
                                         }}
-                                        style={{ minWidth: "220px" }}
                                     />
+                                </FormField>
+                                <FormField label={t("Maps To")}>
                                     <VTextField
-                                        label={t("Maps To")}
                                         modelValue={mapping.target}
                                         onUpdate:modelValue={(v: string) => {
                                             const columnMapping = props.model.statementMapping.columnMapping.map(
@@ -438,33 +486,13 @@ export const StepStatusRules = dc(
                                                 statementMapping: { ...props.model.statementMapping, columnMapping },
                                             });
                                         }}
-                                        style={{ minWidth: "220px" }}
                                     />
-                                </ThemedView>
-                            ))}
-                            <VBtn
-                                variant="tonal"
-                                size="small"
-                                style={{ alignSelf: "flex-start" }}
-                                onClick={() =>
-                                    props.onChange({
-                                        ...props.model,
-                                        statementMapping: {
-                                            ...props.model.statementMapping,
-                                            columnMapping: [
-                                                ...props.model.statementMapping.columnMapping,
-                                                { source: "", target: "" },
-                                            ],
-                                        },
-                                    })
-                                }
-                            >
-                                {t("Add")}
-                            </VBtn>
-                        </ThemedView>
-                    </VCardText>
-                </VCard>
-            </ThemedView>
+                                </FormField>
+                            </div>
+                        ))}
+                    </WizardSection>
+                </SurfaceCardText>
+            </SurfaceCard>
         );
     },
     {

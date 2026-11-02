@@ -7,7 +7,6 @@ import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
 import { statusTone } from "@/components/Table/statusTone";
 import { JsonDiffViewer, type JsonPatchOperation } from "@/components/ui/JsonDiffViewer";
 import { ApiTable } from "@/components/Table/ApiTable";
@@ -30,12 +29,15 @@ import {
 import type { ApprovalDetail, ApprovalRow, ApprovalSummary } from "./types";
 
 import { FormModal } from "@/components/ui/FormModal";
+import { FormField } from "@/components/ui/FormField";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { MetricStrip } from "@/components/ui/MetricStrip";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { MonoRef } from "@/components/ui/MonoRef";
+import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
+import { FormChecklist } from "@/components/ui/FormChecklist";
 import { EmptyState } from "@/components/ui/EmptyState";
 type ApprovalView = "pending" | "history" | "all";
 
@@ -100,6 +102,8 @@ const ApprovalsPage = dc(() => {
     const theme = useTheme();
     const router = useRouter();
     const showChecklists = areChecklistsVisible();
+    const asBadgeTone = (tone: ReturnType<typeof statusTone>): BadgeTone =>
+        tone === "error" ? "danger" : tone === "primary" ? "info" : tone;
     const rows = ref<ApprovalRow[]>([]);
     const total = ref(0);
     const selectedApprovals = ref<Record<string, ApprovalRow>>({});
@@ -621,7 +625,7 @@ const ApprovalsPage = dc(() => {
             label: "Domain",
             headerTooltip: "The risk domain that owns this request. A checker may only act inside their authorised domains.",
             value: (row) => row.domain,
-            Value: ({ row }: { row: ApprovalRow }) => <span title={APPROVAL_DOMAIN_HELP[row.domain]}><StatusChip label={row.domain} tone="neutral" size="x-small" /></span>,
+            Value: ({ row }: { row: ApprovalRow }) => <span title={APPROVAL_DOMAIN_HELP[row.domain]}><StatusBadge status={row.domain} label={row.domain} toneOverride="neutral" /></span>,
         },
         {
             key: "state",
@@ -630,7 +634,7 @@ const ApprovalsPage = dc(() => {
             value: (row) => row.state,
             Value: ({ row }: { row: ApprovalRow }) => {
                 const help = APPROVAL_STATE_HELP[row.state];
-                return <span title={help?.meaning}><StatusChip label={help?.label ?? row.state} tone={help?.tone ?? statusTone(row.state)} size="small" /></span>;
+                return <span title={help?.meaning}><StatusBadge status={row.state} label={help?.label ?? row.state} toneOverride={asBadgeTone(help?.tone ?? statusTone(row.state))} /></span>;
             },
         },
         {
@@ -639,10 +643,10 @@ const ApprovalsPage = dc(() => {
             sortKey: "mode",
             value: (row) => row.mode,
             Value: ({ row }: { row: ApprovalRow }) => (
-                <StatusChip
+                <StatusBadge
+                    status={row.mode}
                     label={row.mode === "EMERGENCY_RATIFICATION" ? t("Emergency") : t("Standard")}
-                    tone={row.mode === "EMERGENCY_RATIFICATION" ? "error" : "neutral"}
-                    size="x-small"
+                    toneOverride={row.mode === "EMERGENCY_RATIFICATION" ? "danger" : "neutral"}
                 />
             ),
         },
@@ -664,7 +668,7 @@ const ApprovalsPage = dc(() => {
             headerTooltip: "How long this request has been waiting. Ageing above 24 hours is highlighted; above 72 hours is critical.",
             value: (row) => String(row.ageHours),
             Value: ({ row }: { row: ApprovalRow }) => (
-                <StatusChip label={`${row.ageHours}h`} tone={row.ageHours >= 72 ? "error" : row.ageHours >= 24 ? "warning" : "neutral"} size="x-small" />
+                <StatusBadge status="age" label={`${row.ageHours}h`} toneOverride={row.ageHours >= 72 ? "danger" : row.ageHours >= 24 ? "warning" : "neutral"} />
             ),
         },
         {
@@ -674,7 +678,7 @@ const ApprovalsPage = dc(() => {
             value: (row) => row.expiresAt ?? "",
             Value: ({ row }: { row: ApprovalRow }) => (
                 row.expired
-                    ? <StatusChip label={t("Expired")} tone="error" size="x-small" />
+                    ? <StatusBadge status="Expired" label={t("Expired")} toneOverride="danger" />
                     : <ThemedText style={{ fontSize: "11px", opacity: row.expiresInHours !== null && row.expiresInHours <= 24 ? 1 : 0.7 }}>
                         {row.expiresInHours === null ? t("No expiry") : `${row.expiresInHours}h`}
                     </ThemedText>
@@ -711,41 +715,29 @@ const ApprovalsPage = dc(() => {
                 </VAlert>
 
                 {summary.value && (
-                    <ThemedView style={{ gap: "12px" }}>
-                        <MetricStrip items={summaryItems.value} />
-                        <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Queue health")}</ThemedText>
-                                    <div style={{ flex: 1 }} />
-                                    <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
-                                </ThemedView>
-                                {showChecklists && (
-                                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
-                                        {SUMMARY_EXPORT_CHECKS.map((check) => (
-                                            <VCheckbox
-                                                key={check.key}
-                                                modelValue={summaryExportChecklist.value[check.key] === true}
-                                                onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
-                                                label={t(check.label)}
-                                                density="compact"
-                                                hideDetails
-                                            />
-                                        ))}
-                                        {!summaryExportChecklistComplete.value && (
-                                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
-                                        )}
-                                    </ThemedView>
-                                )}
-                                <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                    {summary.value.byDomain.map((item) => (
-                                        <StatusChip key={item.domain} label={`${item.domain}: ${item.count}`} tone="info" size="x-small" />
-                                    ))}
-                                </ThemedView>
-                            </SurfaceCardText>
-                        </SurfaceCard>
-                    </ThemedView>
+                    <SummaryExportCard
+                        title={t("Queue health")}
+                        metrics={summaryItems.value}
+                        exportLoading={summaryExportLoading.value}
+                        exportDisabled={!summaryExportChecklistComplete.value}
+                        exportLabel={t("Export summary")}
+                        onExport={() => void exportSummary()}
+                    >
+                        <FormChecklist
+                            checks={[...SUMMARY_EXPORT_CHECKS]}
+                            modelValue={summaryExportChecklist.value}
+                            onUpdate:modelValue={(value: Record<string, boolean>) => (summaryExportChecklist.value = value)}
+                            show={showChecklists}
+                            title={t("Summary export checklist")}
+                            complete={summaryExportChecklistComplete.value}
+                            incompleteMessage={t("Complete all summary export checklist items before exporting")}
+                        />
+                        <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                            {summary.value.byDomain.map((item) => (
+                                <StatusBadge key={item.domain} status={item.domain} label={`${item.domain}: ${item.count}`} toneOverride="info" showDot={false} />
+                            ))}
+                        </ThemedView>
+                    </SummaryExportCard>
                 )}
 
                 <SegmentedTabs
@@ -766,9 +758,9 @@ const ApprovalsPage = dc(() => {
                             alignItems: "center",
                             flexWrap: "wrap",
                             padding: "10px 14px",
-                            borderRadius: "12px",
-                            border: "1px solid rgba(100,116,139,0.25)",
-                            background: "rgba(100,116,139,0.06)",
+                            borderRadius: "var(--pg-radius-md)",
+                            border: "1px solid var(--pg-border-subtle)",
+                            background: "var(--pg-bg-surface-subtle)",
                         }}
                     >
                         <ThemedText style={{ fontSize: "13px", fontWeight: 700 }}>{selectedCount.value} {t("selected")}</ThemedText>
@@ -849,43 +841,45 @@ const ApprovalsPage = dc(() => {
                 onUpdate:modelValue={(value: boolean) => (bulkRejectOpen.value = value)}
                 title={t("Reject selected approvals")}
                 size="sm"
+                onSubmit={() => void runBulkReject()}
+                submitLabel={`${t("Reject")} (${selectedCount.value})`}
+                cancelLabel={t("Cancel")}
+                loading={bulkRejectLoading.value}
+                danger
+                errorMessage={bulkRejectError.value ?? ""}
             >
-<VAlert type="warning" variant="tonal">
-                            {t("Each request is validated independently. Requests you made yourself or cannot check will fail and remain selected.")}
-                        </VAlert>
-                        <VTextarea
-                            label={t("Rejection reason")}
-                            modelValue={bulkRejectReason.value}
-                            onUpdate:modelValue={(value: string) => (bulkRejectReason.value = value)}
-                            rows={3}
-                            hint={t("At least 2 characters. Applied to every selected request.")}
-                            persistentHint
-                        />
-                        {showChecklists && (
-                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Bulk rejection checklist")}</ThemedText>
-                                {BULK_REJECT_CHECKS.map((check) => (
-                                    <VCheckbox
-                                        key={check.key}
-                                        modelValue={bulkRejectChecklist.value[check.key] === true}
-                                        onUpdate:modelValue={(value: unknown) => (bulkRejectChecklist.value = { ...bulkRejectChecklist.value, [check.key]: Boolean(value) })}
-                                        label={t(check.label)}
-                                        density="compact"
-                                        hideDetails
-                                    />
-                                ))}
-                                {!bulkRejectChecklistComplete.value && (
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all bulk rejection checklist items before continuing.")}</ThemedText>
-                                )}
-                            </ThemedView>
+                <VAlert type="warning" variant="tonal">
+                    {t("Each request is validated independently. Requests you made yourself or cannot check will fail and remain selected.")}
+                </VAlert>
+                <FormField
+                    label={t("Rejection reason")}
+                    hint={t("At least 2 characters. Applied to every selected request.")}
+                    required
+                >
+                    <VTextarea
+                        modelValue={bulkRejectReason.value}
+                        onUpdate:modelValue={(value: string) => (bulkRejectReason.value = value)}
+                        rows={3}
+                    />
+                </FormField>
+                {showChecklists && (
+                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Bulk rejection checklist")}</ThemedText>
+                        {BULK_REJECT_CHECKS.map((check) => (
+                            <VCheckbox
+                                key={check.key}
+                                modelValue={bulkRejectChecklist.value[check.key] === true}
+                                onUpdate:modelValue={(value: unknown) => (bulkRejectChecklist.value = { ...bulkRejectChecklist.value, [check.key]: Boolean(value) })}
+                                label={t(check.label)}
+                                density="compact"
+                                hideDetails
+                            />
+                        ))}
+                        {!bulkRejectChecklistComplete.value && (
+                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all bulk rejection checklist items before continuing.")}</ThemedText>
                         )}
-                        {bulkRejectError.value && <VAlert type="error" variant="tonal" density="compact">{bulkRejectError.value}</VAlert>}
-                        <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
-                            <VBtn variant="text" onClick={() => (bulkRejectOpen.value = false)}>{t("Cancel")}</VBtn>
-                            <VBtn color="error" loading={bulkRejectLoading.value} disabled={!bulkRejectChecklistComplete.value} onClick={() => void runBulkReject()}>
-                                {t("Reject")} ({selectedCount.value})
-                            </VBtn>
-                        </ThemedView>
+                    </ThemedView>
+                )}
             </FormModal>
 
             <SlideOverDrawer
@@ -907,11 +901,11 @@ const ApprovalsPage = dc(() => {
                                         <MonoRef value={selected.value.subjectId} />
                                     </ThemedView>
                                     <ThemedView style={{ flexDirection: "row", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
-                                        <StatusChip label={APPROVAL_STATE_HELP[selected.value.state]?.label ?? selected.value.state} tone={APPROVAL_STATE_HELP[selected.value.state]?.tone ?? statusTone(selected.value.state)} />
-                                        <StatusChip label={selected.value.domain} tone="neutral" size="small" />
-                                        <StatusChip label={kindLabel(selected.value.kind)} tone="info" size="small" />
-                                        {selected.value.baseVersion !== null && <StatusChip label={`v${selected.value.baseVersion}`} tone="neutral" size="small" />}
-                                        {selected.value.mode === "EMERGENCY_RATIFICATION" && <StatusChip label={t("Emergency")} tone="error" size="small" />}
+                                        <StatusBadge status={selected.value.state} label={APPROVAL_STATE_HELP[selected.value.state]?.label ?? selected.value.state} toneOverride={asBadgeTone(APPROVAL_STATE_HELP[selected.value.state]?.tone ?? statusTone(selected.value.state))} />
+                                        <StatusBadge status={selected.value.domain} label={selected.value.domain} toneOverride="neutral" />
+                                        <StatusBadge status={selected.value.kind} label={kindLabel(selected.value.kind)} toneOverride="info" />
+                                        {selected.value.baseVersion !== null && <StatusBadge status="version" label={`v${selected.value.baseVersion}`} toneOverride="neutral" />}
+                                        {selected.value.mode === "EMERGENCY_RATIFICATION" && <StatusBadge status="Emergency" label={t("Emergency")} toneOverride="danger" />}
                                     </ThemedView>
                                 </ThemedView>
 
@@ -970,7 +964,7 @@ const ApprovalsPage = dc(() => {
                                     {Array.isArray(selected.value.payloadDiff) ? (
                                         <JsonDiffViewer operations={selected.value.payloadDiff as JsonPatchOperation[]} />
                                     ) : (
-                                        <pre style={{ margin: 0, padding: "10px 12px", borderRadius: "8px", background: "rgba(15,23,42,0.06)", fontSize: "11px", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", direction: "ltr", unicodeBidi: "isolate", maxHeight: "320px", overflow: "auto" }}>
+                                        <pre style={{ margin: 0, padding: "10px 12px", borderRadius: "var(--pg-radius-md)", background: "var(--pg-bg-surface-subtle)", fontSize: "11px", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", direction: "ltr", unicodeBidi: "isolate", maxHeight: "320px", overflow: "auto" }}>
                                             {jsonText(selected.value.payloadDiff)}
                                         </pre>
                                     )}
@@ -986,13 +980,14 @@ const ApprovalsPage = dc(() => {
                                     <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                         <ThemedText type="defaultSemiBold">{t("Checker decision")}</ThemedText>
                                         {requiresOutcome.value && (
-                                            <VSelect
-                                                label={t("Dispute outcome")}
-                                                items={["WON", "LOST"]}
-                                                clearable
-                                                modelValue={outcome.value}
-                                                onUpdate:modelValue={(value: string | null) => (outcome.value = (value as "WON" | "LOST" | null) ?? "")}
-                                            />
+                                            <FormField label={t("Dispute outcome")} required>
+                                                <VSelect
+                                                    items={["WON", "LOST"]}
+                                                    clearable
+                                                    modelValue={outcome.value}
+                                                    onUpdate:modelValue={(value: string | null) => (outcome.value = (value as "WON" | "LOST" | null) ?? "")}
+                                                />
+                                            </FormField>
                                         )}
                                         {showChecklists && (
                                             <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
@@ -1012,20 +1007,24 @@ const ApprovalsPage = dc(() => {
                                                 )}
                                             </ThemedView>
                                         )}
-                                        <VTextarea
-                                            modelValue={decisionReason.value}
-                                            onUpdate:modelValue={(value: string) => (decisionReason.value = value)}
+                                        <FormField
                                             label={t("Decision reason")}
                                             hint={t("Required for rejection. A clear reason lets the maker correct the request.")}
-                                            persistentHint
-                                            rows={2}
-                                        />
-                                        <VTextarea
-                                            modelValue={riskAcceptanceNote.value}
-                                            onUpdate:modelValue={(value: string) => (riskAcceptanceNote.value = value)}
-                                            label={t("Risk acceptance note (optional)")}
-                                            rows={2}
-                                        />
+                                            required={canReject.value}
+                                        >
+                                            <VTextarea
+                                                modelValue={decisionReason.value}
+                                                onUpdate:modelValue={(value: string) => (decisionReason.value = value)}
+                                                rows={2}
+                                            />
+                                        </FormField>
+                                        <FormField label={t("Risk acceptance note (optional)")}>
+                                            <VTextarea
+                                                modelValue={riskAcceptanceNote.value}
+                                                onUpdate:modelValue={(value: string) => (riskAcceptanceNote.value = value)}
+                                                rows={2}
+                                            />
+                                        </FormField>
                                         <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
                                             <VBtn
                                                 color="success"

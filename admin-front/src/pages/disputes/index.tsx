@@ -3,12 +3,11 @@ import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VCheckbox, VProgressCircular, VTextarea, VTextField } from "vuetify/components";
+import { VAlert, VBtn, VProgressCircular, VTextarea, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
 import { statusTone } from "@/components/Table/statusTone";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
@@ -22,12 +21,16 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
 import { FormModal } from "@/components/ui/FormModal";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import type { MetricItem } from "@/components/ui/MetricStrip";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { DescriptionList } from "@/components/ui/DescriptionList";
+import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 type Dispute = {
     id: string;
     externalDisputeRef: string;
@@ -95,6 +98,10 @@ const EVIDENCE_CHECKS = [
 const OPEN_STATES = ["OPENED", "EVIDENCE_REQUESTED", "EVIDENCE_SUBMITTED"];
 const RESOLVED_STATES = ["WON", "LOST", "EXPIRED", "WITHDRAWN"];
 
+const badgeTone = (value: string): BadgeTone => {
+    const tone = statusTone(value);
+    return tone === "error" ? "danger" : tone === "primary" ? "info" : tone;
+};
 const formatDateTime = (value: string | null | undefined): string => {
     if (!value) return "—";
     const date = new Date(value);
@@ -128,6 +135,8 @@ const DisputesPage = dc(() => {
     let filterTimer: ReturnType<typeof setTimeout> | undefined;
 
     const detailsOpen = ref(false);
+    const evidenceOpen = ref(false);
+    const actionError = ref("");
     const selected = ref<DisputeDetail | null>(null);
     const detailLoading = ref(false);
     const actionLoading = ref(false);
@@ -254,6 +263,8 @@ const DisputesPage = dc(() => {
         evidenceDocumentUrl.value = "";
         evidenceNotes.value = "";
         evidenceChecklist.value = {};
+        evidenceOpen.value = false;
+        actionError.value = "";
         detailsOpen.value = true;
         detailLoading.value = true;
         try {
@@ -273,6 +284,7 @@ const DisputesPage = dc(() => {
 
     const submitEvidence = async () => {
         if (!selected.value) return;
+        actionError.value = "";
         const evidence: Record<string, unknown> = {};
         if (evidenceReference.value.trim()) evidence.reference = evidenceReference.value.trim();
         if (evidenceDocumentUrl.value.trim()) evidence.documentUrl = evidenceDocumentUrl.value.trim();
@@ -293,9 +305,11 @@ const DisputesPage = dc(() => {
                 checklist: EVIDENCE_CHECKS.filter((check) => evidenceChecklist.value[check.key]).map((check) => check.key),
             });
             showSnackBar({ type: "success", message: t("Evidence submitted") });
+            evidenceOpen.value = false;
             detailsOpen.value = false;
             refreshAll();
         } catch (error) {
+            actionError.value = extractApiErrorMessage(error);
             showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
         } finally {
             actionLoading.value = false;
@@ -374,7 +388,7 @@ const DisputesPage = dc(() => {
             Value: ({ row }: { row: Dispute }) => (
                 <ThemedView style={{ gap: "2px" }}>
                     <ThemedText style={{ fontSize: "12px" }}>{row.merchantName || "—"}</ThemedText>
-                    <ThemedText style={{ fontSize: "10px", opacity: 0.55, direction: "ltr" }}>{row.merchantId ?? ""}</ThemedText>
+                    <MonoRef value={row.merchantId ?? ""} />
                 </ThemedView>
             ),
         },
@@ -386,7 +400,7 @@ const DisputesPage = dc(() => {
             Value: ({ row }: { row: Dispute }) => (
                 <ThemedView style={{ gap: "2px" }}>
                     <MonoRef value={row.attemptReference || row.attemptId} />
-                    {row.attemptStatus && <StatusChip label={row.attemptStatus} tone={statusTone(row.attemptStatus)} size="x-small" />}
+                    {row.attemptStatus && <StatusBadge status={row.attemptStatus} toneOverride={badgeTone(row.attemptStatus)} />}
                 </ThemedView>
             ),
         },
@@ -402,7 +416,7 @@ const DisputesPage = dc(() => {
             label: "Status",
             sortKey: "status",
             value: (row) => row.status,
-            Value: ({ row }: { row: Dispute }) => <StatusChip label={row.status} tone={statusTone(row.status)} size="small" />,
+            Value: ({ row }: { row: Dispute }) => <StatusBadge status={row.status} toneOverride={badgeTone(row.status)} />,
         },
         {
             key: "reason",
@@ -423,7 +437,7 @@ const DisputesPage = dc(() => {
             value: (row) => row.evidenceDueAt ?? "",
             Value: ({ row }: { row: Dispute }) => (
                 row.evidenceOverdue
-                    ? <StatusChip label={t("Overdue")} tone="error" size="x-small" />
+                    ? <StatusBadge status="OVERDUE" label={t("Overdue")} toneOverride="danger" />
                     : <ThemedView style={{ gap: "2px" }}>
                         <ThemedText style={{ fontSize: "11px" }}>{formatDateTime(row.evidenceDueAt)}</ThemedText>
                         {row.evidenceDueInHours !== null && <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{formatHours(row.evidenceDueInHours)}</ThemedText>}
@@ -436,7 +450,7 @@ const DisputesPage = dc(() => {
             headerTooltip: "The chargeback adjustment drafted from this dispute. Money moves only after a checker approves it.",
             value: (row) => row.adjustmentState ?? "",
             Value: ({ row }: { row: Dispute }) => row.adjustmentState
-                ? <StatusChip label={row.adjustmentState} tone={statusTone(row.adjustmentState)} size="x-small" />
+                ? <StatusBadge status={row.adjustmentState} toneOverride={badgeTone(row.adjustmentState)} />
                 : <ThemedText style={{ opacity: 0.55 }}>—</ThemedText>,
         },
         {
@@ -468,39 +482,24 @@ const DisputesPage = dc(() => {
                 </VAlert>
 
                 {summary.value && (
-                    <>
-                        <MetricStrip items={summaryMetrics.value} />
-                        <SurfaceCard title={t("Dispute health")}>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end" }}>
-                                    <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
-                                </ThemedView>
-                                {showChecklists && (
-                                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
-                                        {SUMMARY_EXPORT_CHECKS.map((check) => (
-                                            <VCheckbox
-                                                key={check.key}
-                                                modelValue={summaryExportChecklist.value[check.key] === true}
-                                                onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
-                                                label={t(check.label)}
-                                                density="compact"
-                                                hideDetails
-                                            />
-                                        ))}
-                                        {!summaryExportChecklistComplete.value && (
-                                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
-                                        )}
-                                    </ThemedView>
-                                )}
-                                <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                    {Object.entries(summary.value.byStatus ?? {}).map(([state, count]) => (
-                                        <StatusChip key={state} label={`${state}: ${count}`} tone={statusTone(state)} size="x-small" />
-                                    ))}
-                                </ThemedView>
-                            </SurfaceCardText>
-                        </SurfaceCard>
-                    </>
+                    <SummaryExportCard
+                        title={t("Dispute health")}
+                        metrics={summaryMetrics.value}
+                        checks={[...SUMMARY_EXPORT_CHECKS]}
+                        checklist={summaryExportChecklist.value}
+                        showChecklists={showChecklists}
+                        checklistComplete={summaryExportChecklistComplete.value}
+                        exportLoading={summaryExportLoading.value}
+                        exportDisabled={!summaryExportChecklistComplete.value}
+                        exportLabel={t("Export summary")}
+                        onExport={() => void exportSummary()}
+                    >
+                        <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                            {Object.entries(summary.value.byStatus ?? {}).map(([state, count]) => (
+                                <StatusBadge key={state} status={state} label={`${state}: ${count}`} toneOverride={badgeTone(state)} />
+                            ))}
+                        </ThemedView>
+                    </SummaryExportCard>
                 )}
 
                 <SegmentedTabs
@@ -572,137 +571,133 @@ const DisputesPage = dc(() => {
                 />
             </ThemedView>
 
-            <FormModal
+            <SlideOverDrawer
                 modelValue={detailsOpen.value}
                 onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)}
                 title={selected.value?.externalDisputeRef ?? t("Dispute")}
-                size="lg"
+                subtitle={selected.value ? selected.value.source : ""}
+                width={660}
+                v-slots={{
+                    footer: () => (
+                        <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
+                            {selected.value?.canSubmitEvidence && (
+                                <VBtn color="primary" onClick={() => { actionError.value = ""; evidenceOpen.value = true; }}>{t("Submit evidence")}</VBtn>
+                            )}
+                            <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
+                        </ThemedView>
+                    ),
+                }}
             >
-{detailLoading.value || !selected.value ? (
-                            <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "300px", gap: "12px" }}>
-                                <VProgressCircular indeterminate size={52} color="primary" />
-                                <ThemedText style={{ opacity: 0.65 }}>{t("Loading dispute")}</ThemedText>
+                {detailLoading.value || !selected.value ? (
+                    <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "300px", gap: "12px" }}>
+                        <VProgressCircular indeterminate size={52} color="primary" />
+                        <ThemedText style={{ opacity: 0.65 }}>{t("Loading dispute")}</ThemedText>
+                    </ThemedView>
+                ) : (
+                    <>
+                        <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap", marginBottom: "16px" }}>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                <MoneyDisplay amount={selected.value.amount} currency={selected.value.currency} colorSign />
+                                <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{selected.value.source}</ThemedText>
                             </ThemedView>
-                        ) : (
-                            <>
-                                <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
-                                    <ThemedView style={{ gap: "4px" }}>
-                                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                            <MoneyDisplay amount={selected.value.amount} currency={selected.value.currency} colorSign />
-                                            <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{selected.value.source}</ThemedText>
-                                        </ThemedView>
-                                    </ThemedView>
-                                    <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
-                                        <StatusChip label={selected.value.status} tone={statusTone(selected.value.status)} />
-                                        {selected.value.evidenceOverdue && <StatusChip label={t("Evidence overdue")} tone="error" size="small" />}
-                                    </ThemedView>
-                                </ThemedView>
+                            <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+                                <StatusBadge status={selected.value.status} toneOverride={badgeTone(selected.value.status)} />
+                                {selected.value.evidenceOverdue && <StatusBadge status="OVERDUE" label={t("Evidence overdue")} toneOverride="danger" />}
+                            </ThemedView>
+                        </ThemedView>
 
-                                {selected.value.evidenceBlockedReason && (
-                                    <VAlert type="warning" variant="tonal">
-                                        {selected.value.evidenceBlockedReason === "EVIDENCE_ALREADY_SUBMITTED"
-                                            ? t("Evidence has already been submitted for this dispute.")
-                                            : selected.value.evidenceBlockedReason === "EVIDENCE_WINDOW_CLOSED"
-                                              ? t("The evidence window has closed.")
-                                              : t("This dispute is not open for evidence submission.")}
-                                    </VAlert>
-                                )}
-
-                                <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "14px" }}>
-                                    <SurfaceCard variant="tonal">
-                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Dispute context")}</ThemedText>
-                                            <DescriptionList items={[
-                                                { label: t("Merchant"), value: selected.value.merchantName || "—" },
-                                                { label: t("Attempt"), value: <MonoRef value={selected.value.attemptReference || selected.value.attemptId} /> },
-                                                { label: t("Attempt status"), value: selected.value.attemptStatus || "—" },
-                                                { label: t("Settled amount"), value: <MoneyDisplay amount={selected.value.attemptSettledAmount} currency={selected.value.currency} size="sm" /> },
-                                                { label: t("Rail"), value: `${selected.value.railCode || "—"} ${selected.value.railName || ""}`.trim() },
-                                                { label: t("Gateway"), value: `${selected.value.gatewayCode || "—"} ${selected.value.gatewayName || ""}`.trim() },
-                                                { label: t("Reason"), value: selected.value.reasonCode || "—" },
-                                                { label: t("Opened"), value: formatDateTime(selected.value.openedAt) },
-                                                { label: t("Evidence due"), value: selected.value.evidenceOverdue ? t("Overdue") : formatDateTime(selected.value.evidenceDueAt) },
-                                                { label: t("Outcome"), value: formatDateTime(selected.value.outcomeAt) },
-                                            ]} />
-                                            {selected.value.merchantId && (
-                                                <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "MerchantDetail", params: { id: selected.value?.merchantId ?? "" } })}>{t("Open merchant")}</VBtn>
-                                            )}
-                                        </SurfaceCardText>
-                                    </SurfaceCard>
-
-                                    <SurfaceCard variant="tonal">
-                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Adjustment and evidence")}</ThemedText>
-                                            <DescriptionList items={[
-                                                { label: t("Adjustment state"), value: selected.value.adjustmentState || "—" },
-                                                { label: t("Adjustment reason"), value: selected.value.adjustmentReason || "—" },
-                                                { label: t("Journal entry"), value: <MonoRef value={selected.value.adjustmentJournalEntryId ?? ""} /> },
-                                                { label: t("Evidence submitted"), value: formatDateTime(selected.value.evidenceSubmittedAt) },
-                                            ]} />
-                                            {selected.value.evidenceJson && (
-                                                <pre style={{ margin: 0, padding: "8px 10px", borderRadius: "8px", background: "rgba(15,23,42,0.06)", fontSize: "10px", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", direction: "ltr", maxHeight: "180px", overflow: "auto" }}>
-                                                    {JSON.stringify(selected.value.evidenceJson, null, 2)}
-                                                </pre>
-                                            )}
-                                        </SurfaceCardText>
-                                    </SurfaceCard>
-                                </ThemedView>
-
-                                {selected.value.canSubmitEvidence && (
-                                    <SurfaceCard variant="tonal">
-                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                                            <ThemedText type="defaultSemiBold">{t("Submit evidence")}</ThemedText>
-                                            <VTextField
-                                                label={t("Evidence reference")}
-                                                modelValue={evidenceReference.value}
-                                                onUpdate:modelValue={(value: string) => (evidenceReference.value = value)}
-                                                placeholder={t("Gateway portal reference or case number")}
-                                            />
-                                            <VTextField
-                                                label={t("Document URL")}
-                                                modelValue={evidenceDocumentUrl.value}
-                                                onUpdate:modelValue={(value: string) => (evidenceDocumentUrl.value = value)}
-                                                placeholder="https://"
-                                            />
-                                            {showChecklists && (
-                                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Evidence checklist")}</ThemedText>
-                                                    {EVIDENCE_CHECKS.map((check) => (
-                                                        <VCheckbox
-                                                            key={check.key}
-                                                            modelValue={evidenceChecklist.value[check.key] === true}
-                                                            onUpdate:modelValue={(value: unknown) => (evidenceChecklist.value = { ...evidenceChecklist.value, [check.key]: Boolean(value) })}
-                                                            label={t(check.label)}
-                                                            density="compact"
-                                                            hideDetails
-                                                        />
-                                                    ))}
-                                                    {!evidenceChecklistComplete.value && (
-                                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all evidence checklist items before submitting")}</ThemedText>
-                                                    )}
-                                                </ThemedView>
-                                            )}
-                                            <VTextarea
-                                                label={t("Evidence notes")}
-                                                modelValue={evidenceNotes.value}
-                                                onUpdate:modelValue={(value: string) => (evidenceNotes.value = value)}
-                                                rows={3}
-                                            />
-                                            <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
-                                                <VBtn color="primary" loading={actionLoading.value} disabled={!evidenceChecklistComplete.value} onClick={() => void submitEvidence()}>{t("Submit evidence")}</VBtn>
-                                                <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
-                                            </ThemedView>
-                                        </SurfaceCardText>
-                                    </SurfaceCard>
-                                )}
-
-                                {!selected.value.canSubmitEvidence && (
-                                    <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                                        <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
-                                    </ThemedView>
-                                )}
-                            </>
+                        {selected.value.evidenceBlockedReason && (
+                            <VAlert type="warning" variant="tonal">
+                                {selected.value.evidenceBlockedReason === "EVIDENCE_ALREADY_SUBMITTED"
+                                    ? t("Evidence has already been submitted for this dispute.")
+                                    : selected.value.evidenceBlockedReason === "EVIDENCE_WINDOW_CLOSED"
+                                      ? t("The evidence window has closed.")
+                                      : t("This dispute is not open for evidence submission.")}
+                            </VAlert>
                         )}
+
+                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "20px" }}>
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Dispute context")}</ThemedText>
+                                <DescriptionList items={[
+                                    { label: t("Merchant"), value: selected.value.merchantName || "—" },
+                                    { label: t("Attempt"), value: <MonoRef value={selected.value.attemptReference || selected.value.attemptId} /> },
+                                    { label: t("Attempt status"), value: selected.value.attemptStatus || "—" },
+                                    { label: t("Settled amount"), value: <MoneyDisplay amount={selected.value.attemptSettledAmount} currency={selected.value.currency} size="sm" /> },
+                                    { label: t("Rail"), value: `${selected.value.railCode || "—"} ${selected.value.railName || ""}`.trim() },
+                                    { label: t("Gateway"), value: `${selected.value.gatewayCode || "—"} ${selected.value.gatewayName || ""}`.trim() },
+                                    { label: t("Reason"), value: selected.value.reasonCode || "—" },
+                                    { label: t("Opened"), value: formatDateTime(selected.value.openedAt) },
+                                    { label: t("Evidence due"), value: selected.value.evidenceOverdue ? t("Overdue") : formatDateTime(selected.value.evidenceDueAt) },
+                                    { label: t("Outcome"), value: formatDateTime(selected.value.outcomeAt) },
+                                ]} />
+                                {selected.value.merchantId && (
+                                    <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "MerchantDetail", params: { id: selected.value?.merchantId ?? "" } })}>{t("Open merchant")}</VBtn>
+                                )}
+                            </ThemedView>
+
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Adjustment and evidence")}</ThemedText>
+                                <DescriptionList items={[
+                                    { label: t("Adjustment state"), value: selected.value.adjustmentState || "—" },
+                                    { label: t("Adjustment reason"), value: selected.value.adjustmentReason || "—" },
+                                    { label: t("Journal entry"), value: <MonoRef value={selected.value.adjustmentJournalEntryId ?? ""} /> },
+                                    { label: t("Evidence submitted"), value: formatDateTime(selected.value.evidenceSubmittedAt) },
+                                ]} />
+                                {selected.value.evidenceJson && (
+                                    <pre style={{ margin: 0, padding: "8px 10px", borderRadius: "var(--pg-radius-sm)", background: "var(--pg-bg-surface-subtle)", border: "1px solid var(--pg-border-subtle)", fontSize: "10px", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", direction: "ltr", maxHeight: "180px", overflow: "auto" }}>
+                                        {JSON.stringify(selected.value.evidenceJson, null, 2)}
+                                    </pre>
+                                )}
+                            </ThemedView>
+                        </ThemedView>
+                    </>
+                )}
+            </SlideOverDrawer>
+
+            <FormModal
+                modelValue={evidenceOpen.value}
+                onUpdate:modelValue={(value: boolean) => (evidenceOpen.value = value)}
+                title={t("Submit evidence")}
+                size="md"
+                loading={actionLoading.value}
+                errorMessage={actionError.value}
+                submitLabel={t("Submit evidence")}
+                cancelLabel={t("Close")}
+                onSubmit={() => void submitEvidence()}
+            >
+                <FormField label={t("Evidence reference")} hint={t("Gateway portal reference or case number")} sensitiveMakerChecker>
+                    <VTextField
+                        modelValue={evidenceReference.value}
+                        onUpdate:modelValue={(value: string) => (evidenceReference.value = value)}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("Document URL")} sensitiveMakerChecker>
+                    <VTextField
+                        modelValue={evidenceDocumentUrl.value}
+                        onUpdate:modelValue={(value: string) => (evidenceDocumentUrl.value = value)}
+                        placeholder="https://"
+                        hideDetails
+                    />
+                </FormField>
+                <FormChecklist
+                    checks={[...EVIDENCE_CHECKS]}
+                    modelValue={evidenceChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (evidenceChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Evidence checklist")}
+                    complete={evidenceChecklistComplete.value}
+                    incompleteMessage={t("Complete all evidence checklist items before submitting")}
+                />
+                <FormField label={t("Evidence notes")} sensitiveMakerChecker>
+                    <VTextarea
+                        modelValue={evidenceNotes.value}
+                        onUpdate:modelValue={(value: string) => (evidenceNotes.value = value)}
+                        rows={3}
+                        hideDetails
+                    />
+                </FormField>
             </FormModal>
         </ScreenContainer>
     );

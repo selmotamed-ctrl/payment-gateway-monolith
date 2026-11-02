@@ -6,7 +6,6 @@ import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
 import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
@@ -15,7 +14,8 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
 import { FormModal } from "@/components/ui/FormModal";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 type TeamMember = {
     id: string;
     name: string;
@@ -53,6 +53,7 @@ const TeamPage = dc(() => {
         authorities: [] as string[],
     });
     const actionLoading = ref(false);
+    const formError = ref("");
 
     const load = async () => {
         loading.value = true;
@@ -75,6 +76,7 @@ const TeamPage = dc(() => {
 
     const openDialog = (member: TeamMember | null) => {
         editing.value = member;
+        formError.value = "";
         form.value = {
             name: member?.name ?? "",
             username: member?.username ?? "",
@@ -93,6 +95,7 @@ const TeamPage = dc(() => {
 
     const save = async () => {
         actionLoading.value = true;
+        formError.value = "";
         try {
             const authoritiesMap: Record<string, boolean> = {};
             for (const authority of form.value.authorities) {
@@ -119,7 +122,9 @@ const TeamPage = dc(() => {
             showSnackBar({ type: "success", message: t("Saved") });
             await load();
         } catch (e) {
-            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+            const message = extractApiErrorMessage(e);
+            formError.value = message;
+            showSnackBar({ type: "error", message });
         } finally {
             actionLoading.value = false;
         }
@@ -144,7 +149,7 @@ const TeamPage = dc(() => {
             key: "status",
             label: "Status",
             Value: ({ row }: { row: TeamMember }) => (
-                <StatusChip label={row.status} tone={row.status === "ACTIVE" ? "success" : "warning"} />
+                <StatusBadge status={row.status} toneOverride={row.status === "ACTIVE" ? "success" : "warning"} />
             ),
         },
         {
@@ -157,6 +162,9 @@ const TeamPage = dc(() => {
             ),
         },
     ];
+
+    const submitDisabled = () =>
+        !editing.value && (!form.value.email.trim() || form.value.password.trim().length < 10);
 
     return () => (
         <ScreenContainer>
@@ -174,21 +182,17 @@ const TeamPage = dc(() => {
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : (
-                    <SurfaceCard>
-                        <SurfaceCardText>
-                            <DataTable
-                                title={t("Team & Roles")}
-                                data={rows.value}
-                                headers={headers}
-                                loading={loading.value}
-                                showNumber={true}
-                                xlsx={false}
-                                noElevation={true}
-                                searchValue={search.value}
-                                setSearchValue={(value) => (search.value = value)}
-                            />
-                        </SurfaceCardText>
-                    </SurfaceCard>
+                    <DataTable
+                        title={t("Team & Roles")}
+                        data={rows.value}
+                        headers={headers}
+                        loading={loading.value}
+                        showNumber={true}
+                        xlsx={false}
+                        noElevation={true}
+                        searchValue={search.value}
+                        setSearchValue={(value) => (search.value = value)}
+                    />
                 )}
             </ThemedView>
 
@@ -197,81 +201,105 @@ const TeamPage = dc(() => {
                 onUpdate:modelValue={(v: any) => (dialogOpen.value = v)}
                 title={editing.value ? t("Edit") : t("Invite Member")}
                 size="md"
+                loading={actionLoading.value}
+                errorMessage={formError.value}
+                onSubmit={() => void save()}
+                v-slots={{
+                    footer: () => (
+                        <>
+                            <VBtn variant="outlined" disabled={actionLoading.value} onClick={() => (dialogOpen.value = false)}>
+                                {t("Cancel")}
+                            </VBtn>
+                            <VBtn
+                                color="primary"
+                                variant="flat"
+                                {...{ type: "submit" }}
+                                loading={actionLoading.value}
+                                disabled={submitDisabled()}
+                            >
+                                {editing.value ? t("Save") : t("Invite Member")}
+                            </VBtn>
+                        </>
+                    ),
+                }}
             >
-<ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
-                            <VTextField
-                                label={t("Full Name")}
-                                modelValue={form.value.name}
-                                onUpdate:modelValue={(v: string) => (form.value.name = v)}
-                                style={{ minWidth: "200px" }}
-                            />
-                            {editing.value ? (
-                                <VSelect
-                                    items={["ACTIVE", "SUSPENDED"]}
-                                    modelValue={form.value.status}
-                                    onUpdate:modelValue={(v: string) => (form.value.status = v)}
-                                    label={t("Status")}
-                                    style={{ minWidth: "180px" }}
-                                />
-                            ) : (
-                                <VTextField
-                                    label={t("Temporary password")}
-                                    type="password"
-                                    hint="at least 10 characters"
-                                    modelValue={form.value.password}
-                                    onUpdate:modelValue={(v: string) => (form.value.password = v)}
-                                    style={{ minWidth: "200px" }}
-                                />
-                            )}
-                            <VTextField
-                                label={t("Email")}
-                                modelValue={form.value.email}
-                                onUpdate:modelValue={(v: string) => (form.value.email = v)}
-                                style={{ minWidth: "200px" }}
-                            />
-                            <VTextField
-                                label={t("Phone")}
-                                modelValue={form.value.phone}
-                                onUpdate:modelValue={(v: string) => (form.value.phone = v)}
-                                style={{ minWidth: "180px" }}
-                            />
+                <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
+                    <FormField label={t("Full Name")} required style={{ minWidth: "200px" }}>
+                        <VTextField
+                            modelValue={form.value.name}
+                            onUpdate:modelValue={(v: string) => (form.value.name = v)}
+                            hideDetails
+                        />
+                    </FormField>
+                    {editing.value ? (
+                        <FormField label={t("Status")} style={{ minWidth: "180px" }}>
                             <VSelect
-                                items={ROLES}
-                                modelValue={form.value.role}
-                                onUpdate:modelValue={(v: string) => (form.value.role = v)}
-                                label={t("Role")}
-                                style={{ minWidth: "220px" }}
+                                items={["ACTIVE", "SUSPENDED"]}
+                                modelValue={form.value.status}
+                                onUpdate:modelValue={(v: string) => (form.value.status = v)}
+                                hideDetails
                             />
-                        </ThemedView>
-                        <VSelect
-                            items={SCOPES.map((scope) => ({ title: scope, value: scope }))}
-                            modelValue={form.value.appScopeIds}
-                            onUpdate:modelValue={(v: string[]) => (form.value.appScopeIds = v)}
-                            label={t("Scopes")}
-                            multiple
-                            chips
-                            closable-chips
-                        />
-                        <VSelect
-                            items={SCOPES.map((scope) => ({ title: `${scope}.*`, value: scope }))}
-                            modelValue={form.value.authorities}
-                            onUpdate:modelValue={(v: string[]) => (form.value.authorities = v)}
-                            label={t("Authorities")}
-                            multiple
-                            chips
-                            closable-chips
-                        />
-                        <VBtn
-                            color="primary"
-                            loading={actionLoading.value}
-                            disabled={
-                                !editing.value &&
-                                (!form.value.email.trim() || form.value.password.trim().length < 10)
-                            }
-                            onClick={() => void save()}
+                        </FormField>
+                    ) : (
+                        <FormField
+                            label={t("Temporary password")}
+                            hint={t("At least 10 characters.")}
+                            required
+                            style={{ minWidth: "200px" }}
                         >
-                            {t("Save")}
-                        </VBtn>
+                            <VTextField
+                                type="password"
+                                modelValue={form.value.password}
+                                onUpdate:modelValue={(v: string) => (form.value.password = v)}
+                                hideDetails
+                            />
+                        </FormField>
+                    )}
+                    <FormField label={t("Email")} required style={{ minWidth: "200px" }}>
+                        <VTextField
+                            modelValue={form.value.email}
+                            onUpdate:modelValue={(v: string) => (form.value.email = v)}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Phone")} style={{ minWidth: "180px" }}>
+                        <VTextField
+                            modelValue={form.value.phone}
+                            onUpdate:modelValue={(v: string) => (form.value.phone = v)}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Role")} required style={{ minWidth: "220px" }}>
+                        <VSelect
+                            items={ROLES}
+                            modelValue={form.value.role}
+                            onUpdate:modelValue={(v: string) => (form.value.role = v)}
+                            hideDetails
+                        />
+                    </FormField>
+                </ThemedView>
+                <FormField label={t("Scopes")}>
+                    <VSelect
+                        items={SCOPES.map((scope) => ({ title: scope, value: scope }))}
+                        modelValue={form.value.appScopeIds}
+                        onUpdate:modelValue={(v: string[]) => (form.value.appScopeIds = v)}
+                        multiple
+                        chips
+                        closable-chips
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("Authorities")}>
+                    <VSelect
+                        items={SCOPES.map((scope) => ({ title: `${scope}.*`, value: scope }))}
+                        modelValue={form.value.authorities}
+                        onUpdate:modelValue={(v: string[]) => (form.value.authorities = v)}
+                        multiple
+                        chips
+                        closable-chips
+                        hideDetails
+                    />
+                </FormField>
             </FormModal>
         </ScreenContainer>
     );

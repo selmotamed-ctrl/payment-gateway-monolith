@@ -1,31 +1,30 @@
 import { Table } from "./Table";
-import TableFilters from "./TableFilters";
+import { EmptyState } from "@/components/ui/EmptyState";
+import TableFilters, { createTableFilterSurface, tableFilterSurfaceKey } from "./TableFilters";
 import { buildFilterQuery, type FilterValues } from "./filters";
-import { rowTone as rowToneFor, statusTone } from "./statusTone";
 import { tableRegistry } from "./tableRegistry";
 import {
     type DataTableProps,
     defaultNumberOfItemsPerPageChoices,
-    type RefreshMethodApiWithoutSkip,
     type RefreshMethodData,
-    type TableHeader as TableHeaderType,
     sortRowsByHeader,
 } from "./types";
-import { ThemedView } from "../ThemedView";
 import { ThemedText } from "../ThemedText";
-import { TableFooter, TableHeader } from "./HeaderFooter";
-import { useDisplay, useLocale, useTheme } from "vuetify";
-import { VBtn, VDivider, VProgressCircular } from "vuetify/components";
-import { computed, defineComponent, onMounted, ref, watch } from "vue";
+import { TableFooter, TableHeader, useTableXlsx } from "./HeaderFooter";
+import { useDisplay, useLocale } from "vuetify";
+import { VBtn, VProgressCircular } from "vuetify/components";
+import { computed, defineComponent, onMounted, provide, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { api } from "@/state/api";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
-import { defaultBoxShadow } from "@/constants/styling";
-import { xlsxUIPipeline, type XlsxHeader } from "@/utils/xlsx";
-import { colors } from "@/plugins/vuetify";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
 
 export const DataTable = defineComponent(
     <T,>(props: DataTableProps<T>) => {
+        const display = useDisplay();
+        const filterSurface = createTableFilterSurface(!display.mobile.value);
+        provide(tableFilterSurfaceKey, filterSurface);
+
         const allData = computed(() => (isServer.value ? serverRows.value : props.data) as T[]);
 
         const sortDirection = ref("asc" as "asc" | "desc");
@@ -51,6 +50,7 @@ export const DataTable = defineComponent(
             }
         };
         const total = ref(props.data.length);
+        const headerTotal = computed(() => (isServer.value ? serverTotal.value : total.value));
         const data = ref<T[]>([]);
         const skip = ref(0);
 
@@ -189,8 +189,6 @@ export const DataTable = defineComponent(
             data.value = _data;
         };
 
-        const display = useDisplay();
-        const isMobile = computed(() => display.mobile.value);
         const reset = () =>
             refresh({
                 nextSkip: 0,
@@ -231,9 +229,6 @@ export const DataTable = defineComponent(
 
         const onSearch = () => reset();
 
-        const currentTheme = useTheme();
-        const theme = computed(() => currentTheme.current.value.colors);
-
         const numberOfPages = computed(() => {
             return numberOfItemsPerPage.value < 1 ? 1 : Math.ceil(Math.abs(total.value / numberOfItemsPerPage.value)) || 1;
         });
@@ -267,66 +262,13 @@ export const DataTable = defineComponent(
 
         const { t } = useLocale();
 
-        const downloadingXlsx = ref(false);
-
-        const translatedHeaders = [] as (XlsxHeader & {
-            originalHeader: TableHeaderType<any>;
-        })[];
-        const translateTableHeadersToXlsxHeader = (
-            headers: TableHeaderType<any>[],
-        ): (XlsxHeader & {
-            originalHeader: TableHeaderType<any>;
-        })[] => {
-            if (translatedHeaders.length) {
-                return translatedHeaders;
-            }
-            for (const th of headers) {
-                if (!th.value) {
-                    continue;
-                }
-                translatedHeaders.push({
-                    key: th.key,
-                    text: typeof th.label == "string" ? t(th.label) : th.key,
-                    type: "string",
-                    required: false,
-                    originalHeader: th,
-                });
-            }
-
-            return translatedHeaders;
-        };
-
-        const downloadXlsx = async () => {
-            if (downloadingXlsx.value || !data.value?.length) {
-                return;
-            }
-            downloadingXlsx.value = true;
-            try {
-                const translatedHeaders = translateTableHeadersToXlsxHeader(props.headers);
-                await xlsxUIPipeline.downloadXlsxFromHeadersAndData({
-                    color: colors.blue.base,
-                    headers: translatedHeaders,
-                    title: props.title,
-                    data: data.value.map((d, index) => {
-                        const item = {} as {
-                            [key: string]: any;
-                        };
-                        for (const header of translatedHeaders) {
-                            item[header.key] = typeof header.originalHeader.value == "function" ? header.originalHeader.value?.(d, index) : "";
-                        }
-                        return item;
-                    }),
-                });
-            } catch (error) {
-                console.error(error);
-            } finally {
-                downloadingXlsx.value = false;
-            }
-        };
+        const { downloadingXlsx, downloadXlsx } = useTableXlsx({
+            headers: () => props.headers,
+            data: () => data.value,
+            title: () => props.title,
+        });
 
         return () => {
-            const isDark = currentTheme.current.value.dark;
-            const colors = currentTheme.current.value.colors;
             if (props.showNumber) {
                 if (props.headers[0]?.key != "__no") {
                     props.headers.unshift({
@@ -346,191 +288,112 @@ export const DataTable = defineComponent(
                     };
                 }
             }
+            const filterControl = filterSurface.hasFilters.value
+                ? {
+                      count: filterSurface.activeCount.value,
+                      open: filterSurface.open.value,
+                      toggle: filterSurface.toggle,
+                  }
+                : undefined;
+
             return (
-                <>
-                    <ThemedView
-                        style={{
-                            flexDirection: "column",
-                            gap: "0",
-                            padding: "0",
-                            backgroundColor: "var(--pg-bg-surface)",
-                            borderRadius: "var(--pg-radius-md)",
-                            boxShadow: props.noElevation ? undefined : "var(--pg-shadow-xs)",
-                            border: "1px solid var(--pg-border-subtle)",
-                            overflow: "hidden",
-                        }}
-                    >
-                        {props.TopSlot ? (
-                            <ThemedView
-                                style={{
-                                    gap: "12px",
-                                }}
-                            >
-                                {props.TopSlot({ refresh, reset, refreshAsIs })}
-                                <VDivider></VDivider>
-                            </ThemedView>
-                        ) : (
-                            <></>
-                        )}
+                <SurfaceCard noPadding class="pg-unified-table">
+                    <TableHeader
+                        loading={!!effectiveLoading.value}
+                        onSearch={onSearch}
+                        onRefresh={refreshAsIs}
+                        searchValue={effectiveSearch.value}
+                        setSearchValue={setSearchValue}
+                        title={props.title}
+                        total={headerTotal.value}
+                        filterControl={filterControl}
+                        xlsx={
+                            (props.xlsx ?? true)
+                                ? {
+                                      disabled: !data.value?.length || props.loading || downloadingXlsx.value,
+                                      handler: downloadXlsx,
+                                      loading: downloadingXlsx.value,
+                                  }
+                                : undefined
+                        }
+                        refresh={refresh}
+                        Icon={props.Icon}
+                        iconName={props.iconName}
+                    ></TableHeader>
 
-                        <TableHeader
-                            loading={!!effectiveLoading.value}
-                            onSearch={onSearch}
-                            searchValue={effectiveSearch.value}
-                            setSearchValue={setSearchValue}
-                            title={props.title}
-                            xlsx={
-                                (props.xlsx ?? true)
-                                    ? {
-                                          disabled: !data.value?.length || props.loading || downloadingXlsx.value,
-                                          handler: downloadXlsx,
-                                          loading: downloadingXlsx.value,
-                                      }
-                                    : undefined
-                            }
+                    {props.TopSlot ? props.TopSlot({ refresh, reset, refreshAsIs }) : null}
+
+                    {server.value?.filters?.length ? (
+                        <TableFilters
+                            filters={server.value.filters}
+                            values={serverFilterValues.value}
+                            total={serverTotal.value}
+                            onChange={(key, value) => {
+                                serverFilterValues.value = { ...serverFilterValues.value, [key]: value };
+                            }}
+                            onClear={() => {
+                                serverFilterValues.value = {};
+                            }}
+                        />
+                    ) : null}
+
+                    {serverError.value ? (
+                        <div class="pg-table-banner pg-table-banner--error" role="alert">
+                            <ThemedText style={{ flex: 1, fontSize: "13px" }}>{serverError.value}</ThemedText>
+                            <VBtn size="small" variant="tonal" color="error" onClick={() => scheduleServerFetch()}>
+                                {t("Retry")}
+                            </VBtn>
+                        </div>
+                    ) : null}
+                    {effectiveLoading.value ? (
+                        <div class="pg-table-loading">
+                            <VProgressCircular indeterminate size={40} color="primary" width={3}></VProgressCircular>
+                        </div>
+                    ) : data.value.length ? (
+                        <Table
+                            {...props}
+                            onSetSort={(_sortBy, _sortDirection) => {
+                                if (isServer.value) {
+                                    serverSortBy.value = _sortBy;
+                                    serverSortDirection.value = _sortDirection;
+                                    return;
+                                }
+                                sortBy.value = _sortBy;
+                                sortDirection.value = _sortDirection;
+                                reset();
+                            }}
+                            sortBy={activeSortBy.value}
+                            sortDirection={activeSortDirection.value}
+                            rowColor={props.rowColor}
+                            refreshAsIs={refreshAsIs}
+                            reset={reset}
+                            skip={skip.value}
+                            pageNumber={currentPage.value}
+                            data={data.value as T[]}
                             refresh={refresh}
-                            Icon={props.Icon}
-                            iconName={props.iconName}
-                        ></TableHeader>
-
-                        {server.value?.filters?.length ? (
-                            <TableFilters
-                                filters={server.value.filters}
-                                values={serverFilterValues.value}
-                                total={serverTotal.value}
-                                onChange={(key, value) => {
-                                    serverFilterValues.value = { ...serverFilterValues.value, [key]: value };
-                                }}
-                                onClear={() => {
-                                    serverFilterValues.value = {};
-                                }}
-                            />
-                        ) : null}
-
-                        {serverError.value ? (
-                            <ThemedView
-                                style={{
-                                    flexDirection: "row",
-                                    alignItems: "center",
-                                    gap: "10px",
-                                    padding: "10px 14px",
-                                    borderRadius: "10px",
-                                    background: "rgba(var(--v-theme-error), 0.08)",
-                                    color: "rgb(var(--v-theme-error))",
-                                }}
-                            >
-                                <ThemedText style={{ flex: 1, fontSize: "13px" }}>{serverError.value}</ThemedText>
-                                <VBtn size="small" variant="tonal" color="error" onClick={() => scheduleServerFetch()}>
-                                    {t("Retry")}
-                                </VBtn>
-                            </ThemedView>
-                        ) : null}
-                        {effectiveLoading.value ? (
-                            <>
-                                <ThemedView
-                                    style={{
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                        width: "100%",
-                                        minHeight: "200px",
-                                        padding: "40px",
-                                    }}
-                                >
-                                    <VProgressCircular indeterminate size={64} color="primary" width={4}></VProgressCircular>
-                                </ThemedView>
-                            </>
-                        ) : data.value.length ? (
-                            <>
-                                <Table
-                                    {...props}
-                                    onSetSort={(_sortBy, _sortDirection) => {
-                                        if (isServer.value) {
-                                            serverSortBy.value = _sortBy;
-                                            serverSortDirection.value = _sortDirection;
-                                            return;
-                                        }
-                                        sortBy.value = _sortBy;
-                                        sortDirection.value = _sortDirection;
-                                        reset();
-                                    }}
-                                    sortBy={activeSortBy.value}
-                                    sortDirection={activeSortDirection.value}
-                                    rowColor={
-                                        isServer.value
-                                            ? (row: T) => theme.value[statusTone(rowToneFor(row as Record<string, unknown>))] ?? theme.value["on-surface-variant"]
-                                            : props.rowColor
-                                    }
-                                    refreshAsIs={refreshAsIs}
-                                    reset={reset}
-                                    skip={skip.value}
-                                    pageNumber={currentPage.value}
-                                    data={data.value as T[]}
-                                    refresh={refresh}
-                                ></Table>
-                            </>
-                        ) : (
-                            <>
-                                <ThemedView
-                                    id="NoData"
-                                    style={{
-                                        padding: "60px 40px",
-                                        borderRadius: "8px",
-                                        borderWidth: "1px",
-                                        borderStyle: "solid",
-                                        borderColor: isDark ? "rgba(255, 255, 255, 0.1)" : "#e2e8f0",
-                                        backgroundColor: isDark ? colors["surface-variant"] : "#f8fafc",
-                                    }}
-                                >
-                                    <ThemedView
-                                        style={{
-                                            alignItems: "center",
-                                            justifyContent: "center",
-                                            flexDirection: "column",
-                                            gap: "12px",
-                                        }}
-                                    >
-                                        <ThemedText
-                                            style={{
-                                                color: colors["on-surface-variant"],
-                                                fontSize: "16px",
-                                                fontWeight: "500",
-                                            }}
-                                        >
-                                            No Data Found
-                                        </ThemedText>
-                                        <ThemedText
-                                            style={{
-                                                color: colors["on-surface-variant"],
-                                                fontSize: "14px",
-                                                opacity: 0.7,
-                                            }}
-                                        >
-                                            There are no items to display
-                                        </ThemedText>
-                                    </ThemedView>
-                                </ThemedView>
-                            </>
-                        )}
-                        <TableFooter
-                            numberOfItemsPerPage={numberOfItemsPerPage.value}
-                            numberOfItemsPerPageChoices={
-                                props.numberOfItemsPerPageChoices === undefined
-                                    ? defaultNumberOfItemsPerPageChoices
-                                    : props.numberOfItemsPerPageChoices || undefined
-                            }
-                            setNumberOfItemsPerPage={props.setNumberOfItemsPerPage}
-                            totalDataLength={total.value}
-                            currentPage={currentPage.value}
-                            goToPage={goToPage}
-                            numberOfPages={numberOfPages.value}
-                            loading={props.loading || false}
-                            hasNext={hasNext.value}
-                            hasPrev={hasPrev.value}
-                            next={next}
-                            prev={prev}
-                        ></TableFooter>
-                    </ThemedView>
-                </>
+                        ></Table>
+                    ) : (
+                        <EmptyState title={t("No Data Found")} description={t("There are no items to display")} icon="mdi-inbox-outline" />
+                    )}
+                    <TableFooter
+                        numberOfItemsPerPage={numberOfItemsPerPage.value}
+                        numberOfItemsPerPageChoices={
+                            props.numberOfItemsPerPageChoices === undefined
+                                ? defaultNumberOfItemsPerPageChoices
+                                : props.numberOfItemsPerPageChoices || undefined
+                        }
+                        setNumberOfItemsPerPage={props.setNumberOfItemsPerPage}
+                        totalDataLength={total.value}
+                        currentPage={currentPage.value}
+                        goToPage={goToPage}
+                        numberOfPages={numberOfPages.value}
+                        loading={props.loading || false}
+                        hasNext={hasNext.value}
+                        hasPrev={hasPrev.value}
+                        next={next}
+                        prev={prev}
+                    ></TableFooter>
+                </SurfaceCard>
             );
         };
     },

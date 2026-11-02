@@ -2,15 +2,16 @@ import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute, useRouter } from "vue-router";
-import { VAlert, VBtn, VDivider } from "vuetify/components";
+import { VBtn } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
-import FieldsSections from "@/components/FieldsSections";
-import type { FieldProps } from "@/components/Field";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import { DescriptionList, type DescriptionItem } from "@/components/ui/DescriptionList";
+import { MonoRef } from "@/components/ui/MonoRef";
 import { statusTone } from "@/components/Table/statusTone";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
@@ -125,14 +126,6 @@ const auditChangeSummary = (entry: AuditRow): string => {
     return keys.map((key) => `${key}: ${auditValue(before[key])} → ${auditValue(after[key])}`).join(" · ");
 };
 
-const field = (text: string, value: unknown, hint?: string, source?: string, copy = false): FieldProps => ({
-    text,
-    value: value === null || value === undefined ? "" : String(value),
-    hint,
-    source,
-    copyOnClick: copy,
-});
-
 const UserDetailPage = dc(() => {
     const { t } = useLocale();
     const route = useRoute();
@@ -171,36 +164,40 @@ const UserDetailPage = dc(() => {
         return value && typeof value === "object" && !Array.isArray(value) ? (value as AcademyProgress) : {};
     });
 
-    const sections = computed(() => {
+    const accountItems = computed<DescriptionItem[]>(() => {
         const entry = user.value;
         if (!entry) return [];
         return [
-            {
-                title: t("Account"),
-                fields: [
-                    field("User ID", entry.id, "Internal user identifier.", "users.id", true),
-                    field("Email", entry.email, "Sign-in identifier.", "users.email", true),
-                    field("Phone", entry.phone, "Optional phone number.", "users.phone", true),
-                    field("Role", entry.role, "Primary role used by route guards.", "users.role"),
-                    field("Status", entry.status, "Account lifecycle state.", "users.status"),
-                    field("Maker", entry.isMaker ? t("Yes") : t("No"), "Allowed to create approval proposals.", "users.is_maker"),
-                    field("Checker", entry.isChecker ? t("Yes") : t("No"), "Allowed to approve proposals.", "users.is_checker"),
-                    field("MFA required", entry.mfaRequired ? t("Yes") : t("No"), "MFA enforcement flag.", "users.mfa_required"),
-                ],
-            },
-            {
-                title: t("Lifecycle"),
-                fields: [
-                    field("Created", formatDateTime(entry.createdAt), "Account creation time.", "users.created_at"),
-                    field("Updated", formatDateTime(entry.updatedAt), "Last account update.", "users.updated_at"),
-                    field("Invited by", entry.invitedById, "Inviting user identifier.", "users.invited_by", true),
-                    field("Invitation expires", formatDateTime(entry.invitationExpiresAt), "Invitation deadline.", "users.invitation_expires_at"),
-                    field("Merchant scope", entry.merchantId, "Empty for internal users.", "users.merchant_id", true),
-                    field("Application scopes", Array.isArray(entry.appScopeIds) ? entry.appScopeIds.join(", ") : "—", "Restricted application access.", "users.app_scope_ids"),
-                ],
-            },
+            { label: t("User ID"), value: <MonoRef value={entry.id} /> },
+            { label: t("Email"), value: entry.email },
+            { label: t("Phone"), value: entry.phone ?? "—" },
+            { label: t("Role"), value: entry.role },
+            { label: t("Status"), value: entry.status },
+            { label: t("Maker"), value: entry.isMaker ? t("Yes") : t("No") },
+            { label: t("Checker"), value: entry.isChecker ? t("Yes") : t("No") },
+            { label: t("MFA required"), value: entry.mfaRequired ? t("Yes") : t("No") },
         ];
     });
+
+    const lifecycleItems = computed<DescriptionItem[]>(() => {
+        const entry = user.value;
+        if (!entry) return [];
+        return [
+            { label: t("Created"), value: formatDateTime(entry.createdAt) },
+            { label: t("Updated"), value: formatDateTime(entry.updatedAt) },
+            { label: t("Invited by"), value: entry.invitedById ? <MonoRef value={entry.invitedById} /> : "—" },
+            { label: t("Invitation expires"), value: formatDateTime(entry.invitationExpiresAt) },
+            { label: t("Merchant scope"), value: entry.merchantId ? <MonoRef value={entry.merchantId} /> : "—" },
+            { label: t("Application scopes"), value: Array.isArray(entry.appScopeIds) ? entry.appScopeIds.join(", ") : "—" },
+        ];
+    });
+
+    const metricItems = computed<MetricItem[]>(() => [
+        { key: "authorities", label: t("Authorities"), value: String(authorityList.value.length) },
+        { key: "approvals", label: t("Approvals"), value: String(approvals.value.length) },
+        { key: "audit", label: t("Audit events"), value: String(auditTrail.value.length) },
+        { key: "academy", label: t("Academy lessons"), value: String(academy.value.completedLessonIds?.length ?? 0) },
+    ]);
 
     return () => (
         <ScreenContainer>
@@ -224,34 +221,22 @@ const UserDetailPage = dc(() => {
                     <>
                         <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                             <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>{user.value.email}</ThemedText>
-                            <StatusChip label={user.value.status} tone={statusTone(user.value.status)} />
-                            <StatusChip label={user.value.role.replaceAll("_", " ")} tone="info" />
-                            {user.value.isMaker && <MetaPill size="small" variant="tonal" color="primary">{t("Maker")}</MetaPill>}
-                            {user.value.isChecker && <MetaPill size="small" variant="tonal" color="secondary">{t("Checker")}</MetaPill>}
+                            <StatusBadge status={user.value.status} toneOverride={statusTone(user.value.status) === "error" ? "danger" : (statusTone(user.value.status) as any)} />
+                            <StatusBadge status={user.value.role} label={user.value.role.replaceAll("_", " ")} toneOverride="info" showDot={false} />
+                            {user.value.isMaker && <StatusBadge status="MAKER" label={t("Maker")} toneOverride="info" showDot={false} />}
+                            {user.value.isChecker && <StatusBadge status="CHECKER" label={t("Checker")} toneOverride="neutral" showDot={false} />}
                         </ThemedView>
 
-                        <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
+                        <MetricStrip items={metricItems.value} />
+
+                        <SurfaceCard>
                             <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Access summary")}</ThemedText>
-                                <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
-                                    {[
-                                        { label: t("Authorities"), value: String(authorityList.value.length) },
-                                        { label: t("Approvals"), value: String(approvals.value.length) },
-                                        { label: t("Audit events"), value: String(auditTrail.value.length) },
-                                        { label: t("Academy lessons"), value: String(academy.value.completedLessonIds?.length ?? 0) },
-                                    ].map((item) => (
-                                        <SurfaceCard key={item.label} variant="tonal">
-                                            <SurfaceCardText style={{ padding: "12px" }}>
-                                                <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
-                                                <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
-                                            </SurfaceCardText>
-                                        </SurfaceCard>
-                                    ))}
-                                </ThemedView>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Account")}</ThemedText>
+                                <DescriptionList columns={2} items={accountItems.value} />
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px", marginTop: "8px" }}>{t("Lifecycle")}</ThemedText>
+                                <DescriptionList columns={2} items={lifecycleItems.value} />
                             </SurfaceCardText>
                         </SurfaceCard>
-
-                        <FieldsSections sections={sections.value} />
 
                         <SurfaceCard>
                             <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
@@ -269,15 +254,15 @@ const UserDetailPage = dc(() => {
                             <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "16px", flex: 1 }}>{t("Recent approvals")}</ThemedText>
-                                    <StatusChip label={`${approvals.value.length}`} tone="neutral" size="x-small" />
+                                    <MetaPill size="x-small" variant="tonal">{approvals.value.length}</MetaPill>
                                 </ThemedView>
                                 {approvals.value.length === 0 && <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("No approval activity.")}</ThemedText>}
                                 {approvals.value.map((approval) => (
-                                    <ThemedView key={approval.id} style={{ gap: "3px", padding: "8px 10px", borderRadius: "8px", border: "1px solid rgba(100,116,139,0.2)" }}>
+                                    <ThemedView key={approval.id} style={{ display: "flex", flexDirection: "column", gap: "3px", padding: "8px 10px", borderRadius: "var(--pg-radius-sm)", border: "1px solid var(--pg-border-subtle)" }}>
                                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-                                            <ThemedText style={{ fontSize: "12px", fontWeight: 700, direction: "ltr" }}>{approval.subjectType}</ThemedText>
-                                            <StatusChip label={approval.state} tone={statusTone(approval.state)} size="x-small" />
-                                            <StatusChip label={approval.mode} tone="neutral" size="x-small" />
+                                            <ThemedText style={{ fontSize: "12px", fontWeight: 600, direction: "ltr" }}>{approval.subjectType}</ThemedText>
+                                            <StatusBadge status={approval.state} toneOverride={statusTone(approval.state) === "error" ? "danger" : (statusTone(approval.state) as any)} showDot={false} />
+                                            <MetaPill size="x-small" variant="tonal">{approval.mode}</MetaPill>
                                             <div style={{ flex: 1 }} />
                                             <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{formatDateTime(approval.createdAt)}</ThemedText>
                                         </ThemedView>
@@ -293,10 +278,10 @@ const UserDetailPage = dc(() => {
                             <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Academy progress")}</ThemedText>
                                 <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                    <StatusChip label={`${academy.value.completedLessonIds?.length ?? 0} ${t("lessons")}`} tone="info" size="x-small" />
-                                    <StatusChip label={`${Object.keys(academy.value.completedLabIds ?? {}).length} ${t("labs")}`} tone="success" size="x-small" />
-                                    <StatusChip label={`${academy.value.earnedBadges?.length ?? 0} ${t("badges")}`} tone="primary" size="x-small" />
-                                    <StatusChip label={`${Object.keys(academy.value.quizScores ?? {}).length} ${t("quizzes")}`} tone="warning" size="x-small" />
+                                    <MetaPill size="x-small" variant="tonal" color="info">{academy.value.completedLessonIds?.length ?? 0} {t("lessons")}</MetaPill>
+                                    <MetaPill size="x-small" variant="tonal" color="success">{Object.keys(academy.value.completedLabIds ?? {}).length} {t("labs")}</MetaPill>
+                                    <MetaPill size="x-small" variant="tonal" color="primary">{academy.value.earnedBadges?.length ?? 0} {t("badges")}</MetaPill>
+                                    <MetaPill size="x-small" variant="tonal" color="warning">{Object.keys(academy.value.quizScores ?? {}).length} {t("quizzes")}</MetaPill>
                                 </ThemedView>
                                 {(academy.value.earnedBadges ?? []).length > 0 && (
                                     <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
@@ -317,16 +302,17 @@ const UserDetailPage = dc(() => {
                                 {auditTrail.value.map((event) => {
                                     const change = auditChangeSummary(event);
                                     return (
-                                        <ThemedView key={event.id} style={{ gap: "3px", padding: "8px 10px", borderRadius: "8px", border: "1px solid rgba(100,116,139,0.2)" }}>
+                                        <ThemedView key={event.id} style={{ display: "flex", flexDirection: "column", gap: "3px", padding: "8px 10px", borderRadius: "var(--pg-radius-sm)", border: "1px solid var(--pg-border-subtle)" }}>
                                             <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-                                                <ThemedText style={{ fontSize: "12px", fontWeight: 700, direction: "ltr" }}>{event.action.replaceAll("_", " ")}</ThemedText>
-                                                <StatusChip label={event.role} tone="info" size="x-small" />
+                                                <ThemedText style={{ fontSize: "12px", fontWeight: 600, direction: "ltr" }}>{event.action.replaceAll("_", " ")}</ThemedText>
+                                                <StatusBadge status={event.role} toneOverride="info" showDot={false} />
                                                 <div style={{ flex: 1 }} />
                                                 <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{formatDateTime(event.createdAt)}</ThemedText>
                                             </ThemedView>
-                                            <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>
-                                                {event.entityType} · {event.entityId}
-                                            </ThemedText>
+                                            <ThemedView style={{ flexDirection: "row", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+                                                <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>{event.entityType}</ThemedText>
+                                                <MonoRef value={event.entityId} truncate={18} />
+                                            </ThemedView>
                                             {change && <ThemedText style={{ fontSize: "11px", opacity: 0.75, direction: "ltr" }}>{change}</ThemedText>}
                                         </ThemedView>
                                     );

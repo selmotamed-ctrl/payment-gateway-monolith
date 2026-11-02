@@ -1,12 +1,12 @@
 import { dc } from "kt-dc";
 
-import { ref, onMounted, onBeforeUnmount } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import ThemedView from "@/components/ThemedView";
-import { VCard, VCardActions, VCardText, VDialog } from "vuetify/components";
 import type { RulesList } from "@/utils/clientValidationRules";
 import { useDisplay, useLocale } from "vuetify";
+import { FormModal } from "@/components/ui/FormModal";
 export type Cords = {
     latitude: string;
     longitude: String;
@@ -29,8 +29,6 @@ const CordsInputMap = dc(
         const { t } = useLocale();
         let map: L.Map | null = null;
         let marker = null as null | L.Marker<any>;
-
-        onMounted(() => {});
 
         onBeforeUnmount(() => {
             if (map) map.remove();
@@ -72,7 +70,6 @@ const CordsInputMap = dc(
 
         const setMapRef = async (r: HTMLElement | null) => {
             if (r) {
-                console.log("Setting map ", r   );
                 if (map) {
                     return;
                 }
@@ -149,7 +146,7 @@ const CordsInputMap = dc(
                 <>
                     <ThemedView
                         style={{
-                            gap: "22px",
+                            gap: "18px",
                             width: "100%",
                             height: "100%",
                         }}
@@ -164,11 +161,7 @@ const CordsInputMap = dc(
                                     setMapRef(r as any);
                                 }}
                                 style={{
-                                    display: "flex",
-                                    flexDirection: "column",
-                                    borderEndStartRadius: "12px",
-                                    borderEndEndRadius: "12px",
-                                    borderRadius: props.fullRounded ? "12px" : undefined,
+                                    borderRadius: props.fullRounded ? "var(--pg-radius-md)" : undefined,
                                     overflow: "hidden",
                                     minHeight: "400px",
                                     height: "100%",
@@ -208,15 +201,6 @@ const CordsInputMap = dc(
                                     props.onClear();
                                 }}
                             />
-                            {props.variant == "dialog" && (
-                                <Button
-                                    label={"Close"}
-                                    variant="text"
-                                    onClick={() => {
-                                        shown.value = false;
-                                    }}
-                                />
-                            )}
                             {props.additionalActions?.()}
                         </ThemedView>
                     </ThemedView>
@@ -226,18 +210,16 @@ const CordsInputMap = dc(
             if (props.variant == "dialog") {
                 return (
                     <>
-                        <VDialog
+                        <FormModal
                             modelValue={shown.value}
-                            onUpdate:modelValue={(v) => {
-                                shown.value = !!v;
+                            onUpdate:modelValue={(value: boolean) => {
+                                shown.value = value;
                             }}
-                            maxWidth={"800px"}
-                            height={"80%"}
+                            title={props.label ? t(props.label) : t("Location")}
+                            size="lg"
                         >
-                            <VCard title={props.label ? t(props.label) : undefined}>
-                                <VCardText class="pa-0">{map}</VCardText>
-                            </VCard>
-                        </VDialog>
+                            {map}
+                        </FormModal>
 
                         <TextField
                             readonly

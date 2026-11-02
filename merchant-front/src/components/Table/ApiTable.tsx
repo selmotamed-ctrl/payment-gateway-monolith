@@ -1,28 +1,28 @@
 import { Table } from "./Table";
-import TableFilters from "./TableFilters";
+import TableFilters, { createTableFilterSurface, tableFilterSurfaceKey } from "./TableFilters";
+import { EmptyState } from "@/components/ui/EmptyState";
 import {
     type ApiTableProps,
     defaultNumberOfItemsPerPageChoices,
     type RefreshMethodApiWithoutSkip,
-    type TableHeader as TableHeaderType,
     sortRowsByHeader,
 } from "./types";
-import { ThemedView } from "../ThemedView";
 import { ThemedText } from "../ThemedText";
-import { TableFooter, TableHeader } from "./HeaderFooter";
+import { TableFooter, TableHeader, useTableXlsx } from "./HeaderFooter";
 import { api } from "@/state/api";
-import { useDisplay, useLocale, useTheme } from "vuetify";
-import { AlertView } from "../AlertView";
-import { VDivider, VProgressCircular } from "vuetify/components";
-import { computed, defineComponent, ref, watch } from "vue";
-import { defaultBoxShadow } from "@/constants/styling";
+import { useDisplay, useLocale } from "vuetify";
+import { VBtn, VProgressCircular } from "vuetify/components";
+import { computed, defineComponent, provide, ref, watch } from "vue";
 import type { JsonValue } from "@/utils/common";
-import { xlsxUIPipeline, type XlsxHeader } from "@/utils/xlsx";
-import { colors } from "@/plugins/vuetify";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
 
 export const ApiTable = defineComponent(
     <T, RawData extends JsonValue = any>(props: ApiTableProps<T>) => {
+        const display = useDisplay();
+        const filterSurface = createTableFilterSurface(!display.mobile.value);
+        provide(tableFilterSurfaceKey, filterSurface);
+
         const sortDirection = ref("asc" as "asc" | "desc");
         const sortBy = ref(null as null | string);
         // A table filters even when the page does not own a search ref.
@@ -134,11 +134,6 @@ export const ApiTable = defineComponent(
                 }) satisfies RefreshMethodApiWithoutSkip,
             );
 
-        const display = useDisplay();
-        const isMobile = computed(() => {
-            return display.mobile.value;
-        });
-
         watch(
             [() => props.numberOfItemsPerPage, () => props.url],
             () => {
@@ -157,8 +152,6 @@ export const ApiTable = defineComponent(
         );
 
         const onSearch = () => reset();
-
-        const currentTheme = useTheme();
 
         const numberOfPages = computed(() => {
             return numberOfItemsPerPage.value < 1 ? 1 : Math.ceil(Math.abs(total.value / numberOfItemsPerPage.value)) || 1;
@@ -207,64 +200,11 @@ export const ApiTable = defineComponent(
             }
         };
 
-        const downloadingXlsx = ref(false);
-
-        const translatedHeaders = [] as (XlsxHeader & {
-            originalHeader: TableHeaderType<any>;
-        })[];
-        const translateTableHeadersToXlsxHeader = (
-            headers: TableHeaderType<any>[],
-        ): (XlsxHeader & {
-            originalHeader: TableHeaderType<any>;
-        })[] => {
-            if (translatedHeaders.length) {
-                return translatedHeaders;
-            }
-            for (const th of headers) {
-                if (!th.value) {
-                    console.log("skipping header", th);
-                    continue;
-                }
-                translatedHeaders.push({
-                    key: th.key,
-                    text: typeof th.label == "string" ? t(th.label) : th.key,
-                    type: "string",
-                    required: false,
-                    originalHeader: th,
-                });
-            }
-
-            return translatedHeaders;
-        };
-
-        const downloadXlsx = async () => {
-            if (downloadingXlsx.value || !data.value?.length) {
-                return;
-            }
-            downloadingXlsx.value = true;
-            try {
-                const translatedHeaders = translateTableHeadersToXlsxHeader(props.headers);
-                await xlsxUIPipeline.downloadXlsxFromHeadersAndData({
-                    color: colors.blue.base,
-                    headers: translatedHeaders,
-                    title: typeof props.title == "function" ? props.title(data) : props.title,
-                    data: data.value.map((d, index) => {
-                        const item = {} as {
-                            [key: string]: any;
-                        };
-                        for (const header of translatedHeaders) {
-                            item[header.key] = typeof header.originalHeader.value == "function" ? header.originalHeader.value?.(d, index) : "";
-                        }
-                        console.log("rendered item", item);
-                        return item;
-                    }),
-                });
-            } catch (error) {
-                console.error(error);
-            } finally {
-                downloadingXlsx.value = false;
-            }
-        };
+        const { downloadingXlsx, downloadXlsx } = useTableXlsx({
+            headers: () => props.headers,
+            data: () => data.value,
+            title: () => title.value,
+        });
 
         onMounted(() => {
             if (props.setRefreshHook) {
@@ -278,8 +218,6 @@ export const ApiTable = defineComponent(
             }
         });
         return () => {
-            const isDark = currentTheme.current.value.dark;
-            const colors = currentTheme.current.value.colors;
             if (props.showNumber) {
                 if (props.headers[0]?.key != "__no") {
                     props.headers.unshift({
@@ -299,22 +237,22 @@ export const ApiTable = defineComponent(
                     };
                 }
             }
+            const filterControl = filterSurface.hasFilters.value
+                ? {
+                      count: filterSurface.activeCount.value,
+                      open: filterSurface.open.value,
+                      toggle: filterSurface.toggle,
+                  }
+                : undefined;
+
             return (
-                <ThemedView
-                    style={{
-                        flexDirection: "column",
-                        gap: "0",
-                        padding: "0",
-                        backgroundColor: "var(--pg-bg-surface)",
-                        borderRadius: "var(--pg-radius-md)",
-                        boxShadow: props.noElevation ? undefined : "var(--pg-shadow-xs)",
-                        border: "1px solid var(--pg-border-subtle)",
-                        overflow: "hidden",
-                    }}
-                >
+                <SurfaceCard noPadding class="pg-unified-table">
                     <TableHeader
                         loading={loading.value}
                         onSearch={onSearch}
+                        onRefresh={refreshAsIs}
+                        total={total.value}
+                        filterControl={filterControl}
                         xlsx={
                             (props.xlsx ?? true)
                                 ? {
@@ -331,18 +269,7 @@ export const ApiTable = defineComponent(
                         Icon={props.Icon}
                         iconName={props.iconName}
                     ></TableHeader>
-                    {props.TopSlot ? (
-                        <ThemedView
-                            style={{
-                                gap: "12px",
-                            }}
-                        >
-                            {props.TopSlot({ loading: loading.value, refresh, reset, refreshAsIs })}
-                            <VDivider></VDivider>
-                        </ThemedView>
-                    ) : (
-                        <></>
-                    )}
+                    {props.TopSlot ? props.TopSlot({ loading: loading.value, refresh, reset, refreshAsIs }) : null}
                     {props.filters?.length ? (
                         <TableFilters
                             filters={props.filters}
@@ -353,94 +280,35 @@ export const ApiTable = defineComponent(
                         />
                     ) : null}
                     {loading.value ? (
-                        <>
-                            <ThemedView
-                                style={{
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    width: "100%",
-                                    minHeight: "200px",
-                                    padding: "40px",
-                                }}
-                            >
-                                <VProgressCircular indeterminate size={64} color="primary" width={4}></VProgressCircular>
-                            </ThemedView>
-                        </>
+                        <div class="pg-table-loading">
+                            <VProgressCircular indeterminate size={40} color="primary" width={3}></VProgressCircular>
+                        </div>
                     ) : errMsg.value ? (
-                        <>
-                            <AlertView
-                                style={{
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    minHeight: "200px",
-                                    flex: "1",
-                                    padding: "40px",
-                                }}
-                                message={errMsg.value}
-                                type="error"
-                            ></AlertView>
-                        </>
+                        <div class="pg-table-banner pg-table-banner--error" role="alert">
+                            <ThemedText style={{ flex: 1, fontSize: "13px" }}>{errMsg.value}</ThemedText>
+                            <VBtn size="small" variant="tonal" color="error" onClick={() => reset()}>
+                                {t("Retry")}
+                            </VBtn>
+                        </div>
                     ) : data.value?.length ? (
-                        <>
-                            <Table
-                                {...props}
-                                onSetSort={(_sortBy, _sortDirection) => {
-                                    sortBy.value = _sortBy;
-                                    sortDirection.value = _sortDirection;
-                                    reset();
-                                }}
-                                sortBy={sortBy.value}
-                                sortDirection={sortDirection.value}
-                                reset={reset}
-                                skip={skip.value}
-                                pageNumber={currentPage.value}
-                                data={data.value as T[]}
-                                refresh={refresh}
-                                refreshAsIs={refreshAsIs}
-                            ></Table>
-                        </>
+                        <Table
+                            {...props}
+                            onSetSort={(_sortBy, _sortDirection) => {
+                                sortBy.value = _sortBy;
+                                sortDirection.value = _sortDirection;
+                                reset();
+                            }}
+                            sortBy={sortBy.value}
+                            sortDirection={sortDirection.value}
+                            reset={reset}
+                            skip={skip.value}
+                            pageNumber={currentPage.value}
+                            data={data.value as T[]}
+                            refresh={refresh}
+                            refreshAsIs={refreshAsIs}
+                        ></Table>
                     ) : (
-                        <>
-                            <ThemedView
-                                id="NoData"
-                                style={{
-                                    padding: "60px 40px",
-                                    borderRadius: "8px",
-                                    borderWidth: "1px",
-                                    borderStyle: "solid",
-                                    borderColor: isDark ? "rgba(255, 255, 255, 0.1)" : "#e2e8f0",
-                                    backgroundColor: isDark ? colors["surface-variant"] : "#f8fafc",
-                                }}
-                            >
-                                <ThemedView
-                                    style={{
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                        flexDirection: "column",
-                                        gap: "12px",
-                                    }}
-                                >
-                                    <ThemedText
-                                        style={{
-                                            color: colors["on-surface-variant"],
-                                            fontSize: "16px",
-                                            fontWeight: "500",
-                                        }}
-                                    >
-                                        {t("No Data Found")}
-                                    </ThemedText>
-                                    <ThemedText
-                                        style={{
-                                            color: colors["on-surface-variant"],
-                                            fontSize: "14px",
-                                            opacity: 0.7,
-                                        }}
-                                    >
-                                        {t("There are no items to display")}
-                                    </ThemedText>
-                                </ThemedView>
-                            </ThemedView>
-                        </>
+                        <EmptyState title={t("No Data Found")} description={t("There are no items to display")} icon="mdi-inbox-outline" />
                     )}
                     <TableFooter
                         numberOfItemsPerPage={props.numberOfItemsPerPage || 10}
@@ -460,7 +328,7 @@ export const ApiTable = defineComponent(
                         next={next}
                         prev={prev}
                     ></TableFooter>
-                </ThemedView>
+                </SurfaceCard>
             );
         };
     },

@@ -1,6 +1,6 @@
 import { dc } from "kt-dc";
-import { computed, ref, watch } from "vue";
-import { RouterView, useRoute, useRouter } from "vue-router";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 import {
     VAppBar,
     VAvatar,
@@ -13,6 +13,7 @@ import {
     VMain,
     VMenu,
     VNavigationDrawer,
+    VProgressLinear,
     VTooltip,
 } from "vuetify/components";
 import { useDisplay, useLocale, useTheme } from "vuetify";
@@ -23,6 +24,11 @@ import { setLocale } from "@/plugins/localization";
 import { showSnackBar } from "@/utils/snackBar";
 import { useSections } from "./sections";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import {
+    GlobalGuideSearchModal,
+    type MerchantGuideSearchEntry,
+} from "@/components/guide/GlobalGuideSearchModal";
+import { ContextualHelpDrawer } from "@/components/guide/ContextualHelpDrawer";
 
 const DefaultLayout = dc(() => {
     const { t, current: locale } = useLocale();
@@ -31,7 +37,14 @@ const DefaultLayout = dc(() => {
     const route = useRoute();
     const router = useRouter();
     const sections = useSections();
+    const guideSearchOpen = ref(false);
+    const helpDrawerOpen = ref(false);
+    const routeLoading = ref(false);
     const collapsedSections = ref<number[]>([]);
+
+    let removeBeforeEach: (() => void) | undefined;
+    let removeAfterEach: (() => void) | undefined;
+    let removeErrorHandler: (() => void) | undefined;
 
     const isSectionCollapsed = (index: number) => collapsedSections.value.includes(index);
 
@@ -41,7 +54,6 @@ const DefaultLayout = dc(() => {
             : [...collapsedSections.value, index];
     };
 
-    // A 280px permanent drawer needs room; below 960px it becomes temporary.
     const isCompact = computed(() => display.smAndDown.value);
     const drawerOpen = ref(!display.smAndDown.value);
 
@@ -52,28 +64,62 @@ const DefaultLayout = dc(() => {
         },
     );
 
-    // A temporary drawer must never survive a navigation.
     watch(
         () => route.fullPath,
         () => {
             if (isCompact.value) {
                 drawerOpen.value = false;
             }
+            void nextTick(() => {
+                const main = document.getElementById("pg-main-content");
+                main?.focus({ preventScroll: true });
+            });
         },
     );
 
-    const isDark = computed(() => theme.current.value.dark);
-    const activeLabel = computed(() => {
-        for (const section of sections.value) {
-            for (const item of section.routes) {
-                if (item.name === route.name) {
-                    return item.label;
+    const navItems = computed(() => sections.value.flatMap((section) => section.routes));
+    const findNavItem = (name: unknown) => navItems.value.find((item) => item.name === String(name ?? ""));
+
+    const activeNavItem = computed(() => {
+        const parentName = route.meta.parentName ? String(route.meta.parentName) : "";
+        if (parentName) {
+            const parent = findNavItem(parentName);
+            if (parent) {
+                return parent;
+            }
+        }
+        const exact = findNavItem(route.name);
+        if (exact) {
+            return exact;
+        }
+        let best: (typeof navItems.value)[number] | undefined;
+        let bestLength = -1;
+        for (const item of navItems.value) {
+            const path = router.resolve({ name: item.name }).path.replace(/\/+$/, "");
+            if (route.path === path || route.path.startsWith(`${path}/`)) {
+                if (path.length > bestLength) {
+                    best = item;
+                    bestLength = path.length;
                 }
             }
+        }
+        return best;
+    });
+
+    const routeTitle = computed(() => {
+        const exact = findNavItem(route.name);
+        if (exact) {
+            return exact.label;
+        }
+        if (route.name === "PosScreen") {
+            return t("POS Screen");
         }
         return "";
     });
 
+    const activeLabel = computed(() => activeNavItem.value?.label ?? "");
+
+    const isDark = computed(() => theme.current.value.dark);
     const displayName = computed(
         () => user.value?.userInfo?.name || user.value?.userInfo?.username || "User",
     );
@@ -81,31 +127,102 @@ const DefaultLayout = dc(() => {
     const initial = computed(() => displayName.value.charAt(0).toUpperCase());
     const isMaker = computed(() => Boolean(user.value?.userInfo?.isMaker));
     const isChecker = computed(() => Boolean(user.value?.userInfo?.isChecker));
+
     const breadcrumbs = computed(() => {
         const list: { label: string; to?: string }[] = [{ label: t("Payment Gateway"), to: "/portal" }];
         const parentName = route.meta.parentName ? String(route.meta.parentName) : "";
         if (parentName) {
-            for (const section of sections.value) {
-                const parent = section.routes.find((item) => item.name === parentName);
-                if (parent) {
-                    list.push({ label: parent.label });
-                    break;
-                }
+            const parent = findNavItem(parentName);
+            if (parent) {
+                list.push({ label: parent.label, to: router.resolve({ name: parent.name }).path });
             }
+        } else if (activeNavItem.value && activeNavItem.value.name !== route.name) {
+            list.push({
+                label: activeNavItem.value.label,
+                to: router.resolve({ name: activeNavItem.value.name }).path,
+            });
         }
-        if (activeLabel.value && list[list.length - 1]?.label !== activeLabel.value) {
-            list.push({ label: activeLabel.value });
+        const current = routeTitle.value || activeLabel.value;
+        if (current && list[list.length - 1]?.label !== current) {
+            list.push({ label: current });
         }
         return list;
     });
 
+    const openGuideSearchEntry = (entry: MerchantGuideSearchEntry) => {
+        guideSearchOpen.value = false;
+        void router.push({ name: entry.routeName, query: { chapter: entry.id } });
+    };
+
+    const openFullGuide = () => {
+        helpDrawerOpen.value = false;
+        const developerRoute = route.name === "DeveloperTokens" || route.name === "MerchantDeveloperGuide";
+        void router.push({ name: developerRoute ? "MerchantDeveloperGuide" : "MerchantGuide" });
+    };
+
+    const onGlobalKeydown = (event: KeyboardEvent) => {
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+            event.preventDefault();
+            guideSearchOpen.value = true;
+        }
+        if (event.key === "Escape") {
+            guideSearchOpen.value = false;
+            helpDrawerOpen.value = false;
+        }
+        const target = event.target as HTMLElement | null;
+        const typing =
+            target?.tagName === "INPUT" ||
+            target?.tagName === "TEXTAREA" ||
+            target?.tagName === "SELECT" ||
+            target?.isContentEditable === true;
+        if (!typing && !event.ctrlKey && !event.metaKey && !event.altKey && event.key === "?") {
+            event.preventDefault();
+            helpDrawerOpen.value = true;
+        }
+    };
+
+    onMounted(() => {
+        window.addEventListener("keydown", onGlobalKeydown);
+        removeBeforeEach = router.beforeEach(() => {
+            routeLoading.value = true;
+            return true;
+        });
+        removeAfterEach = router.afterEach(() => {
+            routeLoading.value = false;
+        });
+        removeErrorHandler = router.onError(() => {
+            routeLoading.value = false;
+        });
+    });
+
+    onBeforeUnmount(() => {
+        window.removeEventListener("keydown", onGlobalKeydown);
+        removeBeforeEach?.();
+        removeAfterEach?.();
+        removeErrorHandler?.();
+    });
+
     return () => (
         <>
+            <a
+                href="#pg-main-content"
+                class="pg-skip-link"
+                onClick={(event: MouseEvent) => {
+                    event.preventDefault();
+                    const main = document.getElementById("pg-main-content");
+                    main?.focus();
+                    main?.scrollIntoView({ block: "start" });
+                }}
+            >
+                {t("Skip to content")}
+            </a>
             <VAppBar flat height={56} color="surface" class="pg-app-bar">
                 <VBtn
                     icon
                     variant="text"
                     aria-label={t("Toggle navigation")}
+                    aria-expanded={drawerOpen.value ? "true" : "false"}
+                    aria-controls="pg-navigation-drawer"
                     onClick={() => (drawerOpen.value = !drawerOpen.value)}
                 >
                     <VIcon icon={drawerOpen.value ? "mdi-menu-open" : "mdi-menu"} />
@@ -113,60 +230,124 @@ const DefaultLayout = dc(() => {
 
                 <div class="pg-app-bar__brand">
                     <img src={LogoSvg} alt="" width={24} height={24} />
-                    <span class="pg-app-bar__title">{activeLabel.value || t("Payment Gateway")}</span>
+                    <span class="pg-app-bar__title">
+                        {routeTitle.value || activeLabel.value || t("Payment Gateway")}
+                    </span>
                 </div>
 
                 <nav class="pg-breadcrumb" aria-label={t("Breadcrumb")}>
                     {breadcrumbs.value.map((crumb, idx) => (
                         <span key={`${crumb.label}-${idx}`} class="pg-breadcrumb__item">
                             {idx > 0 && <span class="pg-breadcrumb__sep">/</span>}
-                            <span>{crumb.label}</span>
+                            {crumb.to ? (
+                                <RouterLink to={crumb.to}>{crumb.label}</RouterLink>
+                            ) : (
+                                <span aria-current={idx === breadcrumbs.value.length - 1 ? "page" : undefined}>
+                                    {crumb.label}
+                                </span>
+                            )}
                         </span>
                     ))}
                 </nav>
 
                 <div class="pg-spacer" />
 
+                <VBtn
+                    icon
+                    variant="text"
+                    size="small"
+                    style={{ width: "32px", height: "32px" }}
+                    aria-label={t("Search guide, rails, cases…")}
+                    onClick={() => (guideSearchOpen.value = true)}
+                >
+                    <VIcon icon="mdi-magnify" />
+                </VBtn>
+
+                <VBtn
+                    variant="text"
+                    size="small"
+                    prependIcon="mdi-help-circle-outline"
+                    class="pg-help-btn"
+                    style={{ height: "32px" }}
+                    aria-label={t("SOP & Help")}
+                    onClick={() => (helpDrawerOpen.value = true)}
+                >
+                    <span class="pg-help-btn__label">{t("SOP & Help")}</span>
+                </VBtn>
+
                 <VTooltip text={isDark.value ? t("Light Mode") : t("Dark Mode")} location="bottom">
                     {{
                         activator: ({ props }: any) => (
-                            <VBtn {...props} icon variant="text" aria-label={t("Toggle theme")} onClick={() => toggleTheme()}>
+                            <VBtn
+                                {...props}
+                                icon
+                                variant="text"
+                                size="small"
+                                style={{ width: "32px", height: "32px" }}
+                                {...{
+                                    "aria-label": t("Toggle theme"),
+                                    "aria-pressed": isDark.value ? "true" : "false",
+                                }}
+                                onClick={() => toggleTheme()}
+                            >
                                 <VIcon icon={isDark.value ? "mdi-weather-sunny" : "mdi-weather-night"} />
                             </VBtn>
                         ),
                     }}
                 </VTooltip>
 
-                <VMenu location="bottom end">
-                    {{
-                        activator: ({ props }: any) => (
-                            <VBtn {...props} icon variant="text" aria-label={t("Language")}>
-                                <VIcon icon="mdi-translate" />
-                            </VBtn>
-                        ),
-                        default: () => (
-                            <VList density="compact" class="pg-menu">
-                                <VListItem
-                                    title="العربية"
-                                    prependIcon="mdi-web"
-                                    active={locale.value === "ar"}
-                                    onClick={() => setLocale("ar")}
-                                />
-                                <VListItem
-                                    title="English"
-                                    prependIcon="mdi-web"
-                                    active={locale.value === "en"}
-                                    onClick={() => setLocale("en")}
-                                />
-                            </VList>
-                        ),
-                    }}
-                </VMenu>
+                <div
+                    role="group"
+                    aria-label={t("Language")}
+                    style={{ display: "inline-flex", alignItems: "center", gap: "2px" }}
+                >
+                    <VBtn
+                        size="small"
+                        variant="text"
+                        style={{
+                            width: "32px",
+                            minWidth: "32px",
+                            height: "32px",
+                            padding: 0,
+                            backgroundColor:
+                                locale.value === "ar" ? "var(--pg-bg-surface-subtle)" : "transparent",
+                        }}
+                        aria-label="العربية"
+                        aria-pressed={locale.value === "ar" ? "true" : "false"}
+                        onClick={() => setLocale("ar")}
+                    >
+                        AR
+                    </VBtn>
+                    <VBtn
+                        size="small"
+                        variant="text"
+                        style={{
+                            width: "32px",
+                            minWidth: "32px",
+                            height: "32px",
+                            padding: 0,
+                            backgroundColor:
+                                locale.value === "en" ? "var(--pg-bg-surface-subtle)" : "transparent",
+                        }}
+                        aria-label="English"
+                        aria-pressed={locale.value === "en" ? "true" : "false"}
+                        onClick={() => setLocale("en")}
+                    >
+                        EN
+                    </VBtn>
+                </div>
 
                 <VMenu location="bottom end">
                     {{
                         activator: ({ props }: any) => (
-                            <VBtn {...props} variant="text" rounded="pill" class="pg-user-btn" aria-label={t("Account")}>
+                            <VBtn
+                                {...props}
+                                variant="text"
+                                rounded="pill"
+                                class="pg-user-btn"
+                                aria-label={t("Account")}
+                                aria-haspopup="menu"
+                            >
                                 <VAvatar size={30} class="pg-avatar">
                                     {initial.value}
                                 </VAvatar>
@@ -174,7 +355,7 @@ const DefaultLayout = dc(() => {
                             </VBtn>
                         ),
                         default: () => (
-                            <VList density="compact" class="pg-menu">
+                            <VList density="compact" class="pg-menu" {...{ role: "menu" }}>
                                 <VListItem
                                     title={displayName.value}
                                     subtitle={role.value}
@@ -184,6 +365,7 @@ const DefaultLayout = dc(() => {
                                 <VListItem
                                     title={t("Logout")}
                                     prependIcon="mdi-logout"
+                                    {...{ role: "menuitem" }}
                                     onClick={() => {
                                         showSnackBar({ type: "primary", message: t("Logout") });
                                         void logout();
@@ -196,6 +378,7 @@ const DefaultLayout = dc(() => {
             </VAppBar>
 
             <VNavigationDrawer
+                {...{ id: "pg-navigation-drawer" }}
                 modelValue={drawerOpen.value}
                 onUpdate:modelValue={(value: boolean) => (drawerOpen.value = value)}
                 permanent={!isCompact.value}
@@ -215,10 +398,10 @@ const DefaultLayout = dc(() => {
                     <StatusBadge status="LIVE" label="LIVE" toneOverride="success" showDot={false} />
                 </div>
                 <div class="pg-drawer__search">
-                    <button type="button" class="pg-search-pill" onClick={() => void router.push({ name: "MerchantGuide" })}>
+                    <button type="button" class="pg-search-pill" onClick={() => (guideSearchOpen.value = true)}>
                         <VIcon icon="mdi-magnify" size={16} />
                         <span class="pg-search-pill__label">{t("Search guide, rails, cases…")}</span>
-                        <span class="pg-search-pill__kbd">?</span>
+                        <span class="pg-search-pill__kbd">Ctrl K</span>
                     </button>
                 </div>
                 <VDivider />
@@ -259,8 +442,11 @@ const DefaultLayout = dc(() => {
                                             prependIcon={item.icon}
                                             title={item.label}
                                             rounded="md"
-                                            class={["pg-nav-item", route.name === item.name ? "pg-keycap-active" : ""]}
-                                            active={route.name === item.name}
+                                            class={[
+                                                "pg-nav-item",
+                                                activeNavItem.value?.name === item.name ? "pg-keycap-active" : "",
+                                            ]}
+                                            active={activeNavItem.value?.name === item.name}
                                         />
                                     ))}
                             </div>
@@ -296,9 +482,30 @@ const DefaultLayout = dc(() => {
                 </div>
             </VNavigationDrawer>
 
-            <VMain class="pg-main">
+            {routeLoading.value && (
+                <div class="pg-route-progress" role="status" aria-live="polite" aria-label={t("Loading")}>
+                    <VProgressLinear indeterminate color="primary" height={3} aria-hidden="true" />
+                </div>
+            )}
+            <VMain
+                class="pg-main"
+                {...{ id: "pg-main-content", tabindex: "-1", "aria-busy": routeLoading.value ? "true" : "false" }}
+            >
                 <RouterView />
             </VMain>
+
+            <GlobalGuideSearchModal
+                modelValue={guideSearchOpen.value}
+                onUpdate:modelValue={(value: boolean) => (guideSearchOpen.value = value)}
+                onSelect={openGuideSearchEntry}
+            />
+
+            <ContextualHelpDrawer
+                modelValue={helpDrawerOpen.value}
+                routeName={String(route.meta.parentName ?? route.name ?? "")}
+                onUpdate:modelValue={(value: boolean) => (helpDrawerOpen.value = value)}
+                onOpenFullGuide={openFullGuide}
+            />
         </>
     );
 });

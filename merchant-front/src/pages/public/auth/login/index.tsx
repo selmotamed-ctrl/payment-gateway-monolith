@@ -110,26 +110,8 @@ const LoginPage = dc(() => {
 
     return () => (
         <AuthLayout>
-            <SurfaceCard>
+            <SurfaceCard title={t("Merchant Portal")} subtitle={t("Sign in to continue")}>
                 <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                        <h1
-                            style={{
-                                margin: 0,
-                                fontSize: "20px",
-                                fontWeight: 600,
-                                lineHeight: 1.3,
-                                color: "var(--pg-ink-primary)",
-                                letterSpacing: "-0.02em",
-                            }}
-                        >
-                            {t("Merchant Portal")}
-                        </h1>
-                        <p style={{ margin: 0, fontSize: "13px", color: "var(--pg-ink-muted)" }}>
-                            {t("Sign in to continue")}
-                        </p>
-                    </div>
-
                     {error.value && (
                         <VAlert type="error" variant="tonal" density="compact">
                             {error.value}

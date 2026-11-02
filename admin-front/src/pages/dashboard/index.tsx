@@ -2,13 +2,14 @@ import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
-import { VBtn, VCheckbox, VIcon, VProgressLinear, VSelect } from "vuetify/components";
+import { VBtn, VCheckbox, VIcon, VProgressLinear } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
+import { EChart } from "@/components/EChart";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -88,6 +89,11 @@ const PERIODS = [
     { title: "90 days", value: "90d" },
 ];
 
+const CHART_TEXT = "#64748b";
+const CHART_GRID = "#e2e8f0";
+const CHART_INDIGO = "#4f46e5";
+const CHART_EMERALD = "#059669";
+
 const formatDuration = (seconds: number): string => {
     if (seconds < 60) return `${formatPlainNumber(seconds)}s`;
     if (seconds < 3600) return `${formatPlainNumber(Math.round(seconds / 60))}m`;
@@ -104,13 +110,6 @@ const formatEventTime = (value: string): string => {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "—";
     return new Intl.DateTimeFormat(undefined, { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
-};
-
-const formatAmount = (value: string | number | null | undefined): string => {
-    if (value === null || value === undefined || value === "") return "—";
-    const number = Number(value);
-    if (!Number.isFinite(number)) return String(value);
-    return `${number.toLocaleString(undefined, { maximumFractionDigits: 4 })} LYD`;
 };
 
 const DashboardPage = dc(() => {
@@ -319,6 +318,58 @@ const DashboardPage = dc(() => {
             })),
     );
 
+    const attemptChartOption = () => ({
+        color: [CHART_INDIGO],
+        tooltip: { trigger: "axis" },
+        grid: { left: "6%", right: "4%", top: "10%", bottom: "18%" },
+        xAxis: {
+            type: "category",
+            data: attemptRows.value.map((row) => row.state),
+            axisLabel: { color: CHART_TEXT, fontSize: 10, interval: 0, rotate: attemptRows.value.length > 5 ? 28 : 0 },
+            axisLine: { lineStyle: { color: CHART_GRID } },
+        },
+        yAxis: {
+            type: "value",
+            axisLabel: { color: CHART_TEXT },
+            splitLine: { lineStyle: { color: CHART_GRID } },
+        },
+        series: [
+            {
+                name: t("Attempts"),
+                type: "bar",
+                data: attemptRows.value.map((row) => row.count),
+                barMaxWidth: 28,
+                itemStyle: { color: CHART_INDIGO, borderRadius: [4, 4, 0, 0] },
+            },
+        ],
+    });
+
+    const volumeChartOption = () => ({
+        color: [CHART_EMERALD],
+        tooltip: { trigger: "axis" },
+        grid: { left: "8%", right: "4%", top: "10%", bottom: "18%" },
+        xAxis: {
+            type: "category",
+            data: attemptRows.value.map((row) => row.state),
+            axisLabel: { color: CHART_TEXT, fontSize: 10, interval: 0, rotate: attemptRows.value.length > 5 ? 28 : 0 },
+            axisLine: { lineStyle: { color: CHART_GRID } },
+        },
+        yAxis: {
+            type: "value",
+            axisLabel: { color: CHART_TEXT },
+            splitLine: { lineStyle: { color: CHART_GRID } },
+        },
+        series: [
+            {
+                name: t("Volume"),
+                type: "bar",
+                data: attemptRows.value.map((row) => Number(row.amount)),
+                barMaxWidth: 28,
+                itemStyle: { color: CHART_EMERALD, borderRadius: [4, 4, 0, 0] },
+            },
+        ],
+    });
+
     const queueAgeing = computed(() => overview.value?.approvalQueueAgeing ?? []);
 
     const queueLinks = [
@@ -330,7 +381,7 @@ const DashboardPage = dc(() => {
         { title: t("Merchants"), subtitle: `${formatPlainNumber(overview.value?.merchantsActive ?? 0)} ${t("active")} · ${formatPlainNumber(overview.value?.merchantsPending ?? 0)} ${t("pending")}`, icon: "mdi-storefront-outline", route: "Merchants" },
     ];
 
-    const routeTone = (state: string) => (state === "OPEN_BREAKER" ? "error" as const : state === "DEGRADED" ? "warning" as const : "success" as const);
+    const routeTone = (state: string) => (state === "OPEN_BREAKER" ? "danger" as const : state === "DEGRADED" ? "warning" as const : "success" as const);
 
     return () => (
         <ScreenContainer>
@@ -379,37 +430,61 @@ const DashboardPage = dc(() => {
 
                         <MetricStrip items={metricItems.value} loading={loading.value} />
 
-                        <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "18px" }}>
-                            <SurfaceCard style={{ flex: "1 1 420px" }}>
-                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                                    <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
-                                        <ThemedView style={{ gap: "3px" }}>
-                                            <ThemedText type="defaultSemiBold">{t("Attempts by state")}</ThemedText>
-                                            <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{t("Payment attempts created in the selected period")}</ThemedText>
-                                        </ThemedView>
-                                        <StatusChip label={`${formatPlainNumber(attemptsTotal.value)} ${t("attempts")}`} tone="neutral" size="small" />
-                                    </ThemedView>
-                                    {loading.value ? (
-                                        <VProgressLinear indeterminate color="primary" />
-                                    ) : attemptRows.value.length === 0 ? (
-                                        <ThemedText style={{ fontSize: "13px", opacity: 0.6 }}>{t("No Data Found")}</ThemedText>
-                                    ) : (
-                                        attemptRows.value.map((row) => (
-                                            <ThemedView key={row.state} style={{ flexDirection: "column", gap: "4px" }}>
-                                                <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px" }}>
-                                                    <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "7px" }}>
-                                                        <StatusChip label={row.state} tone={row.state === "SUCCEEDED" ? "success" : row.state === "UNKNOWN" ? "error" : "neutral"} size="x-small" />
-                                                        <MoneyDisplay amount={row.amount} currency={"LYD"} size="sm" />
-                                                    </ThemedView>
-                                                    <ThemedText style={{ fontSize: "13px", fontWeight: "700" }}>{formatPlainNumber(row.count)}</ThemedText>
-                                                </ThemedView>
-                                                <VProgressLinear modelValue={row.percent} color={row.state === "UNKNOWN" ? "error" : "primary"} height="6px" rounded />
-                                            </ThemedView>
-                                        ))
-                                    )}
-                                </SurfaceCardText>
+                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "18px" }}>
+                            <SurfaceCard title={t("Attempts By State")} subtitle={t("Payment attempts created in the selected period")}>
+                                {loading.value ? (
+                                    <VProgressLinear indeterminate color="primary" />
+                                ) : attemptRows.value.length === 0 ? (
+                                    <EmptyState title={t("No Data Found")} description={t("No payment attempts were recorded for the selected period.")} />
+                                ) : (
+                                    <EChart option={attemptChartOption()} height="260px" />
+                                )}
                             </SurfaceCard>
+                            <SurfaceCard title={t("Volume")} subtitle={t("Attempt volume by state")}>
+                                {loading.value ? (
+                                    <VProgressLinear indeterminate color="primary" />
+                                ) : attemptRows.value.length === 0 ? (
+                                    <EmptyState title={t("No Data Found")} description={t("No payment attempts were recorded for the selected period.")} />
+                                ) : (
+                                    <EChart option={volumeChartOption()} height="260px" />
+                                )}
+                            </SurfaceCard>
+                        </ThemedView>
 
+                        <SurfaceCard title={t("Recent attempts")} subtitle={t("Payment attempts created in the selected period")} noPadding>
+                            {loading.value ? (
+                                <div style={{ padding: "20px" }}>
+                                    <VProgressLinear indeterminate color="primary" />
+                                </div>
+                            ) : attemptRows.value.length === 0 ? (
+                                <EmptyState title={t("No Data Found")} description={t("No payment attempts were recorded for the selected period.")} />
+                            ) : (
+                                <div class="pg-unified-table" style={{ overflowX: "auto" }}>
+                                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                                        <thead>
+                                            <tr>
+                                                <th style={{ textAlign: "start" }}>{t("State")}</th>
+                                                <th style={{ textAlign: "end" }}>{t("Attempts")}</th>
+                                                <th style={{ textAlign: "end" }}>{t("Volume")}</th>
+                                                <th style={{ textAlign: "end" }}>{t("Share")}</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {attemptRows.value.map((row) => (
+                                                <tr key={row.state}>
+                                                    <td><StatusBadge status={row.state} /></td>
+                                                    <td class="pg-tabular" style={{ textAlign: "end" }}>{formatPlainNumber(row.count)}</td>
+                                                    <td style={{ textAlign: "end" }}><MoneyDisplay amount={row.amount} currency="LYD" size="sm" /></td>
+                                                    <td class="pg-tabular" style={{ textAlign: "end" }}>{formatPlainNumber(row.percent, 1)}%</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </SurfaceCard>
+
+                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "18px" }}>
                             <SurfaceCard style={{ flex: "1 1 340px" }}>
                                 <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                                     <ThemedView style={{ gap: "3px" }}>
@@ -422,7 +497,7 @@ const DashboardPage = dc(() => {
                                         { key: "OPEN_BREAKER", label: t("Open breaker"), count: overview.value?.routeHealth?.openBreaker ?? 0 },
                                     ].map((row) => (
                                         <ThemedView key={row.key} style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", alignItems: "center" }}>
-                                            <StatusChip label={row.label} tone={routeTone(row.key)} size="small" />
+                                            <StatusBadge status={row.key} label={row.label} toneOverride={routeTone(row.key)} showDot={false} />
                                             <ThemedText style={{ fontSize: "15px", fontWeight: 700 }}>{formatPlainNumber(row.count)}</ThemedText>
                                         </ThemedView>
                                     ))}
@@ -437,12 +512,12 @@ const DashboardPage = dc(() => {
                                         <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{t("Pending and draft requests by domain")}</ThemedText>
                                     </ThemedView>
                                     {queueAgeing.value.length === 0 ? (
-                                        <ThemedText style={{ fontSize: "13px", opacity: 0.6 }}>{t("No Data Found")}</ThemedText>
+                                        <EmptyState title={t("No Data Found")} description={t("No approval queue entries were recorded for the selected period.")} />
                                     ) : (
                                         queueAgeing.value.map((entry) => (
                                             <ThemedView key={entry.domain} style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", alignItems: "center" }}>
                                                 <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "7px" }}>
-                                                    <StatusChip label={entry.domain} tone={entry.oldestHours >= 72 ? "error" : entry.oldestHours >= 24 ? "warning" : "info"} size="x-small" />
+                                                    <StatusBadge status={entry.domain} label={entry.domain} toneOverride={entry.oldestHours >= 72 ? "danger" : entry.oldestHours >= 24 ? "warning" : "info"} showDot={false} />
                                                     <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{formatHours(entry.oldestHours)}</ThemedText>
                                                 </ThemedView>
                                                 <ThemedText style={{ fontSize: "13px", fontWeight: 700 }}>{formatPlainNumber(entry.count)}</ThemedText>
@@ -490,17 +565,35 @@ const DashboardPage = dc(() => {
                                     ) : recentActivity.value.length === 0 ? (
                                         <EmptyState title={t("No activity recorded yet.")} description={t("Privileged actions will appear here as operators work.")} icon="mdi-shield-search" />
                                     ) : (
-                                        recentActivity.value.map((event) => (
-                                            <ThemedView key={event.id} style={{ flexDirection: "row", alignItems: "center", gap: "10px", justifyContent: "space-between", borderBottom: "1px solid rgba(100,116,139,0.14)", paddingBottom: "7px", flexWrap: "wrap" }}>
-                                                <ThemedView style={{ gap: "2px", minWidth: "220px", flex: 1 }}>
-                                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700, direction: "ltr" }}>{event.action}</ThemedText>
-                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{event.actorEmail || t("System")} · {event.entityType}</ThemedText>
-                                                    {event.entityId && <MonoRef value={event.entityId} truncate={14} />}
-                                                </ThemedView>
-                                                <StatusChip label={event.role} tone="neutral" size="x-small" />
-                                                <ThemedText style={{ fontSize: "10px", opacity: 0.55, minWidth: "90px", textAlign: "right" }}>{formatEventTime(event.createdAt)}</ThemedText>
-                                            </ThemedView>
-                                        ))
+                                        <div class="pg-unified-table" style={{ overflowX: "auto" }}>
+                                            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                                                <thead>
+                                                    <tr>
+                                                        <th style={{ textAlign: "start" }}>{t("Action")}</th>
+                                                        <th style={{ textAlign: "start" }}>{t("Actor")}</th>
+                                                        <th style={{ textAlign: "start" }}>{t("Role")}</th>
+                                                        <th style={{ textAlign: "start" }}>{t("Entity")}</th>
+                                                        <th style={{ textAlign: "end" }}>{t("Time")}</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {recentActivity.value.map((event) => (
+                                                        <tr key={event.id}>
+                                                            <td>
+                                                                <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                                                    <span style={{ fontSize: "12px", fontWeight: 700, direction: "ltr" }}>{event.action}</span>
+                                                                    <span style={{ fontSize: "10px", color: "var(--pg-ink-muted)" }}>{event.entityType}</span>
+                                                                </div>
+                                                            </td>
+                                                            <td style={{ fontSize: "12px" }}>{event.actorEmail || t("System")}</td>
+                                                            <td><StatusBadge status={event.role} showDot={false} /></td>
+                                                            <td><MonoRef value={event.entityId || event.id} truncate={14} /></td>
+                                                            <td style={{ textAlign: "end", fontSize: "11px", color: "var(--pg-ink-muted)" }}>{formatEventTime(event.createdAt)}</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
                                     )}
                                 </SurfaceCardText>
                             </SurfaceCard>

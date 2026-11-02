@@ -8,9 +8,6 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
-import FieldsSections from "@/components/FieldsSections";
-import type { FieldProps } from "@/components/Field";
 import { statusTone } from "@/components/Table/statusTone";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
@@ -33,21 +30,23 @@ import KybReviewDialog from "./components/KybReviewDialog";
 import KybActionDialog, { type KybActionMode } from "./components/KybActionDialog";
 
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { DescriptionList } from "@/components/ui/DescriptionList";
+import { DescriptionList, type DescriptionItem } from "@/components/ui/DescriptionList";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { EmptyState } from "@/components/ui/EmptyState";
-import type { BadgeTone } from "@/components/ui/StatusBadge";
+import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 const parse = (payload: unknown): KybDocumentDetail => {
     const source = (payload ?? {}) as Record<string, unknown>;
     return (source.kybDocument ?? source) as KybDocumentDetail;
 };
 
-const field = (text: string, value: unknown, hint?: string, source?: string, copy = false): FieldProps => ({
-    text,
-    value: value === null || value === undefined ? "" : String(value),
-    hint,
-    source,
-    copyOnClick: copy,
+const detailItem = (label: string, value: unknown, _hint?: string, _source?: string, mono = false): DescriptionItem => ({
+    label,
+    value:
+        value === null || value === undefined || value === ""
+            ? "—"
+            : mono
+              ? <MonoRef value={String(value)} />
+              : String(value),
 });
 
 const auditValue = (value: unknown): string => {
@@ -126,74 +125,74 @@ const KybReviewDetailPage = dc(() => {
             {
                 title: t("Document identity"),
                 description: COLUMN_HELP.documentType,
-                fields: [
-                    field("Document ID", entry.id, "The KYB document database identifier.", "kyb_documents.id", true),
-                    field("Document type", typeHelp.label, typeHelp.meaning, "kyb_documents.doc_type"),
-                    field("Subject type", entry.subjectType, COLUMN_HELP.subject, "kyb_documents.subject_type"),
-                    field("Subject", entry.subjectName || entry.subjectId, "The merchant or beneficial owner the document belongs to.", "kyb_documents.subject_id"),
-                    field("File name", entry.originalFileName, "Original upload file name.", "kyb_documents.original_file_name"),
-                    field("MIME type", entry.mime, "Stored MIME type after magic-byte validation.", "kyb_documents.mime"),
-                    field("Size", formatBytes(entry.sizeBytes), "Stored file size.", "kyb_documents.size_bytes"),
-                    field("SHA-256", entry.sha256, "Content hash used for duplicate-document detection.", "kyb_documents.sha256", true),
-                    field("Uploaded at", formatDateTime(entry.createdAt), COLUMN_HELP.uploaded, "kyb_documents.created_at"),
-                    field("Uploaded by", entry.uploadedBy?.email, COLUMN_HELP.uploaded, "kyb_documents.uploaded_by"),
+                items: [
+                    detailItem("Document ID", entry.id, "The KYB document database identifier.", "kyb_documents.id", true),
+                    detailItem("Document type", typeHelp.label, typeHelp.meaning, "kyb_documents.doc_type"),
+                    detailItem("Subject type", entry.subjectType, COLUMN_HELP.subject, "kyb_documents.subject_type"),
+                    detailItem("Subject", entry.subjectName || entry.subjectId, "The merchant or beneficial owner the document belongs to.", "kyb_documents.subject_id"),
+                    detailItem("File name", entry.originalFileName, "Original upload file name.", "kyb_documents.original_file_name"),
+                    detailItem("MIME type", entry.mime, "Stored MIME type after magic-byte validation.", "kyb_documents.mime"),
+                    detailItem("Size", formatBytes(entry.sizeBytes), "Stored file size.", "kyb_documents.size_bytes"),
+                    detailItem("SHA-256", entry.sha256, "Content hash used for duplicate-document detection.", "kyb_documents.sha256", true),
+                    detailItem("Uploaded at", formatDateTime(entry.createdAt), COLUMN_HELP.uploaded, "kyb_documents.created_at"),
+                    detailItem("Uploaded by", entry.uploadedBy?.email, COLUMN_HELP.uploaded, "kyb_documents.uploaded_by"),
                 ],
             },
             {
                 title: t("Status and integrity"),
                 description: "A document is only reviewable when it is uploaded, unexpired and the antivirus scan is clean.",
-                fields: [
-                    field("Document status", statusHelp.label, statusHelp.meaning, "kyb_documents.status"),
-                    field("AV scan", avHelp.label, avHelp.meaning, "kyb_documents.av_status"),
-                    field("Expiry state", expiry.label, expiry.meaning, "kyb_documents.expires_on"),
-                    field("Expiry date", formatDateTime(entry.expiresOn), COLUMN_HELP.expiry, "kyb_documents.expires_on"),
-                    field("Days until expiry", entry.daysUntilExpiry, "Negative values mean the document has expired.", "kyb_documents.expires_on"),
-                    field("Content available", entry.contentAvailable ? t("Yes") : t("No"), "Whether encrypted content exists for secure preview.", "kyb_documents.content_ciphertext IS NOT NULL"),
-                    field("Status changed at", formatDateTime(entry.statusChangedAt), "When the document status last changed.", "kyb_documents.status_changed_at"),
-                    field("Expired at", formatDateTime(entry.expiredAt), "When the lifecycle worker marked the document expired.", "kyb_documents.expired_at"),
+                items: [
+                    detailItem("Document status", statusHelp.label, statusHelp.meaning, "kyb_documents.status"),
+                    detailItem("AV scan", avHelp.label, avHelp.meaning, "kyb_documents.av_status"),
+                    detailItem("Expiry state", expiry.label, expiry.meaning, "kyb_documents.expires_on"),
+                    detailItem("Expiry date", formatDateTime(entry.expiresOn), COLUMN_HELP.expiry, "kyb_documents.expires_on"),
+                    detailItem("Days until expiry", entry.daysUntilExpiry, "Negative values mean the document has expired.", "kyb_documents.expires_on"),
+                    detailItem("Content available", entry.contentAvailable ? t("Yes") : t("No"), "Whether encrypted content exists for secure preview.", "kyb_documents.content_ciphertext IS NOT NULL"),
+                    detailItem("Status changed at", formatDateTime(entry.statusChangedAt), "When the document status last changed.", "kyb_documents.status_changed_at"),
+                    detailItem("Expired at", formatDateTime(entry.expiredAt), "When the lifecycle worker marked the document expired.", "kyb_documents.expired_at"),
                 ],
             },
             {
                 title: t("Merchant"),
-                fields: [
-                    field("Trade name", entry.merchant?.tradeName, "Customer-facing merchant name.", "merchants.tradeName"),
-                    field("Legal name", entry.merchant?.legalName, "Registered legal entity name.", "merchants.legalName", true),
-                    field("Merchant ID", entry.merchantId, "Merchant database identifier.", "merchants.id", true),
-                    field("Merchant status", entry.merchant?.status, "Merchant lifecycle state.", "merchants.status"),
-                    field("KYB status", entry.merchant?.kybStatus, "Merchant KYB state, recomputed from required evidence.", "merchants.kyb_status"),
-                    field("Risk tier", entry.merchant?.riskTier, "Current merchant risk tier.", "merchants.risk_tier"),
-                    field("Business category", entry.merchant?.businessCategory, "Category used by required-document rules.", "merchants.businessCategory"),
-                    field("Country", entry.merchant?.country, "Merchant country code.", "merchants.country"),
-                    field("Contact phone", entry.merchant?.contactPhone, "Merchant contact phone.", "merchants.contactPhone", true),
-                    field("Contact email", entry.merchant?.contactEmail, "Merchant contact email.", "merchants.contactEmail", true),
+                items: [
+                    detailItem("Trade name", entry.merchant?.tradeName, "Customer-facing merchant name.", "merchants.tradeName"),
+                    detailItem("Legal name", entry.merchant?.legalName, "Registered legal entity name.", "merchants.legalName", true),
+                    detailItem("Merchant ID", entry.merchantId, "Merchant database identifier.", "merchants.id", true),
+                    detailItem("Merchant status", entry.merchant?.status, "Merchant lifecycle state.", "merchants.status"),
+                    detailItem("KYB status", entry.merchant?.kybStatus, "Merchant KYB state, recomputed from required evidence.", "merchants.kyb_status"),
+                    detailItem("Risk tier", entry.merchant?.riskTier, "Current merchant risk tier.", "merchants.risk_tier"),
+                    detailItem("Business category", entry.merchant?.businessCategory, "Category used by required-document rules.", "merchants.businessCategory"),
+                    detailItem("Country", entry.merchant?.country, "Merchant country code.", "merchants.country"),
+                    detailItem("Contact phone", entry.merchant?.contactPhone, "Merchant contact phone.", "merchants.contactPhone", true),
+                    detailItem("Contact email", entry.merchant?.contactEmail, "Merchant contact email.", "merchants.contactEmail", true),
                 ],
             },
             {
                 title: t("Join request context"),
-                fields: entry.joinRequest
+                items: entry.joinRequest
                     ? [
-                          field("Join request ID", entry.joinRequest.id, "The onboarding request that owns this document.", "join_requests.id", true),
-                          field("Request status", entry.joinRequest.status, "Current join-request state.", "join_requests.status"),
-                          field("Onboarding channel", entry.joinRequest.onboardingChannel, COLUMN_HELP.request, "join_requests.onboarding_channel"),
-                          field("Proposed risk tier", entry.joinRequest.proposedRiskTier, "Risk tier proposed by the reviewer.", "join_requests.proposed_risk_tier"),
-                          field("SLA due", formatDateTime(entry.joinRequest.slaDueAt), "Onboarding review SLA.", "join_requests.sla_due_at"),
-                          field("SLA paused", entry.joinRequest.slaPausedAt ? t("Yes") : t("No"), "Information requests pause the SLA.", "join_requests.sla_paused_at"),
-                          field("Assignee", entry.joinRequest.assignedReviewer?.email, COLUMN_HELP.request, "join_requests.assigned_reviewer_id"),
+                          detailItem("Join request ID", entry.joinRequest.id, "The onboarding request that owns this document.", "join_requests.id", true),
+                          detailItem("Request status", entry.joinRequest.status, "Current join-request state.", "join_requests.status"),
+                          detailItem("Onboarding channel", entry.joinRequest.onboardingChannel, COLUMN_HELP.request, "join_requests.onboarding_channel"),
+                          detailItem("Proposed risk tier", entry.joinRequest.proposedRiskTier, "Risk tier proposed by the reviewer.", "join_requests.proposed_risk_tier"),
+                          detailItem("SLA due", formatDateTime(entry.joinRequest.slaDueAt), "Onboarding review SLA.", "join_requests.sla_due_at"),
+                          detailItem("SLA paused", entry.joinRequest.slaPausedAt ? t("Yes") : t("No"), "Information requests pause the SLA.", "join_requests.sla_paused_at"),
+                          detailItem("Assignee", entry.joinRequest.assignedReviewer?.email, COLUMN_HELP.request, "join_requests.assigned_reviewer_id"),
                       ]
-                    : [field("Join request", t("No open join request"), "This document belongs to an active merchant or a closed request.")],
+                    : [detailItem("Join request", t("No open join request"), "This document belongs to an active merchant or a closed request.")],
             },
             {
                 title: t("Review evidence"),
-                fields: [
-                    field("Reviewed by", entry.reviewedBy?.email, COLUMN_HELP.reviewed, "kyb_documents.reviewed_by"),
-                    field("Reviewed at", formatDateTime(entry.reviewedAt), COLUMN_HELP.reviewed, "kyb_documents.reviewed_at"),
-                    field("Rejection reason", entry.rejectionReasonCode, "Closed reason code used when the document was rejected.", "kyb_documents.rejection_reason_code"),
-                    field("Review notes", entry.reviewNotes, "Reviewer notes recorded with the decision.", "kyb_documents.review_notes"),
-                    field("Duplicate justification", entry.duplicateJustification, "Required written justification when a duplicate hash is accepted.", "kyb_documents.duplicate_justification"),
-                    field("Duplicate merchants", entry.duplicateMerchantCount, COLUMN_HELP.duplicate, "kyb_documents.sha256"),
+                items: [
+                    detailItem("Reviewed by", entry.reviewedBy?.email, COLUMN_HELP.reviewed, "kyb_documents.reviewed_by"),
+                    detailItem("Reviewed at", formatDateTime(entry.reviewedAt), COLUMN_HELP.reviewed, "kyb_documents.reviewed_at"),
+                    detailItem("Rejection reason", entry.rejectionReasonCode, "Closed reason code used when the document was rejected.", "kyb_documents.rejection_reason_code"),
+                    detailItem("Review notes", entry.reviewNotes, "Reviewer notes recorded with the decision.", "kyb_documents.review_notes"),
+                    detailItem("Duplicate justification", entry.duplicateJustification, "Required written justification when a duplicate hash is accepted.", "kyb_documents.duplicate_justification"),
+                    detailItem("Duplicate merchants", entry.duplicateMerchantCount, COLUMN_HELP.duplicate, "kyb_documents.sha256"),
                 ],
             },
-        ].filter((section) => section.fields.length > 0);
+        ].filter((section) => section.items.length > 0);
     });
 
     const readiness = computed(() => document.value?.readiness ?? null);
@@ -266,17 +265,17 @@ const KybReviewDetailPage = dc(() => {
 
                     <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                         <span title={statusHelp.meaning}>
-                            <StatusChip label={statusHelp.label} tone={statusHelp.tone} />
+                            <StatusBadge status={entry.status} label={statusHelp.label} toneOverride={asBadgeTone(statusHelp.tone)} />
                         </span>
                         <span title={avHelp.meaning}>
-                            <StatusChip label={avHelp.label} tone={avHelp.tone} />
+                            <StatusBadge status={entry.avStatus} label={avHelp.label} toneOverride={asBadgeTone(avHelp.tone)} />
                         </span>
-                        <StatusChip label={expiry.label} tone={expiry.tone} />
+                        <StatusBadge status={entry.expiryState} label={expiry.label} toneOverride={asBadgeTone(expiry.tone)} />
                         {entry.duplicateMerchantCount > 0 && (
-                            <StatusChip label={`${entry.duplicateMerchantCount} duplicate merchants`} tone="warning" />
+                            <StatusBadge status="duplicate" label={`${entry.duplicateMerchantCount} duplicate merchants`} toneOverride="warning" />
                         )}
                         {entry.status === "UPLOADED" && entry.avStatus === "CLEAN" && entry.expiryState !== "EXPIRED" && (
-                            <StatusChip label={t("Actionable")} tone="success" />
+                            <StatusBadge status="Actionable" label={t("Actionable")} toneOverride="success" />
                         )}
                     </ThemedView>
 
@@ -321,13 +320,23 @@ const KybReviewDetailPage = dc(() => {
                         </SurfaceCard>
                     )}
 
-                    <FieldsSections sections={sections.value} />
+                    {sections.value.map((section) => (
+                        <SurfaceCard key={section.title}>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{section.title}</ThemedText>
+                                {("description" in section && section.description) && (
+                                    <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{section.description}</ThemedText>
+                                )}
+                                <DescriptionList columns={2} items={section.items} />
+                            </SurfaceCardText>
+                        </SurfaceCard>
+                    ))}
 
                     <SurfaceCard>
                         <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px", flex: 1 }}>{t("Audit trail")}</ThemedText>
-                                <StatusChip label={`${entry.auditTrail?.length ?? 0} ${t("events")}`} tone="neutral" size="x-small" />
+                                <StatusBadge status="neutral" label={`${entry.auditTrail?.length ?? 0} ${t("events")}`} toneOverride="neutral" showDot={false} />
                             </ThemedView>
                             <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>
                                 {t("Last 100 recorded actions on this document, newest first.")}
@@ -343,17 +352,17 @@ const KybReviewDetailPage = dc(() => {
                                         style={{
                                             gap: "4px",
                                             padding: "10px 12px",
-                                            borderRadius: "10px",
-                                            border: "1px solid rgba(100,116,139,0.2)",
+                                            borderRadius: "var(--pg-radius-lg)",
+                                            border: "1px solid var(--pg-border-subtle)",
                                         }}
                                     >
                                         <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                             <ThemedText style={{ fontSize: "12px", fontWeight: 700, direction: "ltr" }}>
                                                 {event.action.replaceAll("_", " ")}
                                             </ThemedText>
-                                            <StatusChip label={event.role} tone="info" size="x-small" />
+                                            <StatusBadge status={event.role} label={event.role} toneOverride="info" />
                                             {event.approvalRequestId && (
-                                                <StatusChip label={t("Approval linked")} tone="warning" size="x-small" />
+                                                <StatusBadge status="Approval linked" label={t("Approval linked")} toneOverride="warning" />
                                             )}
                                             <div style={{ flex: 1 }} />
                                             <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{formatDateTime(event.createdAt)}</ThemedText>
@@ -400,10 +409,10 @@ const KybReviewDetailPage = dc(() => {
                                                 <ThemedText type="defaultSemiBold">
                                                     {match.merchant.tradeName || match.merchant.legalName}
                                                 </ThemedText>
-                                                <StatusChip label={match.status} tone={statusTone(match.status)} size="x-small" />
-                                                <StatusChip label={match.merchant.kybStatus} tone={statusTone(match.merchant.kybStatus)} size="x-small" />
+                                                <StatusBadge status={match.status} label={match.status} toneOverride={asBadgeTone(statusTone(match.status))} />
+                                                <StatusBadge status={match.merchant.kybStatus} label={match.merchant.kybStatus} toneOverride={asBadgeTone(statusTone(match.merchant.kybStatus))} />
                                                 {match.joinRequest && (
-                                                    <StatusChip label={match.joinRequest.status} tone={statusTone(match.joinRequest.status)} size="x-small" />
+                                                    <StatusBadge status={match.joinRequest.status} label={match.joinRequest.status} toneOverride={asBadgeTone(statusTone(match.joinRequest.status))} />
                                                 )}
                                             </ThemedView>
                                             <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
@@ -438,9 +447,9 @@ const KybReviewDetailPage = dc(() => {
                             <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Join request readiness")}</ThemedText>
                                 <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                    <StatusChip label={readiness.value.ready ? t("Ready") : t("Blocked")} tone={readiness.value.ready ? "success" : "warning"} />
-                                    <StatusChip label={`${t("Owners")} ${readiness.value.ownersTotal}% / ${readiness.value.ownerThreshold}%`} tone={readiness.value.ownersReady ? "success" : "warning"} />
-                                    <StatusChip label={`${t("Screening")}: ${readiness.value.screeningResult ?? "—"}`} tone={readiness.value.screeningBlocked ? "warning" : "success"} />
+                                    <StatusBadge status={readiness.value.ready ? "Ready" : "Blocked"} label={readiness.value.ready ? t("Ready") : t("Blocked")} toneOverride={readiness.value.ready ? "success" : "warning"} />
+                                    <StatusBadge status="owners" label={`${t("Owners")} ${readiness.value.ownersTotal}% / ${readiness.value.ownerThreshold}%`} toneOverride={readiness.value.ownersReady ? "success" : "warning"} />
+                                    <StatusBadge status="screening" label={`${t("Screening")}: ${readiness.value.screeningResult ?? "—"}`} toneOverride={readiness.value.screeningBlocked ? "warning" : "success"} />
                                 </ThemedView>
                                 {readiness.value.blockers.length > 0 && readiness.value.blockers.map((blocker) => (
                                     <ThemedText key={blocker} style={{ fontSize: "13px" }}>• {blockerLabel(blocker)}</ThemedText>
@@ -448,11 +457,11 @@ const KybReviewDetailPage = dc(() => {
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "13px", marginTop: "4px" }}>{t("Required documents")}</ThemedText>
                                 <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
                                     {readiness.value.requiredDocuments.map((required) => (
-                                        <StatusChip
+                                        <StatusBadge
                                             key={required}
+                                            status={required}
                                             label={required}
-                                            tone={readiness.value?.acceptedDocuments.includes(required) ? "success" : "warning"}
-                                            size="x-small"
+                                            toneOverride={readiness.value?.acceptedDocuments.includes(required) ? "success" : "warning"}
                                         />
                                     ))}
                                 </ThemedView>
@@ -478,7 +487,7 @@ const KybReviewDetailPage = dc(() => {
                                     <SurfaceCard key={revalidation.id} variant="tonal">
                                         <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                                                <StatusChip label={revalidation.status} tone={statusTone(revalidation.status)} size="x-small" />
+                                                <StatusBadge status={revalidation.status} label={revalidation.status} toneOverride={asBadgeTone(statusTone(revalidation.status))} />
                                                 <ThemedText style={{ fontSize: "13px", fontWeight: 600 }}>{revalidation.docType}</ThemedText>
                                             </ThemedView>
                                             <ThemedText style={{ fontSize: "12px" }}>{revalidation.message}</ThemedText>

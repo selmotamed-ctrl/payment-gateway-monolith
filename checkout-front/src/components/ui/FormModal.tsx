@@ -1,4 +1,4 @@
-import { defineComponent, type PropType, type VNodeChild } from "vue";
+import { defineComponent, useId, type PropType, type VNodeChild } from "vue";
 import { VBtn, VDialog } from "vuetify/components";
 import { useLocale } from "vuetify";
 
@@ -21,51 +21,18 @@ export const FormModal = defineComponent({
     emits: ["update:modelValue"],
     setup(props, { emit, slots }) {
         const { t } = useLocale();
+        const titleId = useId();
         const close = () => {
             if (!props.loading) emit("update:modelValue", false);
         };
-        return (): VNodeChild => (
-            <VDialog
-                modelValue={props.modelValue}
-                onUpdate:modelValue={(value: boolean) => emit("update:modelValue", value)}
-                maxWidth={WIDTH_MAP[props.size]}
-                persistent={props.loading}
-            >
-                <div
-                    class="pg-form-modal"
-                    style={{
-                        backgroundColor: "var(--pg-bg-surface)",
-                        border: "1px solid var(--pg-border-subtle)",
-                        borderRadius: "var(--pg-radius-lg)",
-                        boxShadow: "var(--pg-shadow-modal)",
-                        overflow: "hidden",
-                        display: "flex",
-                        flexDirection: "column",
-                        maxHeight: "88vh",
-                    }}
-                >
-                    <div
-                        style={{
-                            display: "flex",
-                            alignItems: "flex-start",
-                            justifyContent: "space-between",
-                            gap: "12px",
-                            padding: "16px 20px",
-                            borderBottom: "1px solid var(--pg-border-subtle)",
-                        }}
-                    >
-                        <div>
-                            <h3 style={{ fontSize: "16px", fontWeight: 600, color: "var(--pg-ink-primary)", margin: 0 }}>
-                                {props.title}
-                            </h3>
-                            {props.subtitle && (
-                                <p style={{ fontSize: "12.5px", color: "var(--pg-ink-muted)", margin: "3px 0 0 0" }}>
-                                    {props.subtitle}
-                                </p>
-                            )}
-                        </div>
-                        <VBtn icon="mdi-close" variant="text" size="x-small" onClick={close} aria-label={t("Close")} />
-                    </div>
+        const submit = (event?: Event) => {
+            event?.preventDefault();
+            if (!props.loading) void props.onSubmit?.();
+        };
+
+        return (): VNodeChild => {
+            const body = (
+                <>
                     <div
                         style={{
                             padding: "20px",
@@ -73,6 +40,8 @@ export const FormModal = defineComponent({
                             display: "flex",
                             flexDirection: "column",
                             gap: "16px",
+                            minHeight: 0,
+                            flex: "1 1 auto",
                         }}
                     >
                         {props.errorMessage && (
@@ -92,7 +61,7 @@ export const FormModal = defineComponent({
                         )}
                         {slots.default?.()}
                     </div>
-                    {props.onSubmit && (
+                    {slots.footer ? (
                         <div
                             style={{
                                 padding: "12px 20px",
@@ -102,6 +71,22 @@ export const FormModal = defineComponent({
                                 alignItems: "center",
                                 justifyContent: "flex-end",
                                 gap: "8px",
+                                flex: "0 0 auto",
+                            }}
+                        >
+                            {slots.footer()}
+                        </div>
+                    ) : props.onSubmit ? (
+                        <div
+                            style={{
+                                padding: "12px 20px",
+                                backgroundColor: "var(--pg-bg-surface-subtle)",
+                                borderTop: "1px solid var(--pg-border-subtle)",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "flex-end",
+                                gap: "8px",
+                                flex: "0 0 auto",
                             }}
                         >
                             <VBtn variant="outlined" disabled={props.loading} onClick={close}>
@@ -110,16 +95,83 @@ export const FormModal = defineComponent({
                             <VBtn
                                 color={props.danger ? "error" : "primary"}
                                 variant="flat"
+                                {...{ type: "submit" }}
                                 loading={props.loading}
-                                onClick={() => void props.onSubmit?.()}
+                                disabled={props.loading}
                             >
                                 {props.submitLabel || t("Save Changes")}
                             </VBtn>
                         </div>
-                    )}
-                </div>
-            </VDialog>
-        );
+                    ) : null}
+                </>
+            );
+
+            return (
+                <VDialog
+                    modelValue={props.modelValue}
+                    onUpdate:modelValue={(value: boolean) => emit("update:modelValue", value)}
+                    maxWidth={WIDTH_MAP[props.size]}
+                    persistent={props.loading}
+                    aria-labelledby={titleId}
+                >
+                    <div
+                        class="pg-form-modal"
+                        style={{
+                            backgroundColor: "var(--pg-bg-surface)",
+                            border: "1px solid var(--pg-border-subtle)",
+                            borderRadius: "var(--pg-radius-lg)",
+                            boxShadow: "var(--pg-shadow-modal)",
+                            overflow: "hidden",
+                            display: "flex",
+                            flexDirection: "column",
+                            maxHeight: "88vh",
+                        }}
+                    >
+                        <div
+                            style={{
+                                display: "flex",
+                                alignItems: "flex-start",
+                                justifyContent: "space-between",
+                                gap: "12px",
+                                padding: "16px 20px",
+                                borderBottom: "1px solid var(--pg-border-subtle)",
+                                flex: "0 0 auto",
+                            }}
+                        >
+                            <div>
+                                <h3 id={titleId} style={{ fontSize: "16px", fontWeight: 600, color: "var(--pg-ink-primary)", margin: 0 }}>
+                                    {props.title}
+                                </h3>
+                                {props.subtitle && (
+                                    <p style={{ fontSize: "12.5px", color: "var(--pg-ink-muted)", margin: "3px 0 0 0" }}>
+                                        {props.subtitle}
+                                    </p>
+                                )}
+                            </div>
+                            <VBtn
+                                icon="mdi-close"
+                                variant="text"
+                                size="small"
+                                disabled={props.loading}
+                                onClick={close}
+                                aria-label={t("Close")}
+                                style={{ flex: "0 0 auto" }}
+                            />
+                        </div>
+                        {props.onSubmit ? (
+                            <form
+                                onSubmit={submit}
+                                style={{ display: "flex", flexDirection: "column", minHeight: 0, flex: "1 1 auto" }}
+                            >
+                                {body}
+                            </form>
+                        ) : (
+                            <div style={{ display: "flex", flexDirection: "column", minHeight: 0, flex: "1 1 auto" }}>{body}</div>
+                        )}
+                    </div>
+                </VDialog>
+            );
+        };
     },
 });
 

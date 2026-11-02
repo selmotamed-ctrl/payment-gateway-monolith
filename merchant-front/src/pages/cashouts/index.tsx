@@ -6,17 +6,18 @@ import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
 import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
-import { MoneyText } from "@/components/MoneyText";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
 import { FormModal } from "@/components/ui/FormModal";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
+import { MonoRef } from "@/components/ui/MonoRef";
 type Cashout = {
     id: string;
     state: string;
@@ -44,6 +45,7 @@ const CashoutsPage = dc(() => {
     const accountNumber = ref("");
     const iban = ref("");
     const walletOptions = ref<{ title: string; value: string }[]>([]);
+    const formError = ref("");
 
     const loadWallets = async () => {
         const response = await api.get(urlsMap.options("wallets"), { params: { limit: 100 } });
@@ -76,6 +78,7 @@ const CashoutsPage = dc(() => {
 
     const request = async () => {
         actionLoading.value = true;
+        formError.value = "";
         try {
             await api.post(urlsMap.cashoutsList, {
                 walletId: walletId.value,
@@ -91,7 +94,9 @@ const CashoutsPage = dc(() => {
             showSnackBar({ type: "success", message: t("Request Cash-Out") });
             await load();
         } catch (e) {
-            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+            const message = extractApiErrorMessage(e);
+            formError.value = message;
+            showSnackBar({ type: "error", message });
         } finally {
             actionLoading.value = false;
         }
@@ -103,7 +108,7 @@ const CashoutsPage = dc(() => {
             case "COMPLETE":
                 return "success" as const;
             case "REJECTED":
-                return "error" as const;
+                return "danger" as const;
             case "PROCESSING":
                 return "info" as const;
             default:
@@ -115,14 +120,22 @@ const CashoutsPage = dc(() => {
         {
             key: "state",
             label: "Cash-Out State",
-            Value: ({ row }: { row: Cashout }) => <StatusChip label={row.state} tone={stateTone(row.state)} />,
+            Value: ({ row }: { row: Cashout }) => (
+                <StatusBadge status={row.state} toneOverride={stateTone(row.state)} />
+            ),
         },
         {
             key: "amount",
             label: "Amount",
-            Value: ({ row }: { row: Cashout }) => <MoneyText value={row.amount} currency={row.currency} bold />,
+            Value: ({ row }: { row: Cashout }) => (
+                <MoneyDisplay amount={row.amount} currency={row.currency} size="sm" />
+            ),
         },
-        { key: "walletId", label: "Wallet Balance", value: (row) => row.walletId },
+        {
+            key: "walletId",
+            label: "Wallet",
+            Value: ({ row }: { row: Cashout }) => <MonoRef value={row.walletId} truncate={14} />,
+        },
         { key: "requestedAt", label: "Submitted At", value: (row) => row.requestedAt },
         { key: "processedAt", label: "Processing", value: (row) => row.processedAt ?? "-" },
         { key: "completedAt", label: "Complete", value: (row) => row.completedAt ?? "-" },
@@ -145,6 +158,7 @@ const CashoutsPage = dc(() => {
                                 bankName.value = "";
                                 accountNumber.value = "";
                                 iban.value = "";
+                                formError.value = "";
                                 void loadWallets();
                                 dialogOpen.value = true;
                             }}
@@ -157,21 +171,17 @@ const CashoutsPage = dc(() => {
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : (
-                    <SurfaceCard>
-                        <SurfaceCardText>
-                            <DataTable
-                                title={t("Cash-Outs")}
-                                data={rows.value}
-                                headers={headers}
-                                loading={loading.value}
-                                showNumber={true}
-                                xlsx={false}
-                                noElevation={true}
-                                searchValue={search.value}
-                                setSearchValue={(value) => (search.value = value)}
-                            />
-                        </SurfaceCardText>
-                    </SurfaceCard>
+                    <DataTable
+                        title={t("Cash-Outs")}
+                        data={rows.value}
+                        headers={headers}
+                        loading={loading.value}
+                        showNumber={true}
+                        xlsx={false}
+                        noElevation={true}
+                        searchValue={search.value}
+                        setSearchValue={(value) => (search.value = value)}
+                    />
                 )}
             </ThemedView>
 
@@ -180,48 +190,73 @@ const CashoutsPage = dc(() => {
                 onUpdate:modelValue={(v: any) => (dialogOpen.value = v)}
                 title={t("Request Cash-Out")}
                 size="sm"
+                loading={actionLoading.value}
+                errorMessage={formError.value}
+                onSubmit={() => void request()}
+                v-slots={{
+                    footer: () => (
+                        <>
+                            <VBtn variant="outlined" disabled={actionLoading.value} onClick={() => (dialogOpen.value = false)}>
+                                {t("Cancel")}
+                            </VBtn>
+                            <VBtn
+                                color="primary"
+                                variant="flat"
+                                {...{ type: "submit" }}
+                                disabled={!walletId.value || !amount.value || !bankName.value || !accountNumber.value}
+                                loading={actionLoading.value}
+                            >
+                                {t("Request Cash-Out")}
+                            </VBtn>
+                        </>
+                    ),
+                }}
             >
-<VAutocomplete
-                            label={t("Wallet")}
-                            items={walletOptions.value}
-                            itemTitle="title"
-                            itemValue="value"
-                            modelValue={walletId.value}
-                            onUpdate:modelValue={(v: string) => (walletId.value = v ?? "")}
-                        />
-                        <VTextField
-                            label={t("Amount")}
-                            modelValue={amount.value}
-                            onUpdate:modelValue={(v: string) => (amount.value = v)}
-                        />
-                        <VTextField
-                            label={t("Currency")}
-                            modelValue={currency.value}
-                            onUpdate:modelValue={(v: string) => (currency.value = v.toUpperCase())}
-                        />
-                        <VTextField
-                            label={t("Bank name")}
-                            modelValue={bankName.value}
-                            onUpdate:modelValue={(v: string) => (bankName.value = v)}
-                        />
-                        <VTextField
-                            label={t("Account number")}
-                            modelValue={accountNumber.value}
-                            onUpdate:modelValue={(v: string) => (accountNumber.value = v)}
-                        />
-                        <VTextField
-                            label={t("IBAN (optional)")}
-                            modelValue={iban.value}
-                            onUpdate:modelValue={(v: string) => (iban.value = v)}
-                        />
-                        <VBtn
-                            color="primary"
-                            disabled={!walletId.value || !amount.value || !bankName.value || !accountNumber.value}
-                            loading={actionLoading.value}
-                            onClick={() => void request()}
-                        >
-                            {t("Request Cash-Out")}
-                        </VBtn>
+                <FormField label={t("Wallet")} required>
+                    <VAutocomplete
+                        items={walletOptions.value}
+                        itemTitle="title"
+                        itemValue="value"
+                        modelValue={walletId.value}
+                        onUpdate:modelValue={(v: string) => (walletId.value = v ?? "")}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("Amount")} required>
+                    <VTextField
+                        modelValue={amount.value}
+                        onUpdate:modelValue={(v: string) => (amount.value = v)}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("Currency")} required>
+                    <VTextField
+                        modelValue={currency.value}
+                        onUpdate:modelValue={(v: string) => (currency.value = v.toUpperCase())}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("Bank name")} required>
+                    <VTextField
+                        modelValue={bankName.value}
+                        onUpdate:modelValue={(v: string) => (bankName.value = v)}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("Account number")} required>
+                    <VTextField
+                        modelValue={accountNumber.value}
+                        onUpdate:modelValue={(v: string) => (accountNumber.value = v)}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("IBAN (optional)")}>
+                    <VTextField
+                        modelValue={iban.value}
+                        onUpdate:modelValue={(v: string) => (iban.value = v)}
+                        hideDetails
+                    />
+                </FormField>
             </FormModal>
         </ScreenContainer>
     );

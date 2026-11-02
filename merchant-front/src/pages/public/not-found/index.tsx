@@ -1,11 +1,16 @@
 import { dc } from "kt-dc";
-import { VBtn } from "vuetify/components";
 import { useLocale } from "vuetify";
-import { RouterLink } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { MonoRef } from "@/components/ui/MonoRef";
+
 const NotFoundPage = dc(() => {
     const { t } = useLocale();
+    const route = useRoute();
+    const router = useRouter();
+
     return () => (
         <div
             style={{
@@ -14,15 +19,21 @@ const NotFoundPage = dc(() => {
                 alignItems: "center",
                 justifyContent: "center",
                 padding: "24px",
+                background: "var(--pg-bg-canvas)",
             }}
         >
-            <SurfaceCard style={{ width: "100%", maxWidth: "440px" }}>
-                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px", alignItems: "center" }}>
-                    <div style={{ fontSize: "48px", fontWeight: "800" }}>404</div>
-                    <div style={{ opacity: 0.7 }}>{t("The page you are looking for does not exist")}</div>
-                    <RouterLink to={{ name: "Dashboard" }}>
-                        <VBtn variant="tonal">{t("Dashboard")}</VBtn>
-                    </RouterLink>
+            <SurfaceCard style={{ width: "100%", maxWidth: "480px" }}>
+                <SurfaceCardText>
+                    <EmptyState
+                        icon="mdi-map-marker-question-outline"
+                        title="404"
+                        description={t("The page you are looking for does not exist")}
+                        actionLabel={t("Dashboard")}
+                        actionVariant="tonal"
+                        onAction={() => void router.push({ name: "Dashboard" })}
+                    >
+                        <MonoRef value={route.fullPath} truncate={64} />
+                    </EmptyState>
                 </SurfaceCardText>
             </SurfaceCard>
         </div>

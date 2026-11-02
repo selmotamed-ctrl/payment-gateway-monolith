@@ -26,9 +26,14 @@ export const MoneyDisplay = defineComponent({
             try {
                 dec = new Decimal(String(props.amount));
             } catch {
-                return <span>{String(props.amount)}</span>;
+                return (
+                    <span class="pg-tabular" style={{ color: "var(--pg-status-danger-text)" }} title="Invalid amount">
+                        {String(props.amount)}
+                    </span>
+                );
             }
-            const precision = props.decimals ?? currencyPrecision(props.currency);
+            const currency = (props.currency || DEFAULT_CURRENCY).toUpperCase();
+            const precision = props.decimals ?? currencyPrecision(currency);
             const isNegative = dec.isNegative();
             const fixed = dec.abs().toFixed(precision);
             const [intPartRaw = "0", fracPart = ""] = fixed.split(".");
@@ -43,6 +48,8 @@ export const MoneyDisplay = defineComponent({
                 <span
                     class="pg-money pg-tabular"
                     dir="ltr"
+                    title={`${fixed} ${currency}`}
+                    aria-label={`${fixed} ${currency}`}
                     style={{
                         display: "inline-flex",
                         alignItems: "baseline",
@@ -71,7 +78,7 @@ export const MoneyDisplay = defineComponent({
                                 letterSpacing: "0.02em",
                             }}
                         >
-                            {props.currency.toUpperCase()}
+                            {currency}
                         </span>
                     )}
                 </span>

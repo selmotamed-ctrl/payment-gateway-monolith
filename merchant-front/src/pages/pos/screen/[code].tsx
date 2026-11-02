@@ -7,10 +7,13 @@ import { StateView } from "@/components/StateView";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
-import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import { MonoRef } from "@/components/ui/MonoRef";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { DescriptionList } from "@/components/ui/DescriptionList";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 type ScreenState = {
     screenCode: string;
@@ -84,45 +87,32 @@ const PosScreenPage = dc(() => {
         <div
             style={{
                 minHeight: "100vh",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
                 padding: "24px",
                 background: "var(--pg-bg-canvas)",
             }}
         >
-            <div style={{ width: "100%", maxWidth: "680px", display: "flex", flexDirection: "column", gap: "16px" }}>
-                <header
-                    style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        gap: "12px",
-                        flexWrap: "wrap",
-                    }}
-                >
-                    <h1
-                        style={{
-                            margin: 0,
-                            color: "var(--pg-ink-primary)",
-                            fontSize: "18px",
-                            fontWeight: 600,
-                            letterSpacing: "-0.02em",
-                        }}
-                    >
-                        {t("POS Screen")} · <span class="pg-mono">{code()}</span>
-                    </h1>
-                    <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-                        <StatusBadge
-                            status={connected.value ? "LIVE" : "PENDING"}
-                            label={connected.value ? t("Live") : t("Pending")}
-                            toneOverride={connected.value ? "success" : "warning"}
-                        />
-                        <VBtn variant="outlined" size="small" onClick={() => void load()} style={{ height: "32px" }}>
-                            {t("Refresh")}
-                        </VBtn>
-                    </div>
-                </header>
+            <div style={{ width: "100%", maxWidth: "720px", margin: "0 auto", display: "flex", flexDirection: "column", gap: "16px" }}>
+                <PageHeader
+                    title={t("POS Screen")}
+                    subtitle={state.value?.merchantName ?? ""}
+                    end={() => (
+                        <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                            <StatusBadge
+                                status={connected.value ? "LIVE" : "PENDING"}
+                                label={connected.value ? t("Live") : t("Pending")}
+                                toneOverride={connected.value ? "success" : "warning"}
+                            />
+                            <VBtn
+                                variant="outlined"
+                                size="small"
+                                onClick={() => void load()}
+                                style={{ height: "32px" }}
+                            >
+                                {t("Refresh")}
+                            </VBtn>
+                        </div>
+                    )}
+                />
 
                 {error.value ? (
                     <SurfaceCard>
@@ -132,103 +122,74 @@ const PosScreenPage = dc(() => {
                     <SurfaceCard>
                         <StateView loading={true} />
                     </SurfaceCard>
-                ) : (
+                ) : state.value ? (
                     <SurfaceCard>
-                        <div
-                            style={{
-                                display: "flex",
-                                flexDirection: "column",
-                                alignItems: "center",
-                                gap: "20px",
-                                textAlign: "center",
-                            }}
-                        >
-                            <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
-                                <span
-                                    style={{
-                                        color: "var(--pg-ink-muted)",
-                                        fontSize: "11.5px",
-                                        fontWeight: 600,
-                                        letterSpacing: "0.05em",
-                                        textTransform: "uppercase",
-                                    }}
-                                >
-                                    {t("Merchant Name")}
-                                </span>
-                                <span
-                                    style={{
-                                        color: "var(--pg-ink-primary)",
-                                        fontSize: "22px",
-                                        fontWeight: 600,
-                                        letterSpacing: "-0.02em",
-                                    }}
-                                >
-                                    {state.value?.merchantName ?? "—"}
-                                </span>
-                            </div>
-
-                            <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
-                                <span
-                                    style={{
-                                        color: "var(--pg-ink-muted)",
-                                        fontSize: "11.5px",
-                                        fontWeight: 600,
-                                        letterSpacing: "0.05em",
-                                        textTransform: "uppercase",
-                                    }}
-                                >
-                                    {t("Amount")}
-                                </span>
-                                {state.value?.amount != null ? (
-                                    <MoneyDisplay
-                                        amount={state.value.amount}
-                                        currency={state.value.currency || "LYD"}
-                                        size="xl"
-                                    />
-                                ) : (
-                                    <span style={{ color: "var(--pg-ink-faint)", fontSize: "24px" }}>—</span>
-                                )}
-                            </div>
-
-                            <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", justifyContent: "center" }}>
-                                {state.value?.status && <StatusBadge status={state.value.status} />}
-                                {state.value?.railCode && (
-                                    <StatusBadge
-                                        status={state.value.railCode}
-                                        label={state.value.railCode}
-                                        toneOverride="neutral"
-                                        showDot={false}
-                                    />
-                                )}
-                            </div>
-
-                            {state.value?.reference && (
-                                <div
-                                    style={{
-                                        display: "flex",
-                                        flexDirection: "column",
-                                        alignItems: "center",
-                                        gap: "5px",
-                                        paddingTop: "16px",
-                                        borderTop: "1px solid var(--pg-border-subtle)",
-                                        width: "100%",
-                                    }}
-                                >
-                                    <span
-                                        style={{
-                                            color: "var(--pg-ink-muted)",
-                                            fontSize: "11.5px",
-                                            fontWeight: 600,
-                                            letterSpacing: "0.05em",
-                                            textTransform: "uppercase",
-                                        }}
-                                    >
-                                        {t("Reference")}
-                                    </span>
-                                    <MonoRef value={state.value?.reference ?? ""} />
+                        <SurfaceCardText>
+                            <DescriptionList
+                                columns={1}
+                                items={[
+                                    {
+                                        label: t("Amount"),
+                                        value: (
+                                            <MoneyDisplay
+                                                amount={state.value?.amount}
+                                                currency={state.value?.currency || "LYD"}
+                                                size="xl"
+                                            />
+                                        ),
+                                    },
+                                    {
+                                        label: t("Status"),
+                                        value: state.value?.status ? (
+                                            <StatusBadge status={state.value.status} />
+                                        ) : (
+                                            "—"
+                                        ),
+                                    },
+                                    {
+                                        label: t("Rail Code"),
+                                        value: state.value?.railCode ? (
+                                            <StatusBadge
+                                                status={state.value.railCode}
+                                                label={state.value.railCode}
+                                                toneOverride="neutral"
+                                                showDot={false}
+                                            />
+                                        ) : (
+                                            "—"
+                                        ),
+                                    },
+                                    {
+                                        label: t("Screen Code"),
+                                        value: code() || "—",
+                                        mono: true,
+                                    },
+                                    {
+                                        label: t("Reference"),
+                                        value: state.value?.reference || "—",
+                                        mono: true,
+                                    },
+                                    {
+                                        label: t("Updated At"),
+                                        value: state.value?.updatedAt || "—",
+                                    },
+                                ]}
+                            />
+                            {state.value?.linkKey && (
+                                <div style={{ marginTop: "16px", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                    <span style={{ fontSize: "12.5px", color: "var(--pg-ink-muted)" }}>{t("Link")}</span>
+                                    <MonoRef value={state.value.linkKey} truncate={42} />
                                 </div>
                             )}
-                        </div>
+                        </SurfaceCardText>
+                    </SurfaceCard>
+                ) : (
+                    <SurfaceCard>
+                        <EmptyState
+                            icon="mdi-monitor-off"
+                            title={t("No Data Found")}
+                            description={t("Waiting For Customer")}
+                        />
                     </SurfaceCard>
                 )}
             </div>

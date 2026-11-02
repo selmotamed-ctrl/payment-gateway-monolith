@@ -1,8 +1,8 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
-import { useLocale } from "vuetify";
+import { useLocale, useTheme } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VCheckbox, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -10,7 +10,7 @@ import { ThemedText } from "@/components/ThemedText";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import type { MetricItem } from "@/components/ui/MetricStrip";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
@@ -23,7 +23,10 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
 import { FormModal } from "@/components/ui/FormModal";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
+import { MetaPill } from "@/components/ui/MetaPill";
 type RailField = {
     id?: string;
     key?: string;
@@ -163,7 +166,10 @@ type RailSummary = {
 
 const RailsPage = dc(() => {
     const { t } = useLocale();
+    const theme = useTheme();
     const showChecklists = areChecklistsVisible();
+    const toneColor = (tone: "error" | "warning"): string =>
+        (theme.current.value.colors as Record<string, string>)[tone] ?? "";
     const summary = ref<RailSummary | null>(null);
     const search = ref<string | null>(null);
     const filters = ref<FilterValues>({});
@@ -595,36 +601,23 @@ const RailsPage = dc(() => {
                 </VAlert>
 
                 {summary.value && (
-                    <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
-                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Rail health")}</ThemedText>
-                                <div style={{ flex: 1 }} />
-                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
-                            </ThemedView>
-                            <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
-                                {showChecklists && (
-                                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
-                                        {SUMMARY_EXPORT_CHECKS.map((check) => (
-                                            <VCheckbox
-                                                key={check.key}
-                                                modelValue={summaryExportChecklist.value[check.key] === true}
-                                                onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
-                                                label={t(check.label)}
-                                                density="compact"
-                                                hideDetails
-                                            />
-                                        ))}
-                                        {!summaryExportChecklistComplete.value && (
-                                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
-                                        )}
-                                    </ThemedView>
-                                )}
-                            </ThemedView>
-                            <MetricStrip items={metricItems.value} />
-                        </SurfaceCardText>
-                    </SurfaceCard>
+                    <SummaryExportCard
+                        title={t("Rail health")}
+                        metrics={metricItems.value}
+                        exportLoading={summaryExportLoading.value}
+                        exportDisabled={!summaryExportChecklistComplete.value}
+                        onExport={() => void exportSummary()}
+                    >
+                        <FormChecklist
+                            checks={[...SUMMARY_EXPORT_CHECKS]}
+                            modelValue={summaryExportChecklist.value}
+                            onUpdate:modelValue={(value: Record<string, boolean>) => (summaryExportChecklist.value = value)}
+                            show={showChecklists}
+                            title={t("Summary export checklist")}
+                            complete={summaryExportChecklistComplete.value}
+                            incompleteMessage={t("Complete all summary export checklist items before exporting")}
+                        />
+                    </SummaryExportCard>
                 )}
 
                 <ApiTable<Rail>
@@ -643,7 +636,7 @@ const RailsPage = dc(() => {
                     searchValue={search.value}
                     setSearchValue={(value) => (search.value = value)}
                     headers={headers}
-                    rowColor={(row) => (row.blocked ? "#dc2626" : (row.routeHealth?.openBreaker ?? 0) > 0 ? "#d97706" : undefined)}
+                    rowColor={(row) => (row.blocked ? toneColor("error") : (row.routeHealth?.openBreaker ?? 0) > 0 ? toneColor("warning") : undefined)}
                     apiDataExtractor={(data) => {
                         const payload = data as { rails?: Rail[]; rows?: Rail[] };
                         return payload.rails ?? payload.rows ?? [];
@@ -683,137 +676,138 @@ const RailsPage = dc(() => {
                 onUpdate:modelValue={(v: any) => (dialogOpen.value = v)}
                 title={[selected.value?.nameEn, selected.value?.code ? `(${selected.value.code})` : ""].filter(Boolean).join(" ")}
                 size="lg"
-            >
-<ThemedView style={{ flexDirection: "row", gap: "10px", alignItems: "center" }}>
-                            
-                            <StatusChip label={selected.value?.collectionMode ?? "-"} tone="info" />
-                        </ThemedView>
-
-                        <ThemedText type="defaultSemiBold">{t("Customer Catalog")}</ThemedText>
-                        <ThemedView style={{ flexDirection: "column", gap: "8px" }}>
-                            {fields.value.length === 0 && (
-                                <ThemedText style={{ opacity: 0.6, fontSize: "13px" }}>
-                                    {t("No Data Found")}
-                                </ThemedText>
-                            )}
-                            {fields.value.map((field, index) => (
-                                <ThemedView
-                                    key={`${field.code}-${index}`}
-                                    style={{
-                                        flexDirection: "row",
-                                        gap: "10px",
-                                        alignItems: "center",
-                                        borderBottom: "1px solid rgba(100,116,139,0.18)",
-                                        paddingBottom: "8px",
-                                        fontSize: "13px",
-                                    }}
-                                >
-                                    <span style={{ width: "150px", fontWeight: 700 }}>{field.code}</span>
-                                    <span style={{ flex: 1 }}>{field.label}</span>
-                                    <StatusChip label={field.type} tone="neutral" />
-                                    {field.required && <StatusChip label="Required" tone="warning" />}
-                                    {field.sensitive && <StatusChip label="Sensitive" tone="error" />}
-                                    <VBtn size="small" variant="text" icon="mdi-pencil" onClick={() => editField(index)} />
-                                    <VBtn
-                                        size="small"
-                                        variant="text"
-                                        icon="mdi-delete-outline"
-                                        color="error"
-                                        onClick={() => void removeField(index)}
-                                    />
-                                </ThemedView>
-                            ))}
-                        </ThemedView>
-
-                        <ThemedText type="defaultSemiBold">
-                            {editingFieldIndex.value === null ? t("Add") : t("Edit")}
-                        </ThemedText>
-                        <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
-                            <VTextField
-                                style={{ flex: "1 1 180px" }}
-                                label={t("Field Key")}
-                                modelValue={fieldForm.value.code}
-                                onUpdate:modelValue={(v: string) => (fieldForm.value.code = v)}
-                            />
-                            <VTextField
-                                style={{ flex: "1 1 200px" }}
-                                label={t("Label (English)")}
-                                modelValue={fieldForm.value.label}
-                                onUpdate:modelValue={(v: string) => (fieldForm.value.label = v)}
-                            />
-                            <VSelect
-                                style={{ flex: "1 1 160px" }}
-                                label={t("Input Type")}
-                                items={PUBLIC_TYPES}
-                                modelValue={fieldForm.value.type}
-                                onUpdate:modelValue={(v: string) => (fieldForm.value.type = v)}
-                            />
-                        </ThemedView>
-                        <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
-                            <VTextField
-                                style={{ flex: "1 1 200px" }}
-                                label={t("Regex")}
-                                modelValue={fieldForm.value.pattern}
-                                onUpdate:modelValue={(v: string) => (fieldForm.value.pattern = v)}
-                            />
-                            <VTextField
-                                style={{ flex: "0 1 120px" }}
-                                label={t("Min")}
-                                type="number"
-                                modelValue={fieldForm.value.minLength}
-                                onUpdate:modelValue={(v: string) => (fieldForm.value.minLength = v)}
-                            />
-                            <VTextField
-                                style={{ flex: "0 1 120px" }}
-                                label={t("Max")}
-                                type="number"
-                                modelValue={fieldForm.value.maxLength}
-                                onUpdate:modelValue={(v: string) => (fieldForm.value.maxLength = v)}
-                            />
-                            <VSwitch
-                                label={t("Required")}
-                                modelValue={fieldForm.value.required}
-                                onUpdate:modelValue={(v: any) => (fieldForm.value.required = !!v)}
-                            />
-                            <VSwitch
-                                label={t("Sensitive")}
-                                modelValue={fieldForm.value.sensitive}
-                                onUpdate:modelValue={(v: any) => (fieldForm.value.sensitive = !!v)}
-                            />
-                        </ThemedView>
-                        <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                            {showChecklists && (
-                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Rail field checklist")}</ThemedText>
-                                    {RAIL_FIELD_CHECKS.map((check) => (
-                                        <VCheckbox
-                                            key={check.key}
-                                            modelValue={railFieldChecklist.value[check.key] === true}
-                                            onUpdate:modelValue={(value: unknown) => (railFieldChecklist.value = { ...railFieldChecklist.value, [check.key]: Boolean(value) })}
-                                            label={t(check.label)}
-                                            density="compact"
-                                            hideDetails
-                                        />
-                                    ))}
-                                    {!railFieldChecklistComplete.value && (
-                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all rail field checklist items before saving")}</ThemedText>
-                                    )}
-                                </ThemedView>
-                            )}
+                onSubmit={() => void saveField()}
+                submitLabel={editingFieldIndex.value === null ? t("Add") : t("Save")}
+                loading={actionLoading.value}
+                v-slots={{
+                    footer: () => (
+                        <>
                             {editingFieldIndex.value !== null && (
                                 <VBtn variant="text" onClick={() => resetFieldForm()}>
                                     {t("Cancel")}
                                 </VBtn>
                             )}
+                            <VBtn variant="outlined" disabled={actionLoading.value} onClick={() => (dialogOpen.value = false)}>
+                                {t("Close")}
+                            </VBtn>
                             <VBtn
                                 color="primary"
+                                variant="flat"
+                                {...{ type: "submit" }}
                                 loading={actionLoading.value}
                                 disabled={!fieldForm.value.code.trim() || !fieldForm.value.label.trim() || !railFieldChecklistComplete.value}
-                                onClick={() => void saveField()}
                             >
                                 {editingFieldIndex.value === null ? t("Add") : t("Save")}
                             </VBtn>
+                        </>
+                    ),
+                }}
+            >
+                <ThemedView style={{ flexDirection: "row", gap: "10px", alignItems: "center" }}>
+                    <StatusBadge status={selected.value?.collectionMode ?? "-"} toneOverride="info" />
+                </ThemedView>
+
+                <ThemedText type="defaultSemiBold">{t("Customer Catalog")}</ThemedText>
+                <ThemedView style={{ flexDirection: "column", gap: "8px" }}>
+                    {fields.value.length === 0 && (
+                        <ThemedText style={{ opacity: 0.6, fontSize: "13px" }}>
+                            {t("No Data Found")}
+                        </ThemedText>
+                    )}
+                    {fields.value.map((field, index) => (
+                        <ThemedView
+                            key={`${field.code}-${index}`}
+                            style={{
+                                flexDirection: "row",
+                                gap: "10px",
+                                alignItems: "center",
+                                borderBottom: "1px solid var(--pg-border-subtle)",
+                                paddingBottom: "8px",
+                                fontSize: "13px",
+                            }}
+                        >
+                            <span style={{ width: "150px", fontWeight: 600 }}>{field.code}</span>
+                            <span style={{ flex: 1 }}>{field.label}</span>
+                            <MetaPill size="x-small" variant="tonal">{field.type}</MetaPill>
+                            {field.required && <StatusBadge status="REQUIRED" label={t("Required")} toneOverride="warning" showDot={false} />}
+                            {field.sensitive && <StatusBadge status="SENSITIVE" label={t("Sensitive")} toneOverride="danger" showDot={false} />}
+                            <VBtn size="small" variant="text" icon="mdi-pencil" onClick={() => editField(index)} />
+                            <VBtn
+                                size="small"
+                                variant="text"
+                                icon="mdi-delete-outline"
+                                color="error"
+                                onClick={() => void removeField(index)}
+                            />
                         </ThemedView>
+                    ))}
+                </ThemedView>
+
+                <ThemedText type="defaultSemiBold">
+                    {editingFieldIndex.value === null ? t("Add") : t("Edit")}
+                </ThemedText>
+                <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
+                    <FormField label={t("Field Key")} required sensitiveMakerChecker style={{ flex: "1 1 180px" }}>
+                        <VTextField
+                            modelValue={fieldForm.value.code}
+                            onUpdate:modelValue={(v: string) => (fieldForm.value.code = v)}
+                        />
+                    </FormField>
+                    <FormField label={t("Label (English)")} required style={{ flex: "1 1 200px" }}>
+                        <VTextField
+                            modelValue={fieldForm.value.label}
+                            onUpdate:modelValue={(v: string) => (fieldForm.value.label = v)}
+                        />
+                    </FormField>
+                    <FormField label={t("Input Type")} style={{ flex: "1 1 160px" }}>
+                        <VSelect
+                            items={PUBLIC_TYPES}
+                            modelValue={fieldForm.value.type}
+                            onUpdate:modelValue={(v: string) => (fieldForm.value.type = v)}
+                        />
+                    </FormField>
+                </ThemedView>
+                <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+                    <FormField label={t("Regex")} style={{ flex: "1 1 200px" }}>
+                        <VTextField
+                            modelValue={fieldForm.value.pattern}
+                            onUpdate:modelValue={(v: string) => (fieldForm.value.pattern = v)}
+                        />
+                    </FormField>
+                    <FormField label={t("Min")} style={{ flex: "0 1 120px" }}>
+                        <VTextField
+                            type="number"
+                            modelValue={fieldForm.value.minLength}
+                            onUpdate:modelValue={(v: string) => (fieldForm.value.minLength = v)}
+                        />
+                    </FormField>
+                    <FormField label={t("Max")} style={{ flex: "0 1 120px" }}>
+                        <VTextField
+                            type="number"
+                            modelValue={fieldForm.value.maxLength}
+                            onUpdate:modelValue={(v: string) => (fieldForm.value.maxLength = v)}
+                        />
+                    </FormField>
+                    <VSwitch
+                        label={t("Required")}
+                        modelValue={fieldForm.value.required}
+                        onUpdate:modelValue={(v: any) => (fieldForm.value.required = !!v)}
+                    />
+                    <VSwitch
+                        label={t("Sensitive")}
+                        modelValue={fieldForm.value.sensitive}
+                        onUpdate:modelValue={(v: any) => (fieldForm.value.sensitive = !!v)}
+                    />
+                </ThemedView>
+                <FormChecklist
+                    checks={[...RAIL_FIELD_CHECKS]}
+                    modelValue={railFieldChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (railFieldChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Rail field checklist")}
+                    complete={railFieldChecklistComplete.value}
+                    incompleteMessage={t("Complete all rail field checklist items before saving")}
+                />
             </FormModal>
 
             {/* Update rail */}
@@ -822,89 +816,91 @@ const RailsPage = dc(() => {
                 onUpdate:modelValue={(v: any) => (editOpen.value = v)}
                 title={[t("Edit"), editingRail.value?.code].filter(Boolean).join(" · ")}
                 size="md"
-            >
-<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 14px" }}>
-                            <VTextField
-                                label={t("Label (English)")}
-                                modelValue={railEditForm.value.nameEn}
-                                onUpdate:modelValue={(v: string) => (railEditForm.value.nameEn = v)}
-                            />
-                            <VTextField
-                                label={t("Label (Arabic)")}
-                                modelValue={railEditForm.value.nameAr}
-                                onUpdate:modelValue={(v: string) => (railEditForm.value.nameAr = v)}
-                            />
-                            <VTextField
-                                label={t("Minimum amount")}
-                                modelValue={railEditForm.value.minAmount}
-                                onUpdate:modelValue={(v: string) => (railEditForm.value.minAmount = v)}
-                            />
-                            <VTextField
-                                label={t("Maximum amount")}
-                                modelValue={railEditForm.value.maxAmount}
-                                onUpdate:modelValue={(v: string) => (railEditForm.value.maxAmount = v)}
-                            />
-                            <VTextField
-                                label={t("Display order")}
-                                type="number"
-                                modelValue={railEditForm.value.displayOrder}
-                                onUpdate:modelValue={(v: string) => (railEditForm.value.displayOrder = v)}
-                            />
-                            <div style={{ display: "flex", alignItems: "center" }}>
-                                <VSwitch
-                                    label={t("Active")}
-                                    modelValue={railEditForm.value.active}
-                                    onUpdate:modelValue={(v: any) => (railEditForm.value.active = !!v)}
-                                />
-                            </div>
-                            <div style={{ gridColumn: "span 2" }}>
-                                <VTextarea
-                                    label={t("Instructions (English)")}
-                                    rows={2}
-                                    modelValue={railEditForm.value.instructionsEn}
-                                    onUpdate:modelValue={(v: string) => (railEditForm.value.instructionsEn = v)}
-                                />
-                            </div>
-                            <div style={{ gridColumn: "span 2" }}>
-                                <VTextarea
-                                    label={t("Instructions (Arabic)")}
-                                    rows={2}
-                                    modelValue={railEditForm.value.instructionsAr}
-                                    onUpdate:modelValue={(v: string) => (railEditForm.value.instructionsAr = v)}
-                                />
-                            </div>
-                        </div>
-                        <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                            {showChecklists && (
-                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Rail edit checklist")}</ThemedText>
-                                    {RAIL_EDIT_CHECKS.map((check) => (
-                                        <VCheckbox
-                                            key={check.key}
-                                            modelValue={railEditChecklist.value[check.key] === true}
-                                            onUpdate:modelValue={(value: unknown) => (railEditChecklist.value = { ...railEditChecklist.value, [check.key]: Boolean(value) })}
-                                            label={t(check.label)}
-                                            density="compact"
-                                            hideDetails
-                                        />
-                                    ))}
-                                    {!railEditChecklistComplete.value && (
-                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all rail checklist items before saving")}</ThemedText>
-                                    )}
-                                </ThemedView>
-                            )}
-                            <VBtn variant="text" onClick={() => (editOpen.value = false)}>
+                onSubmit={() => void saveRail()}
+                submitLabel={t("Save")}
+                loading={savingRail.value}
+                v-slots={{
+                    footer: () => (
+                        <>
+                            <VBtn variant="outlined" disabled={savingRail.value} onClick={() => (editOpen.value = false)}>
                                 {t("Cancel")}
                             </VBtn>
                             <VBtn
                                 color="primary"
+                                variant="flat"
+                                {...{ type: "submit" }}
                                 loading={savingRail.value}
                                 disabled={(!railEditForm.value.nameEn.trim() && !railEditForm.value.nameAr.trim()) || !railEditChecklistComplete.value}
-                                onClick={() => void saveRail()}
                             >
                                 {t("Save")}
                             </VBtn>
-                        </ThemedView>
+                        </>
+                    ),
+                }}
+            >
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 14px" }}>
+                    <FormField label={t("Label (English)")}>
+                        <VTextField
+                            modelValue={railEditForm.value.nameEn}
+                            onUpdate:modelValue={(v: string) => (railEditForm.value.nameEn = v)}
+                        />
+                    </FormField>
+                    <FormField label={t("Label (Arabic)")}>
+                        <VTextField
+                            modelValue={railEditForm.value.nameAr}
+                            onUpdate:modelValue={(v: string) => (railEditForm.value.nameAr = v)}
+                        />
+                    </FormField>
+                    <FormField label={t("Minimum amount")} sensitiveMakerChecker>
+                        <VTextField
+                            modelValue={railEditForm.value.minAmount}
+                            onUpdate:modelValue={(v: string) => (railEditForm.value.minAmount = v)}
+                        />
+                    </FormField>
+                    <FormField label={t("Maximum amount")} sensitiveMakerChecker>
+                        <VTextField
+                            modelValue={railEditForm.value.maxAmount}
+                            onUpdate:modelValue={(v: string) => (railEditForm.value.maxAmount = v)}
+                        />
+                    </FormField>
+                    <FormField label={t("Display order")}>
+                        <VTextField
+                            type="number"
+                            modelValue={railEditForm.value.displayOrder}
+                            onUpdate:modelValue={(v: string) => (railEditForm.value.displayOrder = v)}
+                        />
+                    </FormField>
+                    <div style={{ display: "flex", alignItems: "center" }}>
+                        <VSwitch
+                            label={t("Active")}
+                            modelValue={railEditForm.value.active}
+                            onUpdate:modelValue={(v: any) => (railEditForm.value.active = !!v)}
+                        />
+                    </div>
+                    <FormField label={t("Instructions (English)")} style={{ gridColumn: "span 2" }}>
+                        <VTextarea
+                            rows={2}
+                            modelValue={railEditForm.value.instructionsEn}
+                            onUpdate:modelValue={(v: string) => (railEditForm.value.instructionsEn = v)}
+                        />
+                    </FormField>
+                    <FormField label={t("Instructions (Arabic)")} style={{ gridColumn: "span 2" }}>
+                        <VTextarea
+                            rows={2}
+                            modelValue={railEditForm.value.instructionsAr}
+                            onUpdate:modelValue={(v: string) => (railEditForm.value.instructionsAr = v)}
+                        />
+                    </FormField>
+                </div>
+                <FormChecklist
+                    checks={[...RAIL_EDIT_CHECKS]}
+                    modelValue={railEditChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (railEditChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Rail edit checklist")}
+                    complete={railEditChecklistComplete.value}
+                    incompleteMessage={t("Complete all rail checklist items before saving")}
+                />
             </FormModal>
 
             {/* Add rail */}
@@ -913,37 +909,47 @@ const RailsPage = dc(() => {
                 onUpdate:modelValue={(v: any) => (createOpen.value = v)}
                 title={t("Add Rail")}
                 size="sm"
-            >
-<VTextField
-                            label={t("Rail Code")}
-                            hint="lowercase letters, digits, - and _"
-                            modelValue={railForm.value.code}
-                            onUpdate:modelValue={(v: string) => (railForm.value.code = v)}
-                        />
-                        <VTextField
-                            label={t("Label (English)")}
-                            modelValue={railForm.value.name}
-                            onUpdate:modelValue={(v: string) => (railForm.value.name = v)}
-                        />
-                        <VSelect
-                            label={t("Type")}
-                            items={["REDIRECT", "EMBEDDED", "QR", "PUSH", "TRANSFER", "CASH"]}
-                            modelValue={railForm.value.collectionMode}
-                            onUpdate:modelValue={(v: string) => (railForm.value.collectionMode = v)}
-                        />
-                        <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                            <VBtn variant="text" onClick={() => (createOpen.value = false)}>
+                onSubmit={() => void createRail()}
+                submitLabel={t("Create")}
+                loading={creating.value}
+                v-slots={{
+                    footer: () => (
+                        <>
+                            <VBtn variant="outlined" disabled={creating.value} onClick={() => (createOpen.value = false)}>
                                 {t("Cancel")}
                             </VBtn>
                             <VBtn
                                 color="primary"
+                                variant="flat"
+                                {...{ type: "submit" }}
                                 loading={creating.value}
                                 disabled={!railForm.value.code.trim() || !railForm.value.name.trim()}
-                                onClick={() => void createRail()}
                             >
                                 {t("Create")}
                             </VBtn>
-                        </ThemedView>
+                        </>
+                    ),
+                }}
+            >
+                <FormField label={t("Rail Code")} hint="lowercase letters, digits, - and _" required sensitiveMakerChecker>
+                    <VTextField
+                        modelValue={railForm.value.code}
+                        onUpdate:modelValue={(v: string) => (railForm.value.code = v)}
+                    />
+                </FormField>
+                <FormField label={t("Label (English)")} required>
+                    <VTextField
+                        modelValue={railForm.value.name}
+                        onUpdate:modelValue={(v: string) => (railForm.value.name = v)}
+                    />
+                </FormField>
+                <FormField label={t("Type")}>
+                    <VSelect
+                        items={["REDIRECT", "EMBEDDED", "QR", "PUSH", "TRANSFER", "CASH"]}
+                        modelValue={railForm.value.collectionMode}
+                        onUpdate:modelValue={(v: string) => (railForm.value.collectionMode = v)}
+                    />
+                </FormField>
             </FormModal>
         </ScreenContainer>
     );

@@ -7,7 +7,6 @@ import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
@@ -29,12 +28,12 @@ import {
 } from "./joinRequestHelp";
 import type { JoinRequestSummary } from "./types";
 
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { MetricStrip } from "@/components/ui/MetricStrip";
 import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { MonoRef } from "@/components/ui/MonoRef";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
 type JoinRequestsSummary = {
     total: number;
     open: number;
@@ -272,7 +271,7 @@ const JoinRequestsPage = dc(() => {
 
     const toneColor = (tone: ReturnType<typeof statusTone>): string => {
         const colors = theme.current.value.colors as Record<string, string>;
-        return colors[tone] ?? colors["on-surface-variant"] ?? "#64748b";
+        return colors[tone] ?? colors["on-surface-variant"] ?? "var(--pg-ink-muted)";
     };
 
     const rowColor = (row: JoinRequestSummary): string | undefined => {
@@ -313,7 +312,7 @@ const JoinRequestsPage = dc(() => {
                 const help = joinStatusHelp(row.status);
                 return (
                     <span title={help.meaning}>
-                        <StatusChip label={help.label} tone={help.tone} size="small" />
+                        <StatusBadge status={row.status} label={help.label} toneOverride={asBadgeTone(help.tone)} />
                     </span>
                 );
             },
@@ -324,10 +323,10 @@ const JoinRequestsPage = dc(() => {
             headerTooltip: COLUMN_HELP.channel,
             value: (row) => channelLabel(row.onboardingChannel),
             Value: ({ row }: { row: JoinRequestSummary }) => (
-                <StatusChip
+                <StatusBadge
+                    status={channelLabel(row.onboardingChannel)}
                     label={channelLabel(row.onboardingChannel)}
-                    tone={row.onboardingChannel === "ADMIN_ASSISTED" ? "info" : "neutral"}
-                    size="x-small"
+                    toneOverride={row.onboardingChannel === "ADMIN_ASSISTED" ? "info" : "neutral"}
                 />
             ),
         },
@@ -338,10 +337,10 @@ const JoinRequestsPage = dc(() => {
             headerTooltip: COLUMN_HELP.riskTier,
             value: (row) => row.proposedRiskTier || row.riskTier,
             Value: ({ row }: { row: JoinRequestSummary }) => (
-                <StatusChip
+                <StatusBadge
+                    status={row.proposedRiskTier || row.riskTier || "—"}
                     label={row.proposedRiskTier || row.riskTier || "—"}
-                    tone={statusTone(row.proposedRiskTier || row.riskTier)}
-                    size="small"
+                    toneOverride={asBadgeTone(statusTone(row.proposedRiskTier || row.riskTier))}
                 />
             ),
         },
@@ -362,9 +361,11 @@ const JoinRequestsPage = dc(() => {
                 const currency = textValue(row.profileJson?.currency);
                 return (
                     <ThemedView style={{ gap: "2px" }}>
-                        <ThemedText style={{ fontSize: "13px", fontWeight: 600 }}>
-                            {amount ? `${amount} ${currency}`.trim() : "—"}
-                        </ThemedText>
+                        {amount ? (
+                            <MoneyDisplay amount={amount} currency={currency || "LYD"} size="sm" />
+                        ) : (
+                            <ThemedText style={{ fontSize: "13px", fontWeight: 600 }}>—</ThemedText>
+                        )}
                         <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>
                             {row.merchant?.country || ""}
                         </ThemedText>
@@ -392,7 +393,7 @@ const JoinRequestsPage = dc(() => {
                 const sla = slaInfo(row);
                 return (
                     <ThemedView style={{ gap: "3px" }}>
-                        <StatusChip label={sla.label} tone={sla.tone} size="x-small" />
+                        <StatusBadge status={sla.label} label={sla.label} toneOverride={asBadgeTone(sla.tone)} />
                         <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>
                             {formatDateTime(row.slaDueAt)}
                         </ThemedText>
@@ -438,7 +439,7 @@ const JoinRequestsPage = dc(() => {
                     badgeTone="info"
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-                            <StatusChip label={`${total.value} ${t("requests")}`} tone="info" size="small" />
+                            <StatusBadge status="info" label={`${total.value} ${t("requests")}`} toneOverride="info" showDot={false} />
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
                             {canWrite.value && (
@@ -455,26 +456,25 @@ const JoinRequestsPage = dc(() => {
                 />
 
                 {summary.value && (
-                    <ThemedView style={{ gap: "12px" }}>
-                        <MetricStrip items={summaryItems.value} />
-                        <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "15px", flex: 1 }}>{t("Onboarding SLA health")}</ThemedText>
-                                    <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
-                                    <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("Paused SLAs are excluded from overdue counts.")}</ThemedText>
-                                </ThemedView>
-                                <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                    {Object.entries(summary.value.byStatus ?? {}).map(([state, count]) => (
-                                        <StatusChip key={state} label={`${state.replaceAll("_", " ")}: ${count}`} tone={statusTone(state)} size="x-small" />
-                                    ))}
-                                    {Object.entries(summary.value.byRisk ?? {}).map(([risk, count]) => (
-                                        <StatusChip key={risk} label={`${risk}: ${count}`} tone={statusTone(risk)} size="x-small" />
-                                    ))}
-                                </ThemedView>
-                            </SurfaceCardText>
-                        </SurfaceCard>
-                    </ThemedView>
+                    <SummaryExportCard
+                        title={t("Onboarding SLA health")}
+                        metrics={summaryItems.value}
+                        exportLoading={summaryExportLoading.value}
+                        exportLabel={t("Export summary")}
+                        onExport={() => void exportSummary()}
+                    >
+                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                            <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("Paused SLAs are excluded from overdue counts.")}</ThemedText>
+                        </ThemedView>
+                        <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                            {Object.entries(summary.value.byStatus ?? {}).map(([state, count]) => (
+                                <StatusBadge key={state} status={state} label={`${state.replaceAll("_", " ")}: ${count}`} toneOverride={asBadgeTone(statusTone(state))} showDot={false} />
+                            ))}
+                            {Object.entries(summary.value.byRisk ?? {}).map(([risk, count]) => (
+                                <StatusBadge key={risk} status={risk} label={`${risk}: ${count}`} toneOverride={asBadgeTone(statusTone(risk))} showDot={false} />
+                            ))}
+                        </ThemedView>
+                    </SummaryExportCard>
                 )}
 
                 <ApiTable<JoinRequestSummary>

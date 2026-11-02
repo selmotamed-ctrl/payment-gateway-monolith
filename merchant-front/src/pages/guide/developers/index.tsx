@@ -1,19 +1,21 @@
 import { dc } from "kt-dc";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VTab, VTabs, VWindow, VWindowItem } from "vuetify/components";
+import { useRoute } from "vue-router";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
+import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { GuideMarkdown } from "@/components/guide/GuideMarkdown";
+import { GuideCodeBlock } from "@/components/guide/GuideCodeBlock";
 import { MERCHANT_DEVELOPER_CHAPTERS } from "@/content/guide/merchantDeveloperApiGuide";
 import type { DeveloperCodeLanguage } from "@/content/guide/types";
-import { showSnackBar } from "@/utils/snackBar";
 
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { MetaPill } from "@/components/ui/MetaPill";
+
 const LANGUAGES: { value: DeveloperCodeLanguage; label: string }[] = [
     { value: "typescript", label: "TypeScript / Node / Bun" },
     { value: "php", label: "PHP (Laravel)" },
@@ -21,34 +23,22 @@ const LANGUAGES: { value: DeveloperCodeLanguage; label: string }[] = [
     { value: "curl", label: "cURL" },
 ];
 
-const codeStyle = {
-    direction: "ltr" as const,
-    textAlign: "left" as const,
-    background: "rgba(100,116,139,0.12)",
-    borderRadius: "10px",
-    padding: "12px",
-    overflowX: "auto" as const,
-    fontSize: "12px",
-    lineHeight: 1.6,
-    margin: 0,
-    whiteSpace: "pre" as const,
-};
-
 const MerchantDeveloperGuidePage = dc(() => {
     const { current, t } = useLocale();
+    const route = useRoute();
     const isArabic = computed(() => current.value === "ar");
     const selectedId = ref(MERCHANT_DEVELOPER_CHAPTERS[0]?.id ?? "D-01");
     const language = ref<DeveloperCodeLanguage>("typescript");
     const selected = computed(() => MERCHANT_DEVELOPER_CHAPTERS.find((chapter) => chapter.id === selectedId.value) ?? MERCHANT_DEVELOPER_CHAPTERS[0]);
 
-    const copy = async (text: string) => {
-        try {
-            await navigator.clipboard.writeText(text);
-            showSnackBar({ type: "success", message: t("Copied") });
-        } catch {
-            showSnackBar({ type: "error", message: t("Unable to copy") });
+    const applyRouteQuery = () => {
+        const chapterId = typeof route.query.chapter === "string" ? route.query.chapter : "";
+        if (chapterId && MERCHANT_DEVELOPER_CHAPTERS.some((chapter) => chapter.id === chapterId)) {
+            selectedId.value = chapterId;
         }
     };
+
+    watch(() => route.query, () => applyRouteQuery(), { deep: true, immediate: true });
 
     return () => (
         <ScreenContainer>
@@ -84,7 +74,7 @@ const MerchantDeveloperGuidePage = dc(() => {
                     <SurfaceCard>
                         <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                <StatusChip label={selected.value.id} tone="primary" />
+                                <StatusBadge status={selected.value.id} label={selected.value.id} toneOverride="info" showDot={false} />
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "20px" }}>
                                     {isArabic.value && selected.value.titleAr ? selected.value.titleAr : selected.value.titleEn}
                                 </ThemedText>
@@ -93,23 +83,13 @@ const MerchantDeveloperGuidePage = dc(() => {
                             {selected.value.codeTemplates ? (
                                 <ThemedView style={{ gap: "8px" }}>
                                     <ThemedText type="defaultSemiBold">{isArabic.value ? "قوالب كود جاهزة للتشغيل" : "Ready-to-run code templates"}</ThemedText>
-                                    <VTabs modelValue={language.value} onUpdate:modelValue={(value: any) => (language.value = value)} density="compact">
-                                        {LANGUAGES.map((entry) => (
-                                            <VTab key={entry.value} value={entry.value}>{entry.label}</VTab>
-                                        ))}
-                                    </VTabs>
-                                    <VWindow modelValue={language.value} onUpdate:modelValue={(value: any) => (language.value = value)}>
-                                        {LANGUAGES.map((entry) => (
-                                            <VWindowItem key={`window-${entry.value}`} value={entry.value}>
-                                                <ThemedView style={{ gap: "8px" }}>
-                                                    <VBtn size="small" variant="tonal" style={{ alignSelf: "flex-end" }} onClick={() => void copy(selected.value?.codeTemplates?.[entry.value] ?? "")}>
-                                                        {isArabic.value ? "نسخ" : "Copy"}
-                                                    </VBtn>
-                                                    <pre style={codeStyle}>{selected.value?.codeTemplates?.[entry.value] ?? ""}</pre>
-                                                </ThemedView>
-                                            </VWindowItem>
-                                        ))}
-                                    </VWindow>
+                                    <SegmentedTabs
+                                        modelValue={language.value}
+                                        tabs={LANGUAGES}
+                                        ariaLabel={isArabic.value ? "لغة الشيفرة" : "Code language"}
+                                        onUpdate:modelValue={(value: string) => (language.value = value as DeveloperCodeLanguage)}
+                                    />
+                                    <GuideCodeBlock code={selected.value?.codeTemplates?.[language.value] ?? ""} />
                                 </ThemedView>
                             ) : null}
                         </SurfaceCardText>

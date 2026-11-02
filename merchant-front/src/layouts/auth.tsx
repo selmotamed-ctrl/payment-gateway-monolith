@@ -9,7 +9,7 @@ export const AuthLayout = defineComponent({
         const { t } = useLocale();
         return () => (
             <div class="pg-auth-shell">
-                <aside class="pg-auth-aside">
+                <aside class="pg-auth-aside pg-login-grid">
                     <div class="pg-auth-brand">
                         <div class="pg-auth-brand__mark">
                             <img src={LogoSvg} alt="" width={24} height={24} />

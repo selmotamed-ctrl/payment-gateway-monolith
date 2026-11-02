@@ -6,7 +6,6 @@ import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
 import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
@@ -15,7 +14,8 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
 import { FormModal } from "@/components/ui/FormModal";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 type CredentialSet = {
     id: string;
     label: string;
@@ -48,6 +48,7 @@ const CredentialsPage = dc(() => {
         secretRef: "",
     });
     const actionLoading = ref(false);
+    const formError = ref("");
 
     const load = async () => {
         loading.value = true;
@@ -70,6 +71,7 @@ const CredentialsPage = dc(() => {
 
     const openDialog = (row: CredentialSet | null) => {
         editing.value = row;
+        formError.value = "";
         form.value = {
             label: row?.label ?? "",
             gatewayCode: row?.gatewayCode ?? "",
@@ -84,6 +86,7 @@ const CredentialsPage = dc(() => {
 
     const save = async () => {
         actionLoading.value = true;
+        formError.value = "";
         try {
             const entries = [
                 ...(form.value.username
@@ -112,14 +115,16 @@ const CredentialsPage = dc(() => {
             showSnackBar({ type: "success", message: t("Saved") });
             await load();
         } catch (e) {
-            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+            const message = extractApiErrorMessage(e);
+            formError.value = message;
+            showSnackBar({ type: "error", message });
         } finally {
             actionLoading.value = false;
         }
     };
 
     const headers: TableHeader<CredentialSet>[] = [
-        { key: "label", label: "Merchant Name", value: (row) => row.label },
+        { key: "label", label: "Credential Name", value: (row) => row.label },
         { key: "gatewayCode", label: "Gateway Code", value: (row) => row.gatewayCode },
         { key: "env", label: "Environment", value: (row) => row.env },
         { key: "settlementTarget", label: "Settlement Target", value: (row) => row.settlementTarget },
@@ -127,14 +132,18 @@ const CredentialsPage = dc(() => {
             key: "status",
             label: "Status",
             Value: ({ row }: { row: CredentialSet }) => (
-                <StatusChip label={row.status} tone={row.status === "ACTIVE" ? "success" : "warning"} />
+                <StatusBadge status={row.status} toneOverride={row.status === "ACTIVE" ? "success" : "warning"} />
             ),
         },
         {
             key: "hasSecret",
             label: "Secret",
             Value: ({ row }: { row: CredentialSet }) => (
-                <StatusChip label={row.hasSecret ? t("Write Only") : "-"} tone={row.hasSecret ? "warning" : "neutral"} />
+                <StatusBadge
+                    status={row.hasSecret ? "WRITE_ONLY" : "NONE"}
+                    label={row.hasSecret ? t("Write Only") : "-"}
+                    toneOverride={row.hasSecret ? "warning" : "neutral"}
+                />
             ),
         },
         { key: "lastCheckedAt", label: "Last Used", value: (row) => row.lastCheckedAt ?? "-" },
@@ -166,76 +175,85 @@ const CredentialsPage = dc(() => {
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : (
-                    <SurfaceCard>
-                        <SurfaceCardText>
-                            <DataTable
-                                title={t("Merchant Credentials")}
-                                data={rows.value}
-                                headers={headers}
-                                loading={loading.value}
-                                showNumber={true}
-                                xlsx={false}
-                                noElevation={true}
-                                searchValue={search.value}
-                                setSearchValue={(value) => (search.value = value)}
-                            />
-                        </SurfaceCardText>
-                    </SurfaceCard>
+                    <DataTable
+                        title={t("Merchant Credentials")}
+                        data={rows.value}
+                        headers={headers}
+                        loading={loading.value}
+                        showNumber={true}
+                        xlsx={false}
+                        noElevation={true}
+                        searchValue={search.value}
+                        setSearchValue={(value) => (search.value = value)}
+                    />
                 )}
             </ThemedView>
 
             <FormModal
                 modelValue={dialogOpen.value}
                 onUpdate:modelValue={(v: any) => (dialogOpen.value = v)}
-                title={editing.value ? t("Edit") : t("Create")}
+                title={editing.value ? t("Edit Credential") : t("Create Credential")}
                 size="md"
+                loading={actionLoading.value}
+                errorMessage={formError.value}
+                submitLabel={t("Save")}
+                onSubmit={() => void save()}
             >
-<VTextField
-                            label={t("Merchant Name")}
-                            modelValue={form.value.label}
-                            onUpdate:modelValue={(v: string) => (form.value.label = v)}
-                        />
-                        <VTextField
-                            label={t("Gateway Code")}
-                            modelValue={form.value.gatewayCode}
-                            onUpdate:modelValue={(v: string) => (form.value.gatewayCode = v)}
-                            disabled={!!editing.value}
-                        />
-                        <VSelect
-                            items={["SANDBOX", "LIVE"]}
-                            modelValue={form.value.env}
-                            onUpdate:modelValue={(v: any) => (form.value.env = v)}
-                            label={t("Environment")}
-                            disabled={!!editing.value}
-                        />
-                        <VSelect
-                            items={["PLATFORM_CLEARING", "MERCHANT_DIRECT", "PROVIDER_HELD"]}
-                            modelValue={form.value.settlementTarget}
-                            onUpdate:modelValue={(v: any) => (form.value.settlementTarget = v)}
-                            label={t("Settlement Target")}
-                            disabled={!!editing.value}
-                        />
-                        <VTextField
-                            label="username"
-                            modelValue={form.value.username}
-                            onUpdate:modelValue={(v: string) => (form.value.username = v)}
-                        />
-                        <VTextField
-                            label={t("Secret")}
-                            type="password"
-                            modelValue={form.value.secret}
-                            onUpdate:modelValue={(v: string) => (form.value.secret = v)}
-                            hint={t("Write Only")}
-                            persistentHint
-                        />
-                        <VTextField
-                            label="secret_ref"
-                            modelValue={form.value.secretRef}
-                            onUpdate:modelValue={(v: string) => (form.value.secretRef = v)}
-                        />
-                        <VBtn color="primary" loading={actionLoading.value} onClick={() => void save()}>
-                            {t("Save")}
-                        </VBtn>
+                <FormField label={t("Credential Name")} required>
+                    <VTextField
+                        modelValue={form.value.label}
+                        onUpdate:modelValue={(v: string) => (form.value.label = v)}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("Gateway Code")} required>
+                    <VTextField
+                        modelValue={form.value.gatewayCode}
+                        onUpdate:modelValue={(v: string) => (form.value.gatewayCode = v)}
+                        disabled={!!editing.value}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("Environment")} required>
+                    <VSelect
+                        items={["SANDBOX", "LIVE"]}
+                        modelValue={form.value.env}
+                        onUpdate:modelValue={(v: any) => (form.value.env = v)}
+                        disabled={!!editing.value}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("Settlement Target")} required>
+                    <VSelect
+                        items={["PLATFORM_CLEARING", "MERCHANT_DIRECT", "PROVIDER_HELD"]}
+                        modelValue={form.value.settlementTarget}
+                        onUpdate:modelValue={(v: any) => (form.value.settlementTarget = v)}
+                        disabled={!!editing.value}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("Username")}>
+                    <VTextField
+                        modelValue={form.value.username}
+                        onUpdate:modelValue={(v: string) => (form.value.username = v)}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("Secret")} hint={t("Write Only")}>
+                    <VTextField
+                        type="password"
+                        modelValue={form.value.secret}
+                        onUpdate:modelValue={(v: string) => (form.value.secret = v)}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("Secret Reference")}>
+                    <VTextField
+                        modelValue={form.value.secretRef}
+                        onUpdate:modelValue={(v: string) => (form.value.secretRef = v)}
+                        hideDetails
+                    />
+                </FormField>
             </FormModal>
         </ScreenContainer>
     );

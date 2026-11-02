@@ -1,8 +1,8 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
-import { useLocale } from "vuetify";
+import { useLocale, useTheme } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VCheckbox, VSelect, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VSelect, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -10,7 +10,7 @@ import { ThemedText } from "@/components/ThemedText";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import type { MetricItem } from "@/components/ui/MetricStrip";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
@@ -23,7 +23,10 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
 import { FormModal } from "@/components/ui/FormModal";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
+import { MetaPill } from "@/components/ui/MetaPill";
 const SUMMARY_EXPORT_CHECKS = [
     { key: "ROUTE_SCOPE_VERIFIED", label: "Route portfolio scope verified" },
     { key: "STATUS_HEALTH_REVIEWED", label: "Status and health reviewed" },
@@ -69,7 +72,10 @@ type RouteSummary = {
 
 const RoutesPage = dc(() => {
     const { t } = useLocale();
+    const theme = useTheme();
     const showChecklists = areChecklistsVisible();
+    const toneColor = (tone: "error" | "warning"): string =>
+        (theme.current.value.colors as Record<string, string>)[tone] ?? "";
     const summary = ref<RouteSummary | null>(null);
     const search = ref<string | null>(null);
     const filters = ref<FilterValues>({});
@@ -450,36 +456,23 @@ const RoutesPage = dc(() => {
                 </VAlert>
 
                 {summary.value && (
-                    <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
-                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Route health")}</ThemedText>
-                                <div style={{ flex: 1 }} />
-                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
-                            </ThemedView>
-                            <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
-                                {showChecklists && (
-                                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
-                                        {SUMMARY_EXPORT_CHECKS.map((check) => (
-                                            <VCheckbox
-                                                key={check.key}
-                                                modelValue={summaryExportChecklist.value[check.key] === true}
-                                                onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
-                                                label={t(check.label)}
-                                                density="compact"
-                                                hideDetails
-                                            />
-                                        ))}
-                                        {!summaryExportChecklistComplete.value && (
-                                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
-                                        )}
-                                    </ThemedView>
-                                )}
-                            </ThemedView>
-                            <MetricStrip items={metricItems.value} />
-                        </SurfaceCardText>
-                    </SurfaceCard>
+                    <SummaryExportCard
+                        title={t("Route health")}
+                        metrics={metricItems.value}
+                        exportLoading={summaryExportLoading.value}
+                        exportDisabled={!summaryExportChecklistComplete.value}
+                        onExport={() => void exportSummary()}
+                    >
+                        <FormChecklist
+                            checks={[...SUMMARY_EXPORT_CHECKS]}
+                            modelValue={summaryExportChecklist.value}
+                            onUpdate:modelValue={(value: Record<string, boolean>) => (summaryExportChecklist.value = value)}
+                            show={showChecklists}
+                            title={t("Summary export checklist")}
+                            complete={summaryExportChecklistComplete.value}
+                            incompleteMessage={t("Complete all summary export checklist items before exporting")}
+                        />
+                    </SummaryExportCard>
                 )}
 
                 <ApiTable<GatewayRoute>
@@ -498,7 +491,7 @@ const RoutesPage = dc(() => {
                     searchValue={search.value}
                     setSearchValue={(value) => (search.value = value)}
                     headers={headers}
-                    rowColor={(row) => (row.healthState === "OPEN_BREAKER" ? "#dc2626" : row.healthState === "DEGRADED" ? "#d97706" : undefined)}
+                    rowColor={(row) => (row.healthState === "OPEN_BREAKER" ? toneColor("error") : row.healthState === "DEGRADED" ? toneColor("warning") : undefined)}
                     apiDataExtractor={(data) => {
                         const payload = data as { routes?: GatewayRoute[]; rows?: GatewayRoute[] };
                         return payload.routes ?? payload.rows ?? [];
@@ -537,88 +530,96 @@ const RoutesPage = dc(() => {
                 onUpdate:modelValue={(v: any) => (dialogOpen.value = v)}
                 title={[t("Edit route"), editingRoute.value?.railCode, "→", editingRoute.value?.gatewayCode].filter(Boolean).join(" · ")}
                 size="md"
-            >
-<ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                            <StatusChip label={editingRoute.value?.credentialPolicy ?? "-"} tone="info" />
-                            <StatusChip label={editingRoute.value?.healthState ?? "-"} tone="neutral" />
-                        </ThemedView>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 14px" }}>
-                            <VTextField
-                                label={t("Priority")}
-                                type="number"
-                                modelValue={String(routeEditForm.value.priority)}
-                                onUpdate:modelValue={(v: string) => (routeEditForm.value.priority = Number(v) || 0)}
-                            />
-                            <VTextField
-                                label={t("Weight")}
-                                type="number"
-                                modelValue={String(routeEditForm.value.weight)}
-                                onUpdate:modelValue={(v: string) => (routeEditForm.value.weight = Number(v) || 1)}
-                            />
-                            <VTextField
-                                label={t("Minimum amount")}
-                                modelValue={routeEditForm.value.minAmount}
-                                onUpdate:modelValue={(v: string) => (routeEditForm.value.minAmount = v)}
-                            />
-                            <VTextField
-                                label={t("Maximum amount")}
-                                modelValue={routeEditForm.value.maxAmount}
-                                onUpdate:modelValue={(v: string) => (routeEditForm.value.maxAmount = v)}
-                            />
-                            <VTextField
-                                label={t("Daily cap")}
-                                modelValue={routeEditForm.value.dailyCapAmount}
-                                onUpdate:modelValue={(v: string) => (routeEditForm.value.dailyCapAmount = v)}
-                            />
-                            <VSelect
-                                label={t("Status")}
-                                items={["ACTIVE", "PAUSED", "DRAINING"]}
-                                modelValue={routeEditForm.value.status}
-                                onUpdate:modelValue={(v: string) => (routeEditForm.value.status = v)}
-                            />
-                            <div style={{ gridColumn: "span 2" }}>
-                                <VTextarea
-                                    label={t("Cost model (JSON)")}
-                                    rows={4}
-                                    modelValue={routeEditForm.value.costModel}
-                                    onUpdate:modelValue={(v: string) => (routeEditForm.value.costModel = v)}
-                                />
-                            </div>
-                            <div style={{ gridColumn: "span 2" }}>
-                                <VTextarea
-                                    label={t("Scope (JSON)")}
-                                    rows={3}
-                                    modelValue={routeEditForm.value.scope}
-                                    onUpdate:modelValue={(v: string) => (routeEditForm.value.scope = v)}
-                                />
-                            </div>
-                        </div>
-                        {showChecklists && (
-                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Route edit checklist")}</ThemedText>
-                                {ROUTE_EDIT_CHECKS.map((check) => (
-                                    <VCheckbox
-                                        key={check.key}
-                                        modelValue={routeEditChecklist.value[check.key] === true}
-                                        onUpdate:modelValue={(value: unknown) => (routeEditChecklist.value = { ...routeEditChecklist.value, [check.key]: Boolean(value) })}
-                                        label={t(check.label)}
-                                        density="compact"
-                                        hideDetails
-                                    />
-                                ))}
-                                {!routeEditChecklistComplete.value && (
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all route checklist items before saving")}</ThemedText>
-                                )}
-                            </ThemedView>
-                        )}
-                        <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                            <VBtn variant="text" onClick={() => (dialogOpen.value = false)}>
+                onSubmit={() => void saveRoute()}
+                submitLabel={t("Save")}
+                loading={actionLoading.value}
+                v-slots={{
+                    footer: () => (
+                        <>
+                            <VBtn variant="outlined" disabled={actionLoading.value} onClick={() => (dialogOpen.value = false)}>
                                 {t("Cancel")}
                             </VBtn>
-                            <VBtn color="primary" loading={actionLoading.value} disabled={!routeEditChecklistComplete.value} onClick={() => void saveRoute()}>
+                            <VBtn
+                                color="primary"
+                                variant="flat"
+                                {...{ type: "submit" }}
+                                loading={actionLoading.value}
+                                disabled={!routeEditChecklistComplete.value}
+                            >
                                 {t("Save")}
                             </VBtn>
-                        </ThemedView>
+                        </>
+                    ),
+                }}
+            >
+                <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
+                    <MetaPill size="small" variant="tonal" color="primary">{editingRoute.value?.credentialPolicy ?? "-"}</MetaPill>
+                    <StatusBadge status={editingRoute.value?.healthState ?? "-"} toneOverride={healthTone(editingRoute.value?.healthState ?? "") === "error" ? "danger" : (healthTone(editingRoute.value?.healthState ?? "") as any)} />
+                </ThemedView>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 14px" }}>
+                    <FormField label={t("Priority")} sensitiveMakerChecker>
+                        <VTextField
+                            type="number"
+                            modelValue={String(routeEditForm.value.priority)}
+                            onUpdate:modelValue={(v: string) => (routeEditForm.value.priority = Number(v) || 0)}
+                        />
+                    </FormField>
+                    <FormField label={t("Weight")} sensitiveMakerChecker>
+                        <VTextField
+                            type="number"
+                            modelValue={String(routeEditForm.value.weight)}
+                            onUpdate:modelValue={(v: string) => (routeEditForm.value.weight = Number(v) || 1)}
+                        />
+                    </FormField>
+                    <FormField label={t("Minimum amount")} sensitiveMakerChecker>
+                        <VTextField
+                            modelValue={routeEditForm.value.minAmount}
+                            onUpdate:modelValue={(v: string) => (routeEditForm.value.minAmount = v)}
+                        />
+                    </FormField>
+                    <FormField label={t("Maximum amount")} sensitiveMakerChecker>
+                        <VTextField
+                            modelValue={routeEditForm.value.maxAmount}
+                            onUpdate:modelValue={(v: string) => (routeEditForm.value.maxAmount = v)}
+                        />
+                    </FormField>
+                    <FormField label={t("Daily cap")} sensitiveMakerChecker>
+                        <VTextField
+                            modelValue={routeEditForm.value.dailyCapAmount}
+                            onUpdate:modelValue={(v: string) => (routeEditForm.value.dailyCapAmount = v)}
+                        />
+                    </FormField>
+                    <FormField label={t("Status")} sensitiveMakerChecker>
+                        <VSelect
+                            items={["ACTIVE", "PAUSED", "DRAINING"]}
+                            modelValue={routeEditForm.value.status}
+                            onUpdate:modelValue={(v: string) => (routeEditForm.value.status = v)}
+                        />
+                    </FormField>
+                    <FormField label={t("Cost model (JSON)")} style={{ gridColumn: "span 2" }} sensitiveMakerChecker>
+                        <VTextarea
+                            rows={4}
+                            modelValue={routeEditForm.value.costModel}
+                            onUpdate:modelValue={(v: string) => (routeEditForm.value.costModel = v)}
+                        />
+                    </FormField>
+                    <FormField label={t("Scope (JSON)")} style={{ gridColumn: "span 2" }} sensitiveMakerChecker>
+                        <VTextarea
+                            rows={3}
+                            modelValue={routeEditForm.value.scope}
+                            onUpdate:modelValue={(v: string) => (routeEditForm.value.scope = v)}
+                        />
+                    </FormField>
+                </div>
+                <FormChecklist
+                    checks={[...ROUTE_EDIT_CHECKS]}
+                    modelValue={routeEditChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (routeEditChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Route edit checklist")}
+                    complete={routeEditChecklistComplete.value}
+                    incompleteMessage={t("Complete all route checklist items before saving")}
+                />
             </FormModal>
 
             <FormModal
@@ -626,44 +627,55 @@ const RoutesPage = dc(() => {
                 onUpdate:modelValue={(v: any) => (createOpen.value = v)}
                 title={t("Add Route")}
                 size="md"
-            >
-<VSelect
-                            label={t("Rails")}
-                            items={railOptions.value}
-                            modelValue={routeForm.value.railId}
-                            onUpdate:modelValue={(v: string) => (routeForm.value.railId = v)}
-                        />
-                        <VSelect
-                            label={t("Gateways")}
-                            items={gatewayOptions.value}
-                            modelValue={routeForm.value.gatewayId}
-                            onUpdate:modelValue={(v: string) => (routeForm.value.gatewayId = v)}
-                        />
-                        <VTextField
-                            label={t("Priority")}
-                            type="number"
-                            modelValue={String(routeForm.value.priority)}
-                            onUpdate:modelValue={(v: string) => (routeForm.value.priority = Number(v) || 0)}
-                        />
-                        <VTextField
-                            label={t("Max Amount")}
-                            hint="optional, e.g. 5000.0000"
-                            modelValue={routeForm.value.limitAmount}
-                            onUpdate:modelValue={(v: string) => (routeForm.value.limitAmount = v)}
-                        />
-                        <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                            <VBtn variant="text" onClick={() => (createOpen.value = false)}>
+                onSubmit={() => void createRoute()}
+                submitLabel={t("Create")}
+                loading={creating.value}
+                v-slots={{
+                    footer: () => (
+                        <>
+                            <VBtn variant="outlined" disabled={creating.value} onClick={() => (createOpen.value = false)}>
                                 {t("Cancel")}
                             </VBtn>
                             <VBtn
                                 color="primary"
+                                variant="flat"
+                                {...{ type: "submit" }}
                                 loading={creating.value}
                                 disabled={!routeForm.value.railId || !routeForm.value.gatewayId}
-                                onClick={() => void createRoute()}
                             >
                                 {t("Create")}
                             </VBtn>
-                        </ThemedView>
+                        </>
+                    ),
+                }}
+            >
+                <FormField label={t("Rails")} required>
+                    <VSelect
+                        items={railOptions.value}
+                        modelValue={routeForm.value.railId}
+                        onUpdate:modelValue={(v: string) => (routeForm.value.railId = v)}
+                    />
+                </FormField>
+                <FormField label={t("Gateways")} required>
+                    <VSelect
+                        items={gatewayOptions.value}
+                        modelValue={routeForm.value.gatewayId}
+                        onUpdate:modelValue={(v: string) => (routeForm.value.gatewayId = v)}
+                    />
+                </FormField>
+                <FormField label={t("Priority")} sensitiveMakerChecker>
+                    <VTextField
+                        type="number"
+                        modelValue={String(routeForm.value.priority)}
+                        onUpdate:modelValue={(v: string) => (routeForm.value.priority = Number(v) || 0)}
+                    />
+                </FormField>
+                <FormField label={t("Max Amount")} hint="optional, e.g. 5000.0000" sensitiveMakerChecker>
+                    <VTextField
+                        modelValue={routeForm.value.limitAmount}
+                        onUpdate:modelValue={(v: string) => (routeForm.value.limitAmount = v)}
+                    />
+                </FormField>
             </FormModal>
         </ScreenContainer>
     );

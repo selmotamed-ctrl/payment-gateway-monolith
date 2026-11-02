@@ -7,7 +7,6 @@ import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
@@ -35,10 +34,11 @@ import KybDocumentPreview from "./components/KybDocumentPreview";
 import KybReviewDialog from "./components/KybReviewDialog";
 import KybActionDialog, { type KybActionMode } from "./components/KybActionDialog";
 
-import { FormModal } from "@/components/ui/FormModal";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { MetricStrip } from "@/components/ui/MetricStrip";
 import { MonoRef } from "@/components/ui/MonoRef";
+import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
+import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
 type KybDocumentsSummary = {
     total: number;
     pending: number;
@@ -72,6 +72,8 @@ const KybReviewPage = dc(() => {
     const { t } = useLocale();
     const theme = useTheme();
     const router = useRouter();
+    const asBadgeTone = (tone: ReturnType<typeof statusTone>): BadgeTone =>
+        tone === "error" ? "danger" : tone === "primary" ? "info" : tone;
     const search = ref<string | null>(null);
     const filters = ref<FilterValues>({});
     const rows = ref<KybDocumentSummary[]>([]);
@@ -306,7 +308,7 @@ const KybReviewPage = dc(() => {
 
     const toneColor = (tone: ReturnType<typeof statusTone>): string => {
         const colors = theme.current.value.colors as Record<string, string>;
-        return colors[tone] ?? colors["on-surface-variant"] ?? "#64748b";
+        return colors[tone] ?? colors["on-surface-variant"] ?? "var(--pg-ink-muted)";
     };
 
     const rowColor = (row: KybDocumentSummary): string | undefined => {
@@ -333,10 +335,10 @@ const KybReviewPage = dc(() => {
                         {row.merchantLegalName || row.merchantId}
                     </ThemedText>
                     <ThemedView style={{ flexDirection: "row", gap: "4px", flexWrap: "wrap" }}>
-                        <StatusChip label={row.merchantStatus || "—"} tone={statusTone(row.merchantStatus ?? "")} size="x-small" />
-                        <StatusChip label={`KYB ${row.merchantKybStatus || "—"}`} tone={statusTone(row.merchantKybStatus ?? "")} size="x-small" />
+                        <StatusBadge status={row.merchantStatus || "—"} label={row.merchantStatus || "—"} toneOverride={asBadgeTone(statusTone(row.merchantStatus ?? ""))} />
+                        <StatusBadge status={row.merchantKybStatus || "—"} label={`KYB ${row.merchantKybStatus || "—"}`} toneOverride={asBadgeTone(statusTone(row.merchantKybStatus ?? ""))} />
                         {row.subjectType === "BENEFICIAL_OWNER" && (
-                            <StatusChip label={row.subjectName || "Owner"} tone="info" size="x-small" />
+                            <StatusBadge status={row.subjectName || "Owner"} label={row.subjectName || "Owner"} toneOverride="info" />
                         )}
                     </ThemedView>
                 </ThemedView>
@@ -352,7 +354,7 @@ const KybReviewPage = dc(() => {
                 const help = documentTypeHelp(row.docType);
                 return (
                     <span title={help.meaning}>
-                        <StatusChip label={help.label} tone="info" size="small" />
+                        <StatusBadge status={row.docType} label={help.label} toneOverride="info" />
                     </span>
                 );
             },
@@ -381,7 +383,7 @@ const KybReviewPage = dc(() => {
                 const help = documentStatusHelp(row.status);
                 return (
                     <span title={help.meaning}>
-                        <StatusChip label={help.label} tone={help.tone} size="small" />
+                        <StatusBadge status={row.status} label={help.label} toneOverride={asBadgeTone(help.tone)} />
                     </span>
                 );
             },
@@ -396,7 +398,7 @@ const KybReviewPage = dc(() => {
                 const help = avStatusHelp(row.avStatus);
                 return (
                     <span title={help.meaning}>
-                        <StatusChip label={help.label} tone={help.tone} size="small" />
+                        <StatusBadge status={row.avStatus} label={help.label} toneOverride={asBadgeTone(help.tone)} />
                     </span>
                 );
             },
@@ -412,10 +414,10 @@ const KybReviewPage = dc(() => {
                 return (
                     <ThemedView style={{ gap: "3px" }}>
                         <span title={help.meaning}>
-                            <StatusChip
+                            <StatusBadge
+                                status={row.expiryState}
                                 label={row.daysUntilExpiry === null ? help.label : `${help.label} ${row.daysUntilExpiry < 0 ? `(${Math.abs(row.daysUntilExpiry)}d ago)` : `(${row.daysUntilExpiry}d)`}`}
-                                tone={help.tone}
-                                size="x-small"
+                                toneOverride={asBadgeTone(help.tone)}
                             />
                         </span>
                         <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{formatDateTime(row.expiresOn)}</ThemedText>
@@ -430,10 +432,10 @@ const KybReviewPage = dc(() => {
             value: (row) => String(row.duplicateMerchantCount),
             Value: ({ row }: { row: KybDocumentSummary }) =>
                 row.duplicateMerchantCount > 0 ? (
-                    <StatusChip
+                    <StatusBadge
+                        status="duplicate"
                         label={`${row.duplicateMerchantCount} merchant${row.duplicateMerchantCount === 1 ? "" : "s"}`}
-                        tone="warning"
-                        size="x-small"
+                        toneOverride="warning"
                     />
                 ) : (
                     <ThemedText style={{ opacity: 0.55 }}>—</ThemedText>
@@ -449,8 +451,8 @@ const KybReviewPage = dc(() => {
                 const sla = requestSlaLabel(row);
                 return (
                     <ThemedView style={{ gap: "3px" }}>
-                        <StatusChip label={row.joinRequest.status} tone={statusTone(row.joinRequest.status)} size="x-small" />
-                        <StatusChip label={`SLA ${sla.label}`} tone={sla.tone} size="x-small" />
+                        <StatusBadge status={row.joinRequest.status} label={row.joinRequest.status} toneOverride={asBadgeTone(statusTone(row.joinRequest.status))} />
+                        <StatusBadge status={sla.label} label={`SLA ${sla.label}`} toneOverride={asBadgeTone(sla.tone)} />
                         <MonoRef value={row.joinRequest.id} truncate={18} />
                     </ThemedView>
                 );
@@ -533,9 +535,9 @@ const KybReviewPage = dc(() => {
                     badgeTone="info"
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                            <StatusChip label={`${total.value} ${t("documents")}`} tone="info" size="small" />
-                            <StatusChip label={`${actionableCount.value} ${t("actionable")}`} tone="success" size="small" />
-                            <StatusChip label={`${duplicateCount.value} ${t("duplicates")}`} tone={duplicateCount.value ? "warning" : "neutral"} size="small" />
+                            <StatusBadge status="info" label={`${total.value} ${t("documents")}`} toneOverride="info" showDot={false} />
+                            <StatusBadge status="success" label={`${actionableCount.value} ${t("actionable")}`} toneOverride="success" showDot={false} />
+                            <StatusBadge status="duplicates" label={`${duplicateCount.value} ${t("duplicates")}`} toneOverride={duplicateCount.value ? "warning" : "neutral"} showDot={false} />
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
                         </ThemedView>
@@ -543,26 +545,22 @@ const KybReviewPage = dc(() => {
                 />
 
                 {summary.value && (
-                    <ThemedView style={{ gap: "12px" }}>
-                        <MetricStrip items={summaryItems.value} />
-                        <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Document review health")}</ThemedText>
-                                    <div style={{ flex: 1 }} />
-                                    <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
-                                </ThemedView>
-                                <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                    {Object.entries(summary.value.byStatus ?? {}).map(([state, count]) => (
-                                        <StatusChip key={state} label={`${state}: ${count}`} tone={statusTone(state)} size="x-small" />
-                                    ))}
-                                    {Object.entries(summary.value.byAvStatus ?? {}).map(([state, count]) => (
-                                        <StatusChip key={`av-${state}`} label={`AV ${state}: ${count}`} tone={statusTone(state)} size="x-small" />
-                                    ))}
-                                </ThemedView>
-                            </SurfaceCardText>
-                        </SurfaceCard>
-                    </ThemedView>
+                    <SummaryExportCard
+                        title={t("Document review health")}
+                        metrics={summaryItems.value}
+                        exportLoading={summaryExportLoading.value}
+                        exportLabel={t("Export summary")}
+                        onExport={() => void exportSummary()}
+                    >
+                        <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                            {Object.entries(summary.value.byStatus ?? {}).map(([state, count]) => (
+                                <StatusBadge key={state} status={state} label={`${state}: ${count}`} toneOverride={asBadgeTone(statusTone(state))} showDot={false} />
+                            ))}
+                            {Object.entries(summary.value.byAvStatus ?? {}).map(([state, count]) => (
+                                <StatusBadge key={`av-${state}`} status={state} label={`AV ${state}: ${count}`} toneOverride={asBadgeTone(statusTone(state))} showDot={false} />
+                            ))}
+                        </ThemedView>
+                    </SummaryExportCard>
                 )}
 
                 {areHelpPanelsVisible() && (
@@ -627,14 +625,15 @@ const KybReviewPage = dc(() => {
                 />
             </ThemedView>
 
-            <FormModal
+            <SlideOverDrawer
                 modelValue={previewOpen.value}
                 onUpdate:modelValue={(value: boolean) => (previewOpen.value = value)}
-                title={"Details"}
-                size="lg"
+                title={t("Document inspection")}
+                subtitle={previewDocument.value?.originalFileName || previewDocument.value?.merchantName || ""}
+                width={720}
             >
-<KybDocumentPreview document={previewDocument.value} />
-            </FormModal>
+                <KybDocumentPreview document={previewDocument.value} />
+            </SlideOverDrawer>
 
             <KybReviewDialog
                 open={reviewOpen.value}

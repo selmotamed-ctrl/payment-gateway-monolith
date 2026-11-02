@@ -29,7 +29,15 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { buildRailFormSchema, normalizeFormValues } from "@/utils/zReady";
 import { adaptedLocale } from "@/plugins/localization";
 
-import { MoneyDisplay, MonoRef, StatusBadge, SurfaceCard } from "@/components/ui";
+import {
+    DescriptionList,
+    EmptyState,
+    MoneyDisplay,
+    MonoRef,
+    StatusBadge,
+    SurfaceCard,
+    type DescriptionItem,
+} from "@/components/ui";
 type Phase = "SUMMARY" | "FORM" | "ACTION" | "CONFIRMING" | "RECEIPT" | "ERROR";
 
 const newIdempotencyKey = () =>
@@ -92,25 +100,37 @@ const PayPage = dc(() => {
 
     const currency = computed(() => summary.value?.currency ?? "LYD");
 
-    const feeRows = computed(() => {
+    const breakdownItems = computed<DescriptionItem[]>(() => {
         const data = summary.value;
         if (!data) {
             return [];
         }
-        const rows: { label: string; value: string; emphasis?: boolean }[] = [
-            { label: t("Amount"), value: data.baseAmount },
+        const items: DescriptionItem[] = [
+            {
+                label: t("Amount"),
+                value: data.baseAmount,
+                money: true,
+                currency: currency.value,
+            },
         ];
         if (data.feeBearerMode !== "MERCHANT_ABSORBS") {
-            rows.push({
+            items.push({
                 label:
                     data.feeBearerMode === "SPLIT"
                         ? `${t("Service Fee")} (${data.splitPercent ?? "0"}%)`
                         : t("Service Fee"),
                 value: data.feeAmount,
+                money: true,
+                currency: currency.value,
             });
         }
-        rows.push({ label: t("Amount Charged"), value: data.totalAmount, emphasis: true });
-        return rows;
+        items.push({
+            label: t("Amount Charged"),
+            value: data.totalAmount,
+            money: true,
+            currency: currency.value,
+        });
+        return items;
     });
 
     const validate = (): boolean => {
@@ -346,7 +366,7 @@ const PayPage = dc(() => {
     const renderAction = () => {
         const action = clientAction.value;
         if (!action) {
-            return <StateView empty={true} emptyTitle={t("No Data Found")} />;
+            return <EmptyState title={t("No Data Found")} icon="mdi-inbox-outline" />;
         }
         switch (action.kind) {
             case "SHOW_OTP_FORM":
@@ -388,7 +408,7 @@ const PayPage = dc(() => {
                     />
                 );
             default:
-                return <StateView empty={true} emptyTitle={t("No Data Found")} />;
+                return <EmptyState title={t("No Data Found")} icon="mdi-inbox-outline" />;
         }
     };
 
@@ -529,37 +549,10 @@ const PayPage = dc(() => {
                                 <span style={{ fontSize: "11px", fontWeight: 600, color: "var(--pg-ink-muted)" }}>
                                     {t("Amount Breakdown")}
                                 </span>
-                                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                                    {feeRows.value.map((row) => (
-                                        <div
-                                            key={row.label}
-                                            style={{
-                                                display: "flex",
-                                                justifyContent: "space-between",
-                                                alignItems: "baseline",
-                                                gap: "12px",
-                                                flexWrap: "wrap",
-                                            }}
-                                        >
-                                            <span
-                                                style={{
-                                                    fontSize: "13px",
-                                                    color: row.emphasis
-                                                        ? "var(--pg-ink-primary)"
-                                                        : "var(--pg-ink-secondary)",
-                                                    fontWeight: row.emphasis ? 500 : 400,
-                                                }}
-                                            >
-                                                {row.label}
-                                            </span>
-                                            <MoneyDisplay
-                                                amount={row.value}
-                                                currency={currency.value}
-                                                size={row.emphasis ? "lg" : "md"}
-                                            />
-                                        </div>
-                                    ))}
-                                </div>
+                                <DescriptionList
+                                    ariaLabel={t("Amount Breakdown")}
+                                    items={breakdownItems.value}
+                                />
                                 {summary.value?.expiresAt && (
                                     <span style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>
                                         {t("Expires At")}: {summary.value.expiresAt}
@@ -666,7 +659,7 @@ const PayPage = dc(() => {
                                         <span style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>
                                             {t("Payment Status")}
                                         </span>
-                                        <StatusBadge status={attemptStatus.value} toneOverride="warning" />
+                                        <StatusBadge status={attemptStatus.value} />
                                     </div>
                                     {renderReference()}
                                     <VBtn variant="tonal" onClick={() => void cancelAttempt()}>
@@ -737,7 +730,7 @@ const PayPage = dc(() => {
                                         <span style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>
                                             {t("Payment Status")}
                                         </span>
-                                        <StatusBadge status={attemptStatus.value} toneOverride="danger" />
+                                        <StatusBadge status={attemptStatus.value} />
                                     </div>
                                     <VBtn variant="tonal" onClick={() => (phase.value = "FORM")}>
                                         {t("Try Another Method")}

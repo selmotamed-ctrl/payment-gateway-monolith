@@ -2,13 +2,15 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VCard, VCardText, VCheckbox, VSelect, VTextField, VSwitch } from "vuetify/components";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
+import { VAlert, VBtn, VSelect, VSwitch, VTextField } from "vuetify/components";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
+import { WizardSection } from "./WizardSection";
 import type { WizardStepProps } from "./StepIdentity";
 
 const CREDENTIAL_CHECKLIST = [
@@ -24,6 +26,12 @@ const stringToList = (value: string) =>
         .split(",")
         .map((entry) => entry.trim())
         .filter((entry) => !!entry);
+
+const gridStyle = {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: "14px",
+} as const;
 
 export const StepEnvironments = dc(
     (props: WizardStepProps) => {
@@ -96,219 +104,208 @@ export const StepEnvironments = dc(
         };
 
         return () => (
-            <ThemedView style={{ gap: "16px" }}>
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                            {t("Environments & Auth")}
-                        </ThemedText>
-
-                        {props.model.environments.map((environment, index) => (
-                            <ThemedView
-                                key={environment.env}
-                                style={{
-                                    flexDirection: "row",
-                                    gap: "14px",
-                                    flexWrap: "wrap",
-                                    border: "1px solid rgba(100,116,139,0.2)",
-                                    borderRadius: "12px",
-                                    padding: "14px",
-                                }}
-                            >
-                                <ThemedView style={{ gap: "10px", minWidth: "180px" }}>
-                                    <ThemedText type="defaultSemiBold">{environment.env}</ThemedText>
+            <SurfaceCard title={t("Environments & Auth")}>
+                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+                    {props.model.environments.map((environment, index) => (
+                        <WizardSection
+                            key={environment.env}
+                            title={environment.env}
+                            divider={index > 0}
+                            v-slots={{
+                                actions: () => (
+                                    <StatusBadge
+                                        status={environment.enabled ? "ACTIVE" : "DISABLED"}
+                                        label={environment.enabled ? t("Enabled") : t("Inactive")}
+                                    />
+                                ),
+                            }}
+                        >
+                            <div style={gridStyle}>
+                                <FormField label={t("Base URL")}>
+                                    <VTextField
+                                        modelValue={environment.baseUrl}
+                                        onUpdate:modelValue={(v: string) => updateEnvironment(index, { baseUrl: v })}
+                                    />
+                                </FormField>
+                                <FormField label={t("Allowed Hosts")}>
+                                    <VTextField
+                                        modelValue={listToString(environment.allowedHosts)}
+                                        onUpdate:modelValue={(v: string) =>
+                                            updateEnvironment(index, { allowedHosts: stringToList(v) })
+                                        }
+                                    />
+                                </FormField>
+                                <FormField label={t("Inbound IP Allowlist")}>
+                                    <VTextField
+                                        modelValue={listToString(environment.inboundIpAllowlist)}
+                                        onUpdate:modelValue={(v: string) =>
+                                            updateEnvironment(index, { inboundIpAllowlist: stringToList(v) })
+                                        }
+                                    />
+                                </FormField>
+                                <FormField label={t("Enabled")}>
                                     <VSwitch
-                                        label={t("Enabled")}
                                         modelValue={environment.enabled}
                                         onUpdate:modelValue={(v: boolean | null) => updateEnvironment(index, { enabled: !!v })}
                                         density="compact"
                                         hideDetails
                                     />
-                                </ThemedView>
-                                <VTextField
-                                    label={t("Base URL")}
-                                    modelValue={environment.baseUrl}
-                                    onUpdate:modelValue={(v: string) => updateEnvironment(index, { baseUrl: v })}
-                                    style={{ minWidth: "280px" }}
-                                />
-                                <VTextField
-                                    label={t("Allowed Hosts")}
-                                    modelValue={listToString(environment.allowedHosts)}
-                                    onUpdate:modelValue={(v: string) =>
-                                        updateEnvironment(index, { allowedHosts: stringToList(v) })
-                                    }
-                                    style={{ minWidth: "240px" }}
-                                />
-                                <VTextField
-                                    label={t("Inbound IP Allowlist")}
-                                    modelValue={listToString(environment.inboundIpAllowlist)}
-                                    onUpdate:modelValue={(v: string) =>
-                                        updateEnvironment(index, { inboundIpAllowlist: stringToList(v) })
-                                    }
-                                    style={{ minWidth: "240px" }}
-                                />
-                            </ThemedView>
-                        ))}
-                    </VCardText>
-                </VCard>
+                                </FormField>
+                            </div>
+                        </WizardSection>
+                    ))}
 
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedText type="defaultSemiBold">{t("Auth Method")}</ThemedText>
-                        <ThemedView style={{ flexDirection: "row", gap: "14px", flexWrap: "wrap" }}>
-                            <VSelect
-                                items={[
-                                    "NONE",
-                                    "API_KEY",
-                                    "PERMANENT_TOKEN",
-                                    "TOKEN_ENDPOINT",
-                                    "REFRESH_TOKEN",
-                                    "USERNAME_PASSWORD",
-                                    "BASIC",
-                                    "REQUEST_SIGNATURE",
-                                    "OAUTH2_CLIENT_CREDENTIALS",
-                                    "MUTUAL_TLS",
-                                ]}
-                                modelValue={props.model.auth.method}
-                                onUpdate:modelValue={(v: any) => updateAuth({ method: v })}
-                                label={t("Auth Method")}
-                                style={{ minWidth: "260px" }}
-                            />
-                            <VTextField
-                                label="username"
-                                modelValue={props.model.auth.username}
-                                onUpdate:modelValue={(v: string) => updateAuth({ username: v })}
-                                style={{ minWidth: "200px" }}
-                            />
-                            <VTextField
-                                label="key_ref"
-                                modelValue={props.model.auth.keyRef}
-                                onUpdate:modelValue={(v: string) => updateAuth({ keyRef: v })}
-                                style={{ minWidth: "200px" }}
-                            />
-                            <VTextField
-                                label="token_url"
-                                modelValue={props.model.auth.tokenUrl}
-                                onUpdate:modelValue={(v: string) => updateAuth({ tokenUrl: v })}
-                                style={{ minWidth: "260px" }}
-                            />
-                            <VTextField
-                                label="client_id_ref"
-                                modelValue={props.model.auth.clientIdRef}
-                                onUpdate:modelValue={(v: string) => updateAuth({ clientIdRef: v })}
-                                style={{ minWidth: "200px" }}
-                            />
-                            <VTextField
-                                label="client_secret_ref"
-                                modelValue={props.model.auth.clientSecretRef}
-                                onUpdate:modelValue={(v: string) => updateAuth({ clientSecretRef: v })}
-                                style={{ minWidth: "200px" }}
-                            />
-                        </ThemedView>
-                    </VCardText>
-                </VCard>
+                    <WizardSection title={t("Auth Method")} divider>
+                        <div style={gridStyle}>
+                            <FormField label={t("Auth Method")}>
+                                <VSelect
+                                    items={[
+                                        "NONE",
+                                        "API_KEY",
+                                        "PERMANENT_TOKEN",
+                                        "TOKEN_ENDPOINT",
+                                        "REFRESH_TOKEN",
+                                        "USERNAME_PASSWORD",
+                                        "BASIC",
+                                        "REQUEST_SIGNATURE",
+                                        "OAUTH2_CLIENT_CREDENTIALS",
+                                        "MUTUAL_TLS",
+                                    ]}
+                                    modelValue={props.model.auth.method}
+                                    onUpdate:modelValue={(v: any) => updateAuth({ method: v })}
+                                />
+                            </FormField>
+                            <FormField label="username">
+                                <VTextField
+                                    modelValue={props.model.auth.username}
+                                    onUpdate:modelValue={(v: string) => updateAuth({ username: v })}
+                                />
+                            </FormField>
+                            <FormField label="key_ref" sensitiveMakerChecker>
+                                <VTextField
+                                    modelValue={props.model.auth.keyRef}
+                                    onUpdate:modelValue={(v: string) => updateAuth({ keyRef: v })}
+                                />
+                            </FormField>
+                            <FormField label="token_url">
+                                <VTextField
+                                    modelValue={props.model.auth.tokenUrl}
+                                    onUpdate:modelValue={(v: string) => updateAuth({ tokenUrl: v })}
+                                />
+                            </FormField>
+                            <FormField label="client_id_ref">
+                                <VTextField
+                                    modelValue={props.model.auth.clientIdRef}
+                                    onUpdate:modelValue={(v: string) => updateAuth({ clientIdRef: v })}
+                                />
+                            </FormField>
+                            <FormField label="client_secret_ref" sensitiveMakerChecker>
+                                <VTextField
+                                    modelValue={props.model.auth.clientSecretRef}
+                                    onUpdate:modelValue={(v: string) => updateAuth({ clientSecretRef: v })}
+                                />
+                            </FormField>
+                        </div>
+                    </WizardSection>
 
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                            <ThemedText type="defaultSemiBold">{t("Write Only")}</ThemedText>
-                            <VBtn variant="tonal" size="small" onClick={addCredential}>
-                                {t("Add")}
-                            </VBtn>
-                        </ThemedView>
-
+                    <WizardSection
+                        title={t("Write Only")}
+                        divider
+                        v-slots={{
+                            actions: () => (
+                                <VBtn variant="tonal" size="small" onClick={addCredential}>
+                                    {t("Add")}
+                                </VBtn>
+                            ),
+                        }}
+                    >
                         {props.model.credentialSets.map((credential, index) => (
-                            <ThemedView
+                            <WizardSection
                                 key={index}
-                                style={{
-                                    flexDirection: "row",
-                                    gap: "12px",
-                                    flexWrap: "wrap",
-                                    alignItems: "center",
-                                    borderBottom: "1px solid rgba(100,116,139,0.18)",
-                                    paddingBottom: "10px",
+                                title={credential.label || `${t("Write Only")} ${index + 1}`}
+                                divider={index > 0}
+                                v-slots={{
+                                    actions: () => (
+                                        <StatusBadge
+                                            status={credential.env}
+                                            toneOverride={credential.env === "LIVE" ? "warning" : "info"}
+                                        />
+                                    ),
                                 }}
                             >
-                                <StatusChip label={t("Write Only")} tone="warning" />
-                                <VTextField
-                                    label={t("Token Name")}
-                                    modelValue={credential.label}
-                                    onUpdate:modelValue={(v: string) => updateCredential(index, { label: v })}
-                                    style={{ minWidth: "180px" }}
-                                />
-                                <VSelect
-                                    items={["PLATFORM", "MERCHANT"]}
-                                    modelValue={credential.ownerType}
-                                    onUpdate:modelValue={(v: any) => updateCredential(index, { ownerType: v })}
-                                    label={t("Owner")}
-                                    style={{ minWidth: "160px" }}
-                                />
-                                <VSelect
-                                    items={["PLATFORM_CLEARING", "MERCHANT_DIRECT", "PROVIDER_HELD"]}
-                                    modelValue={credential.settlementTarget}
-                                    onUpdate:modelValue={(v: any) => updateCredential(index, { settlementTarget: v })}
-                                    label={t("Settlement Target")}
-                                    style={{ minWidth: "200px" }}
-                                />
-                                <VSelect
-                                    items={["SANDBOX", "LIVE"]}
-                                    modelValue={credential.env}
-                                    onUpdate:modelValue={(v: any) => updateCredential(index, { env: v })}
-                                    label={t("Environment")}
-                                    style={{ minWidth: "150px" }}
-                                />
-                                <VTextField
-                                    label={t("Secret")}
-                                    type="password"
-                                    modelValue={credential.secret}
-                                    onUpdate:modelValue={(v: string) => updateCredential(index, { secret: v })}
-                                    style={{ minWidth: "220px" }}
-                                />
-                                <VTextField
-                                    label="secret_ref"
-                                    modelValue={credential.secretRef}
-                                    onUpdate:modelValue={(v: string) => updateCredential(index, { secretRef: v })}
-                                    style={{ minWidth: "180px" }}
-                                />
-                            </ThemedView>
+                                <div style={gridStyle}>
+                                    <FormField label={t("Token Name")}>
+                                        <VTextField
+                                            modelValue={credential.label}
+                                            onUpdate:modelValue={(v: string) => updateCredential(index, { label: v })}
+                                        />
+                                    </FormField>
+                                    <FormField label={t("Owner")}>
+                                        <VSelect
+                                            items={["PLATFORM", "MERCHANT"]}
+                                            modelValue={credential.ownerType}
+                                            onUpdate:modelValue={(v: any) => updateCredential(index, { ownerType: v })}
+                                        />
+                                    </FormField>
+                                    <FormField label={t("Settlement Target")}>
+                                        <VSelect
+                                            items={["PLATFORM_CLEARING", "MERCHANT_DIRECT", "PROVIDER_HELD"]}
+                                            modelValue={credential.settlementTarget}
+                                            onUpdate:modelValue={(v: any) => updateCredential(index, { settlementTarget: v })}
+                                        />
+                                    </FormField>
+                                    <FormField label={t("Environment")}>
+                                        <VSelect
+                                            items={["SANDBOX", "LIVE"]}
+                                            modelValue={credential.env}
+                                            onUpdate:modelValue={(v: any) => updateCredential(index, { env: v })}
+                                        />
+                                    </FormField>
+                                    <FormField label={t("Secret")} sensitiveMakerChecker>
+                                        <VTextField
+                                            type="password"
+                                            modelValue={credential.secret}
+                                            onUpdate:modelValue={(v: string) => updateCredential(index, { secret: v })}
+                                        />
+                                    </FormField>
+                                    <FormField label="secret_ref" sensitiveMakerChecker>
+                                        <VTextField
+                                            modelValue={credential.secretRef}
+                                            onUpdate:modelValue={(v: string) => updateCredential(index, { secretRef: v })}
+                                        />
+                                    </FormField>
+                                </div>
+                            </WizardSection>
                         ))}
 
-                        {showChecklists && (
-                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Credential check checklist")}</ThemedText>
-                                {CREDENTIAL_CHECKLIST.map((check) => (
-                                    <VCheckbox
-                                        key={check.key}
-                                        modelValue={credentialChecklist.value[check.key] === true}
-                                        onUpdate:modelValue={(value: unknown) => (credentialChecklist.value = { ...credentialChecklist.value, [check.key]: Boolean(value) })}
-                                        label={t(check.label)}
-                                        density="compact"
-                                        hideDetails
-                                    />
-                                ))}
-                                {!credentialChecklistComplete.value && (
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all credential check items before running the check")}</ThemedText>
-                                )}
-                            </ThemedView>
-                        )}
-                        <ThemedView style={{ flexDirection: "row", gap: "12px", alignItems: "center" }}>
+                        <FormChecklist
+                            checks={CREDENTIAL_CHECKLIST.map((check) => ({ key: check.key, label: check.label }))}
+                            modelValue={credentialChecklist.value}
+                            onUpdate:modelValue={(value: Record<string, boolean>) => (credentialChecklist.value = value)}
+                            show={showChecklists}
+                            title={t("Credential check checklist")}
+                            incompleteMessage={t("Complete all credential check items before running the check")}
+                            complete={credentialChecklistComplete.value}
+                        />
+
+                        <div style={{ display: "flex", flexDirection: "row", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
                             <VBtn color="primary" loading={checking.value} disabled={!credentialChecklistComplete.value} onClick={() => void runCredentialCheck()}>
                                 {t("Credential Check")}
                             </VBtn>
                             {checkResult.value && (
-                                <VAlert type="success" variant="tonal" density="compact" style={{ flex: 1 }}>
+                                <VAlert type="success" variant="tonal" density="compact" style={{ flex: 1, minWidth: "220px" }}>
                                     {checkResult.value}
                                 </VAlert>
                             )}
                             {checkError.value && (
-                                <VAlert type="error" variant="tonal" density="compact" style={{ flex: 1 }}>
+                                <VAlert type="error" variant="tonal" density="compact" style={{ flex: 1, minWidth: "220px" }}>
                                     {checkError.value}
                                 </VAlert>
                             )}
-                        </ThemedView>
-                    </VCardText>
-                </VCard>
-            </ThemedView>
+                        </div>
+                    </WizardSection>
+                </SurfaceCardText>
+            </SurfaceCard>
         );
     },
     {

@@ -7,18 +7,17 @@ import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
 import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
-import { MoneyText } from "@/components/MoneyText";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
-import { toDecimal } from "@/utils/money";
 
 import { FormModal } from "@/components/ui/FormModal";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 type Wallet = {
     id: string;
     name: string;
@@ -42,6 +41,7 @@ const WalletsPage = dc(() => {
     const dialogOpen = ref(false);
     const form = ref({ name: "", currency: "LYD", applicationId: "" });
     const applicationOptions = ref<{ title: string; value: string }[]>([]);
+    const formError = ref("");
 
     const loadApplications = async () => {
         const response = await api.get(urlsMap.options("applications"), { params: { limit: 100 } });
@@ -74,6 +74,7 @@ const WalletsPage = dc(() => {
 
     const createWallet = async () => {
         actionLoading.value = true;
+        formError.value = "";
         try {
             await api.post(urlsMap.walletsList, {
                 applicationId: form.value.applicationId,
@@ -84,41 +85,43 @@ const WalletsPage = dc(() => {
             showSnackBar({ type: "success", message: t("Created") });
             await load();
         } catch (e) {
-            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+            const message = extractApiErrorMessage(e);
+            formError.value = message;
+            showSnackBar({ type: "error", message });
         } finally {
             actionLoading.value = false;
         }
     };
 
     const headers: TableHeader<Wallet>[] = [
-        { key: "name", label: "Merchant Name", value: (row) => row.name },
+        { key: "name", label: "Wallet Name", value: (row) => row.name },
         { key: "currency", label: "Currency", value: (row) => row.currency },
         {
             key: "balance",
             label: "Wallet Balance",
-            Value: ({ row }: { row: Wallet }) => <MoneyText value={row.balance} currency={row.currency} bold />,
+            Value: ({ row }: { row: Wallet }) => (
+                <MoneyDisplay amount={row.balance} currency={row.currency} size="sm" />
+            ),
         },
         {
             key: "pendingBalance",
             label: "Pending",
-            Value: ({ row }: { row: Wallet }) => <MoneyText value={row.pendingBalance} currency={row.currency} />,
+            Value: ({ row }: { row: Wallet }) => (
+                <MoneyDisplay amount={row.pendingBalance} currency={row.currency} size="sm" />
+            ),
         },
         {
             key: "negativeBalance",
             label: "Amount Due",
             Value: ({ row }: { row: Wallet }) => (
-                <MoneyText
-                    value={row.negativeBalance}
-                    currency={row.currency}
-                    color={toDecimal(row.negativeBalance).greaterThan(0) ? "#dc2626" : undefined}
-                />
+                <MoneyDisplay amount={row.negativeBalance} currency={row.currency} size="sm" colorSign />
             ),
         },
         {
             key: "status",
             label: "Status",
             Value: ({ row }: { row: Wallet }) => (
-                <StatusChip label={row.status} tone={row.status === "ACTIVE" ? "success" : "warning"} />
+                <StatusBadge status={row.status} toneOverride={row.status === "ACTIVE" ? "success" : "warning"} />
             ),
         },
         { key: "lastTransactionAt", label: "Last Used", value: (row) => row.lastTransactionAt ?? "-" },
@@ -168,6 +171,7 @@ const WalletsPage = dc(() => {
                             variant="tonal"
                             onClick={() => {
                                 form.value = { name: "", currency: "LYD", applicationId: "" };
+                                formError.value = "";
                                 void loadApplications();
                                 dialogOpen.value = true;
                             }}
@@ -180,51 +184,54 @@ const WalletsPage = dc(() => {
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : (
-                    <SurfaceCard>
-                        <SurfaceCardText>
-                            <DataTable
-                                title={t("Wallets")}
-                                data={rows.value}
-                                headers={headers}
-                                loading={loading.value}
-                                showNumber={true}
-                                xlsx={false}
-                                noElevation={true}
-                                searchValue={search.value}
-                                setSearchValue={(value) => (search.value = value)}
-                            />
-                        </SurfaceCardText>
-                    </SurfaceCard>
+                    <DataTable
+                        title={t("Wallets")}
+                        data={rows.value}
+                        headers={headers}
+                        loading={loading.value}
+                        showNumber={true}
+                        xlsx={false}
+                        noElevation={true}
+                        searchValue={search.value}
+                        setSearchValue={(value) => (search.value = value)}
+                    />
                 )}
             </ThemedView>
 
             <FormModal
                 modelValue={dialogOpen.value}
                 onUpdate:modelValue={(v: any) => (dialogOpen.value = v)}
-                title={"Details"}
+                title={t("Create Wallet")}
                 size="sm"
+                loading={actionLoading.value}
+                errorMessage={formError.value}
+                submitLabel={t("Create")}
+                onSubmit={() => void createWallet()}
             >
-<VAutocomplete
-                            label={t("Applications")}
-                            items={applicationOptions.value}
-                            itemTitle="title"
-                            itemValue="value"
-                            modelValue={form.value.applicationId}
-                            onUpdate:modelValue={(v: string) => (form.value.applicationId = v ?? "")}
-                        />
-                        <VTextField
-                            label={t("Wallet label")}
-                            modelValue={form.value.name}
-                            onUpdate:modelValue={(v: string) => (form.value.name = v)}
-                        />
-                        <VTextField
-                            label={t("Currency")}
-                            modelValue={form.value.currency}
-                            onUpdate:modelValue={(v: string) => (form.value.currency = v.toUpperCase())}
-                        />
-                        <VBtn color="primary" loading={actionLoading.value} onClick={() => void createWallet()}>
-                            {t("Create")}
-                        </VBtn>
+                <FormField label={t("Application")} required>
+                    <VAutocomplete
+                        items={applicationOptions.value}
+                        itemTitle="title"
+                        itemValue="value"
+                        modelValue={form.value.applicationId}
+                        onUpdate:modelValue={(v: string) => (form.value.applicationId = v ?? "")}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("Wallet Name")} required>
+                    <VTextField
+                        modelValue={form.value.name}
+                        onUpdate:modelValue={(v: string) => (form.value.name = v)}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("Currency")} required>
+                    <VTextField
+                        modelValue={form.value.currency}
+                        onUpdate:modelValue={(v: string) => (form.value.currency = v.toUpperCase())}
+                        hideDetails
+                    />
+                </FormField>
             </FormModal>
         </ScreenContainer>
     );

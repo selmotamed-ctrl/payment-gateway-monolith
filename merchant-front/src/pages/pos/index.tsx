@@ -7,7 +7,6 @@ import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
 import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
@@ -16,7 +15,8 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
 import { FormModal } from "@/components/ui/FormModal";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 type Terminal = {
     id: string;
     name: string;
@@ -40,6 +40,7 @@ const PosTerminalsPage = dc(() => {
     const terminalForm = ref({ name: "", location: "" });
     const screenForm = ref({ name: "", role: "CASHIER" });
     const actionLoading = ref(false);
+    const formError = ref("");
 
     const load = async () => {
         loading.value = true;
@@ -62,13 +63,16 @@ const PosTerminalsPage = dc(() => {
 
     const createTerminal = async () => {
         actionLoading.value = true;
+        formError.value = "";
         try {
             await api.post(urlsMap.posTerminals, terminalForm.value);
             terminalOpen.value = false;
             showSnackBar({ type: "success", message: t("Created") });
             await load();
         } catch (e) {
-            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+            const message = extractApiErrorMessage(e);
+            formError.value = message;
+            showSnackBar({ type: "error", message });
         } finally {
             actionLoading.value = false;
         }
@@ -79,6 +83,7 @@ const PosTerminalsPage = dc(() => {
             return;
         }
         actionLoading.value = true;
+        formError.value = "";
         try {
             await api.post(urlsMap.posScreens(activeTerminal.value.id), {
                 label: screenForm.value.name,
@@ -88,20 +93,22 @@ const PosTerminalsPage = dc(() => {
             showSnackBar({ type: "success", message: t("Created") });
             await load();
         } catch (e) {
-            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+            const message = extractApiErrorMessage(e);
+            formError.value = message;
+            showSnackBar({ type: "error", message });
         } finally {
             actionLoading.value = false;
         }
     };
 
     const headers: TableHeader<Terminal>[] = [
-        { key: "name", label: "Merchant Name", value: (row) => row.name },
-        { key: "location", label: "Brand", value: (row) => row.location },
+        { key: "name", label: "Terminal Name", value: (row) => row.name },
+        { key: "location", label: "Location", value: (row) => row.location },
         {
             key: "status",
             label: "Status",
             Value: ({ row }: { row: Terminal }) => (
-                <StatusChip label={row.status} tone={row.status === "ACTIVE" ? "success" : "warning"} />
+                <StatusBadge status={row.status} toneOverride={row.status === "ACTIVE" ? "success" : "warning"} />
             ),
         },
         { key: "lastSeenAt", label: "Last Used", value: (row) => row.lastSeenAt ?? "-" },
@@ -113,7 +120,7 @@ const PosTerminalsPage = dc(() => {
                     {(row.screens ?? []).map((screen) => (
                         <ThemedView key={screen.id} style={{ flexDirection: "row", gap: "6px", alignItems: "center" }}>
                             <span style={{ fontSize: "12px" }}>{screen.name}</span>
-                            <StatusChip label={screen.role} tone="info" />
+                            <StatusBadge status={screen.role} label={screen.role} toneOverride="info" />
                             <VBtn
                                 size="x-small"
                                 variant="text"
@@ -124,7 +131,7 @@ const PosTerminalsPage = dc(() => {
                         </ThemedView>
                     ))}
                     {!(row.screens ?? []).length && (
-                        <span style={{ fontSize: "12px", opacity: 0.6 }}>{t("No Data Found")}</span>
+                        <span style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>{t("No screens paired")}</span>
                     )}
                 </ThemedView>
             ),
@@ -140,6 +147,7 @@ const PosTerminalsPage = dc(() => {
                         onClick={() => {
                             activeTerminal.value = row;
                             screenForm.value = { name: "", role: "CASHIER" };
+                            formError.value = "";
                             screenOpen.value = true;
                         }}
                     >
@@ -174,6 +182,7 @@ const PosTerminalsPage = dc(() => {
                             variant="tonal"
                             onClick={() => {
                                 terminalForm.value = { name: "", location: "" };
+                                formError.value = "";
                                 terminalOpen.value = true;
                             }}
                         >
@@ -185,43 +194,44 @@ const PosTerminalsPage = dc(() => {
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : (
-                    <SurfaceCard>
-                        <SurfaceCardText>
-                            <DataTable
-                                title={t("POS Terminals")}
-                                data={rows.value}
-                                headers={headers}
-                                loading={loading.value}
-                                showNumber={true}
-                                xlsx={false}
-                                noElevation={true}
-                                searchValue={search.value}
-                                setSearchValue={(value) => (search.value = value)}
-                            />
-                        </SurfaceCardText>
-                    </SurfaceCard>
+                    <DataTable
+                        title={t("POS Terminals")}
+                        data={rows.value}
+                        headers={headers}
+                        loading={loading.value}
+                        showNumber={true}
+                        xlsx={false}
+                        noElevation={true}
+                        searchValue={search.value}
+                        setSearchValue={(value) => (search.value = value)}
+                    />
                 )}
             </ThemedView>
 
             <FormModal
                 modelValue={terminalOpen.value}
                 onUpdate:modelValue={(v: any) => (terminalOpen.value = v)}
-                title={"Details"}
+                title={t("Create Terminal")}
                 size="sm"
+                loading={actionLoading.value}
+                errorMessage={formError.value}
+                submitLabel={t("Create")}
+                onSubmit={() => void createTerminal()}
             >
-<VTextField
-                            label={t("Terminal")}
-                            modelValue={terminalForm.value.name}
-                            onUpdate:modelValue={(v: string) => (terminalForm.value.name = v)}
-                        />
-                        <VTextField
-                            label={t("Brand")}
-                            modelValue={terminalForm.value.location}
-                            onUpdate:modelValue={(v: string) => (terminalForm.value.location = v)}
-                        />
-                        <VBtn color="primary" loading={actionLoading.value} onClick={() => void createTerminal()}>
-                            {t("Create")}
-                        </VBtn>
+                <FormField label={t("Terminal Name")} required>
+                    <VTextField
+                        modelValue={terminalForm.value.name}
+                        onUpdate:modelValue={(v: string) => (terminalForm.value.name = v)}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("Location")}>
+                    <VTextField
+                        modelValue={terminalForm.value.location}
+                        onUpdate:modelValue={(v: string) => (terminalForm.value.location = v)}
+                        hideDetails
+                    />
+                </FormField>
             </FormModal>
 
             <FormModal
@@ -229,20 +239,25 @@ const PosTerminalsPage = dc(() => {
                 onUpdate:modelValue={(v: any) => (screenOpen.value = v)}
                 title={activeTerminal.value?.name ?? t("POS terminal")}
                 size="sm"
+                loading={actionLoading.value}
+                errorMessage={formError.value}
+                submitLabel={t("Create")}
+                onSubmit={() => void createScreen()}
             >
-<VTextField
-                            label={t("Merchant Name")}
-                            modelValue={screenForm.value.name}
-                            onUpdate:modelValue={(v: string) => (screenForm.value.name = v)}
-                        />
-                        <VTextField
-                            label={t("Type")}
-                            modelValue={screenForm.value.role}
-                            onUpdate:modelValue={(v: string) => (screenForm.value.role = v.toUpperCase())}
-                        />
-                        <VBtn color="primary" loading={actionLoading.value} onClick={() => void createScreen()}>
-                            {t("Create")}
-                        </VBtn>
+                <FormField label={t("Screen Name")} required>
+                    <VTextField
+                        modelValue={screenForm.value.name}
+                        onUpdate:modelValue={(v: string) => (screenForm.value.name = v)}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("Type")}>
+                    <VTextField
+                        modelValue={screenForm.value.role}
+                        onUpdate:modelValue={(v: string) => (screenForm.value.role = v.toUpperCase())}
+                        hideDetails
+                    />
+                </FormField>
             </FormModal>
         </ScreenContainer>
     );

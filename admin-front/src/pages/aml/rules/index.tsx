@@ -3,12 +3,11 @@ import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VCheckbox, VProgressCircular, VSelect, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VProgressCircular, VSelect, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
 import { statusTone } from "@/components/Table/statusTone";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
@@ -21,10 +20,14 @@ import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { FormModal } from "@/components/ui/FormModal";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
+import type { MetricItem } from "@/components/ui/MetricStrip";
+import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { DescriptionList } from "@/components/ui/DescriptionList";
+import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 type AmlRule = {
     id: string;
     code: string;
@@ -83,6 +86,10 @@ const PARAM_HELP: Record<string, string> = {
     RAIL: 'Example: {"rail_codes": ["moamalat"], "min_amount": "20000.0000"}',
     MERCHANT_DIRECT_AMOUNT: 'Example: {"min_amount": "100000.0000", "currency": "LYD"}',
 };
+const badgeTone = (value: string): BadgeTone => {
+    const tone = statusTone(value);
+    return tone === "error" ? "danger" : tone === "primary" ? "info" : tone;
+};
 const formatDateTime = (value: string | null | undefined): string => {
     if (!value) return "—";
     const date = new Date(value);
@@ -132,6 +139,7 @@ const AmlRulesPage = dc(() => {
         effectiveFrom: "",
     });
     const actionLoading = ref(false);
+    const createError = ref("");
     const ruleChecklist = ref<Record<string, boolean>>({});
     const exportLoading = ref(false);
     const summaryExportLoading = ref(false);
@@ -229,6 +237,7 @@ const AmlRulesPage = dc(() => {
             effectiveFrom: "",
         };
         ruleChecklist.value = {};
+        createError.value = "";
         createOpen.value = true;
     };
     const onRuleTypeChanged = (type: string) => {
@@ -253,6 +262,7 @@ const AmlRulesPage = dc(() => {
     };
     const ruleChecklistComplete = computed(() => !showChecklists || RULE_CHECKS.every((check) => ruleChecklist.value[check.key] === true));
     const submit = async () => {
+        createError.value = "";
         const scope = parseJsonObject(form.value.scopeText);
         const params = parseJsonObject(form.value.paramsText);
         if (scope === null || params === null) {
@@ -286,6 +296,7 @@ const AmlRulesPage = dc(() => {
             });
             refreshAll();
         } catch (error) {
+            createError.value = extractApiErrorMessage(error);
             showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
         } finally {
             actionLoading.value = false;
@@ -347,14 +358,14 @@ const AmlRulesPage = dc(() => {
             key: "action",
             label: "Action",
             value: (row) => row.action,
-            Value: ({ row }: { row: AmlRule }) => <StatusChip label={row.action} tone={row.action === "BLOCK" || row.action === "HOLD" ? "error" : row.action === "FLAG" ? "warning" : "neutral"} size="x-small" />,
+            Value: ({ row }: { row: AmlRule }) => <StatusBadge status={row.action} toneOverride={row.action === "BLOCK" || row.action === "HOLD" ? "danger" : row.action === "FLAG" ? "warning" : "neutral"} />,
         },
         {
             key: "severity",
             label: "Severity",
             sortKey: "baseSeverity",
             value: (row) => row.baseSeverity,
-            Value: ({ row }: { row: AmlRule }) => <StatusChip label={row.baseSeverity} tone={statusTone(row.baseSeverity)} size="small" />,
+            Value: ({ row }: { row: AmlRule }) => <StatusBadge status={row.baseSeverity} toneOverride={badgeTone(row.baseSeverity)} />,
         },
         {
             key: "params",
@@ -369,8 +380,8 @@ const AmlRulesPage = dc(() => {
             value: (row) => String(row.active),
             Value: ({ row }: { row: AmlRule }) => (
                 row.pendingApproval
-                    ? <StatusChip label={t("Pending approval")} tone="warning" size="small" />
-                    : <StatusChip label={row.active ? t("Active") : t("Inactive")} tone={row.active ? "success" : "neutral"} size="small" />
+                    ? <StatusBadge status="PENDING_APPROVAL" label={t("Pending approval")} toneOverride="warning" />
+                    : <StatusBadge status={row.active ? "ACTIVE" : "INACTIVE"} label={row.active ? t("Active") : t("Inactive")} toneOverride={row.active ? "success" : "neutral"} />
             ),
         },
         {
@@ -378,7 +389,7 @@ const AmlRulesPage = dc(() => {
             label: "Approval",
             value: (row) => row.approvalState ?? "",
             Value: ({ row }: { row: AmlRule }) => row.approvalState
-                ? <StatusChip label={row.approvalState} tone={statusTone(row.approvalState)} size="x-small" />
+                ? <StatusBadge status={row.approvalState} toneOverride={badgeTone(row.approvalState)} />
                 : <ThemedText style={{ opacity: 0.55 }}>—</ThemedText>,
         },
         {
@@ -416,21 +427,19 @@ const AmlRulesPage = dc(() => {
                     {t("Every AML rule change is a maker-checker request. The rule stays inactive until a different MLRO or authorised checker approves it.")}
                 </VAlert>
                 {summary.value && (
-                    <>
-                        <MetricStrip items={summaryMetrics.value} />
-                        <SurfaceCard title={t("Rule posture")}>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end" }}>
-                                    <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
-                                </ThemedView>
-                                <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                    {Object.entries(summary.value.byType ?? {}).map(([type, count]) => (
-                                        <StatusChip key={type} label={`${type}: ${count}`} tone="neutral" size="x-small" />
-                                    ))}
-                                </ThemedView>
-                            </SurfaceCardText>
-                        </SurfaceCard>
-                    </>
+                    <SummaryExportCard
+                        title={t("Rule posture")}
+                        metrics={summaryMetrics.value}
+                        exportLoading={summaryExportLoading.value}
+                        exportLabel={t("Export summary")}
+                        onExport={() => void exportSummary()}
+                    >
+                        <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                            {Object.entries(summary.value.byType ?? {}).map(([type, count]) => (
+                                <StatusBadge key={type} status={type} label={`${type}: ${count}`} toneOverride="neutral" />
+                            ))}
+                        </ThemedView>
+                    </SummaryExportCard>
                 )}
                 <ApiTable<AmlRule>
                     title={t("AML rule register")}
@@ -486,115 +495,114 @@ const AmlRulesPage = dc(() => {
                     )}
                 />
             </ThemedView>
-            <FormModal
+            <SlideOverDrawer
                 modelValue={detailsOpen.value}
                 onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)}
                 title={selected.value?.code ?? t("AML rule")}
-                size="lg"
+                subtitle={selected.value ? `${selected.value.name} · v${selected.value.version}` : ""}
+                width={620}
+                v-slots={{
+                    footer: () => (
+                        <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
+                    ),
+                }}
             >
-{detailLoading.value || !selected.value ? (
-                            <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "260px", gap: "12px" }}>
-                                <VProgressCircular indeterminate size={52} color="primary" />
-                                <ThemedText style={{ opacity: 0.65 }}>{t("Loading AML rule")}</ThemedText>
+                {detailLoading.value || !selected.value ? (
+                    <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "260px", gap: "12px" }}>
+                        <VProgressCircular indeterminate size={52} color="primary" />
+                        <ThemedText style={{ opacity: 0.65 }}>{t("Loading AML rule")}</ThemedText>
+                    </ThemedView>
+                ) : (
+                    <>
+                        <ThemedView style={{ flexDirection: "row", gap: "6px", alignItems: "center", flexWrap: "wrap", marginBottom: "16px" }}>
+                            <StatusBadge status={selected.value.pendingApproval ? "PENDING_APPROVAL" : selected.value.active ? "ACTIVE" : "INACTIVE"} label={selected.value.pendingApproval ? t("Pending approval") : selected.value.active ? t("Active") : t("Inactive")} toneOverride={selected.value.pendingApproval ? "warning" : selected.value.active ? "success" : "neutral"} />
+                            <StatusBadge status={selected.value.action} toneOverride={selected.value.action === "BLOCK" || selected.value.action === "HOLD" ? "danger" : "warning"} />
+                            <StatusBadge status={selected.value.baseSeverity} toneOverride={badgeTone(selected.value.baseSeverity)} />
+                        </ThemedView>
+                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "20px", marginBottom: "16px" }}>
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Rule context")}</ThemedText>
+                                <DescriptionList items={[
+                                    { label: t("Rule code"), value: <MonoRef value={selected.value.code} /> },
+                                    { label: t("Type"), value: selected.value.ruleType },
+                                    { label: t("Action"), value: selected.value.action },
+                                    { label: t("Severity"), value: selected.value.baseSeverity },
+                                    { label: t("Effective from"), value: formatDateTime(selected.value.effectiveFrom) },
+                                    { label: t("Effective to"), value: formatDateTime(selected.value.effectiveTo) },
+                                    { label: t("Created"), value: formatDateTime(selected.value.createdAt) },
+                                    { label: t("Version"), value: String(selected.value.version) },
+                                ]} />
                             </ThemedView>
-                        ) : (
-                            <>
-                                <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
-                                    <ThemedView style={{ gap: "4px" }}>
-                                        <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{selected.value.name} · v{selected.value.version}</ThemedText>
-                                    </ThemedView>
-                                    <ThemedView style={{ flexDirection: "row", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
-                                        <StatusChip label={selected.value.pendingApproval ? t("Pending approval") : selected.value.active ? t("Active") : t("Inactive")} tone={selected.value.pendingApproval ? "warning" : selected.value.active ? "success" : "neutral"} />
-                                        <StatusChip label={selected.value.action} tone={selected.value.action === "BLOCK" || selected.value.action === "HOLD" ? "error" : "warning"} size="small" />
-                                        <StatusChip label={selected.value.baseSeverity} tone={statusTone(selected.value.baseSeverity)} size="small" />
-                                    </ThemedView>
-                                </ThemedView>
-                                <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "14px" }}>
-                                    <SurfaceCard variant="tonal">
-                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Rule context")}</ThemedText>
-                                            <DescriptionList items={[
-                                                { label: t("Rule code"), value: <MonoRef value={selected.value.code} /> },
-                                                { label: t("Type"), value: selected.value.ruleType },
-                                                { label: t("Action"), value: selected.value.action },
-                                                { label: t("Severity"), value: selected.value.baseSeverity },
-                                                { label: t("Effective from"), value: formatDateTime(selected.value.effectiveFrom) },
-                                                { label: t("Effective to"), value: formatDateTime(selected.value.effectiveTo) },
-                                                { label: t("Created"), value: formatDateTime(selected.value.createdAt) },
-                                                { label: t("Version"), value: String(selected.value.version) },
-                                            ]} />
-                                        </SurfaceCardText>
-                                    </SurfaceCard>
-                                    <SurfaceCard variant="tonal">
-                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Approval")}</ThemedText>
-                                            <DescriptionList items={[
-                                                { label: t("Approval state"), value: selected.value.approvalState || selected.value.approval?.state || "—" },
-                                                { label: t("Approval request"), value: <MonoRef value={selected.value.approvalRequestId ?? ""} /> },
-                                                { label: t("Checker"), value: selected.value.approval?.checkerUserId || "—" },
-                                                { label: t("Rejection reason"), value: selected.value.approval?.rejectionReason || "—" },
-                                            ]} />
-                                            {selected.value.approvalRequestId && (
-                                                <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "Approvals" })}>{t("Open approvals")}</VBtn>
-                                            )}
-                                        </SurfaceCardText>
-                                    </SurfaceCard>
-                                </ThemedView>
-                                <SurfaceCard variant="tonal">
-                                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                                        <ThemedText type="defaultSemiBold">{t("Scope")}</ThemedText>
-                                        <pre style={{ margin: 0, padding: "8px 10px", borderRadius: "8px", background: "rgba(15,23,42,0.06)", fontSize: "10px", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", direction: "ltr", maxHeight: "160px", overflow: "auto" }}>{JSON.stringify(selected.value.scope ?? {}, null, 2)}</pre>
-                                        <ThemedText type="defaultSemiBold">{t("Params")}</ThemedText>
-                                        <pre style={{ margin: 0, padding: "8px 10px", borderRadius: "8px", background: "rgba(15,23,42,0.06)", fontSize: "10px", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", direction: "ltr", maxHeight: "220px", overflow: "auto" }}>{JSON.stringify(selected.value.params ?? {}, null, 2)}</pre>
-                                    </SurfaceCardText>
-                                </SurfaceCard>
-                                <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end" }}>
-                                    <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
-                                </ThemedView>
-                            </>
-                        )}
-            </FormModal>
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Approval")}</ThemedText>
+                                <DescriptionList items={[
+                                    { label: t("Approval state"), value: selected.value.approvalState || selected.value.approval?.state || "—" },
+                                    { label: t("Approval request"), value: <MonoRef value={selected.value.approvalRequestId ?? ""} /> },
+                                    { label: t("Checker"), value: selected.value.approval?.checkerUserId || "—" },
+                                    { label: t("Rejection reason"), value: selected.value.approval?.rejectionReason || "—" },
+                                ]} />
+                                {selected.value.approvalRequestId && (
+                                    <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "Approvals" })}>{t("Open approvals")}</VBtn>
+                                )}
+                            </ThemedView>
+                        </ThemedView>
+                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                            <ThemedText type="defaultSemiBold">{t("Scope")}</ThemedText>
+                            <pre style={{ margin: 0, padding: "8px 10px", borderRadius: "var(--pg-radius-sm)", background: "var(--pg-bg-surface-subtle)", border: "1px solid var(--pg-border-subtle)", fontSize: "10px", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", direction: "ltr", maxHeight: "160px", overflow: "auto" }}>{JSON.stringify(selected.value.scope ?? {}, null, 2)}</pre>
+                            <ThemedText type="defaultSemiBold">{t("Params")}</ThemedText>
+                            <pre style={{ margin: 0, padding: "8px 10px", borderRadius: "var(--pg-radius-sm)", background: "var(--pg-bg-surface-subtle)", border: "1px solid var(--pg-border-subtle)", fontSize: "10px", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", direction: "ltr", maxHeight: "220px", overflow: "auto" }}>{JSON.stringify(selected.value.params ?? {}, null, 2)}</pre>
+                        </ThemedView>
+                    </>
+                )}
+            </SlideOverDrawer>
             <FormModal
                 modelValue={createOpen.value}
                 onUpdate:modelValue={(value: boolean) => (createOpen.value = value)}
                 title={t("Draft AML rule")}
                 size="lg"
+                loading={actionLoading.value}
+                errorMessage={createError.value}
+                submitLabel={t("Create draft")}
+                onSubmit={() => void submit()}
             >
-<VAlert type="info" variant="tonal">{t("The rule is created inactive and an approval request is issued. A different authorised checker must approve it.")}</VAlert>
-                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px" }}>
-                            <VTextField label={t("Code")} modelValue={form.value.code} onUpdate:modelValue={(value: string) => (form.value.code = value)} />
-                            <VTextField label={t("Name")} modelValue={form.value.name} onUpdate:modelValue={(value: string) => (form.value.name = value)} />
-                        </ThemedView>
-                        <VSelect items={RULE_TYPES.map((value) => ({ title: value, value }))} modelValue={form.value.ruleType} onUpdate:modelValue={(value: string) => onRuleTypeChanged(value)} label={t("Rule type")} />
-                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "10px" }}>
-                            <VSelect items={RULE_ACTIONS.map((value) => ({ title: value, value }))} modelValue={form.value.action} onUpdate:modelValue={(value: string) => (form.value.action = value)} label={t("Action")} />
-                            <VSelect items={SEVERITIES.map((value) => ({ title: value, value }))} modelValue={form.value.baseSeverity} onUpdate:modelValue={(value: string) => (form.value.baseSeverity = value)} label={t("Severity")} />
-                        </ThemedView>
-                        <VTextField type="date" label={t("Effective from (optional)")} modelValue={form.value.effectiveFrom} onUpdate:modelValue={(value: string) => (form.value.effectiveFrom = value)} />
-                        <VTextarea label={t("Scope JSON")} modelValue={form.value.scopeText} onUpdate:modelValue={(value: string) => (form.value.scopeText = value)} rows={3} hint={t("Use {} for all merchants and rails.")} persistentHint />
-                        <VTextarea label={t("Params JSON")} modelValue={form.value.paramsText} onUpdate:modelValue={(value: string) => (form.value.paramsText = value)} rows={4} hint={PARAM_HELP[form.value.ruleType] ?? ""} persistentHint />
-                        {showChecklists && (
-                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Rule checklist")}</ThemedText>
-                                {RULE_CHECKS.map((check) => (
-                                    <VCheckbox
-                                        key={check.key}
-                                        modelValue={ruleChecklist.value[check.key] === true}
-                                        onUpdate:modelValue={(value: unknown) => (ruleChecklist.value = { ...ruleChecklist.value, [check.key]: Boolean(value) })}
-                                        label={t(check.label)}
-                                        density="compact"
-                                        hideDetails
-                                    />
-                                ))}
-                                {!ruleChecklistComplete.value && (
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all rule checklist items before drafting")}</ThemedText>
-                                )}
-                            </ThemedView>
-                        )}
-                        <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end", flexWrap: "wrap" }}>
-                            <VBtn variant="text" onClick={() => (createOpen.value = false)}>{t("Cancel")}</VBtn>
-                            <VBtn color="primary" loading={actionLoading.value} disabled={!form.value.code.trim() || !form.value.name.trim() || !ruleChecklistComplete.value} onClick={() => void submit()}>{t("Create draft")}</VBtn>
-                        </ThemedView>
+                <VAlert type="info" variant="tonal">{t("The rule is created inactive and an approval request is issued. A different authorised checker must approve it.")}</VAlert>
+                <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px" }}>
+                    <FormField label={t("Code")} required sensitiveMakerChecker>
+                        <VTextField modelValue={form.value.code} onUpdate:modelValue={(value: string) => (form.value.code = value)} hideDetails />
+                    </FormField>
+                    <FormField label={t("Name")} required sensitiveMakerChecker>
+                        <VTextField modelValue={form.value.name} onUpdate:modelValue={(value: string) => (form.value.name = value)} hideDetails />
+                    </FormField>
+                </ThemedView>
+                <FormField label={t("Rule type")} required sensitiveMakerChecker>
+                    <VSelect items={RULE_TYPES.map((value) => ({ title: value, value }))} modelValue={form.value.ruleType} onUpdate:modelValue={(value: string) => onRuleTypeChanged(value)} hideDetails />
+                </FormField>
+                <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "10px" }}>
+                    <FormField label={t("Action")} required sensitiveMakerChecker>
+                        <VSelect items={RULE_ACTIONS.map((value) => ({ title: value, value }))} modelValue={form.value.action} onUpdate:modelValue={(value: string) => (form.value.action = value)} hideDetails />
+                    </FormField>
+                    <FormField label={t("Severity")} required sensitiveMakerChecker>
+                        <VSelect items={SEVERITIES.map((value) => ({ title: value, value }))} modelValue={form.value.baseSeverity} onUpdate:modelValue={(value: string) => (form.value.baseSeverity = value)} hideDetails />
+                    </FormField>
+                </ThemedView>
+                <FormField label={t("Effective from (optional)")} sensitiveMakerChecker>
+                    <VTextField type="date" modelValue={form.value.effectiveFrom} onUpdate:modelValue={(value: string) => (form.value.effectiveFrom = value)} hideDetails />
+                </FormField>
+                <FormField label={t("Scope JSON")} hint={t("Use {} for all merchants and rails.")} sensitiveMakerChecker>
+                    <VTextarea modelValue={form.value.scopeText} onUpdate:modelValue={(value: string) => (form.value.scopeText = value)} rows={3} hideDetails />
+                </FormField>
+                <FormField label={t("Params JSON")} hint={PARAM_HELP[form.value.ruleType] ?? ""} sensitiveMakerChecker>
+                    <VTextarea modelValue={form.value.paramsText} onUpdate:modelValue={(value: string) => (form.value.paramsText = value)} rows={4} hideDetails />
+                </FormField>
+                <FormChecklist
+                    checks={[...RULE_CHECKS]}
+                    modelValue={ruleChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (ruleChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Rule checklist")}
+                    complete={ruleChecklistComplete.value}
+                    incompleteMessage={t("Complete all rule checklist items before drafting")}
+                />
             </FormModal>
         </ScreenContainer>
     );

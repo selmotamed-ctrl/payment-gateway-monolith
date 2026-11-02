@@ -15,6 +15,12 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
 import { FormModal } from "@/components/ui/FormModal";
+import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
+import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import { DescriptionList } from "@/components/ui/DescriptionList";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { MetaPill } from "@/components/ui/MetaPill";
 type PlatformSetting = {
@@ -74,6 +80,13 @@ const jsonPreview = (value: unknown): string => {
     } catch {
         return String(value);
     }
+};
+
+const restoreTone = (status: string): "success" | "warning" | "danger" | "neutral" => {
+    if (status === "ADDED") return "success";
+    if (status === "CHANGED" || status === "MISSING_IN_BACKUP") return "warning";
+    if (status === "INVALID" || status === "REMOVED") return "danger";
+    return "neutral";
 };
 
 const SUMMARY_EXPORT_CHECKS = [
@@ -208,14 +221,27 @@ const PlatformSettingsPage = dc(() => {
         }
     };
 
-    const summaryItems = computed(() => {
+    const metricItems = computed<MetricItem[]>(() => {
         const data = summary.value;
         if (!data) return [];
         return [
-            { label: t("Setting keys"), value: String(data.keys), tone: "info" as const },
-            { label: t("Versions"), value: String(data.versions), tone: "neutral" as const },
-            { label: t("Updated last 24h"), value: String(data.updatedLast24h), tone: data.updatedLast24h > 0 ? "success" as const : "neutral" as const },
-            { label: t("Future effective"), value: String(data.futureEffective), tone: data.futureEffective > 0 ? "warning" as const : "success" as const },
+            { key: "keys", label: t("Setting keys"), value: String(data.keys) },
+            { key: "versions", label: t("Versions"), value: String(data.versions) },
+            { key: "updated", label: t("Updated last 24h"), value: String(data.updatedLast24h), badge: data.updatedLast24h > 0 ? t("Active") : t("Clear"), badgeTone: data.updatedLast24h > 0 ? "success" : "neutral" },
+            { key: "future", label: t("Future effective"), value: String(data.futureEffective), badge: data.futureEffective > 0 ? t("Watch") : t("Clear"), badgeTone: data.futureEffective > 0 ? "warning" : "success" },
+        ];
+    });
+
+    const restoreMetricItems = computed<MetricItem[]>(() => {
+        const preview = restorePreview.value;
+        if (!preview) return [];
+        return [
+            { key: "backupKeys", label: t("Backup keys"), value: String(preview.summary.backupKeys) },
+            { key: "added", label: t("Added"), value: String(preview.summary.added) },
+            { key: "changed", label: t("Changed"), value: String(preview.summary.changed) },
+            { key: "unchanged", label: t("Unchanged"), value: String(preview.summary.unchanged) },
+            { key: "invalid", label: t("Invalid"), value: String(preview.summary.invalid), badge: preview.summary.invalid > 0 ? t("Critical") : t("Clear"), badgeTone: preview.summary.invalid > 0 ? "danger" : "success" },
+            { key: "missing", label: t("Missing in backup"), value: String(preview.summary.missingInBackup), badge: preview.summary.missingInBackup > 0 ? t("Watch") : t("Clear"), badgeTone: preview.summary.missingInBackup > 0 ? "warning" : "success" },
         ];
     });
 
@@ -452,58 +478,38 @@ const PlatformSettingsPage = dc(() => {
                 ) : (
                     <>
                         {summary.value && (
-                            <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
-                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                    <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Configuration health")}</ThemedText>
-                                        <div style={{ flex: 1 }} />
-                                        <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
-                                    </ThemedView>
-                                    <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
-                                        {showChecklists && (
-                                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
-                                                {SUMMARY_EXPORT_CHECKS.map((check) => (
-                                                    <VCheckbox
-                                                        key={check.key}
-                                                        modelValue={summaryExportChecklist.value[check.key] === true}
-                                                        onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
-                                                        label={t(check.label)}
-                                                        density="compact"
-                                                        hideDetails
-                                                    />
-                                                ))}
-                                                {!summaryExportChecklistComplete.value && (
-                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
-                                                )}
-                                            </ThemedView>
-                                        )}
-                                        {summaryItems.value.map((item) => (
-                                            <SurfaceCard key={item.label} variant="tonal">
-                                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
-                                                    <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
-                                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
-                                                </SurfaceCardText>
-                                            </SurfaceCard>
-                                        ))}
-                                    </ThemedView>
-                                    <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                        {Object.entries(summary.value.scopes ?? {}).map(([scope, count]) => (
-                                            <MetaPill key={scope} size="x-small" variant="tonal">{scope}: {count}</MetaPill>
-                                        ))}
-                                    </ThemedView>
-                                </SurfaceCardText>
-                            </SurfaceCard>
+                            <SummaryExportCard
+                                title={t("Configuration health")}
+                                metrics={metricItems.value}
+                                exportLoading={summaryExportLoading.value}
+                                exportDisabled={!summaryExportChecklistComplete.value}
+                                onExport={() => void exportSummary()}
+                            >
+                                <FormChecklist
+                                    checks={[...SUMMARY_EXPORT_CHECKS]}
+                                    modelValue={summaryExportChecklist.value}
+                                    onUpdate:modelValue={(value: Record<string, boolean>) => (summaryExportChecklist.value = value)}
+                                    show={showChecklists}
+                                    title={t("Summary export checklist")}
+                                    complete={summaryExportChecklistComplete.value}
+                                    incompleteMessage={t("Complete all summary export checklist items before exporting")}
+                                />
+                                <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                                    {Object.entries(summary.value.scopes ?? {}).map(([scope, count]) => (
+                                        <MetaPill key={scope} size="x-small" variant="tonal">{scope}: {count}</MetaPill>
+                                    ))}
+                                </ThemedView>
+                            </SummaryExportCard>
                         )}
 
-                        <VTextField
-                            label={t("Search setting key")}
-                            modelValue={search.value}
-                            onUpdate:modelValue={(value: string) => (search.value = value)}
-                            prependInnerIcon="mdi-magnify"
-                            clearable
-                            hideDetails
-                        />
+                        <FormField label={t("Search setting key")}>
+                            <VTextField
+                                modelValue={search.value}
+                                onUpdate:modelValue={(value: string) => (search.value = value)}
+                                prependInnerIcon="mdi-magnify"
+                                clearable
+                            />
+                        </FormField>
 
                         {rows.value.length === 0 && (
                             <SurfaceCard>
@@ -546,114 +552,96 @@ const PlatformSettingsPage = dc(() => {
                 onUpdate:modelValue={(value: boolean) => (restoreOpen.value = value)}
                 title={t("Restore preview")}
                 size="lg"
-            >
-<VAlert type="info" variant="tonal">
-                            {t("Choose a settings backup JSON. This preview does not write anything.")}
-                        </VAlert>
-                        <VFileInput
-                            label={t("Settings backup JSON")}
-                            {...{ accept: ".json,application/json" }}
-                            modelValue={null}
-                            prependIcon="mdi-file-upload-outline"
-                            onUpdate:modelValue={(value: File | File[] | null) => void previewBackup(value)}
-                        />
-                        {restoreLoading.value && <StateView loading={true} minHeight="120px" />}
-                        {restoreError.value && <VAlert type="error" variant="tonal" density="compact">{restoreError.value}</VAlert>}
-                        {restorePreview.value && (
-                            <>
-                                <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{restoreFileName.value}</ThemedText>
-                                <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "8px" }}>
-                                    {[
-                                        { label: t("Backup keys"), value: restorePreview.value.summary.backupKeys, tone: "info" as const },
-                                        { label: t("Added"), value: restorePreview.value.summary.added, tone: "success" as const },
-                                        { label: t("Changed"), value: restorePreview.value.summary.changed, tone: "warning" as const },
-                                        { label: t("Unchanged"), value: restorePreview.value.summary.unchanged, tone: "neutral" as const },
-                                        { label: t("Invalid"), value: restorePreview.value.summary.invalid, tone: "error" as const },
-                                        { label: t("Missing in backup"), value: restorePreview.value.summary.missingInBackup, tone: "warning" as const },
-                                    ].map((item) => (
-                                        <SurfaceCard key={item.label} variant="tonal">
-                                            <SurfaceCardText style={{ padding: "10px" }}>
-                                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{item.label}</ThemedText>
-                                                <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
-                                            </SurfaceCardText>
-                                        </SurfaceCard>
-                                    ))}
-                                </ThemedView>
-                                <ThemedView style={{ gap: "6px" }}>
-                                    {restorePreview.value.entries.map((entry) => (
-                                        <ThemedView key={`${entry.index}-${entry.key}`} style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap", padding: "7px 9px", borderRadius: "8px", border: "1px solid rgba(100,116,139,0.2)" }}>
-                                            <MetaPill size="x-small" variant="tonal" color={entry.status === "ADDED" ? "success" : entry.status === "CHANGED" ? "warning" : entry.status === "INVALID" ? "error" : "neutral"}>{entry.status}</MetaPill>
-                                            <ThemedText style={{ fontSize: "12px", fontWeight: 700, direction: "ltr" }}>{entry.key}</ThemedText>
-                                            <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{entry.scope}</ThemedText>
-                                            {entry.currentVersion !== undefined && (
-                                                <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>
-                                                    v{entry.currentVersion ?? 0} → v{entry.nextVersion ?? 1}
-                                                </ThemedText>
-                                            )}
-                                            {entry.effectiveFrom && <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{formatDateTime(entry.effectiveFrom)}</ThemedText>}
-                                            {entry.reason && <ThemedText style={{ fontSize: "11px", color: "#dc2626" }}>{entry.reason}</ThemedText>}
-                                        </ThemedView>
-                                    ))}
-                                </ThemedView>
-                                {restorePreview.value.missingInBackup.length > 0 && (
-                                    <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>
-                                        {t("Current keys missing from backup")}: {restorePreview.value.missingInBackup.join(", ")}
-                                    </ThemedText>
-                                )}
-                                {restorePreview.value.summary.invalid > 0 && (
-                                    <VAlert type="error" variant="tonal" density="compact">
-                                        {t("Fix or remove invalid backup entries before applying.")}
-                                    </VAlert>
-                                )}
-                                <VDivider />
-                                <VTextarea
-                                    label={t("Restore reason")}
-                                    modelValue={restoreReason.value}
-                                    onUpdate:modelValue={(value: string) => (restoreReason.value = value)}
-                                    rows={2}
-                                    hint={t("Required. Recorded in the audit log.")}
-                                    persistentHint
-                                />
-                                {showChecklists && (
-                                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Restore checklist")}</ThemedText>
-                                        {RESTORE_CHECKS.map((check) => (
-                                            <VCheckbox
-                                                key={check.key}
-                                                modelValue={restoreChecklist.value[check.key] === true}
-                                                onUpdate:modelValue={(value: unknown) => (restoreChecklist.value = { ...restoreChecklist.value, [check.key]: Boolean(value) })}
-                                                label={t(check.label)}
-                                                density="compact"
-                                                hideDetails
-                                            />
-                                        ))}
-                                        {!restoreChecklistComplete.value && (
-                                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all restore checklist items before applying.")}</ThemedText>
-                                        )}
-                                    </ThemedView>
-                                )}
-                                <VCheckbox
-                                    modelValue={restoreConfirm.value}
-                                    onUpdate:modelValue={(value: boolean | null) => (restoreConfirm.value = !!value)}
-                                    label={t("I understand this creates new setting versions immediately.")}
-                                    hideDetails
-                                />
-                                {restoreApplyError.value && <VAlert type="error" variant="tonal" density="compact">{restoreApplyError.value}</VAlert>}
-                            </>
-                        )}
-                        <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
-                            <VBtn variant="text" onClick={() => (restoreOpen.value = false)}>{t("Close")}</VBtn>
+                onSubmit={() => void applyRestore()}
+                submitLabel={t("Apply restore")}
+                loading={restoreApplying.value}
+                errorMessage={restoreApplyError.value ?? restoreError.value ?? ""}
+                v-slots={{
+                    footer: () => (
+                        <>
+                            <VBtn variant="outlined" disabled={restoreApplying.value} onClick={() => (restoreOpen.value = false)}>{t("Close")}</VBtn>
                             {restorePreview.value && (
                                 <VBtn
                                     color="warning"
+                                    variant="flat"
+                                    {...{ type: "submit" }}
                                     loading={restoreApplying.value}
                                     disabled={!restoreConfirm.value || !restoreChecklistComplete.value || restoreReason.value.trim().length < 3 || restorePreview.value.summary.invalid > 0}
-                                    onClick={() => void applyRestore()}
                                 >
                                     {t("Apply restore")}
                                 </VBtn>
                             )}
+                        </>
+                    ),
+                }}
+            >
+                <VAlert type="info" variant="tonal">
+                    {t("Choose a settings backup JSON. This preview does not write anything.")}
+                </VAlert>
+                <FormField label={t("Settings backup JSON")} sensitiveMakerChecker>
+                    <VFileInput
+                        {...{ accept: ".json,application/json" }}
+                        modelValue={null}
+                        prependIcon="mdi-file-upload-outline"
+                        onUpdate:modelValue={(value: File | File[] | null) => void previewBackup(value)}
+                    />
+                </FormField>
+                {restoreLoading.value && <StateView loading={true} minHeight="120px" />}
+                {restorePreview.value && (
+                    <>
+                        <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{restoreFileName.value}</ThemedText>
+                        <MetricStrip items={restoreMetricItems.value} />
+                        <ThemedView style={{ gap: "6px" }}>
+                            {restorePreview.value.entries.map((entry) => (
+                                <ThemedView key={`${entry.index}-${entry.key}`} style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap", padding: "7px 9px", borderRadius: "var(--pg-radius-sm)", border: "1px solid var(--pg-border-subtle)" }}>
+                                    <StatusBadge status={entry.status} toneOverride={restoreTone(entry.status)} showDot={false} />
+                                    <ThemedText style={{ fontSize: "12px", fontWeight: 600, direction: "ltr" }}>{entry.key}</ThemedText>
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{entry.scope}</ThemedText>
+                                    {entry.currentVersion !== undefined && (
+                                        <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>
+                                            v{entry.currentVersion ?? 0} → v{entry.nextVersion ?? 1}
+                                        </ThemedText>
+                                    )}
+                                    {entry.effectiveFrom && <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{formatDateTime(entry.effectiveFrom)}</ThemedText>}
+                                    {entry.reason && <ThemedText style={{ fontSize: "11px", color: "var(--pg-status-danger-text)" }}>{entry.reason}</ThemedText>}
+                                </ThemedView>
+                            ))}
                         </ThemedView>
+                        {restorePreview.value.missingInBackup.length > 0 && (
+                            <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>
+                                {t("Current keys missing from backup")}: {restorePreview.value.missingInBackup.join(", ")}
+                            </ThemedText>
+                        )}
+                        {restorePreview.value.summary.invalid > 0 && (
+                            <VAlert type="error" variant="tonal" density="compact">
+                                {t("Fix or remove invalid backup entries before applying.")}
+                            </VAlert>
+                        )}
+                        <VDivider />
+                        <FormField label={t("Restore reason")} hint={t("Required. Recorded in the audit log.")} required sensitiveMakerChecker>
+                            <VTextarea
+                                modelValue={restoreReason.value}
+                                onUpdate:modelValue={(value: string) => (restoreReason.value = value)}
+                                rows={2}
+                            />
+                        </FormField>
+                        <FormChecklist
+                            checks={[...RESTORE_CHECKS]}
+                            modelValue={restoreChecklist.value}
+                            onUpdate:modelValue={(value: Record<string, boolean>) => (restoreChecklist.value = value)}
+                            show={showChecklists}
+                            title={t("Restore checklist")}
+                            complete={restoreChecklistComplete.value}
+                            incompleteMessage={t("Complete all restore checklist items before applying.")}
+                        />
+                        <VCheckbox
+                            modelValue={restoreConfirm.value}
+                            onUpdate:modelValue={(value: boolean | null) => (restoreConfirm.value = !!value)}
+                            label={t("I understand this creates new setting versions immediately.")}
+                            hideDetails
+                        />
+                    </>
+                )}
             </FormModal>
 
             <FormModal
@@ -661,99 +649,109 @@ const PlatformSettingsPage = dc(() => {
                 onUpdate:modelValue={(value: boolean) => (dialogOpen.value = value)}
                 title={history.value?.length > 0 ? t("Edit setting") : t("New setting")}
                 size="lg"
+                onSubmit={() => void save()}
+                submitLabel={t("Save new version")}
+                loading={saving.value}
+                errorMessage={editError.value ?? ""}
+                v-slots={{
+                    footer: () => (
+                        <>
+                            <VBtn variant="outlined" disabled={saving.value} onClick={() => (dialogOpen.value = false)}>{t("Cancel")}</VBtn>
+                            <VBtn color="primary" variant="flat" {...{ type: "submit" }} loading={saving.value} disabled={!editChecklistComplete.value}>
+                                {t("Save new version")}
+                            </VBtn>
+                        </>
+                    ),
+                }}
             >
-<ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-                            
-                            {history.value.length > 0 && <MetaPill size="small" variant="tonal" color="primary">v{history.value[0]?.version}</MetaPill>}
-                        </ThemedView>
+                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                    {history.value.length > 0 && <MetaPill size="small" variant="tonal" color="primary">v{history.value[0]?.version}</MetaPill>}
+                </ThemedView>
 
-                        <VTextField
-                            label={t("Setting key")}
-                            modelValue={editKey.value}
-                            onUpdate:modelValue={(value: string) => (editKey.value = value)}
-                            readonly={history.value.length > 0}
-                            hint={t("Example: checkout.support_config")}
-                            persistentHint
-                        />
-                        <VTextarea
-                            label={t("JSON value")}
-                            modelValue={editValue.value}
-                            onUpdate:modelValue={(value: string) => (editValue.value = value)}
-                            rows={12}
-                            autoGrow
-                            style={{ fontFamily: "ui-monospace, monospace", direction: "ltr" }}
-                        />
-                        {editError.value && <VAlert type="error" variant="tonal" density="compact">{editError.value}</VAlert>}
-                        {showChecklists && (
-                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Setting checklist")}</ThemedText>
-                                {SETTING_EDIT_CHECKS.map((check) => (
-                                    <VCheckbox
-                                        key={check.key}
-                                        modelValue={editChecklist.value[check.key] === true}
-                                        onUpdate:modelValue={(value: unknown) => (editChecklist.value = { ...editChecklist.value, [check.key]: Boolean(value) })}
-                                        label={t(check.label)}
-                                        density="compact"
-                                        hideDetails
-                                    />
-                                ))}
-                                {!editChecklistComplete.value && (
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all setting checklist items before saving.")}</ThemedText>
-                                )}
-                            </ThemedView>
-                        )}
+                <FormField
+                    label={t("Setting key")}
+                    hint={t("Example: checkout.support_config")}
+                    required
+                    sensitiveMakerChecker
+                >
+                    <VTextField
+                        modelValue={editKey.value}
+                        onUpdate:modelValue={(value: string) => (editKey.value = value)}
+                        readonly={history.value.length > 0}
+                    />
+                </FormField>
+                <FormField label={t("JSON value")} required sensitiveMakerChecker>
+                    <VTextarea
+                        modelValue={editValue.value}
+                        onUpdate:modelValue={(value: string) => (editValue.value = value)}
+                        rows={12}
+                        autoGrow
+                        style={{ fontFamily: "ui-monospace, monospace", direction: "ltr" }}
+                    />
+                </FormField>
+                <FormChecklist
+                    checks={[...SETTING_EDIT_CHECKS]}
+                    modelValue={editChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (editChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Setting checklist")}
+                    complete={editChecklistComplete.value}
+                    incompleteMessage={t("Complete all setting checklist items before saving.")}
+                />
 
-                        {history.value.length > 0 && (
-                            <>
-                                <VDivider />
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "14px" }}>{t("Version history")}</ThemedText>
-                                {history.value.map((row) => (
-                                    <ThemedView
-                                        key={row.id}
-                                        style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap", padding: "8px 10px", borderRadius: "8px", border: "1px solid rgba(100,116,139,0.2)" }}
-                                    >
-                                        <MetaPill size="x-small" variant="tonal" color="primary">v{row.version}</MetaPill>
-                                        <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>{formatDateTime(row.effectiveFrom)}</ThemedText>
-                                        <ThemedText style={{ fontSize: "11px", opacity: 0.45 }}>{formatDateTime(row.updatedAt)}</ThemedText>
-                                        <div style={{ flex: 1 }} />
-                                        {row.version !== history.value[0]?.version && (
-                                            <VBtn size="x-small" variant="text" onClick={() => (compareRow.value = row)}>{t("Compare with current")}</VBtn>
-                                        )}
-                                        <VBtn size="x-small" variant="text" onClick={() => restoreVersion(row)}>{t("Load into editor")}</VBtn>
-                                    </ThemedView>
-                                ))}
-                            </>
-                        )}
-
-                        {compareRow.value && (
-                            <SurfaceCard variant="tonal">
-                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                                    <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
-                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "13px", flex: 1 }}>
-                                            {t("Comparing")} v{compareRow.value.version} → v{history.value[0]?.version}
-                                        </ThemedText>
-                                        <VBtn size="x-small" variant="text" onClick={() => (compareRow.value = null)}>{t("Clear comparison")}</VBtn>
-                                    </ThemedView>
-                                    {diffRows.value.length === 0 && (
-                                        <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{t("No differences in this version pair.")}</ThemedText>
+                {history.value.length > 0 && (
+                    <>
+                        <VDivider />
+                        <ThemedText type="defaultSemiBold" style={{ fontSize: "14px" }}>{t("Version history")}</ThemedText>
+                        {history.value.map((row) => (
+                            <ThemedView
+                                key={row.id}
+                                style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "8px 10px", borderRadius: "var(--pg-radius-sm)", border: "1px solid var(--pg-border-subtle)" }}
+                            >
+                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                                    <MetaPill size="x-small" variant="tonal" color="primary">v{row.version}</MetaPill>
+                                    <div style={{ flex: 1 }} />
+                                    {row.version !== history.value[0]?.version && (
+                                        <VBtn size="x-small" variant="text" onClick={() => (compareRow.value = row)}>{t("Compare with current")}</VBtn>
                                     )}
-                                    {diffRows.value.map((row) => (
-                                        <ThemedView key={row.path} style={{ gap: "3px", padding: "6px 8px", borderRadius: "8px", background: "rgba(100,116,139,0.08)" }}>
-                                            <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center" }}>
-                                                <ThemedText style={{ fontSize: "11px", fontWeight: 700, direction: "ltr" }}>{row.path}</ThemedText>
-                                                <MetaPill size="x-small" variant="tonal" color={row.kind === "ADDED" ? "success" : row.kind === "REMOVED" ? "error" : "warning"}>{row.kind}</MetaPill>
-                                            </ThemedView>
-                                            <ThemedText style={{ fontSize: "11px", direction: "ltr", opacity: 0.75 }}>{row.before} → {row.after}</ThemedText>
-                                        </ThemedView>
-                                    ))}
-                                </SurfaceCardText>
-                            </SurfaceCard>
-                        )}
+                                    <VBtn size="x-small" variant="text" onClick={() => restoreVersion(row)}>{t("Load into editor")}</VBtn>
+                                </ThemedView>
+                                <DescriptionList
+                                    columns={2}
+                                    items={[
+                                        { label: t("Effective"), value: formatDateTime(row.effectiveFrom) },
+                                        { label: t("Updated"), value: formatDateTime(row.updatedAt) },
+                                    ]}
+                                />
+                            </ThemedView>
+                        ))}
+                    </>
+                )}
 
-                        <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
-                            <VBtn variant="text" onClick={() => (dialogOpen.value = false)}>{t("Cancel")}</VBtn>
-                            <VBtn color="primary" loading={saving.value} disabled={!editChecklistComplete.value} onClick={() => void save()}>{t("Save new version")}</VBtn>
-                        </ThemedView>
+                {compareRow.value && (
+                    <SurfaceCard variant="tonal">
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "13px", flex: 1 }}>
+                                    {t("Comparing")} v{compareRow.value.version} → v{history.value[0]?.version}
+                                </ThemedText>
+                                <VBtn size="x-small" variant="text" onClick={() => (compareRow.value = null)}>{t("Clear comparison")}</VBtn>
+                            </ThemedView>
+                            {diffRows.value.length === 0 && (
+                                <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{t("No differences in this version pair.")}</ThemedText>
+                            )}
+                            {diffRows.value.map((row) => (
+                                <ThemedView key={row.path} style={{ display: "flex", flexDirection: "column", gap: "3px", padding: "6px 8px", borderRadius: "var(--pg-radius-sm)", background: "var(--pg-bg-surface-subtle)" }}>
+                                    <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center" }}>
+                                        <ThemedText style={{ fontSize: "11px", fontWeight: 600, direction: "ltr" }}>{row.path}</ThemedText>
+                                        <StatusBadge status={row.kind} toneOverride={restoreTone(row.kind)} showDot={false} />
+                                    </ThemedView>
+                                    <ThemedText style={{ fontSize: "11px", direction: "ltr", opacity: 0.75 }}>{row.before} → {row.after}</ThemedText>
+                                </ThemedView>
+                            ))}
+                        </SurfaceCardText>
+                    </SurfaceCard>
+                )}
             </FormModal>
         </ScreenContainer>
     );

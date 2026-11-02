@@ -1,20 +1,19 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VSelect, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
 import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
-import { MoneyText } from "@/components/MoneyText";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
+import { MonoRef } from "@/components/ui/MonoRef";
 type Payment = {
     id: string;
     reference: string;
@@ -36,8 +35,6 @@ const PaymentsPage = dc(() => {
     const loading = ref(true);
     const error = ref<string | null>(null);
     const search = ref<string | null>(null);
-    const statusFilter = ref<string | null>(null);
-    const railFilter = ref<string | null>(null);
 
     const load = async () => {
         loading.value = true;
@@ -46,8 +43,6 @@ const PaymentsPage = dc(() => {
             const response = await api.get(urlsMap.paymentsList, {
                 params: {
                     search: search.value || undefined,
-                    status: statusFilter.value || undefined,
-                    railCode: railFilter.value || undefined,
                 },
             });
             const payload = response.data?.data ?? response.data ?? {};
@@ -62,46 +57,62 @@ const PaymentsPage = dc(() => {
 
     void load();
 
-    const statusTone = (status: string) => {
+    const statusTone = (status: string): BadgeTone => {
         switch (status) {
             case "SUCCEEDED":
-                return "success" as const;
+                return "success";
             case "FAILED":
             case "BLOCKED":
             case "CANCELLED":
-                return "error" as const;
+                return "danger";
             case "UNKNOWN":
             case "VERIFYING":
-                return "warning" as const;
+                return "warning";
             default:
-                return "info" as const;
+                return "info";
         }
     };
 
     const headers: TableHeader<Payment>[] = [
-        { key: "reference", label: "Reference", value: (row) => row.reference },
+        {
+            key: "reference",
+            label: "Reference",
+            Value: ({ row }: { row: Payment }) => <MonoRef value={row.reference} truncate={18} />,
+        },
         { key: "railCode", label: "Rail Code", value: (row) => row.railCode },
         {
             key: "status",
             label: "Status",
-            Value: ({ row }: { row: Payment }) => <StatusChip label={row.status} tone={statusTone(row.status)} />,
+            Value: ({ row }: { row: Payment }) => (
+                <StatusBadge status={row.status} toneOverride={statusTone(row.status)} />
+            ),
         },
         {
             key: "amount",
             label: "Amount",
-            Value: ({ row }: { row: Payment }) => <MoneyText value={row.amount} currency={row.currency} bold />,
+            Value: ({ row }: { row: Payment }) => (
+                <MoneyDisplay amount={row.amount} currency={row.currency} size="sm" />
+            ),
         },
         {
             key: "commission",
             label: "Commission",
-            Value: ({ row }: { row: Payment }) => <MoneyText value={row.commission} currency={row.currency} />,
+            Value: ({ row }: { row: Payment }) => (
+                <MoneyDisplay amount={row.commission} currency={row.currency} size="sm" />
+            ),
         },
         {
             key: "net",
             label: "Net",
-            Value: ({ row }: { row: Payment }) => <MoneyText value={row.net} currency={row.currency} />,
+            Value: ({ row }: { row: Payment }) => (
+                <MoneyDisplay amount={row.net} currency={row.currency} size="sm" colorSign />
+            ),
         },
-        { key: "applicationId", label: "Applications", value: (row) => row.applicationId },
+        {
+            key: "applicationId",
+            label: "Application",
+            Value: ({ row }: { row: Payment }) => <MonoRef value={row.applicationId} truncate={14} />,
+        },
         { key: "createdAt", label: "Created At", value: (row) => row.createdAt },
         { key: "confirmedAt", label: "Payment Complete", value: (row) => row.confirmedAt ?? "-" },
     ];
@@ -112,66 +123,22 @@ const PaymentsPage = dc(() => {
                 <PageHeader
                     title={t("Payments")}
                     subtitle={t("Payment attempts, statuses, and settlement references.")}
-                    end={() => (
-                        <ThemedView style={{ flexDirection: "row", gap: "10px" }}>
-                            <VSelect
-                                items={[
-                                    "CREATED",
-                                    "INITIATING",
-                                    "AWAITING_CUSTOMER",
-                                    "AUTHORIZING",
-                                    "VERIFYING",
-                                    "UNKNOWN",
-                                    "SUCCEEDED",
-                                    "FAILED",
-                                    "EXPIRED",
-                                    "CANCELLED",
-                                    "BLOCKED",
-                                ]}
-                                modelValue={statusFilter.value}
-                                onUpdate:modelValue={(v: string | null) => {
-                                    statusFilter.value = v;
-                                    void load();
-                                }}
-                                label={t("Status")}
-                                density="compact"
-                                hideDetails
-                                clearable
-                                style={{ minWidth: "190px" }}
-                            />
-                            <VTextField
-                                label={t("Rail Code")}
-                                modelValue={railFilter.value ?? ""}
-                                onUpdate:modelValue={(v: string) => {
-                                    railFilter.value = v || null;
-                                    void load();
-                                }}
-                                density="compact"
-                                hideDetails
-                                style={{ minWidth: "160px" }}
-                            />
-                        </ThemedView>
-                    )}
                 />
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : (
-                    <SurfaceCard>
-                        <SurfaceCardText>
-                            <DataTable
-                                title={t("Payments")}
-                                data={rows.value}
-                                headers={headers}
-                                loading={loading.value}
-                                showNumber={true}
-                                xlsx={false}
-                                noElevation={true}
-                                searchValue={search.value}
-                                setSearchValue={(value) => (search.value = value)}
-                            />
-                        </SurfaceCardText>
-                    </SurfaceCard>
+                    <DataTable
+                        title={t("Payments")}
+                        data={rows.value}
+                        headers={headers}
+                        loading={loading.value}
+                        showNumber={true}
+                        xlsx={false}
+                        noElevation={true}
+                        searchValue={search.value}
+                        setSearchValue={(value) => (search.value = value)}
+                    />
                 )}
             </ThemedView>
         </ScreenContainer>

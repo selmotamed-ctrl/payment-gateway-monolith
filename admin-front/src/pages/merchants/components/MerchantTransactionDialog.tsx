@@ -3,12 +3,12 @@ import { useLocale } from "vuetify";
 import { VAlert, VBtn } from "vuetify/components";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
 import { statusTone } from "@/components/Table/statusTone";
-import { formatDateTime, formatMoney } from "../merchantHelp";
+import { formatDateTime } from "../merchantHelp";
 import type { MerchantTransaction } from "../types";
 
-import { FormModal } from "@/components/ui/FormModal";
+import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
+import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { MonoRef } from "@/components/ui/MonoRef";
 
@@ -22,25 +22,38 @@ const MerchantTransactionDialog = dc(
         onOpenCase?: (caseId: string) => void;
     }) => {
         const { t } = useLocale();
+        const badgeTone = (tone: ReturnType<typeof statusTone>): BadgeTone =>
+            tone === "error" ? "danger" : tone === "primary" ? "info" : tone;
         return () => {
             const tx = props.transaction;
             if (!tx) return <></>;
             const currency = tx.currency;
             return (
-                <FormModal
+                <SlideOverDrawer
                 modelValue={props.open}
                 onUpdate:modelValue={(value: boolean) => props.onUpdate(value)}
                 title={t("Transaction detail")}
-                size="lg"
+                subtitle={tx.reference}
+                width={680}
+                v-slots={{
+                    footer: () => (
+                        <>
+                            {props.canInquire && ["UNKNOWN", "VERIFYING"].includes(tx.status) && (
+                                <VBtn variant="tonal" prependIcon="mdi-radar" onClick={() => props.onInquire(tx)}>{t("Schedule inquiry")}</VBtn>
+                            )}
+                            <VBtn variant="text" onClick={() => props.onUpdate(false)}>{t("Close")}</VBtn>
+                        </>
+                    ),
+                }}
             >
 <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
                                 <ThemedView style={{ gap: "4px" }}>
                                     <ThemedText style={{ fontSize: "12px", opacity: 0.65, direction: "ltr" }}>{tx.reference}</ThemedText>
                                 </ThemedView>
                                 <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                                    <StatusChip label={tx.status} tone={statusTone(tx.status)} />
-                                    <StatusChip label={tx.env} tone={tx.env === "LIVE" ? "warning" : "info"} size="small" />
-                                    <StatusChip label={tx.mode} tone="neutral" size="small" />
+                                    <StatusBadge status={tx.status} label={tx.status} toneOverride={badgeTone(statusTone(tx.status))} />
+                                    <StatusBadge status={tx.env} label={tx.env} toneOverride={tx.env === "LIVE" ? "warning" : "info"} />
+                                    <StatusBadge status={tx.mode} label={tx.mode} toneOverride="neutral" />
                                 </ThemedView>
                             </ThemedView>
 
@@ -77,13 +90,13 @@ const MerchantTransactionDialog = dc(
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Amounts and references")}</ThemedText>
                                     <DescriptionList
                                         items={[
-                                            { label: t("Requested"), value: formatMoney(tx.requestedAmount, currency) },
-                                            { label: t("Surcharge"), value: formatMoney(tx.surchargeAmount, currency) },
-                                            { label: t("Total charged"), value: formatMoney(tx.totalChargedAmount, currency) },
-                                            { label: t("Settled"), value: formatMoney(tx.settledAmount, currency) },
-                                            { label: t("Gateway fee"), value: formatMoney(tx.gatewayFeeAmount, currency) },
-                                            { label: t("Platform commission"), value: formatMoney(tx.platformCommissionAmount, currency) },
-                                            { label: t("Net to merchant"), value: formatMoney(tx.netMerchantAmount, currency) },
+                                            { label: t("Requested"), value: tx.requestedAmount, money: true, currency },
+                                            { label: t("Surcharge"), value: tx.surchargeAmount, money: true, currency },
+                                            { label: t("Total charged"), value: tx.totalChargedAmount, money: true, currency },
+                                            { label: t("Settled"), value: tx.settledAmount, money: true, currency },
+                                            { label: t("Gateway fee"), value: tx.gatewayFeeAmount, money: true, currency },
+                                            { label: t("Platform commission"), value: tx.platformCommissionAmount, money: true, currency },
+                                            { label: t("Net to merchant"), value: tx.netMerchantAmount, money: true, currency },
                                             { label: t("Provider reference"), value: <MonoRef value={tx.providerReference ?? ""} /> },
                                             { label: t("Network reference"), value: <MonoRef value={tx.networkReference ?? ""} /> },
                                             { label: t("Gateway reference"), value: <MonoRef value={tx.gatewayReference ?? ""} /> },
@@ -97,21 +110,14 @@ const MerchantTransactionDialog = dc(
                                 {tx.operatorCases.length === 0 && <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("No operator case linked")}</ThemedText>}
                                 {tx.operatorCases.map((operatorCase) => (
                                     <ThemedView key={operatorCase.id} style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                                        <StatusChip label={operatorCase.state} tone={statusTone(operatorCase.state)} size="x-small" />
-                                        <StatusChip label={operatorCase.priority} tone={statusTone(operatorCase.priority)} size="x-small" />
+                                        <StatusBadge status={operatorCase.state} label={operatorCase.state} toneOverride={badgeTone(statusTone(operatorCase.state))} />
+                                        <StatusBadge status={operatorCase.priority} label={operatorCase.priority} toneOverride={badgeTone(statusTone(operatorCase.priority))} />
                                         <ThemedText style={{ fontSize: "12px" }}>{operatorCase.kind} · {formatDateTime(operatorCase.slaDueAt)}</ThemedText>
                                         <VBtn size="x-small" variant="text" onClick={() => props.onOpenCase?.(operatorCase.id)}>{t("Open case")}</VBtn>
                                     </ThemedView>
                                 ))}
                             </ThemedView>
-
-                            <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end", flexWrap: "wrap" }}>
-                                {props.canInquire && ["UNKNOWN", "VERIFYING"].includes(tx.status) && (
-                                    <VBtn variant="tonal" prependIcon="mdi-radar" onClick={() => props.onInquire(tx)}>{t("Schedule inquiry")}</VBtn>
-                                )}
-                                <VBtn variant="text" onClick={() => props.onUpdate(false)}>{t("Close")}</VBtn>
-                            </ThemedView>
-            </FormModal>
+            </SlideOverDrawer>
             );
         };
     },

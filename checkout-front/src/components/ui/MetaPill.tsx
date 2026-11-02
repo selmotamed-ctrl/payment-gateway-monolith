@@ -7,7 +7,7 @@ const toneForColor = (color: string): BadgeTone => {
     if (["success", "green"].includes(normalized)) return "success";
     if (["warning", "amber", "orange"].includes(normalized)) return "warning";
     if (["error", "danger", "red"].includes(normalized)) return "danger";
-    if (["primary", "secondary", "info", "blue"].includes(normalized)) return "info";
+    if (["info", "blue"].includes(normalized)) return "info";
     return "neutral";
 };
 
@@ -16,7 +16,7 @@ const TONE_STYLES: Record<BadgeTone, { bg: string; text: string; border: string 
     warning: { bg: "var(--pg-status-warning-bg)", text: "var(--pg-status-warning-text)", border: "var(--pg-status-warning-border)" },
     danger: { bg: "var(--pg-status-danger-bg)", text: "var(--pg-status-danger-text)", border: "var(--pg-status-danger-border)" },
     info: { bg: "var(--pg-status-info-bg)", text: "var(--pg-status-info-text)", border: "var(--pg-status-info-border)" },
-    neutral: { bg: "var(--pg-status-neutral-bg)", text: "var(--pg-status-neutral-text)", border: "var(--pg-status-neutral-border)" },
+    neutral: { bg: "var(--pg-bg-surface-subtle)", text: "var(--pg-ink-secondary)", border: "var(--pg-border-subtle)" },
 };
 
 export const MetaPill = defineComponent({
@@ -26,7 +26,6 @@ export const MetaPill = defineComponent({
         size: { type: String as PropType<"x-small" | "small" | "default">, default: "small" },
         variant: { type: String as PropType<"tonal" | "flat" | "outlined" | "text">, default: "tonal" },
         prependIcon: { type: String, default: "" },
-        onClick: { type: Function as PropType<(event: MouseEvent) => void>, default: undefined },
     },
     setup(props, { slots }) {
         return (): VNodeChild => {
@@ -34,24 +33,23 @@ export const MetaPill = defineComponent({
             const palette = TONE_STYLES[tone];
             const outlined = props.variant === "outlined";
             const text = props.variant === "text";
+            const height = props.size === "x-small" ? "20px" : props.size === "default" ? "24px" : "22px";
             return (
                 <span
-                    onClick={props.onClick}
                     style={{
                         display: "inline-flex",
                         alignItems: "center",
                         gap: "5px",
-                        height: props.size === "x-small" ? "20px" : "22px",
+                        height,
                         padding: "0 8px",
                         borderRadius: "var(--pg-radius-sm)",
                         backgroundColor: text ? "transparent" : outlined ? "transparent" : palette.bg,
-                        color: palette.text,
-                        border: text ? "1px solid transparent" : `1px solid ${palette.border}`,
+                        color: text ? "var(--pg-ink-secondary)" : palette.text,
+                        border: text ? "1px solid transparent" : `1px solid ${outlined ? "var(--pg-border-subtle)" : palette.border}`,
                         fontSize: props.size === "x-small" ? "11px" : "12px",
                         fontWeight: 500,
                         lineHeight: 1,
                         whiteSpace: "nowrap",
-                        cursor: props.onClick ? "pointer" : undefined,
                     }}
                 >
                     {props.prependIcon && <VIcon icon={props.prependIcon} size={12} />}

@@ -1,11 +1,13 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
-import { VAlert, VBtn, VCard, VCardText, VSelect, VTextField, VTextarea, VSwitch } from "vuetify/components";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
+import { VAlert, VBtn, VSelect, VSwitch, VTextField } from "vuetify/components";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { FLOW_PHASES, type WizardFlowStep, type WizardTransform } from "./types";
+import { WizardSection } from "./WizardSection";
 import type { WizardStepProps } from "./StepIdentity";
 
 const TRANSFORM_OPS = [
@@ -104,6 +106,12 @@ const emptyStep = (phase: WizardFlowStep["phase"], order: number): WizardFlowSte
     assertExpression: "",
     outputName: "",
 });
+
+const gridStyle = {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+    gap: "14px",
+} as const;
 
 export const StepFlowBuilder = dc(
     (props: WizardStepProps) => {
@@ -209,206 +217,209 @@ export const StepFlowBuilder = dc(
             const steps = flowForPhase(phase).steps;
 
             return (
-                <ThemedView style={{ gap: "16px" }}>
-                    <VCard>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedView
-                                style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
-                            >
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                                    {t("Flow Builder")}
-                                </ThemedText>
-                                <ThemedView style={{ flexDirection: "row", gap: "8px" }}>
-                                    <VBtn variant="tonal" size="small" onClick={validateAll}>
-                                        {t("Preview")}
-                                    </VBtn>
-                                    <VBtn color="primary" size="small" onClick={addStep}>
-                                        {t("Add")}
-                                    </VBtn>
-                                </ThemedView>
-                            </ThemedView>
+                <SurfaceCard
+                    title={t("Flow Builder")}
+                    v-slots={{
+                        headerActions: () => (
+                            <>
+                                <VBtn variant="tonal" size="small" onClick={validateAll}>
+                                    {t("Preview")}
+                                </VBtn>
+                                <VBtn color="primary" size="small" onClick={addStep}>
+                                    {t("Add")}
+                                </VBtn>
+                            </>
+                        ),
+                    }}
+                >
+                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+                        <SegmentedTabs
+                            modelValue={phase}
+                            tabs={FLOW_PHASES.map((item) => ({
+                                value: item,
+                                label: item,
+                                count: flowForPhase(item).steps.length,
+                            }))}
+                            onUpdate:modelValue={(value: string) => (activePhase.value = value as WizardFlowStep["phase"])}
+                            ariaLabel={t("Flow Builder")}
+                        />
 
-                            <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                                {FLOW_PHASES.map((item) => {
-                                    const count = flowForPhase(item).steps.length;
-                                    return (
-                                        <VBtn
-                                            key={item}
-                                            size="small"
-                                            variant={item === phase ? "flat" : "tonal"}
-                                            color={item === phase ? "primary" : undefined}
-                                            onClick={() => (activePhase.value = item)}
-                                        >
-                                            {item} ({count})
-                                        </VBtn>
-                                    );
-                                })}
-                            </ThemedView>
+                        {validationErrors.value.length > 0 && (
+                            <VAlert type="error" variant="tonal" density="compact">
+                                <ul style={{ margin: 0, paddingInlineStart: "18px" }}>
+                                    {validationErrors.value.map((error, index) => (
+                                        <li key={index}>{error}</li>
+                                    ))}
+                                </ul>
+                            </VAlert>
+                        )}
 
-                            {validationErrors.value.length > 0 && (
-                                <VAlert type="error" variant="tonal" density="compact">
-                                    <ul style={{ margin: 0, paddingInlineStart: "18px" }}>
-                                        {validationErrors.value.map((error, index) => (
-                                            <li key={index}>{error}</li>
-                                        ))}
-                                    </ul>
-                                </VAlert>
-                            )}
-                        </VCardText>
-                    </VCard>
-
-                    {steps.map((step, stepIndex) => {
-                        const errors = validateFlowStep(step);
-                        return (
-                            <VCard key={stepIndex}>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                    <ThemedView
-                                        style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
-                                    >
-                                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
-                                            <ThemedText type="defaultSemiBold">
-                                                {stepIndex + 1}. {step.name || t("Step")}
-                                            </ThemedText>
-                                            <StatusChip
-                                                label={step.sideEffect}
-                                                tone={step.sideEffect === "MOVES_MONEY" ? "error" : "neutral"}
+                        {steps.map((step, stepIndex) => {
+                            const errors = validateFlowStep(step);
+                            return (
+                                <WizardSection
+                                    key={stepIndex}
+                                    title={`${stepIndex + 1}. ${step.name || t("Step")}`}
+                                    divider={stepIndex > 0}
+                                    v-slots={{
+                                        actions: () => (
+                                            <>
+                                                <StatusBadge
+                                                    status={step.sideEffect}
+                                                    toneOverride={step.sideEffect === "MOVES_MONEY" ? "danger" : "neutral"}
+                                                    showDot={false}
+                                                />
+                                                {step.pointOfNoReturn && (
+                                                    <StatusBadge
+                                                        status="POINT_OF_NO_RETURN"
+                                                        label={t("Point Of No Return")}
+                                                        toneOverride="warning"
+                                                        showDot={false}
+                                                    />
+                                                )}
+                                                <StatusBadge
+                                                    status={errors.length === 0 ? "PASSED" : "FAILED"}
+                                                    label={errors.length === 0 ? t("Passed") : t("Failed")}
+                                                    toneOverride={errors.length === 0 ? "success" : "danger"}
+                                                />
+                                                <VBtn size="x-small" variant="text" onClick={() => moveStep(phase, stepIndex, -1)}>
+                                                    ↑
+                                                </VBtn>
+                                                <VBtn size="x-small" variant="text" onClick={() => moveStep(phase, stepIndex, 1)}>
+                                                    ↓
+                                                </VBtn>
+                                                <VBtn
+                                                    size="x-small"
+                                                    variant="text"
+                                                    color="error"
+                                                    onClick={() => removeStep(phase, stepIndex)}
+                                                >
+                                                    ×
+                                                </VBtn>
+                                            </>
+                                        ),
+                                    }}
+                                >
+                                    <div style={gridStyle}>
+                                        <FormField label={t("Merchant Name")}>
+                                            <VTextField
+                                                modelValue={step.name}
+                                                onUpdate:modelValue={(v: string) => updateStep(phase, stepIndex, { name: v })}
                                             />
-                                            {step.pointOfNoReturn && <StatusChip label={t("Point Of No Return")} tone="warning" />}
-                                            {errors.length === 0 ? (
-                                                <StatusChip label={t("Passed")} tone="success" />
-                                            ) : (
-                                                <StatusChip label={t("Failed")} tone="error" />
-                                            )}
-                                        </ThemedView>
-                                        <ThemedView style={{ flexDirection: "row", gap: "6px" }}>
-                                            <VBtn size="x-small" variant="text" onClick={() => moveStep(phase, stepIndex, -1)}>
-                                                ↑
-                                            </VBtn>
-                                            <VBtn size="x-small" variant="text" onClick={() => moveStep(phase, stepIndex, 1)}>
-                                                ↓
-                                            </VBtn>
-                                            <VBtn
-                                                size="x-small"
-                                                variant="text"
-                                                color="error"
-                                                onClick={() => removeStep(phase, stepIndex)}
-                                            >
-                                                ×
-                                            </VBtn>
-                                        </ThemedView>
-                                    </ThemedView>
-
-                                    <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
-                                        <VTextField
-                                            label={t("Merchant Name")}
-                                            modelValue={step.name}
-                                            onUpdate:modelValue={(v: string) => updateStep(phase, stepIndex, { name: v })}
-                                            style={{ minWidth: "200px" }}
-                                        />
-                                        <VSelect
-                                            items={["HTTP", "COMPUTE", "RENDER", "WAIT", "ASSERT", "BRANCH"]}
-                                            modelValue={step.type}
-                                            onUpdate:modelValue={(v: any) => updateStep(phase, stepIndex, { type: v })}
-                                            label={t("Step Type")}
-                                            style={{ minWidth: "160px" }}
-                                        />
-                                        <VTextField
-                                            label="method"
-                                            modelValue={step.method}
-                                            onUpdate:modelValue={(v: string) => updateStep(phase, stepIndex, { method: v })}
-                                            style={{ minWidth: "120px" }}
-                                        />
-                                        <VTextField
-                                            label={t("Base URL")}
-                                            modelValue={step.url}
-                                            onUpdate:modelValue={(v: string) => updateStep(phase, stepIndex, { url: v })}
-                                            style={{ minWidth: "300px" }}
-                                        />
-                                        <VSelect
-                                            items={["READ_ONLY", "SAFE_WITH_COOLDOWN", "SENDS_NOTIFICATION", "MOVES_MONEY"]}
-                                            modelValue={step.sideEffect}
-                                            onUpdate:modelValue={(v: any) => updateStep(phase, stepIndex, { sideEffect: v })}
-                                            label={t("Side Effect")}
-                                            style={{ minWidth: "200px" }}
-                                        />
-                                        <VSelect
-                                            items={["NEVER", "SAFE", "IDEMPOTENT"]}
-                                            modelValue={step.retryPolicy}
-                                            onUpdate:modelValue={(v: any) => updateStep(phase, stepIndex, { retryPolicy: v })}
-                                            label={t("Retry Policy")}
-                                            style={{ minWidth: "160px" }}
-                                        />
-                                        <VTextField
-                                            label={t("Idempotency")}
-                                            modelValue={step.idempotencyConfig}
-                                            onUpdate:modelValue={(v: string) =>
-                                                updateStep(phase, stepIndex, { idempotencyConfig: v })
-                                            }
-                                            style={{ minWidth: "180px" }}
-                                        />
-                                        <VTextField
-                                            label="output"
-                                            modelValue={step.outputName}
-                                            onUpdate:modelValue={(v: string) => updateStep(phase, stepIndex, { outputName: v })}
-                                            style={{ minWidth: "160px" }}
-                                        />
-                                    </ThemedView>
-
-                                    <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "12px" }}>
-                                        <VSwitch
-                                            label={t("Point Of No Return")}
-                                            modelValue={step.pointOfNoReturn}
-                                            onUpdate:modelValue={(v: boolean | null) =>
-                                                updateStep(phase, stepIndex, { pointOfNoReturn: !!v })
-                                            }
-                                            density="compact"
-                                            hideDetails
-                                        />
-                                    </ThemedView>
+                                        </FormField>
+                                        <FormField label={t("Step Type")}>
+                                            <VSelect
+                                                items={["HTTP", "COMPUTE", "RENDER", "WAIT", "ASSERT", "BRANCH"]}
+                                                modelValue={step.type}
+                                                onUpdate:modelValue={(v: any) => updateStep(phase, stepIndex, { type: v })}
+                                            />
+                                        </FormField>
+                                        <FormField label="method">
+                                            <VTextField
+                                                modelValue={step.method}
+                                                onUpdate:modelValue={(v: string) => updateStep(phase, stepIndex, { method: v })}
+                                            />
+                                        </FormField>
+                                        <FormField label={t("Base URL")}>
+                                            <VTextField
+                                                modelValue={step.url}
+                                                onUpdate:modelValue={(v: string) => updateStep(phase, stepIndex, { url: v })}
+                                            />
+                                        </FormField>
+                                        <FormField label={t("Side Effect")}>
+                                            <VSelect
+                                                items={["READ_ONLY", "SAFE_WITH_COOLDOWN", "SENDS_NOTIFICATION", "MOVES_MONEY"]}
+                                                modelValue={step.sideEffect}
+                                                onUpdate:modelValue={(v: any) => updateStep(phase, stepIndex, { sideEffect: v })}
+                                            />
+                                        </FormField>
+                                        <FormField label={t("Retry Policy")}>
+                                            <VSelect
+                                                items={["NEVER", "SAFE", "IDEMPOTENT"]}
+                                                modelValue={step.retryPolicy}
+                                                onUpdate:modelValue={(v: any) => updateStep(phase, stepIndex, { retryPolicy: v })}
+                                            />
+                                        </FormField>
+                                        <FormField label={t("Idempotency")}>
+                                            <VTextField
+                                                modelValue={step.idempotencyConfig}
+                                                onUpdate:modelValue={(v: string) =>
+                                                    updateStep(phase, stepIndex, { idempotencyConfig: v })
+                                                }
+                                            />
+                                        </FormField>
+                                        <FormField label="output">
+                                            <VTextField
+                                                modelValue={step.outputName}
+                                                onUpdate:modelValue={(v: string) => updateStep(phase, stepIndex, { outputName: v })}
+                                            />
+                                        </FormField>
+                                        <FormField label={t("Point Of No Return")}>
+                                            <VSwitch
+                                                modelValue={step.pointOfNoReturn}
+                                                onUpdate:modelValue={(v: boolean | null) =>
+                                                    updateStep(phase, stepIndex, { pointOfNoReturn: !!v })
+                                                }
+                                                density="compact"
+                                                hideDetails
+                                            />
+                                        </FormField>
+                                    </div>
 
                                     {step.type === "ASSERT" && (
-                                        <VTextField
-                                            label="assert_expression"
-                                            modelValue={step.assertExpression}
-                                            onUpdate:modelValue={(v: string) =>
-                                                updateStep(phase, stepIndex, { assertExpression: v })
-                                            }
-                                        />
+                                        <FormField label="assert_expression">
+                                            <VTextField
+                                                modelValue={step.assertExpression}
+                                                onUpdate:modelValue={(v: string) =>
+                                                    updateStep(phase, stepIndex, { assertExpression: v })
+                                                }
+                                            />
+                                        </FormField>
                                     )}
 
-                                    <ThemedView style={{ flexDirection: "column", gap: "8px" }}>
-                                        <ThemedView
-                                            style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
-                                        >
-                                            <ThemedText type="defaultSemiBold">{t("Transforms")}</ThemedText>
-                                            <VBtn size="x-small" variant="tonal" onClick={() => addTransform(phase, stepIndex)}>
-                                                {t("Add")}
-                                            </VBtn>
-                                        </ThemedView>
+                                    <WizardSection
+                                        title={t("Transforms")}
+                                        divider
+                                        v-slots={{
+                                            actions: () => (
+                                                <VBtn size="x-small" variant="tonal" onClick={() => addTransform(phase, stepIndex)}>
+                                                    {t("Add")}
+                                                </VBtn>
+                                            ),
+                                        }}
+                                    >
                                         {(step.transforms ?? []).map((transform, transformIndex) => (
-                                            <ThemedView key={transformIndex} style={{ flexDirection: "row", gap: "10px", alignItems: "center" }}>
-                                                <VSelect
-                                                    items={TRANSFORM_OPS}
-                                                    modelValue={transform.op}
-                                                    onUpdate:modelValue={(v: string) =>
-                                                        updateTransform(phase, stepIndex, transformIndex, { op: v })
-                                                    }
-                                                    label={t("Type")}
-                                                    style={{ minWidth: "240px" }}
-                                                />
-                                                <VTextField
-                                                    label={t("Params")}
-                                                    modelValue={(transform.args ?? []).join(",")}
-                                                    onUpdate:modelValue={(v: string) =>
-                                                        updateTransform(phase, stepIndex, transformIndex, {
-                                                            args: v
-                                                                .split(",")
-                                                                .map((entry) => entry.trim())
-                                                                .filter((entry) => !!entry),
-                                                        })
-                                                    }
-                                                    style={{ minWidth: "260px" }}
-                                                />
+                                            <div
+                                                key={transformIndex}
+                                                style={{
+                                                    display: "grid",
+                                                    gridTemplateColumns: "minmax(180px, 1fr) minmax(220px, 1.4fr) auto",
+                                                    gap: "12px",
+                                                    alignItems: "end",
+                                                }}
+                                            >
+                                                <FormField label={t("Type")}>
+                                                    <VSelect
+                                                        items={TRANSFORM_OPS}
+                                                        modelValue={transform.op}
+                                                        onUpdate:modelValue={(v: string) =>
+                                                            updateTransform(phase, stepIndex, transformIndex, { op: v })
+                                                        }
+                                                    />
+                                                </FormField>
+                                                <FormField label={t("Params")}>
+                                                    <VTextField
+                                                        modelValue={(transform.args ?? []).join(",")}
+                                                        onUpdate:modelValue={(v: string) =>
+                                                            updateTransform(phase, stepIndex, transformIndex, {
+                                                                args: v
+                                                                    .split(",")
+                                                                    .map((entry) => entry.trim())
+                                                                    .filter((entry) => !!entry),
+                                                            })
+                                                        }
+                                                    />
+                                                </FormField>
                                                 <VBtn
                                                     size="x-small"
                                                     variant="text"
@@ -417,9 +428,9 @@ export const StepFlowBuilder = dc(
                                                 >
                                                     ×
                                                 </VBtn>
-                                            </ThemedView>
+                                            </div>
                                         ))}
-                                    </ThemedView>
+                                    </WizardSection>
 
                                     {errors.length > 0 && (
                                         <VAlert type="warning" variant="tonal" density="compact">
@@ -430,11 +441,11 @@ export const StepFlowBuilder = dc(
                                             </ul>
                                         </VAlert>
                                     )}
-                                </VCardText>
-                            </VCard>
-                        );
-                    })}
-                </ThemedView>
+                                </WizardSection>
+                            );
+                        })}
+                    </SurfaceCardText>
+                </SurfaceCard>
             );
         };
     },

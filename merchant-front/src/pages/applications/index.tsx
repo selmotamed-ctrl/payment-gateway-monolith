@@ -1,13 +1,11 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VSelect, VTextField, VTextarea } from "vuetify/components";
+import { VBtn, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
 import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
@@ -16,7 +14,10 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
 import { FormModal } from "@/components/ui/FormModal";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
+import { MonoRef } from "@/components/ui/MonoRef";
 type Application = {
     id: string;
     name: string;
@@ -46,6 +47,7 @@ const ApplicationsPage = dc(() => {
     const descriptive = ref({ name: "", businessUseDescription: "", expectedMonthlyVolume: "" });
     const sensitive = ref({ assignedWalletId: "", railWhitelist: "", redirectDomainAllowlist: "", reason: "" });
     const actionLoading = ref(false);
+    const formError = ref("");
 
     const load = async () => {
         loading.value = true;
@@ -69,6 +71,7 @@ const ApplicationsPage = dc(() => {
     const openDialog = (row: Application, nextMode: "DESCRIPTIVE" | "SENSITIVE") => {
         selected.value = row;
         mode.value = nextMode;
+        formError.value = "";
         descriptive.value = {
             name: row.name,
             businessUseDescription: row.businessUseDescription,
@@ -88,6 +91,7 @@ const ApplicationsPage = dc(() => {
             return;
         }
         actionLoading.value = true;
+        formError.value = "";
         try {
             if (mode.value === "DESCRIPTIVE") {
                 await api.patch(urlsMap.applicationPatch(selected.value.id), descriptive.value);
@@ -111,21 +115,29 @@ const ApplicationsPage = dc(() => {
             showSnackBar({ type: "success", message: t("Saved") });
             await load();
         } catch (e) {
-            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+            const message = extractApiErrorMessage(e);
+            formError.value = message;
+            showSnackBar({ type: "error", message });
         } finally {
             actionLoading.value = false;
         }
     };
 
     const headers: TableHeader<Application>[] = [
-        { key: "name", label: "Merchant Name", value: (row) => row.name },
+        { key: "name", label: "Application Name", value: (row) => row.name },
         { key: "businessUseDescription", label: "Sales Channel Description", value: (row) => row.businessUseDescription },
         {
             key: "expectedMonthlyVolume",
             label: "Expected Monthly Volume",
-            value: (row) => `${row.expectedMonthlyVolume ?? ""} ${row.currency ?? ""}`,
+            Value: ({ row }: { row: Application }) => (
+                <MoneyDisplay amount={row.expectedMonthlyVolume} currency={row.currency} size="sm" />
+            ),
         },
-        { key: "assignedWalletId", label: "Wallet Balance", value: (row) => row.assignedWalletId ?? "-" },
+        {
+            key: "assignedWalletId",
+            label: "Wallet",
+            Value: ({ row }: { row: Application }) => <MonoRef value={row.assignedWalletId} truncate={14} />,
+        },
         {
             key: "railWhitelist",
             label: "Rail Whitelist",
@@ -135,7 +147,7 @@ const ApplicationsPage = dc(() => {
             key: "status",
             label: "Status",
             Value: ({ row }: { row: Application }) => (
-                <StatusChip label={row.status} tone={row.status === "ACTIVE" ? "success" : "warning"} />
+                <StatusBadge status={row.status} toneOverride={row.status === "ACTIVE" ? "success" : "warning"} />
             ),
         },
         {
@@ -143,9 +155,9 @@ const ApplicationsPage = dc(() => {
             label: "Pending",
             Value: ({ row }: { row: Application }) =>
                 row.pendingChange ? (
-                    <StatusChip label={t("Pending")} tone="warning" />
+                    <StatusBadge status="PENDING" label={t("Pending")} />
                 ) : (
-                    <StatusChip label={t("Approved")} tone="success" />
+                    <StatusBadge status="APPROVED" label={t("Approved")} />
                 ),
         },
         { key: "pendingApprovalReason", label: "Reason", value: (row) => row.pendingApprovalReason ?? "-" },
@@ -168,27 +180,25 @@ const ApplicationsPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Applications")}
-                    subtitle={t("Payment applications, environments, and configuration.")} />
+                <PageHeader
+                    title={t("Applications")}
+                    subtitle={t("Payment applications, environments, and configuration.")}
+                />
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : (
-                    <SurfaceCard>
-                        <SurfaceCardText>
-                            <DataTable
-                                title={t("Applications")}
-                                data={rows.value}
-                                headers={headers}
-                                loading={loading.value}
-                                showNumber={true}
-                                xlsx={false}
-                                noElevation={true}
-                                searchValue={search.value}
-                                setSearchValue={(value) => (search.value = value)}
-                            />
-                        </SurfaceCardText>
-                    </SurfaceCard>
+                    <DataTable
+                        title={t("Applications")}
+                        data={rows.value}
+                        headers={headers}
+                        loading={loading.value}
+                        showNumber={true}
+                        xlsx={false}
+                        noElevation={true}
+                        searchValue={search.value}
+                        setSearchValue={(value) => (search.value = value)}
+                    />
                 )}
             </ThemedView>
 
@@ -197,59 +207,69 @@ const ApplicationsPage = dc(() => {
                 onUpdate:modelValue={(v: any) => (dialogOpen.value = v)}
                 title={selected.value?.name ?? t("Application")}
                 size="md"
+                loading={actionLoading.value}
+                errorMessage={formError.value}
+                submitLabel={mode.value === "DESCRIPTIVE" ? t("Save Changes") : t("Propose")}
+                onSubmit={() => void submit()}
             >
-{mode.value === "DESCRIPTIVE" ? (
-                            <>
-                                <VTextField
-                                    label={t("Merchant Name")}
-                                    modelValue={descriptive.value.name}
-                                    onUpdate:modelValue={(v: string) => (descriptive.value.name = v)}
-                                />
-                                <VTextarea
-                                    label={t("Sales Channel Description")}
-                                    modelValue={descriptive.value.businessUseDescription}
-                                    onUpdate:modelValue={(v: string) => (descriptive.value.businessUseDescription = v)}
-                                    rows={3}
-                                />
-                                <VTextField
-                                    label={t("Expected Monthly Volume")}
-                                    modelValue={descriptive.value.expectedMonthlyVolume}
-                                    onUpdate:modelValue={(v: string) => (descriptive.value.expectedMonthlyVolume = v)}
-                                />
-                            </>
-                        ) : (
-                            <>
-                                <VTextField
-                                    label="assigned_wallet_id"
-                                    modelValue={sensitive.value.assignedWalletId}
-                                    onUpdate:modelValue={(v: string) => (sensitive.value.assignedWalletId = v)}
-                                />
-                                <VTextField
-                                    label={t("Rail Whitelist")}
-                                    modelValue={sensitive.value.railWhitelist}
-                                    onUpdate:modelValue={(v: string) => (sensitive.value.railWhitelist = v)}
-                                    hint="Comma separated, empty means all rails"
-                                    persistentHint
-                                />
-                                <VTextField
-                                    label="redirect_domain_allowlist"
-                                    modelValue={sensitive.value.redirectDomainAllowlist}
-                                    onUpdate:modelValue={(v: string) => (sensitive.value.redirectDomainAllowlist = v)}
-                                    hint="Comma separated domains"
-                                    persistentHint
-                                />
-                                <VTextarea
-                                    label={t("Reason")}
-                                    modelValue={sensitive.value.reason}
-                                    onUpdate:modelValue={(v: string) => (sensitive.value.reason = v)}
-                                    rows={2}
-                                />
-                            </>
-                        )}
-
-                        <VBtn color="primary" loading={actionLoading.value} onClick={() => void submit()}>
-                            {mode.value === "DESCRIPTIVE" ? t("Save Changes") : t("Propose")}
-                        </VBtn>
+                {mode.value === "DESCRIPTIVE" ? (
+                    <>
+                        <FormField label={t("Application Name")} required>
+                            <VTextField
+                                modelValue={descriptive.value.name}
+                                onUpdate:modelValue={(v: string) => (descriptive.value.name = v)}
+                                hideDetails
+                            />
+                        </FormField>
+                        <FormField label={t("Sales Channel Description")}>
+                            <VTextarea
+                                modelValue={descriptive.value.businessUseDescription}
+                                onUpdate:modelValue={(v: string) => (descriptive.value.businessUseDescription = v)}
+                                rows={3}
+                                hideDetails
+                            />
+                        </FormField>
+                        <FormField label={t("Expected Monthly Volume")}>
+                            <VTextField
+                                modelValue={descriptive.value.expectedMonthlyVolume}
+                                onUpdate:modelValue={(v: string) => (descriptive.value.expectedMonthlyVolume = v)}
+                                hideDetails
+                            />
+                        </FormField>
+                    </>
+                ) : (
+                    <>
+                        <FormField label={t("Assigned Wallet ID")} hint={t("Wallet that receives settlements for this application.")}>
+                            <VTextField
+                                modelValue={sensitive.value.assignedWalletId}
+                                onUpdate:modelValue={(v: string) => (sensitive.value.assignedWalletId = v)}
+                                hideDetails
+                            />
+                        </FormField>
+                        <FormField label={t("Rail Whitelist")} hint={t("Comma separated, empty means all rails.")}>
+                            <VTextField
+                                modelValue={sensitive.value.railWhitelist}
+                                onUpdate:modelValue={(v: string) => (sensitive.value.railWhitelist = v)}
+                                hideDetails
+                            />
+                        </FormField>
+                        <FormField label={t("Redirect Domain Allowlist")} hint={t("Comma separated domains.")}>
+                            <VTextField
+                                modelValue={sensitive.value.redirectDomainAllowlist}
+                                onUpdate:modelValue={(v: string) => (sensitive.value.redirectDomainAllowlist = v)}
+                                hideDetails
+                            />
+                        </FormField>
+                        <FormField label={t("Reason")}>
+                            <VTextarea
+                                modelValue={sensitive.value.reason}
+                                onUpdate:modelValue={(v: string) => (sensitive.value.reason = v)}
+                                rows={2}
+                                hideDetails
+                            />
+                        </FormField>
+                    </>
+                )}
             </FormModal>
         </ScreenContainer>
     );

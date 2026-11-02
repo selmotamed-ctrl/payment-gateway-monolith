@@ -6,6 +6,7 @@ import LogoSvg from "@/assets/images/logo.svg";
 import { setLocale } from "@/plugins/localization";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import { DescriptionList } from "@/components/ui/DescriptionList";
 
 const FEATURES = [
     {
@@ -64,7 +65,7 @@ const LandingPage = dc(() => {
                             style={{
                                 width: "36px",
                                 height: "36px",
-                                borderRadius: "8px",
+                                borderRadius: "var(--pg-radius-md)",
                                 display: "inline-flex",
                                 alignItems: "center",
                                 justifyContent: "center",
@@ -179,41 +180,20 @@ const LandingPage = dc(() => {
 
                     <SurfaceCard title={t("Pricing Summary")} subtitle={t("Transparent merchant pricing.")}>
                         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                            {PRICING.map((item) => (
-                                <div
-                                    key={item.label}
-                                    style={{
-                                        display: "flex",
-                                        alignItems: "baseline",
-                                        justifyContent: "space-between",
-                                        gap: "16px",
-                                        paddingBottom: "12px",
-                                        borderBottom: "1px solid var(--pg-border-subtle)",
-                                    }}
-                                >
-                                    <span style={{ color: "var(--pg-ink-muted)", fontSize: "12.5px" }}>
-                                        {t(item.label)}
-                                    </span>
-                                    <span
-                                        class="pg-tabular"
-                                        style={{
-                                            color: "var(--pg-ink-primary)",
-                                            fontSize: "18px",
-                                            fontWeight: 600,
-                                            whiteSpace: "nowrap",
-                                        }}
-                                    >
-                                        {item.value}
-                                    </span>
-                                </div>
-                            ))}
+                            <DescriptionList
+                                ariaLabel={t("Pricing Summary")}
+                                items={PRICING.map((item) => ({
+                                    label: t(item.label),
+                                    value: item.value,
+                                }))}
+                            />
                             <div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
                                 <span
                                     aria-hidden="true"
                                     style={{
                                         width: "6px",
                                         height: "6px",
-                                        borderRadius: "9999px",
+                                        borderRadius: "50%",
                                         backgroundColor: "var(--pg-status-success-dot)",
                                     }}
                                 />
@@ -239,7 +219,7 @@ const LandingPage = dc(() => {
                                     style={{
                                         width: "34px",
                                         height: "34px",
-                                        borderRadius: "7px",
+                                        borderRadius: "var(--pg-radius-sm)",
                                         display: "inline-flex",
                                         alignItems: "center",
                                         justifyContent: "center",

@@ -1,6 +1,6 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
-import { useLocale } from "vuetify";
+import { useLocale, useTheme } from "vuetify";
 
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -21,7 +21,7 @@ import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { formatPlainNumber, toDecimal } from "@/utils/money";
 
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
 type Overview = {
     currency?: string;
     walletBalance?: string;
@@ -43,6 +43,8 @@ type Overview = {
 
 const DashboardPage = dc(() => {
     const { t } = useLocale();
+    const theme = useTheme();
+    const chartInk = () => theme.current.value.colors["on-surface-variant"];
     const overview = ref<Overview | null>(null);
     const loading = ref(true);
     const error = ref<string | null>(null);
@@ -105,10 +107,10 @@ const DashboardPage = dc(() => {
         const rows = overview.value?.volumeByDay ?? [];
         return {
             tooltip: { trigger: "axis" },
-            legend: { textStyle: { color: "#94a3b8" } },
+            legend: { textStyle: { color: chartInk() } },
             grid: { left: "8%", right: "4%", top: "12%", bottom: "12%" },
-            xAxis: { type: "category", data: rows.map((row) => row.day), axisLabel: { color: "#94a3b8" } },
-            yAxis: { type: "value", axisLabel: { color: "#94a3b8" } },
+            xAxis: { type: "category", data: rows.map((row) => row.day), axisLabel: { color: chartInk() } },
+            yAxis: { type: "value", axisLabel: { color: chartInk() } },
             series: [
                 {
                     name: t("Gross"),
@@ -135,7 +137,7 @@ const DashboardPage = dc(() => {
         const rows = overview.value?.volumeByRail ?? [];
         return {
             tooltip: { trigger: "item" },
-            legend: { textStyle: { color: "#94a3b8" } },
+            legend: { textStyle: { color: chartInk() } },
             series: [
                 {
                     name: t("By Rail"),
@@ -183,43 +185,29 @@ const DashboardPage = dc(() => {
                         <MetricStrip items={metricItems.value} loading={loading.value} />
 
                         <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "18px" }}>
-                            <SurfaceCard style={{ flex: "1 1 440px" }}>
-                                <SurfaceCardText>
-                                    <ThemedText type="defaultSemiBold" style={{ marginBottom: "10px" }}>
-                                        {t("Monthly Volume")}
-                                    </ThemedText>
-                                    <EChart option={volumeChart()} height="300px" />
-                                </SurfaceCardText>
+                            <SurfaceCard title={t("Monthly Volume")} style={{ flex: "1 1 440px" }}>
+                                <EChart option={volumeChart()} height="300px" />
                             </SurfaceCard>
-                            <SurfaceCard style={{ flex: "1 1 340px" }}>
-                                <SurfaceCardText>
-                                    <ThemedText type="defaultSemiBold" style={{ marginBottom: "10px" }}>
-                                        {t("By Rail")}
-                                    </ThemedText>
-                                    <EChart option={railChart()} height="300px" />
-                                </SurfaceCardText>
+                            <SurfaceCard title={t("By Rail")} style={{ flex: "1 1 340px" }}>
+                                <EChart option={railChart()} height="300px" />
                             </SurfaceCard>
                         </ThemedView>
 
-                        <SurfaceCard>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                                <DataTable
-                                    title={t("Recent Payments")}
-                                    data={overview.value?.recentPayments ?? []}
-                                    headers={paymentHeaders}
-                                    loading={loading.value}
-                                    showNumber={false}
-                                    xlsx={false}
-                                    noElevation={true}
-                                />
-                            </SurfaceCardText>
-                        </SurfaceCard>
+                        <DataTable
+                            title={t("Recent Payments")}
+                            data={overview.value?.recentPayments ?? []}
+                            headers={paymentHeaders}
+                            loading={loading.value}
+                            showNumber={false}
+                            xlsx={false}
+                            noElevation={true}
+                        />
 
                         <ThemedView style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                            <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>
+                            <ThemedText style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>
                                 {t("Gross")}: <MoneyDisplay amount={overview.value?.todayVolume ?? "0"} currency={currency()} />
                             </ThemedText>
-                            <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>
+                            <ThemedText style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>
                                 {formatPlainNumber(overview.value?.volumeByRail?.length ?? 0)} {t("By Rail")}
                             </ThemedText>
                         </ThemedView>

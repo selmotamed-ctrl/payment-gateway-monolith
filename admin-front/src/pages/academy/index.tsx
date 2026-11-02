@@ -2,13 +2,17 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VCheckbox, VExpansionPanel, VExpansionPanelText, VExpansionPanelTitle, VExpansionPanels, VProgressLinear, VRadio, VRadioGroup, VSelect, VTextField } from "vuetify/components";
+import { VAlert, VBtn, VCheckbox, VExpansionPanel, VExpansionPanelText, VExpansionPanelTitle, VExpansionPanels, VProgressLinear, VRadio, VRadioGroup, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { DescriptionList } from "@/components/ui/DescriptionList";
+import { MonoRef } from "@/components/ui/MonoRef";
+import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import { GuideMarkdown } from "@/components/guide/GuideMarkdown";
 import {
     ACADEMY_MODULES,
@@ -48,6 +52,8 @@ type Incident = {
     scenarioId: string;
     message: string;
 };
+
+type AcademyStep = "lessons" | "lab" | "quiz";
 
 const BADGE_LABELS: Record<AcademyBadge, string> = {
     CERTIFIED_SUPPORT_SPECIALIST: "Certified Support Specialist",
@@ -154,11 +160,23 @@ const AcademyPage = dc(() => {
     const labScenarioIndex = ref(0);
     const labMistakes = ref<string[]>([]);
     const labAttempts = ref(0);
+    const activeStep = ref<AcademyStep>("lessons");
 
     const selectedModule = computed<AcademyModule>(() => findAcademyModule(selectedModuleId.value) ?? ACADEMY_MODULES[0]!);
     const trackModules = computed(() =>
         ACADEMY_MODULES.filter((module) => module.tracks.includes(selectedTrack.value) || selectedTrack.value === "MASTER_OPERATOR"),
     );
+    const trackTabs = computed(() =>
+        ACADEMY_TRACKS.map((track) => ({
+            value: track.id,
+            label: `${isArabic.value ? TRACK_LABELS_AR[track.id] : track.titleEn} · ${trackProgressPercent(progress.value, track)}%`,
+        })),
+    );
+    const stepTabs = computed(() => [
+        { value: "lessons", label: isArabic.value ? "الخطوة 1 — الدروس" : "Step 1 — Lessons" },
+        { value: "lab", label: isArabic.value ? "الخطوة 2 — المختبر التفاعلي" : "Step 2 — Interactive lab" },
+        { value: "quiz", label: isArabic.value ? "الخطوة 3 — الاختبار" : "Step 3 — Verification quiz" },
+    ]);
 
     const moduleTitle = (module: AcademyModule): string => (isArabic.value ? module.titleAr : module.titleEn);
     const moduleSummary = (module: AcademyModule): string => (isArabic.value && module.summaryAr ? module.summaryAr : module.summaryEn);
@@ -279,6 +297,7 @@ const AcademyPage = dc(() => {
     const selectModule = (moduleId: string) => {
         selectedModuleId.value = moduleId;
         progress.value.lastModuleId = moduleId;
+        activeStep.value = "lessons";
         incident.value = null;
         labFeedback.value = null;
         labScenarioIndex.value = 0;
@@ -492,8 +511,8 @@ const AcademyPage = dc(() => {
                     subtitle={t("Structured learning paths for operators and compliance staff.")}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                            <StatusChip label={`${completedModules.value} / ${ACADEMY_MODULES.length} ${isArabic.value ? "وحدات" : "modules"}`} tone="info" />
-                            <StatusChip label={`${overallPercent.value}%`} tone={overallPercent.value === 100 ? "success" : "primary"} />
+                            <StatusBadge status="MODULES" label={`${completedModules.value} / ${ACADEMY_MODULES.length} ${isArabic.value ? "وحدات" : "modules"}`} toneOverride="info" showDot={false} />
+                            <StatusBadge status="PROGRESS" label={`${overallPercent.value}%`} toneOverride={overallPercent.value === 100 ? "success" : "info"} showDot={false} />
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} disabled={!teamExportChecklistComplete.value} onClick={() => void exportCertifications()}>
                                 {isArabic.value ? "تصدير الشهادات" : "Export certifications"}
                             </VBtn>
@@ -526,28 +545,19 @@ const AcademyPage = dc(() => {
                 )}
 
                 {summary.value && (
-                    <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
-                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{isArabic.value ? "صحة الأكاديمية" : "Academy health"}</ThemedText>
-                            <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
-                                {[
-                                    [isArabic.value ? "المستخدمون" : "Users", `${summary.value.usersWithProgress}/${summary.value.totalUsers}`],
-                                    [isArabic.value ? "لم يبدأ" : "Not started", String(summary.value.notStarted)],
-                                    [isArabic.value ? "الوحدات" : "Modules", String(summary.value.completedModules)],
-                                    [isArabic.value ? "الدروس" : "Lessons", String(summary.value.completedLessons)],
-                                    [isArabic.value ? "المختبرات" : "Labs", String(summary.value.completedLabs)],
-                                    [isArabic.value ? "الشارات" : "Badges", String(summary.value.earnedBadges)],
-                                    [isArabic.value ? "نشط 7 أيام" : "Active 7d", String(summary.value.activeLast7d)],
-                                ].map(([label, value]) => (
-                                    <SurfaceCard key={label} variant="tonal">
-                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
-                                            <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{label}</ThemedText>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{value}</ThemedText>
-                                        </SurfaceCardText>
-                                    </SurfaceCard>
-                                ))}
-                            </ThemedView>
-                        </SurfaceCardText>
+                    <SurfaceCard title={isArabic.value ? "صحة الأكاديمية" : "Academy health"}>
+                        <DescriptionList
+                            columns={2}
+                            items={[
+                                { label: isArabic.value ? "المستخدمون" : "Users", value: `${summary.value.usersWithProgress}/${summary.value.totalUsers}` },
+                                { label: isArabic.value ? "لم يبدأ" : "Not started", value: String(summary.value.notStarted) },
+                                { label: isArabic.value ? "الوحدات" : "Modules", value: String(summary.value.completedModules) },
+                                { label: isArabic.value ? "الدروس" : "Lessons", value: String(summary.value.completedLessons) },
+                                { label: isArabic.value ? "المختبرات" : "Labs", value: String(summary.value.completedLabs) },
+                                { label: isArabic.value ? "الشارات" : "Badges", value: String(summary.value.earnedBadges) },
+                                { label: isArabic.value ? "نشط 7 أيام" : "Active 7d", value: String(summary.value.activeLast7d) },
+                            ]}
+                        />
                     </SurfaceCard>
                 )}
 
@@ -563,7 +573,7 @@ const AcademyPage = dc(() => {
                         <VExpansionPanelTitle>
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                 <ThemedText type="defaultSemiBold">{isArabic.value ? "شهادات الفريق" : "Team certifications"}</ThemedText>
-                                <StatusChip label={`${teamUsers.value.length} ${isArabic.value ? "مستخدم" : "users"}`} tone="info" size="x-small" />
+                                <StatusBadge status="USERS" label={`${teamUsers.value.length} ${isArabic.value ? "مستخدم" : "users"}`} toneOverride="info" showDot={false} />
                             </ThemedView>
                         </VExpansionPanelTitle>
                         <VExpansionPanelText>
@@ -579,14 +589,18 @@ const AcademyPage = dc(() => {
                                 {teamLoading.value && <StateView loading={true} minHeight="120px" />}
                                 {teamError.value && <VAlert type="error" variant="tonal" density="compact">{teamError.value}</VAlert>}
                                 {!teamLoading.value && teamLoaded.value && teamRows.value.length === 0 && (
-                                    <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{isArabic.value ? "لا توجد نتائج." : "No results."}</ThemedText>
+                                    <EmptyState
+                                        title={isArabic.value ? "لا توجد نتائج." : "No results."}
+                                        description={isArabic.value ? "جرّب بريداً أو دوراً آخر." : "Try another email or role."}
+                                        icon="mdi-account-search"
+                                    />
                                 )}
                                 {teamRows.value.map((row) => (
                                     <SurfaceCard key={row.id} variant="tonal">
                                         <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                                <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{row.email}</ThemedText>
-                                                <StatusChip label={row.role.replaceAll("_", " ")} tone="neutral" size="x-small" />
+                                                <MonoRef value={row.email} />
+                                                <StatusBadge status={row.role} label={row.role.replaceAll("_", " ")} showDot={false} />
                                                 {row.isMaker && <MetaPill size="x-small" variant="tonal" color="primary">{isArabic.value ? "صانع" : "Maker"}</MetaPill>}
                                                 {row.isChecker && <MetaPill size="x-small" variant="tonal" color="secondary">{isArabic.value ? "مدقق" : "Checker"}</MetaPill>}
                                                 <div style={{ flex: 1 }} />
@@ -594,7 +608,7 @@ const AcademyPage = dc(() => {
                                             </ThemedView>
                                             <VProgressLinear modelValue={row.percent} color={row.percent === 100 ? "success" : "primary"} height="6px" rounded />
                                             <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                                <StatusChip label={`${row.completed}/${ACADEMY_MODULES.length} ${isArabic.value ? "وحدات" : "modules"}`} tone="neutral" size="x-small" />
+                                                <StatusBadge status="MODULES" label={`${row.completed}/${ACADEMY_MODULES.length} ${isArabic.value ? "وحدات" : "modules"}`} showDot={false} />
                                                 {row.badges.map((badge) => (
                                                     <MetaPill key={badge} size="x-small" variant="tonal" color="success">{badge}</MetaPill>
                                                 ))}
@@ -619,14 +633,14 @@ const AcademyPage = dc(() => {
                             <ThemedText type="defaultSemiBold">{`${overallPercent.value}%`}</ThemedText>
                         </ThemedView>
                         <VProgressLinear modelValue={overallPercent.value} color="success" height="10px" rounded />
-                        <VSelect
-                            modelValue={selectedTrack.value}
-                            onUpdate:modelValue={(value: AcademyTrack | null) => (selectedTrack.value = value ?? "SUPPORT")}
-                            items={ACADEMY_TRACKS.map((track) => ({ title: isArabic.value ? TRACK_LABELS_AR[track.id] : track.titleEn, value: track.id }))}
-                            label={isArabic.value ? "مسار الدور" : "Role track"}
-                            hideDetails
-                            style={{ maxWidth: "360px" }}
-                        />
+                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                            <ThemedText style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>{isArabic.value ? "مسار الدور" : "Role track"}</ThemedText>
+                            <SegmentedTabs
+                                modelValue={selectedTrack.value}
+                                tabs={trackTabs.value}
+                                onUpdate:modelValue={(value: string) => (selectedTrack.value = value as AcademyTrack)}
+                            />
+                        </ThemedView>
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             {ACADEMY_TRACKS.map((track) => {
                                 const earned = badgeEarned(track.badge);
@@ -679,26 +693,28 @@ const AcademyPage = dc(() => {
                                             onClick={() => selectModule(module.id)}
                                             style={{
                                                 cursor: "pointer",
-                                                border: active ? "2px solid var(--v-theme-primary)" : "1px solid rgba(100,116,139,0.18)",
+                                                borderColor: active ? "var(--pg-border-focus)" : "var(--pg-border-subtle)",
+                                                boxShadow: active ? "inset 0 0 0 1px var(--pg-border-focus)" : undefined,
                                             }}
                                         >
                                             <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                                                 <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                                    <StatusChip label={module.letter || module.id} tone={active ? "primary" : "neutral"} size="x-small" />
+                                                    <StatusBadge status={module.id} label={module.letter || module.id} toneOverride={active ? "info" : "neutral"} showDot={false} />
                                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "14px", flex: "1 1 180px" }}>
                                                         {moduleTitle(module)}
                                                     </ThemedText>
-                                                    {mastered ? <StatusChip label={t("Mastered")} tone="success" size="x-small" /> : null}
+                                                    {mastered ? <StatusBadge status="MASTERED" label={t("Mastered")} toneOverride="success" showDot={false} /> : null}
                                                 </ThemedView>
                                                 <ThemedText style={{ fontSize: "12px", opacity: 0.7 }}>{moduleSummary(module)}</ThemedText>
                                                 <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                                    <StatusChip
+                                                    <StatusBadge
+                                                        status="LESSONS"
                                                         label={`${module.lessons.filter((lesson) => progress.value.completedLessonIds.includes(lesson.id)).length}/${module.lessons.length} lessons`}
-                                                        tone={moduleLessonsComplete(progress.value, module) ? "success" : "neutral"}
-                                                        size="x-small"
+                                                        toneOverride={moduleLessonsComplete(progress.value, module) ? "success" : "neutral"}
+                                                        showDot={false}
                                                     />
-                                                    <StatusChip label={moduleLabPassed(progress.value, module) ? "Lab passed" : "Lab locked"} tone={moduleLabPassed(progress.value, module) ? "success" : "neutral"} size="x-small" />
-                                                    <StatusChip label={moduleQuizPerfect(progress.value, module) ? "Quiz 100%" : "Quiz locked"} tone={moduleQuizPerfect(progress.value, module) ? "success" : "neutral"} size="x-small" />
+                                                    <StatusBadge status="LAB" label={moduleLabPassed(progress.value, module) ? "Lab passed" : "Lab locked"} toneOverride={moduleLabPassed(progress.value, module) ? "success" : "neutral"} showDot={false} />
+                                                    <StatusBadge status="QUIZ" label={moduleQuizPerfect(progress.value, module) ? "Quiz 100%" : "Quiz locked"} toneOverride={moduleQuizPerfect(progress.value, module) ? "success" : "neutral"} showDot={false} />
                                                 </ThemedView>
                                             </SurfaceCardText>
                                         </SurfaceCard>
@@ -710,9 +726,9 @@ const AcademyPage = dc(() => {
                                 <SurfaceCard>
                                     <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                         <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                            <StatusChip label={selectedModule.value.id} tone="primary" />
+                                            <StatusBadge status={selectedModule.value.id} label={selectedModule.value.id} toneOverride="info" showDot={false} />
                                             <ThemedText type="defaultSemiBold" style={{ fontSize: "20px" }}>{moduleTitle(selectedModule.value)}</ThemedText>
-                                            {selectedMastered.value ? <StatusChip label={t("Mastered")} tone="success" /> : null}
+                                            {selectedMastered.value ? <StatusBadge status="MASTERED" label={t("Mastered")} toneOverride="success" showDot={false} /> : null}
                                         </ThemedView>
                                         <ThemedText style={{ fontSize: "13px", opacity: 0.8 }}>{moduleSummary(selectedModule.value)}</ThemedText>
                                         <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
@@ -723,6 +739,13 @@ const AcademyPage = dc(() => {
                                     </SurfaceCardText>
                                 </SurfaceCard>
 
+                                <SegmentedTabs
+                                    modelValue={activeStep.value}
+                                    tabs={stepTabs.value}
+                                    onUpdate:modelValue={(value: string) => (activeStep.value = value as AcademyStep)}
+                                />
+
+                                {activeStep.value === "lessons" ? (
                                 <SurfaceCard>
                                     <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                         <ThemedText type="defaultSemiBold">{isArabic.value ? "الخطوة 1 — الدروس" : "Step 1 — Lessons"}</ThemedText>
@@ -733,7 +756,7 @@ const AcademyPage = dc(() => {
                                                     <VExpansionPanel key={lesson.id} value={lesson.id}>
                                                         <VExpansionPanelTitle>
                                                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                                                <StatusChip label={lesson.id} tone={read ? "success" : "neutral"} size="x-small" />
+                                                                <StatusBadge status={lesson.id} label={lesson.id} toneOverride={read ? "success" : "neutral"} showDot={false} />
                                                                 <span>{isArabic.value && lesson.titleAr ? lesson.titleAr : lesson.titleEn}</span>
                                                             </ThemedView>
                                                         </VExpansionPanelTitle>
@@ -751,13 +774,15 @@ const AcademyPage = dc(() => {
                                         </VExpansionPanels>
                                     </SurfaceCardText>
                                 </SurfaceCard>
+                                ) : null}
 
+                                {activeStep.value === "lab" ? (
                                 <SurfaceCard>
                                     <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                         <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                             <ThemedText type="defaultSemiBold">{isArabic.value ? "الخطوة 2 — المختبر التفاعلي" : "Step 2 — Interactive lab"}</ThemedText>
-                                            <StatusChip label={selectedLab.value.id} tone="info" size="x-small" />
-                                            {selectedLabPassed.value ? <StatusChip label={t("Passed")} tone="success" size="x-small" /> : null}
+                                            <StatusBadge status={selectedLab.value.id} label={selectedLab.value.id} toneOverride="info" showDot={false} />
+                                            {selectedLabPassed.value ? <StatusBadge status="PASSED" label={t("Passed")} toneOverride="success" showDot={false} /> : null}
                                         </ThemedView>
                                         <GuideMarkdown source={selectedLab.value.descriptionEn} compact />
                                         {!selectedLessonsComplete.value ? (
@@ -784,10 +809,10 @@ const AcademyPage = dc(() => {
                                                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "14px" }}>
                                                                     {isArabic.value && currentScenario.value.titleAr ? currentScenario.value.titleAr : currentScenario.value.titleEn}
                                                                 </ThemedText>
-                                                                <StatusChip
+                                                                <StatusBadge
+                                                                    status="SCENARIO"
                                                                     label={`${labScenarioIndex.value + 1} / ${selectedLab.value.scenarios.length}`}
-                                                                    tone="neutral"
-                                                                    size="x-small"
+                                                                    showDot={false}
                                                                 />
                                                             </ThemedView>
                                                             <ThemedText style={{ fontSize: "13px", lineHeight: 1.65 }}>
@@ -821,20 +846,22 @@ const AcademyPage = dc(() => {
                                                 <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                                                     <VBtn size="small" variant="text" onClick={resetLab}>{isArabic.value ? "إعادة المختبر" : "Restart lab"}</VBtn>
                                                     {labMistakes.value.length > 0 ? (
-                                                        <StatusChip label={`${labMistakes.value.length} mistakes`} tone="error" size="x-small" />
+                                                        <StatusBadge status="MISTAKES" label={`${labMistakes.value.length} mistakes`} toneOverride="danger" showDot={false} />
                                                     ) : null}
                                                 </ThemedView>
                                             </>
                                         )}
                                     </SurfaceCardText>
                                 </SurfaceCard>
+                                ) : null}
 
+                                {activeStep.value === "quiz" ? (
                                 <SurfaceCard>
                                     <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                                         <ThemedView style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
                                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                                 <ThemedText type="defaultSemiBold">{isArabic.value ? "الخطوة 3 — الاختبار" : "Step 3 — Verification quiz"}</ThemedText>
-                                                <StatusChip label={moduleQuizId(selectedModule.value)} tone="primary" size="x-small" />
+                                                <StatusBadge status={moduleQuizId(selectedModule.value)} label={moduleQuizId(selectedModule.value)} toneOverride="info" showDot={false} />
                                             </ThemedView>
                                             <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
                                                 {isArabic.value ? "100% مطلوب للنجاح (8 من 8)" : "100% required to pass (8 of 8)"}
@@ -904,6 +931,7 @@ const AcademyPage = dc(() => {
                                         </ThemedView>
                                     </SurfaceCardText>
                                 </SurfaceCard>
+                                ) : null}
                             </ThemedView>
                         </ThemedView>
                     </>

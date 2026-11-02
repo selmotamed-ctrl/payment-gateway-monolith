@@ -7,14 +7,19 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
-import { percentOf, toDecimal } from "@/utils/money";
+import { toDecimal } from "@/utils/money";
 
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
+import { MonoRef } from "@/components/ui/MonoRef";
+import { DescriptionList, type DescriptionItem } from "@/components/ui/DescriptionList";
+import { EmptyState } from "@/components/ui/EmptyState";
 type BusinessProfile = {
     legalName: string;
     tradeName: string;
@@ -276,6 +281,60 @@ const OnboardingPage = dc(() => {
         }
     };
 
+    const reviewItems = computed<DescriptionItem[]>(() => [
+        { label: t("Legal Name"), value: profile.value.legalName || "-" },
+        {
+            label: t("Registration Number"),
+            value: profile.value.registrationNumber ? (
+                <MonoRef value={profile.value.registrationNumber} truncate={18} />
+            ) : (
+                "-"
+            ),
+        },
+        {
+            label: t("Tax ID"),
+            value: profile.value.taxId ? <MonoRef value={profile.value.taxId} truncate={18} /> : "-",
+        },
+        { label: t("Business Category"), value: profile.value.businessCategory || "-" },
+        {
+            label: t("Expected Monthly Volume"),
+            value: profile.value.expectedMonthlyVolume ? (
+                <MoneyDisplay
+                    amount={profile.value.expectedMonthlyVolume}
+                    currency={profile.value.currency || "LYD"}
+                    size="sm"
+                />
+            ) : (
+                "-"
+            ),
+        },
+        { label: t("Beneficial Owners"), value: owners.value.length },
+        { label: t("Documents"), value: documents.value.length },
+        { label: t("Bank Details"), value: payout.value.bankName || "-" },
+    ]);
+
+    const addOwner = () => {
+        owners.value = [
+            ...owners.value,
+            {
+                fullName: "",
+                ownershipPercent: "",
+                nationalId: "",
+                dateOfBirth: "",
+                nationality: "",
+                isPep: false,
+                isController: false,
+            },
+        ];
+    };
+
+    const addDocument = () => {
+        documents.value = [
+            ...documents.value,
+            { docType: DOCUMENT_TYPES[0]?.value ?? "COMMERCIAL_REGISTRY", file: null, expiresOn: "" },
+        ];
+    };
+
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
@@ -283,7 +342,7 @@ const OnboardingPage = dc(() => {
                     title={t("Merchant Onboarding")}
                     subtitle={t("Complete KYB, payout, and storefront details for activation.")}
                     end={() =>
-                        joinStatus.value ? <StatusChip label={joinStatus.value} tone="info" /> : (<></>)
+                        joinStatus.value ? <StatusBadge status={joinStatus.value} toneOverride="info" /> : <></>
                     }
                 />
 
@@ -294,53 +353,51 @@ const OnboardingPage = dc(() => {
                 )}
 
                 {revalidations.value.length > 0 && (
-                    <SurfaceCard variant="tonal" color="warning">
-                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>
-                                {t("KYB re-verification required")}
-                            </ThemedText>
-                            {revalidations.value.map((request) => (
-                                <ThemedView key={request.id} style={{ gap: "8px" }}>
-                                    <ThemedText style={{ fontSize: "13px" }}>
-                                        {request.docType}: {request.message}
+                    <SurfaceCard variant="tonal" color="warning" bodyGap="12px">
+                        <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>
+                            {t("KYB re-verification required")}
+                        </ThemedText>
+                        {revalidations.value.map((request) => (
+                            <ThemedView key={request.id} style={{ gap: "8px" }}>
+                                <ThemedText style={{ fontSize: "13px" }}>
+                                    {request.docType}: {request.message}
+                                </ThemedText>
+                                {request.dueAt && (
+                                    <ThemedText style={{ fontSize: "11px", color: "var(--pg-ink-muted)" }}>
+                                        {t("Due")}: {new Date(request.dueAt).toLocaleDateString()}
                                     </ThemedText>
-                                    {request.dueAt && (
-                                        <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>
-                                            {t("Due")}: {new Date(request.dueAt).toLocaleDateString()}
-                                        </ThemedText>
-                                    )}
-                                    <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+                                )}
+                                <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap", alignItems: "flex-end" }}>
+                                    <FormField label={t("Replacement file")} style={{ minWidth: "260px" }}>
                                         <VFileInput
-                                            label={t("Replacement file")}
                                             modelValue={revalidationFiles.value[request.id] ?? null}
                                             onUpdate:modelValue={(value: File | File[] | null) => {
                                                 revalidationFiles.value[request.id] = Array.isArray(value) ? (value[0] ?? null) : value;
                                             }}
                                             density="compact"
                                             hideDetails
-                                            style={{ minWidth: "260px" }}
                                         />
+                                    </FormField>
+                                    <FormField label={t("Expiry date")} style={{ minWidth: "180px" }}>
                                         <VTextField
-                                            label={t("Expiry date")}
                                             modelValue={revalidationExpiry.value[request.id] ?? ""}
                                             onUpdate:modelValue={(value: string) => (revalidationExpiry.value[request.id] = value)}
                                             density="compact"
                                             hideDetails
-                                            style={{ minWidth: "180px" }}
                                         />
-                                        <VBtn
-                                            size="small"
-                                            variant="flat"
-                                            color="warning"
-                                            loading={saving.value}
-                                            onClick={() => void uploadRevalidation(request)}
-                                        >
-                                            {t("Upload replacement")}
-                                        </VBtn>
-                                    </ThemedView>
+                                    </FormField>
+                                    <VBtn
+                                        size="small"
+                                        variant="flat"
+                                        color="warning"
+                                        loading={saving.value}
+                                        onClick={() => void uploadRevalidation(request)}
+                                    >
+                                        {t("Upload replacement")}
+                                    </VBtn>
                                 </ThemedView>
-                            ))}
-                        </SurfaceCardText>
+                            </ThemedView>
+                        ))}
                     </SurfaceCard>
                 )}
 
@@ -351,256 +408,255 @@ const OnboardingPage = dc(() => {
                 ) : (
                     <>
                         <SurfaceCard>
-                            <SurfaceCardText>
-                                <VTimeline density="compact" side="end" align="start">
-                                    {STEPS.map((item, index) => (
-                                        <VTimelineItem key={item.key} size="small">
-                                            <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                                                <ThemedText
-                                                    style={{
-                                                        fontWeight: index + 1 === step.value ? "800" : "500",
-                                                        fontSize: "14px",
-                                                    }}
-                                                >
-                                                    {t(item.title)}
-                                                </ThemedText>
-                                                {stepValid(index + 1) && <StatusChip label={t("Approved")} tone="success" />}
-                                            </div>
-                                        </VTimelineItem>
-                                    ))}
-                                </VTimeline>
-                            </SurfaceCardText>
+                            <VTimeline density="compact" side="end" align="start">
+                                {STEPS.map((item, index) => (
+                                    <VTimelineItem key={item.key} size="small">
+                                        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                                            <ThemedText
+                                                style={{
+                                                    fontWeight: index + 1 === step.value ? "800" : "500",
+                                                    fontSize: "14px",
+                                                }}
+                                            >
+                                                {t(item.title)}
+                                            </ThemedText>
+                                            {stepValid(index + 1) && (
+                                                <StatusBadge status="APPROVED" label={t("Approved")} />
+                                            )}
+                                        </div>
+                                    </VTimelineItem>
+                                ))}
+                            </VTimeline>
                         </SurfaceCard>
 
                         {step.value === 1 && (
-                            <SurfaceCard>
-                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                                        {t("Business Profile")}
-                                    </ThemedText>
-                                    <ThemedView style={{ flexDirection: "row", gap: "14px", flexWrap: "wrap" }}>
+                            <SurfaceCard title={t("Business Profile")} bodyGap="12px">
+                                <ThemedView style={{ flexDirection: "row", gap: "14px", flexWrap: "wrap" }}>
+                                    <FormField label={t("Legal Name")} required style={{ minWidth: "240px", flex: "1 1 240px" }}>
                                         <VTextField
-                                            label={t("Legal Name")}
                                             modelValue={profile.value.legalName}
                                             onUpdate:modelValue={(v: string) => (profile.value.legalName = v)}
-                                            style={{ minWidth: "240px" }}
+                                            hideDetails
                                         />
+                                    </FormField>
+                                    <FormField label={t("Trade Name")} required style={{ minWidth: "240px", flex: "1 1 240px" }}>
                                         <VTextField
-                                            label={t("Trade Name")}
                                             modelValue={profile.value.tradeName}
                                             onUpdate:modelValue={(v: string) => (profile.value.tradeName = v)}
-                                            style={{ minWidth: "240px" }}
+                                            hideDetails
                                         />
+                                    </FormField>
+                                    <FormField label={t("Registration Number")} required style={{ minWidth: "220px", flex: "1 1 220px" }}>
                                         <VTextField
-                                            label={t("Registration Number")}
                                             modelValue={profile.value.registrationNumber}
                                             onUpdate:modelValue={(v: string) => (profile.value.registrationNumber = v)}
-                                            style={{ minWidth: "220px" }}
+                                            hideDetails
                                         />
+                                    </FormField>
+                                    <FormField label={t("Tax ID")} required style={{ minWidth: "200px", flex: "1 1 200px" }}>
                                         <VTextField
-                                            label={t("Tax ID")}
                                             modelValue={profile.value.taxId}
                                             onUpdate:modelValue={(v: string) => (profile.value.taxId = v)}
-                                            style={{ minWidth: "200px" }}
+                                            hideDetails
                                         />
+                                    </FormField>
+                                    <FormField label={t("Business Category")} required style={{ minWidth: "220px", flex: "1 1 220px" }}>
                                         <VSelect
                                             items={CATEGORIES}
                                             modelValue={profile.value.businessCategory}
                                             onUpdate:modelValue={(v: string) => (profile.value.businessCategory = v)}
-                                            label={t("Business Category")}
-                                            style={{ minWidth: "220px" }}
+                                            hideDetails
                                         />
+                                    </FormField>
+                                    <FormField label={t("Phone")} style={{ minWidth: "180px", flex: "1 1 180px" }}>
                                         <VTextField
-                                            label={t("Phone")}
                                             modelValue={profile.value.contactPhone}
                                             onUpdate:modelValue={(v: string) => (profile.value.contactPhone = v)}
-                                            style={{ minWidth: "180px" }}
+                                            hideDetails
                                         />
+                                    </FormField>
+                                    <FormField label={t("Email")} style={{ minWidth: "220px", flex: "1 1 220px" }}>
                                         <VTextField
-                                            label={t("Email")}
                                             modelValue={profile.value.contactEmail}
                                             onUpdate:modelValue={(v: string) => (profile.value.contactEmail = v)}
-                                            style={{ minWidth: "220px" }}
+                                            hideDetails
                                         />
+                                    </FormField>
+                                    <FormField label={t("Expected Monthly Volume")} style={{ minWidth: "220px", flex: "1 1 220px" }}>
                                         <VTextField
-                                            label={t("Expected Monthly Volume")}
                                             modelValue={profile.value.expectedMonthlyVolume}
                                             onUpdate:modelValue={(v: string) => (profile.value.expectedMonthlyVolume = v)}
-                                            style={{ minWidth: "220px" }}
+                                            hideDetails
                                         />
+                                    </FormField>
+                                    <FormField label={t("Currency")} style={{ minWidth: "130px", flex: "0 1 130px" }}>
                                         <VTextField
-                                            label={t("Currency")}
                                             modelValue={profile.value.currency}
                                             onUpdate:modelValue={(v: string) => (profile.value.currency = v.toUpperCase())}
-                                            style={{ minWidth: "130px" }}
+                                            hideDetails
                                         />
+                                    </FormField>
+                                    <FormField label={t("Website")} style={{ minWidth: "220px", flex: "1 1 220px" }}>
                                         <VTextField
-                                            label={t("Website")}
                                             modelValue={profile.value.website}
                                             onUpdate:modelValue={(v: string) => (profile.value.website = v)}
-                                            style={{ minWidth: "220px" }}
+                                            hideDetails
                                         />
-                                    </ThemedView>
+                                    </FormField>
+                                </ThemedView>
+                                <FormField label={t("Registered Address")}>
                                     <VTextField
-                                        label={t("Registered Address")}
                                         modelValue={profile.value.registeredAddress}
                                         onUpdate:modelValue={(v: string) => (profile.value.registeredAddress = v)}
+                                        hideDetails
                                     />
+                                </FormField>
+                                <FormField label={t("Sales Channel Description")}>
                                     <VTextarea
-                                        label={t("Sales Channel Description")}
                                         modelValue={profile.value.businessUseDescription}
                                         onUpdate:modelValue={(v: string) => (profile.value.businessUseDescription = v)}
                                         rows={3}
+                                        hideDetails
                                     />
-                                    <VBtn variant="tonal" loading={saving.value} onClick={() => void saveProfile()}>
-                                        {t("Save")}
-                                    </VBtn>
-                                </SurfaceCardText>
+                                </FormField>
+                                <VBtn variant="tonal" loading={saving.value} onClick={() => void saveProfile()}>
+                                    {t("Save")}
+                                </VBtn>
                             </SurfaceCard>
                         )}
 
                         {step.value === 2 && (
-                            <SurfaceCard>
-                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                    <ThemedView
-                                        style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
-                                    >
-                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                                            {t("Beneficial Owners")}
-                                        </ThemedText>
-                                        <VBtn
-                                            variant="tonal"
-                                            size="small"
-                                            onClick={() =>
-                                                owners.value = [
-                                                    ...owners.value,
-                                                    {
-                                                        fullName: "",
-                                                        ownershipPercent: "",
-                                                        nationalId: "",
-                                                        dateOfBirth: "",
-                                                        nationality: "",
-                                                        isPep: false,
-                                                        isController: false,
-                                                    },
-                                                ]
-                                            }
-                                        >
+                            <SurfaceCard
+                                title={t("Beneficial Owners")}
+                                bodyGap="12px"
+                                v-slots={{
+                                    headerActions: () => (
+                                        <VBtn variant="tonal" size="small" onClick={addOwner}>
                                             {t("Add")}
                                         </VBtn>
-                                    </ThemedView>
-
-                                    {owners.value.map((owner, index) => (
+                                    ),
+                                }}
+                            >
+                                {owners.value.length === 0 ? (
+                                    <EmptyState
+                                        title={t("No beneficial owners yet")}
+                                        description={t("Add each owner with 25% or more ownership.")}
+                                    />
+                                ) : (
+                                    owners.value.map((owner, index) => (
                                         <ThemedView
                                             key={index}
-                                            style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap", alignItems: "center" }}
+                                            style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap", alignItems: "flex-end" }}
                                         >
-                                            <VTextField
-                                                label={t("Full Name")}
-                                                modelValue={owner.fullName}
-                                                onUpdate:modelValue={(v: string) => (owners.value[index]!.fullName = v)}
-                                                style={{ minWidth: "200px" }}
-                                            />
-                                            <VTextField
-                                                label={t("Ownership Percent")}
-                                                modelValue={owner.ownershipPercent}
-                                                onUpdate:modelValue={(v: string) =>
-                                                    (owners.value[index]!.ownershipPercent = v)
-                                                }
-                                                style={{ minWidth: "160px" }}
-                                            />
-                                            <VTextField
-                                                label={t("National ID")}
-                                                modelValue={owner.nationalId}
-                                                onUpdate:modelValue={(v: string) => (owners.value[index]!.nationalId = v)}
-                                                style={{ minWidth: "180px" }}
-                                            />
-                                            <VTextField
-                                                label={t("Date Of Birth")}
-                                                modelValue={owner.dateOfBirth}
-                                                onUpdate:modelValue={(v: string) =>
-                                                    (owners.value[index]!.dateOfBirth = v)
-                                                }
-                                                style={{ minWidth: "170px" }}
-                                            />
-                                            <VTextField
-                                                label={t("Nationality")}
-                                                modelValue={owner.nationality}
-                                                onUpdate:modelValue={(v: string) => (owners.value[index]!.nationality = v)}
-                                                style={{ minWidth: "150px" }}
-                                            />
+                                            <FormField label={t("Full Name")} required style={{ minWidth: "200px", flex: "1 1 200px" }}>
+                                                <VTextField
+                                                    modelValue={owner.fullName}
+                                                    onUpdate:modelValue={(v: string) => (owners.value[index]!.fullName = v)}
+                                                    hideDetails
+                                                />
+                                            </FormField>
+                                            <FormField label={t("Ownership Percent")} required style={{ minWidth: "160px", flex: "0 1 160px" }}>
+                                                <VTextField
+                                                    modelValue={owner.ownershipPercent}
+                                                    onUpdate:modelValue={(v: string) =>
+                                                        (owners.value[index]!.ownershipPercent = v)
+                                                    }
+                                                    hideDetails
+                                                />
+                                            </FormField>
+                                            <FormField label={t("National ID")} style={{ minWidth: "180px", flex: "1 1 180px" }}>
+                                                <VTextField
+                                                    modelValue={owner.nationalId}
+                                                    onUpdate:modelValue={(v: string) => (owners.value[index]!.nationalId = v)}
+                                                    hideDetails
+                                                />
+                                            </FormField>
+                                            <FormField label={t("Date Of Birth")} style={{ minWidth: "170px", flex: "0 1 170px" }}>
+                                                <VTextField
+                                                    modelValue={owner.dateOfBirth}
+                                                    onUpdate:modelValue={(v: string) =>
+                                                        (owners.value[index]!.dateOfBirth = v)
+                                                    }
+                                                    hideDetails
+                                                />
+                                            </FormField>
+                                            <FormField label={t("Nationality")} style={{ minWidth: "150px", flex: "0 1 150px" }}>
+                                                <VTextField
+                                                    modelValue={owner.nationality}
+                                                    onUpdate:modelValue={(v: string) => (owners.value[index]!.nationality = v)}
+                                                    hideDetails
+                                                />
+                                            </FormField>
                                             <VBtn
                                                 size="x-small"
                                                 variant="text"
                                                 color="error"
                                                 onClick={() => (owners.value = owners.value.filter((_, i) => i !== index))}
                                             >
-                                                ×
+                                                {t("Remove")}
                                             </VBtn>
                                         </ThemedView>
-                                    ))}
+                                    ))
+                                )}
 
-                                    <ThemedText style={{ fontSize: "13px" }}>
-                                        {t("Ownership Percent")}: {totalOwnership.value.toString()}%
-                                    </ThemedText>
-                                    <VBtn variant="tonal" loading={saving.value} onClick={() => void saveOwners()}>
-                                        {t("Save")}
-                                    </VBtn>
-                                </SurfaceCardText>
+                                <ThemedText style={{ fontSize: "13px", color: "var(--pg-ink-muted)" }}>
+                                    {t("Ownership Percent")}: {totalOwnership.value.toString()}%
+                                </ThemedText>
+                                <VBtn variant="tonal" loading={saving.value} onClick={() => void saveOwners()}>
+                                    {t("Save")}
+                                </VBtn>
                             </SurfaceCard>
                         )}
 
                         {step.value === 3 && (
-                            <SurfaceCard>
-                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                    <ThemedView
-                                        style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
-                                    >
-                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                                            {t("Documents")}
-                                        </ThemedText>
-                                        <VBtn
-                                            variant="tonal"
-                                            size="small"
-                                            onClick={() =>
-                                                documents.value = [
-                                                    ...documents.value,
-                                                    { docType: DOCUMENT_TYPES[0]?.value ?? "COMMERCIAL_REGISTRY", file: null, expiresOn: "" },
-                                                ]
-                                            }
-                                        >
+                            <SurfaceCard
+                                title={t("Documents")}
+                                bodyGap="12px"
+                                v-slots={{
+                                    headerActions: () => (
+                                        <VBtn variant="tonal" size="small" onClick={addDocument}>
                                             {t("Add")}
                                         </VBtn>
-                                    </ThemedView>
-
-                                    {documents.value.map((document, index) => (
+                                    ),
+                                }}
+                            >
+                                {documents.value.length === 0 ? (
+                                    <EmptyState
+                                        title={t("No documents uploaded yet")}
+                                        description={t("Add the KYB documents required for activation.")}
+                                    />
+                                ) : (
+                                    documents.value.map((document, index) => (
                                         <ThemedView
                                             key={index}
-                                            style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap", alignItems: "center" }}
+                                            style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap", alignItems: "flex-end" }}
                                         >
-                                            <VSelect
-                                                items={DOCUMENT_TYPES}
-                                                itemTitle="title"
-                                                itemValue="value"
-                                                modelValue={document.docType}
-                                                onUpdate:modelValue={(v: string) => (documents.value[index]!.docType = v)}
-                                                label={t("Document Type")}
-                                                style={{ minWidth: "220px" }}
-                                            />
-                                            <VFileInput
-                                                label={t("Uploaded File")}
-                                                modelValue={document.file}
-                                                onUpdate:modelValue={(v: File | File[] | null) => {
-                                                    documents.value[index]!.file = Array.isArray(v) ? (v[0] ?? null) : v;
-                                                }}
-                                                style={{ minWidth: "260px" }}
-                                            />
-                                            <VTextField
-                                                label={t("Expiry Date")}
-                                                modelValue={document.expiresOn}
-                                                onUpdate:modelValue={(v: string) => (documents.value[index]!.expiresOn = v)}
-                                                style={{ minWidth: "170px" }}
-                                            />
+                                            <FormField label={t("Document Type")} style={{ minWidth: "220px", flex: "1 1 220px" }}>
+                                                <VSelect
+                                                    items={DOCUMENT_TYPES}
+                                                    itemTitle="title"
+                                                    itemValue="value"
+                                                    modelValue={document.docType}
+                                                    onUpdate:modelValue={(v: string) => (documents.value[index]!.docType = v)}
+                                                    hideDetails
+                                                />
+                                            </FormField>
+                                            <FormField label={t("Uploaded File")} style={{ minWidth: "260px", flex: "1 1 260px" }}>
+                                                <VFileInput
+                                                    modelValue={document.file}
+                                                    onUpdate:modelValue={(v: File | File[] | null) => {
+                                                        documents.value[index]!.file = Array.isArray(v) ? (v[0] ?? null) : v;
+                                                    }}
+                                                    hideDetails
+                                                />
+                                            </FormField>
+                                            <FormField label={t("Expiry Date")} style={{ minWidth: "170px", flex: "0 1 170px" }}>
+                                                <VTextField
+                                                    modelValue={document.expiresOn}
+                                                    onUpdate:modelValue={(v: string) => (documents.value[index]!.expiresOn = v)}
+                                                    hideDetails
+                                                />
+                                            </FormField>
                                             <VBtn
                                                 size="small"
                                                 variant="tonal"
@@ -610,84 +666,59 @@ const OnboardingPage = dc(() => {
                                                 {t("Upload")}
                                             </VBtn>
                                         </ThemedView>
-                                    ))}
-                                </SurfaceCardText>
+                                    ))
+                                )}
                             </SurfaceCard>
                         )}
 
                         {step.value === 4 && (
-                            <SurfaceCard>
-                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                                        {t("Bank Details")}
-                                    </ThemedText>
-                                    <ThemedView style={{ flexDirection: "row", gap: "14px", flexWrap: "wrap" }}>
+                            <SurfaceCard title={t("Bank Details")} bodyGap="12px">
+                                <ThemedView style={{ flexDirection: "row", gap: "14px", flexWrap: "wrap" }}>
+                                    <FormField label={t("Bank")} style={{ minWidth: "220px", flex: "1 1 220px" }}>
                                         <VTextField
-                                            label={t("Bank")}
                                             modelValue={payout.value.bankName}
                                             onUpdate:modelValue={(v: string) => (payout.value.bankName = v)}
-                                            style={{ minWidth: "220px" }}
+                                            hideDetails
                                         />
+                                    </FormField>
+                                    <FormField label={t("Account Holder")} style={{ minWidth: "220px", flex: "1 1 220px" }}>
                                         <VTextField
-                                            label={t("Legal Name")}
                                             modelValue={payout.value.accountHolder}
                                             onUpdate:modelValue={(v: string) => (payout.value.accountHolder = v)}
-                                            style={{ minWidth: "220px" }}
+                                            hideDetails
                                         />
+                                    </FormField>
+                                    <FormField label={t("IBAN")} style={{ minWidth: "220px", flex: "1 1 220px" }}>
                                         <VTextField
-                                            label="IBAN"
                                             modelValue={payout.value.iban}
                                             onUpdate:modelValue={(v: string) => (payout.value.iban = v.toUpperCase())}
-                                            style={{ minWidth: "220px" }}
+                                            hideDetails
                                         />
+                                    </FormField>
+                                    <FormField label={t("Account Number")} style={{ minWidth: "200px", flex: "1 1 200px" }}>
                                         <VTextField
-                                            label={t("Token Name")}
                                             modelValue={payout.value.accountNumber}
                                             onUpdate:modelValue={(v: string) => (payout.value.accountNumber = v)}
-                                            style={{ minWidth: "200px" }}
+                                            hideDetails
                                         />
+                                    </FormField>
+                                    <FormField label={t("SWIFT")} style={{ minWidth: "170px", flex: "0 1 170px" }}>
                                         <VTextField
-                                            label="SWIFT"
                                             modelValue={payout.value.swift}
                                             onUpdate:modelValue={(v: string) => (payout.value.swift = v.toUpperCase())}
-                                            style={{ minWidth: "170px" }}
+                                            hideDetails
                                         />
-                                    </ThemedView>
-                                </SurfaceCardText>
+                                    </FormField>
+                                </ThemedView>
                             </SurfaceCard>
                         )}
 
                         {step.value === 5 && (
-                            <SurfaceCard>
-                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                                        {t("Submit Application")}
-                                    </ThemedText>
-                                    <ThemedView style={{ flexDirection: "column", gap: "6px", fontSize: "13px" }}>
-                                        <span>
-                                            {t("Legal Name")}: {profile.value.legalName || "-"}
-                                        </span>
-                                        <span>
-                                            {t("Business Category")}: {profile.value.businessCategory || "-"}
-                                        </span>
-                                        <span>
-                                            {t("Expected Monthly Volume")}: {profile.value.expectedMonthlyVolume || "-"} {" "}
-                                            {profile.value.currency}
-                                        </span>
-                                        <span>
-                                            {t("Beneficial Owners")}: {owners.value.length}
-                                        </span>
-                                        <span>
-                                            {t("Documents")}: {documents.value.length}
-                                        </span>
-                                        <span>
-                                            {t("Bank Details")}: {payout.value.bankName || "-"}
-                                        </span>
-                                    </ThemedView>
-                                    <VBtn color="primary" loading={saving.value} onClick={() => void submit()}>
-                                        {t("Submit Application")}
-                                    </VBtn>
-                                </SurfaceCardText>
+                            <SurfaceCard title={t("Submit Application")} bodyGap="12px">
+                                <DescriptionList items={reviewItems.value} columns={2} />
+                                <VBtn color="primary" loading={saving.value} onClick={() => void submit()}>
+                                    {t("Submit Application")}
+                                </VBtn>
                             </SurfaceCard>
                         )}
 

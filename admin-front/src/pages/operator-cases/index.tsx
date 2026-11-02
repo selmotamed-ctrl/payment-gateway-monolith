@@ -8,8 +8,7 @@ import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
-import { MoneyText } from "@/components/MoneyText";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
@@ -35,10 +34,13 @@ import type { BulkInquiryResult, OperatorCaseSummary } from "./types";
 
 import { FormModal } from "@/components/ui/FormModal";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { MetricStrip } from "@/components/ui/MetricStrip";
 import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { MonoRef } from "@/components/ui/MonoRef";
+import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { FormField } from "@/components/ui/FormField";
 type AssigneeOption = { title: string; value: string };
 
 type OperatorCasesSummary = {
@@ -92,6 +94,8 @@ const ASSIGN_CHECKS = [
 const OperatorCasesPage = dc(() => {
     const { t } = useLocale();
     const showChecklists = areChecklistsVisible();
+    const asBadgeTone = (tone: ReturnType<typeof statusTone>): BadgeTone =>
+        tone === "error" ? "danger" : tone === "primary" ? "info" : tone;
     const theme = useTheme();
     const router = useRouter();
 
@@ -375,7 +379,7 @@ const OperatorCasesPage = dc(() => {
 
     const toneColor = (tone: ReturnType<typeof statusTone>): string => {
         const colors = theme.current.value.colors as Record<string, string>;
-        return colors[tone] ?? colors["on-surface-variant"] ?? "#64748b";
+        return colors[tone] ?? colors["on-surface-variant"] ?? "var(--pg-ink-muted)";
     };
 
     const rowColor = (row: OperatorCaseSummary): string | undefined => {
@@ -634,11 +638,12 @@ const OperatorCasesPage = dc(() => {
             Value: ({ row }: { row: OperatorCaseSummary }) => {
                 const help = caseHelp(row.caseType);
                 return (
-                    <StatusChip
+                    <StatusBadge
+                        status={row.caseType}
                         label={help.label}
-                        tone={
+                        toneOverride={
                             row.caseType === "CONFLICT" || row.caseType === "LATE_SUCCESS"
-                                ? "error"
+                                ? "danger"
                                 : row.caseType === "UNKNOWN" || row.caseType === "MISMATCH"
                                   ? "warning"
                                   : "info"
@@ -655,7 +660,7 @@ const OperatorCasesPage = dc(() => {
             value: (row) => row.priority,
             Value: ({ row }: { row: OperatorCaseSummary }) => (
                 <span title={priorityHelp(row.priority).meaning}>
-                    <StatusChip label={row.priority} tone={statusTone(row.priority)} />
+                    <StatusBadge status={row.priority} label={row.priority} toneOverride={asBadgeTone(statusTone(row.priority))} />
                 </span>
             ),
         },
@@ -667,7 +672,7 @@ const OperatorCasesPage = dc(() => {
             value: (row) => row.state,
             Value: ({ row }: { row: OperatorCaseSummary }) => (
                 <span title={caseStateHelp(row.state).meaning}>
-                    <StatusChip label={row.state} tone={statusTone(row.state)} />
+                    <StatusBadge status={row.state} label={row.state} toneOverride={asBadgeTone(statusTone(row.state))} />
                 </span>
             ),
         },
@@ -715,7 +720,7 @@ const OperatorCasesPage = dc(() => {
                 }
                 return (
                     <ThemedView style={{ gap: "2px" }}>
-                        <MoneyText value={amount} currency={row.currency} showCurrency={Boolean(row.currency)} bold />
+                        <MoneyDisplay amount={amount} currency={row.currency || "LYD"} size="sm" />
                         <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{source}</ThemedText>
                     </ThemedView>
                 );
@@ -730,7 +735,7 @@ const OperatorCasesPage = dc(() => {
                 <ThemedView style={{ gap: "3px" }}>
                     <MonoRef value={row.attemptReference ?? ""} truncate={18} />
                     {row.attemptStatus ? (
-                        <StatusChip label={row.attemptStatus} tone={statusTone(row.attemptStatus)} size="x-small" />
+                        <StatusBadge status={row.attemptStatus} label={row.attemptStatus} toneOverride={asBadgeTone(statusTone(row.attemptStatus))} />
                     ) : (
                         <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>No attempt</ThemedText>
                     )}
@@ -774,10 +779,10 @@ const OperatorCasesPage = dc(() => {
             value: (row) => row.reconciliationResult ?? "",
             Value: ({ row }: { row: OperatorCaseSummary }) =>
                 row.reconciliationResult ? (
-                    <StatusChip
+                    <StatusBadge
+                        status={row.reconciliationResult}
                         label={row.reconciliationResult}
-                        tone={statusTone(row.reconciliationResult)}
-                        size="x-small"
+                        toneOverride={asBadgeTone(statusTone(row.reconciliationResult))}
                     />
                 ) : (
                     <ThemedText style={{ opacity: 0.55 }}>—</ThemedText>
@@ -790,7 +795,7 @@ const OperatorCasesPage = dc(() => {
             value: (row) => row.approvalState ?? "",
             Value: ({ row }: { row: OperatorCaseSummary }) =>
                 row.approvalState ? (
-                    <StatusChip label={row.approvalState} tone={statusTone(row.approvalState)} size="x-small" />
+                    <StatusBadge status={row.approvalState} label={row.approvalState} toneOverride={asBadgeTone(statusTone(row.approvalState))} />
                 ) : (
                     <ThemedText style={{ opacity: 0.55 }}>—</ThemedText>
                 ),
@@ -815,7 +820,7 @@ const OperatorCasesPage = dc(() => {
                 const sla = slaInfo(row.slaDueAt);
                 return (
                     <ThemedView style={{ gap: "3px" }}>
-                        <StatusChip label={sla.label} tone={sla.tone} size="x-small" />
+                        <StatusBadge status={sla.label} label={sla.label} toneOverride={asBadgeTone(sla.tone)} />
                         <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>
                             {formatDateTime(row.slaDueAt)}
                         </ThemedText>
@@ -847,7 +852,7 @@ const OperatorCasesPage = dc(() => {
                 }
                 return (
                     <ThemedView style={{ gap: "3px" }}>
-                        <StatusChip label={String(schedule.status ?? "").replaceAll("_", " ")} tone={statusTone(schedule.status)} size="x-small" />
+                        <StatusBadge status={String(schedule.status ?? "")} label={String(schedule.status ?? "").replaceAll("_", " ")} toneOverride={asBadgeTone(statusTone(schedule.status))} />
                         {schedule.nextRunAt && (
                             <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{formatDateTime(schedule.nextRunAt)}</ThemedText>
                         )}
@@ -907,16 +912,8 @@ const OperatorCasesPage = dc(() => {
                     badgeTone={summary.value && summary.value.p1Open > 0 ? "danger" : "info"}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
-                            <StatusChip
-                                label={`${total.value} ${t("cases")}`}
-                                tone="info"
-                                size="small"
-                            />
-                            <StatusChip
-                                label={`${selectedCount.value} ${t("selected")}`}
-                                tone={selectedCount.value > 0 ? "primary" : "neutral"}
-                                size="small"
-                            />
+                            <StatusBadge status="cases" label={`${total.value} ${t("cases")}`} toneOverride="info" showDot={false} />
+                            <StatusBadge status="selected" label={`${selectedCount.value} ${t("selected")}`} toneOverride={selectedCount.value > 0 ? "info" : "neutral"} showDot={false} />
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-radar" onClick={() => void router.push({ name: "GatewayInquirySchedules" })}>{t("Inquiry Schedule")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
@@ -925,44 +922,35 @@ const OperatorCasesPage = dc(() => {
                 />
 
                 {summary.value && (
-                    <ThemedView style={{ gap: "12px" }}>
-                        <MetricStrip items={summaryItems.value} />
-                        <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "15px", flex: 1 }}>{t("Operator queue health")}</ThemedText>
-                                    <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
-                                    <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("P1 target: 4h · P2 target: 24h")}</ThemedText>
-                                </ThemedView>
-                                {showChecklists && (
-                                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
-                                        {SUMMARY_EXPORT_CHECKS.map((check) => (
-                                            <VCheckbox
-                                                key={check.key}
-                                                modelValue={summaryExportChecklist.value[check.key] === true}
-                                                onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
-                                                label={t(check.label)}
-                                                density="compact"
-                                                hideDetails
-                                            />
-                                        ))}
-                                        {!summaryExportChecklistComplete.value && (
-                                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
-                                        )}
-                                    </ThemedView>
-                                )}
-                                <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                    {Object.entries(summary.value.byPriority ?? {}).map(([priority, count]) => (
-                                        <StatusChip key={priority} label={`${priority}: ${count}`} tone={statusTone(priority)} size="x-small" />
-                                    ))}
-                                    {Object.entries(summary.value.byState ?? {}).map(([state, count]) => (
-                                        <StatusChip key={state} label={`${state.replaceAll("_", " ")}: ${count}`} tone={statusTone(state)} size="x-small" />
-                                    ))}
-                                </ThemedView>
-                            </SurfaceCardText>
-                        </SurfaceCard>
-                    </ThemedView>
+                    <SummaryExportCard
+                        title={t("Operator queue health")}
+                        metrics={summaryItems.value}
+                        exportLoading={summaryExportLoading.value}
+                        exportDisabled={!summaryExportChecklistComplete.value}
+                        exportLabel={t("Export summary")}
+                        onExport={() => void exportSummary()}
+                    >
+                        <FormChecklist
+                            checks={[...SUMMARY_EXPORT_CHECKS]}
+                            modelValue={summaryExportChecklist.value}
+                            onUpdate:modelValue={(value: Record<string, boolean>) => (summaryExportChecklist.value = value)}
+                            show={showChecklists}
+                            title={t("Summary export checklist")}
+                            complete={summaryExportChecklistComplete.value}
+                            incompleteMessage={t("Complete all summary export checklist items before exporting")}
+                        />
+                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                            <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("P1 target: 4h · P2 target: 24h")}</ThemedText>
+                        </ThemedView>
+                        <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                            {Object.entries(summary.value.byPriority ?? {}).map(([priority, count]) => (
+                                <StatusBadge key={priority} status={priority} label={`${priority}: ${count}`} toneOverride={asBadgeTone(statusTone(priority))} showDot={false} />
+                            ))}
+                            {Object.entries(summary.value.byState ?? {}).map(([state, count]) => (
+                                <StatusBadge key={state} status={state} label={`${state.replaceAll("_", " ")}: ${count}`} toneOverride={asBadgeTone(statusTone(state))} showDot={false} />
+                            ))}
+                        </ThemedView>
+                    </SummaryExportCard>
                 )}
 
                 <ApiTable<OperatorCaseSummary>
@@ -1024,24 +1012,16 @@ const OperatorCasesPage = dc(() => {
                                     alignItems: "center",
                                     flexWrap: "wrap",
                                     padding: "12px 14px",
-                                    borderRadius: "12px",
-                                    border: "1px solid rgba(100,116,139,0.25)",
-                                    background: "rgba(100,116,139,0.06)",
+                                    borderRadius: "var(--pg-radius-md)",
+                                    border: "1px solid var(--pg-border-subtle)",
+                                    background: "var(--pg-bg-surface-subtle)",
                                 }}
                             >
                                 <ThemedText style={{ fontSize: "13px", fontWeight: 700 }}>
                                     {selectedCount.value} {t("selected")}
                                 </ThemedText>
-                                <StatusChip
-                                    label={`${selectedEligibleCount.value} ${t("inquiry-ready")}`}
-                                    tone="success"
-                                    size="x-small"
-                                />
-                                <StatusChip
-                                    label={`${selectedSkippedCount.value} ${t("will be skipped")}`}
-                                    tone={selectedSkippedCount.value > 0 ? "warning" : "neutral"}
-                                    size="x-small"
-                                />
+                                <StatusBadge status="eligible" label={`${selectedEligibleCount.value} ${t("inquiry-ready")}`} toneOverride="success" />
+                                <StatusBadge status="skipped" label={`${selectedSkippedCount.value} ${t("will be skipped")}`} toneOverride={selectedSkippedCount.value > 0 ? "warning" : "neutral"} />
                                 <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>
                                     {t(
                                         "Only UNKNOWN or VERIFYING attempts on gateways with status inquiry are scheduled.",
@@ -1101,9 +1081,9 @@ const OperatorCasesPage = dc(() => {
                 {inspectionCase.value && (
                     <ThemedView style={{ gap: "16px" }}>
                         <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
-                            <StatusChip label={inspectionCase.value.state} tone={statusTone(inspectionCase.value.state)} />
-                            <StatusChip label={inspectionCase.value.priority} tone={statusTone(inspectionCase.value.priority)} />
-                            <StatusChip label={slaInfo(inspectionCase.value.slaDueAt).label} tone={slaInfo(inspectionCase.value.slaDueAt).tone} />
+                            <StatusBadge status={inspectionCase.value.state} label={inspectionCase.value.state} toneOverride={asBadgeTone(statusTone(inspectionCase.value.state))} />
+                            <StatusBadge status={inspectionCase.value.priority} label={inspectionCase.value.priority} toneOverride={asBadgeTone(statusTone(inspectionCase.value.priority))} />
+                            <StatusBadge status={slaInfo(inspectionCase.value.slaDueAt).label} label={slaInfo(inspectionCase.value.slaDueAt).label} toneOverride={asBadgeTone(slaInfo(inspectionCase.value.slaDueAt).tone)} />
                         </ThemedView>
                         <DescriptionList
                             columns={2}
@@ -1158,32 +1138,33 @@ const OperatorCasesPage = dc(() => {
                 onUpdate:modelValue={(value: boolean) => (inquiryOpen.value = value)}
                 title={t("Inquire about selected cases")}
                 size="md"
+                onSubmit={confirmInquiry}
+                submitLabel={`${t("Inquire")} (${inquiryCaseIds.value.length})`}
+                cancelLabel={t("Cancel")}
+                loading={bulkLoading.value}
+                danger={false}
             >
-<ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
-                            {t("Only eligible UNKNOWN or VERIFYING attempts on supported gateways are scheduled.")}
-                        </ThemedText>
-                        {showChecklists && (
-                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Inquiry checklist")}</ThemedText>
-                                {INQUIRY_CHECKS.map((check) => (
-                                    <VCheckbox
-                                        key={check.key}
-                                        modelValue={inquiryChecklist.value[check.key] === true}
-                                        onUpdate:modelValue={(value: unknown) => (inquiryChecklist.value = { ...inquiryChecklist.value, [check.key]: Boolean(value) })}
-                                        label={t(check.label)}
-                                        density="compact"
-                                        hideDetails
-                                    />
-                                ))}
-                                {!inquiryChecklistComplete.value && (
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all inquiry checklist items before continuing")}</ThemedText>
-                                )}
-                            </ThemedView>
+                <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
+                    {t("Only eligible UNKNOWN or VERIFYING attempts on supported gateways are scheduled.")}
+                </ThemedText>
+                {showChecklists && (
+                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Inquiry checklist")}</ThemedText>
+                        {INQUIRY_CHECKS.map((check) => (
+                            <VCheckbox
+                                key={check.key}
+                                modelValue={inquiryChecklist.value[check.key] === true}
+                                onUpdate:modelValue={(value: unknown) => (inquiryChecklist.value = { ...inquiryChecklist.value, [check.key]: Boolean(value) })}
+                                label={t(check.label)}
+                                density="compact"
+                                hideDetails
+                            />
+                        ))}
+                        {!inquiryChecklistComplete.value && (
+                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all inquiry checklist items before continuing")}</ThemedText>
                         )}
-                        <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
-                            <VBtn variant="text" onClick={() => (inquiryOpen.value = false)}>{t("Cancel")}</VBtn>
-                            <VBtn color="primary" loading={bulkLoading.value} disabled={!inquiryChecklistComplete.value} onClick={() => confirmInquiry()}>{t("Inquire")} ({inquiryCaseIds.value.length})</VBtn>
-                        </ThemedView>
+                    </ThemedView>
+                )}
             </FormModal>
 
             <FormModal
@@ -1191,52 +1172,53 @@ const OperatorCasesPage = dc(() => {
                 onUpdate:modelValue={(value: boolean) => (assignOpen.value = value)}
                 title={t("Assign selected cases")}
                 size="md"
+                onSubmit={() => void assignSelected()}
+                submitLabel={`${t("Assign")} (${selectedCount.value})`}
+                cancelLabel={t("Cancel")}
+                loading={assignSaving.value}
             >
-<ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
-                            {t("Resolved and pending-checker cases are skipped automatically.")}
-                        </ThemedText>
-                        <VAutocomplete
-                            label={t("Assignee")}
-                            items={assignOptions.value}
-                            itemTitle="title"
-                            itemValue="value"
-                            modelValue={assignUserId.value}
-                            loading={assignOptionsLoading.value}
-                            clearable
-                            hint={t("Leave empty to unassign the selected cases.")}
-                            persistentHint
-                            onUpdate:modelValue={(value: unknown) => (assignUserId.value = value ? String(value) : null)}
-                            onUpdate:search={(value: string) => void searchAssignees(value)}
-                        />
-                        <VTextField
-                            label={t("Reason (optional)")}
-                            modelValue={assignReason.value}
-                            onUpdate:modelValue={(value: string) => (assignReason.value = value)}
-                        />
-                        {showChecklists && (
-                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Assignment checklist")}</ThemedText>
-                                {ASSIGN_CHECKS.map((check) => (
-                                    <VCheckbox
-                                        key={check.key}
-                                        modelValue={assignChecklist.value[check.key] === true}
-                                        onUpdate:modelValue={(value: unknown) => (assignChecklist.value = { ...assignChecklist.value, [check.key]: Boolean(value) })}
-                                        label={t(check.label)}
-                                        density="compact"
-                                        hideDetails
-                                    />
-                                ))}
-                                {!assignChecklistComplete.value && (
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all assignment checklist items before assigning")}</ThemedText>
-                                )}
-                            </ThemedView>
+                <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
+                    {t("Resolved and pending-checker cases are skipped automatically.")}
+                </ThemedText>
+                <FormField
+                    label={t("Assignee")}
+                    hint={t("Leave empty to unassign the selected cases.")}
+                >
+                    <VAutocomplete
+                        items={assignOptions.value}
+                        itemTitle="title"
+                        itemValue="value"
+                        modelValue={assignUserId.value}
+                        loading={assignOptionsLoading.value}
+                        clearable
+                        onUpdate:modelValue={(value: unknown) => (assignUserId.value = value ? String(value) : null)}
+                        onUpdate:search={(value: string) => void searchAssignees(value)}
+                    />
+                </FormField>
+                <FormField label={t("Reason (optional)")}>
+                    <VTextField
+                        modelValue={assignReason.value}
+                        onUpdate:modelValue={(value: string) => (assignReason.value = value)}
+                    />
+                </FormField>
+                {showChecklists && (
+                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Assignment checklist")}</ThemedText>
+                        {ASSIGN_CHECKS.map((check) => (
+                            <VCheckbox
+                                key={check.key}
+                                modelValue={assignChecklist.value[check.key] === true}
+                                onUpdate:modelValue={(value: unknown) => (assignChecklist.value = { ...assignChecklist.value, [check.key]: Boolean(value) })}
+                                label={t(check.label)}
+                                density="compact"
+                                hideDetails
+                            />
+                        ))}
+                        {!assignChecklistComplete.value && (
+                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all assignment checklist items before assigning")}</ThemedText>
                         )}
-                        <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
-                            <VBtn variant="text" onClick={() => (assignOpen.value = false)}>{t("Cancel")}</VBtn>
-                            <VBtn color="primary" loading={assignSaving.value} disabled={!assignChecklistComplete.value} onClick={() => void assignSelected()}>
-                                {t("Assign")} ({selectedCount.value})
-                            </VBtn>
-                        </ThemedView>
+                    </ThemedView>
+                )}
             </FormModal>
 
             <FormModal
@@ -1244,45 +1226,45 @@ const OperatorCasesPage = dc(() => {
                 onUpdate:modelValue={(value: boolean) => (stateOpen.value = value)}
                 title={t("Set state for selected cases")}
                 size="sm"
+                onSubmit={() => void applyBulkState()}
+                submitLabel={`${t("Apply")} (${selectedCount.value})`}
+                cancelLabel={t("Cancel")}
+                loading={stateSaving.value}
             >
-<ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
-                            {t("Resolved, pending-checker and unchanged cases are skipped automatically.")}
-                        </ThemedText>
-                        <VSelect
-                            label={t("State")}
-                            items={["OPEN", "IN_PROGRESS"]}
-                            modelValue={bulkState.value}
-                            onUpdate:modelValue={(value: string | null) => (bulkState.value = value === "OPEN" ? "OPEN" : "IN_PROGRESS")}
-                        />
-                        <VTextField
-                            label={t("Reason (optional)")}
-                            modelValue={stateReason.value}
-                            onUpdate:modelValue={(value: string) => (stateReason.value = value)}
-                        />
-                        {showChecklists && (
-                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("State change checklist")}</ThemedText>
-                                {STATE_CHANGE_CHECKS.map((check) => (
-                                    <VCheckbox
-                                        key={check.key}
-                                        modelValue={stateChangeChecklist.value[check.key] === true}
-                                        onUpdate:modelValue={(value: unknown) => (stateChangeChecklist.value = { ...stateChangeChecklist.value, [check.key]: Boolean(value) })}
-                                        label={t(check.label)}
-                                        density="compact"
-                                        hideDetails
-                                    />
-                                ))}
-                                {!stateChangeChecklistComplete.value && (
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all state checklist items before applying")}</ThemedText>
-                                )}
-                            </ThemedView>
+                <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
+                    {t("Resolved, pending-checker and unchanged cases are skipped automatically.")}
+                </ThemedText>
+                <FormField label={t("State")} required>
+                    <VSelect
+                        items={["OPEN", "IN_PROGRESS"]}
+                        modelValue={bulkState.value}
+                        onUpdate:modelValue={(value: string | null) => (bulkState.value = value === "OPEN" ? "OPEN" : "IN_PROGRESS")}
+                    />
+                </FormField>
+                <FormField label={t("Reason (optional)")}>
+                    <VTextField
+                        modelValue={stateReason.value}
+                        onUpdate:modelValue={(value: string) => (stateReason.value = value)}
+                    />
+                </FormField>
+                {showChecklists && (
+                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("State change checklist")}</ThemedText>
+                        {STATE_CHANGE_CHECKS.map((check) => (
+                            <VCheckbox
+                                key={check.key}
+                                modelValue={stateChangeChecklist.value[check.key] === true}
+                                onUpdate:modelValue={(value: unknown) => (stateChangeChecklist.value = { ...stateChangeChecklist.value, [check.key]: Boolean(value) })}
+                                label={t(check.label)}
+                                density="compact"
+                                hideDetails
+                            />
+                        ))}
+                        {!stateChangeChecklistComplete.value && (
+                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all state checklist items before applying")}</ThemedText>
                         )}
-                        <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
-                            <VBtn variant="text" onClick={() => (stateOpen.value = false)}>{t("Cancel")}</VBtn>
-                            <VBtn color="primary" loading={stateSaving.value} disabled={!stateChangeChecklistComplete.value} onClick={() => void applyBulkState()}>
-                                {t("Apply")} ({selectedCount.value})
-                            </VBtn>
-                        </ThemedView>
+                    </ThemedView>
+                )}
             </FormModal>
 
             <FormModal
@@ -1290,52 +1272,50 @@ const OperatorCasesPage = dc(() => {
                 onUpdate:modelValue={(value: boolean | null) => (resultOpen.value = Boolean(value))}
                 title={t("Bulk inquiry result")}
                 size="lg"
-            >
-<ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                            <StatusChip
-                                label={`${bulkResult.value?.scheduled ?? 0} ${t("scheduled")}`}
-                                tone="success"
-                            />
-                            <StatusChip
-                                label={`${bulkResult.value?.skipped ?? 0} ${t("skipped")}`}
-                                tone={(bulkResult.value?.skipped ?? 0) > 0 ? "warning" : "neutral"}
-                            />
-                        </ThemedView>
-                        <ThemedView style={{ flexDirection: "column", gap: "8px" }}>
-                            {(bulkResult.value?.results ?? []).map((result) => (
-                                <ThemedView
-                                    key={result.caseId}
-                                    style={{
-                                        flexDirection: "row",
-                                        alignItems: "center",
-                                        gap: "10px",
-                                        padding: "10px 12px",
-                                        borderRadius: "10px",
-                                        border: "1px solid rgba(100,116,139,0.2)",
-                                    }}
-                                >
-                                    <StatusChip
-                                        label={result.status}
-                                        tone={result.status === "SCHEDULED" ? "success" : "warning"}
-                                        size="x-small"
-                                    />
-                                    <ThemedView style={{ flex: 1, gap: "2px" }}>
-                                        <ThemedText style={{ fontSize: "13px", fontWeight: 600 }}>
-                                            {result.caseRef ?? result.caseId}
-                                        </ThemedText>
-                                        <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>
-                                            {result.attemptReference ?? result.attemptId ?? "—"} · {t(result.message)}
-                                        </ThemedText>
-                                    </ThemedView>
-                                    <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>
-                                        {reasonText(result.reason)}
-                                    </ThemedText>
-                                </ThemedView>
-                            ))}
-                        </ThemedView>
+                v-slots={{
+                    footer: () => (
                         <VBtn variant="tonal" onClick={() => (resultOpen.value = false)}>
                             {t("Close")}
                         </VBtn>
+                    ),
+                }}
+            >
+                <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
+                    <StatusBadge status="scheduled" label={`${bulkResult.value?.scheduled ?? 0} ${t("scheduled")}`} toneOverride="success" />
+                    <StatusBadge status="skipped" label={`${bulkResult.value?.skipped ?? 0} ${t("skipped")}`} toneOverride={(bulkResult.value?.skipped ?? 0) > 0 ? "warning" : "neutral"} />
+                </ThemedView>
+                <ThemedView style={{ flexDirection: "column", gap: "8px" }}>
+                    {(bulkResult.value?.results ?? []).map((result) => (
+                        <ThemedView
+                            key={result.caseId}
+                            style={{
+                                flexDirection: "row",
+                                alignItems: "center",
+                                gap: "10px",
+                                padding: "10px 12px",
+                                borderRadius: "var(--pg-radius-lg)",
+                                border: "1px solid var(--pg-border-subtle)",
+                            }}
+                        >
+                            <StatusBadge
+                                status={result.status}
+                                label={result.status}
+                                toneOverride={result.status === "SCHEDULED" ? "success" : "warning"}
+                            />
+                            <ThemedView style={{ flex: 1, gap: "2px" }}>
+                                <ThemedText style={{ fontSize: "13px", fontWeight: 600 }}>
+                                    {result.caseRef ?? result.caseId}
+                                </ThemedText>
+                                <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>
+                                    {result.attemptReference ?? result.attemptId ?? "—"} · {t(result.message)}
+                                </ThemedText>
+                            </ThemedView>
+                            <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>
+                                {reasonText(result.reason)}
+                            </ThemedText>
+                        </ThemedView>
+                    ))}
+                </ThemedView>
             </FormModal>
         </ScreenContainer>
     );

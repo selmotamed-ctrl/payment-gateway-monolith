@@ -1,16 +1,16 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
-import { useLocale } from "vuetify";
+import { useLocale, useTheme } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VCheckbox, VSelect, VTextField } from "vuetify/components";
+import { VAlert, VBtn, VSelect, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MonoRef } from "@/components/ui/MonoRef";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import type { MetricItem } from "@/components/ui/MetricStrip";
 import { statusTone } from "@/components/Table/statusTone";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
@@ -24,7 +24,10 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
 import { FormModal } from "@/components/ui/FormModal";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
+import { MetaPill } from "@/components/ui/MetaPill";
 const ROLLBACK_CHECKS = [
     { key: "TARGET_VERSION_VERIFIED", label: "Target version verified" },
     { key: "GATES_VERIFIED", label: "Rollback target gates verified" },
@@ -88,7 +91,10 @@ const kindTone = (kind: string) => {
 
 const GatewaysPage = dc(() => {
     const { t } = useLocale();
+    const theme = useTheme();
     const showChecklists = areChecklistsVisible();
+    const toneColor = (tone: "error" | "warning"): string =>
+        (theme.current.value.colors as Record<string, string>)[tone] ?? "";
     const router = useRouter();
     const rows = ref<Gateway[]>([]);
     const total = ref(0);
@@ -345,7 +351,7 @@ const GatewaysPage = dc(() => {
             value: (row) => `${row.code} ${row.name}`,
             Value: ({ row }: { row: Gateway }) => (
                 <ThemedView style={{ gap: "2px" }}>
-                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{row.name}</ThemedText>
+                    <ThemedText style={{ fontSize: "12px", fontWeight: 600 }}>{row.name}</ThemedText>
                     <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
                         <MonoRef value={row.code} />
                         <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{row.operator}</ThemedText>
@@ -456,39 +462,28 @@ const GatewaysPage = dc(() => {
                 </VAlert>
 
                 {summary.value && (
-                    <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
-                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Gateway health")}</ThemedText>
-                                <div style={{ flex: 1 }} />
-                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
-                            </ThemedView>
-                            {showChecklists && (
-                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
-                                    {SUMMARY_EXPORT_CHECKS.map((check) => (
-                                        <VCheckbox
-                                            key={check.key}
-                                            modelValue={summaryExportChecklist.value[check.key] === true}
-                                            onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
-                                            label={t(check.label)}
-                                            density="compact"
-                                            hideDetails
-                                        />
-                                    ))}
-                                    {!summaryExportChecklistComplete.value && (
-                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
-                                    )}
-                                </ThemedView>
-                            )}
-                            <MetricStrip items={metricItems.value} />
-                            <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                {Object.entries(summary.value.byKind ?? {}).map(([kind, count]) => (
-                                    <StatusChip key={kind} label={`${kind}: ${count}`} tone={kindTone(kind)} size="x-small" />
-                                ))}
-                            </ThemedView>
-                        </SurfaceCardText>
-                    </SurfaceCard>
+                    <SummaryExportCard
+                        title={t("Gateway health")}
+                        metrics={metricItems.value}
+                        exportLoading={summaryExportLoading.value}
+                        exportDisabled={!summaryExportChecklistComplete.value}
+                        onExport={() => void exportSummary()}
+                    >
+                        <FormChecklist
+                            checks={[...SUMMARY_EXPORT_CHECKS]}
+                            modelValue={summaryExportChecklist.value}
+                            onUpdate:modelValue={(value: Record<string, boolean>) => (summaryExportChecklist.value = value)}
+                            show={showChecklists}
+                            title={t("Summary export checklist")}
+                            complete={summaryExportChecklistComplete.value}
+                            incompleteMessage={t("Complete all summary export checklist items before exporting")}
+                        />
+                        <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                            {Object.entries(summary.value.byKind ?? {}).map(([kind, count]) => (
+                                <StatusBadge key={kind} status={kind} label={`${kind}: ${count}`} toneOverride={kindTone(kind) === "primary" ? "info" : (kindTone(kind) as any)} showDot={false} />
+                            ))}
+                        </ThemedView>
+                    </SummaryExportCard>
                 )}
 
                 <ApiTable<Gateway>
@@ -507,7 +502,7 @@ const GatewaysPage = dc(() => {
                     searchValue={search.value}
                     setSearchValue={(value) => (search.value = value)}
                     headers={headers.value}
-                    rowColor={(row) => (row.routeHealth.openBreaker > 0 ? "#dc2626" : row.riskClass === "HIGH_RISK" ? "#d97706" : undefined)}
+                    rowColor={(row) => (row.routeHealth.openBreaker > 0 ? toneColor("error") : row.riskClass === "HIGH_RISK" ? toneColor("warning") : undefined)}
                     apiDataExtractor={(data) => {
                         const payload = data as { gateways?: Gateway[]; rows?: Gateway[] };
                         return payload.gateways ?? payload.rows ?? [];
@@ -551,47 +546,57 @@ const GatewaysPage = dc(() => {
                 onUpdate:modelValue={(value: boolean) => (rollbackOpen.value = value)}
                 title={t("Rollback gateway")}
                 size="md"
+                onSubmit={() => void applyRollback()}
+                submitLabel={t("Rollback")}
+                loading={rollbackLoading.value}
+                errorMessage={rollbackError.value ?? ""}
+                v-slots={{
+                    footer: () => (
+                        <>
+                            <VBtn variant="outlined" disabled={rollbackLoading.value} onClick={() => (rollbackOpen.value = false)}>
+                                {t("Cancel")}
+                            </VBtn>
+                            <VBtn
+                                color="warning"
+                                variant="flat"
+                                {...{ type: "submit" }}
+                                loading={rollbackLoading.value}
+                                disabled={!rollbackChecklistComplete.value}
+                            >
+                                {t("Rollback")}
+                            </VBtn>
+                        </>
+                    ),
+                }}
             >
-<VAlert type="warning" variant="tonal">
-                            {t("Rollback changes the live version immediately. Verify the target version and operational impact first.")}
-                        </VAlert>
-                        <VSelect
-                            label={t("Target version")}
-                            items={(rollbackGateway.value ? rollbackTargets(rollbackGateway.value) : []).map((version) => ({
-                                title: `v${version.versionNumber} · ${version.state}`,
-                                value: version.id,
-                            }))}
-                            modelValue={rollbackTarget.value}
-                            onUpdate:modelValue={(value: string) => (rollbackTarget.value = value)}
-                        />
-                        <VTextField
-                            label={t("Rollback reason")}
-                            modelValue={rollbackReason.value}
-                            onUpdate:modelValue={(value: string) => (rollbackReason.value = value)}
-                        />
-                        {showChecklists && (
-                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Rollback checklist")}</ThemedText>
-                                {ROLLBACK_CHECKS.map((check) => (
-                                    <VCheckbox
-                                        key={check.key}
-                                        modelValue={rollbackChecklist.value[check.key] === true}
-                                        onUpdate:modelValue={(value: unknown) => (rollbackChecklist.value = { ...rollbackChecklist.value, [check.key]: Boolean(value) })}
-                                        label={t(check.label)}
-                                        density="compact"
-                                        hideDetails
-                                    />
-                                ))}
-                                {!rollbackChecklistComplete.value && (
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all rollback checklist items before continuing")}</ThemedText>
-                                )}
-                            </ThemedView>
-                        )}
-                        {rollbackError.value && <VAlert type="error" variant="tonal" density="compact">{rollbackError.value}</VAlert>}
-                        <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
-                            <VBtn variant="text" onClick={() => (rollbackOpen.value = false)}>{t("Cancel")}</VBtn>
-                            <VBtn color="warning" loading={rollbackLoading.value} disabled={!rollbackChecklistComplete.value} onClick={() => void applyRollback()}>{t("Rollback")}</VBtn>
-                        </ThemedView>
+                <VAlert type="warning" variant="tonal">
+                    {t("Rollback changes the live version immediately. Verify the target version and operational impact first.")}
+                </VAlert>
+                <FormField label={t("Target version")} required sensitiveMakerChecker>
+                    <VSelect
+                        items={(rollbackGateway.value ? rollbackTargets(rollbackGateway.value) : []).map((version) => ({
+                            title: `v${version.versionNumber} · ${version.state}`,
+                            value: version.id,
+                        }))}
+                        modelValue={rollbackTarget.value}
+                        onUpdate:modelValue={(value: string) => (rollbackTarget.value = value)}
+                    />
+                </FormField>
+                <FormField label={t("Rollback reason")} required sensitiveMakerChecker>
+                    <VTextField
+                        modelValue={rollbackReason.value}
+                        onUpdate:modelValue={(value: string) => (rollbackReason.value = value)}
+                    />
+                </FormField>
+                <FormChecklist
+                    checks={[...ROLLBACK_CHECKS]}
+                    modelValue={rollbackChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (rollbackChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Rollback checklist")}
+                    complete={rollbackChecklistComplete.value}
+                    incompleteMessage={t("Complete all rollback checklist items before continuing")}
+                />
             </FormModal>
 
             <FormModal
@@ -599,17 +604,46 @@ const GatewaysPage = dc(() => {
                 onUpdate:modelValue={(value: boolean) => (createOpen.value = value)}
                 title={t("New Gateway")}
                 size="md"
+                onSubmit={() => void createGateway()}
+                submitLabel={t("Create")}
+                loading={creating.value}
+                v-slots={{
+                    footer: () => (
+                        <>
+                            <VBtn variant="outlined" disabled={creating.value} onClick={() => (createOpen.value = false)}>
+                                {t("Cancel")}
+                            </VBtn>
+                            <VBtn
+                                color="primary"
+                                variant="flat"
+                                {...{ type: "submit" }}
+                                loading={creating.value}
+                                disabled={!form.value.code.trim() || !form.value.name.trim()}
+                            >
+                                {t("Create")}
+                            </VBtn>
+                        </>
+                    ),
+                }}
             >
-<VTextField label={t("Gateway code")} hint="lowercase letters, digits, - and _" modelValue={form.value.code} onUpdate:modelValue={(value: string) => (form.value.code = value)} />
-                        <VTextField label={t("Gateway name")} modelValue={form.value.name} onUpdate:modelValue={(value: string) => (form.value.name = value)} />
-                        <VTextField label={t("Operator")} modelValue={form.value.operator} onUpdate:modelValue={(value: string) => (form.value.operator = value)} />
-                        <VSelect label={t("Kind")} items={["DIRECT", "AGGREGATOR", "NATIVE_ADAPTER", "INTERNAL"]} modelValue={form.value.kind} onUpdate:modelValue={(value: string) => (form.value.kind = value)} />
-                        <VTextField label={t("Country")} modelValue={form.value.country} onUpdate:modelValue={(value: string) => (form.value.country = value)} />
-                        <VSelect label={t("Risk class")} items={["NORMAL", "HIGH_RISK"]} modelValue={form.value.riskClass} onUpdate:modelValue={(value: string) => (form.value.riskClass = value)} />
-                        <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                            <VBtn variant="text" onClick={() => (createOpen.value = false)}>{t("Cancel")}</VBtn>
-                            <VBtn color="primary" loading={creating.value} disabled={!form.value.code.trim() || !form.value.name.trim()} onClick={() => void createGateway()}>{t("Create")}</VBtn>
-                        </ThemedView>
+                <FormField label={t("Gateway code")} hint="lowercase letters, digits, - and _" required sensitiveMakerChecker>
+                    <VTextField modelValue={form.value.code} onUpdate:modelValue={(value: string) => (form.value.code = value)} />
+                </FormField>
+                <FormField label={t("Gateway name")} required>
+                    <VTextField modelValue={form.value.name} onUpdate:modelValue={(value: string) => (form.value.name = value)} />
+                </FormField>
+                <FormField label={t("Operator")}>
+                    <VTextField modelValue={form.value.operator} onUpdate:modelValue={(value: string) => (form.value.operator = value)} />
+                </FormField>
+                <FormField label={t("Kind")}>
+                    <VSelect items={["DIRECT", "AGGREGATOR", "NATIVE_ADAPTER", "INTERNAL"]} modelValue={form.value.kind} onUpdate:modelValue={(value: string) => (form.value.kind = value)} />
+                </FormField>
+                <FormField label={t("Country")}>
+                    <VTextField modelValue={form.value.country} onUpdate:modelValue={(value: string) => (form.value.country = value)} />
+                </FormField>
+                <FormField label={t("Risk class")} sensitiveMakerChecker>
+                    <VSelect items={["NORMAL", "HIGH_RISK"]} modelValue={form.value.riskClass} onUpdate:modelValue={(value: string) => (form.value.riskClass = value)} />
+                </FormField>
             </FormModal>
         </ScreenContainer>
     );

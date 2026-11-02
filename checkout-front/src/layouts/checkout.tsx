@@ -11,10 +11,14 @@ export type CheckoutLayoutProps = {
 const CheckoutLayout = dc(
     (props: CheckoutLayoutProps, _, { slots }) => {
         return () => (
-            <div class="pg-checkout">
-                {props.title && <div class="pg-checkout__title">{props.title}</div>}
+            <main class="pg-checkout">
+                {props.title && (
+                    <h1 class="pg-checkout__title" style={{ margin: 0 }}>
+                        {props.title}
+                    </h1>
+                )}
                 {slots.default?.()}
-            </div>
+            </main>
         );
     },
     {

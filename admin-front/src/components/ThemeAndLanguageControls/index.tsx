@@ -60,7 +60,7 @@ const ThemedAndLanguageControls = dc(() => {
                                         padding: "8px",
                                         background: currentTheme.value.dark ? "rgba(30, 30, 30, 0.98)" : "rgba(255, 255, 255, 0.98)",
                                         backdropFilter: "blur(20px)",
-                                        borderRadius: "16px",
+                                        borderRadius: "var(--pg-radius-md)",
                                         boxShadow: currentTheme.value.dark ? "0 8px 32px rgba(0, 0, 0, 0.5)" : "0 8px 32px rgba(0, 0, 0, 0.12)",
                                     }}
                                 >

@@ -8,10 +8,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
-import FieldsSections from "@/components/FieldsSections";
 import CollapsibleSection, { type SectionCommand } from "@/components/CollapsibleSection";
-import type { FieldProps } from "@/components/Field";
 import { ApiTable } from "@/components/Table/ApiTable";
 import type { TableHeader } from "@/components/Table/types";
 import { statusTone } from "@/components/Table/statusTone";
@@ -61,13 +58,15 @@ import {
 } from "./merchantTableFilters";
 
 import { FormModal } from "@/components/ui/FormModal";
+import { FormField } from "@/components/ui/FormField";
+import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import { MetricStrip } from "@/components/ui/MetricStrip";
-import { DescriptionList } from "@/components/ui/DescriptionList";
+import { DescriptionList, type DescriptionItem } from "@/components/ui/DescriptionList";
 import { MonoRef } from "@/components/ui/MonoRef";
-import type { BadgeTone } from "@/components/ui/StatusBadge";
+import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 const parse = (payload: unknown): MerchantDetail => {
     const source = (payload ?? {}) as Record<string, unknown>;
     const merchant = ((source.merchant ?? source) ?? {}) as Record<string, any>;
@@ -93,12 +92,14 @@ const parse = (payload: unknown): MerchantDetail => {
     return merchant as MerchantDetail;
 };
 
-const field = (text: string, value: unknown, hint?: string, source?: string, copy = false): FieldProps => ({
-    text,
-    value: value === null || value === undefined ? "" : String(value),
-    hint,
-    source,
-    copyOnClick: copy,
+const detailItem = (label: string, value: unknown, _hint?: string, _source?: string, mono = false): DescriptionItem => ({
+    label,
+    value:
+        value === null || value === undefined || value === ""
+            ? "—"
+            : mono
+              ? <MonoRef value={String(value)} />
+              : String(value),
 });
 
 const jsonText = (value: unknown): string => {
@@ -302,48 +303,48 @@ const MerchantDetailPage = dc(() => {
                 title: t("Identity and lifecycle"),
                 description: t("Core merchant identity, lifecycle and support contacts. Sensitive fields are shown only when your role may see them."),
                 defaultExpanded: true,
-                fields: [
-                    field("Display name", entry.displayName, "Customer-facing display name.", "merchants.display_name"),
-                    field("Trade name", entry.tradeName, "Customer-facing trade name.", "merchants.tradeName"),
-                    field("Legal name", entry.legalName, "Registered legal entity name.", "merchants.legalName", true),
-                    field("Merchant ID", entry.id, "Stable merchant database identifier.", "merchants.id", true),
-                    field("Status", status.label, status.meaning, "merchants.status"),
-                    field("Version", entry.version, "Optimistic-concurrency version for pending edits.", "merchants.version"),
-                    field("Onboarding channel", entry.onboardingChannel, COLUMN_HELP.channel, "merchants.onboardingChannel"),
-                    field("Country", entry.country, COLUMN_HELP.country, "merchants.country"),
-                    field("Created", formatDateTime(entry.createdAt), "Merchant record creation time.", "merchants.created_at"),
-                    field("Activated", formatDateTime(entry.activatedAt), "Activation time.", "merchants.activatedAt"),
-                    field("Suspended", formatDateTime(entry.suspendedAt), "Suspension time.", "merchants.suspendedAt"),
-                    field("Suspension reason", entry.suspensionReasonRedacted ? t("Restricted") : entry.suspensionReasonCode, "AML reasons are restricted to compliance.", "merchants.suspensionReasonCode"),
-                    field("Closed", formatDateTime(entry.closedAt), "Closure time.", "merchants.closedAt"),
+                items: [
+                    detailItem("Display name", entry.displayName, "Customer-facing display name.", "merchants.display_name"),
+                    detailItem("Trade name", entry.tradeName, "Customer-facing trade name.", "merchants.tradeName"),
+                    detailItem("Legal name", entry.legalName, "Registered legal entity name.", "merchants.legalName", true),
+                    detailItem("Merchant ID", entry.id, "Stable merchant database identifier.", "merchants.id", true),
+                    detailItem("Status", status.label, status.meaning, "merchants.status"),
+                    detailItem("Version", entry.version, "Optimistic-concurrency version for pending edits.", "merchants.version"),
+                    detailItem("Onboarding channel", entry.onboardingChannel, COLUMN_HELP.channel, "merchants.onboardingChannel"),
+                    detailItem("Country", entry.country, COLUMN_HELP.country, "merchants.country"),
+                    detailItem("Created", formatDateTime(entry.createdAt), "Merchant record creation time.", "merchants.created_at"),
+                    detailItem("Activated", formatDateTime(entry.activatedAt), "Activation time.", "merchants.activatedAt"),
+                    detailItem("Suspended", formatDateTime(entry.suspendedAt), "Suspension time.", "merchants.suspendedAt"),
+                    detailItem("Suspension reason", entry.suspensionReasonRedacted ? t("Restricted") : entry.suspensionReasonCode, "AML reasons are restricted to compliance.", "merchants.suspensionReasonCode"),
+                    detailItem("Closed", formatDateTime(entry.closedAt), "Closure time.", "merchants.closedAt"),
                 ],
             },
             {
                 title: t("Contacts and descriptive profile"),
                 defaultExpanded: false,
-                fields: [
-                    field("Contact email", entry.contactEmail, "Primary merchant contact email.", "merchants.contactEmail", true),
-                    field("Contact phone", entry.contactPhone, "Primary merchant contact phone.", "merchants.contactPhone", true),
-                    field("Support email", entry.supportEmail, "Merchant support contact email.", "merchants.supportEmail", true),
-                    field("Support phone", entry.supportPhone, "Merchant support contact phone.", "merchants.supportPhone", true),
-                    field("Logo URL", entry.logoUrl, "Optional merchant logo URL.", "merchants.logoUrl"),
+                items: [
+                    detailItem("Contact email", entry.contactEmail, "Primary merchant contact email.", "merchants.contactEmail", true),
+                    detailItem("Contact phone", entry.contactPhone, "Primary merchant contact phone.", "merchants.contactPhone", true),
+                    detailItem("Support email", entry.supportEmail, "Merchant support contact email.", "merchants.supportEmail", true),
+                    detailItem("Support phone", entry.supportPhone, "Merchant support contact phone.", "merchants.supportPhone", true),
+                    detailItem("Logo URL", entry.logoUrl, "Optional merchant logo URL.", "merchants.logoUrl"),
                 ],
             },
             {
                 title: t("Commercial and risk profile"),
                 defaultExpanded: false,
-                fields: [
-                    field("Tax ID", sensitiveVisible ? entry.taxId : t("Restricted"), "Tax registration identifier. Sensitive field.", "merchants.taxId", true),
-                    field("Registration number", sensitiveVisible ? entry.registrationNo : t("Restricted"), "Commercial registration number. Sensitive field.", "merchants.registrationNo", true),
-                    field("Business category", sensitiveVisible ? entry.businessCategory : t("Restricted"), COLUMN_HELP.category, "merchants.businessCategory"),
-                    field("Risk tier", sensitiveVisible ? risk?.label ?? "—" : t("Restricted"), risk?.meaning, "merchants.riskTier"),
-                    field("KYB status", sensitiveVisible ? kyb?.label ?? "—" : t("Restricted"), kyb?.meaning, "merchants.kybStatus"),
-                    field("Next KYB review", sensitiveVisible ? formatDateTime(entry.nextKybReviewAt) : t("Restricted"), COLUMN_HELP.review, "merchants.nextKybReviewAt"),
-                    field("Commission receivable ceiling", financialVisible ? formatMoney(entry.commissionReceivableCeiling, currency.value) : t("Restricted"), "Commission receivable ceiling. Sensitive financial field.", "merchants.commissionReceivableCeiling"),
-                    field("Negative balance ceiling", financialVisible ? formatMoney(entry.negativeBalanceCeiling, currency.value) : t("Restricted"), "Allowed negative wallet balance ceiling. Sensitive financial field.", "merchants.negativeBalanceCeiling"),
-                    field("Payout bank", financialVisible ? String((entry.payoutBankDetailsJson ?? {}).bank ?? "—") : t("Restricted"), "Payout bank name.", "merchants.payoutBankDetailsJson.bank"),
-                    field("Payout account", financialVisible ? String((entry.payoutBankDetailsJson ?? {}).iban ?? (entry.payoutBankDetailsJson ?? {}).accountNumber ?? "—") : t("Restricted"), "Payout IBAN/account. Sensitive financial field.", "merchants.payoutBankDetailsJson.iban"),
-                    field("Payout holder", financialVisible ? String((entry.payoutBankDetailsJson ?? {}).holder ?? "—") : t("Restricted"), "Payout account holder.", "merchants.payoutBankDetailsJson.holder"),
+                items: [
+                    detailItem("Tax ID", sensitiveVisible ? entry.taxId : t("Restricted"), "Tax registration identifier. Sensitive field.", "merchants.taxId", true),
+                    detailItem("Registration number", sensitiveVisible ? entry.registrationNo : t("Restricted"), "Commercial registration number. Sensitive field.", "merchants.registrationNo", true),
+                    detailItem("Business category", sensitiveVisible ? entry.businessCategory : t("Restricted"), COLUMN_HELP.category, "merchants.businessCategory"),
+                    detailItem("Risk tier", sensitiveVisible ? risk?.label ?? "—" : t("Restricted"), risk?.meaning, "merchants.riskTier"),
+                    detailItem("KYB status", sensitiveVisible ? kyb?.label ?? "—" : t("Restricted"), kyb?.meaning, "merchants.kybStatus"),
+                    detailItem("Next KYB review", sensitiveVisible ? formatDateTime(entry.nextKybReviewAt) : t("Restricted"), COLUMN_HELP.review, "merchants.nextKybReviewAt"),
+                    detailItem("Commission receivable ceiling", financialVisible ? formatMoney(entry.commissionReceivableCeiling, currency.value) : t("Restricted"), "Commission receivable ceiling. Sensitive financial field.", "merchants.commissionReceivableCeiling"),
+                    detailItem("Negative balance ceiling", financialVisible ? formatMoney(entry.negativeBalanceCeiling, currency.value) : t("Restricted"), "Allowed negative wallet balance ceiling. Sensitive financial field.", "merchants.negativeBalanceCeiling"),
+                    detailItem("Payout bank", financialVisible ? String((entry.payoutBankDetailsJson ?? {}).bank ?? "—") : t("Restricted"), "Payout bank name.", "merchants.payoutBankDetailsJson.bank"),
+                    detailItem("Payout account", financialVisible ? String((entry.payoutBankDetailsJson ?? {}).iban ?? (entry.payoutBankDetailsJson ?? {}).accountNumber ?? "—") : t("Restricted"), "Payout IBAN/account. Sensitive financial field.", "merchants.payoutBankDetailsJson.iban"),
+                    detailItem("Payout holder", financialVisible ? String((entry.payoutBankDetailsJson ?? {}).holder ?? "—") : t("Restricted"), "Payout account holder.", "merchants.payoutBankDetailsJson.holder"),
                 ],
             },
         ];
@@ -360,7 +361,8 @@ const MerchantDetailPage = dc(() => {
             {
                 key: "grossVolume",
                 label: t("30-day gross volume"),
-                value: formatMoney(totals.grossVolume ?? 0, currency.value),
+                moneyAmount: totals.grossVolume ?? 0,
+                currency: currency.value,
                 subLabel: t("Last 30 days"),
                 badge: t("Gross"),
                 badgeTone: "info" as const,
@@ -368,7 +370,8 @@ const MerchantDetailPage = dc(() => {
             {
                 key: "netCredited",
                 label: t("Net credited"),
-                value: formatMoney(totals.netCredited ?? 0, currency.value),
+                moneyAmount: totals.netCredited ?? 0,
+                currency: currency.value,
                 subLabel: t("Settled to merchant"),
                 badge: t("Net"),
                 badgeTone: "success" as const,
@@ -376,7 +379,8 @@ const MerchantDetailPage = dc(() => {
             {
                 key: "commission",
                 label: t("Platform commission"),
-                value: formatMoney(totals.commission ?? 0, currency.value),
+                moneyAmount: totals.commission ?? 0,
+                currency: currency.value,
                 subLabel: t("Platform revenue"),
                 badge: t("Fee"),
                 badgeTone: "neutral" as const,
@@ -400,7 +404,8 @@ const MerchantDetailPage = dc(() => {
             {
                 key: "averageTicket",
                 label: t("Average ticket"),
-                value: formatMoney(totals.averageTicket ?? 0, currency.value),
+                moneyAmount: totals.averageTicket ?? 0,
+                currency: currency.value,
                 subLabel: t("Per attempt"),
                 badge: t("30D"),
                 badgeTone: "neutral" as const,
@@ -468,7 +473,7 @@ const MerchantDetailPage = dc(() => {
                 sortKey: "status",
                 headerTooltip: COLUMN_HELP.transactionStatus,
                 value: (row) => row.status,
-                Value: ({ row }: { row: MerchantTransaction }) => <StatusChip label={row.status} tone={statusTone(row.status)} size="x-small" />,
+                Value: ({ row }: { row: MerchantTransaction }) => <StatusBadge status={row.status} label={row.status} toneOverride={asBadgeTone(statusTone(row.status))} />,
             },
             {
                 key: "application",
@@ -508,7 +513,10 @@ const MerchantDetailPage = dc(() => {
                 Value: ({ row }: { row: MerchantTransaction }) => (
                     <ThemedView style={{ gap: "2px" }}>
                         <MoneyDisplay amount={row.netMerchantAmount} currency={row.currency} size="sm" />
-                        <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{t("fee")} {formatMoney(row.gatewayFeeAmount, row.currency)}</ThemedText>
+                        <ThemedView style={{ flexDirection: "row", gap: "4px", alignItems: "baseline" }}>
+                            <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{t("fee")}</ThemedText>
+                            <MoneyDisplay amount={row.gatewayFeeAmount} currency={row.currency} size="sm" />
+                        </ThemedView>
                     </ThemedView>
                 ),
             });
@@ -529,7 +537,7 @@ const MerchantDetailPage = dc(() => {
             value: (row) => row.operatorCases[0]?.state ?? "",
             Value: ({ row }: { row: MerchantTransaction }) =>
                 row.operatorCases[0]
-                    ? <StatusChip label={`${row.operatorCases[0].priority} · ${row.operatorCases[0].state}`} tone={statusTone(row.operatorCases[0].state)} size="x-small" />
+                    ? <StatusBadge status={row.operatorCases[0].state} label={`${row.operatorCases[0].priority} · ${row.operatorCases[0].state}`} toneOverride={asBadgeTone(statusTone(row.operatorCases[0].state))} />
                     : <ThemedText style={{ opacity: 0.55 }}>—</ThemedText>,
         });
         return headers;
@@ -543,7 +551,7 @@ const MerchantDetailPage = dc(() => {
                     <ThemedText style={{ fontSize: "10px", opacity: 0.55, direction: "ltr" }}>{row.id}</ThemedText>
                 </ThemedView>
             ) },
-            { key: "status", label: "Status", sortKey: "status", headerTooltip: COLUMN_HELP.applicationStatus, value: (row) => row.status, Value: ({ row }: { row: MerchantApplicationRow }) => <StatusChip label={row.status} tone={statusTone(row.status)} size="x-small" /> },
+            { key: "status", label: "Status", sortKey: "status", headerTooltip: COLUMN_HELP.applicationStatus, value: (row) => row.status, Value: ({ row }: { row: MerchantApplicationRow }) => <StatusBadge status={row.status} label={row.status} toneOverride={asBadgeTone(statusTone(row.status))} /> },
             { key: "wallet", label: "Wallet", value: (row) => row.assignedWallet.id, Value: ({ row }: { row: MerchantApplicationRow }) => (
                 <ThemedView style={{ gap: "2px" }}>
                     <ThemedText style={{ fontSize: "12px" }}>{row.assignedWallet.currency}</ThemedText>
@@ -552,7 +560,7 @@ const MerchantDetailPage = dc(() => {
             ) },
             { key: "links", label: "Links / tokens", headerTooltip: COLUMN_HELP.applicationLinks, value: (row) => `${row.paymentLinkCount}/${row.accessTokenCount}`, Value: ({ row }: { row: MerchantApplicationRow }) => <ThemedText style={{ fontSize: "12px" }}>{row.paymentLinkCount} / {row.accessTokenCount}</ThemedText> },
             { key: "pos", label: "POS", value: (row) => String(row.posTerminalCount) },
-            { key: "railWhitelist", label: "Rails", headerTooltip: COLUMN_HELP.applicationRails, value: (row) => row.railWhitelistMode, Value: ({ row }: { row: MerchantApplicationRow }) => <StatusChip label={row.railWhitelistMode === "ALL" ? t("All rails") : row.railWhitelistMode === "NONE" ? t("No rails") : `${row.railWhitelistCount} ${t("rails")}`} tone="neutral" size="x-small" /> },
+            { key: "railWhitelist", label: "Rails", headerTooltip: COLUMN_HELP.applicationRails, value: (row) => row.railWhitelistMode, Value: ({ row }: { row: MerchantApplicationRow }) => <StatusBadge status={row.railWhitelistMode} label={row.railWhitelistMode === "ALL" ? t("All rails") : row.railWhitelistMode === "NONE" ? t("No rails") : `${row.railWhitelistCount} ${t("rails")}`} toneOverride="neutral" /> },
             { key: "domains", label: "Domains", headerTooltip: COLUMN_HELP.applicationDomains, value: (row) => String(row.redirectDomainCount) },
             { key: "createdAt", label: "Created", sortKey: "createdAt", value: (row) => row.createdAt, Value: ({ row }: { row: MerchantApplicationRow }) => <ThemedText style={{ fontSize: "11px" }}>{formatDateTime(row.createdAt)}</ThemedText> },
         ];
@@ -573,7 +581,7 @@ const MerchantDetailPage = dc(() => {
         const headers: TableHeader<MerchantWalletRow>[] = [
             { key: "id", label: "Wallet", headerTooltip: COLUMN_HELP.walletId, value: (row) => row.id, Value: ({ row }: { row: MerchantWalletRow }) => <ThemedText style={{ fontSize: "11px", direction: "ltr" }}>{row.id}</ThemedText> },
             { key: "currency", label: "Currency", sortKey: "currency", value: (row) => row.currency },
-            { key: "status", label: "Status", sortKey: "status", value: (row) => row.status, Value: ({ row }: { row: MerchantWalletRow }) => <StatusChip label={row.status} tone={statusTone(row.status)} size="x-small" /> },
+            { key: "status", label: "Status", sortKey: "status", value: (row) => row.status, Value: ({ row }: { row: MerchantWalletRow }) => <StatusBadge status={row.status} label={row.status} toneOverride={asBadgeTone(statusTone(row.status))} /> },
         ];
         if (canFinancial.value) {
             headers.push(
@@ -593,29 +601,29 @@ const MerchantDetailPage = dc(() => {
     const cashoutHeaders: TableHeader<MerchantCashout>[] = [
         { key: "id", label: "Cash-out", value: (row) => row.id, Value: ({ row }) => <ThemedText style={{ fontSize: "11px", direction: "ltr" }}>{row.id}</ThemedText> },
         { key: "amount", label: "Amount", sortKey: "amount", value: (row) => row.amount, Value: ({ row }) => <MoneyDisplay amount={row.amount} currency={row.currency} size="sm" /> },
-        { key: "state", label: "State", sortKey: "state", value: (row) => row.state, Value: ({ row }) => <StatusChip label={row.state} tone={statusTone(row.state)} size="x-small" /> },
+        { key: "state", label: "State", sortKey: "state", value: (row) => row.state, Value: ({ row }) => <StatusBadge status={row.state} label={row.state} toneOverride={asBadgeTone(statusTone(row.state))} /> },
         { key: "wallet", label: "Wallet", value: (row) => row.wallet.id, Value: ({ row }) => <ThemedText style={{ fontSize: "11px", direction: "ltr" }}>{row.wallet.id}</ThemedText> },
         { key: "destination", label: "Destination", headerTooltip: COLUMN_HELP.cashoutDestination, value: (row) => JSON.stringify(row.destination), Value: ({ row }) => <ThemedText style={{ fontSize: "11px" }}>{String(row.destination.bank ?? row.destination.bankName ?? "—")} · {String(row.destination.account ?? row.destination.accountNumber ?? row.destination.iban ?? "—")}</ThemedText> },
-        { key: "adjustment", label: "Adjustment", value: (row) => row.adjustment?.state ?? "", Value: ({ row }) => row.adjustment ? <StatusChip label={row.adjustment.state} tone={statusTone(row.adjustment.state)} size="x-small" /> : <ThemedText style={{ opacity: 0.55 }}>—</ThemedText> },
+        { key: "adjustment", label: "Adjustment", value: (row) => row.adjustment?.state ?? "", Value: ({ row }) => row.adjustment ? <StatusBadge status={row.adjustment.state} label={row.adjustment.state} toneOverride={asBadgeTone(statusTone(row.adjustment.state))} /> : <ThemedText style={{ opacity: 0.55 }}>—</ThemedText> },
         { key: "createdAt", label: "Created", sortKey: "createdAt", value: (row) => row.createdAt, Value: ({ row }) => <ThemedText style={{ fontSize: "11px" }}>{formatDateTime(row.createdAt)}</ThemedText> },
     ];
 
     const disputeHeaders: TableHeader<MerchantDispute>[] = [
         { key: "externalDisputeRef", label: "Dispute", value: (row) => row.externalDisputeRef, Value: ({ row }) => <ThemedView style={{ gap: "2px" }}><ThemedText style={{ fontSize: "11px", direction: "ltr" }}>{row.externalDisputeRef}</ThemedText><ThemedText style={{ fontSize: "10px", opacity: 0.55, direction: "ltr" }}>{row.attempt.reference}</ThemedText></ThemedView> },
         { key: "amount", label: "Amount", sortKey: "amount", value: (row) => row.amount, Value: ({ row }) => <MoneyDisplay amount={row.amount} currency={row.currency} size="sm" /> },
-        { key: "status", label: "Status", sortKey: "status", value: (row) => row.status, Value: ({ row }) => <StatusChip label={row.status} tone={statusTone(row.status)} size="x-small" /> },
+        { key: "status", label: "Status", sortKey: "status", value: (row) => row.status, Value: ({ row }) => <StatusBadge status={row.status} label={row.status} toneOverride={asBadgeTone(statusTone(row.status))} /> },
         { key: "reason", label: "Reason", headerTooltip: COLUMN_HELP.disputeReason, value: (row) => row.reasonCode ?? "" },
         { key: "rail", label: "Rail / gateway", value: (row) => `${row.rail.code} ${row.gateway.code}` },
         { key: "openedAt", label: "Opened", sortKey: "openedAt", value: (row) => row.openedAt, Value: ({ row }) => <ThemedText style={{ fontSize: "11px" }}>{formatDateTime(row.openedAt)}</ThemedText> },
         { key: "evidenceDueAt", label: "Evidence due", sortKey: "evidenceDueAt", value: (row) => row.evidenceDueAt ?? "", Value: ({ row }) => <ThemedText style={{ fontSize: "11px" }}>{formatDateTime(row.evidenceDueAt)}</ThemedText> },
-        { key: "adjustment", label: "Adjustment", value: (row) => row.adjustment?.state ?? "", Value: ({ row }) => row.adjustment ? <StatusChip label={row.adjustment.state} tone={statusTone(row.adjustment.state)} size="x-small" /> : <ThemedText style={{ opacity: 0.55 }}>—</ThemedText> },
+        { key: "adjustment", label: "Adjustment", value: (row) => row.adjustment?.state ?? "", Value: ({ row }) => row.adjustment ? <StatusBadge status={row.adjustment.state} label={row.adjustment.state} toneOverride={asBadgeTone(statusTone(row.adjustment.state))} /> : <ThemedText style={{ opacity: 0.55 }}>—</ThemedText> },
     ];
 
     const adjustmentHeaders: TableHeader<MerchantAdjustment>[] = [
         { key: "id", label: "Adjustment", value: (row) => row.id, Value: ({ row }) => <ThemedText style={{ fontSize: "11px", direction: "ltr" }}>{row.id}</ThemedText> },
         { key: "type", label: "Type", sortKey: "type", value: (row) => row.type },
         { key: "amount", label: "Amount", sortKey: "amount", value: (row) => row.amount, Value: ({ row }) => <MoneyDisplay amount={row.amount} currency={row.currency} size="sm" /> },
-        { key: "state", label: "State", sortKey: "state", value: (row) => row.state, Value: ({ row }) => <StatusChip label={row.state} tone={statusTone(row.state)} size="x-small" /> },
+        { key: "state", label: "State", sortKey: "state", value: (row) => row.state, Value: ({ row }) => <StatusBadge status={row.state} label={row.state} toneOverride={asBadgeTone(statusTone(row.state))} /> },
         { key: "attempt", label: "Source attempt", value: (row) => row.sourceAttempt?.reference ?? "", Value: ({ row }) => <ThemedText style={{ fontSize: "11px", direction: "ltr" }}>{row.sourceAttempt?.reference ?? "—"}</ThemedText> },
         { key: "dispute", label: "Dispute", value: (row) => row.dispute?.externalDisputeRef ?? "" },
         { key: "reason", label: "Reason", headerTooltip: COLUMN_HELP.adjustmentReason, value: (row) => row.reason },
@@ -625,8 +633,8 @@ const MerchantDetailPage = dc(() => {
 
     const notificationHeaders: TableHeader<MerchantNotification>[] = [
         { key: "templateCode", label: "Template", sortKey: "templateCode", value: (row) => row.templateCode },
-        { key: "channel", label: "Channel", sortKey: "channel", value: (row) => `${row.channel} ${row.lang}`, Value: ({ row }) => <StatusChip label={`${row.channel} · ${row.lang}`} tone="neutral" size="x-small" /> },
-        { key: "status", label: "Status", sortKey: "status", value: (row) => row.status, Value: ({ row }) => <StatusChip label={row.status} tone={statusTone(row.status)} size="x-small" /> },
+        { key: "channel", label: "Channel", sortKey: "channel", value: (row) => `${row.channel} ${row.lang}`, Value: ({ row }) => <StatusBadge status={row.channel} label={`${row.channel} · ${row.lang}`} toneOverride="neutral" /> },
+        { key: "status", label: "Status", sortKey: "status", value: (row) => row.status, Value: ({ row }) => <StatusBadge status={row.status} label={row.status} toneOverride={asBadgeTone(statusTone(row.status))} /> },
         { key: "attempts", label: "Attempts", sortKey: "attempts", value: (row) => String(row.attempts) },
         { key: "addressMasked", label: "Recipient", headerTooltip: COLUMN_HELP.notificationRecipient, value: (row) => row.addressMasked },
         { key: "nextAttemptAt", label: "Next attempt", value: (row) => row.nextAttemptAt ?? "", Value: ({ row }) => <ThemedText style={{ fontSize: "11px" }}>{formatDateTime(row.nextAttemptAt)}</ThemedText> },
@@ -703,12 +711,12 @@ const MerchantDetailPage = dc(() => {
                     />
 
                     <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                        <span title={statusHelp.value.meaning}><StatusChip label={statusHelp.value.label} tone={statusHelp.value.tone} /></span>
-                        {entry.kybStatus && <StatusChip label={kybStatusHelp(entry.kybStatus).label} tone={kybStatusHelp(entry.kybStatus).tone} />}
-                        {entry.riskTier && <StatusChip label={riskHelp(entry.riskTier).label} tone={riskHelp(entry.riskTier).tone} />}
-                        <StatusChip label={`v${entry.version}`} tone="neutral" size="small" />
-                        {entry.pendingApprovalCount > 0 && <StatusChip label={`${entry.pendingApprovalCount} ${t("pending changes")}`} tone="warning" />}
-                        {entry.redactedFields.length > 0 && <StatusChip label={t("Some fields restricted")} tone="neutral" size="small" />}
+                        <span title={statusHelp.value.meaning}><StatusBadge status={entry.status} label={statusHelp.value.label} toneOverride={asBadgeTone(statusHelp.value.tone)} /></span>
+                        {entry.kybStatus && <StatusBadge status={entry.kybStatus} label={kybStatusHelp(entry.kybStatus).label} toneOverride={asBadgeTone(kybStatusHelp(entry.kybStatus).tone)} />}
+                        {entry.riskTier && <StatusBadge status={entry.riskTier} label={riskHelp(entry.riskTier).label} toneOverride={asBadgeTone(riskHelp(entry.riskTier).tone)} />}
+                        <StatusBadge status="version" label={`v${entry.version}`} toneOverride="neutral" />
+                        {entry.pendingApprovalCount > 0 && <StatusBadge status="pending" label={`${entry.pendingApprovalCount} ${t("pending changes")}`} toneOverride="warning" />}
+                        {entry.redactedFields.length > 0 && <StatusBadge status="restricted" label={t("Some fields restricted")} toneOverride="neutral" />}
                     </ThemedView>
 
                     <SurfaceCard>
@@ -749,15 +757,17 @@ const MerchantDetailPage = dc(() => {
 
                     {activeTab.value === "all" && areHelpPanelsVisible() && <SurfaceCard><SurfaceCardText><MerchantHelpPanel /></SurfaceCardText></SurfaceCard>}
 
-                    {show("details") && (
-                        <FieldsSections
-                            sections={sections.value}
-                            collapsible={activeTab.value === "all"}
-                            storageKeyPrefix={`merchant:${merchantId.value}:fields`}
-                            defaultExpanded={activeTab.value === "all" ? false : true}
-                            command={sectionCommand.value}
-                        />
-                    )}
+                    {show("details") && sections.value.map((section) => (
+                        <SurfaceCard key={section.title}>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{section.title}</ThemedText>
+                                {("description" in section && section.description) && (
+                                    <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{section.description}</ThemedText>
+                                )}
+                                <DescriptionList columns={2} items={section.items} />
+                            </SurfaceCardText>
+                        </SurfaceCard>
+                    ))}
 
                     {show("transactions") && (
                         <>
@@ -775,9 +785,9 @@ const MerchantDetailPage = dc(() => {
                             <MetricStrip items={healthItems.value} />
                         )}
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", marginTop: "10px" }}>
-                            <StatusChip label={`${t("Ledger balance")}: ${formatMoney(stats.value?.walletBalance?.balance ?? balance.value, currency.value)}`} tone={Number(stats.value?.walletBalance?.balance ?? balance.value ?? 0) < 0 ? "error" : "success"} />
-                            <StatusChip label={`${t("Negative ceiling")}: ${formatMoney(stats.value?.negativeBalanceCeiling ?? entry.negativeBalanceCeiling, currency.value)}`} tone="neutral" />
-                            <StatusChip label={`${t("Next KYB review")}: ${formatDateTime(stats.value?.nextKybReviewAt ?? entry.nextKybReviewAt)}`} tone="neutral" />
+                            <StatusBadge status="ledger balance" label={`${t("Ledger balance")}: ${formatMoney(stats.value?.walletBalance?.balance ?? balance.value, currency.value)}`} toneOverride={Number(stats.value?.walletBalance?.balance ?? balance.value ?? 0) < 0 ? "danger" : "success"} />
+                            <StatusBadge status="negative ceiling" label={`${t("Negative ceiling")}: ${formatMoney(stats.value?.negativeBalanceCeiling ?? entry.negativeBalanceCeiling, currency.value)}`} toneOverride="neutral" />
+                            <StatusBadge status="next review" label={`${t("Next KYB review")}: ${formatDateTime(stats.value?.nextKybReviewAt ?? entry.nextKybReviewAt)}`} toneOverride="neutral" />
                         </ThemedView>
                     </CollapsibleSection>
 
@@ -917,9 +927,9 @@ const MerchantDetailPage = dc(() => {
                                     <SurfaceCard key={change.id} variant="tonal">
                                         <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
                                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                                                <StatusChip label={change.state} tone={statusTone(change.state)} size="x-small" />
+                                                <StatusBadge status={change.state} label={change.state} toneOverride={asBadgeTone(statusTone(change.state))} />
                                                 <ThemedText style={{ fontSize: "12px" }}>{change.maker?.email ?? change.makerUserId}</ThemedText>
-                                                {change.baseVersion && <StatusChip label={`base v${change.baseVersion}`} tone="neutral" size="x-small" />}
+                                                {change.baseVersion && <StatusBadge status="base version" label={`base v${change.baseVersion}`} toneOverride="neutral" />}
                                             </ThemedView>
                                             {change.makerReason && <ThemedText style={{ fontSize: "12px" }}>{change.makerReason}</ThemedText>}
                                             <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{formatDateTime(change.createdAt)} · {change.mode}</ThemedText>
@@ -939,8 +949,8 @@ const MerchantDetailPage = dc(() => {
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("AML cases")}</ThemedText>
                                 {entry.amlCases.map((amlCase) => (
                                     <ThemedView key={amlCase.id} style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                                        <StatusChip label={amlCase.status} tone={statusTone(amlCase.status)} size="x-small" />
-                                        <StatusChip label={amlCase.severity} tone={statusTone(amlCase.severity)} size="x-small" />
+                                        <StatusBadge status={amlCase.status} label={amlCase.status} toneOverride={asBadgeTone(statusTone(amlCase.status))} />
+                                        <StatusBadge status={amlCase.severity} label={amlCase.severity} toneOverride={asBadgeTone(statusTone(amlCase.severity))} />
                                         <ThemedText style={{ fontSize: "12px" }}>{amlCase.triggerReason}</ThemedText>
                                         <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{formatDateTime(amlCase.createdAt)}</ThemedText>
                                     </ThemedView>
@@ -958,7 +968,7 @@ const MerchantDetailPage = dc(() => {
                                 </ThemedView>
                                 {(entry.joinRequests ?? []).map((row) => (
                                     <ThemedView key={row.id} style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                                        <StatusChip label={row.status} tone={statusTone(row.status)} size="x-small" />
+                                        <StatusBadge status={row.status} label={row.status} toneOverride={asBadgeTone(statusTone(row.status))} />
                                         <ThemedText style={{ fontSize: "12px", direction: "ltr" }}>{row.id}</ThemedText>
                                         <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{formatDateTime(row.createdAt)}</ThemedText>
                                         <VBtn size="x-small" variant="text" onClick={() => void router.push({ name: "JoinRequestDetail", params: { id: row.id } })}>
@@ -979,8 +989,8 @@ const MerchantDetailPage = dc(() => {
                                 </ThemedView>
                                 {entry.kybDocuments.map((document) => (
                                     <ThemedView key={document.id} style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                                        <StatusChip label={document.status} tone={statusTone(document.status)} size="x-small" />
-                                        <StatusChip label={document.avStatus} tone={statusTone(document.avStatus)} size="x-small" />
+                                        <StatusBadge status={document.status} label={document.status} toneOverride={asBadgeTone(statusTone(document.status))} />
+                                        <StatusBadge status={document.avStatus} label={document.avStatus} toneOverride={asBadgeTone(statusTone(document.avStatus))} />
                                         <ThemedText style={{ fontSize: "12px" }}>{document.docType} · {document.originalFileName || document.id}</ThemedText>
                                         <VBtn size="x-small" variant="text" onClick={() => void router.push({ name: "KybReviewDetail", params: { id: document.id } })}>{t("Open")}</VBtn>
                                     </ThemedView>
@@ -995,8 +1005,8 @@ const MerchantDetailPage = dc(() => {
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Beneficial owners")}</ThemedText>
                                 {entry.beneficialOwners.map((owner) => (
                                     <ThemedView key={owner.id} style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                                        <StatusChip label={owner.screeningStatus} tone={statusTone(owner.screeningStatus)} size="x-small" />
-                                        {owner.pepDeclared && <StatusChip label="PEP" tone="error" size="x-small" />}
+                                        <StatusBadge status={owner.screeningStatus} label={owner.screeningStatus} toneOverride={asBadgeTone(statusTone(owner.screeningStatus))} />
+                                        {owner.pepDeclared && <StatusBadge status="PEP" label="PEP" toneOverride="danger" />}
                                         <ThemedText style={{ fontSize: "12px" }}>{owner.fullNameEn || owner.fullNameAr} · {owner.role} · {owner.ownershipPercent ?? "—"}%</ThemedText>
                                     </ThemedView>
                                 ))}
@@ -1078,9 +1088,9 @@ const MerchantDetailPage = dc(() => {
                             </ThemedView>
                             {entry.fieldHistory.length === 0 && <ThemedText style={{ opacity: 0.6 }}>{t("No field changes recorded")}</ThemedText>}
                             {entry.fieldHistory.slice(0, 8).map((change) => (
-                                <ThemedView key={change.id} style={{ gap: "2px", borderBottom: "1px solid rgba(100,116,139,0.12)", paddingBottom: "6px" }}>
+                                <ThemedView key={change.id} style={{ gap: "2px", borderBottom: "1px solid var(--pg-border-subtle)", paddingBottom: "6px" }}>
                                     <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                                        <StatusChip label={change.fieldName} tone={change.redacted ? "neutral" : "info"} size="x-small" />
+                                        <StatusBadge status={change.fieldName} label={change.fieldName} toneOverride={change.redacted ? "neutral" : "info"} />
                                         <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{change.actorEmail || change.actorId} · {formatDateTime(change.createdAt)} · {change.source}</ThemedText>
                                     </ThemedView>
                                     <ThemedText style={{ fontSize: "12px", opacity: 0.8 }}>
@@ -1119,25 +1129,27 @@ const MerchantDetailPage = dc(() => {
                     }}
                 />
                 <FormModal
-                modelValue={withdrawOpen.value}
-                onUpdate:modelValue={(value: boolean) => (withdrawOpen.value = value)}
-                title={t("Withdraw pending change")}
-                size="md"
-            >
-<ThemedText style={{ fontSize: "13px" }}>{withdrawTarget.value?.id}</ThemedText>
-                            <VTextarea v-model={withdrawReason.value} label={t("Withdrawal reason (optional)")} rows={3} autoGrow />
-                            <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                                <VBtn variant="text" onClick={() => (withdrawOpen.value = false)}>{t("Cancel")}</VBtn>
-                                <VBtn color="error" onClick={() => void withdraw()}>{t("Withdraw")}</VBtn>
-                            </ThemedView>
-            </FormModal>
-                <FormModal
-                modelValue={historyOpen.value}
-                onUpdate:modelValue={(value: boolean) => (historyOpen.value = value)}
-                title={"Details"}
-                size="lg"
-            >
-<ApiTable<MerchantDetailChange>
+                    modelValue={withdrawOpen.value}
+                    onUpdate:modelValue={(value: boolean) => (withdrawOpen.value = value)}
+                    title={t("Withdraw pending change")}
+                    size="md"
+                    onSubmit={() => void withdraw()}
+                    submitLabel={t("Withdraw")}
+                    cancelLabel={t("Cancel")}
+                    danger
+                >
+                    <ThemedText style={{ fontSize: "13px" }}>{withdrawTarget.value?.id}</ThemedText>
+                    <FormField label={t("Withdrawal reason (optional)")}>
+                        <VTextarea v-model={withdrawReason.value} rows={3} autoGrow />
+                    </FormField>
+                </FormModal>
+                <SlideOverDrawer
+                    modelValue={historyOpen.value}
+                    onUpdate:modelValue={(value: boolean) => (historyOpen.value = value)}
+                    title={t("Field history")}
+                    width={760}
+                >
+                    <ApiTable<MerchantDetailChange>
                                 title={t("Field history")}
                                 url={urlsMap.merchantDetailChanges(merchantId.value)}
                                 localSearch={false}
@@ -1170,7 +1182,7 @@ const MerchantDetailPage = dc(() => {
                                     });
                                 }}
                             />
-            </FormModal>
+                </SlideOverDrawer>
             </ScreenContainer>
         );
     };

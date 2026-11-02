@@ -1,8 +1,9 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
-import { VBtn, VChip, VIcon } from "vuetify/components";
+import { VBtn, VIcon } from "vuetify/components";
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
+import { MetaPill } from "@/components/ui";
 import type { RailDescriptor } from "@/components/renderers/types";
 
 export type PerRailInstructionsBannerProps = {
@@ -76,10 +77,12 @@ export const PerRailInstructionsBanner = dc(
 
             return (
                 <div
+                    role="region"
+                    aria-label={title}
                     style={{
-                        border: "1px solid rgba(15,107,255,0.22)",
-                        background: "rgba(15,107,255,0.06)",
-                        borderRadius: "12px",
+                        border: "1px solid var(--pg-border-subtle)",
+                        background: "var(--pg-bg-surface-subtle)",
+                        borderRadius: "var(--pg-radius-md)",
                         padding: "12px 14px",
                         display: "flex",
                         flexDirection: "column",
@@ -87,8 +90,15 @@ export const PerRailInstructionsBanner = dc(
                     }}
                 >
                     <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px" }}>
-                        <VIcon icon="mdi-lightbulb-on-outline" color="primary" size={"22px"} />
-                        <ThemedText type="defaultSemiBold" style={{ flex: 1, fontSize: "14px" }}>
+                        <VIcon
+                            icon="mdi-lightbulb-on-outline"
+                            size={22}
+                            style={{ color: "var(--pg-accent-interactive)" }}
+                        />
+                        <ThemedText
+                            type="defaultSemiBold"
+                            style={{ flex: 1, fontSize: "14px", color: "var(--pg-ink-primary)" }}
+                        >
                             {title}
                         </ThemedText>
                         <VBtn
@@ -96,6 +106,7 @@ export const PerRailInstructionsBanner = dc(
                             variant="text"
                             size="small"
                             aria-label={expandLabel}
+                            aria-expanded={expanded.value ? "true" : "false"}
                             onClick={() => (expanded.value = !expanded.value)}
                         >
                             <VIcon icon={expanded.value ? "mdi-chevron-up" : "mdi-chevron-down"} />
@@ -107,7 +118,10 @@ export const PerRailInstructionsBanner = dc(
                             aria-label={helpLabel}
                             onClick={() => props.onOpenHelp?.()}
                         >
-                            <VIcon icon="mdi-help-circle-outline" color="primary" />
+                            <VIcon
+                                icon="mdi-help-circle-outline"
+                                style={{ color: "var(--pg-accent-interactive)" }}
+                            />
                         </VBtn>
                     </ThemedView>
 
@@ -115,20 +129,22 @@ export const PerRailInstructionsBanner = dc(
                         <ThemedView style={{ gap: "12px" }}>
                             {prerequisites.value.length > 0 && (
                                 <ThemedView style={{ gap: "6px" }}>
-                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "12px", opacity: 0.75 }}>
+                                    <ThemedText
+                                        type="defaultSemiBold"
+                                        style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}
+                                    >
                                         {prerequisitesLabel}
                                     </ThemedText>
                                     <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "6px" }}>
                                         {prerequisites.value.map((item, index) => (
-                                            <VChip
+                                            <MetaPill
                                                 key={`${item}-${index}`}
                                                 size="small"
                                                 variant="tonal"
-                                                color="primary"
                                                 prependIcon="mdi-check-circle-outline"
                                             >
                                                 {item}
-                                            </VChip>
+                                            </MetaPill>
                                         ))}
                                     </ThemedView>
                                 </ThemedView>
@@ -136,7 +152,10 @@ export const PerRailInstructionsBanner = dc(
 
                             {steps.value.length > 0 && (
                                 <ThemedView style={{ gap: "8px" }}>
-                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "12px", opacity: 0.75 }}>
+                                    <ThemedText
+                                        type="defaultSemiBold"
+                                        style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}
+                                    >
                                         {stepsLabel}
                                     </ThemedText>
                                     {steps.value.map((step, index) => (
@@ -149,19 +168,26 @@ export const PerRailInstructionsBanner = dc(
                                                     width: "24px",
                                                     height: "24px",
                                                     minWidth: "24px",
-                                                    borderRadius: "999px",
-                                                    background: "rgb(var(--v-theme-primary))",
-                                                    color: "white",
+                                                    borderRadius: "var(--pg-radius-sm)",
+                                                    background: "var(--pg-accent-primary)",
+                                                    color: "var(--pg-bg-surface)",
                                                     display: "flex",
                                                     alignItems: "center",
                                                     justifyContent: "center",
                                                     fontSize: "12px",
-                                                    fontWeight: "800",
+                                                    fontWeight: 600,
                                                 }}
                                             >
                                                 {index + 1}
                                             </span>
-                                            <ThemedText style={{ fontSize: "13px", lineHeight: "1.7", flex: 1 }}>
+                                            <ThemedText
+                                                style={{
+                                                    fontSize: "13px",
+                                                    lineHeight: 1.7,
+                                                    flex: 1,
+                                                    color: "var(--pg-ink-secondary)",
+                                                }}
+                                            >
                                                 {step}
                                             </ThemedText>
                                         </ThemedView>

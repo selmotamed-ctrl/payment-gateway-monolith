@@ -7,18 +7,19 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import { MetricStrip } from "@/components/ui/MetricStrip";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { DescriptionList } from "@/components/ui/DescriptionList";
 type Liquidity = {
     currency?: string;
     treasuryBalance?: string;
@@ -105,13 +106,6 @@ const LiquidityPage = dc(() => {
 
     const currency = () => data.value?.currency ?? "LYD";
 
-    const line = (label: string, value: string | undefined, sign = false) => (
-        <ThemedView key={label} style={{ flexDirection: "row", justifyContent: "space-between", gap: "12px" }}>
-            <ThemedText style={{ fontSize: "13px" }}>{t(label)}</ThemedText>
-            <MoneyDisplay amount={value ?? "0"} currency={currency()} size="lg" colorSign={sign} />
-        </ThemedView>
-    );
-
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
@@ -148,69 +142,104 @@ const LiquidityPage = dc(() => {
                             { key: "cover", label: t("Treasury Cover"), value: data.value?.coverRatio ?? "-", badge: Number(data.value?.coverRatio ?? 1) < 1 ? t("Failed") : t("Passed"), badgeTone: Number(data.value?.coverRatio ?? 1) < 1 ? "danger" : "success" },
                         ]} />
 
-                        <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "18px" }}>
-                        <SurfaceCard style={{ flex: "1 1 340px" }}>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                                <ThemedText type="defaultSemiBold">{t("Cash-Out Queue")}</ThemedText>
-                                {line("Pending", data.value?.cashoutQueue?.pending)}
-                                {line("Processing", data.value?.cashoutQueue?.processing)}
-                                {line("Complete", data.value?.cashoutQueue?.completed)}
-                                {line("Amount Due", data.value?.cashoutQueue?.nextDayDemand)}
-                            </SurfaceCardText>
-                        </SurfaceCard>
+                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "18px" }}>
+                            <SurfaceCard title={t("Cash-Out Queue")}>
+                                <DescriptionList
+                                    items={[
+                                        { label: t("Pending"), value: data.value?.cashoutQueue?.pending ?? "0", money: true, currency: currency() },
+                                        { label: t("Processing"), value: data.value?.cashoutQueue?.processing ?? "0", money: true, currency: currency() },
+                                        { label: t("Complete"), value: data.value?.cashoutQueue?.completed ?? "0", money: true, currency: currency() },
+                                        { label: t("Amount Due"), value: data.value?.cashoutQueue?.nextDayDemand ?? "0", money: true, currency: currency() },
+                                    ]}
+                                />
+                            </SurfaceCard>
 
-                        <SurfaceCard style={{ flex: "1 1 340px" }}>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                                <ThemedText type="defaultSemiBold">{t("Holds And Reserves")}</ThemedText>
-                                {line("Holds And Reserves", data.value?.holdsAndReserves?.amlHold)}
-                                {line("Chargeback", data.value?.holdsAndReserves?.chargebackReserve)}
-                                {line("Suspense", data.value?.holdsAndReserves?.suspense)}
-                                {line("Commission Receivable", data.value?.receivables?.commissionReceivable)}
-                                <ThemedView style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                                    <ThemedText style={{ fontSize: "13px" }}>{t("Oldest")}</ThemedText>
-                                    <StatusChip
-                                        label={`${data.value?.holdsAndReserves?.oldestItemAgeDays ?? 0}d`}
-                                        tone="warning"
-                                    />
-                                </ThemedView>
-                            </SurfaceCardText>
-                        </SurfaceCard>
+                            <SurfaceCard title={t("Holds And Reserves")}>
+                                <DescriptionList
+                                    items={[
+                                        { label: t("Holds And Reserves"), value: data.value?.holdsAndReserves?.amlHold ?? "0", money: true, currency: currency() },
+                                        { label: t("Chargeback"), value: data.value?.holdsAndReserves?.chargebackReserve ?? "0", money: true, currency: currency() },
+                                        { label: t("Suspense"), value: data.value?.holdsAndReserves?.suspense ?? "0", money: true, currency: currency() },
+                                        { label: t("Commission Receivable"), value: data.value?.receivables?.commissionReceivable ?? "0", money: true, currency: currency() },
+                                        {
+                                            label: t("Oldest"),
+                                            value: (
+                                                <StatusBadge
+                                                    status="OLDEST_ITEM"
+                                                    label={`${data.value?.holdsAndReserves?.oldestItemAgeDays ?? 0}d`}
+                                                    toneOverride="warning"
+                                                    showDot={false}
+                                                />
+                                            ),
+                                        },
+                                    ]}
+                                />
+                            </SurfaceCard>
 
-                        <SurfaceCard style={{ flex: "1 1 100%" }}>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                                <ThemedText type="defaultSemiBold">{t("Clearing by gateway")}</ThemedText>
-                                {(data.value?.clearingByGateway ?? []).length === 0 && <EmptyState title={t("No gateway clearing balances")} description={t("No gateway clearing balances are available for this snapshot.")} />}
-                                {(data.value?.clearingByGateway ?? []).map((row) => (
-                                    <ThemedView
-                                        key={row.gatewayId}
-                                        style={{ flexDirection: "row", gap: "14px", alignItems: "center", fontSize: "13px", borderBottom: "1px solid rgba(100,116,139,0.12)", paddingBottom: "6px" }}
-                                    >
-                                        <ThemedView style={{ flex: 1, gap: "2px" }}>
-                                            <MonoRef value={row.gatewayCode} copyable={false} />
-                                            <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{row.gatewayName}</ThemedText>
-                                        </ThemedView>
-                                        <MoneyDisplay amount={row.balance} currency={currency()} size="lg" />
-                                        <span style={{ opacity: 0.55 }}>{t("T+0")}: {row.t0}</span>
-                                        <span style={{ opacity: 0.55 }}>{t("T+1")}: {row.t1}</span>
-                                        <span style={{ opacity: 0.55 }}>{t("T+2")}: {row.t2}</span>
-                                        <span style={{ opacity: 0.55 }}>{t("Older")}: {row.older}</span>
-                                    </ThemedView>
-                                ))}
-                            </SurfaceCardText>
-                        </SurfaceCard>
+                            <SurfaceCard title={t("Clearing by gateway")} noPadding>
+                                {(data.value?.clearingByGateway ?? []).length === 0 ? (
+                                    <EmptyState title={t("No gateway clearing balances")} description={t("No gateway clearing balances are available for this snapshot.")} />
+                                ) : (
+                                    <div class="pg-unified-table" style={{ overflowX: "auto" }}>
+                                        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                                            <thead>
+                                                <tr>
+                                                    <th style={{ textAlign: "start" }}>{t("Gateway")}</th>
+                                                    <th style={{ textAlign: "end" }}>{t("Balance")}</th>
+                                                    <th style={{ textAlign: "end" }}>{t("T+0")}</th>
+                                                    <th style={{ textAlign: "end" }}>{t("T+1")}</th>
+                                                    <th style={{ textAlign: "end" }}>{t("T+2")}</th>
+                                                    <th style={{ textAlign: "end" }}>{t("Older")}</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {(data.value?.clearingByGateway ?? []).map((row) => (
+                                                    <tr key={row.gatewayId}>
+                                                        <td>
+                                                            <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                                                <MonoRef value={row.gatewayCode} copyable={false} />
+                                                                <span style={{ fontSize: "10px", color: "var(--pg-ink-muted)" }}>{row.gatewayName}</span>
+                                                            </div>
+                                                        </td>
+                                                        <td style={{ textAlign: "end" }}><MoneyDisplay amount={row.balance} currency={currency()} size="sm" /></td>
+                                                        <td style={{ textAlign: "end" }}><MoneyDisplay amount={row.t0} currency={currency()} size="sm" showCurrency={false} /></td>
+                                                        <td style={{ textAlign: "end" }}><MoneyDisplay amount={row.t1} currency={currency()} size="sm" showCurrency={false} /></td>
+                                                        <td style={{ textAlign: "end" }}><MoneyDisplay amount={row.t2} currency={currency()} size="sm" showCurrency={false} /></td>
+                                                        <td style={{ textAlign: "end" }}><MoneyDisplay amount={row.older} currency={currency()} size="sm" showCurrency={false} /></td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </SurfaceCard>
 
-                        <SurfaceCard>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                                <ThemedText type="defaultSemiBold">{t("Settlement ageing")}</ThemedText>
-                                {(data.value?.clearingAgeing ?? []).map((row) => (
-                                    <ThemedView key={row.bucket} style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", fontSize: "13px" }}>
-                                        <ThemedText>{row.bucket}</ThemedText>
-                                        <ThemedText>{row.count} {t("attempts")}</ThemedText>
-                                        <MoneyDisplay amount={row.amount} currency={currency()} size="md" />
-                                    </ThemedView>
-                                ))}
-                            </SurfaceCardText>
-                        </SurfaceCard>
+                            <SurfaceCard title={t("Settlement ageing")} noPadding>
+                                {(data.value?.clearingAgeing ?? []).length === 0 ? (
+                                    <EmptyState title={t("No Data Found")} description={t("No settlement ageing buckets are available for this snapshot.")} />
+                                ) : (
+                                    <div class="pg-unified-table" style={{ overflowX: "auto" }}>
+                                        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                                            <thead>
+                                                <tr>
+                                                    <th style={{ textAlign: "start" }}>{t("Bucket")}</th>
+                                                    <th style={{ textAlign: "end" }}>{t("Attempts")}</th>
+                                                    <th style={{ textAlign: "end" }}>{t("Amount")}</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {(data.value?.clearingAgeing ?? []).map((row) => (
+                                                    <tr key={row.bucket}>
+                                                        <td>{row.bucket}</td>
+                                                        <td class="pg-tabular" style={{ textAlign: "end" }}>{row.count} {t("attempts")}</td>
+                                                        <td style={{ textAlign: "end" }}><MoneyDisplay amount={row.amount} currency={currency()} size="sm" /></td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </SurfaceCard>
                         </ThemedView>
                     </ThemedView>
                 )}

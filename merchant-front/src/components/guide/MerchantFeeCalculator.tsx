@@ -2,10 +2,11 @@ import { dc } from "kt-dc";
 import { computed } from "vue";
 import type Decimal from "decimal.js";
 import { useLocale } from "vuetify";
-import { VBtn, VBtnToggle, VCard, VCardText, VSelect, VTextField } from "vuetify/components";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { MoneyText } from "@/components/MoneyText";
+import { VSelect, VTextField } from "vuetify/components";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { DescriptionList } from "@/components/ui/DescriptionList";
 import { toDecimal } from "@/utils/money";
 
 export type FeeBearer = "MERCHANT_ABSORBS" | "PAYER_SURCHARGE" | "SPLIT";
@@ -94,99 +95,107 @@ export const MerchantFeeCalculator = dc(
             return rows;
         });
 
+        const feeBearerTabs = computed(() => [
+            { value: "MERCHANT_ABSORBS", label: isArabic.value ? "التاجر يتحمل" : "Merchant absorbs" },
+            { value: "PAYER_SURCHARGE", label: isArabic.value ? "رسم على الدافع" : "Payer surcharge" },
+            { value: "SPLIT", label: isArabic.value ? "تقسيم" : "Split" },
+        ]);
+
         return () => (
-            <VCard>
-                <VCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                    <ThemedView style={{ gap: "4px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
-                            {isArabic.value ? "حاسبة الرسوم وصافي التسوية" : "Fee & net settlement calculator"}
-                        </ThemedText>
-                        <ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>
-                            {isArabic.value
-                                ? "نفس نموذج متحمل الرسوم المستخدم في صفحة الدفع، محسوب بـ decimal.js."
-                                : "The same fee-bearer model used by checkout, calculated with decimal.js."}
-                        </ThemedText>
-                    </ThemedView>
-                    <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "12px" }}>
-                        <VTextField
-                            label={isArabic.value ? "المبلغ" : "Amount"}
-                            type="number"
-                            modelValue={props.modelValue.amount}
-                            onUpdate:modelValue={(value: string) => update({ amount: value })}
-                            suffix="LYD"
-                            style={{ minWidth: "170px", flex: "1 1 170px" }}
-                        />
-                        <VSelect
-                            label={isArabic.value ? "السكة" : "Rail"}
-                            items={RAIL_CODES.map((code) => ({ title: code, value: code }))}
-                            modelValue={props.modelValue.rail}
-                            onUpdate:modelValue={(value: string) => update({ rail: value })}
-                            style={{ minWidth: "190px", flex: "1 1 190px" }}
-                        />
-                        <VTextField
-                            label={isArabic.value ? "العمولة" : "Commission"}
-                            type="number"
-                            modelValue={props.modelValue.commission}
-                            onUpdate:modelValue={(value: string) => update({ commission: value })}
-                            suffix="%"
-                            style={{ minWidth: "150px", flex: "1 1 150px" }}
-                        />
-                        <VTextField
-                            label={isArabic.value ? "رسم البوابة" : "Gateway fee"}
-                            type="number"
-                            modelValue={props.modelValue.gatewayFee}
-                            onUpdate:modelValue={(value: string) => update({ gatewayFee: value })}
-                            suffix="%"
-                            style={{ minWidth: "150px", flex: "1 1 150px" }}
-                        />
+            <SurfaceCard
+                title={isArabic.value ? "حاسبة الرسوم وصافي التسوية" : "Fee & net settlement calculator"}
+                subtitle={
+                    isArabic.value
+                        ? "نفس نموذج متحمل الرسوم المستخدم في صفحة الدفع، محسوب بـ decimal.js."
+                        : "The same fee-bearer model used by checkout, calculated with decimal.js."
+                }
+            >
+                <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                    <div style={{ display: "flex", flexDirection: "row", flexWrap: "wrap", gap: "12px" }}>
+                        <div style={{ minWidth: "170px", flex: "1 1 170px" }}>
+                            <FormField label={isArabic.value ? "المبلغ" : "Amount"} required>
+                                <VTextField
+                                    type="number"
+                                    modelValue={props.modelValue.amount}
+                                    onUpdate:modelValue={(value: string) => update({ amount: value })}
+                                    suffix="LYD"
+                                    hideDetails
+                                />
+                            </FormField>
+                        </div>
+                        <div style={{ minWidth: "190px", flex: "1 1 190px" }}>
+                            <FormField label={isArabic.value ? "السكة" : "Rail"} required>
+                                <VSelect
+                                    items={RAIL_CODES.map((code) => ({ title: code, value: code }))}
+                                    modelValue={props.modelValue.rail}
+                                    onUpdate:modelValue={(value: string) => update({ rail: value })}
+                                    hideDetails
+                                />
+                            </FormField>
+                        </div>
+                        <div style={{ minWidth: "150px", flex: "1 1 150px" }}>
+                            <FormField label={isArabic.value ? "العمولة" : "Commission"} required>
+                                <VTextField
+                                    type="number"
+                                    modelValue={props.modelValue.commission}
+                                    onUpdate:modelValue={(value: string) => update({ commission: value })}
+                                    suffix="%"
+                                    hideDetails
+                                />
+                            </FormField>
+                        </div>
+                        <div style={{ minWidth: "150px", flex: "1 1 150px" }}>
+                            <FormField label={isArabic.value ? "رسم البوابة" : "Gateway fee"} required>
+                                <VTextField
+                                    type="number"
+                                    modelValue={props.modelValue.gatewayFee}
+                                    onUpdate:modelValue={(value: string) => update({ gatewayFee: value })}
+                                    suffix="%"
+                                    hideDetails
+                                />
+                            </FormField>
+                        </div>
                         {props.modelValue.feeBearer === "SPLIT" ? (
-                            <VTextField
-                                label={isArabic.value ? "حصة المنصة" : "Platform share"}
-                                type="number"
-                                modelValue={props.modelValue.platformShare}
-                                onUpdate:modelValue={(value: string) => update({ platformShare: value })}
-                                suffix="%"
-                                style={{ minWidth: "150px", flex: "1 1 150px" }}
-                            />
+                            <div style={{ minWidth: "150px", flex: "1 1 150px" }}>
+                                <FormField label={isArabic.value ? "حصة المنصة" : "Platform share"} required>
+                                    <VTextField
+                                        type="number"
+                                        modelValue={props.modelValue.platformShare}
+                                        onUpdate:modelValue={(value: string) => update({ platformShare: value })}
+                                        suffix="%"
+                                        hideDetails
+                                    />
+                                </FormField>
+                            </div>
                         ) : null}
-                    </ThemedView>
-                    <ThemedView style={{ gap: "8px" }}>
-                        <ThemedText style={{ fontSize: "13px", opacity: 0.72 }}>{isArabic.value ? "متحمل الرسوم" : "Fee bearer"}</ThemedText>
-                        <VBtnToggle
-                            mandatory
-                            divided
-                            modelValue={props.modelValue.feeBearer}
-                            onUpdate:modelValue={(value: FeeBearer | null) => {
-                                if (value) update({ feeBearer: value });
-                            }}
-                            style={{ maxWidth: "700px" }}
-                        >
-                            <VBtn value="MERCHANT_ABSORBS" size="small">{isArabic.value ? "التاجر يتحمل" : "Merchant absorbs"}</VBtn>
-                            <VBtn value="PAYER_SURCHARGE" size="small">{isArabic.value ? "رسم على الدافع" : "Payer surcharge"}</VBtn>
-                            <VBtn value="SPLIT" size="small">{isArabic.value ? "تقسيم" : "Split"}</VBtn>
-                        </VBtnToggle>
-                    </ThemedView>
-                    <div style={{ overflowX: "auto", maxWidth: "760px" }}>
-                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "14px" }}>
-                            <tbody>
-                                {feeRows.value.map((row) => (
-                                    <tr key={row.label} style={{ borderBottom: "1px solid rgba(100,116,139,0.18)" }}>
-                                        <td style={{ padding: "9px 6px", opacity: 0.74 }}>{row.label}</td>
-                                        <td style={{ padding: "9px 6px", textAlign: "end", direction: "ltr" }}>
-                                            <MoneyText value={row.value} currency="LYD" bold />
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
                     </div>
-                    <ThemedText style={{ fontSize: "12px", opacity: 0.6, maxWidth: "760px" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        <span style={{ fontSize: "13px", color: "var(--pg-ink-secondary)" }}>
+                            {isArabic.value ? "متحمل الرسوم" : "Fee bearer"}
+                        </span>
+                        <SegmentedTabs
+                            modelValue={props.modelValue.feeBearer}
+                            tabs={feeBearerTabs.value}
+                            ariaLabel={isArabic.value ? "متحمل الرسوم" : "Fee bearer"}
+                            onUpdate:modelValue={(value: string) => update({ feeBearer: value as FeeBearer })}
+                        />
+                    </div>
+                    <DescriptionList
+                        ariaLabel={isArabic.value ? "نتائج الرسوم" : "Fee results"}
+                        items={feeRows.value.map((row) => ({
+                            label: row.label,
+                            value: row.value.toString(),
+                            money: true,
+                            currency: "LYD",
+                        }))}
+                    />
+                    <span style={{ fontSize: "12px", color: "var(--pg-ink-muted)", maxWidth: "760px", lineHeight: 1.55 }}>
                         {isArabic.value
                             ? "رسم البوابة تقديري على إجمالي العميل ويُعرض للشفافية؛ إضافة المحفظة تتبع معادلة متحمل الرسوم المختار."
                             : "Gateway fee is estimated on the customer total for this rail and is shown for transparency; the wallet credit follows the selected fee-bearer formula."}
-                    </ThemedText>
-                </VCardText>
-            </VCard>
+                    </span>
+                </div>
+            </SurfaceCard>
         );
     },
     { props: ["modelValue", "onUpdate:modelValue"] as any },

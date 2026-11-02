@@ -64,8 +64,8 @@ export const TableRowActions = defineComponent<{
                                                 gap: "12px",
                                                 padding: "12px",
                                                 borderRadius: "12px",
-                                                border: "solid 1px #00000022",
-                                                backgroundColor: currentColors.background,
+                                                border: "1px solid var(--pg-border-subtle)",
+                                                backgroundColor: "var(--pg-bg-surface)",
                                             }}
                                         >
                                             {actionsList
@@ -85,6 +85,7 @@ export const TableRowActions = defineComponent<{
                                                     let content = (
                                                         <ThemedView
                                                             key={`${index}`}
+                                                            noHoverable
                                                             role="button"
                                                             tabindex={disabled ? -1 : 0}
                                                             aria-disabled={disabled ? "true" : "false"}
@@ -267,8 +268,9 @@ export const TableRowActions = defineComponent<{
                         let content = (
                             <>
                                 <ThemedView
-                                    class={disabled ? "" : `table-row-action-button hoverable`}
+                                    class={disabled ? "" : "table-row-action-button"}
                                     key={`${index}`}
+                                    noHoverable
                                     role="button"
                                     tabindex={disabled ? -1 : 0}
                                     aria-disabled={disabled ? "true" : "false"}

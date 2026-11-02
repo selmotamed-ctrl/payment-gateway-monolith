@@ -1,15 +1,17 @@
 import { dc } from "kt-dc";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useLocale } from "vuetify";
-import { useRouter } from "vue-router";
-import { VBtn, VCheckbox, VIcon, VProgressLinear, VTab, VTabs, VTextField, VWindow, VWindowItem } from "vuetify/components";
+import { useRoute, useRouter } from "vue-router";
+import { VBtn, VCheckbox, VIcon, VProgressLinear, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { GuideMarkdown } from "@/components/guide/GuideMarkdown";
+import { GuideCodeBlock } from "@/components/guide/GuideCodeBlock";
 import { MerchantFeeCalculator, type MerchantFeeCalculatorForm } from "@/components/guide/MerchantFeeCalculator";
 import { MERCHANT_OPERATIONS_CHAPTERS } from "@/content/guide/merchantOperationsGuide";
 import { MERCHANT_DEVELOPER_CHAPTERS } from "@/content/guide/merchantDeveloperApiGuide";
@@ -61,6 +63,13 @@ const ROLE_LABELS: Record<MerchantChapterRole, string> = {
     MERCHANT_CASHIER: "In-Store Cashier",
     DEVELOPER: "Developer",
 };
+
+const CODE_LANGUAGES: { value: DeveloperCodeLanguage; label: string }[] = [
+    { value: "typescript", label: "TypeScript / Node / Bun" },
+    { value: "php", label: "PHP (Laravel)" },
+    { value: "python", label: "Python (httpx)" },
+    { value: "curl", label: "cURL" },
+];
 
 
 
@@ -142,6 +151,7 @@ const shellQuote = (value: string): string => "'" + value.replace(/'/g, "'\\''")
 const MerchantGuidePage = dc(() => {
     const locale = useLocale();
     const { t } = locale;
+    const route = useRoute();
     const router = useRouter();
     const isArabic = computed(() => locale.current.value === "ar");
 
@@ -213,6 +223,29 @@ const MerchantGuidePage = dc(() => {
         selectedChapter.value = chapter;
         chapterOpen.value = true;
     };
+
+    const applyRouteQuery = () => {
+        const searchQuery = typeof route.query.search === "string" ? route.query.search : "";
+        if (searchQuery && searchQuery !== "1") {
+            search.value = searchQuery;
+        }
+        const chapterId = typeof route.query.chapter === "string" ? route.query.chapter : "";
+        if (chapterId) {
+            const chapter = allCards.value.find((entry) => entry.id === chapterId);
+            if (chapter) {
+                openChapter(chapter);
+            }
+        }
+    };
+
+    watch(() => route.query, () => applyRouteQuery(), { deep: true, immediate: true });
+
+    const roleTabs = computed(() =>
+        ROLE_FILTERS.map((role) => ({
+            value: role.value,
+            label: isArabic.value ? role.labelAr : role.labelEn,
+        })),
+    );
 
     const toggleStep = (id: string, value: boolean | null | undefined) => {
         const next = { ...checklist.value };
@@ -414,28 +447,6 @@ curl ${shellQuote(paymentEndpoint.value)} \\
         ),
     );
 
-    const copyText = async (text: string) => {
-        try {
-            await navigator.clipboard.writeText(text);
-            showSnackBar({ type: "success", message: t("Copied") });
-        } catch {
-            showSnackBar({ type: "error", message: t("Unable to copy") });
-        }
-    };
-
-    const codeStyle = {
-        direction: "ltr" as const,
-        textAlign: "left" as const,
-        background: "rgba(100,116,139,0.12)",
-        borderRadius: "10px",
-        padding: "12px",
-        overflowX: "auto" as const,
-        fontSize: "12px",
-        lineHeight: 1.6,
-        margin: 0,
-        whiteSpace: "pre" as const,
-    };
-
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
@@ -479,8 +490,9 @@ curl ${shellQuote(paymentEndpoint.value)} \\
                                         flexWrap: "wrap",
                                         gap: "10px",
                                         padding: "10px 12px",
-                                        borderRadius: "10px",
-                                        background: checklist.value[step.id] === true ? "rgba(5,150,105,0.08)" : "rgba(100,116,139,0.07)",
+                                        borderRadius: "var(--pg-radius-md)",
+                                        border: `1px solid ${checklist.value[step.id] === true ? "var(--pg-status-success-border)" : "var(--pg-border-subtle)"}`,
+                                        background: checklist.value[step.id] === true ? "var(--pg-status-success-bg)" : "var(--pg-bg-surface-subtle)",
                                     }}
                                 >
                                     <VCheckbox
@@ -521,21 +533,18 @@ curl ${shellQuote(paymentEndpoint.value)} \\
                             clearable
                             hideDetails
                         />
-                        <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "8px" }}>
-                            {ROLE_FILTERS.map((role) => (
-                                <MetaPill
-                                    key={role.value}
-                                    onClick={() => (selectedRole.value = role.value)}
-                                    color={selectedRole.value === role.value ? "primary" : undefined}
-                                    variant={selectedRole.value === role.value ? "flat" : "tonal"}
-                                    style={{ cursor: "pointer", fontWeight: "700" }}
-                                >
-                                    {isArabic.value ? role.labelAr : role.labelEn}
-                                </MetaPill>
-                            ))}
-                        </ThemedView>
+                        <SegmentedTabs
+                            modelValue={selectedRole.value}
+                            tabs={roleTabs.value}
+                            ariaLabel={isArabic.value ? "تصفية حسب الدور" : "Filter by role"}
+                            onUpdate:modelValue={(value: string) => (selectedRole.value = value as MerchantChapterRole)}
+                        />
                         {filteredChapters.value.length === 0 ? (
-                            <StateView empty emptyTitle={isArabic.value ? "لا فصول" : "No chapters found"} emptyDescription={isArabic.value ? "جرّب كلمة أو دوراً آخر." : "Try a different keyword or role."} minHeight="180px" />
+                            <EmptyState
+                                icon="mdi-book-search-outline"
+                                title={isArabic.value ? "لا فصول" : "No chapters found"}
+                                description={isArabic.value ? "جرّب كلمة أو دوراً آخر." : "Try a different keyword or role."}
+                            />
                         ) : (
                             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "12px" }}>
                                 {filteredChapters.value.map((chapter) => (
@@ -549,7 +558,12 @@ curl ${shellQuote(paymentEndpoint.value)} \\
                                                 {chapterBody(chapter).replace(/[#>*`]/g, "").replace(/\s+/g, " ").slice(0, 180)}
                                             </ThemedText>
                                             <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "6px", alignItems: "center" }}>
-                                                <StatusChip label={t(ROLE_LABELS[chapter.role])} tone={chapter.role === "ALL" ? "info" : "primary"} size="x-small" />
+                                                <StatusBadge
+                                                    status={chapter.role}
+                                                    label={t(ROLE_LABELS[chapter.role])}
+                                                    toneOverride={chapter.role === "ALL" ? "neutral" : "info"}
+                                                    showDot={false}
+                                                />
                                                 {chapter.tags.slice(0, 3).map((tag) => (
                                                     <MetaPill key={`${chapter.id}-${tag}`} size="x-small" variant="text">{tag}</MetaPill>
                                                 ))}
@@ -585,34 +599,26 @@ curl ${shellQuote(paymentEndpoint.value)} \\
                             <code style={{ fontSize: "12px", direction: "ltr" }}>POST /api/v1/external/links</code>
                             <code style={{ fontSize: "12px", direction: "ltr" }}>GET /api/v1/external/links/:key</code>
                             <code style={{ fontSize: "12px", direction: "ltr" }}>GET /api/v1/external/payments/:reference</code>
-                            <StatusChip label="Bearer pg_live_" tone="warning" size="x-small" />
+                            <StatusBadge status="pg_live_" label="Bearer pg_live_" toneOverride="warning" showDot={false} />
                         </ThemedView>
-                        <VTabs modelValue={snippetTab.value} onUpdate:modelValue={(value: any) => (snippetTab.value = value)} density="compact">
-                            <VTab value="typescript">TypeScript / Node / Bun</VTab>
-                            <VTab value="php">PHP (Laravel)</VTab>
-                            <VTab value="python">Python (httpx)</VTab>
-                            <VTab value="curl">cURL</VTab>
-                        </VTabs>
-                        <VWindow modelValue={snippetTab.value} onUpdate:modelValue={(value: any) => (snippetTab.value = value)}>
-                            {(["typescript", "php", "python", "curl"] as DeveloperCodeLanguage[]).map((language) => (
-                                <VWindowItem key={language} value={language}>
-                                    <ThemedView style={{ gap: "8px" }}>
-                                        <VBtn size="small" variant="tonal" style={{ alignSelf: "flex-end" }} onClick={() => void copyText(snippets.value[language])}>
-                                            {isArabic.value ? "نسخ" : "Copy"}
-                                        </VBtn>
-                                        <pre style={codeStyle}>{snippets.value[language]}</pre>
-                                    </ThemedView>
-                                </VWindowItem>
-                            ))}
-                        </VWindow>
+                        <SegmentedTabs
+                            modelValue={snippetTab.value}
+                            tabs={CODE_LANGUAGES}
+                            ariaLabel={isArabic.value ? "لغة الشيفرة" : "Code language"}
+                            onUpdate:modelValue={(value: string) => (snippetTab.value = value as DeveloperCodeLanguage)}
+                        />
+                        <GuideCodeBlock code={snippets.value[snippetTab.value]} />
                         <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "16px" }}>
                             <ThemedView style={{ flex: "1 1 360px", gap: "8px" }}>
                                 <ThemedText type="defaultSemiBold">{isArabic.value ? "الـ webhook الذي تستقبله" : "Webhook you receive"}</ThemedText>
-                                <pre style={codeStyle}>{`POST https://merchant.example/webhooks/payments
+                                <GuideCodeBlock
+                                    copyable={false}
+                                    code={`POST https://merchant.example/webhooks/payments
 X-PG-Signature: t=1730000000,v1=9f2c...
 Content-Type: application/json
 
-${webhookPayload.value}`}</pre>
+${webhookPayload.value}`}
+                                />
                             </ThemedView>
                             <ThemedView style={{ flex: "1 1 320px", gap: "8px" }}>
                                 <ThemedText type="defaultSemiBold">{isArabic.value ? "تحقق من كل استدعاء" : "Verify every callback"}</ThemedText>
@@ -634,41 +640,34 @@ ${webhookPayload.value}`}</pre>
                 title={selectedChapter.value ? chapterTitle(selectedChapter.value) : ""}
                 size="lg"
             >
-<ThemedView style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: "12px" }}>
-                            
-                            <VBtn icon variant="text" size="small" onClick={() => (chapterOpen.value = false)}>
-                                <VIcon icon="mdi-close" />
-                            </VBtn>
+                {selectedChapter.value ? (
+                    <>
+                        <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: "6px" }}>
+                            <StatusBadge
+                                status={selectedChapter.value.role}
+                                label={t(ROLE_LABELS[selectedChapter.value.role])}
+                                toneOverride={selectedChapter.value.role === "ALL" ? "neutral" : "info"}
+                                showDot={false}
+                            />
+                            {selectedChapter.value.tags.map((tag) => (
+                                <MetaPill key={`${selectedChapter.value?.id}-dialog-${tag}`} size="x-small" variant="tonal">{tag}</MetaPill>
+                            ))}
                         </ThemedView>
-                        {selectedChapter.value ? (
-                            <>
-                                <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: "6px" }}>
-                                    <StatusChip label={t(ROLE_LABELS[selectedChapter.value.role])} tone={selectedChapter.value.role === "ALL" ? "info" : "primary"} size="x-small" />
-                                    {selectedChapter.value.tags.map((tag) => (
-                                        <MetaPill key={`${selectedChapter.value?.id}-dialog-${tag}`} size="x-small" variant="tonal">{tag}</MetaPill>
-                                    ))}
-                                </ThemedView>
-                                <GuideMarkdown source={chapterBody(selectedChapter.value)} />
-                                {selectedChapter.value.codeTemplates ? (
-                                    <ThemedView style={{ gap: "8px" }}>
-                                        <ThemedText type="defaultSemiBold">{isArabic.value ? "قوالب الكود" : "Code templates"}</ThemedText>
-                                        <VTabs modelValue={snippetTab.value} onUpdate:modelValue={(value: any) => (snippetTab.value = value)} density="compact">
-                                            <VTab value="typescript">TypeScript</VTab>
-                                            <VTab value="php">PHP</VTab>
-                                            <VTab value="python">Python</VTab>
-                                            <VTab value="curl">cURL</VTab>
-                                        </VTabs>
-                                        <VWindow modelValue={snippetTab.value} onUpdate:modelValue={(value: any) => (snippetTab.value = value)}>
-                                            {(["typescript", "php", "python", "curl"] as DeveloperCodeLanguage[]).map((language) => (
-                                                <VWindowItem key={`dialog-${language}`} value={language}>
-                                                    <pre style={codeStyle}>{selectedChapter.value?.codeTemplates?.[language] ?? ""}</pre>
-                                                </VWindowItem>
-                                            ))}
-                                        </VWindow>
-                                    </ThemedView>
-                                ) : null}
-                            </>
+                        <GuideMarkdown source={chapterBody(selectedChapter.value)} />
+                        {selectedChapter.value.codeTemplates ? (
+                            <ThemedView style={{ gap: "8px" }}>
+                                <ThemedText type="defaultSemiBold">{isArabic.value ? "قوالب الكود" : "Code templates"}</ThemedText>
+                                <SegmentedTabs
+                                    modelValue={snippetTab.value}
+                                    tabs={CODE_LANGUAGES}
+                                    ariaLabel={isArabic.value ? "لغة الشيفرة" : "Code language"}
+                                    onUpdate:modelValue={(value: string) => (snippetTab.value = value as DeveloperCodeLanguage)}
+                                />
+                                <GuideCodeBlock code={selectedChapter.value?.codeTemplates?.[snippetTab.value] ?? ""} />
+                            </ThemedView>
                         ) : null}
+                    </>
+                ) : null}
             </FormModal>
         </ScreenContainer>
     );

@@ -49,8 +49,8 @@ const STATUS_TO_TONE: Record<string, BadgeTone> = {
     SUBMITTED: "warning",
     QUEUED: "warning",
     RETRYING: "warning",
-    AMOUNT_MISMATCH: "warning",
-    MISSING_LOCALLY: "warning",
+    AMOUNT_MISMATCH: "danger",
+    MISSING_LOCALLY: "danger",
     DUPLICATE: "warning",
     OVERDUE: "danger",
 
@@ -131,6 +131,7 @@ export function formatHumanStatus(raw: string): string {
     if (!raw) return "—";
     const upper = raw.toUpperCase();
     if (upper === "AML_HOLD") return "AML Hold";
+    if (upper === "AML-CONFIDENTIAL" || upper === "AML_CONFIDENTIAL") return "AML-CONFIDENTIAL";
     if (["KYC", "KYB", "OTP", "P1", "P2", "P3", "AML", "LYD"].includes(upper)) return upper;
     return raw
         .replace(/_/g, " ")
@@ -153,8 +154,11 @@ export const StatusBadge = defineComponent({
     setup(props) {
         return (): VNodeChild => {
             const normalized = (props.status ?? "").trim().toUpperCase();
-            const tone = props.toneOverride ?? STATUS_TO_TONE[normalized] ?? "neutral";
-            const palette = TONE_STYLES[tone];
+            const tone =
+                props.toneOverride && TONE_STYLES[props.toneOverride]
+                    ? props.toneOverride
+                    : STATUS_TO_TONE[normalized] ?? "neutral";
+            const palette = TONE_STYLES[tone] ?? TONE_STYLES.neutral;
             const displayLabel = props.label || formatHumanStatus(props.status);
             return (
                 <span

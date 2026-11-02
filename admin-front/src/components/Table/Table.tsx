@@ -1,8 +1,8 @@
 import "./styling.css";
 import { readCell, type BaseTableProps, type IconProps, type RefreshMethodData, type RefreshMethodWithNextSkip, type TableHeader } from "./types";
+import { criticalRowTone } from "./statusTone";
 import { ThemedView } from "../ThemedView";
-import { ThemedText } from "../ThemedText";
-import { useDisplay, useLocale, useTheme } from "vuetify";
+import { useLocale } from "vuetify";
 import Icon from "@/components/Icon/index.vue";
 import { TableRowActions } from "./TableRowActions";
 import { defineComponent } from "vue";
@@ -10,7 +10,6 @@ import { VForm, VIcon, VTooltip } from "vuetify/components";
 import { extractApiError } from "@/utils/errors/extractor";
 import { showConfirm } from "@/utils/confirm";
 import { adaptedLocale } from "@/plugins/localization";
-import { colors } from "@/plugins/vuetify";
 
 const headerIconProps: Omit<IconProps, "icon"> = {
     // Todo
@@ -24,7 +23,6 @@ const HeaderCell = defineComponent(
         header: TableHeader<T>;
     }) => {
         const locale = useLocale();
-        const theme = useTheme();
         const { t } = locale;
         return () => {
             const h = props.header;
@@ -54,20 +52,7 @@ const HeaderCell = defineComponent(
                 >
                     {h.label && (
                         <>
-                            <ThemedText
-                                style={[
-                                    {
-                                        color: theme.current.value.colors["on-surface-variant"],
-                                        fontSize: "13px",
-                                        fontWeight: "600",
-                                        letterSpacing: "0.01em",
-                                        textTransform: "uppercase",
-                                    },
-                                    h.headerTextStyle,
-                                ]}
-                            >
-                                {t(h.label)}
-                            </ThemedText>
+                            <span style={h.headerTextStyle}>{t(h.label)}</span>
                         </>
                     )}
 
@@ -110,7 +95,7 @@ const HeaderCell = defineComponent(
                         <>
                             <Button
                                 variant="text"
-                                color={!isSortSelected ? colors.grey.darken1 : colors.blue.base}
+                                color={isSortSelected ? "primary" : undefined}
                                 {...{
                                     "aria-label": isSortSelected
                                         ? `${t("Sorted")} ${props.sortDirection === "asc" ? t("ascending") : t("descending")} ${t("by")} ${t(h.label ?? h.key)}`
@@ -157,7 +142,6 @@ export const Table = defineComponent(
             skip: number;
         },
     ) => {
-        const display = useDisplay();
         const state = ref(
             {} as {
                 [key: string]: any;
@@ -229,15 +213,10 @@ export const Table = defineComponent(
                 loadingCells.value[cellKey] = false;
             }
         };
-        const theme = useTheme();
         const { t } = useLocale();
 
         return () => {
-            const isMobile = display.mobile.value;
-            const padding = !isMobile ? "20px 15px" : "6px 12px";
-            const isDark = theme.current.value.dark;
-            const colors = theme.current.value.colors;
-            const separatorStyle = isDark ? `2px solid rgba(255, 255, 255, 0.1)` : "2px solid #e2e8f0";
+            const separatorStyle = "1px solid var(--pg-border-subtle)";
             return (
                 <ThemedView>
                     <ThemedView style={[props.tableContainerStyle]} class="table-wrapper">
@@ -255,7 +234,7 @@ export const Table = defineComponent(
                                 {typeof (props as any).title === "string" && (
                                     <caption class="pg-sr-only">{t((props as any).title)}</caption>
                                 )}
-                                <tr class="table-header-row">
+                                <tr>
                                     {props.headers.map((header) => {
                                         return (
                                             <th
@@ -273,13 +252,7 @@ export const Table = defineComponent(
                                                 style={{
                                                     borderInlineEnd: header.endSeparator ? separatorStyle : undefined,
                                                     borderInlineStart: header.startSeparator ? separatorStyle : undefined,
-                                                    padding: padding,
                                                     width: header.minWidth ? "1px" : undefined,
-                                                    backgroundColor: "var(--pg-bg-surface-subtle)",
-                                                    borderBottom: "1px solid var(--pg-border-subtle)",
-                                                    position: "sticky",
-                                                    top: 0,
-                                                    zIndex: 10,
                                                 }}
                                             >
                                                 <HeaderCell
@@ -299,33 +272,23 @@ export const Table = defineComponent(
                                         return <props.Row key={`${index}`} items={row}></props.Row>;
                                     }
 
+                                    let rowColor: string | undefined;
+                                    try {
+                                        rowColor = props.rowColor?.(row);
+                                    } catch {
+                                        rowColor = undefined;
+                                    }
+                                    const criticalTone = criticalRowTone(row as Record<string, unknown>, rowColor);
+
                                     return (
                                         <>
                                             <tr
                                                 key={`${index + props.skip}`}
                                                 class={[
                                                     "table-data-row",
-                                                    (() => {
-                                                        try {
-                                                            const tone = String(props.rowColor?.(row) ?? "").toLowerCase();
-                                                            return ["#dc2626", "#d97706", "#ef4444", "#f59e0b"].some((entry) =>
-                                                                tone.includes(entry),
-                                                            )
-                                                                ? "pg-critical-row"
-                                                                : "";
-                                                        } catch {
-                                                            return "";
-                                                        }
-                                                    })(),
+                                                    criticalTone === "danger" ? "pg-critical-row" : "",
+                                                    criticalTone === "warning" ? "pg-critical-row pg-critical-row--warning" : "",
                                                 ]}
-                                                style={{
-                                                    backgroundColor: "var(--pg-bg-surface)",
-                                                    borderBottom:
-                                                        index < props.data.length - 1 && props.placeDividers
-                                                            ? "1px solid var(--pg-border-subtle)"
-                                                            : undefined,
-                                                    transition: "background-color 0.12s ease",
-                                                }}
                                             >
                                                 {props.headers.map((header, headerIndex) => {
                                                     const cellKey = `${index}${headerIndex}`;
@@ -371,12 +334,11 @@ export const Table = defineComponent(
                                                                 <td
                                                                     key={header.key}
                                                                     style={{
-                                                                        padding: padding,
+                                                                        padding: "6px 12px",
                                                                         borderInlineEnd: header.endSeparator ? separatorStyle : undefined,
                                                                         borderInlineStart: header.startSeparator ? separatorStyle : undefined,
-                                                                        transition: "background-color 0.15s ease",
                                                                         minWidth: "250px",
-                                                                        paddingTop: "22px",
+                                                                        paddingTop: "12px",
                                                                     }}
                                                                 >
                                                                     <VForm
@@ -421,9 +383,7 @@ export const Table = defineComponent(
                                                                 style={{
                                                                     borderInlineEnd: header.endSeparator ? separatorStyle : undefined,
                                                                     borderInlineStart: header.startSeparator ? separatorStyle : undefined,
-                                                                    padding: padding,
-                                                                    cursor: header.onCellPress && "pointer",
-                                                                    transition: "background-color 0.15s ease",
+                                                                    cursor: header.onCellPress ? "pointer" : undefined,
                                                                 }}
                                                                 onClick={
                                                                     header.onCellPress
@@ -443,10 +403,6 @@ export const Table = defineComponent(
                                                                         flexDirection: "row",
                                                                         alignItems: "center",
                                                                         gap: "12px",
-                                                                        color: colors["on-surface"],
-                                                                        fontWeight: "500",
-                                                                        fontSize: "14px",
-                                                                        lineHeight: "20px",
                                                                     }}
                                                                 >
                                                                     {header.CellTooltip ? (

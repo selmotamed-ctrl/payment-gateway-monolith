@@ -1,15 +1,14 @@
 import { dc } from "kt-dc";
-import { Fragment, computed, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VCheckbox, VDivider, VExpansionPanel, VExpansionPanelText, VExpansionPanelTitle, VExpansionPanels, VFileInput, VIcon, VSelect, VStepper, VStepperHeader, VStepperItem, VStepperWindow, VStepperWindowItem, VTextField } from "vuetify/components";
+import { VAlert, VBtn, VDivider, VExpansionPanel, VExpansionPanelText, VExpansionPanelTitle, VExpansionPanels, VFileInput, VIcon, VSelect, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -17,6 +16,13 @@ import { showSnackBar } from "@/utils/snackBar";
 
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { MetaPill } from "@/components/ui/MetaPill";
+import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { MonoRef } from "@/components/ui/MonoRef";
+import { DescriptionList } from "@/components/ui/DescriptionList";
+import { MetricStrip } from "@/components/ui/MetricStrip";
 type RailKind = "OTP_PULL" | "REDIRECT" | "EMBEDDED" | "QR_DISPLAY" | "PUSH_APPROVAL" | "HYBRID";
 
 const RAIL_KINDS: RailKind[] = ["OTP_PULL", "REDIRECT", "EMBEDDED", "QR_DISPLAY", "PUSH_APPROVAL", "HYBRID"];
@@ -164,7 +170,7 @@ const prettyBody = (body: string): string => {
 };
 
 const monoStyle = {
-    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+    fontFamily: "var(--pg-font-mono)",
     fontSize: "12px",
     lineHeight: 1.55,
     whiteSpace: "pre-wrap",
@@ -173,8 +179,10 @@ const monoStyle = {
     textAlign: "left",
     margin: 0,
     padding: "10px",
-    borderRadius: "8px",
-    background: "rgba(100,116,139,0.12)",
+    borderRadius: "var(--pg-radius-sm)",
+    background: "var(--pg-bg-surface-subtle)",
+    border: "1px solid var(--pg-border-subtle)",
+    color: "var(--pg-ink-primary)",
     overflowX: "auto",
 } as const;
 
@@ -444,150 +452,129 @@ const GatewayAiImportPage = dc(() => {
     const renderTranscriptPreview = (payload: TranscriptResponse) => {
         const vocabularyEntries = Object.entries(payload.vocabulary ?? {});
         return (
-            <SurfaceCard>
-                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                    <ThemedView
-                        style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}
-                    >
-                        <ThemedText type="defaultSemiBold">{t("AI Integration Kit")}</ThemedText>
-                        <StatusChip label={payload.specVersion || "-"} tone="info" />
-                        <StatusChip label={payload.filename || "-"} tone="neutral" />
-                    </ThemedView>
+            <div
+                style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "12px",
+                    paddingTop: "16px",
+                    borderTop: "1px solid var(--pg-border-subtle)",
+                }}
+            >
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                    <ThemedText type="defaultSemiBold">{t("AI Integration Kit")}</ThemedText>
+                    <StatusBadge status={payload.specVersion || "-"} toneOverride="info" />
+                    <StatusBadge
+                        status="FILE"
+                        label={payload.filename || "-"}
+                        toneOverride="neutral"
+                        showDot={false}
+                    />
+                </div>
 
-                    {vocabularyEntries.length > 0 && (
-                        <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                            {vocabularyEntries.map(([key, values]) => (
-                                <MetaPill key={key} size="small" variant="tonal" color="primary">
-                                    {key}: {(values ?? []).join(", ")}
-                                </MetaPill>
-                            ))}
-                        </ThemedView>
-                    )}
-
-                    <VDivider />
-
-                    <div style={{ ...monoStyle, maxHeight: "320px", overflowY: "auto" }}>
-                        {payload.markdown || t("No transcript content returned.")}
+                {vocabularyEntries.length > 0 && (
+                    <div style={{ display: "flex", flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
+                        {vocabularyEntries.map(([key, values]) => (
+                            <MetaPill key={key} size="small" variant="tonal" color="primary">
+                                {key}: {(values ?? []).join(", ")}
+                            </MetaPill>
+                        ))}
                     </div>
-                </SurfaceCardText>
-            </SurfaceCard>
+                )}
+
+                <VDivider />
+
+                <pre class="pg-mono" style={{ ...monoStyle, maxHeight: "320px", overflowY: "auto" }}>
+                    {payload.markdown || t("No transcript content returned.")}
+                </pre>
+            </div>
         );
     };
 
     const renderScorecard = (nextReport: VerificationReport) => {
         const layers = nextReport.layers ?? [];
         return (
-            <SurfaceCard>
-                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                    <ThemedView
-                        style={{
-                            flexDirection: "row",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            gap: "10px",
-                            flexWrap: "wrap",
-                        }}
-                    >
-                        <ThemedText type="defaultSemiBold">{t("4-Layer Scorecard")}</ThemedText>
-                        <StatusChip
-                            label={nextReport.valid ? t("VALID") : t("INVALID")}
-                            tone={nextReport.valid ? "success" : "error"}
-                        />
-                    </ThemedView>
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                <div
+                    style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: "10px",
+                        flexWrap: "wrap",
+                    }}
+                >
+                    <ThemedText type="defaultSemiBold">{t("4-Layer Scorecard")}</ThemedText>
+                    <StatusBadge
+                        status={nextReport.valid ? "VERIFIED" : "FAILED"}
+                        label={nextReport.valid ? t("VALID") : t("INVALID")}
+                        toneOverride={nextReport.valid ? "success" : "danger"}
+                    />
+                </div>
 
-                    {layers.length === 0 ? (
-                        <ThemedText style={{ opacity: 0.7 }}>{t("No layer results returned.")}</ThemedText>
-                    ) : (
-                        layers.map((layer) => (
-                            <ThemedView
-                                key={`${layer.layer}-${layer.name}`}
-                                style={{
-                                    border: "1px solid rgba(100,116,139,0.25)",
-                                    borderRadius: "10px",
-                                    padding: "12px",
-                                    gap: "8px",
-                                }}
-                            >
-                                <ThemedView
-                                    style={{
-                                        flexDirection: "row",
-                                        alignItems: "center",
-                                        gap: "10px",
-                                        flexWrap: "wrap",
-                                    }}
-                                >
-                                    <MetaPill size="small" variant="tonal" color="primary">
-                                        {t("Layer")} {layer.layer}
-                                    </MetaPill>
-                                    <ThemedText type="defaultSemiBold" style={{ flex: 1 }}>
-                                        {t(layer.name)}
-                                    </ThemedText>
-                                    <StatusChip
-                                        label={layer.passed ? t("PASSED") : t("FAILED")}
-                                        tone={layer.passed ? "success" : "error"}
-                                    />
-                                </ThemedView>
-                                <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                                    <MetaPill size="x-small" variant="text" color="error">
-                                        {t("Errors")}: {layer.errorCount}
-                                    </MetaPill>
-                                    <MetaPill size="x-small" variant="text" color="warning">
-                                        {t("Warnings")}: {layer.warningCount}
-                                    </MetaPill>
-                                </ThemedView>
-                            </ThemedView>
-                        ))
-                    )}
-                </SurfaceCardText>
-            </SurfaceCard>
+                {layers.length === 0 ? (
+                    <ThemedText style={{ opacity: 0.7 }}>{t("No layer results returned.")}</ThemedText>
+                ) : (
+                    <MetricStrip
+                        items={layers.map((layer) => ({
+                            key: `${layer.layer}-${layer.name}`,
+                            label: `${t("Layer")} ${layer.layer} · ${t(layer.name)}`,
+                            value: layer.passed ? t("PASSED") : t("FAILED"),
+                            badge: layer.passed ? "PASSED" : "FAILED",
+                            badgeTone: layer.passed ? "success" : "danger",
+                            subLabel: `${t("Errors")}: ${layer.errorCount} · ${t("Warnings")}: ${layer.warningCount}`,
+                        }))}
+                    />
+                )}
+            </div>
         );
     };
 
     const renderIssueList = (issues: VerificationIssue[] | undefined, title: string, tone: "error" | "warning") => {
         const list = issues ?? [];
         return (
-            <SurfaceCard>
+            <SurfaceCard title={title}>
                 <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                    <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
-                        <ThemedText type="defaultSemiBold">{title}</ThemedText>
-                        <MetaPill size="x-small" variant="tonal" color={tone}>
-                            {list.length}
-                        </MetaPill>
-                    </ThemedView>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <StatusBadge
+                            status={tone === "error" ? "FAILED" : "WARNING"}
+                            label={String(list.length)}
+                            toneOverride={tone === "error" ? "danger" : "warning"}
+                            showDot={false}
+                        />
+                    </div>
 
                     {list.length === 0 ? (
                         <ThemedText style={{ opacity: 0.7 }}>{t("None")}</ThemedText>
                     ) : (
                         list.map((issue, index) => (
-                            <ThemedView
+                            <div
                                 key={`${issue.path}-${issue.code}-${index}`}
                                 style={{
-                                    borderInlineStart: `3px solid ${
-                                        tone === "error" ? "rgba(239,68,68,0.75)" : "rgba(245,158,11,0.75)"
-                                    }`,
-                                    paddingInlineStart: "10px",
+                                    display: "flex",
+                                    flexDirection: "column",
                                     gap: "4px",
+                                    paddingInlineStart: "10px",
+                                    paddingTop: "8px",
+                                    borderInlineStart: `3px solid ${
+                                        tone === "error"
+                                            ? "var(--pg-status-danger-dot)"
+                                            : "var(--pg-status-warning-dot)"
+                                    }`,
+                                    borderTop: "1px solid var(--pg-border-subtle)",
                                 }}
                             >
-                                <ThemedView
-                                    style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}
-                                >
-                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>
-                                        {issue.code}
-                                    </ThemedText>
-                                    {issue.path && (
-                                        <ThemedText style={{ ...monoStyle, padding: 0, background: "transparent", opacity: 0.7 }}>
-                                            {issue.path}
-                                        </ThemedText>
-                                    )}
-                                </ThemedView>
+                                <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                    <MonoRef value={issue.code} copyable={false} />
+                                    {issue.path && <MonoRef value={issue.path} copyable={false} />}
+                                </div>
                                 <ThemedText style={{ fontSize: "13px" }}>{issue.message}</ThemedText>
                                 {issue.aiFixHint && (
-                                    <ThemedText style={{ fontSize: "12px", opacity: 0.8 }}>
+                                    <ThemedText style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>
                                         <strong>{t("AI fix hint")}:</strong> {issue.aiFixHint}
                                     </ThemedText>
                                 )}
-                            </ThemedView>
+                            </div>
                         ))
                     )}
                 </SurfaceCardText>
@@ -598,34 +585,30 @@ const GatewayAiImportPage = dc(() => {
     const renderKeyValues = (title: string, values: Record<string, unknown> | undefined) => {
         const entries = Object.entries(values ?? {});
         return (
-            <ThemedView style={{ gap: "6px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                 <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>
                     {title}
                 </ThemedText>
                 {entries.length === 0 ? (
                     <ThemedText style={{ fontSize: "12px", opacity: 0.7 }}>{t("No data")}</ThemedText>
                 ) : (
-                    <div style={{ display: "grid", gridTemplateColumns: "minmax(120px, 220px) 1fr", gap: "6px 12px" }}>
-                        {entries.map(([key, value]) => (
-                            <Fragment key={key}>
-                                <ThemedText style={{ ...monoStyle, padding: 0, background: "transparent", opacity: 0.75 }}>
-                                    {key}
-                                </ThemedText>
-                                <ThemedText style={{ ...monoStyle, padding: 0, background: "transparent" }}>
-                                    {formatValue(value)}
-                                </ThemedText>
-                            </Fragment>
-                        ))}
-                    </div>
+                    <DescriptionList
+                        columns={2}
+                        items={entries.map(([key, value]) => ({
+                            label: key,
+                            value: formatValue(value),
+                            mono: true,
+                        }))}
+                    />
                 )}
-            </ThemedView>
+            </div>
         );
     };
 
     const renderRequests = (requests: VectorRequest[] | undefined) => {
         const list = requests ?? [];
         return (
-            <ThemedView style={{ gap: "8px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                 <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>
                     {t("Captured Requests")}
                 </ThemedText>
@@ -635,29 +618,33 @@ const GatewayAiImportPage = dc(() => {
                     list.map((request, index) => {
                         const headerEntries = Object.entries(request.headers ?? {});
                         return (
-                            <ThemedView
+                            <div
                                 key={`${request.method}-${request.url}-${index}`}
                                 style={{
-                                    border: "1px solid rgba(100,116,139,0.25)",
-                                    borderRadius: "10px",
-                                    padding: "10px",
+                                    display: "flex",
+                                    flexDirection: "column",
                                     gap: "8px",
+                                    paddingTop: "10px",
+                                    borderTop: "1px solid var(--pg-border-subtle)",
                                 }}
                             >
-                                <ThemedText style={{ fontFamily: monoStyle.fontFamily, fontSize: "13px", fontWeight: 700 }}>
-                                    {request.method} {request.url}
-                                </ThemedText>
+                                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                    <span class="pg-mono" style={{ fontSize: "13px", fontWeight: 700 }}>
+                                        {request.method}
+                                    </span>
+                                    <MonoRef value={request.url} copyable={false} />
+                                </div>
                                 {headerEntries.length > 0 && (
-                                    <pre style={monoStyle}>
+                                    <pre class="pg-mono" style={monoStyle}>
                                         {headerEntries.map(([key, value]) => `${key}: ${value}`).join("\n")}
                                     </pre>
                                 )}
-                                {request.body && <pre style={monoStyle}>{prettyBody(request.body)}</pre>}
-                            </ThemedView>
+                                {request.body && <pre class="pg-mono" style={monoStyle}>{prettyBody(request.body)}</pre>}
+                            </div>
                         );
                     })
                 )}
-            </ThemedView>
+            </div>
         );
     };
 
@@ -665,21 +652,19 @@ const GatewayAiImportPage = dc(() => {
         const vectors = nextReport.vectorResults ?? [];
         const passed = vectors.filter((vector) => vector.passed).length;
         return (
-            <SurfaceCard>
+            <SurfaceCard
+                title={t("Vector Results")}
+                v-slots={{
+                    headerActions: () => (
+                        <StatusBadge
+                            status={passed === vectors.length ? "PASSED" : "PENDING"}
+                            label={`${passed} / ${vectors.length} ${t("passed")}`}
+                            toneOverride={passed === vectors.length ? "success" : "warning"}
+                        />
+                    ),
+                }}
+            >
                 <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                    <ThemedView
-                        style={{
-                            flexDirection: "row",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            gap: "10px",
-                            flexWrap: "wrap",
-                        }}
-                    >
-                        <ThemedText type="defaultSemiBold">{t("Vector Results")}</ThemedText>
-                        <StatusChip label={`${passed} / ${vectors.length} ${t("passed")}`} tone={passed === vectors.length ? "success" : "warning"} />
-                    </ThemedView>
-
                     {vectors.length === 0 ? (
                         <ThemedText style={{ opacity: 0.7 }}>{t("No vector results returned.")}</ThemedText>
                     ) : (
@@ -687,47 +672,44 @@ const GatewayAiImportPage = dc(() => {
                             {vectors.map((vector, index) => (
                                 <VExpansionPanel key={`${vector.name}-${index}`} value={index}>
                                     <VExpansionPanelTitle>
-                                        <ThemedView
-                                            style={{
-                                                flexDirection: "row",
-                                                alignItems: "center",
-                                                gap: "8px",
-                                                flexWrap: "wrap",
-                                            }}
-                                        >
+                                        <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                             <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>
                                                 {vector.name}
                                             </ThemedText>
-                                            <StatusChip label={vector.phase || "-"} tone="info" size="x-small" />
-                                            <StatusChip
+                                            <StatusBadge
+                                                status={vector.phase || "-"}
+                                                toneOverride="info"
+                                                showDot={false}
+                                            />
+                                            <StatusBadge
+                                                status={vector.passed ? "PASSED" : "FAILED"}
                                                 label={vector.passed ? t("PASSED") : t("FAILED")}
-                                                tone={vector.passed ? "success" : "error"}
-                                                size="x-small"
+                                                toneOverride={vector.passed ? "success" : "danger"}
                                             />
                                             {vector.status && (
                                                 <MetaPill size="x-small" variant="outlined">
                                                     {vector.status}
                                                 </MetaPill>
                                             )}
-                                        </ThemedView>
+                                        </div>
                                     </VExpansionPanelTitle>
                                     <VExpansionPanelText>
-                                        <ThemedView style={{ gap: "12px", paddingTop: "6px" }}>
+                                        <div style={{ display: "flex", flexDirection: "column", gap: "12px", paddingTop: "6px" }}>
                                             {renderKeyValues(t("Extractions"), vector.extractions)}
                                             {renderRequests(vector.requests)}
                                             {(vector.errors ?? []).length > 0 && (
                                                 <VAlert type="error" variant="tonal" density="compact">
-                                                    <ThemedView style={{ gap: "4px" }}>
+                                                    <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                                                         {(vector.errors ?? []).map((issue, errorIndex) => (
                                                             <ThemedText key={`${issue.code}-${errorIndex}`} style={{ fontSize: "12px" }}>
                                                                 {issue.path ? `${issue.path}: ` : ""}
                                                                 {issue.message}
                                                             </ThemedText>
                                                         ))}
-                                                    </ThemedView>
+                                                    </div>
                                                 </VAlert>
                                             )}
-                                        </ThemedView>
+                                        </div>
                                     </VExpansionPanelText>
                                 </VExpansionPanel>
                             ))}
@@ -741,38 +723,44 @@ const GatewayAiImportPage = dc(() => {
     const renderSummary = (nextReport: VerificationReport) => {
         const summary = nextReport.summary;
         return (
-            <SurfaceCard>
+            <SurfaceCard
+                title={t("Verification Summary")}
+                v-slots={{
+                    headerActions: () => (
+                        <>
+                            <StatusBadge
+                                status={nextReport.valid ? "VERIFIED" : "FAILED"}
+                                label={nextReport.valid ? t("VALID") : t("INVALID")}
+                                toneOverride={nextReport.valid ? "success" : "danger"}
+                            />
+                            <StatusBadge status={nextReport.specVersion || "-"} toneOverride="info" />
+                        </>
+                    ),
+                }}
+            >
                 <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                    <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                        <ThemedText type="defaultSemiBold">{t("Verification Summary")}</ThemedText>
-                        <StatusChip
-                            label={nextReport.valid ? t("VALID") : t("INVALID")}
-                            tone={nextReport.valid ? "success" : "error"}
-                        />
-                        <StatusChip label={nextReport.specVersion || "-"} tone="info" />
-                    </ThemedView>
-                    <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                        <MetaPill size="small" variant="tonal">
-                            {t("Gateway")}: {summary?.gatewayCode ?? "-"}
-                        </MetaPill>
-                        <MetaPill size="small" variant="tonal">
-                            {t("Rail")}: {summary?.railCode ?? "-"}
-                        </MetaPill>
-                        <MetaPill size="small" variant="tonal">
-                            {t("Collection Mode")}: {summary?.collectionMode ?? "-"}
-                        </MetaPill>
-                        <MetaPill size="small" variant="tonal">
-                            {t("Vectors")}: {summary?.passedVectors ?? 0} / {summary?.vectorCount ?? 0}
-                        </MetaPill>
-                        <MetaPill size="small" variant="tonal" color="error">
-                            {t("Errors")}: {summary?.errorCount ?? 0}
-                        </MetaPill>
-                        <MetaPill size="small" variant="tonal" color="warning">
-                            {t("Warnings")}: {summary?.warningCount ?? 0}
-                        </MetaPill>
-                    </ThemedView>
+                    <DescriptionList
+                        columns={2}
+                        items={[
+                            {
+                                label: t("Gateway"),
+                                value: summary?.gatewayCode ? <MonoRef value={summary.gatewayCode} /> : "-",
+                            },
+                            {
+                                label: t("Rail"),
+                                value: summary?.railCode ? <MonoRef value={summary.railCode} /> : "-",
+                            },
+                            { label: t("Collection Mode"), value: summary?.collectionMode ?? "-" },
+                            {
+                                label: t("Vectors"),
+                                value: `${summary?.passedVectors ?? 0} / ${summary?.vectorCount ?? 0}`,
+                            },
+                            { label: t("Errors"), value: summary?.errorCount ?? 0 },
+                            { label: t("Warnings"), value: summary?.warningCount ?? 0 },
+                        ]}
+                    />
                     {(summary?.flowPhases ?? []).length > 0 && (
-                        <ThemedText style={{ fontSize: "12px", opacity: 0.8 }}>
+                        <ThemedText style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>
                             <strong>{t("Flow Phases")}:</strong> {(summary?.flowPhases ?? []).join(" → ")}
                         </ThemedText>
                     )}
@@ -803,26 +791,24 @@ const GatewayAiImportPage = dc(() => {
     };
 
     const renderStepDownload = () => (
-        <SurfaceCard>
+        <SurfaceCard
+            title={t("Download the AI Integration Kit")}
+            subtitle={t("Download the markdown transcript, hand it to any external AI assistant, and bring the resulting JSON spec back here.")}
+        >
             <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                    {t("Download the AI Integration Kit")}
-                </ThemedText>
-                <ThemedText style={{ fontSize: "13px", opacity: 0.8 }}>
-                    {t("Download the markdown transcript, hand it to any external AI assistant, and bring the resulting JSON spec back here.")}
-                </ThemedText>
-
-                <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
-                    <VSelect
-                        label={t("Rail Kind (optional)")}
-                        items={RAIL_KINDS}
-                        clearable
-                        modelValue={railKind.value}
-                        onUpdate:modelValue={(value: RailKind | null) => {
-                            railKind.value = value;
-                        }}
-                        style={{ minWidth: "260px", maxWidth: "320px" }}
-                    />
+                <div style={{ display: "flex", flexDirection: "row", gap: "12px", flexWrap: "wrap", alignItems: "flex-end" }}>
+                    <div style={{ minWidth: "260px", maxWidth: "320px", flex: "0 1 320px" }}>
+                        <FormField label={t("Rail Kind (optional)")}>
+                            <VSelect
+                                items={RAIL_KINDS}
+                                clearable
+                                modelValue={railKind.value}
+                                onUpdate:modelValue={(value: RailKind | null) => {
+                                    railKind.value = value;
+                                }}
+                            />
+                        </FormField>
+                    </div>
                     <VBtn
                         color="primary"
                         prependIcon={"mdi-download"}
@@ -840,7 +826,7 @@ const GatewayAiImportPage = dc(() => {
                     >
                         {t("Copy transcript")}
                     </VBtn>
-                </ThemedView>
+                </div>
 
                 {transcriptLoading.value ? (
                     <StateView loading={true} minHeight="180px" />
@@ -862,25 +848,22 @@ const GatewayAiImportPage = dc(() => {
 
     const renderStepVerify = () => (
         <ThemedView style={{ gap: "14px" }}>
-            <SurfaceCard>
+            <SurfaceCard
+                title={t("Upload & Verify the Spec")}
+                subtitle={t("Select the JSON spec produced by your external AI. It is parsed locally and validated against the four backend layers.")}
+            >
                 <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                    <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                        {t("Upload & Verify the Spec")}
-                    </ThemedText>
-                    <ThemedText style={{ fontSize: "13px", opacity: 0.8 }}>
-                        {t("Select the JSON spec produced by your external AI. It is parsed locally and validated against the four backend layers.")}
-                    </ThemedText>
-
-                    <VFileInput
-                        {...{ accept: ".json,application/json" }}
-                        label={t("Spec File")}
-                        modelValue={specFileModel.value}
-                        onUpdate:modelValue={(value: File | File[] | null) => void readSpecFile(value)}
-                        prependIcon={"mdi-file-code-outline"}
-                    />
+                    <FormField label={t("Spec File")}>
+                        <VFileInput
+                            {...{ accept: ".json,application/json" }}
+                            modelValue={specFileModel.value}
+                            onUpdate:modelValue={(value: File | File[] | null) => void readSpecFile(value)}
+                            prependIcon={"mdi-file-code-outline"}
+                        />
+                    </FormField>
 
                     {specFileName.value && (
-                        <ThemedText style={{ fontSize: "12px", opacity: 0.7 }}>
+                        <ThemedText style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>
                             {t("Selected file")}: {specFileName.value}
                         </ThemedText>
                     )}
@@ -942,15 +925,17 @@ const GatewayAiImportPage = dc(() => {
     const renderCredentials = (nextReport: VerificationReport) => {
         const credentials = nextReport.requiredCredentials ?? [];
         return (
-            <SurfaceCard>
-                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                    <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
-                        <ThemedText type="defaultSemiBold">{t("Required Credentials")}</ThemedText>
+            <SurfaceCard
+                title={t("Required Credentials")}
+                v-slots={{
+                    headerActions: () => (
                         <MetaPill size="x-small" variant="tonal" color="primary">
                             {credentials.length}
                         </MetaPill>
-                    </ThemedView>
-
+                    ),
+                }}
+            >
+                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                     {credentials.length === 0 ? (
                         <ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>
                             {t("No credentials are required for this spec.")}
@@ -963,54 +948,57 @@ const GatewayAiImportPage = dc(() => {
                                 credential.description ?? "",
                             ].filter((part) => !!part);
                             const hint = hintParts.join(" • ");
+                            const missingSecret =
+                                credential.is_secret && !(credentialsValues.value[credential.key] ?? "").trim();
                             return (
-                                <ThemedView
+                                <div
                                     key={`${credential.key}-${index}`}
                                     style={{
-                                        border: "1px solid rgba(100,116,139,0.25)",
-                                        borderRadius: "10px",
-                                        padding: "12px",
+                                        display: "flex",
+                                        flexDirection: "column",
                                         gap: "8px",
+                                        paddingTop: index === 0 ? 0 : "12px",
+                                        borderTop: index === 0 ? undefined : "1px solid var(--pg-border-subtle)",
                                     }}
                                 >
-                                    <ThemedView
-                                        style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}
-                                    >
-                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>
-                                            {credential.key}
-                                        </ThemedText>
-                                        <StatusChip
+                                    <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                        <MonoRef value={credential.key} copyable={false} />
+                                        <StatusBadge
+                                            status={credential.is_secret ? "SECRET" : "PLAIN"}
                                             label={credential.is_secret ? t("Secret") : t("Plain")}
-                                            tone={credential.is_secret ? "warning" : "info"}
-                                            size="x-small"
+                                            toneOverride={credential.is_secret ? "warning" : "info"}
+                                            showDot={false}
                                         />
                                         {credential.type && (
                                             <MetaPill size="x-small" variant="text">
                                                 {credential.type}
                                             </MetaPill>
                                         )}
-                                    </ThemedView>
+                                    </div>
 
-                                    <ThemedView
-                                        style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}
-                                    >
-                                        <VTextField
-                                            label={credential.key}
-                                            modelValue={credentialsValues.value[credential.key] ?? ""}
-                                            onUpdate:modelValue={(value: string) => {
-                                                credentialsValues.value = {
-                                                    ...credentialsValues.value,
-                                                    [credential.key]: value,
-                                                };
-                                            }}
-                                            type={credential.is_secret && !visible ? "password" : "text"}
-                                            error={credential.is_secret && !(credentialsValues.value[credential.key] ?? "").trim()}
-                                            errorMessages={credential.is_secret && !(credentialsValues.value[credential.key] ?? "").trim() ? t("Required before import") : []}
-                                            autocomplete={credential.is_secret ? "new-password" : "off"}
-                                            hint={hint || undefined}
-                                            persistentHint={!!hint}
-                                            style={{ flex: 1, minWidth: "240px" }}
-                                        />
+                                    <div style={{ display: "flex", flexDirection: "row", alignItems: "flex-start", gap: "8px", flexWrap: "wrap" }}>
+                                        <div style={{ flex: "1 1 240px", minWidth: "240px" }}>
+                                            <FormField
+                                                label={credential.key}
+                                                hint={hint || undefined}
+                                                error={missingSecret ? t("Required before import") : ""}
+                                                required={credential.is_secret}
+                                                sensitiveMakerChecker={credential.is_secret}
+                                            >
+                                                <VTextField
+                                                    modelValue={credentialsValues.value[credential.key] ?? ""}
+                                                    onUpdate:modelValue={(value: string) => {
+                                                        credentialsValues.value = {
+                                                            ...credentialsValues.value,
+                                                            [credential.key]: value,
+                                                        };
+                                                    }}
+                                                    type={credential.is_secret && !visible ? "password" : "text"}
+                                                    autocomplete={credential.is_secret ? "new-password" : "off"}
+                                                    error={missingSecret}
+                                                />
+                                            </FormField>
+                                        </div>
                                         {credential.is_secret && (
                                             <VBtn
                                                 icon
@@ -1026,8 +1014,8 @@ const GatewayAiImportPage = dc(() => {
                                                 <VIcon icon={visible ? "mdi-eye-off" : "mdi-eye"} />
                                             </VBtn>
                                         )}
-                                    </ThemedView>
-                                </ThemedView>
+                                    </div>
+                                </div>
                             );
                         })
                     )}
@@ -1042,51 +1030,61 @@ const GatewayAiImportPage = dc(() => {
             return <ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>{t("No counts returned.")}</ThemedText>;
         }
         return (
-            <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                {entries.map(([key, value]) => (
-                    <MetaPill key={key} size="small" variant="tonal" color="primary">
-                        {key}: {formatValue(value)}
-                    </MetaPill>
-                ))}
-            </ThemedView>
+            <DescriptionList
+                columns={2}
+                items={entries.map(([key, value]) => ({
+                    label: key,
+                    value: formatValue(value),
+                    mono: true,
+                }))}
+            />
         );
     };
 
     const renderSuccess = (result: ImportResponse) => {
         const credentialCheck = result.credentialCheck;
         return (
-            <SurfaceCard>
-                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                    <ThemedView
-                        style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}
-                    >
-                        <VIcon icon={"mdi-check-decagram"} color="success" size={"30px"} />
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
-                            {t("Draft created successfully")}
-                        </ThemedText>
-                        <StatusChip label={`${result.versionState} v${result.versionNumber}`} tone="success" />
-                    </ThemedView>
-
-                    <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                        <MetaPill size="small" variant="tonal">
-                            {t("Gateway")}: {result.gatewayCode}
-                        </MetaPill>
-                        <MetaPill size="small" variant="tonal">
-                            {t("Rail")}: {result.railCode}
-                        </MetaPill>
-                        <MetaPill size="small" variant="tonal">
-                            {t("Version")}: {result.versionNumber}
-                        </MetaPill>
-                        <MetaPill size="small" variant="tonal">
-                            {t("State")}: {result.versionState}
-                        </MetaPill>
-                        {credentialCheck && (
-                            <StatusChip
-                                label={`${t("Credentials")}: ${credentialCheck.status}`}
-                                tone={credentialCheck.status === "VERIFIED" ? "success" : "error"}
+            <SurfaceCard
+                title={t("Draft created successfully")}
+                v-slots={{
+                    headerActions: () => (
+                        <>
+                            <VIcon icon={"mdi-check-decagram"} color="success" size={"24px"} />
+                            <StatusBadge
+                                status={result.versionState}
+                                label={`${result.versionState} v${result.versionNumber}`}
                             />
-                        )}
-                    </ThemedView>
+                        </>
+                    ),
+                }}
+            >
+                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                    <DescriptionList
+                        columns={2}
+                        items={[
+                            { label: t("Gateway"), value: <MonoRef value={result.gatewayCode} /> },
+                            { label: t("Rail"), value: <MonoRef value={result.railCode} /> },
+                            { label: t("Version"), value: result.versionNumber, mono: true },
+                            {
+                                label: t("State"),
+                                value: <StatusBadge status={result.versionState} label={result.versionState} />,
+                            },
+                            ...(credentialCheck
+                                ? [
+                                      {
+                                          label: t("Credentials"),
+                                          value: (
+                                              <StatusBadge
+                                                  status={credentialCheck.status}
+                                                  label={credentialCheck.status}
+                                                  toneOverride={credentialCheck.status === "VERIFIED" ? "success" : "danger"}
+                                              />
+                                          ),
+                                      },
+                                  ]
+                                : []),
+                        ]}
+                    />
 
                     {credentialCheck && (
                         <ThemedView style={{ gap: "4px" }}>
@@ -1096,7 +1094,7 @@ const GatewayAiImportPage = dc(() => {
                                 </ThemedText>
                             )}
                             {credentialCheck.reason && (
-                                <ThemedText style={{ fontSize: "13px", opacity: 0.8 }}>
+                                <ThemedText style={{ fontSize: "13px", color: "var(--pg-ink-muted)" }}>
                                     <strong>{t("Reason")}:</strong> {credentialCheck.reason}
                                 </ThemedText>
                             )}
@@ -1105,10 +1103,10 @@ const GatewayAiImportPage = dc(() => {
 
                     <VDivider />
 
-                    <ThemedView style={{ gap: "8px" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                         <ThemedText type="defaultSemiBold">{t("Imported Counts")}</ThemedText>
                         {renderCounts(result.counts)}
-                    </ThemedView>
+                    </div>
 
                     {result.nextStep && (
                         <VAlert type="info" variant="tonal">
@@ -1119,14 +1117,14 @@ const GatewayAiImportPage = dc(() => {
                         </VAlert>
                     )}
 
-                    <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
                         <VBtn color="primary" prependIcon={"mdi-open-in-new"} onClick={openGateway}>
                             {t("Open Gateway")}
                         </VBtn>
                         <VBtn variant="tonal" onClick={startOver}>
                             {t("Start another import")}
                         </VBtn>
-                    </ThemedView>
+                    </div>
                 </SurfaceCardText>
             </SurfaceCard>
         );
@@ -1154,30 +1152,28 @@ const GatewayAiImportPage = dc(() => {
 
         return (
             <ThemedView style={{ gap: "14px" }}>
-                <SurfaceCard>
+                <SurfaceCard
+                    title={t("Bind Secrets & Create the Draft")}
+                    subtitle={t("Secrets are sent once to the backend and are never prefilled or displayed from storage.")}
+                >
                     <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                            {t("Bind Secrets & Create the Draft")}
-                        </ThemedText>
-                        <ThemedText style={{ fontSize: "13px", opacity: 0.8 }}>
-                            {t("Secrets are sent once to the backend and are never prefilled or displayed from storage.")}
-                        </ThemedText>
-
                         {report.value.collision?.gatewayExists && (
                             <VAlert type="warning" variant="tonal" density="compact">
                                 {t("Gateway code already exists. Importing as a new version is recommended.")}
                             </VAlert>
                         )}
 
-                        <VSelect
-                            label={t("Import Mode")}
-                            items={IMPORT_MODES.map((mode) => ({ title: t(mode.title), value: mode.value }))}
-                            modelValue={importMode.value}
-                            onUpdate:modelValue={(value: ImportMode | null) => {
-                                importMode.value = value ?? "CREATE_NEW";
-                            }}
-                            style={{ maxWidth: "360px" }}
-                        />
+                        <div style={{ maxWidth: "360px" }}>
+                            <FormField label={t("Import Mode")}>
+                                <VSelect
+                                    items={IMPORT_MODES.map((mode) => ({ title: t(mode.title), value: mode.value }))}
+                                    modelValue={importMode.value}
+                                    onUpdate:modelValue={(value: ImportMode | null) => {
+                                        importMode.value = value ?? "CREATE_NEW";
+                                    }}
+                                />
+                            </FormField>
+                        </div>
                     </SurfaceCardText>
                 </SurfaceCard>
 
@@ -1189,24 +1185,15 @@ const GatewayAiImportPage = dc(() => {
                     </VAlert>
                 )}
 
-                {showChecklists && (
-                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Import checklist")}</ThemedText>
-                        {IMPORT_CHECKS.map((check) => (
-                            <VCheckbox
-                                key={check.key}
-                                modelValue={importChecklist.value[check.key] === true}
-                                onUpdate:modelValue={(value: unknown) => (importChecklist.value = { ...importChecklist.value, [check.key]: Boolean(value) })}
-                                label={t(check.label)}
-                                density="compact"
-                                hideDetails
-                            />
-                        ))}
-                        {!importChecklistComplete.value && (
-                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all import checklist items before creating the draft")}</ThemedText>
-                        )}
-                    </ThemedView>
-                )}
+                <FormChecklist
+                    checks={IMPORT_CHECKS.map((check) => ({ key: check.key, label: check.label }))}
+                    modelValue={importChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (importChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Import checklist")}
+                    incompleteMessage={t("Complete all import checklist items before creating the draft")}
+                    complete={importChecklistComplete.value}
+                />
 
                 {!report.value.valid && (
                     <VAlert type="error" variant="tonal">
@@ -1227,6 +1214,12 @@ const GatewayAiImportPage = dc(() => {
             </ThemedView>
         );
     };
+
+    const stepTabs = [
+        { value: "1", label: `1. ${t("Download Kit")}` },
+        { value: "2", label: `2. ${t("Verify Spec")}` },
+        { value: "3", label: `3. ${t("Import Draft")}` },
+    ];
 
     return () => (
         <ScreenContainer>
@@ -1254,21 +1247,18 @@ const GatewayAiImportPage = dc(() => {
                     </ThemedView>
                 </VAlert>
 
-                <VStepper modelValue={step.value} onUpdate:modelValue={(v: any) => (step.value = v)} flat style={{ background: "transparent" }}>
-                    <VStepperHeader>
-                        <VStepperItem title={t("Download Kit")} value={1} />
-                        <VStepperItem title={t("Verify Spec")} value={2} />
-                        <VStepperItem title={t("Import Draft")} value={3} />
-                    </VStepperHeader>
-                    <VStepperWindow>
-                        <VStepperWindowItem value={1}>{renderStepDownload()}</VStepperWindowItem>
-                        <VStepperWindowItem value={2}>{renderStepVerify()}</VStepperWindowItem>
-                        <VStepperWindowItem value={3}>{renderStepImport()}</VStepperWindowItem>
-                    </VStepperWindow>
-                </VStepper>
+                <SegmentedTabs
+                    modelValue={String(step.value)}
+                    tabs={stepTabs}
+                    onUpdate:modelValue={(value: string) => (step.value = Number(value))}
+                    ariaLabel={t("Smart AI Integration")}
+                />
 
-                <ThemedView
+                {step.value === 1 ? renderStepDownload() : step.value === 2 ? renderStepVerify() : renderStepImport()}
+
+                <div
                     style={{
+                        display: "flex",
                         flexDirection: "row",
                         justifyContent: "space-between",
                         gap: "12px",
@@ -1279,7 +1269,7 @@ const GatewayAiImportPage = dc(() => {
                         {t("Back")}
                     </VBtn>
 
-                    <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
                         {step.value === 1 && (
                             <VBtn color="primary" onClick={() => (step.value = 2)}>
                                 {t("Continue to Verify")}
@@ -1310,8 +1300,8 @@ const GatewayAiImportPage = dc(() => {
                                 {t("Open Gateway")}
                             </VBtn>
                         )}
-                    </ThemedView>
-                </ThemedView>
+                    </div>
+                </div>
             </ThemedView>
         </ScreenContainer>
     );

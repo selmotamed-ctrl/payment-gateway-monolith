@@ -1,7 +1,8 @@
 import { dc } from "kt-dc";
 import type { FieldProps } from "../Field";
-import { VCard, VCardActions, VCardText, VDialog } from "vuetify/components";
+import { VDialog } from "vuetify/components";
 import { useLocale } from "vuetify";
+import { SurfaceCard } from "@/components/ui";
 
 export const DetailsFieldsDialog = dc<
     {},
@@ -42,46 +43,41 @@ export const DetailsFieldsDialog = dc<
 
     return () => {
         return (
-            <>
-                <VDialog
-                    modelValue={shown.value}
-                    onUpdate:modelValue={(v) => {
-                        shown.value = !!v;
-                    }}
-                    maxWidth={"1000px"}
-                    width={"100%"}
-                    style={{
-                        zIndex: 99,
-                    }}
+            <VDialog
+                modelValue={shown.value}
+                onUpdate:modelValue={(v) => {
+                    shown.value = !!v;
+                }}
+                maxWidth={"1000px"}
+                width={"100%"}
+                style={{
+                    zIndex: 99,
+                }}
+            >
+                <SurfaceCard
+                    title={title.value ? t(title.value) : ""}
+                    style={{ width: "100%" }}
                 >
-                    <VCard title={title.value ? t(title.value) : undefined}>
-                        <VCardText>
-                            <ThemedView
-                                style={{
-                                    gap: "22px",
-                                }}
-                            >
-                                {!!fields.value?.length && <FieldsSections noElevation sections={fields.value}></FieldsSections>}
-                                {slot?.value?.({
-                                    close: () => {
-                                        shown.value = false;
-                                    },
-                                })}
-                            </ThemedView>
-                        </VCardText>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "22px" }}>
+                        {!!fields.value?.length && <FieldsSections noElevation sections={fields.value}></FieldsSections>}
+                        {slot?.value?.({
+                            close: () => {
+                                shown.value = false;
+                            },
+                        })}
+                    </div>
 
-                        <VCardActions>
-                            <Button
-                                onClick={() => {
-                                    shown.value = false;
-                                }}
-                            >
-                                {t("Close")}
-                            </Button>
-                        </VCardActions>
-                    </VCard>
-                </VDialog>
-            </>
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "16px" }}>
+                        <Button
+                            onClick={() => {
+                                shown.value = false;
+                            }}
+                        >
+                            {t("Close")}
+                        </Button>
+                    </div>
+                </SurfaceCard>
+            </VDialog>
         );
     };
 });

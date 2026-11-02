@@ -1,11 +1,73 @@
-import { ThemedView } from "../ThemedView";
-import { ThemedText } from "../ThemedText";
-import { type IconProps, type RefreshMethodWithNextSkip } from "./types";
-import { defaultBoxShadow } from "@/constants/styling/index";
-import { useDisplay, useLocale, useTheme } from "vuetify";
-import Icon from "@/components/Icon/index.vue";
-import { VAutocomplete, VForm, VProgressLinear, VTooltip } from "vuetify/components";
-import { computed, defineComponent, ref } from "vue";
+import { type IconProps, type RefreshMethodWithNextSkip, type TableHeader as TableHeaderType } from "./types";
+import { xlsxUIPipeline, type XlsxHeader } from "@/utils/xlsx";
+import { colors } from "@/plugins/vuetify";
+import { useDisplay, useLocale } from "vuetify";
+import {
+    VAutocomplete,
+    VBtn,
+    VForm,
+    VIcon,
+    VTextField,
+    VTooltip,
+} from "vuetify/components";
+import { computed, defineComponent, ref, watch } from "vue";
+
+export const useTableXlsx = (options: {
+    headers: () => TableHeaderType<any>[];
+    data: () => any[];
+    title: () => string;
+}) => {
+    const { t } = useLocale();
+    const downloadingXlsx = ref(false);
+
+    const downloadXlsx = async () => {
+        const rows = options.data() ?? [];
+        if (downloadingXlsx.value || rows.length === 0) {
+            return;
+        }
+        downloadingXlsx.value = true;
+        try {
+            const translatedHeaders = options
+                .headers()
+                .filter((header) => !!header.value)
+                .map((header) => ({
+                    key: header.key,
+                    text: typeof header.label == "string" ? t(header.label) : header.key,
+                    type: "string",
+                    required: false,
+                    originalHeader: header,
+                })) as (XlsxHeader & { originalHeader: TableHeaderType<any> })[];
+
+            await xlsxUIPipeline.downloadXlsxFromHeadersAndData({
+                color: colors.blue.base,
+                headers: translatedHeaders,
+                title: options.title(),
+                data: rows.map((row, index) => {
+                    const item: Record<string, any> = {};
+                    for (const header of translatedHeaders) {
+                        item[header.key] =
+                            typeof header.originalHeader.value == "function"
+                                ? header.originalHeader.value(row, index)
+                                : "";
+                    }
+                    return item;
+                }),
+            });
+        } catch (error) {
+            console.error(error);
+        } finally {
+            downloadingXlsx.value = false;
+        }
+    };
+
+    return { downloadingXlsx, downloadXlsx };
+};
+
+export type TableFilterControl = {
+    count: number;
+    open: boolean;
+    toggle: () => void;
+};
 
 export const TableFooter = defineComponent<{
     hasPrev: boolean;
@@ -25,9 +87,7 @@ export const TableFooter = defineComponent<{
 }>(
     (props) => {
         const display = useDisplay();
-        const isMobile = computed(() => {
-            return display.mobile.value;
-        });
+        const isMobile = computed(() => display.mobile.value);
 
         return () => {
             if (isMobile.value) {
@@ -89,6 +149,7 @@ type TableHeaderProps = {
     setSearchValue?: (text: string | null) => void;
     searchValue?: string | null;
     onSearch?: () => Promise<void> | void;
+    onRefresh?: () => void | Promise<void>;
     iconName?: string;
     xlsx?: {
         handler: () => void | Promise<void>;
@@ -98,14 +159,14 @@ type TableHeaderProps = {
     Icon?: (iconProps: Omit<IconProps, "icon">) => JSX.Element;
     title: string;
     loading: boolean;
+    total?: number;
+    filterControl?: TableFilterControl;
 };
 
 export const TableHeader = defineComponent<TableHeaderProps>(
     (props) => {
         const display = useDisplay();
-        const isMobile = computed(() => {
-            return display.mobile.value;
-        });
+        const isMobile = computed(() => display.mobile.value);
         return () => {
             if (isMobile.value) {
                 return <TableHeaderMobile {...props}></TableHeaderMobile>;
@@ -115,147 +176,126 @@ export const TableHeader = defineComponent<TableHeaderProps>(
         };
     },
     {
-        props: ["Icon", "xlsx", "iconName", "onSearch", "refresh", "searchValue", "setSearchValue", "title", "loading"],
+        props: [
+            "Icon",
+            "xlsx",
+            "iconName",
+            "onSearch",
+            "onRefresh",
+            "refresh",
+            "searchValue",
+            "setSearchValue",
+            "title",
+            "loading",
+            "total",
+            "filterControl",
+        ],
     },
 );
 
 const TableHeaderDesktop = defineComponent(
     (props: TableHeaderProps) => {
-        return () => {
-            return (
-                <ThemedView
-                    style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: "16px",
-                        paddingRight: "16px",
-                        paddingLeft: "16px",
-                        paddingTop: "12px",
-                        paddingBottom: "12px",
-                    }}
-                >
+        return () => (
+            <div class="pg-table-toolbar">
+                <div class="pg-table-toolbar__left">
                     <HeaderLeft {...props}></HeaderLeft>
+                </div>
+                <div class="pg-table-toolbar__right">
                     <HeaderRight {...props}></HeaderRight>
-                </ThemedView>
-            );
-        };
+                </div>
+            </div>
+        );
     },
     {
-        props: ["Icon", "xlsx", "iconName", "onSearch", "loading", "refresh", "searchValue", "setSearchValue", "title"],
+        props: [
+            "Icon",
+            "xlsx",
+            "iconName",
+            "onSearch",
+            "onRefresh",
+            "loading",
+            "refresh",
+            "searchValue",
+            "setSearchValue",
+            "title",
+            "total",
+            "filterControl",
+        ],
     },
 );
 
 const TableHeaderMobile = defineComponent<TableHeaderProps>(
     (props) => {
-        return () => {
-            return (
-                <ThemedView
-                    style={{
-                        flexDirection: "column",
-                        gap: "16px",
-                        paddingTop: "12px",
-                        paddingBottom: "12px",
-                    }}
-                >
-                    <HeaderLeft {...props}></HeaderLeft>
-                    <HeaderRight {...props}></HeaderRight>
-                </ThemedView>
-            );
-        };
+        return () => (
+            <div class="pg-table-toolbar pg-table-toolbar--mobile">
+                <span class="pg-sr-only">{props.title}</span>
+                <HeaderLeft {...props}></HeaderLeft>
+                <HeaderRight {...props}></HeaderRight>
+            </div>
+        );
     },
     {
-        props: ["refresh", "xlsx", "setSearchValue", "searchValue", "onSearch", "loading", "iconName", "Icon", "title"],
+        props: [
+            "refresh",
+            "xlsx",
+            "setSearchValue",
+            "searchValue",
+            "onSearch",
+            "onRefresh",
+            "loading",
+            "iconName",
+            "Icon",
+            "title",
+            "total",
+            "filterControl",
+        ],
     },
 );
 
 const HeaderLeft = defineComponent<TableHeaderProps>(
     (props) => {
         const { t } = useLocale();
-        return () => {
-            const theme = useTheme().current.value.colors;
-
-            const iconProps: IconProps = {
-                color: theme.primary,
-                size: "18px",
-            };
-            return (
-                <ThemedView
-                    style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: "12px",
-                    }}
-                >
-                    {props.xlsx && (
-                        <>
-                            <Button
-                                {...props}
-                                variant="text"
-                                iconName="mdi-note-text-outline"
-                                onClick={props.xlsx!.handler}
-                                disabled={props.xlsx!.disabled}
-                                loading={props.xlsx!.loading}
-                            >
-                                <VTooltip activator={"parent"}>
-                                    <ThemedView>
-                                        {t(
-                                            "Download Current Data as Excel Sheet",
-                                        )}
-                                    </ThemedView>
-                                </VTooltip>
-                            </Button>
-                        </>
-                    )}
-                    {props.Icon || props.iconName ? (
-                        <ThemedView
-                            style={{
-                                padding: "8px",
-                                backgroundColor: theme.primary + "15",
-                                borderRadius: "8px",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                            }}
-                        >
-                            {props.Icon ? (
-                                <props.Icon {...iconProps}></props.Icon>
-                            ) : props.iconName ? (
-                                <>
-                                    <Icon {...iconProps} icon={props.iconName}></Icon>
-                                </>
-                            ) : (
-                                <></>
-                            )}
-                        </ThemedView>
-                    ) : (
-                        <></>
-                    )}
-
-                    <ThemedView
-                        style={{
-                            gap: "4px",
-                            flex: 1,
-                        }}
+        return () => (
+            <div class="pg-table-toolbar__group">
+                <span class="pg-sr-only">{t(props.title)}</span>
+                {!props.onSearch || !props.setSearchValue ? (
+                    <span class="pg-table-toolbar__title">{t(props.title)}</span>
+                ) : (
+                    <Search {...props}></Search>
+                )}
+                {props.filterControl && (
+                    <VBtn
+                        size="small"
+                        variant="outlined"
+                        prependIcon="mdi-filter-variant"
+                        class="pg-filter-trigger"
+                        aria-expanded={props.filterControl.open ? "true" : "false"}
+                        onClick={() => props.filterControl?.toggle()}
                     >
-                        <ThemedText
-                            style={{
-                                color: theme["on-surface"],
-                                fontWeight: "600",
-                                fontSize: "20px",
-                                letterSpacing: "-0.01em",
-                            }}
-                        >
-                            {t(props.title)}
-                        </ThemedText>
-                        {props.loading && <VProgressLinear indeterminate color="primary" height={2}></VProgressLinear>}
-                    </ThemedView>
-                </ThemedView>
-            );
-        };
+                        {t("Filters")}
+                        {props.filterControl.count > 0 && (
+                            <span class="pg-filter-trigger__badge pg-tabular">{props.filterControl.count}</span>
+                        )}
+                    </VBtn>
+                )}
+            </div>
+        );
     },
     {
-        props: ["refresh", "xlsx", "loading", "setSearchValue", "searchValue", "onSearch", "iconName", "Icon", "title"],
+        props: [
+            "refresh",
+            "xlsx",
+            "loading",
+            "setSearchValue",
+            "searchValue",
+            "onSearch",
+            "onRefresh",
+            "iconName",
+            "Icon",
+            "title",
+            "total",
+            "filterControl",
+        ],
     },
 );
 
@@ -271,77 +311,154 @@ const Search = defineComponent<{
         const { t } = locale;
         return () => {
             if (!props.onSearch || !props.setSearchValue) {
-                return <ThemedView></ThemedView>;
+                return <></>;
             }
 
             return (
-                <TextField
-                    minWidth={"200px"}
+                <VTextField
+                    class="pg-table-search"
                     variant="outlined"
-                    density={"compact"}
+                    density="compact"
                     hideDetails
                     color="primary"
-                    loading={false}
                     disabled={props.loading}
-                    rounded
                     onUpdate:modelValue={(text) => props.setSearchValue?.(text)}
-                    modelValue={props.searchValue || null}
+                    modelValue={props.searchValue || ""}
                     {...{ "aria-label": t("Search") }}
                     placeholder={t("Search")}
                     // @ts-ignore
                     onKeyup={(e) => {
-                        console.log("submitted", e.key, props.searchValue);
-
-                        if (e.key == "Enter") {
+                        if (e.key === "Enter") {
                             props.onSearch?.();
                         }
                     }}
                 >
                     {{
-                        "prepend-inner": () => {
-                            return (
-                                <Icon
-                                    onClick={() => {
-                                        props.onSearch?.();
-                                    }}
-                                    icon="mdi-magnify"
-                                ></Icon>
-                            );
-                        },
+                        "prepend-inner": () => (
+                            <VIcon
+                                icon="mdi-magnify"
+                                size={18}
+                                onClick={() => props.onSearch?.()}
+                                style={{ cursor: "pointer" }}
+                            />
+                        ),
                     }}
-                </TextField>
+                </VTextField>
             );
         };
     },
     {
-        props: ["setSearchValue",  "loading", "searchValue", "refresh", "onSearch"],
+        props: ["setSearchValue", "loading", "searchValue", "refresh", "onSearch"],
     },
 );
 
 const HeaderRight = defineComponent(
     (props: TableHeaderProps) => {
-        const display = useDisplay();
-        return () => {
-            const isMobile = display.mobile.value;
-            return (
-                <ThemedView
-                    style={
-                        isMobile
-                            ? {
-                                  flexDirection: "column",
-                                  gap: "12px",
-                                  width: "100%",
-                              }
-                            : { flexDirection: "row", gap: "12px", alignItems: "center" }
-                    }
-                >
-                    <Search {...props}></Search>
-                </ThemedView>
-            );
-        };
+        const { t } = useLocale();
+        return () => (
+            <div class="pg-table-toolbar__group pg-table-toolbar__group--end">
+                {props.total !== undefined && (
+                    <span class="pg-record-count pg-tabular">
+                        {props.total} {t("records")}
+                    </span>
+                )}
+                <VTooltip text={t("Refresh")} location="top">
+                    {{
+                        activator: ({ props: activatorProps }: any) => (
+                            <VBtn
+                                {...activatorProps}
+                                icon
+                                size="small"
+                                variant="text"
+                                aria-label={t("Refresh")}
+                                disabled={props.loading}
+                                onClick={() => {
+                                    if (props.onRefresh) {
+                                        void props.onRefresh();
+                                        return;
+                                    }
+                                    void props.refresh({ nextSkip: 0 });
+                                }}
+                            >
+                                <VIcon icon="mdi-refresh" size={18} />
+                            </VBtn>
+                        ),
+                    }}
+                </VTooltip>
+                {props.xlsx && (
+                    <VTooltip text={t("Download Current Data as Excel Sheet")} location="top">
+                        {{
+                            activator: ({ props: activatorProps }: any) => (
+                                <VBtn
+                                    {...activatorProps}
+                                    icon
+                                    size="small"
+                                    variant="text"
+                                    aria-label={t("Download Current Data as Excel Sheet")}
+                                    disabled={props.xlsx!.disabled}
+                                    loading={props.xlsx!.loading}
+                                    onClick={() => void props.xlsx!.handler()}
+                                >
+                                    <VIcon icon="mdi-file-excel-outline" size={18} />
+                                </VBtn>
+                            ),
+                        }}
+                    </VTooltip>
+                )}
+            </div>
+        );
     },
     {
-        props: ["refresh", "setSearchValue", "searchValue", "onSearch", "iconName", "Icon", "loading", "title"],
+        props: [
+            "refresh",
+            "setSearchValue",
+            "searchValue",
+            "onSearch",
+            "onRefresh",
+            "iconName",
+            "Icon",
+            "loading",
+            "title",
+            "total",
+            "filterControl",
+            "xlsx",
+        ],
+    },
+);
+
+const PageNumberButton = defineComponent<{
+    page: number;
+    active?: boolean;
+    loading: boolean;
+    label?: string;
+    goToPage: (targetPageNumber: number) => void;
+}>(
+    (props) => {
+        const activate = () => {
+            if (!props.loading) props.goToPage(props.page);
+        };
+        return () => (
+            <div
+                class={["pg-page-number", props.active ? "pg-page-number--active" : ""]}
+                role="button"
+                tabindex={props.loading ? -1 : 0}
+                aria-current={props.active ? "page" : undefined}
+                aria-label={props.label}
+                aria-disabled={props.loading ? "true" : undefined}
+                onKeydown={(event: KeyboardEvent) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        activate();
+                    }
+                }}
+                onClick={activate}
+            >
+                <span>{props.label ?? props.page}</span>
+            </div>
+        );
+    },
+    {
+        props: ["page", "active", "loading", "label", "goToPage"],
     },
 );
 
@@ -368,27 +485,20 @@ const TableFooterLeft = defineComponent(
             }
 
             return (
-                <ThemedView
+                <div
+                    class="pg-pagination"
                     {...{ role: "navigation", "aria-label": t("Pagination") }}
-                    style={{
-                        gap: isMobile ? "12px" : "16px",
-                        flexDirection: "row",
-                        alignItems: "center",
-                        flexWrap: "wrap",
-                    }}
+                    style={{ gap: isMobile ? "12px" : "16px" }}
                 >
                     <PrevButton loading={props.loading} hasPrev={props.hasPrev} prev={props.prev}></PrevButton>
                     <PagesNumbers
-                        style={{
-                            paddingBottom: "0px",
-                        }}
                         loading={props.loading}
                         currentPage={props.currentPage}
                         goToPage={props.goToPage}
                         numberOfPages={props.numberOfPages}
                     ></PagesNumbers>
                     <NextButton loading={props.loading} hasNext={props.hasNext} next={props.next}></NextButton>
-                </ThemedView>
+                </div>
             );
         };
     },
@@ -400,202 +510,49 @@ const TableFooterLeft = defineComponent(
 const PagesNumbers = defineComponent(
     (props: { currentPage: number; numberOfPages: number; goToPage: (targetPageNumber: number) => void; loading: boolean }) => {
         return () => {
-            const theme = useTheme().current.value.colors;
             const rangedLength = 2;
-            let startSection = <></>;
-            if (props.currentPage > rangedLength + 1) {
-                startSection = (
-                    <ThemedView
-                        class="page-number-button"
-                        role="button"
-                        tabindex={props.loading ? -1 : 0}
-                        onKeydown={(event: KeyboardEvent) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                                event.preventDefault();
-                                (event.currentTarget as HTMLElement).click();
-                            }
-                        }}
-                        style={{
-                            borderRadius: "6px",
-                            padding: "6px 12px",
-                            minWidth: "32px",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            backgroundColor: "transparent",
-                            cursor: props.loading ? "not-allowed" : "pointer",
-                            transition: "all 0.2s ease",
-                        }}
-                        onClick={() => !props.loading && props.goToPage(1)}
-                    >
-                        <ThemedText
-                            style={{
-                                color: props.loading ? theme.info : theme["on-surface-variant"],
-                                fontWeight: "500",
-                                fontSize: "14px",
-                            }}
-                        >
-                            1{props.currentPage - rangedLength - 1 == 1 ? "" : "..."}
-                        </ThemedText>
-                    </ThemedView>
-                );
-            }
+            const startSection =
+                props.currentPage > rangedLength + 1 ? (
+                    <PageNumberButton
+                        page={1}
+                        label={`1${props.currentPage - rangedLength - 1 == 1 ? "" : "..."}`}
+                        loading={props.loading}
+                        goToPage={props.goToPage}
+                    />
+                ) : null;
 
-            let lastSection = <></>;
-            if (props.currentPage < props.numberOfPages - rangedLength) {
-                lastSection = (
-                    <ThemedView
-                        class="page-number-button"
-                        role="button"
-                        tabindex={props.loading ? -1 : 0}
-                        onKeydown={(event: KeyboardEvent) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                                event.preventDefault();
-                                (event.currentTarget as HTMLElement).click();
-                            }
-                        }}
-                        style={{
-                            borderRadius: "6px",
-                            padding: "6px 12px",
-                            minWidth: "32px",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            backgroundColor: "transparent",
-                            cursor: props.loading ? "not-allowed" : "pointer",
-                            transition: "all 0.2s ease",
-                        }}
-                        onClick={() => !props.loading && props.goToPage(props.numberOfPages)}
-                    >
-                        <ThemedText
-                            style={{
-                                color: props.loading ? theme.info : theme["on-surface-variant"],
-                                fontWeight: "500",
-                                fontSize: "14px",
-                            }}
-                        >
-                            {props.currentPage + rangedLength + 1 == props.numberOfPages ? "" : "..."}
-                            {props.numberOfPages}
-                        </ThemedText>
-                    </ThemedView>
-                );
-            }
+            const lastSection =
+                props.currentPage < props.numberOfPages - rangedLength ? (
+                    <PageNumberButton
+                        page={props.numberOfPages}
+                        label={`${props.currentPage + rangedLength + 1 == props.numberOfPages ? "" : "..."}${props.numberOfPages}`}
+                        loading={props.loading}
+                        goToPage={props.goToPage}
+                    />
+                ) : null;
 
             const previousPagesNumbers: JSX.Element[] = [];
             for (let i = props.currentPage - rangedLength > 1 ? props.currentPage - rangedLength : 1; i < props.currentPage; i++) {
                 previousPagesNumbers.push(
-                    <ThemedView
-                        key={`${i}`}
-                        class="page-number-button"
-                        role="button"
-                        tabindex={props.loading ? -1 : 0}
-                        onKeydown={(event: KeyboardEvent) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                                event.preventDefault();
-                                (event.currentTarget as HTMLElement).click();
-                            }
-                        }}
-                        style={{
-                            borderRadius: "6px",
-                            padding: "6px 12px",
-                            minWidth: "32px",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            backgroundColor: "transparent",
-                            cursor: props.loading ? "not-allowed" : "pointer",
-                            transition: "all 0.2s ease",
-                        }}
-                        onClick={() => !props.loading && props.goToPage(i)}
-                    >
-                        <ThemedText
-                            style={{
-                                color: props.loading ? theme.info : theme["on-surface-variant"],
-                                fontWeight: "500",
-                                fontSize: "14px",
-                            }}
-                        >
-                            {i}
-                        </ThemedText>
-                    </ThemedView>,
+                    <PageNumberButton key={`${i}`} page={i} loading={props.loading} goToPage={props.goToPage} />,
                 );
             }
 
             const nextPagesNumbers: JSX.Element[] = [];
             for (let i = props.currentPage + 1; i <= Math.min(props.numberOfPages, props.currentPage + rangedLength); i++) {
                 nextPagesNumbers.push(
-                    <ThemedView
-                        key={`${i}`}
-                        class="page-number-button"
-                        role="button"
-                        tabindex={props.loading ? -1 : 0}
-                        onKeydown={(event: KeyboardEvent) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                                event.preventDefault();
-                                (event.currentTarget as HTMLElement).click();
-                            }
-                        }}
-                        style={{
-                            borderRadius: "6px",
-                            padding: "6px 12px",
-                            minWidth: "32px",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            backgroundColor: "transparent",
-                            cursor: props.loading ? "not-allowed" : "pointer",
-                            transition: "all 0.2s ease",
-                        }}
-                        onClick={() => !props.loading && props.goToPage(i)}
-                    >
-                        <ThemedText
-                            style={{
-                                color: props.loading ? theme.info : theme["on-surface-variant"],
-                                fontWeight: "500",
-                                fontSize: "14px",
-                            }}
-                        >
-                            {i}
-                        </ThemedText>
-                    </ThemedView>,
+                    <PageNumberButton key={`${i}`} page={i} loading={props.loading} goToPage={props.goToPage} />,
                 );
             }
 
             return (
-                <ThemedView
-                    style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: "8px",
-                    }}
-                >
+                <div class="pg-page-numbers">
                     {startSection}
                     {previousPagesNumbers}
-                    <ThemedView
-                        {...{ "aria-current": "page" }}
-                        style={{
-                            backgroundColor: theme.primary,
-                            borderRadius: "6px",
-                            padding: "6px 12px",
-                            minWidth: "32px",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                        }}
-                    >
-                        <ThemedText
-                            style={{
-                                color: "#ffffff",
-                                fontWeight: "600",
-                                fontSize: "14px",
-                            }}
-                        >
-                            {props.currentPage}
-                        </ThemedText>
-                    </ThemedView>
+                    <PageNumberButton page={props.currentPage} active loading={props.loading} goToPage={props.goToPage} />
                     {nextPagesNumbers}
                     {lastSection}
-                </ThemedView>
+                </div>
             );
         };
     },
@@ -607,14 +564,11 @@ const PagesNumbers = defineComponent(
 const PrevButton = defineComponent(
     (props: { loading: boolean; hasPrev: boolean; prev: () => void }) => {
         const locale = useLocale();
-        const theme = useTheme();
         return () => {
-            const colors = theme.current.value.colors;
-            const isDark = theme.current.value.dark;
             const isDisabled = !props.hasPrev || props.loading;
             return (
-                <ThemedView
-                    class="pagination-button"
+                <div
+                    class={["pg-pagination-button", isDisabled ? "pg-pagination-button--disabled" : ""]}
                     role="button"
                     tabindex={isDisabled ? -1 : 0}
                     {...{ "aria-label": locale.t("Previous page"), "aria-disabled": isDisabled ? "true" : "false" }}
@@ -624,31 +578,12 @@ const PrevButton = defineComponent(
                             if (!isDisabled) props.prev();
                         }
                     }}
-                    style={{
-                        borderRadius: "8px",
-                        borderWidth: "1px",
-                        borderStyle: "solid",
-                        borderColor: isDisabled ? (isDark ? "rgba(255, 255, 255, 0.1)" : "#e2e8f0") : colors.primary,
-                        backgroundColor: isDisabled ? (isDark ? colors["surface-variant"] : "#f8fafc") : isDark ? colors.surface : "#ffffff",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: "8px 10px",
-                        cursor: isDisabled ? "not-allowed" : "pointer",
-                        transition: "all 0.2s ease",
-                        opacity: isDisabled ? 0.6 : 1,
-                    }}
                     onClick={() => {
-                        if (!isDisabled) {
-                            props.prev();
-                        }
+                        if (!isDisabled) props.prev();
                     }}
                 >
-                    <Icon
-                        color={isDisabled ? colors["on-surface-variant"] : colors.primary}
-                        icon={locale.isRtl.value ? "mdi-chevron-right" : "mdi-chevron-left"}
-                        size={20}
-                    ></Icon>
-                </ThemedView>
+                    <VIcon icon={locale.isRtl.value ? "mdi-chevron-right" : "mdi-chevron-left"} size={18} />
+                </div>
             );
         };
     },
@@ -656,17 +591,15 @@ const PrevButton = defineComponent(
         props: ["loading", "hasPrev", "prev"],
     },
 );
+
 const NextButton = defineComponent(
     (props: { loading: boolean; hasNext: boolean; next: () => void }) => {
         const locale = useLocale();
-        const theme = useTheme();
         return () => {
-            const colors = theme.current.value.colors;
-            const isDark = theme.current.value.dark;
             const isDisabled = !props.hasNext || props.loading;
             return (
-                <ThemedView
-                    class="pagination-button"
+                <div
+                    class={["pg-pagination-button", isDisabled ? "pg-pagination-button--disabled" : ""]}
                     role="button"
                     tabindex={isDisabled ? -1 : 0}
                     {...{ "aria-label": locale.t("Next page"), "aria-disabled": isDisabled ? "true" : "false" }}
@@ -676,31 +609,12 @@ const NextButton = defineComponent(
                             if (!isDisabled) props.next();
                         }
                     }}
-                    style={{
-                        borderRadius: "8px",
-                        borderWidth: "1px",
-                        borderStyle: "solid",
-                        borderColor: isDisabled ? (isDark ? "rgba(255, 255, 255, 0.1)" : "#e2e8f0") : colors.primary,
-                        backgroundColor: isDisabled ? (isDark ? colors["surface-variant"] : "#f8fafc") : isDark ? colors.surface : "#ffffff",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: "8px 10px",
-                        cursor: isDisabled ? "not-allowed" : "pointer",
-                        transition: "all 0.2s ease",
-                        opacity: isDisabled ? 0.6 : 1,
-                    }}
                     onClick={() => {
-                        if (!isDisabled) {
-                            props.next();
-                        }
+                        if (!isDisabled) props.next();
                     }}
                 >
-                    <Icon
-                        color={isDisabled ? colors["on-surface-variant"] : colors.primary}
-                        icon={locale.isRtl.value ? "mdi-chevron-left" : "mdi-chevron-right"}
-                        size={20}
-                    ></Icon>
-                </ThemedView>
+                    <VIcon icon={locale.isRtl.value ? "mdi-chevron-left" : "mdi-chevron-right"} size={18} />
+                </div>
             );
         };
     },
@@ -722,7 +636,7 @@ const TableFooterRight = defineComponent(
             }) || (null as null | { label: string; value: number }),
         );
 
-        watch([() => props.numberOfItemsPerPage], (v) => {
+        watch([() => props.numberOfItemsPerPage], () => {
             selectedNumberOfItemsPerPage.value =
                 props.numberOfItemsPerPageChoices?.find((choice) => {
                     return choice.value == props.numberOfItemsPerPage;
@@ -737,15 +651,11 @@ const TableFooterRight = defineComponent(
             const autocompleteRef = ref(null as null | InstanceType<typeof VAutocomplete>);
 
             return (
-                <ThemedView
-                    style={{
-                        width: "150px",
-                    }}
-                >
+                <div class="pg-page-size">
                     <VForm>
                         <VAutocomplete
                             variant="outlined"
-                            density={"compact"}
+                            density="compact"
                             hideDetails
                             type={"data"}
                             color="primary"
@@ -754,8 +664,6 @@ const TableFooterRight = defineComponent(
                             }}
                             items={props.numberOfItemsPerPageChoices || []}
                             onUpdate:modelValue={(item) => {
-                                console.log(item);
-                                console.log("");
                                 selectedNumberOfItemsPerPage.value = item;
                                 props.setNumberOfItemsPerPage?.(item.value);
                                 autocompleteRef.value?.blur();
@@ -765,7 +673,7 @@ const TableFooterRight = defineComponent(
                             itemTitle={(item) => item.label}
                         ></VAutocomplete>
                     </VForm>
-                </ThemedView>
+                </div>
             );
         };
     },
@@ -790,38 +698,27 @@ const TableFooterMobile = defineComponent(
         numberOfPages: number;
         goToPage: (targetPageNumber: number) => void;
     }) => {
-        const theme = useTheme();
-        return () => {
-            return (
-                <ThemedView
-                    style={{
-                        flexDirection: "column",
-                        gap: "16px",
-                        paddingTop: "16px",
-                        paddingBottom: "16px",
-                        borderTop: theme.current.value.dark ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid #e2e8f0",
-                    }}
-                >
-                    <TableFooterLeft
-                        totalDataLength={props.totalDataLength}
-                        loading={props.loading}
-                        hasNext={props.hasNext}
-                        hasPrev={props.hasPrev}
-                        next={props.next}
-                        currentPage={props.currentPage}
-                        goToPage={props.goToPage}
-                        numberOfPages={props.numberOfPages}
-                        prev={props.prev}
-                    />
-                    <TableFooterRight
-                        dataLength={props.totalDataLength}
-                        numberOfItemsPerPageChoices={props.numberOfItemsPerPageChoices}
-                        numberOfItemsPerPage={props.numberOfItemsPerPage}
-                        setNumberOfItemsPerPage={props.setNumberOfItemsPerPage}
-                    />
-                </ThemedView>
-            );
-        };
+        return () => (
+            <div class="pg-table-footer pg-table-footer--mobile">
+                <TableFooterLeft
+                    totalDataLength={props.totalDataLength}
+                    loading={props.loading}
+                    hasNext={props.hasNext}
+                    hasPrev={props.hasPrev}
+                    next={props.next}
+                    currentPage={props.currentPage}
+                    goToPage={props.goToPage}
+                    numberOfPages={props.numberOfPages}
+                    prev={props.prev}
+                />
+                <TableFooterRight
+                    dataLength={props.totalDataLength}
+                    numberOfItemsPerPageChoices={props.numberOfItemsPerPageChoices}
+                    numberOfItemsPerPage={props.numberOfItemsPerPage}
+                    setNumberOfItemsPerPage={props.setNumberOfItemsPerPage}
+                />
+            </div>
+        );
     },
     {
         props: [
@@ -858,42 +755,27 @@ const TableFooterDesktop = defineComponent(
         next: () => void;
         loading: boolean;
     }) => {
-        const theme = useTheme();
-        return () => {
-            console.log("choices!", props.numberOfItemsPerPageChoices);
-            return (
-                <ThemedView
-                    style={{
-                        flexDirection: "row",
-                        justifyContent: "space-between",
-                        gap: "16px",
-                        paddingRight: "16px",
-                        paddingLeft: "16px",
-                        paddingTop: "16px",
-                        paddingBottom: "16px",
-                        borderTop: theme.current.value.dark ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid #e2e8f0",
-                    }}
-                >
-                    <TableFooterLeft
-                        totalDataLength={props.totalDataLength}
-                        loading={props.loading}
-                        hasNext={props.hasNext}
-                        hasPrev={props.hasPrev}
-                        next={props.next}
-                        prev={props.prev}
-                        currentPage={props.currentPage}
-                        goToPage={props.goToPage}
-                        numberOfPages={props.numberOfPages}
-                    />
-                    <TableFooterRight
-                        dataLength={props.totalDataLength}
-                        numberOfItemsPerPage={props.numberOfItemsPerPage}
-                        numberOfItemsPerPageChoices={props.numberOfItemsPerPageChoices}
-                        setNumberOfItemsPerPage={props.setNumberOfItemsPerPage}
-                    />
-                </ThemedView>
-            );
-        };
+        return () => (
+            <div class="pg-table-footer">
+                <TableFooterLeft
+                    totalDataLength={props.totalDataLength}
+                    loading={props.loading}
+                    hasNext={props.hasNext}
+                    hasPrev={props.hasPrev}
+                    next={props.next}
+                    prev={props.prev}
+                    currentPage={props.currentPage}
+                    goToPage={props.goToPage}
+                    numberOfPages={props.numberOfPages}
+                />
+                <TableFooterRight
+                    dataLength={props.totalDataLength}
+                    numberOfItemsPerPage={props.numberOfItemsPerPage}
+                    numberOfItemsPerPageChoices={props.numberOfItemsPerPageChoices}
+                    setNumberOfItemsPerPage={props.setNumberOfItemsPerPage}
+                />
+            </div>
+        );
     },
     {
         props: [

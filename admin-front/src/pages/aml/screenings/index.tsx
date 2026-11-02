@@ -2,12 +2,11 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VCheckbox, VProgressCircular, VSelect, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VProgressCircular, VSelect, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
 import { statusTone } from "@/components/Table/statusTone";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
@@ -20,11 +19,15 @@ import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { FormModal } from "@/components/ui/FormModal";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
+import type { MetricItem } from "@/components/ui/MetricStrip";
+import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 type Screening = {
     id: string;
     subjectType: string;
@@ -92,7 +95,11 @@ const formatDateTime = (value: string | null | undefined): string => {
     if (Number.isNaN(date.getTime())) return "—";
     return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
 };
-const resultTone = (result: string) => statusTone(result);
+const badgeTone = (value: string): BadgeTone => {
+    const tone = statusTone(value);
+    return tone === "error" ? "danger" : tone === "primary" ? "info" : tone;
+};
+const resultTone = (result: string) => badgeTone(result);
 const AmlScreeningsPage = dc(() => {
     const { t } = useLocale();
     const showChecklists = areChecklistsVisible();
@@ -109,6 +116,8 @@ const AmlScreeningsPage = dc(() => {
     } | null>(null);
     let filterTimer: ReturnType<typeof setTimeout> | undefined;
     const detailsOpen = ref(false);
+    const dispositionOpen = ref(false);
+    const actionError = ref("");
     const selected = ref<ScreeningDetail | null>(null);
     const detailLoading = ref(false);
     const selectedMatchId = ref("");
@@ -208,6 +217,8 @@ const AmlScreeningsPage = dc(() => {
         disposition.value = "FALSE_POSITIVE";
         dispositionChecklist.value = {};
         note.value = "";
+        dispositionOpen.value = false;
+        actionError.value = "";
         detailsOpen.value = true;
         detailLoading.value = true;
         try {
@@ -225,6 +236,7 @@ const AmlScreeningsPage = dc(() => {
     };
     const dispositionChecklistComplete = computed(() => !showChecklists || DISPOSITION_CHECKS.every((check) => dispositionChecklist.value[check.key] === true));
     const submitDisposition = async () => {
+        actionError.value = "";
         if (!selectedMatchId.value) {
             showSnackBar({ type: "warning", message: t("Select an unresolved match") });
             return;
@@ -244,6 +256,7 @@ const AmlScreeningsPage = dc(() => {
                 notes: note.value.trim(),
                 checklist: DISPOSITION_CHECKS.filter((check) => dispositionChecklist.value[check.key]).map((check) => check.key),
             });
+            dispositionOpen.value = false;
             showSnackBar({ type: "success", message: t("Disposition saved") });
             if (selected.value) {
                 const response = await api.get(urlsMap.amlScreeningDetail(selected.value.id));
@@ -254,6 +267,7 @@ const AmlScreeningsPage = dc(() => {
             }
             refreshAll();
         } catch (error) {
+            actionError.value = extractApiErrorMessage(error);
             showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
         } finally {
             actionLoading.value = false;
@@ -316,7 +330,7 @@ const AmlScreeningsPage = dc(() => {
             key: "result",
             label: "Result",
             value: (row) => row.result,
-            Value: ({ row }: { row: Screening }) => <StatusChip label={row.result} tone={resultTone(row.result)} size="small" />,
+            Value: ({ row }: { row: Screening }) => <StatusBadge status={row.result} toneOverride={resultTone(row.result)} />,
         },
         {
             key: "score",
@@ -384,21 +398,19 @@ const AmlScreeningsPage = dc(() => {
                     {t("AML-CONFIDENTIAL · Screening results and matches are restricted to Compliance, MLRO and authorised AML reviewers.")}
                 </VAlert>
                 {summary.value && (
-                    <>
-                        <MetricStrip items={summaryMetrics.value} />
-                        <SurfaceCard title={t("Screening health")}>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end" }}>
-                                    <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
-                                </ThemedView>
-                                <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                    {Object.entries(summary.value.byResult ?? {}).map(([result, count]) => (
-                                        <StatusChip key={result} label={`${result}: ${count}`} tone={resultTone(result)} size="x-small" />
-                                    ))}
-                                </ThemedView>
-                            </SurfaceCardText>
-                        </SurfaceCard>
-                    </>
+                    <SummaryExportCard
+                        title={t("Screening health")}
+                        metrics={summaryMetrics.value}
+                        exportLoading={summaryExportLoading.value}
+                        exportLabel={t("Export summary")}
+                        onExport={() => void exportSummary()}
+                    >
+                        <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                            {Object.entries(summary.value.byResult ?? {}).map(([result, count]) => (
+                                <StatusBadge key={result} status={result} label={`${result}: ${count}`} toneOverride={resultTone(result)} />
+                            ))}
+                        </ThemedView>
+                    </SummaryExportCard>
                 )}
                 <ApiTable<Screening>
                     title={t("AML screening queue")}
@@ -454,132 +466,133 @@ const AmlScreeningsPage = dc(() => {
                     )}
                 />
             </ThemedView>
-            <FormModal
+            <SlideOverDrawer
                 modelValue={detailsOpen.value}
                 onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)}
                 title={selected.value?.subjectName ?? t("AML screening")}
-                size="lg"
+                subtitle={selected.value ? `${selected.value.subjectType} · ${selected.value.subjectReference}` : ""}
+                width={640}
+                v-slots={{
+                    footer: () => (
+                        <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
+                            {unresolvedMatches.value.length > 0 && (
+                                <VBtn color="primary" onClick={() => { actionError.value = ""; dispositionOpen.value = true; }}>{t("Disposition an unresolved match")}</VBtn>
+                            )}
+                            <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
+                        </ThemedView>
+                    ),
+                }}
             >
-{detailLoading.value || !selected.value ? (
-                            <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "280px", gap: "12px" }}>
-                                <VProgressCircular indeterminate size={52} color="primary" />
-                                <ThemedText style={{ opacity: 0.65 }}>{t("Loading screening")}</ThemedText>
+                {detailLoading.value || !selected.value ? (
+                    <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "280px", gap: "12px" }}>
+                        <VProgressCircular indeterminate size={52} color="primary" />
+                        <ThemedText style={{ opacity: 0.65 }}>{t("Loading screening")}</ThemedText>
+                    </ThemedView>
+                ) : (
+                    <>
+                        <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap", marginBottom: "16px" }}>
+                            <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{selected.value.subjectType} · {selected.value.subjectReference}</ThemedText>
+                            <ThemedView style={{ flexDirection: "row", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+                                <StatusBadge status={selected.value.result} toneOverride={resultTone(selected.value.result)} />
+                                <StatusBadge status="MATCH_COUNT" label={`${selected.value.matchCount} ${t("matches")}`} toneOverride="neutral" />
                             </ThemedView>
-                        ) : (
-                            <>
-                                <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
-                                    <ThemedView style={{ gap: "4px" }}>
-                                        <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{selected.value.subjectType} · {selected.value.subjectReference}</ThemedText>
+                        </ThemedView>
+                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "20px", marginBottom: "16px" }}>
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Screening context")}</ThemedText>
+                                <DescriptionList items={[
+                                    { label: t("Provider"), value: selected.value.provider },
+                                    { label: t("Provider reference"), value: <MonoRef value={selected.value.providerRequestRef ?? ""} /> },
+                                    { label: t("Trigger"), value: selected.value.trigger },
+                                    { label: t("Merchant"), value: selected.value.merchantName || "—" },
+                                    { label: t("Score"), value: selected.value.score || "—" },
+                                    { label: t("Requested"), value: formatDateTime(selected.value.requestedAt) },
+                                    { label: t("Completed"), value: formatDateTime(selected.value.completedAt) },
+                                    { label: t("List versions"), value: JSON.stringify(selected.value.lists ?? {}) },
+                                ]} />
+                            </ThemedView>
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Related AML cases")}</ThemedText>
+                                {selected.value.amlCases.length === 0 && <EmptyState title={t("No AML case linked")} description={t("No AML case has been linked to this screening.")} />}
+                                {selected.value.amlCases.map((entry) => (
+                                    <ThemedView key={entry.id} style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                                        <StatusBadge status={entry.severity} toneOverride={badgeTone(entry.severity)} />
+                                        <StatusBadge status={entry.status} toneOverride={badgeTone(entry.status)} />
+                                        <MonoRef value={entry.id} />
+                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{formatDateTime(entry.createdAt)}</ThemedText>
                                     </ThemedView>
-                                    <ThemedView style={{ flexDirection: "row", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
-                                        <StatusChip label={selected.value.result} tone={resultTone(selected.value.result)} />
-                                        <StatusChip label={`${selected.value.matchCount} ${t("matches")}`} tone="neutral" size="small" />
+                                ))}
+                            </ThemedView>
+                        </ThemedView>
+                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                            <ThemedText type="defaultSemiBold">{t("Matches")}</ThemedText>
+                            {selected.value.matches.length === 0 && <EmptyState title={t("No matches returned")} description={t("The screening provider returned no matches.")} />}
+                            {selected.value.matches.map((match) => (
+                                <ThemedView key={match.id} style={{ gap: "4px", borderBottom: "1px solid var(--pg-border-subtle)", paddingBottom: "7px" }}>
+                                    <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                                        <StatusBadge status={match.disposition} toneOverride={match.disposition === "TRUE_MATCH" ? "danger" : match.disposition === "UNREVIEWED" ? "warning" : "success"} />
+                                        <ThemedText style={{ fontSize: "12px", fontWeight: 600 }}>{match.matchedName}</ThemedText>
+                                        <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>{match.listType} · {match.listName} · {match.score}</ThemedText>
                                     </ThemedView>
+                                    <MonoRef value={match.listEntryRef} />
+                                    {match.dispositionNotes && <ThemedText style={{ fontSize: "10px", opacity: 0.7 }}>{match.dispositionNotes}</ThemedText>}
+                                    {match.dispositionBy && <ThemedText style={{ fontSize: "10px", opacity: 0.5, direction: "ltr" }}>{match.dispositionBy}</ThemedText>}
                                 </ThemedView>
-                                <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "14px" }}>
-                                    <SurfaceCard variant="tonal">
-                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Screening context")}</ThemedText>
-                                            <DescriptionList items={[
-                                                { label: t("Provider"), value: selected.value.provider },
-                                                { label: t("Provider reference"), value: <MonoRef value={selected.value.providerRequestRef ?? ""} /> },
-                                                { label: t("Trigger"), value: selected.value.trigger },
-                                                { label: t("Merchant"), value: selected.value.merchantName || "—" },
-                                                { label: t("Score"), value: selected.value.score || "—" },
-                                                { label: t("Requested"), value: formatDateTime(selected.value.requestedAt) },
-                                                { label: t("Completed"), value: formatDateTime(selected.value.completedAt) },
-                                                { label: t("List versions"), value: JSON.stringify(selected.value.lists ?? {}) },
-                                            ]} />
-                                        </SurfaceCardText>
-                                    </SurfaceCard>
-                                    <SurfaceCard variant="tonal">
-                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Related AML cases")}</ThemedText>
-                                            {selected.value.amlCases.length === 0 && <EmptyState title={t("No AML case linked")} description={t("No AML case has been linked to this screening.")} />}
-                                            {selected.value.amlCases.map((entry) => (
-                                                <ThemedView key={entry.id} style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-                                                    <StatusChip label={entry.severity} tone={statusTone(entry.severity)} size="x-small" />
-                                                    <StatusChip label={entry.status} tone={statusTone(entry.status)} size="x-small" />
-                                                    <MonoRef value={entry.id} />
-                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{formatDateTime(entry.createdAt)}</ThemedText>
-                                                </ThemedView>
-                                            ))}
-                                        </SurfaceCardText>
-                                    </SurfaceCard>
-                                </ThemedView>
-                                <SurfaceCard variant="tonal">
-                                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                                        <ThemedText type="defaultSemiBold">{t("Matches")}</ThemedText>
-                                        {selected.value.matches.length === 0 && <EmptyState title={t("No matches returned")} description={t("The screening provider returned no matches.")} />}
-                                        {selected.value.matches.map((match) => (
-                                            <ThemedView key={match.id} style={{ gap: "4px", borderBottom: "1px solid rgba(100,116,139,0.12)", paddingBottom: "7px" }}>
-                                                <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-                                                    <StatusChip label={match.disposition} tone={match.disposition === "TRUE_MATCH" ? "error" : match.disposition === "UNREVIEWED" ? "warning" : "success"} size="x-small" />
-                                                    <ThemedText style={{ fontSize: "12px", fontWeight: 600 }}>{match.matchedName}</ThemedText>
-                                                    <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>{match.listType} · {match.listName} · {match.score}</ThemedText>
-                                                </ThemedView>
-                                                <MonoRef value={match.listEntryRef} />
-                                                {match.dispositionNotes && <ThemedText style={{ fontSize: "10px", opacity: 0.7 }}>{match.dispositionNotes}</ThemedText>}
-                                                {match.dispositionBy && <ThemedText style={{ fontSize: "10px", opacity: 0.5, direction: "ltr" }}>{match.dispositionBy}</ThemedText>}
-                                            </ThemedView>
-                                        ))}
-                                    </SurfaceCardText>
-                                </SurfaceCard>
-                                {unresolvedMatches.value.length > 0 ? (
-                                    <SurfaceCard variant="tonal">
-                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                            <ThemedText type="defaultSemiBold">{t("Disposition an unresolved match")}</ThemedText>
-                                            <VSelect
-                                                items={unresolvedMatches.value.map((match) => ({ title: `${match.matchedName} · ${match.listType} · ${match.score}`, value: match.id }))}
-                                                modelValue={selectedMatchId.value}
-                                                onUpdate:modelValue={(value: string) => (selectedMatchId.value = value)}
-                                                label={t("Unresolved match")}
-                                            />
-                                            <VSelect
-                                                items={DISPOSITIONS}
-                                                modelValue={disposition.value}
-                                                onUpdate:modelValue={(value: string) => (disposition.value = value)}
-                                                label={t("Disposition")}
-                                            />
-                                            {showChecklists && (
-                                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Disposition checklist")}</ThemedText>
-                                                    {DISPOSITION_CHECKS.map((check) => (
-                                                        <VCheckbox
-                                                            key={check.key}
-                                                            modelValue={dispositionChecklist.value[check.key] === true}
-                                                            onUpdate:modelValue={(value: unknown) => (dispositionChecklist.value = { ...dispositionChecklist.value, [check.key]: Boolean(value) })}
-                                                            label={t(check.label)}
-                                                            density="compact"
-                                                            hideDetails
-                                                        />
-                                                    ))}
-                                                    {!dispositionChecklistComplete.value && (
-                                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all disposition checklist items before saving")}</ThemedText>
-                                                    )}
-                                                </ThemedView>
-                                            )}
-                                            <VTextarea
-                                                modelValue={note.value}
-                                                onUpdate:modelValue={(value: string) => (note.value = value)}
-                                                label={t("Disposition notes")}
-                                                hint={t("Required. Explain why the match is false, true or escalated.")}
-                                                persistentHint
-                                                rows={3}
-                                            />
-                                            <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
-                                                <VBtn color="primary" loading={actionLoading.value} disabled={!dispositionChecklistComplete.value} onClick={() => void submitDisposition()}>{t("Save disposition")}</VBtn>
-                                                <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
-                                            </ThemedView>
-                                        </SurfaceCardText>
-                                    </SurfaceCard>
-                                ) : (
-                                    <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                                        <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
-                                    </ThemedView>
-                                )}
-                            </>
-                        )}
+                            ))}
+                        </ThemedView>
+                    </>
+                )}
+            </SlideOverDrawer>
+
+            <FormModal
+                modelValue={dispositionOpen.value}
+                onUpdate:modelValue={(value: boolean) => (dispositionOpen.value = value)}
+                title={t("Disposition an unresolved match")}
+                size="md"
+                loading={actionLoading.value}
+                errorMessage={actionError.value}
+                submitLabel={t("Save disposition")}
+                cancelLabel={t("Close")}
+                onSubmit={() => void submitDisposition()}
+            >
+                <FormField label={t("Unresolved match")} required sensitiveMakerChecker>
+                    <VSelect
+                        items={unresolvedMatches.value.map((match) => ({ title: `${match.matchedName} · ${match.listType} · ${match.score}`, value: match.id }))}
+                        modelValue={selectedMatchId.value}
+                        onUpdate:modelValue={(value: string) => (selectedMatchId.value = value)}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("Disposition")} required sensitiveMakerChecker>
+                    <VSelect
+                        items={DISPOSITIONS}
+                        modelValue={disposition.value}
+                        onUpdate:modelValue={(value: string) => (disposition.value = value)}
+                        hideDetails
+                    />
+                </FormField>
+                <FormChecklist
+                    checks={[...DISPOSITION_CHECKS]}
+                    modelValue={dispositionChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (dispositionChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Disposition checklist")}
+                    complete={dispositionChecklistComplete.value}
+                    incompleteMessage={t("Complete all disposition checklist items before saving")}
+                />
+                <FormField
+                    label={t("Disposition notes")}
+                    hint={t("Required. Explain why the match is false, true or escalated.")}
+                    required
+                    sensitiveMakerChecker
+                >
+                    <VTextarea
+                        modelValue={note.value}
+                        onUpdate:modelValue={(value: string) => (note.value = value)}
+                        rows={3}
+                        hideDetails
+                    />
+                </FormField>
             </FormModal>
         </ScreenContainer>
     );

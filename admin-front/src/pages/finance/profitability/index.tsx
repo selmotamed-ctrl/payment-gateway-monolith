@@ -8,7 +8,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
 import { EChart } from "@/components/EChart";
-import { StatusChip } from "@/components/StatusChip";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
@@ -16,12 +16,13 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { formatMoney, formatPlainNumber, toDecimal } from "@/utils/money";
 import { showSnackBar } from "@/utils/snackBar";
 
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import { MetricStrip } from "@/components/ui/MetricStrip";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { DescriptionList } from "@/components/ui/DescriptionList";
 type Profitability = {
     period?: string;
     currency?: string;
@@ -52,6 +53,12 @@ type Profitability = {
     byGateway?: { gatewayCode: string; volume: string; gross: string; cost: string; net: string }[];
     byDay?: { day: string; volume: string; gross: string; cost: string; net: string }[];
 };
+
+const CHART_TEXT = "#64748b";
+const CHART_GRID = "#e2e8f0";
+const CHART_INDIGO = "#4f46e5";
+const CHART_EMERALD = "#059669";
+const CHART_SLATE = "#64748b";
 
 const ProfitabilityPage = dc(() => {
     const { t } = useLocale();
@@ -140,24 +147,27 @@ const ProfitabilityPage = dc(() => {
 
     const currency = () => data.value?.currency ?? "LYD";
 
-    const moneyLine = (label: string, value: string | undefined, sign = false) => (
-        <ThemedView key={label} style={{ flexDirection: "row", justifyContent: "space-between", gap: "12px", borderBottom: "1px solid rgba(100,116,139,0.12)", paddingBottom: "5px" }}>
-            <ThemedText style={{ fontSize: "13px" }}>{t(label)}</ThemedText>
-            <MoneyDisplay amount={value ?? "0"} currency={currency()} size="lg" colorSign={sign} />
-        </ThemedView>
-    );
-
     const railChartOption = () => {
         const rows = data.value?.byRail ?? [];
         return {
+            color: [CHART_INDIGO, CHART_SLATE],
             tooltip: { trigger: "axis" },
-            legend: { textStyle: { color: "#94a3b8" } },
+            legend: { textStyle: { color: CHART_TEXT } },
             grid: { left: "8%", right: "4%", top: "12%", bottom: "12%" },
-            xAxis: { type: "category", data: rows.map((row) => row.railCode), axisLabel: { color: "#94a3b8" } },
-            yAxis: { type: "value", axisLabel: { color: "#94a3b8" } },
+            xAxis: {
+                type: "category",
+                data: rows.map((row) => row.railCode),
+                axisLabel: { color: CHART_TEXT },
+                axisLine: { lineStyle: { color: CHART_GRID } },
+            },
+            yAxis: {
+                type: "value",
+                axisLabel: { color: CHART_TEXT },
+                splitLine: { lineStyle: { color: CHART_GRID } },
+            },
             series: [
-                { name: t("Gross"), type: "bar", data: rows.map((row) => toDecimal(row.gross).toNumber()), itemStyle: { borderRadius: [4, 4, 0, 0] } },
-                { name: t("Gateway cost"), type: "bar", data: rows.map((row) => toDecimal(row.cost).toNumber()) },
+                { name: t("Gross"), type: "bar", data: rows.map((row) => toDecimal(row.gross).toNumber()), itemStyle: { color: CHART_INDIGO, borderRadius: [4, 4, 0, 0] } },
+                { name: t("Gateway cost"), type: "bar", data: rows.map((row) => toDecimal(row.cost).toNumber()), itemStyle: { color: CHART_SLATE } },
             ],
         };
     };
@@ -165,14 +175,24 @@ const ProfitabilityPage = dc(() => {
     const dayChartOption = () => {
         const rows = data.value?.byDay ?? [];
         return {
+            color: [CHART_EMERALD, CHART_INDIGO],
             tooltip: { trigger: "axis" },
-            legend: { textStyle: { color: "#94a3b8" } },
+            legend: { textStyle: { color: CHART_TEXT } },
             grid: { left: "8%", right: "4%", top: "12%", bottom: "12%" },
-            xAxis: { type: "category", data: rows.map((row) => row.day), axisLabel: { color: "#94a3b8" } },
-            yAxis: { type: "value", axisLabel: { color: "#94a3b8" } },
+            xAxis: {
+                type: "category",
+                data: rows.map((row) => row.day),
+                axisLabel: { color: CHART_TEXT },
+                axisLine: { lineStyle: { color: CHART_GRID } },
+            },
+            yAxis: {
+                type: "value",
+                axisLabel: { color: CHART_TEXT },
+                splitLine: { lineStyle: { color: CHART_GRID } },
+            },
             series: [
-                { name: t("Gross commission"), type: "line", smooth: true, data: rows.map((row) => toDecimal(row.gross).toNumber()) },
-                { name: t("Net"), type: "line", smooth: true, data: rows.map((row) => toDecimal(row.net).toNumber()) },
+                { name: t("Gross commission"), type: "line", smooth: true, data: rows.map((row) => toDecimal(row.gross).toNumber()), itemStyle: { color: CHART_EMERALD } },
+                { name: t("Net"), type: "line", smooth: true, data: rows.map((row) => toDecimal(row.net).toNumber()), itemStyle: { color: CHART_INDIGO } },
             ],
         };
     };
@@ -182,27 +202,35 @@ const ProfitabilityPage = dc(() => {
         rows: Array<{ key: string; volume: string; gross: string; cost: string; net: string }>,
         monoKey = false,
     ) => (
-        <SurfaceCard>
-            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                <ThemedText type="defaultSemiBold">{t(title)}</ThemedText>
-                <ThemedView style={{ flexDirection: "row", gap: "12px", fontSize: "11px", opacity: 0.6, borderBottom: "1px solid rgba(100,116,139,0.2)", paddingBottom: "4px" }}>
-                    <span style={{ flex: 1 }}>{t("Name")}</span>
-                    <span style={{ width: "130px", textAlign: "right" }}>{t("Volume")}</span>
-                    <span style={{ width: "120px", textAlign: "right" }}>{t("Gross")}</span>
-                    <span style={{ width: "120px", textAlign: "right" }}>{t("Cost")}</span>
-                    <span style={{ width: "120px", textAlign: "right" }}>{t("Net")}</span>
-                </ThemedView>
-                {rows.length === 0 && <EmptyState title={t("No Data Found")} description={t("No rows match the selected period.")} />}
-                {rows.map((row) => (
-                    <ThemedView key={row.key} style={{ flexDirection: "row", gap: "12px", alignItems: "center", fontSize: "12px", borderBottom: "1px solid rgba(100,116,139,0.1)", paddingBottom: "5px" }}>
-                        <span style={{ flex: 1 }}>{monoKey ? <MonoRef value={row.key} copyable={false} /> : row.key}</span>
-                        <span style={{ width: "130px", textAlign: "right" }}><MoneyDisplay amount={row.volume} currency={currency()} size="sm" showCurrency={false} /></span>
-                        <span style={{ width: "120px", textAlign: "right" }}><MoneyDisplay amount={row.gross} currency={currency()} size="sm" showCurrency={false} /></span>
-                        <span style={{ width: "120px", textAlign: "right" }}><MoneyDisplay amount={row.cost} currency={currency()} size="sm" showCurrency={false} /></span>
-                        <span style={{ width: "120px", textAlign: "right" }}><MoneyDisplay amount={row.net} currency={currency()} size="sm" showCurrency={false} colorSign /></span>
-                    </ThemedView>
-                ))}
-            </SurfaceCardText>
+        <SurfaceCard title={t(title)} noPadding>
+            {rows.length === 0 ? (
+                <EmptyState title={t("No Data Found")} description={t("No rows match the selected period.")} />
+            ) : (
+                <div class="pg-unified-table" style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                        <thead>
+                            <tr>
+                                <th style={{ textAlign: "start" }}>{t("Name")}</th>
+                                <th style={{ textAlign: "end" }}>{t("Volume")}</th>
+                                <th style={{ textAlign: "end" }}>{t("Gross")}</th>
+                                <th style={{ textAlign: "end" }}>{t("Cost")}</th>
+                                <th style={{ textAlign: "end" }}>{t("Net")}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {rows.map((row) => (
+                                <tr key={row.key}>
+                                    <td>{monoKey ? <MonoRef value={row.key} copyable={false} /> : row.key}</td>
+                                    <td style={{ textAlign: "end" }}><MoneyDisplay amount={row.volume} currency={currency()} size="sm" showCurrency={false} /></td>
+                                    <td style={{ textAlign: "end" }}><MoneyDisplay amount={row.gross} currency={currency()} size="sm" showCurrency={false} /></td>
+                                    <td style={{ textAlign: "end" }}><MoneyDisplay amount={row.cost} currency={currency()} size="sm" showCurrency={false} /></td>
+                                    <td style={{ textAlign: "end" }}><MoneyDisplay amount={row.net} currency={currency()} size="sm" showCurrency={false} colorSign /></td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
         </SurfaceCard>
     );
 
@@ -254,53 +282,67 @@ const ProfitabilityPage = dc(() => {
                             { key: "netContribution", label: t("Net Contribution"), moneyAmount: data.value?.periodNetContribution ?? "0", currency: currency(), subLabel: `${formatPlainNumber(data.value?.commissionMargin, 2)}% ${t("Commission margin")}` },
                         ]} />
 
-                        <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "18px" }}>
-                            <SurfaceCard style={{ flex: "1 1 420px" }}>
-                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                                    <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                                        <ThemedText type="defaultSemiBold">{t("Period P&L")}</ThemedText>
-                                        <StatusChip label={`${data.value?.windowDays ?? 0} ${t("days")}`} tone="neutral" size="small" />
+                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "18px" }}>
+                            <SurfaceCard title={t("Period P&L")}>
+                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                    <ThemedView style={{ display: "flex", justifyContent: "flex-end" }}>
+                                        <StatusBadge status="WINDOW" label={`${data.value?.windowDays ?? 0} ${t("days")}`} toneOverride="neutral" showDot={false} />
                                     </ThemedView>
-                                    {moneyLine("Gross commission", data.value?.grossCommissionRevenue)}
-                                    {moneyLine("Gateway cost (period)", data.value?.gatewayCostPeriod)}
-                                    {moneyLine("Period net revenue", data.value?.periodNetRevenue)}
-                                    {moneyLine("Chargeback losses (period)", data.value?.chargebackLossesPeriod)}
-                                    {moneyLine("Commission reversed (refunds)", data.value?.refundCommissionReversed)}
-                                    {moneyLine("Period net contribution", data.value?.periodNetContribution, true)}
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.5 }}>
+                                    <DescriptionList
+                                        items={[
+                                            { label: t("Gross commission"), value: data.value?.grossCommissionRevenue ?? "0", money: true, currency: currency() },
+                                            { label: t("Gateway cost (period)"), value: data.value?.gatewayCostPeriod ?? "0", money: true, currency: currency() },
+                                            { label: t("Period net revenue"), value: data.value?.periodNetRevenue ?? "0", money: true, currency: currency() },
+                                            { label: t("Chargeback losses (period)"), value: data.value?.chargebackLossesPeriod ?? "0", money: true, currency: currency() },
+                                            { label: t("Commission reversed (refunds)"), value: data.value?.refundCommissionReversed ?? "0", money: true, currency: currency() },
+                                            {
+                                                label: t("Period net contribution"),
+                                                value: <MoneyDisplay amount={data.value?.periodNetContribution ?? "0"} currency={currency()} size="md" colorSign />,
+                                            },
+                                        ]}
+                                    />
+                                    <ThemedText style={{ fontSize: "10px", color: "var(--pg-ink-muted)" }}>
                                         {data.value?.succeededAttempts ?? 0} {t("succeeded attempts")} · {t("Average commission")} {formatMoney(data.value?.averageCommission, { currency: currency() })} · {t("Average ticket")} {formatMoney(data.value?.averageTicket, { currency: currency() })}
                                     </ThemedText>
-                                </SurfaceCardText>
+                                </ThemedView>
                             </SurfaceCard>
 
-                            <SurfaceCard style={{ flex: "1 1 420px" }}>
-                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                                    <ThemedText type="defaultSemiBold">{t("Current ledger position")}</ThemedText>
-                                    {moneyLine("Gateway cost realized", data.value?.gatewayCostRealized)}
-                                    {moneyLine("Gateway cost accrued", data.value?.gatewayCostAccrued)}
-                                    {moneyLine("Chargeback reserve movement", data.value?.chargebackLosses)}
-                                    {moneyLine("All-time net revenue", data.value?.netRevenue)}
-                                    {moneyLine("All-time net contribution", data.value?.netContribution, true)}
-                                    {moneyLine("Commission receivable", data.value?.commissionReceivable)}
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.5 }}>
+                            <SurfaceCard title={t("Current ledger position")}>
+                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                    <DescriptionList
+                                        items={[
+                                            { label: t("Gateway cost realized"), value: data.value?.gatewayCostRealized ?? "0", money: true, currency: currency() },
+                                            { label: t("Gateway cost accrued"), value: data.value?.gatewayCostAccrued ?? "0", money: true, currency: currency() },
+                                            { label: t("Chargeback reserve movement"), value: data.value?.chargebackLosses ?? "0", money: true, currency: currency() },
+                                            { label: t("All-time net revenue"), value: data.value?.netRevenue ?? "0", money: true, currency: currency() },
+                                            {
+                                                label: t("All-time net contribution"),
+                                                value: <MoneyDisplay amount={data.value?.netContribution ?? "0"} currency={currency()} size="md" colorSign />,
+                                            },
+                                            { label: t("Commission receivable"), value: data.value?.commissionReceivable ?? "0", money: true, currency: currency() },
+                                        ]}
+                                    />
+                                    <ThemedText style={{ fontSize: "10px", color: "var(--pg-ink-muted)" }}>
                                         {t("Gateway cost ratio")} {formatPlainNumber(data.value?.gatewayCostRatio, 2)}% · {t("Net margin")} {formatPlainNumber(data.value?.netMargin, 2)}%
                                     </ThemedText>
-                                </SurfaceCardText>
+                                </ThemedView>
                             </SurfaceCard>
                         </ThemedView>
 
-                        <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "18px" }}>
-                            <SurfaceCard style={{ flex: "1 1 420px" }}>
-                                <SurfaceCardText>
-                                    <ThemedText type="defaultSemiBold" style={{ marginBottom: "10px" }}>{t("By rail")}</ThemedText>
+                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "18px" }}>
+                            <SurfaceCard title={t("By rail")}>
+                                {(data.value?.byRail ?? []).length === 0 ? (
+                                    <EmptyState title={t("No Data Found")} description={t("No rows match the selected period.")} />
+                                ) : (
                                     <EChart option={railChartOption()} height="300px" />
-                                </SurfaceCardText>
+                                )}
                             </SurfaceCard>
-                            <SurfaceCard style={{ flex: "1 1 420px" }}>
-                                <SurfaceCardText>
-                                    <ThemedText type="defaultSemiBold" style={{ marginBottom: "10px" }}>{t("By day")}</ThemedText>
+                            <SurfaceCard title={t("By day")}>
+                                {(data.value?.byDay ?? []).length === 0 ? (
+                                    <EmptyState title={t("No Data Found")} description={t("No rows match the selected period.")} />
+                                ) : (
                                     <EChart option={dayChartOption()} height="300px" />
-                                </SurfaceCardText>
+                                )}
                             </SurfaceCard>
                         </ThemedView>
 

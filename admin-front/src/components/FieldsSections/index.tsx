@@ -171,10 +171,10 @@ const Fields = dc(
                             height: "100%",
                             padding: props.collapsible ? "18px 22px" : "28px 24px",
                             gap: expanded ? "20px" : "0",
-                            borderRadius: "16px",
-                            boxShadow: props.noElevation ? undefined : "0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04)",
+                            borderRadius: "var(--pg-radius-md)",
+                            boxShadow: props.noElevation ? undefined : "var(--pg-shadow-xs)",
                             background: cc.surface,
-                            border: `1px solid ${cc.outlineVariant}20`,
+                            border: "1px solid var(--pg-border-subtle)",
                             transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
                         }}
                         class={`${props.noElevation ? undefined : "fields-section-card"}`}

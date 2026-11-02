@@ -3,12 +3,11 @@ import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import { VAlert, VAutocomplete, VBtn, VCheckbox, VProgressCircular, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VAutocomplete, VBtn, VProgressCircular, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
 import { statusTone } from "@/components/Table/statusTone";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
@@ -22,12 +21,16 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
 import { FormModal } from "@/components/ui/FormModal";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import type { MetricItem } from "@/components/ui/MetricStrip";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { DescriptionList } from "@/components/ui/DescriptionList";
+import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 type Adjustment = {
     id: string;
     type: string;
@@ -104,6 +107,10 @@ const ADJUSTMENT_CHECKS = [
 const OPEN_STATES = ["DRAFT", "PENDING_REVIEW", "APPROVED", "EXECUTING"];
 const EXECUTED_STATES = ["EXECUTED"];
 
+const badgeTone = (value: string): BadgeTone => {
+    const tone = statusTone(value);
+    return tone === "error" ? "danger" : tone === "primary" ? "info" : tone;
+};
 const formatDateTime = (value: string | null | undefined): string => {
     if (!value) return "—";
     const date = new Date(value);
@@ -155,6 +162,7 @@ const AdjustmentsPage = dc(() => {
     const createOpen = ref(false);
     const form = ref(emptyForm());
     const actionLoading = ref(false);
+    const createError = ref("");
     const proposalChecklist = ref<Record<string, boolean>>({});
     const exportLoading = ref(false);
     const summaryExportLoading = ref(false);
@@ -313,6 +321,7 @@ const AdjustmentsPage = dc(() => {
     const openCreate = () => {
         form.value = emptyForm();
         proposalChecklist.value = {};
+        createError.value = "";
         glAccountOptions.value = [];
         createOpen.value = true;
         void loadMerchants();
@@ -327,6 +336,7 @@ const AdjustmentsPage = dc(() => {
     const proposalChecklistComplete = computed(() => !showChecklists || ADJUSTMENT_CHECKS.every((check) => proposalChecklist.value[check.key] === true));
 
     const submit = async () => {
+        createError.value = "";
         const amount = form.value.amount.trim();
         if (!/^\d{1,14}(\.\d{1,4})?$/.test(amount)) {
             showSnackBar({ type: "warning", message: t("Amount must be a decimal with up to 4 places") });
@@ -363,6 +373,7 @@ const AdjustmentsPage = dc(() => {
             });
             refreshAll();
         } catch (error) {
+            createError.value = extractApiErrorMessage(error);
             showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
         } finally {
             actionLoading.value = false;
@@ -440,7 +451,7 @@ const AdjustmentsPage = dc(() => {
             label: "State",
             sortKey: "state",
             value: (row) => row.state,
-            Value: ({ row }: { row: Adjustment }) => <StatusChip label={row.state} tone={statusTone(row.state)} size="small" />,
+            Value: ({ row }: { row: Adjustment }) => <StatusBadge status={row.state} toneOverride={badgeTone(row.state)} />,
         },
         {
             key: "amount",
@@ -456,7 +467,7 @@ const AdjustmentsPage = dc(() => {
             Value: ({ row }: { row: Adjustment }) => (
                 <ThemedView style={{ gap: "2px" }}>
                     <ThemedText style={{ fontSize: "12px" }}>{row.merchantName || "—"}</ThemedText>
-                    <ThemedText style={{ fontSize: "10px", opacity: 0.55, direction: "ltr" }}>{row.merchantId ?? ""}</ThemedText>
+                    <MonoRef value={row.merchantId ?? ""} />
                 </ThemedView>
             ),
         },
@@ -482,7 +493,7 @@ const AdjustmentsPage = dc(() => {
             headerTooltip: "The maker-checker request that must approve this adjustment before money moves.",
             value: (row) => row.approvalState ?? "",
             Value: ({ row }: { row: Adjustment }) => row.approvalState
-                ? <StatusChip label={row.approvalState} tone={statusTone(row.approvalState)} size="x-small" />
+                ? <StatusBadge status={row.approvalState} toneOverride={badgeTone(row.approvalState)} />
                 : <ThemedText style={{ opacity: 0.55 }}>—</ThemedText>,
         },
         {
@@ -522,42 +533,27 @@ const AdjustmentsPage = dc(() => {
                 </VAlert>
 
                 {summary.value && (
-                    <>
-                        <MetricStrip items={summaryMetrics.value} />
-                        <SurfaceCard title={t("Adjustment health")}>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end" }}>
-                                    <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
-                                </ThemedView>
-                                {showChecklists && (
-                                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
-                                        {SUMMARY_EXPORT_CHECKS.map((check) => (
-                                            <VCheckbox
-                                                key={check.key}
-                                                modelValue={summaryExportChecklist.value[check.key] === true}
-                                                onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
-                                                label={t(check.label)}
-                                                density="compact"
-                                                hideDetails
-                                            />
-                                        ))}
-                                        {!summaryExportChecklistComplete.value && (
-                                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
-                                        )}
-                                    </ThemedView>
-                                )}
-                                <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                    {Object.entries(summary.value.byState ?? {}).map(([state, count]) => (
-                                        <StatusChip key={state} label={`${state}: ${count}`} tone={statusTone(state)} size="x-small" />
-                                    ))}
-                                    {Object.entries(summary.value.byType ?? {}).map(([type, count]) => (
-                                        <StatusChip key={type} label={`${type}: ${count}`} tone="neutral" size="x-small" />
-                                    ))}
-                                </ThemedView>
-                            </SurfaceCardText>
-                        </SurfaceCard>
-                    </>
+                    <SummaryExportCard
+                        title={t("Adjustment health")}
+                        metrics={summaryMetrics.value}
+                        checks={[...SUMMARY_EXPORT_CHECKS]}
+                        checklist={summaryExportChecklist.value}
+                        showChecklists={showChecklists}
+                        checklistComplete={summaryExportChecklistComplete.value}
+                        exportLoading={summaryExportLoading.value}
+                        exportDisabled={!summaryExportChecklistComplete.value}
+                        exportLabel={t("Export summary")}
+                        onExport={() => void exportSummary()}
+                    >
+                        <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                            {Object.entries(summary.value.byState ?? {}).map(([state, count]) => (
+                                <StatusBadge key={state} status={state} label={`${state}: ${count}`} toneOverride={badgeTone(state)} />
+                            ))}
+                            {Object.entries(summary.value.byType ?? {}).map(([type, count]) => (
+                                <StatusBadge key={type} status={type} label={`${type}: ${count}`} toneOverride="neutral" />
+                            ))}
+                        </ThemedView>
+                    </SummaryExportCard>
                 )}
 
                 <SegmentedTabs
@@ -625,180 +621,178 @@ const AdjustmentsPage = dc(() => {
                 />
             </ThemedView>
 
-            <FormModal
+            <SlideOverDrawer
                 modelValue={detailsOpen.value}
                 onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)}
                 title={[selected.value?.type, "·", formatMoney(selected.value?.amount, selected.value?.currency)].filter(Boolean).join(" · ")}
-                size="lg"
+                subtitle={selected.value ? selected.value.merchantName || selected.value.merchantId || "" : ""}
+                width={660}
+                v-slots={{
+                    footer: () => (
+                        <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
+                    ),
+                }}
             >
-{detailLoading.value || !selected.value ? (
-                            <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "280px", gap: "12px" }}>
-                                <VProgressCircular indeterminate size={52} color="primary" />
-                                <ThemedText style={{ opacity: 0.65 }}>{t("Loading adjustment")}</ThemedText>
+                {detailLoading.value || !selected.value ? (
+                    <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "280px", gap: "12px" }}>
+                        <VProgressCircular indeterminate size={52} color="primary" />
+                        <ThemedText style={{ opacity: 0.65 }}>{t("Loading adjustment")}</ThemedText>
+                    </ThemedView>
+                ) : (
+                    <>
+                        <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap", marginBottom: "16px" }}>
+                            <MoneyDisplay amount={selected.value.amount} currency={selected.value.currency} size="lg" colorSign />
+                            <ThemedView style={{ flexDirection: "row", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+                                <StatusBadge status={selected.value.state} toneOverride={badgeTone(selected.value.state)} />
+                                {selected.value.approvalState && <StatusBadge status={selected.value.approvalState} label={`approval ${selected.value.approvalState}`} toneOverride={badgeTone(selected.value.approvalState)} />}
+                                {selected.value.draftedBySystem && <StatusBadge status="SYSTEM_DRAFT" label={t("System draft")} toneOverride="info" />}
                             </ThemedView>
-                        ) : (
-                            <>
-                                <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
-                                    <ThemedView style={{ gap: "4px" }}>
-                                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                            <MoneyDisplay amount={selected.value.amount} currency={selected.value.currency} colorSign />
-                                            <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{selected.value.merchantName || selected.value.merchantId || "—"}</ThemedText>
-                                        </ThemedView>
-                                    </ThemedView>
-                                    <ThemedView style={{ flexDirection: "row", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
-                                        <StatusChip label={selected.value.state} tone={statusTone(selected.value.state)} />
-                                        {selected.value.approvalState && <StatusChip label={`approval ${selected.value.approvalState}`} tone={statusTone(selected.value.approvalState)} size="small" />}
-                                        {selected.value.draftedBySystem && <StatusChip label={t("System draft")} tone="info" size="small" />}
-                                    </ThemedView>
-                                </ThemedView>
+                        </ThemedView>
 
-                                <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "14px" }}>
-                                    <SurfaceCard variant="tonal">
-                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Adjustment context")}</ThemedText>
-                                            <DescriptionList items={[
-                                                { label: t("Merchant"), value: selected.value.merchantName || "—" },
-                                                { label: t("Source attempt"), value: <MonoRef value={selected.value.sourceAttemptReference || selected.value.sourceAttemptId || ""} /> },
-                                                { label: t("Attempt status"), value: selected.value.sourceAttemptStatus || "—" },
-                                                { label: t("Dispute"), value: <MonoRef value={selected.value.disputeReference || selected.value.disputeId || ""} /> },
-                                                { label: t("Dispute status"), value: selected.value.disputeStatus || "—" },
-                                                { label: t("Dispute amount"), value: <MoneyDisplay amount={selected.value.disputeAmount} currency={selected.value.currency} size="sm" /> },
-                                                { label: t("Target account"), value: `${selected.value.targetAccountType || "—"} · ${selected.value.currency}` },
-                                                { label: t("Reverse commission"), value: selected.value.reverseCommission ? t("Yes") : t("No") },
-                                                { label: t("Reason"), value: selected.value.reason },
-                                                { label: t("Created"), value: formatDateTime(selected.value.createdAt) },
-                                                { label: t("Executed"), value: formatDateTime(selected.value.executedAt) },
-                                            ]} />
-                                            {selected.value.merchantId && (
-                                                <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "MerchantDetail", params: { id: selected.value?.merchantId ?? "" } })}>{t("Open merchant")}</VBtn>
-                                            )}
-                                        </SurfaceCardText>
-                                    </SurfaceCard>
+                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "20px" }}>
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Adjustment context")}</ThemedText>
+                                <DescriptionList items={[
+                                    { label: t("Merchant"), value: selected.value.merchantName || "—" },
+                                    { label: t("Source attempt"), value: <MonoRef value={selected.value.sourceAttemptReference || selected.value.sourceAttemptId || ""} /> },
+                                    { label: t("Attempt status"), value: selected.value.sourceAttemptStatus || "—" },
+                                    { label: t("Dispute"), value: <MonoRef value={selected.value.disputeReference || selected.value.disputeId || ""} /> },
+                                    { label: t("Dispute status"), value: selected.value.disputeStatus || "—" },
+                                    { label: t("Dispute amount"), value: <MoneyDisplay amount={selected.value.disputeAmount} currency={selected.value.currency} size="sm" colorSign /> },
+                                    { label: t("Target account"), value: `${selected.value.targetAccountType || "—"} · ${selected.value.currency}` },
+                                    { label: t("Reverse commission"), value: selected.value.reverseCommission ? t("Yes") : t("No") },
+                                    { label: t("Reason"), value: selected.value.reason },
+                                    { label: t("Created"), value: formatDateTime(selected.value.createdAt) },
+                                    { label: t("Executed"), value: formatDateTime(selected.value.executedAt) },
+                                ]} />
+                                {selected.value.merchantId && (
+                                    <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "MerchantDetail", params: { id: selected.value?.merchantId ?? "" } })}>{t("Open merchant")}</VBtn>
+                                )}
+                            </ThemedView>
 
-                                    <SurfaceCard variant="tonal">
-                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Approval and ledger")}</ThemedText>
-                                            <DescriptionList items={[
-                                                { label: t("Approval request"), value: <MonoRef value={selected.value.approvalRequestId ?? ""} /> },
-                                                { label: t("Approval state"), value: selected.value.approvalState || "—" },
-                                                { label: t("Checker"), value: selected.value.approval?.checkerUserId || selected.value.checkerUserId || "—" },
-                                                { label: t("Rejection reason"), value: selected.value.approval?.rejectionReason || "—" },
-                                                { label: t("Journal entry"), value: <MonoRef value={selected.value.journalEntryId ?? ""} /> },
-                                                { label: t("Journal type"), value: selected.value.journalEntry?.refType || "—" },
-                                                { label: t("Journal reference"), value: <MonoRef value={selected.value.journalEntry?.refId ?? ""} /> },
-                                                { label: t("External dispute ref"), value: <MonoRef value={selected.value.externalDisputeRef ?? ""} /> },
-                                                { label: t("Provider refund ref"), value: <MonoRef value={selected.value.providerRefundRef ?? ""} /> },
-                                            ]} />
-                                            {selected.value.approvalRequestId && (
-                                                <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "Approvals" })}>{t("Open approvals")}</VBtn>
-                                            )}
-                                        </SurfaceCardText>
-                                    </SurfaceCard>
-                                </ThemedView>
-
-                                <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                                    <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
-                                </ThemedView>
-                            </>
-                        )}
-            </FormModal>
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Approval and ledger")}</ThemedText>
+                                <DescriptionList items={[
+                                    { label: t("Approval request"), value: <MonoRef value={selected.value.approvalRequestId ?? ""} /> },
+                                    { label: t("Approval state"), value: selected.value.approvalState || "—" },
+                                    { label: t("Checker"), value: selected.value.approval?.checkerUserId || selected.value.checkerUserId || "—" },
+                                    { label: t("Rejection reason"), value: selected.value.approval?.rejectionReason || "—" },
+                                    { label: t("Journal entry"), value: <MonoRef value={selected.value.journalEntryId ?? ""} /> },
+                                    { label: t("Journal type"), value: selected.value.journalEntry?.refType || "—" },
+                                    { label: t("Journal reference"), value: <MonoRef value={selected.value.journalEntry?.refId ?? ""} /> },
+                                    { label: t("External dispute ref"), value: <MonoRef value={selected.value.externalDisputeRef ?? ""} /> },
+                                    { label: t("Provider refund ref"), value: <MonoRef value={selected.value.providerRefundRef ?? ""} /> },
+                                ]} />
+                                {selected.value.approvalRequestId && (
+                                    <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "Approvals" })}>{t("Open approvals")}</VBtn>
+                                )}
+                            </ThemedView>
+                        </ThemedView>
+                    </>
+                )}
+            </SlideOverDrawer>
 
             <FormModal
                 modelValue={createOpen.value}
                 onUpdate:modelValue={(value: boolean) => (createOpen.value = value)}
                 title={t("Propose adjustment")}
                 size="md"
+                loading={actionLoading.value}
+                errorMessage={createError.value}
+                submitLabel={t("Create draft")}
+                onSubmit={() => void submit()}
             >
-<VAlert type="info" variant="tonal">
-                            {t("The draft creates an approval request. The adjustment does not execute until a different finance checker approves it.")}
-                        </VAlert>
-                        <VSelect
-                            items={ADJUSTMENT_TYPES.map((value) => ({ title: value, value }))}
-                            modelValue={form.value.type}
-                            onUpdate:modelValue={(value: string) => (form.value.type = value)}
-                            label={t("Adjustment type")}
-                        />
+                <VAlert type="info" variant="tonal">
+                    {t("The draft creates an approval request. The adjustment does not execute until a different finance checker approves it.")}
+                </VAlert>
+                <FormField label={t("Adjustment type")} required sensitiveMakerChecker>
+                    <VSelect
+                        items={ADJUSTMENT_TYPES.map((value) => ({ title: value, value }))}
+                        modelValue={form.value.type}
+                        onUpdate:modelValue={(value: string) => (form.value.type = value)}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("Amount")} required sensitiveMakerChecker>
+                    <VTextField
+                        modelValue={form.value.amount}
+                        onUpdate:modelValue={(value: string) => (form.value.amount = value)}
+                        placeholder="0.0000"
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("Merchant")} required sensitiveMakerChecker>
+                    <VAutocomplete
+                        items={merchantOptions.value}
+                        itemTitle="title"
+                        itemValue="value"
+                        modelValue={form.value.merchantId}
+                        onUpdate:modelValue={(value: string | null) => onMerchantChanged(value ?? "")}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField
+                    label={t("Target merchant wallet account")}
+                    hint={form.value.merchantId ? t("Select the merchant wallet GL account") : t("Choose a merchant first")}
+                    required
+                    sensitiveMakerChecker
+                >
+                    <VAutocomplete
+                        items={glAccountOptions.value}
+                        itemTitle="title"
+                        itemValue="value"
+                        modelValue={form.value.targetGlAccountId}
+                        onUpdate:modelValue={(value: string | null) => (form.value.targetGlAccountId = value ?? "")}
+                        disabled={!form.value.merchantId}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("Reason")} required sensitiveMakerChecker>
+                    <VTextField
+                        modelValue={form.value.reason}
+                        onUpdate:modelValue={(value: string) => (form.value.reason = value)}
+                        hideDetails
+                    />
+                </FormField>
+                <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px" }}>
+                    <FormField label={t("Source attempt ID (optional)")} sensitiveMakerChecker>
                         <VTextField
-                            label={t("Amount")}
-                            modelValue={form.value.amount}
-                            onUpdate:modelValue={(value: string) => (form.value.amount = value)}
-                            placeholder="0.0000"
+                            modelValue={form.value.sourceAttemptId}
+                            onUpdate:modelValue={(value: string) => (form.value.sourceAttemptId = value)}
+                            hideDetails
                         />
-                        <VAutocomplete
-                            label={t("Merchant")}
-                            items={merchantOptions.value}
-                            itemTitle="title"
-                            itemValue="value"
-                            modelValue={form.value.merchantId}
-                            onUpdate:modelValue={(value: string | null) => onMerchantChanged(value ?? "")}
-                        />
-                        <VAutocomplete
-                            label={t("Target merchant wallet account")}
-                            items={glAccountOptions.value}
-                            itemTitle="title"
-                            itemValue="value"
-                            modelValue={form.value.targetGlAccountId}
-                            onUpdate:modelValue={(value: string | null) => (form.value.targetGlAccountId = value ?? "")}
-                            disabled={!form.value.merchantId}
-                            hint={form.value.merchantId ? t("Select the merchant wallet GL account") : t("Choose a merchant first")}
-                            persistentHint
-                        />
+                    </FormField>
+                    <FormField label={t("Dispute ID (optional)")} sensitiveMakerChecker>
                         <VTextField
-                            label={t("Reason")}
-                            modelValue={form.value.reason}
-                            onUpdate:modelValue={(value: string) => (form.value.reason = value)}
+                            modelValue={form.value.disputeId}
+                            onUpdate:modelValue={(value: string) => (form.value.disputeId = value)}
+                            hideDetails
                         />
-                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px" }}>
-                            <VTextField
-                                label={t("Source attempt ID (optional)")}
-                                modelValue={form.value.sourceAttemptId}
-                                onUpdate:modelValue={(value: string) => (form.value.sourceAttemptId = value)}
-                            />
-                            <VTextField
-                                label={t("Dispute ID (optional)")}
-                                modelValue={form.value.disputeId}
-                                onUpdate:modelValue={(value: string) => (form.value.disputeId = value)}
-                            />
-                        </ThemedView>
-                        <VTextField
-                            label={t("External dispute reference (optional)")}
-                            modelValue={form.value.externalDisputeRef}
-                            onUpdate:modelValue={(value: string) => (form.value.externalDisputeRef = value)}
-                        />
-                        {showChecklists && (
-                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Proposal checklist")}</ThemedText>
-                                {ADJUSTMENT_CHECKS.map((check) => (
-                                    <VCheckbox
-                                        key={check.key}
-                                        modelValue={proposalChecklist.value[check.key] === true}
-                                        onUpdate:modelValue={(value: unknown) => (proposalChecklist.value = { ...proposalChecklist.value, [check.key]: Boolean(value) })}
-                                        label={t(check.label)}
-                                        density="compact"
-                                        hideDetails
-                                    />
-                                ))}
-                                {!proposalChecklistComplete.value && (
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all proposal checklist items before drafting")}</ThemedText>
-                                )}
-                            </ThemedView>
-                        )}
-                        <VSwitch
-                            label={t("Reverse commission")}
-                            modelValue={form.value.reverseCommission}
-                            onUpdate:modelValue={(value: unknown) => (form.value.reverseCommission = Boolean(value))}
-                        />
-                        <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end", flexWrap: "wrap" }}>
-                            <VBtn variant="text" onClick={() => (createOpen.value = false)}>{t("Cancel")}</VBtn>
-                            <VBtn
-                                color="primary"
-                                loading={actionLoading.value}
-                                disabled={!form.value.merchantId || !form.value.targetGlAccountId || !form.value.amount.trim() || form.value.reason.trim().length < 2 || !proposalChecklistComplete.value}
-                                onClick={() => void submit()}
-                            >
-                                {t("Create draft")}
-                            </VBtn>
-                        </ThemedView>
+                    </FormField>
+                </ThemedView>
+                <FormField label={t("External dispute reference (optional)")} sensitiveMakerChecker>
+                    <VTextField
+                        modelValue={form.value.externalDisputeRef}
+                        onUpdate:modelValue={(value: string) => (form.value.externalDisputeRef = value)}
+                        hideDetails
+                    />
+                </FormField>
+                <FormChecklist
+                    checks={[...ADJUSTMENT_CHECKS]}
+                    modelValue={proposalChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (proposalChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Proposal checklist")}
+                    complete={proposalChecklistComplete.value}
+                    incompleteMessage={t("Complete all proposal checklist items before drafting")}
+                />
+                <FormField label={t("Reverse commission")} sensitiveMakerChecker>
+                    <VSwitch
+                        modelValue={form.value.reverseCommission}
+                        onUpdate:modelValue={(value: unknown) => (form.value.reverseCommission = Boolean(value))}
+                        hideDetails
+                    />
+                </FormField>
             </FormModal>
         </ScreenContainer>
     );

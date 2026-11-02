@@ -74,26 +74,8 @@ const RegisterPage = dc(() => {
 
     return () => (
         <AuthLayout>
-            <SurfaceCard>
+            <SurfaceCard title={t("Create Account")} subtitle={t("Register")}>
                 <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                        <h1
-                            style={{
-                                margin: 0,
-                                fontSize: "20px",
-                                fontWeight: 600,
-                                lineHeight: 1.3,
-                                color: "var(--pg-ink-primary)",
-                                letterSpacing: "-0.02em",
-                            }}
-                        >
-                            {t("Create Account")}
-                        </h1>
-                        <p style={{ margin: 0, fontSize: "13px", color: "var(--pg-ink-muted)" }}>
-                            {t("Register")}
-                        </p>
-                    </div>
-
                     {error.value && (
                         <VAlert type="error" variant="tonal" density="compact">
                             {error.value}

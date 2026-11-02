@@ -2,10 +2,14 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VCard, VCardText, VCheckbox, VSelect, VTextField, VTextarea } from "vuetify/components";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
+import { VAlert, VBtn, VSelect, VTextField, VTextarea } from "vuetify/components";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { DescriptionList } from "@/components/ui/DescriptionList";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { MonoRef } from "@/components/ui/MonoRef";
+import { WizardSection } from "./WizardSection";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -60,6 +64,12 @@ type GateResult = {
     passed: boolean;
     detail?: string;
 };
+
+const gridStyle = {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+    gap: "14px",
+} as const;
 
 export const StepSimulator = dc(
     (props: WizardStepProps) => {
@@ -170,71 +180,62 @@ export const StepSimulator = dc(
         };
 
         return () => (
-            <ThemedView style={{ gap: "16px" }}>
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                            {t("Dry Run")}
-                        </ThemedText>
-                        <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
-                            <VSelect
-                                items={[
-                                    "CREDENTIAL_CHECK",
-                                    "PRE_INITIATE",
-                                    "INITIATE",
-                                    "SUBMIT",
-                                    "VERIFY",
-                                    "CANCEL",
-                                    "REFUND",
-                                    "VOID",
-                                    "CAPTURE",
-                                    "SETTLEMENT_FETCH",
-                                ]}
-                                modelValue={phase.value}
-                                onUpdate:modelValue={(v: string) => (phase.value = v)}
-                                label={t("Phase")}
-                                style={{ minWidth: "220px" }}
+            <SurfaceCard title={t("Simulator & Approval")}>
+                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+                    <WizardSection title={t("Dry Run")}>
+                        <div style={gridStyle}>
+                            <FormField label={t("Phase")}>
+                                <VSelect
+                                    items={[
+                                        "CREDENTIAL_CHECK",
+                                        "PRE_INITIATE",
+                                        "INITIATE",
+                                        "SUBMIT",
+                                        "VERIFY",
+                                        "CANCEL",
+                                        "REFUND",
+                                        "VOID",
+                                        "CAPTURE",
+                                        "SETTLEMENT_FETCH",
+                                    ]}
+                                    modelValue={phase.value}
+                                    onUpdate:modelValue={(v: string) => (phase.value = v)}
+                                />
+                            </FormField>
+                            <FormField label={t("Amount")}>
+                                <VTextField
+                                    modelValue={sampleAmount.value}
+                                    onUpdate:modelValue={(v: string) => (sampleAmount.value = v)}
+                                />
+                            </FormField>
+                            <FormField label={t("Currency")}>
+                                <VTextField
+                                    modelValue={sampleCurrency.value}
+                                    onUpdate:modelValue={(v: string) => (sampleCurrency.value = v.toUpperCase())}
+                                />
+                            </FormField>
+                        </div>
+                        <FormField label={t("Params")}>
+                            <VTextarea
+                                modelValue={formData.value}
+                                onUpdate:modelValue={(v: string) => (formData.value = v)}
+                                rows={4}
                             />
-                            <VTextField
-                                label={t("Amount")}
-                                modelValue={sampleAmount.value}
-                                onUpdate:modelValue={(v: string) => (sampleAmount.value = v)}
-                                style={{ minWidth: "140px" }}
-                            />
-                            <VTextField
-                                label={t("Currency")}
-                                modelValue={sampleCurrency.value}
-                                onUpdate:modelValue={(v: string) => (sampleCurrency.value = v.toUpperCase())}
-                                style={{ minWidth: "130px" }}
-                            />
-                        </ThemedView>
-                        <VTextarea
-                            label={t("Params")}
-                            modelValue={formData.value}
-                            onUpdate:modelValue={(v: string) => (formData.value = v)}
-                            rows={4}
+                        </FormField>
+                        <FormChecklist
+                            checks={DRY_RUN_CHECKS.map((check) => ({ key: check.key, label: check.label }))}
+                            modelValue={dryRunChecklist.value}
+                            onUpdate:modelValue={(value: Record<string, boolean>) => (dryRunChecklist.value = value)}
+                            show={showChecklists}
+                            title={t("Dry-run checklist")}
+                            incompleteMessage={t("Complete all dry-run checklist items before running")}
+                            complete={dryRunChecklistComplete.value}
                         />
-                        {showChecklists && (
-                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Dry-run checklist")}</ThemedText>
-                                {DRY_RUN_CHECKS.map((check) => (
-                                    <VCheckbox
-                                        key={check.key}
-                                        modelValue={dryRunChecklist.value[check.key] === true}
-                                        onUpdate:modelValue={(value: unknown) => (dryRunChecklist.value = { ...dryRunChecklist.value, [check.key]: Boolean(value) })}
-                                        label={t(check.label)}
-                                        density="compact"
-                                        hideDetails
-                                    />
-                                ))}
-                                {!dryRunChecklistComplete.value && (
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all dry-run checklist items before running")}</ThemedText>
-                                )}
-                            </ThemedView>
-                        )}
-                        <VBtn color="primary" loading={dryRunning.value} disabled={!dryRunChecklistComplete.value} onClick={() => void runDryRun()}>
-                            {t("Dry Run")}
-                        </VBtn>
+                        <div>
+                            <VBtn color="primary" loading={dryRunning.value} disabled={!dryRunChecklistComplete.value} onClick={() => void runDryRun()}>
+                                {t("Dry Run")}
+                            </VBtn>
+                        </div>
                         {dryRunError.value && (
                             <VAlert type="error" variant="tonal" density="compact">
                                 {dryRunError.value}
@@ -242,53 +243,47 @@ export const StepSimulator = dc(
                         )}
                         {dryRunOutput.value && (
                             <pre
+                                class="pg-mono"
                                 style={{
                                     margin: 0,
                                     fontSize: "12px",
+                                    lineHeight: 1.55,
                                     whiteSpace: "pre-wrap",
+                                    wordBreak: "break-word",
                                     direction: "ltr",
-                                    background: "rgba(100,116,139,0.08)",
+                                    background: "var(--pg-bg-surface-subtle)",
+                                    color: "var(--pg-ink-primary)",
+                                    border: "1px solid var(--pg-border-subtle)",
                                     padding: "12px",
-                                    borderRadius: "10px",
+                                    borderRadius: "var(--pg-radius-sm)",
+                                    overflowX: "auto",
                                 }}
                             >
                                 {dryRunOutput.value}
                             </pre>
                         )}
-                    </VCardText>
-                </VCard>
+                    </WizardSection>
 
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <ThemedView
-                            style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
-                        >
-                            <ThemedText type="defaultSemiBold">{t("Test Suite")}</ThemedText>
-                            <ThemedView style={{ flexDirection: "row", gap: "8px" }}>
+                    <WizardSection
+                        title={t("Test Suite")}
+                        divider
+                        v-slots={{
+                            actions: () => (
                                 <VBtn color="primary" size="small" loading={suiteRunning.value} disabled={!suiteChecklistComplete.value} onClick={() => void runSuite()}>
                                     {t("Run")}
                                 </VBtn>
-                            </ThemedView>
-                        </ThemedView>
-
-                        {showChecklists && (
-                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Test suite checklist")}</ThemedText>
-                                {SUITE_CHECKS.map((check) => (
-                                    <VCheckbox
-                                        key={check.key}
-                                        modelValue={suiteChecklist.value[check.key] === true}
-                                        onUpdate:modelValue={(value: unknown) => (suiteChecklist.value = { ...suiteChecklist.value, [check.key]: Boolean(value) })}
-                                        label={t(check.label)}
-                                        density="compact"
-                                        hideDetails
-                                    />
-                                ))}
-                                {!suiteChecklistComplete.value && (
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all test suite checklist items before running")}</ThemedText>
-                                )}
-                            </ThemedView>
-                        )}
+                            ),
+                        }}
+                    >
+                        <FormChecklist
+                            checks={SUITE_CHECKS.map((check) => ({ key: check.key, label: check.label }))}
+                            modelValue={suiteChecklist.value}
+                            onUpdate:modelValue={(value: Record<string, boolean>) => (suiteChecklist.value = value)}
+                            show={showChecklists}
+                            title={t("Test suite checklist")}
+                            incompleteMessage={t("Complete all test suite checklist items before running")}
+                            complete={suiteChecklistComplete.value}
+                        />
 
                         {suiteError.value && (
                             <VAlert type="error" variant="tonal" density="compact">
@@ -296,75 +291,81 @@ export const StepSimulator = dc(
                             </VAlert>
                         )}
 
-                        <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
+                        <div style={{ display: "flex", flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             {scenarios.value.map((scenario) => (
-                                <StatusChip
+                                <StatusBadge
                                     key={scenario.key}
+                                    status={scenario.passed ? "PASSED" : "FAILED"}
                                     label={`${scenario.name || scenario.key}: ${scenario.passed ? t("Passed") : t("Failed")}`}
-                                    tone={scenario.passed ? "success" : "error"}
+                                    toneOverride={scenario.passed ? "success" : "danger"}
                                 />
                             ))}
-                        </ThemedView>
-                    </VCardText>
-                </VCard>
+                        </div>
+                    </WizardSection>
 
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                        <ThemedText type="defaultSemiBold">{t("Go-Live Gates")}</ThemedText>
-                        {gates.value.map((gate) => (
-                            <ThemedView
-                                key={gate.key}
-                                style={{ flexDirection: "row", gap: "12px", alignItems: "center", fontSize: "13px" }}
-                            >
-                                <StatusChip label={gate.passed ? t("Passed") : t("Pending")} tone={gate.passed ? "success" : "warning"} />
-                                <span style={{ flex: 1, direction: "ltr" }}>{gate.key}</span>
-                                <span style={{ opacity: 0.65 }}>{gate.detail ?? ""}</span>
-                            </ThemedView>
-                        ))}
-                    </VCardText>
-                </VCard>
+                    <WizardSection title={t("Go-Live Gates")} divider>
+                        <DescriptionList
+                            items={gates.value.map((gate, index) => ({
+                                label: `${t("Gate")} ${index + 1}`,
+                                value: (
+                                    <span
+                                        style={{
+                                            display: "inline-flex",
+                                            alignItems: "center",
+                                            justifyContent: "flex-end",
+                                            gap: "8px",
+                                            flexWrap: "wrap",
+                                        }}
+                                    >
+                                        <MonoRef value={gate.key} copyable={false} />
+                                        <span style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>
+                                            {gate.detail ?? ""}
+                                        </span>
+                                        <StatusBadge
+                                            status={gate.passed ? "PASSED" : "PENDING"}
+                                            label={gate.passed ? t("Passed") : t("Pending")}
+                                            toneOverride={gate.passed ? "success" : "warning"}
+                                        />
+                                    </span>
+                                ),
+                            }))}
+                        />
+                    </WizardSection>
 
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <ThemedText type="defaultSemiBold">{t("Rollback Version")}</ThemedText>
-                        <VTextField
-                            label="rollback_version_id"
-                            modelValue={rollbackVersionId.value}
-                            onUpdate:modelValue={(v: string) => {
-                                rollbackVersionId.value = v;
-                                props.onChange({ ...props.model, rollbackVersionId: v || null });
-                            }}
+                    <WizardSection title={t("Rollback Version")} divider>
+                        <FormField label="rollback_version_id">
+                            <VTextField
+                                modelValue={rollbackVersionId.value}
+                                onUpdate:modelValue={(v: string) => {
+                                    rollbackVersionId.value = v;
+                                    props.onChange({ ...props.model, rollbackVersionId: v || null });
+                                }}
+                            />
+                        </FormField>
+                        <FormField label={t("Reason")}>
+                            <VTextarea
+                                modelValue={submitReason.value}
+                                onUpdate:modelValue={(v: string) => (submitReason.value = v)}
+                                rows={3}
+                            />
+                        </FormField>
+                        <FormChecklist
+                            checks={SUBMIT_CHECKS.map((check) => ({ key: check.key, label: check.label }))}
+                            modelValue={submitChecklist.value}
+                            onUpdate:modelValue={(value: Record<string, boolean>) => (submitChecklist.value = value)}
+                            show={showChecklists}
+                            title={t("Go-live checklist")}
+                            incompleteMessage={t("Complete all go-live checklist items before submitting")}
+                            complete={submitChecklistComplete.value}
                         />
-                        <VTextarea
-                            label={t("Reason")}
-                            modelValue={submitReason.value}
-                            onUpdate:modelValue={(v: string) => (submitReason.value = v)}
-                            rows={3}
-                        />
-                        {showChecklists && (
-                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Go-live checklist")}</ThemedText>
-                                {SUBMIT_CHECKS.map((check) => (
-                                    <VCheckbox
-                                        key={check.key}
-                                        modelValue={submitChecklist.value[check.key] === true}
-                                        onUpdate:modelValue={(value: unknown) => (submitChecklist.value = { ...submitChecklist.value, [check.key]: Boolean(value) })}
-                                        label={t(check.label)}
-                                        density="compact"
-                                        hideDetails
-                                    />
-                                ))}
-                                {!submitChecklistComplete.value && (
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all go-live checklist items before submitting")}</ThemedText>
-                                )}
-                            </ThemedView>
-                        )}
-                        <VBtn color="primary" loading={submitting.value} disabled={!submitChecklistComplete.value} onClick={() => void submitForApproval()}>
-                            {t("Submit For Approval")}
-                        </VBtn>
-                    </VCardText>
-                </VCard>
-            </ThemedView>
+                        <div>
+                            <VBtn color="primary" loading={submitting.value} disabled={!submitChecklistComplete.value} onClick={() => void submitForApproval()}>
+                                {t("Submit For Approval")}
+                            </VBtn>
+                        </div>
+                    </WizardSection>
+                </SurfaceCardText>
+            </SurfaceCard>
         );
     },
     {

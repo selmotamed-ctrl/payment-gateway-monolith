@@ -1,9 +1,10 @@
 import { defineComponent, ref, type VNode } from "vue";
-import { VDialog, VCard, VCardTitle, VCardText, VCardActions, VForm } from "vuetify/components";
+import { VDialog, VForm } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { dc } from "kt-dc";
 import { extractApiError, UnknownError, type ApiError } from "@/utils/errors/extractor";
 import { AlertView } from "./AlertView";
+import { SurfaceCard } from "@/components/ui";
 import type { JSONObject } from "kt-common";
 export interface ConfirmOptions {
     title: string;
@@ -88,11 +89,12 @@ export const AwaitedConfirmationDialog = dc<{}, { show(opts: ConfirmOptions): Pr
         >
             {{
                 default: () => (
-                    <VCard>
-                        <VCardTitle class="text-h6">{t(title.value)}</VCardTitle>
-                        <VCardText>{t(message.value)}</VCardText>
-                        {slot.value && (
-                            <VCardText>
+                    <SurfaceCard title={t(title.value)} style={{ width: "100%" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                            <div style={{ fontSize: "13.5px", color: "var(--pg-ink-secondary)" }}>
+                                {t(message.value)}
+                            </div>
+                            {slot.value && (
                                 <VForm
                                     modelValue={valid.value}
                                     onUpdate:modelValue={(v) => {
@@ -101,20 +103,18 @@ export const AwaitedConfirmationDialog = dc<{}, { show(opts: ConfirmOptions): Pr
                                 >
                                     {slot.value?.({ form })}
                                 </VForm>
-                            </VCardText>
-                        )}
-                        <VCardText>
+                            )}
                             <AlertView type="error" message={apiError.value?.error} messages={apiError.value?.errors}></AlertView>
-                        </VCardText>
-                        <VCardActions class="justify-end">
-                            <Button disabled={loading.value} variant="text" onClick={onCancel}>
-                                {t("Cancel")}
-                            </Button>
-                            <Button variant="text" loading={loading.value} disabled={!valid.value || loading.value} color={type.value} onClick={onConfirm}>
-                                {t("Confirm")}
-                            </Button>
-                        </VCardActions>
-                    </VCard>
+                            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+                                <Button disabled={loading.value} variant="text" onClick={onCancel}>
+                                    {t("Cancel")}
+                                </Button>
+                                <Button variant="text" loading={loading.value} disabled={!valid.value || loading.value} color={type.value} onClick={onConfirm}>
+                                    {t("Confirm")}
+                                </Button>
+                            </div>
+                        </div>
+                    </SurfaceCard>
                 ),
             }}
         </VDialog>

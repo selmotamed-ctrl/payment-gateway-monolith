@@ -9,9 +9,6 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
-import FieldsSections from "@/components/FieldsSections";
-import type { FieldProps } from "@/components/Field";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities, user } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
@@ -39,9 +36,11 @@ import type {
 } from "./types";
 
 import { FormModal } from "@/components/ui/FormModal";
+import { FormField } from "@/components/ui/FormField";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { DescriptionList } from "@/components/ui/DescriptionList";
+import { DescriptionList, type DescriptionItem } from "@/components/ui/DescriptionList";
 import { MonoRef } from "@/components/ui/MonoRef";
+import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 import { EmptyState } from "@/components/ui/EmptyState";
 const parse = (payload: unknown): JoinRequestDetail => {
     const source = (payload ?? {}) as Record<string, unknown>;
@@ -53,18 +52,20 @@ const asText = (value: unknown): string => (value === null || value === undefine
 const jsonRecord = (value: unknown): Record<string, unknown> =>
     value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 
-const field = (
-    text: string,
+const detailItem = (
+    label: string,
     value: unknown,
-    hint?: string,
-    source?: string,
-    copy = false,
-): FieldProps => ({
-    text,
-    value: value === null || value === undefined ? "" : String(value),
-    hint,
-    source,
-    copyOnClick: copy,
+    _hint?: string,
+    _source?: string,
+    mono = false,
+): DescriptionItem => ({
+    label,
+    value:
+        value === null || value === undefined || value === ""
+            ? "—"
+            : mono
+              ? <MonoRef value={String(value)} />
+              : String(value),
 });
 
 const formatBytes = (value: number): string => {
@@ -252,6 +253,8 @@ const JoinRequestDetailPage = dc(() => {
     const canWithdraw = computed(() => canWrite.value && !isFinal.value);
     const sla = computed(() => slaInfo(detail.value ?? {}));
     const statusHelp = computed(() => joinStatusHelp(detail.value?.status ?? ""));
+    const asBadgeTone = (tone: ReturnType<typeof statusTone>): BadgeTone =>
+        tone === "error" ? "danger" : tone === "primary" ? "info" : tone;
     const profile = computed(() => jsonRecord(detail.value?.profileJson));
     const merchant = computed(() => detail.value?.merchant);
     const payout = computed(() => jsonRecord(merchant.value?.payoutBankDetailsJson));
@@ -336,6 +339,10 @@ const JoinRequestDetailPage = dc(() => {
     };
 
     const decide = async () => {
+        if (decision.value === "APPROVED" && !readiness.value?.ready) {
+            showSnackBar({ type: "warning", message: t("All approval blockers must be cleared before approval.") });
+            return;
+        }
         if (decision.value === "REJECTED" && decisionNotes.value.trim().length < 3) {
             showSnackBar({ type: "warning", message: t("A rejection note is required") });
             return;
@@ -595,54 +602,54 @@ const JoinRequestDetailPage = dc(() => {
             {
                 title: t("Business"),
                 description: t("Applicant identity as recorded on the merchant and onboarding profile."),
-                fields: [
-                    field("Legal name", merchant.value?.legalName, "Registered legal entity name.", "merchants.legalName"),
-                    field("Trade name", merchant.value?.tradeName, "Customer-facing business name.", "merchants.tradeName"),
-                    field("Merchant ID", entry.merchantId, "The merchant database identifier.", "merchants.id", true),
-                    field("Join request ID", entry.id, "The onboarding request identifier.", "join_requests.id", true),
-                    field("Status", statusHelp.value.label, statusHelp.value.meaning, "join_requests.status"),
-                    field("Channel", channelLabel(entry.onboardingChannel), COLUMN_HELP.channel, "join_requests.onboarding_channel"),
-                    field("Country", merchant.value?.country, "Two-letter country code.", "merchants.country"),
-                    field("Business category", merchant.value?.businessCategory, "Category used by the risk-based four-eyes policy.", "merchants.businessCategory"),
-                    field("Registration number", merchant.value?.registrationNo, "Commercial registration number.", "merchants.registrationNo", true),
-                    field("Tax ID", merchant.value?.taxId, "Tax registration identifier.", "merchants.taxId", true),
-                    field("Risk tier", entry.proposedRiskTier || entry.riskTier, "Proposed at approval; written to the merchant on activation.", "join_requests.proposed_risk_tier"),
+                items: [
+                    detailItem("Legal name", merchant.value?.legalName, "Registered legal entity name.", "merchants.legalName"),
+                    detailItem("Trade name", merchant.value?.tradeName, "Customer-facing business name.", "merchants.tradeName"),
+                    detailItem("Merchant ID", entry.merchantId, "The merchant database identifier.", "merchants.id", true),
+                    detailItem("Join request ID", entry.id, "The onboarding request identifier.", "join_requests.id", true),
+                    detailItem("Status", statusHelp.value.label, statusHelp.value.meaning, "join_requests.status"),
+                    detailItem("Channel", channelLabel(entry.onboardingChannel), COLUMN_HELP.channel, "join_requests.onboarding_channel"),
+                    detailItem("Country", merchant.value?.country, "Two-letter country code.", "merchants.country"),
+                    detailItem("Business category", merchant.value?.businessCategory, "Category used by the risk-based four-eyes policy.", "merchants.businessCategory"),
+                    detailItem("Registration number", merchant.value?.registrationNo, "Commercial registration number.", "merchants.registrationNo", true),
+                    detailItem("Tax ID", merchant.value?.taxId, "Tax registration identifier.", "merchants.taxId", true),
+                    detailItem("Risk tier", entry.proposedRiskTier || entry.riskTier, "Proposed at approval; written to the merchant on activation.", "join_requests.proposed_risk_tier"),
                 ],
             },
             {
                 title: t("Contact and volume"),
-                fields: [
-                    field("Contact phone", merchant.value?.contactPhone, "Primary merchant contact phone.", "merchants.contactPhone", true),
-                    field("Contact email", merchant.value?.contactEmail, "Primary merchant contact email.", "merchants.contactEmail", true),
-                    field("Website", profile.value.websiteUrl, "Declared business website.", "join_requests.profile_json.websiteUrl"),
-                    field("Registered address", profile.value.registeredAddress, "Declared registered address.", "join_requests.profile_json.registeredAddress"),
-                    field("Expected monthly volume", profile.value.expectedMonthlyVolume, "Expected processing volume captured at onboarding.", "join_requests.profile_json.expectedMonthlyVolume"),
-                    field("Currency", profile.value.currency, "Currency of the expected volume.", "join_requests.profile_json.currency"),
-                    field("Business use", profile.value.businessUseDescription, "Merchant description of the intended payment use.", "join_requests.profile_json.businessUseDescription"),
+                items: [
+                    detailItem("Contact phone", merchant.value?.contactPhone, "Primary merchant contact phone.", "merchants.contactPhone", true),
+                    detailItem("Contact email", merchant.value?.contactEmail, "Primary merchant contact email.", "merchants.contactEmail", true),
+                    detailItem("Website", profile.value.websiteUrl, "Declared business website.", "join_requests.profile_json.websiteUrl"),
+                    detailItem("Registered address", profile.value.registeredAddress, "Declared registered address.", "join_requests.profile_json.registeredAddress"),
+                    detailItem("Expected monthly volume", profile.value.expectedMonthlyVolume, "Expected processing volume captured at onboarding.", "join_requests.profile_json.expectedMonthlyVolume"),
+                    detailItem("Currency", profile.value.currency, "Currency of the expected volume.", "join_requests.profile_json.currency"),
+                    detailItem("Business use", profile.value.businessUseDescription, "Merchant description of the intended payment use.", "join_requests.profile_json.businessUseDescription"),
                 ],
             },
             {
                 title: t("Payout account"),
-                fields: [
-                    field("Bank", payout.value.bank ?? payout.value.bankName, "Payout bank name.", "merchants.payoutBankDetailsJson.bank"),
-                    field("Account", payout.value.iban ?? payout.value.accountNumber ?? payout.value.account, "Payout IBAN or account number. Stored as JSON and hashed for duplicate detection.", "merchants.payoutBankDetailsJson.iban"),
-                    field("Account hash", merchant.value?.payoutAccountHash, "SHA-256 duplicate-detection hash; raw account is never used as a lookup key.", "merchants.payoutAccountHash", true),
+                items: [
+                    detailItem("Bank", payout.value.bank ?? payout.value.bankName, "Payout bank name.", "merchants.payoutBankDetailsJson.bank"),
+                    detailItem("Account", payout.value.iban ?? payout.value.accountNumber ?? payout.value.account, "Payout IBAN or account number. Stored as JSON and hashed for duplicate detection.", "merchants.payoutBankDetailsJson.iban"),
+                    detailItem("Account hash", merchant.value?.payoutAccountHash, "SHA-256 duplicate-detection hash; raw account is never used as a lookup key.", "merchants.payoutAccountHash", true),
                 ],
             },
             {
                 title: t("Review and decision"),
-                fields: [
-                    field("Submitted by", entry.submittedBy?.email, "The operator who prepared or the merchant user who submitted the request.", "join_requests.submitted_by_user_id"),
-                    field("Submitted at", formatDateTime(entry.submittedAt), "Submission timestamp.", "join_requests.submitted_at"),
-                    field("Assignee", entry.assignedReviewer?.email, COLUMN_HELP.reviewer, "join_requests.assigned_reviewer_id"),
-                    field("Four eyes", entry.fourEyesRequired ? t("Required") : t("Not required"), "Maker-checker is mandatory when the policy or risk conditions require it.", "join_requests.four_eyes_required"),
-                    field("SLA", `${sla.value.label} · ${sla.value.detail}`, COLUMN_HELP.sla, "join_requests.sla_due_at"),
-                    field("Decision", entry.decision, "Final decision recorded on the join request.", "join_requests.decision"),
-                    field("Decision reason", entry.decisionReasonCode, "Reason code recorded by the decision maker.", "join_requests.decision_reason_code"),
-                    field("Decision notes", entry.decisionNotes, "Reviewer notes recorded with the decision.", "join_requests.decision_notes"),
+                items: [
+                    detailItem("Submitted by", entry.submittedBy?.email, "The operator who prepared or the merchant user who submitted the request.", "join_requests.submitted_by_user_id"),
+                    detailItem("Submitted at", formatDateTime(entry.submittedAt), "Submission timestamp.", "join_requests.submitted_at"),
+                    detailItem("Assignee", entry.assignedReviewer?.email, COLUMN_HELP.reviewer, "join_requests.assigned_reviewer_id"),
+                    detailItem("Four eyes", entry.fourEyesRequired ? t("Required") : t("Not required"), "Maker-checker is mandatory when the policy or risk conditions require it.", "join_requests.four_eyes_required"),
+                    detailItem("SLA", `${sla.value.label} · ${sla.value.detail}`, COLUMN_HELP.sla, "join_requests.sla_due_at"),
+                    detailItem("Decision", entry.decision, "Final decision recorded on the join request.", "join_requests.decision"),
+                    detailItem("Decision reason", entry.decisionReasonCode, "Reason code recorded by the decision maker.", "join_requests.decision_reason_code"),
+                    detailItem("Decision notes", entry.decisionNotes, "Reviewer notes recorded with the decision.", "join_requests.decision_notes"),
                 ],
             },
-        ].filter((section) => section.fields.length > 0);
+        ].filter((section) => section.items.length > 0);
     });
 
     const duplicateLabel = (flag: DuplicateFlag): string =>
@@ -693,16 +700,17 @@ const JoinRequestDetailPage = dc(() => {
 
                     <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
                         <span title={statusHelp.value.meaning}>
-                            <StatusChip label={statusHelp.value.label} tone={statusHelp.value.tone} />
+                            <StatusBadge status={entry.status} label={statusHelp.value.label} toneOverride={asBadgeTone(statusHelp.value.tone)} />
                         </span>
-                        <StatusChip label={channelLabel(entry.onboardingChannel)} tone={entry.onboardingChannel === "ADMIN_ASSISTED" ? "info" : "neutral"} />
-                        <StatusChip label={entry.proposedRiskTier || entry.riskTier} tone={statusTone(entry.proposedRiskTier || entry.riskTier)} />
-                        <StatusChip label={`SLA ${sla.value.label}`} tone={sla.value.tone} />
-                        <StatusChip
+                        <StatusBadge status={entry.onboardingChannel} label={channelLabel(entry.onboardingChannel)} toneOverride={entry.onboardingChannel === "ADMIN_ASSISTED" ? "info" : "neutral"} />
+                        <StatusBadge status={entry.proposedRiskTier || entry.riskTier} label={entry.proposedRiskTier || entry.riskTier} toneOverride={asBadgeTone(statusTone(entry.proposedRiskTier || entry.riskTier))} />
+                        <StatusBadge status={sla.value.label} label={`SLA ${sla.value.label}`} toneOverride={asBadgeTone(sla.value.tone)} />
+                        <StatusBadge
+                            status={readiness.value?.ready ? t("Decision ready") : t("Blocked")}
                             label={readiness.value?.ready ? t("Decision ready") : t("Blocked")}
-                            tone={readiness.value?.ready ? "success" : "warning"}
+                            toneOverride={readiness.value?.ready ? "success" : "warning"}
                         />
-                        {entry.fourEyesRequired && <StatusChip label={t("Four eyes")} tone="warning" />}
+                        {entry.fourEyesRequired && <StatusBadge status="Four eyes" label={t("Four eyes")} toneOverride="warning" />}
                     </ThemedView>
 
                     <SurfaceCard>
@@ -745,7 +753,9 @@ const JoinRequestDetailPage = dc(() => {
                                 </ThemedText>
                                 {canCheck.value ? (
                                     <ThemedView style={{ gap: "10px" }}>
-                                        <VTextField v-model={checkerNotes.value} label={t("Checker notes or rejection reason")} />
+                                        <FormField label={t("Checker notes or rejection reason")}>
+                                            <VTextField v-model={checkerNotes.value} />
+                                        </FormField>
                                         <ThemedView style={{ flexDirection: "row", gap: "10px" }}>
                                             <VBtn color="success" loading={actionLoading.value} onClick={() => void checkerDecision(true)}>
                                                 {t("Approve and execute")}
@@ -804,13 +814,23 @@ const JoinRequestDetailPage = dc(() => {
                         </SurfaceCard>
                     )}
 
-                    <FieldsSections sections={sections.value} />
+                    {sections.value.map((section) => (
+                        <SurfaceCard key={section.title}>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{section.title}</ThemedText>
+                                {("description" in section && section.description) && (
+                                    <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{section.description}</ThemedText>
+                                )}
+                                <DescriptionList columns={2} items={section.items} />
+                            </SurfaceCardText>
+                        </SurfaceCard>
+                    ))}
 
                     <SurfaceCard>
                         <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px", flex: 1 }}>{t("Audit trail")}</ThemedText>
-                                <StatusChip label={`${entry.auditTrail?.length ?? 0} ${t("events")}`} tone="neutral" size="x-small" />
+                                <StatusBadge status="neutral" label={`${entry.auditTrail?.length ?? 0} ${t("events")}`} toneOverride="neutral" showDot={false} />
                             </ThemedView>
                             <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>
                                 {t("Last 100 recorded actions on this join request, newest first.")}
@@ -826,17 +846,17 @@ const JoinRequestDetailPage = dc(() => {
                                         style={{
                                             gap: "4px",
                                             padding: "10px 12px",
-                                            borderRadius: "10px",
-                                            border: "1px solid rgba(100,116,139,0.2)",
+                                            borderRadius: "var(--pg-radius-lg)",
+                                            border: "1px solid var(--pg-border-subtle)",
                                         }}
                                     >
                                         <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                             <ThemedText style={{ fontSize: "12px", fontWeight: 700, direction: "ltr" }}>
                                                 {event.action.replaceAll("_", " ")}
                                             </ThemedText>
-                                            <StatusChip label={event.role} tone="info" size="x-small" />
+                                            <StatusBadge status={event.role} label={event.role} toneOverride="info" />
                                             {event.approvalRequestId && (
-                                                <StatusChip label={t("Approval linked")} tone="warning" size="x-small" />
+                                                <StatusBadge status="Approval linked" label={t("Approval linked")} toneOverride="warning" />
                                             )}
                                             <div style={{ flex: 1 }} />
                                             <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{formatDateTime(event.createdAt)}</ThemedText>
@@ -873,17 +893,17 @@ const JoinRequestDetailPage = dc(() => {
                             ) : (
                                 <ThemedView style={{ gap: "10px" }}>
                                     <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                                        <StatusChip label={entry.screening.result} tone={statusTone(entry.screening.result)} />
-                                        <StatusChip label={`${entry.screening.matchCount} ${t("matches")}`} tone={entry.screening.matchCount > 0 ? "warning" : "success"} />
-                                        <StatusChip label={`${t("Highest score")}: ${entry.screening.highestScore ?? "—"}`} tone="neutral" />
+                                        <StatusBadge status={entry.screening.result} label={entry.screening.result} toneOverride={asBadgeTone(statusTone(entry.screening.result))} />
+                                        <StatusBadge status={`${entry.screening.matchCount} matches`} label={`${entry.screening.matchCount} ${t("matches")}`} toneOverride={entry.screening.matchCount > 0 ? "warning" : "success"} />
+                                        <StatusBadge status="Highest score" label={`${t("Highest score")}: ${entry.screening.highestScore ?? "—"}`} toneOverride="neutral" />
                                     </ThemedView>
-                                    {entry.amlDetailsRedacted && <ThemedText style={{ fontSize: "12px", color: "rgb(var(--v-theme-warning))" }}>{t("Match details are redacted for your role.")}</ThemedText>}
+                                    {entry.amlDetailsRedacted && <ThemedText style={{ fontSize: "12px", color: "var(--pg-status-warning-text)" }}>{t("Match details are redacted for your role.")}</ThemedText>}
                                     {entry.screening.matches.map((match) => (
                                         <SurfaceCard key={match.id} variant="tonal">
                                             <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                                                 <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                                                    <StatusChip label={match.listType} tone="warning" size="x-small" />
-                                                    <StatusChip label={match.disposition} tone={statusTone(match.disposition)} size="x-small" />
+                                                    <StatusBadge status={match.listType} label={match.listType} toneOverride="warning" />
+                                                    <StatusBadge status={match.disposition} label={match.disposition} toneOverride={asBadgeTone(statusTone(match.disposition))} />
                                                     <ThemedText style={{ fontSize: "12px" }}>{t("Score")}: {match.score}</ThemedText>
                                                 </ThemedView>
                                                 <ThemedText style={{ fontSize: "13px" }}>{match.matchedName} · {match.listName}</ThemedText>
@@ -897,8 +917,8 @@ const JoinRequestDetailPage = dc(() => {
                                             <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("AML cases")}</ThemedText>
                                             {entry.screening.amlCases.map((amlCase) => (
                                                 <ThemedView key={amlCase.id} style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                                                    <StatusChip label={amlCase.status} tone={statusTone(amlCase.status)} size="x-small" />
-                                                    <StatusChip label={amlCase.severity} tone={statusTone(amlCase.severity)} size="x-small" />
+                                                    <StatusBadge status={amlCase.status} label={amlCase.status} toneOverride={asBadgeTone(statusTone(amlCase.status))} />
+                                                    <StatusBadge status={amlCase.severity} label={amlCase.severity} toneOverride={asBadgeTone(statusTone(amlCase.severity))} />
                                                     <ThemedText style={{ fontSize: "12px", direction: "ltr" }}>{amlCase.id}</ThemedText>
                                                 </ThemedView>
                                             ))}
@@ -938,8 +958,8 @@ const JoinRequestDetailPage = dc(() => {
                                                 </ThemedText>
                                             </ThemedView>
                                             <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
-                                                <StatusChip label={owner.screeningStatus} tone={statusTone(owner.screeningStatus)} size="x-small" />
-                                                {owner.pepDeclared && <StatusChip label="PEP" tone="error" size="x-small" />}
+                                                <StatusBadge status={owner.screeningStatus} label={owner.screeningStatus} toneOverride={asBadgeTone(statusTone(owner.screeningStatus))} />
+                                                {owner.pepDeclared && <StatusBadge status="PEP" label="PEP" toneOverride="danger" />}
                                                 {canWrite.value && !isFinal.value && (
                                                     <>
                                                         <VBtn size="x-small" variant="text" onClick={() => openOwner(owner)}>{t("Edit")}</VBtn>
@@ -979,11 +999,11 @@ const JoinRequestDetailPage = dc(() => {
                                 {(readiness.value?.requiredDocuments ?? []).map((docTypeRequired) => {
                                     const accepted = readiness.value?.acceptedDocuments?.includes(docTypeRequired);
                                     return (
-                                        <StatusChip
+                                        <StatusBadge
                                             key={docTypeRequired}
+                                            status={docTypeRequired}
                                             label={`${docTypeRequired}${accepted ? "" : ` · ${t("missing")}`}`}
-                                            tone={accepted ? "success" : "warning"}
-                                            size="x-small"
+                                            toneOverride={accepted ? "success" : "warning"}
                                         />
                                     );
                                 })}
@@ -1002,9 +1022,9 @@ const JoinRequestDetailPage = dc(() => {
                                                 </ThemedText>
                                             </ThemedView>
                                             <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
-                                                <StatusChip label={document.status} tone={statusTone(document.status)} size="x-small" />
-                                                <StatusChip label={document.avStatus} tone={statusTone(document.avStatus)} size="x-small" />
-                                                {document.expiresOn && <StatusChip label={`exp ${document.expiresOn.slice(0, 10)}`} tone="neutral" size="x-small" />}
+                                                <StatusBadge status={document.status} label={document.status} toneOverride={asBadgeTone(statusTone(document.status))} />
+                                                <StatusBadge status={document.avStatus} label={document.avStatus} toneOverride={asBadgeTone(statusTone(document.avStatus))} />
+                                                {document.expiresOn && <StatusBadge status="expiry" label={`exp ${document.expiresOn.slice(0, 10)}`} toneOverride="neutral" />}
                                             </ThemedView>
                                         </ThemedView>
                                         <MonoRef value={document.sha256} truncate={28} />
@@ -1108,7 +1128,7 @@ const JoinRequestDetailPage = dc(() => {
                                     )}
                                 </ThemedView>
                                 {detail.value?.onboardingChannel === "ADMIN_ASSISTED" && detail.value?.submittedBy?.id === currentUserId.value && (
-                                    <ThemedText style={{ fontSize: "12px", color: "rgb(var(--v-theme-warning))" }}>
+                                    <ThemedText style={{ fontSize: "12px", color: "var(--pg-status-warning-text)" }}>
                                         {t("You prepared this admin-assisted request, so an independent operator must decide it.")}
                                     </ThemedText>
                                 )}
@@ -1118,152 +1138,218 @@ const JoinRequestDetailPage = dc(() => {
                 </ThemedView>
 
                 <FormModal
-                modelValue={profileOpen.value}
-                onUpdate:modelValue={(value: boolean) => (profileOpen.value = value)}
-                title={t("Edit applicant profile")}
-                size="lg"
-            >
-<div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "12px" }}>
-                                <VTextField v-model={profileForm.value.legalName} label={t("Legal name")} />
-                                <VTextField v-model={profileForm.value.tradeName} label={t("Trade name")} />
-                                <VTextField v-model={profileForm.value.country} label={t("Country code")} />
-                                <VTextField v-model={profileForm.value.businessCategory} label={t("Business category")} />
-                                <VTextField v-model={profileForm.value.registrationNumber} label={t("Registration number")} />
-                                <VTextField v-model={profileForm.value.taxId} label={t("Tax ID")} />
-                                <VTextField v-model={profileForm.value.contactPhone} label={t("Contact phone")} />
-                                <VTextField v-model={profileForm.value.contactEmail} label={t("Contact email")} />
-                                <VTextField v-model={profileForm.value.expectedMonthlyVolume} label={t("Expected monthly volume")} />
-                                <VTextField v-model={profileForm.value.currency} label={t("Currency")} />
-                                <VTextField v-model={profileForm.value.websiteUrl} label={t("Website URL")} />
-                                <VTextField v-model={profileForm.value.payoutBankName} label={t("Payout bank")} />
-                                <VTextField v-model={profileForm.value.payoutAccount} label={t("Payout account / IBAN")} />
-                            </div>
-                            <VTextField v-model={profileForm.value.registeredAddress} label={t("Registered address")} />
-                            <VTextarea v-model={profileForm.value.businessUseDescription} label={t("Business use description")} rows={3} autoGrow />
-                            <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                                <VBtn variant="text" onClick={() => (profileOpen.value = false)}>{t("Cancel")}</VBtn>
-                                <VBtn color="primary" loading={actionLoading.value} onClick={saveProfile}>{t("Save")}</VBtn>
-                            </ThemedView>
-            </FormModal>
+                    modelValue={profileOpen.value}
+                    onUpdate:modelValue={(value: boolean) => (profileOpen.value = value)}
+                    title={t("Edit applicant profile")}
+                    size="lg"
+                    onSubmit={saveProfile}
+                    submitLabel={t("Save")}
+                    cancelLabel={t("Cancel")}
+                    loading={actionLoading.value}
+                >
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "12px" }}>
+                        <FormField label={t("Legal name")}>
+                            <VTextField v-model={profileForm.value.legalName} />
+                        </FormField>
+                        <FormField label={t("Trade name")}>
+                            <VTextField v-model={profileForm.value.tradeName} />
+                        </FormField>
+                        <FormField label={t("Country code")}>
+                            <VTextField v-model={profileForm.value.country} />
+                        </FormField>
+                        <FormField label={t("Business category")}>
+                            <VTextField v-model={profileForm.value.businessCategory} />
+                        </FormField>
+                        <FormField label={t("Registration number")}>
+                            <VTextField v-model={profileForm.value.registrationNumber} />
+                        </FormField>
+                        <FormField label={t("Tax ID")}>
+                            <VTextField v-model={profileForm.value.taxId} />
+                        </FormField>
+                        <FormField label={t("Contact phone")}>
+                            <VTextField v-model={profileForm.value.contactPhone} />
+                        </FormField>
+                        <FormField label={t("Contact email")}>
+                            <VTextField v-model={profileForm.value.contactEmail} />
+                        </FormField>
+                        <FormField label={t("Expected monthly volume")}>
+                            <VTextField v-model={profileForm.value.expectedMonthlyVolume} />
+                        </FormField>
+                        <FormField label={t("Currency")}>
+                            <VTextField v-model={profileForm.value.currency} />
+                        </FormField>
+                        <FormField label={t("Website URL")}>
+                            <VTextField v-model={profileForm.value.websiteUrl} />
+                        </FormField>
+                        <FormField label={t("Payout bank")}>
+                            <VTextField v-model={profileForm.value.payoutBankName} />
+                        </FormField>
+                        <FormField label={t("Payout account / IBAN")}>
+                            <VTextField v-model={profileForm.value.payoutAccount} />
+                        </FormField>
+                    </div>
+                    <FormField label={t("Registered address")}>
+                        <VTextField v-model={profileForm.value.registeredAddress} />
+                    </FormField>
+                    <FormField label={t("Business use description")}>
+                        <VTextarea v-model={profileForm.value.businessUseDescription} rows={3} autoGrow />
+                    </FormField>
+                </FormModal>
 
                 <FormModal
-                modelValue={ownerOpen.value}
-                onUpdate:modelValue={(value: boolean) => (ownerOpen.value = value)}
-                title={editingOwnerId.value ? t("Edit beneficial owner") : t("Add beneficial owner")}
-                size="md"
-            >
-<VAlert type="info" variant="tonal" density="compact">
-                                {t("The identity number is encrypted at rest and only its hash is used for duplicate detection.")}
-                            </VAlert>
-                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px" }}>
-                                <VTextField v-model={ownerForm.value.fullName} label={t("Full name (Arabic)")} />
-                                <VTextField v-model={ownerForm.value.fullNameEn} label={t("Full name (English)")} />
-                                <VSelect v-model={ownerForm.value.identityType} label={t("Identity type")} items={["NATIONAL_ID", "PASSPORT"]} />
-                                <VTextField v-model={ownerForm.value.identityNumber} label={editingOwnerId.value ? t("New identity number (optional)") : t("Identity number")} />
-                                <VTextField v-model={ownerForm.value.nationality} label={t("Nationality")} />
-                                <VTextField v-model={ownerForm.value.dateOfBirth} label={t("Date of birth (YYYY-MM-DD)")} />
-                                <VTextField v-model={ownerForm.value.ownershipPercent} label={t("Ownership percent")} />
-                                <VSelect v-model={ownerForm.value.role} label={t("Role")} items={["OWNER", "DIRECTOR", "SIGNATORY", "CONTROLLER"]} />
-                                <VCheckbox v-model={ownerForm.value.pepDeclared} label={t("Declared PEP")} density="compact" hideDetails />
-                            </div>
-                            <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                                <VBtn variant="text" onClick={() => (ownerOpen.value = false)}>{t("Cancel")}</VBtn>
-                                <VBtn color="primary" loading={actionLoading.value} onClick={saveOwner}>{t("Save")}</VBtn>
-                            </ThemedView>
-            </FormModal>
+                    modelValue={ownerOpen.value}
+                    onUpdate:modelValue={(value: boolean) => (ownerOpen.value = value)}
+                    title={editingOwnerId.value ? t("Edit beneficial owner") : t("Add beneficial owner")}
+                    size="md"
+                    onSubmit={saveOwner}
+                    submitLabel={t("Save")}
+                    cancelLabel={t("Cancel")}
+                    loading={actionLoading.value}
+                >
+                    <VAlert type="info" variant="tonal" density="compact">
+                        {t("The identity number is encrypted at rest and only its hash is used for duplicate detection.")}
+                    </VAlert>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px" }}>
+                        <FormField label={t("Full name (Arabic)")} required>
+                            <VTextField v-model={ownerForm.value.fullName} />
+                        </FormField>
+                        <FormField label={t("Full name (English)")}>
+                            <VTextField v-model={ownerForm.value.fullNameEn} />
+                        </FormField>
+                        <FormField label={t("Identity type")}>
+                            <VSelect v-model={ownerForm.value.identityType} items={["NATIONAL_ID", "PASSPORT"]} />
+                        </FormField>
+                        <FormField label={editingOwnerId.value ? t("New identity number (optional)") : t("Identity number")} required={!editingOwnerId.value}>
+                            <VTextField v-model={ownerForm.value.identityNumber} />
+                        </FormField>
+                        <FormField label={t("Nationality")}>
+                            <VTextField v-model={ownerForm.value.nationality} />
+                        </FormField>
+                        <FormField label={t("Date of birth (YYYY-MM-DD)")}>
+                            <VTextField v-model={ownerForm.value.dateOfBirth} />
+                        </FormField>
+                        <FormField label={t("Ownership percent")}>
+                            <VTextField v-model={ownerForm.value.ownershipPercent} />
+                        </FormField>
+                        <FormField label={t("Role")}>
+                            <VSelect v-model={ownerForm.value.role} items={["OWNER", "DIRECTOR", "SIGNATORY", "CONTROLLER"]} />
+                        </FormField>
+                    </div>
+                    <VCheckbox v-model={ownerForm.value.pepDeclared} label={t("Declared PEP")} density="compact" hideDetails />
+                </FormModal>
 
                 <FormModal
-                modelValue={uploadOpen.value}
-                onUpdate:modelValue={(value: boolean) => (uploadOpen.value = value)}
-                title={t("Upload KYB document")}
-                size="md"
-            >
-<VSelect v-model={docType.value} label={t("Document type")} items={DOCUMENT_TYPES} />
-                            <VTextField v-model={docExpiresOn.value} label={t("Expiry date (YYYY-MM-DD, optional)")} />
-                            <input ref={docFileInput} type="file" accept="application/pdf,image/png,image/jpeg" />
-                            <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
-                                {t("PDF, PNG or JPEG up to 10 MiB. The file is magic-byte checked, malware scanned and encrypted before storage.")}
-                            </ThemedText>
-                            <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                                <VBtn variant="text" onClick={() => (uploadOpen.value = false)}>{t("Cancel")}</VBtn>
-                                <VBtn color="primary" loading={actionLoading.value} onClick={uploadDocument}>{t("Upload")}</VBtn>
-                            </ThemedView>
-            </FormModal>
+                    modelValue={uploadOpen.value}
+                    onUpdate:modelValue={(value: boolean) => (uploadOpen.value = value)}
+                    title={t("Upload KYB document")}
+                    size="md"
+                    onSubmit={uploadDocument}
+                    submitLabel={t("Upload")}
+                    cancelLabel={t("Cancel")}
+                    loading={actionLoading.value}
+                >
+                    <FormField label={t("Document type")} required>
+                        <VSelect v-model={docType.value} items={DOCUMENT_TYPES} />
+                    </FormField>
+                    <FormField label={t("Expiry date (YYYY-MM-DD, optional)")}>
+                        <VTextField v-model={docExpiresOn.value} />
+                    </FormField>
+                    <FormField
+                        label={t("KYB document file")}
+                        hint={t("PDF, PNG or JPEG up to 10 MiB. The file is magic-byte checked, malware scanned and encrypted before storage.")}
+                        required
+                    >
+                        <input ref={docFileInput} type="file" accept="application/pdf,image/png,image/jpeg" />
+                    </FormField>
+                </FormModal>
 
                 <FormModal
-                modelValue={reviewOpen.value}
-                onUpdate:modelValue={(value: boolean) => (reviewOpen.value = value)}
-                title={t("Review document")}
-                size="md"
-            >
-<ThemedText style={{ fontSize: "13px" }}>{reviewTarget.value?.docType} · {reviewTarget.value?.originalFileName}</ThemedText>
-                            <VSelect v-model={reviewDecision.value} label={t("Decision")} items={[{ title: "Accept", value: "ACCEPTED" }, { title: "Reject", value: "REJECTED" }]} />
-                            <VTextField v-model={reviewExpiresOn.value} label={t("Expiry date (YYYY-MM-DD, optional)")} />
-                            <VTextarea v-model={reviewNotes.value} label={t("Review notes")} rows={3} autoGrow />
-                            <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                                <VBtn variant="text" onClick={() => (reviewOpen.value = false)}>{t("Cancel")}</VBtn>
-                                <VBtn color="primary" loading={actionLoading.value} onClick={saveReview}>{t("Save review")}</VBtn>
-                            </ThemedView>
-            </FormModal>
+                    modelValue={reviewOpen.value}
+                    onUpdate:modelValue={(value: boolean) => (reviewOpen.value = value)}
+                    title={t("Review document")}
+                    size="md"
+                    onSubmit={saveReview}
+                    submitLabel={t("Save review")}
+                    cancelLabel={t("Cancel")}
+                    loading={actionLoading.value}
+                    danger={reviewDecision.value === "REJECTED"}
+                >
+                    <ThemedText style={{ fontSize: "13px" }}>{reviewTarget.value?.docType} · {reviewTarget.value?.originalFileName}</ThemedText>
+                    <FormField label={t("Decision")}>
+                        <VSelect v-model={reviewDecision.value} items={[{ title: "Accept", value: "ACCEPTED" }, { title: "Reject", value: "REJECTED" }]} />
+                    </FormField>
+                    <FormField label={t("Expiry date (YYYY-MM-DD, optional)")}>
+                        <VTextField v-model={reviewExpiresOn.value} />
+                    </FormField>
+                    <FormField label={t("Review notes")}>
+                        <VTextarea v-model={reviewNotes.value} rows={3} autoGrow />
+                    </FormField>
+                </FormModal>
 
                 <FormModal
-                modelValue={infoOpen.value}
-                onUpdate:modelValue={(value: boolean) => (infoOpen.value = value)}
-                title={t("Request information")}
-                size="md"
-            >
-<VTextField v-model={infoItems.value} label={t("Requested items (comma separated)")} />
-                            <VTextarea v-model={infoMessage.value} label={t("Message")} rows={4} autoGrow />
-                            <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
-                                {t("The onboarding SLA is paused while the request is in INFO_REQUESTED.")}
-                            </ThemedText>
-                            <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                                <VBtn variant="text" onClick={() => (infoOpen.value = false)}>{t("Cancel")}</VBtn>
-                                <VBtn color="warning" loading={actionLoading.value} onClick={requestInfo}>{t("Request")}</VBtn>
-                            </ThemedView>
-            </FormModal>
+                    modelValue={infoOpen.value}
+                    onUpdate:modelValue={(value: boolean) => (infoOpen.value = value)}
+                    title={t("Request information")}
+                    size="md"
+                    onSubmit={requestInfo}
+                    submitLabel={t("Request")}
+                    cancelLabel={t("Cancel")}
+                    loading={actionLoading.value}
+                >
+                    <FormField label={t("Requested items (comma separated)")} required>
+                        <VTextField v-model={infoItems.value} />
+                    </FormField>
+                    <FormField
+                        label={t("Message")}
+                        hint={t("The onboarding SLA is paused while the request is in INFO_REQUESTED.")}
+                        required
+                    >
+                        <VTextarea v-model={infoMessage.value} rows={4} autoGrow />
+                    </FormField>
+                </FormModal>
 
                 <FormModal
-                modelValue={decisionOpen.value}
-                onUpdate:modelValue={(value: boolean) => (decisionOpen.value = value)}
-                title={decision.value === "APPROVED" ? t("Approve join request") : t("Reject join request")}
-                size="md"
-            >
-{decision.value === "APPROVED" && !readiness.value?.ready && (
-                                <VAlert type="warning" variant="tonal">{t("All approval blockers must be cleared before approval.")}</VAlert>
-                            )}
-                            {decision.value === "APPROVED" && (
-                                <VSelect v-model={decisionRiskTier.value} label={t("Activation risk tier")} items={["LOW", "STANDARD", "HIGH"]} />
-                            )}
-                            {decision.value === "REJECTED" && (
-                                <VSelect v-model={decisionReason.value} label={t("Reason code")} items={REJECTION_REASONS} />
-                            )}
-                            <VTextarea v-model={decisionNotes.value} label={t("Decision notes")} rows={4} autoGrow />
-                            <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                                <VBtn variant="text" onClick={closeDecision}>{t("Cancel")}</VBtn>
-                                <VBtn
-                                    color={decision.value === "APPROVED" ? "success" : "error"}
-                                    loading={actionLoading.value}
-                                    disabled={decision.value === "APPROVED" && !readiness.value?.ready}
-                                    onClick={() => void decide()}
-                                >
-                                    {decision.value === "APPROVED" ? t("Propose approval") : t("Propose rejection")}
-                                </VBtn>
-                            </ThemedView>
-            </FormModal>
+                    modelValue={decisionOpen.value}
+                    onUpdate:modelValue={(value: boolean) => (decisionOpen.value = value)}
+                    title={decision.value === "APPROVED" ? t("Approve join request") : t("Reject join request")}
+                    size="md"
+                    onSubmit={() => void decide()}
+                    submitLabel={decision.value === "APPROVED" ? t("Propose approval") : t("Propose rejection")}
+                    cancelLabel={t("Cancel")}
+                    loading={actionLoading.value}
+                    danger={decision.value === "REJECTED"}
+                >
+                    {decision.value === "APPROVED" && !readiness.value?.ready && (
+                        <VAlert type="warning" variant="tonal">{t("All approval blockers must be cleared before approval.")}</VAlert>
+                    )}
+                    {decision.value === "APPROVED" && (
+                        <FormField label={t("Activation risk tier")}>
+                            <VSelect v-model={decisionRiskTier.value} items={["LOW", "STANDARD", "HIGH"]} />
+                        </FormField>
+                    )}
+                    {decision.value === "REJECTED" && (
+                        <FormField label={t("Reason code")} required>
+                            <VSelect v-model={decisionReason.value} items={REJECTION_REASONS} />
+                        </FormField>
+                    )}
+                    <FormField label={t("Decision notes")} required={decision.value === "REJECTED"}>
+                        <VTextarea v-model={decisionNotes.value} rows={4} autoGrow />
+                    </FormField>
+                </FormModal>
 
                 <FormModal
-                modelValue={withdrawOpen.value}
-                onUpdate:modelValue={(value: boolean) => (withdrawOpen.value = value)}
-                title={t("Withdraw join request")}
-                size="sm"
-            >
-<ThemedText>{t("The request will be closed as withdrawn. A pending checker approval is cancelled.")}</ThemedText>
-                            <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                                <VBtn variant="text" onClick={() => (withdrawOpen.value = false)}>{t("Cancel")}</VBtn>
-                                <VBtn color="error" loading={actionLoading.value} onClick={withdraw}>{t("Withdraw")}</VBtn>
-                            </ThemedView>
-            </FormModal>
+                    modelValue={withdrawOpen.value}
+                    onUpdate:modelValue={(value: boolean) => (withdrawOpen.value = value)}
+                    title={t("Withdraw join request")}
+                    size="sm"
+                    onSubmit={withdraw}
+                    submitLabel={t("Withdraw")}
+                    cancelLabel={t("Cancel")}
+                    loading={actionLoading.value}
+                    danger
+                >
+                    <ThemedText>{t("The request will be closed as withdrawn. A pending checker approval is cancelled.")}</ThemedText>
+                </FormModal>
             </ScreenContainer>
         );
     };

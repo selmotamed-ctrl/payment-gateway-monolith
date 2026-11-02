@@ -1,8 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
-import { VAlert, VBtn, VSelect, VTextarea, VTextField } from "vuetify/components";
-import { ThemedView } from "@/components/ThemedView";
+import { VAlert, VSelect, VTextarea, VTextField } from "vuetify/components";
 import { ThemedText } from "@/components/ThemedText";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
@@ -13,6 +12,7 @@ import type { KybDocumentSummary } from "../types";
 
 import { FormModal } from "@/components/ui/FormModal";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { FormField } from "@/components/ui/FormField";
 const KybReviewDialog = dc(
     (props: {
         open: boolean;
@@ -88,6 +88,12 @@ const KybReviewDialog = dc(
                 onUpdate:modelValue={(value: boolean) => props.onUpdate(value)}
                 title={t("Review KYB document")}
                 size="md"
+                onSubmit={() => void submit()}
+                submitLabel={t("Save decision")}
+                cancelLabel={t("Cancel")}
+                loading={saving.value}
+                danger={decision.value === "REJECTED"}
+                errorMessage={error.value ?? ""}
             >
 <ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>
                             {props.document?.docType} · {props.document?.originalFileName || props.document?.id}
@@ -107,32 +113,23 @@ const KybReviewDialog = dc(
                         />
                         {decision.value === "ACCEPTED" ? (
                             <>
-                                <VTextField v-model={expiresOn.value} label={t("Expiry date (YYYY-MM-DD, optional)")} />
+                                <FormField label={t("Expiry date (YYYY-MM-DD, optional)")}>
+                                    <VTextField v-model={expiresOn.value} />
+                                </FormField>
                                 {duplicate.value && (
-                                    <VTextarea
-                                        v-model={duplicateJustification.value}
-                                        label={t("Duplicate justification (required, at least 10 characters)")}
-                                        rows={3}
-                                        autoGrow
-                                    />
+                                    <FormField label={t("Duplicate justification (required, at least 10 characters)")} required>
+                                        <VTextarea v-model={duplicateJustification.value} rows={3} autoGrow />
+                                    </FormField>
                                 )}
                             </>
                         ) : (
-                            <VSelect v-model={reasonCode.value} label={t("Rejection reason")} items={REVIEW_REASON_CODES} />
+                            <FormField label={t("Rejection reason")} required>
+                                <VSelect v-model={reasonCode.value} items={REVIEW_REASON_CODES} />
+                            </FormField>
                         )}
-                        <VTextarea v-model={notes.value} label={t("Reviewer notes")} rows={3} autoGrow />
-                        {error.value && <VAlert type="error" variant="tonal">{error.value}</VAlert>}
-                        <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                            <VBtn variant="text" onClick={() => props.onUpdate(false)}>{t("Cancel")}</VBtn>
-                            <VBtn
-                                color={decision.value === "ACCEPTED" ? "success" : "error"}
-                                loading={saving.value}
-                                disabled={requiresJustification.value}
-                                onClick={() => void submit()}
-                            >
-                                {t("Save decision")}
-                            </VBtn>
-                        </ThemedView>
+                        <FormField label={t("Reviewer notes")}>
+                            <VTextarea v-model={notes.value} rows={3} autoGrow />
+                        </FormField>
             </FormModal>
         );
     },

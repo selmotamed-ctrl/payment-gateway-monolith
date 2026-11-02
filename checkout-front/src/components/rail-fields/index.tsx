@@ -44,12 +44,16 @@ export const RailFieldForm = dc(
                         placeholder: placeholderFor(field) ?? undefined,
                         modelValue: value,
                         error: !!error,
-                        errorMessages: error ? [error] : undefined,
                         required: field.required,
                     };
                     if (field.inputType === "select") {
                         return (
-                            <FormField key={field.key} label={label} required={field.required}>
+                            <FormField
+                                key={field.key}
+                                label={label}
+                                error={error}
+                                required={field.required}
+                            >
                                 <VSelect
                                     items={(field.options ?? []).map((option) => ({ title: option, value: option }))}
                                     {...shared}
@@ -61,7 +65,12 @@ export const RailFieldForm = dc(
                         );
                     }
                     return (
-                        <FormField key={field.key} label={label} required={field.required}>
+                        <FormField
+                            key={field.key}
+                            label={label}
+                            error={error}
+                            required={field.required}
+                        >
                             <VTextField
                                 {...shared}
                                 type={field.sensitivity === "PAN" ? "password" : "text"}
@@ -74,7 +83,9 @@ export const RailFieldForm = dc(
                     );
                 })}
                 {visibleFields.value.length === 0 && (
-                    <ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>{t("Continue To Payment")}</ThemedText>
+                    <ThemedText style={{ fontSize: "13px", color: "var(--pg-ink-muted)" }}>
+                        {t("Continue To Payment")}
+                    </ThemedText>
                 )}
             </ThemedView>
         );

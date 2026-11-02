@@ -1,8 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
-import { VAlert, VBtn, VSelect, VTextarea } from "vuetify/components";
-import { ThemedView } from "@/components/ThemedView";
+import { VAlert, VSelect, VTextarea } from "vuetify/components";
 import { ThemedText } from "@/components/ThemedText";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
@@ -12,6 +11,7 @@ import { REVIEW_REASON_CODES } from "../kybReviewHelp";
 import type { KybDocumentSummary } from "../types";
 
 import { FormModal } from "@/components/ui/FormModal";
+import { FormField } from "@/components/ui/FormField";
 export type KybActionMode = "REPLACEMENT" | "REVALIDATION";
 
 const KybActionDialog = dc(
@@ -74,6 +74,12 @@ const KybActionDialog = dc(
                 onUpdate:modelValue={(value: boolean) => props.onUpdate(value)}
                 title={t(isReplacement.value ? "Request document replacement" : "Request KYB re-verification")}
                 size="md"
+                onSubmit={() => void submit()}
+                submitLabel={t(isReplacement.value ? "Reject and request replacement" : "Open re-verification")}
+                cancelLabel={t("Cancel")}
+                loading={saving.value}
+                danger={isReplacement.value}
+                errorMessage={error.value ?? ""}
             >
 <ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>
                             {props.document?.docType} · {props.document?.merchantName}
@@ -83,15 +89,12 @@ const KybActionDialog = dc(
                                 ? t("The current document will be rejected, the join request will move to INFO_REQUESTED, and its SLA will pause until the merchant responds.")
                                 : t("A periodic re-verification request will be opened for the merchant. The current document remains available as historical evidence.")}
                         </VAlert>
-                        <VSelect v-model={reasonCode.value} label={t("Reason")} items={REVIEW_REASON_CODES} />
-                        <VTextarea v-model={message.value} label={t("Message to the merchant")} rows={4} autoGrow />
-                        {error.value && <VAlert type="error" variant="tonal">{error.value}</VAlert>}
-                        <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                            <VBtn variant="text" onClick={() => props.onUpdate(false)}>{t("Cancel")}</VBtn>
-                            <VBtn color="warning" loading={saving.value} onClick={() => void submit()}>
-                                {t(isReplacement.value ? "Reject and request replacement" : "Open re-verification")}
-                            </VBtn>
-                        </ThemedView>
+                        <FormField label={t("Reason")} required>
+                            <VSelect v-model={reasonCode.value} items={REVIEW_REASON_CODES} />
+                        </FormField>
+                        <FormField label={t("Message to the merchant")} required>
+                            <VTextarea v-model={message.value} rows={4} autoGrow />
+                        </FormField>
             </FormModal>
         );
     },

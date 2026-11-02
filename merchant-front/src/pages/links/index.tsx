@@ -1,17 +1,14 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VTextField, VTextarea } from "vuetify/components";
+import { VBtn, VTextField } from "vuetify/components";
 import QRCode from "qrcode";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
 import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
-import { MoneyText } from "@/components/MoneyText";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -19,7 +16,10 @@ import { showSnackBar } from "@/utils/snackBar";
 import { copyToClipboard } from "@/utils/common";
 
 import { FormModal } from "@/components/ui/FormModal";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
+import { MonoRef } from "@/components/ui/MonoRef";
 type PaymentLink = {
     id: string;
     linkKey: string;
@@ -67,6 +67,7 @@ const LinksPage = dc(() => {
         railWhitelist: "",
     });
     const actionLoading = ref(false);
+    const formError = ref("");
 
     const qrOpen = ref(false);
     const qrDataUrl = ref<string | null>(null);
@@ -99,6 +100,7 @@ const LinksPage = dc(() => {
 
     const createLink = async () => {
         actionLoading.value = true;
+        formError.value = "";
         try {
             await api.post(urlsMap.linksList, {
                 description: form.value.description,
@@ -116,7 +118,9 @@ const LinksPage = dc(() => {
             showSnackBar({ type: "success", message: t("Created") });
             await load();
         } catch (e) {
-            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+            const message = extractApiErrorMessage(e);
+            formError.value = message;
+            showSnackBar({ type: "error", message });
         } finally {
             actionLoading.value = false;
         }
@@ -163,23 +167,33 @@ const LinksPage = dc(() => {
     };
 
     const headers: TableHeader<PaymentLink>[] = [
-        { key: "linkKey", label: "Link Key", value: (row) => row.linkKey },
-        { key: "description", label: "Merchant Name", value: (row) => row.description },
+        {
+            key: "linkKey",
+            label: "Link Key",
+            Value: ({ row }: { row: PaymentLink }) => <MonoRef value={row.linkKey} truncate={18} />,
+        },
+        { key: "description", label: "Description", value: (row) => row.description },
         {
             key: "amount",
             label: "Amount",
-            Value: ({ row }: { row: PaymentLink }) => <MoneyText value={row.amount} currency={row.currency} bold />,
+            Value: ({ row }: { row: PaymentLink }) => (
+                <MoneyDisplay amount={row.amount} currency={row.currency} size="sm" />
+            ),
         },
         { key: "useCount", label: "Use Count", value: (row) => `${row.confirmedCount}/${row.useCount}` },
         {
             key: "status",
             label: "Status",
             Value: ({ row }: { row: PaymentLink }) => (
-                <StatusChip label={row.status} tone={row.status === "ACTIVE" ? "success" : "warning"} />
+                <StatusBadge status={row.status} toneOverride={row.status === "ACTIVE" ? "success" : "warning"} />
             ),
         },
         { key: "expiresAt", label: "Expiry", value: (row) => row.expiresAt ?? "-" },
-        { key: "railWhitelist", label: "Rail Whitelist", value: (row) => (row.railWhitelist?.length ? row.railWhitelist.join(", ") : t("All")) },
+        {
+            key: "railWhitelist",
+            label: "Rail Whitelist",
+            value: (row) => (row.railWhitelist?.length ? row.railWhitelist.join(", ") : t("All")),
+        },
         { key: "createdAt", label: "Created At", value: (row) => row.createdAt },
         {
             key: "actions",
@@ -217,13 +231,23 @@ const LinksPage = dc(() => {
     ];
 
     const attemptHeaders: TableHeader<Attempt>[] = [
-        { key: "reference", label: "Reference", value: (row) => row.reference },
+        {
+            key: "reference",
+            label: "Reference",
+            Value: ({ row }: { row: Attempt }) => <MonoRef value={row.reference} truncate={18} />,
+        },
         { key: "railCode", label: "Rail Code", value: (row) => row.railCode },
-        { key: "status", label: "Status", value: (row) => row.status },
+        {
+            key: "status",
+            label: "Status",
+            Value: ({ row }: { row: Attempt }) => <StatusBadge status={row.status} />,
+        },
         {
             key: "amount",
             label: "Amount",
-            Value: ({ row }: { row: Attempt }) => <MoneyText value={row.amount} currency={row.currency} />,
+            Value: ({ row }: { row: Attempt }) => (
+                <MoneyDisplay amount={row.amount} currency={row.currency} size="sm" />
+            ),
         },
         { key: "otpAttempts", label: "Attempts", value: (row) => String(row.otpAttempts ?? 0) },
         { key: "createdAt", label: "Created At", value: (row) => row.createdAt },
@@ -249,6 +273,7 @@ const LinksPage = dc(() => {
                                     redirectUrl: "",
                                     railWhitelist: "",
                                 };
+                                formError.value = "";
                                 createOpen.value = true;
                             }}
                         >
@@ -260,21 +285,17 @@ const LinksPage = dc(() => {
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : (
-                    <SurfaceCard>
-                        <SurfaceCardText>
-                            <DataTable
-                                title={t("Payment Links")}
-                                data={rows.value}
-                                headers={headers}
-                                loading={loading.value}
-                                showNumber={true}
-                                xlsx={false}
-                                noElevation={true}
-                                searchValue={search.value}
-                                setSearchValue={(value) => (search.value = value)}
-                            />
-                        </SurfaceCardText>
-                    </SurfaceCard>
+                    <DataTable
+                        title={t("Payment Links")}
+                        data={rows.value}
+                        headers={headers}
+                        loading={loading.value}
+                        showNumber={true}
+                        xlsx={false}
+                        noElevation={true}
+                        searchValue={search.value}
+                        setSearchValue={(value) => (search.value = value)}
+                    />
                 )}
             </ThemedView>
 
@@ -283,54 +304,63 @@ const LinksPage = dc(() => {
                 onUpdate:modelValue={(v: any) => (createOpen.value = v)}
                 title={t("Payment Link")}
                 size="md"
+                loading={actionLoading.value}
+                errorMessage={formError.value}
+                submitLabel={t("Create")}
+                onSubmit={() => void createLink()}
             >
-<VTextField
-                            label={t("Merchant Name")}
-                            modelValue={form.value.description}
-                            onUpdate:modelValue={(v: string) => (form.value.description = v)}
-                        />
-                        <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
-                            <VTextField
-                                label={t("Amount")}
-                                modelValue={form.value.amount}
-                                onUpdate:modelValue={(v: string) => (form.value.amount = v)}
-                                style={{ minWidth: "170px" }}
-                            />
-                            <VTextField
-                                label={t("Currency")}
-                                modelValue={form.value.currency}
-                                onUpdate:modelValue={(v: string) => (form.value.currency = v.toUpperCase())}
-                                style={{ minWidth: "130px" }}
-                            />
-                            <VTextField
-                                label={t("Use Count")}
-                                type="number"
-                                modelValue={form.value.useCount}
-                                onUpdate:modelValue={(v: any) => (form.value.useCount = Number(v))}
-                                style={{ minWidth: "140px" }}
-                            />
-                            <VTextField
-                                label={t("Expiry")}
-                                modelValue={form.value.expiresAt}
-                                onUpdate:modelValue={(v: string) => (form.value.expiresAt = v)}
-                                style={{ minWidth: "200px" }}
-                            />
-                        </ThemedView>
+                <FormField label={t("Description")} required>
+                    <VTextField
+                        modelValue={form.value.description}
+                        onUpdate:modelValue={(v: string) => (form.value.description = v)}
+                        hideDetails
+                    />
+                </FormField>
+                <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
+                    <FormField label={t("Amount")} required style={{ minWidth: "170px" }}>
                         <VTextField
-                            label={t("Redirect URL")}
-                            modelValue={form.value.redirectUrl}
-                            onUpdate:modelValue={(v: string) => (form.value.redirectUrl = v)}
+                            modelValue={form.value.amount}
+                            onUpdate:modelValue={(v: string) => (form.value.amount = v)}
+                            hideDetails
                         />
+                    </FormField>
+                    <FormField label={t("Currency")} required style={{ minWidth: "130px" }}>
                         <VTextField
-                            label={t("Rail Whitelist")}
-                            modelValue={form.value.railWhitelist}
-                            onUpdate:modelValue={(v: string) => (form.value.railWhitelist = v)}
-                            hint="Comma separated, empty means all rails"
-                            persistentHint
+                            modelValue={form.value.currency}
+                            onUpdate:modelValue={(v: string) => (form.value.currency = v.toUpperCase())}
+                            hideDetails
                         />
-                        <VBtn color="primary" loading={actionLoading.value} onClick={() => void createLink()}>
-                            {t("Create")}
-                        </VBtn>
+                    </FormField>
+                    <FormField label={t("Use Count")} style={{ minWidth: "140px" }}>
+                        <VTextField
+                            type="number"
+                            modelValue={form.value.useCount}
+                            onUpdate:modelValue={(v: any) => (form.value.useCount = Number(v))}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Expiry")} style={{ minWidth: "200px" }}>
+                        <VTextField
+                            modelValue={form.value.expiresAt}
+                            onUpdate:modelValue={(v: string) => (form.value.expiresAt = v)}
+                            hideDetails
+                        />
+                    </FormField>
+                </ThemedView>
+                <FormField label={t("Redirect URL")}>
+                    <VTextField
+                        modelValue={form.value.redirectUrl}
+                        onUpdate:modelValue={(v: string) => (form.value.redirectUrl = v)}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("Rail Whitelist")} hint={t("Comma separated, empty means all rails.")}>
+                    <VTextField
+                        modelValue={form.value.railWhitelist}
+                        onUpdate:modelValue={(v: string) => (form.value.railWhitelist = v)}
+                        hideDetails
+                    />
+                </FormField>
             </FormModal>
 
             <FormModal
@@ -339,14 +369,12 @@ const LinksPage = dc(() => {
                 title={t("QR Code")}
                 size="sm"
             >
-{qrDataUrl.value ? (
-                            <img src={qrDataUrl.value} alt="qr" width={"280px"} height={"280px"} />
-                        ) : (
-                            <StateView loading={true} minHeight="200px" />
-                        )}
-                        <ThemedText style={{ fontSize: "12px", opacity: 0.7, direction: "ltr" }}>
-                            {qrLink.value ? checkoutUrl(qrLink.value) : ""}
-                        </ThemedText>
+                {qrDataUrl.value ? (
+                    <img src={qrDataUrl.value} alt="qr" width={"280px"} height={"280px"} />
+                ) : (
+                    <StateView loading={true} minHeight="200px" />
+                )}
+                {qrLink.value && <MonoRef value={checkoutUrl(qrLink.value)} />}
             </FormModal>
 
             <FormModal
@@ -355,19 +383,19 @@ const LinksPage = dc(() => {
                 title={t("Attempts Inspector")}
                 size="lg"
             >
-{attemptsLoading.value ? (
-                            <StateView loading={true} />
-                        ) : (
-                            <DataTable
-                                title={t("Attempts")}
-                                data={attempts.value}
-                                headers={attemptHeaders}
-                                loading={false}
-                                showNumber={true}
-                                xlsx={false}
-                                noElevation={true}
-                            />
-                        )}
+                {attemptsLoading.value ? (
+                    <StateView loading={true} />
+                ) : (
+                    <DataTable
+                        title={t("Attempts")}
+                        data={attempts.value}
+                        headers={attemptHeaders}
+                        loading={false}
+                        showNumber={true}
+                        xlsx={false}
+                        noElevation={true}
+                    />
+                )}
             </FormModal>
         </ScreenContainer>
     );

@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
@@ -19,6 +19,7 @@ import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import { MetricStrip } from "@/components/ui/MetricStrip";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { DescriptionList } from "@/components/ui/DescriptionList";
 type InvariantResult = {
     ok?: boolean;
     drift?: string;
@@ -103,13 +104,6 @@ const InvariantPage = dc(() => {
 
     const currency = () => data.value?.currency ?? "LYD";
 
-    const sideRow = (label: string, value: string | undefined) => (
-        <ThemedView key={label} style={{ flexDirection: "row", justifyContent: "space-between", gap: "12px" }}>
-            <ThemedText style={{ fontSize: "13px" }}>{t(label)}</ThemedText>
-            <MoneyDisplay amount={value ?? "0"} currency={currency()} size="md" colorSign />
-        </ThemedView>
-    );
-
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
@@ -149,9 +143,10 @@ const InvariantPage = dc(() => {
                         <SurfaceCard title={t("Invariant Status")}>
                             <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                 <ThemedView style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
-                                    <StatusChip
+                                    <StatusBadge
+                                        status={data.value?.ok ? "PASSED" : "FAILED"}
                                         label={data.value?.ok ? t("Passed") : t("Failed")}
-                                        tone={data.value?.ok ? "success" : "error"}
+                                        toneOverride={data.value?.ok ? "success" : "danger"}
                                     />
                                     <ThemedText style={{ fontSize: "13px" }}>
                                         {t("Last Run")}: {data.value?.checkedAt ? new Date(data.value.checkedAt).toLocaleString() : "-"}
@@ -161,49 +156,59 @@ const InvariantPage = dc(() => {
                             </SurfaceCardText>
                         </SurfaceCard>
 
-                        <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "18px" }}>
-                            <SurfaceCard style={{ flex: "1 1 380px" }}>
-                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                                    <ThemedText type="defaultSemiBold">{t("Treasury Cover")}</ThemedText>
-                                    {sideRow("Treasury Balance", data.value?.sides?.treasury)}
-                                    {sideRow("GATEWAY_CLEARING", data.value?.sides?.clearing)}
-                                    {sideRow("Commission Receivable", data.value?.sides?.commissionReceivable)}
-                                </SurfaceCardText>
+                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "18px" }}>
+                            <SurfaceCard title={t("Treasury Cover")}>
+                                <DescriptionList
+                                    items={[
+                                        { label: t("Treasury Balance"), value: data.value?.sides?.treasury ?? "0", money: true, currency: currency() },
+                                        { label: t("GATEWAY_CLEARING"), value: data.value?.sides?.clearing ?? "0", money: true, currency: currency() },
+                                        { label: t("Commission Receivable"), value: data.value?.sides?.commissionReceivable ?? "0", money: true, currency: currency() },
+                                    ]}
+                                />
                             </SurfaceCard>
-                            <SurfaceCard style={{ flex: "1 1 380px" }}>
-                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                                    <ThemedText type="defaultSemiBold">{t("Ledger")}</ThemedText>
-                                    {sideRow("MERCHANT_WALLET", data.value?.sides?.merchantWallet)}
-                                    {sideRow("PLATFORM_INCOME", data.value?.sides?.platformIncome)}
-                                    {sideRow("PROVIDER_FEE_EXPENSE", data.value?.sides?.providerFeeExpense)}
-                                    {sideRow("GATEWAY_FEE_EXPENSE", data.value?.sides?.gatewayFeeExpense)}
-                                    {sideRow("GATEWAY_FEE_ACCRUAL", data.value?.sides?.gatewayFeeAccrual)}
-                                    {sideRow("AML_HOLD", data.value?.sides?.amlHold)}
-                                    {sideRow("CHARGEBACK_RESERVE", data.value?.sides?.chargebackReserve)}
-                                    {sideRow("SUSPENSE", data.value?.sides?.suspense)}
-                                </SurfaceCardText>
+                            <SurfaceCard title={t("Ledger")}>
+                                <DescriptionList
+                                    items={[
+                                        { label: t("MERCHANT_WALLET"), value: data.value?.sides?.merchantWallet ?? "0", money: true, currency: currency() },
+                                        { label: t("PLATFORM_INCOME"), value: data.value?.sides?.platformIncome ?? "0", money: true, currency: currency() },
+                                        { label: t("PROVIDER_FEE_EXPENSE"), value: data.value?.sides?.providerFeeExpense ?? "0", money: true, currency: currency() },
+                                        { label: t("GATEWAY_FEE_EXPENSE"), value: data.value?.sides?.gatewayFeeExpense ?? "0", money: true, currency: currency() },
+                                        { label: t("GATEWAY_FEE_ACCRUAL"), value: data.value?.sides?.gatewayFeeAccrual ?? "0", money: true, currency: currency() },
+                                        { label: t("AML_HOLD"), value: data.value?.sides?.amlHold ?? "0", money: true, currency: currency() },
+                                        { label: t("CHARGEBACK_RESERVE"), value: data.value?.sides?.chargebackReserve ?? "0", money: true, currency: currency() },
+                                        { label: t("SUSPENSE"), value: data.value?.sides?.suspense ?? "0", money: true, currency: currency() },
+                                    ]}
+                                />
                             </SurfaceCard>
                         </ThemedView>
 
-                        <SurfaceCard>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                                <ThemedText type="defaultSemiBold">{t("Ledger accounts")}</ThemedText>
-                                <ThemedView style={{ flexDirection: "row", gap: "12px", fontSize: "11px", opacity: 0.6, borderBottom: "1px solid rgba(100,116,139,0.2)", paddingBottom: "4px" }}>
-                                    <span style={{ flex: 1 }}>{t("Account")}</span>
-                                    <span style={{ width: "170px" }}>{t("Type")}</span>
-                                    <span style={{ width: "140px", textAlign: "right" }}>{t("Live balance")}</span>
-                                    <span style={{ width: "140px", textAlign: "right" }}>{t("Natural balance")}</span>
-                                </ThemedView>
-                                {(data.value?.accounts ?? []).length === 0 && <EmptyState title={t("No Data Found")} description={t("No ledger accounts returned by the invariant check.")} />}
-                                {(data.value?.accounts ?? []).map((row) => (
-                                    <ThemedView key={row.accountId} style={{ flexDirection: "row", gap: "12px", alignItems: "center", fontSize: "12px", borderBottom: "1px solid rgba(100,116,139,0.1)", paddingBottom: "5px" }}>
-                                        <span style={{ flex: 1 }}><MonoRef value={row.accountId} /></span>
-                                        <span style={{ width: "170px" }}>{row.accountType}</span>
-                                        <span style={{ width: "140px", textAlign: "right" }}><MoneyDisplay amount={row.liveBalance} currency={currency()} size="sm" showCurrency={false} /></span>
-                                        <span style={{ width: "140px", textAlign: "right" }}><MoneyDisplay amount={row.naturalBalance} currency={currency()} size="sm" showCurrency={false} colorSign /></span>
-                                    </ThemedView>
-                                ))}
-                            </SurfaceCardText>
+                        <SurfaceCard title={t("Ledger accounts")} noPadding>
+                            {(data.value?.accounts ?? []).length === 0 ? (
+                                <EmptyState title={t("No Data Found")} description={t("No ledger accounts returned by the invariant check.")} />
+                            ) : (
+                                <div class="pg-unified-table" style={{ overflowX: "auto" }}>
+                                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                                        <thead>
+                                            <tr>
+                                                <th style={{ textAlign: "start" }}>{t("Account")}</th>
+                                                <th style={{ textAlign: "start" }}>{t("Type")}</th>
+                                                <th style={{ textAlign: "end" }}>{t("Live balance")}</th>
+                                                <th style={{ textAlign: "end" }}>{t("Natural balance")}</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {(data.value?.accounts ?? []).map((row) => (
+                                                <tr key={row.accountId}>
+                                                    <td><MonoRef value={row.accountId} /></td>
+                                                    <td><StatusBadge status={row.accountType} label={row.accountType} showDot={false} /></td>
+                                                    <td style={{ textAlign: "end" }}><MoneyDisplay amount={row.liveBalance} currency={currency()} size="sm" showCurrency={false} /></td>
+                                                    <td style={{ textAlign: "end" }}><MoneyDisplay amount={row.naturalBalance} currency={currency()} size="sm" showCurrency={false} colorSign /></td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
                         </SurfaceCard>
                     </>
                 )}

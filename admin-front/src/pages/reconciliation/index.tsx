@@ -3,13 +3,12 @@ import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VCheckbox, VFileInput, VProgressCircular, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VFileInput, VProgressCircular, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
 import { statusTone } from "@/components/Table/statusTone";
 import { ApiTable } from "@/components/Table/ApiTable";
 import { DataTable } from "@/components/Table/DataTable";
@@ -24,12 +23,17 @@ import { showSnackBar } from "@/utils/snackBar";
 import { formatPlainNumber } from "@/utils/money";
 
 import { FormModal } from "@/components/ui/FormModal";
+import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { DescriptionList } from "@/components/ui/DescriptionList";
+import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 const UPLOAD_CHECKS = [
     { key: "SOURCE_VERIFIED", label: "Statement source verified" },
     { key: "FILE_REVIEWED", label: "Statement file reviewed" },
@@ -123,6 +127,11 @@ type ReconciliationSummary = {
     mismatchedRows: number;
     matchRate: string;
     resultCounts: Record<string, number>;
+};
+
+const badgeTone = (value: string): BadgeTone => {
+    const tone = statusTone(value);
+    return tone === "error" ? "danger" : tone === "primary" ? "info" : tone;
 };
 
 const formatDateTime = (value: string | null | undefined): string => {
@@ -558,7 +567,7 @@ const ReconciliationPage = dc(() => {
         {
             key: "active",
             label: "Status",
-            Value: ({ row }: { row: StatementSource }) => <StatusChip label={row.active ? t("Active") : t("Inactive")} tone={row.active ? "success" : "neutral"} size="small" />,
+            Value: ({ row }: { row: StatementSource }) => <StatusBadge status={row.active ? "ACTIVE" : "INACTIVE"} label={row.active ? t("Active") : t("Inactive")} toneOverride={row.active ? "success" : "neutral"} />,
         },
         {
             key: "actions",
@@ -593,7 +602,7 @@ const ReconciliationPage = dc(() => {
             key: "state",
             label: "State",
             value: (row) => row.state,
-            Value: ({ row }: { row: ReconciliationRun }) => <StatusChip label={row.state} tone={row.state === "COMPLETED" ? "success" : "warning"} size="small" />,
+            Value: ({ row }: { row: ReconciliationRun }) => <StatusBadge status={row.state} toneOverride={row.state === "COMPLETED" ? "success" : "warning"} />,
         },
         { key: "total", label: "Rows", value: (row) => String(row.totalRows) },
         { key: "matched", label: "Matched", value: (row) => String(row.matchedRows) },
@@ -617,7 +626,7 @@ const ReconciliationPage = dc(() => {
     ]);
 
     const itemHeaders: TableHeader<ReconciliationItem>[] = [
-        { key: "result", label: "Result", Value: ({ row }: { row: ReconciliationItem }) => <StatusChip label={row.result} tone={row.result === "MATCHED" ? "success" : row.result === "DUPLICATE" ? "warning" : "error"} size="x-small" /> },
+        { key: "result", label: "Result", Value: ({ row }: { row: ReconciliationItem }) => <StatusBadge status={row.result} toneOverride={row.result === "MATCHED" ? "success" : row.result === "DUPLICATE" ? "warning" : "danger"} /> },
         { key: "ourReference", label: "Our reference", value: (row) => row.ourReference, Value: ({ row }: { row: ReconciliationItem }) => <MonoRef value={row.ourReference} /> },
         { key: "providerReference", label: "Provider reference", value: (row) => row.providerReference, Value: ({ row }: { row: ReconciliationItem }) => <MonoRef value={row.providerReference} /> },
         { key: "batch", label: "Batch", value: (row) => row.batchReference ?? "—", Value: ({ row }: { row: ReconciliationItem }) => <MonoRef value={row.batchReference ?? ""} /> },
@@ -646,7 +655,10 @@ const ReconciliationPage = dc(() => {
         },
     ];
 
-    const resultTone = (result: string) => statusTone(result);
+    const resultTone = (result: string): BadgeTone => {
+        const tone = statusTone(result);
+        return tone === "error" ? "danger" : tone === "primary" ? "info" : tone;
+    };
 
     return () => (
         <ScreenContainer>
@@ -659,7 +671,6 @@ const ReconciliationPage = dc(() => {
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => { void load(); runRefreshHook.value?.refreshAsIs(); }}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
                         </ThemedView>
                     )}
                 />
@@ -673,36 +684,26 @@ const ReconciliationPage = dc(() => {
                         </VAlert>
 
                         {summary.value && (
-                            <>
-                                <MetricStrip items={summaryMetrics.value} />
-                                <SurfaceCard title={t("Reconciliation health")}>
-                                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                        {showChecklists && (
-                                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
-                                                {SUMMARY_EXPORT_CHECKS.map((check) => (
-                                                    <VCheckbox
-                                                        key={check.key}
-                                                        modelValue={summaryExportChecklist.value[check.key] === true}
-                                                        onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
-                                                        label={t(check.label)}
-                                                        density="compact"
-                                                        hideDetails
-                                                    />
-                                                ))}
-                                                {!summaryExportChecklistComplete.value && (
-                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
-                                                )}
-                                            </ThemedView>
-                                        )}
-                                        <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                            {Object.entries(summary.value.resultCounts ?? {}).map(([result, count]) => (
-                                                <StatusChip key={result} label={`${result}: ${count}`} tone={resultTone(result)} size="x-small" />
-                                            ))}
-                                        </ThemedView>
-                                    </SurfaceCardText>
-                                </SurfaceCard>
-                            </>
+                            <SummaryExportCard
+                                title={t("Reconciliation health")}
+                                metrics={summaryMetrics.value}
+                                checks={[...SUMMARY_EXPORT_CHECKS]}
+                                checklist={summaryExportChecklist.value}
+                                showChecklists={showChecklists}
+                                checklistComplete={summaryExportChecklistComplete.value}
+                                exportLoading={summaryExportLoading.value}
+                                exportDisabled={!summaryExportChecklistComplete.value}
+                                exportLabel={t("Export summary")}
+                                onExport={() => void exportSummary()}
+                            >
+                                <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                                    {Object.entries(summary.value.resultCounts ?? {}).map(([result, count]) => (
+                                        <StatusBadge key={result} status={result} label={`${result}: ${count}`}
+                                            toneOverride={resultTone(result)}
+                                        />
+                                    ))}
+                                </ThemedView>
+                            </SummaryExportCard>
                         )}
 
                         <SegmentedTabs
@@ -720,37 +721,36 @@ const ReconciliationPage = dc(() => {
                                 <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                                     <ThemedText type="defaultSemiBold">{t("Upload a statement")}</ThemedText>
                                     <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap", alignItems: "flex-start" }}>
-                                        <VSelect
-                                            items={sources.value.map((source) => ({ title: source.name, value: source.id }))}
-                                            modelValue={selectedSourceId.value}
-                                            onUpdate:modelValue={(value: string | null) => {
-                                                selectedSourceId.value = value;
-                                                preview.value = null;
-                                            }}
-                                            label={t("Statement source")}
-                                            style={{ minWidth: "220px" }}
+                                        <FormField label={t("Statement source")} required>
+                                            <VSelect
+                                                items={sources.value.map((source) => ({ title: source.name, value: source.id }))}
+                                                modelValue={selectedSourceId.value}
+                                                onUpdate:modelValue={(value: string | null) => {
+                                                    selectedSourceId.value = value;
+                                                    preview.value = null;
+                                                }}
+                                                hideDetails
+                                                style={{ minWidth: "220px" }}
+                                            />
+                                        </FormField>
+                                        <FormField label={t("Period start")} required>
+                                            <VTextField type="date" modelValue={periodStart.value} onUpdate:modelValue={(value: string) => (periodStart.value = value)} hideDetails style={{ minWidth: "170px" }} />
+                                        </FormField>
+                                        <FormField label={t("Period end")} required>
+                                            <VTextField type="date" modelValue={periodEnd.value} onUpdate:modelValue={(value: string) => (periodEnd.value = value)} hideDetails style={{ minWidth: "170px" }} />
+                                        </FormField>
+                                        <FormField label={t("Statement file")} required>
+                                            <VFileInput modelValue={file.value} onUpdate:modelValue={(value: File | File[] | null) => void onFileChanged(value)} hideDetails style={{ minWidth: "260px" }} />
+                                        </FormField>
+                                        <FormChecklist
+                                            checks={[...UPLOAD_CHECKS]}
+                                            modelValue={uploadChecklist.value}
+                                            onUpdate:modelValue={(value: Record<string, boolean>) => (uploadChecklist.value = value)}
+                                            show={showChecklists}
+                                            title={t("Upload checklist")}
+                                            complete={uploadChecklistComplete.value}
+                                            incompleteMessage={t("Complete all upload checklist items before uploading")}
                                         />
-                                        <VTextField type="date" label={t("Period start")} modelValue={periodStart.value} onUpdate:modelValue={(value: string) => (periodStart.value = value)} style={{ minWidth: "170px" }} />
-                                        <VTextField type="date" label={t("Period end")} modelValue={periodEnd.value} onUpdate:modelValue={(value: string) => (periodEnd.value = value)} style={{ minWidth: "170px" }} />
-                                        <VFileInput label={t("Statement file")} modelValue={file.value} onUpdate:modelValue={(value: File | File[] | null) => void onFileChanged(value)} style={{ minWidth: "260px" }} />
-                                        {showChecklists && (
-                                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Upload checklist")}</ThemedText>
-                                                {UPLOAD_CHECKS.map((check) => (
-                                                    <VCheckbox
-                                                        key={check.key}
-                                                        modelValue={uploadChecklist.value[check.key] === true}
-                                                        onUpdate:modelValue={(value: unknown) => (uploadChecklist.value = { ...uploadChecklist.value, [check.key]: Boolean(value) })}
-                                                        label={t(check.label)}
-                                                        density="compact"
-                                                        hideDetails
-                                                    />
-                                                ))}
-                                                {!uploadChecklistComplete.value && (
-                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all upload checklist items before uploading")}</ThemedText>
-                                                )}
-                                            </ThemedView>
-                                        )}
                                         <VBtn color="primary" loading={uploadLoading.value} disabled={!selectedSourceId.value || !file.value || !uploadChecklistComplete.value} onClick={() => void upload()}>{t("Upload")}</VBtn>
                                     </ThemedView>
                                 </SurfaceCardText>
@@ -765,7 +765,7 @@ const ReconciliationPage = dc(() => {
                                                 <thead>
                                                     <tr>
                                                         {preview.value.columns.map((column) => (
-                                                            <th key={column} style={{ border: "1px solid rgba(100,116,139,0.3)", padding: "6px 10px", textAlign: "left" }}>{column}</th>
+                                                            <th key={column} style={{ border: "1px solid var(--pg-border-subtle)", padding: "6px 10px", textAlign: "left" }}>{column}</th>
                                                         ))}
                                                     </tr>
                                                 </thead>
@@ -773,7 +773,7 @@ const ReconciliationPage = dc(() => {
                                                     {preview.value.rows.map((row, index) => (
                                                         <tr key={index}>
                                                             {row.map((cell, cellIndex) => (
-                                                                <td key={cellIndex} style={{ border: "1px solid rgba(100,116,139,0.2)", padding: "6px 10px" }}>{cell}</td>
+                                                                <td key={cellIndex} style={{ border: "1px solid var(--pg-border-subtle)", padding: "6px 10px" }}>{cell}</td>
                                                             ))}
                                                         </tr>
                                                     ))}
@@ -788,7 +788,7 @@ const ReconciliationPage = dc(() => {
                         <ThemedView style={{ display: activeMode.value === "sources" ? "flex" : "none", flexDirection: "column", gap: "18px" }}>
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Statement sources")}</ThemedText>
-                                <StatusChip label={String(sources.value.length)} tone="neutral" size="x-small" />
+                                <StatusBadge status="SOURCE_COUNT" label={String(sources.value.length)} toneOverride="neutral" />
                             </ThemedView>
                             <DataTable
                                 title={t("Statement sources")}
@@ -861,135 +861,141 @@ const ReconciliationPage = dc(() => {
                 onUpdate:modelValue={(value: boolean) => (sourceEditOpen.value = value)}
                 title={t("Edit statement source")}
                 size="md"
+                loading={sourceSaving.value}
+                errorMessage={sourceError.value ?? ""}
+                submitLabel={t("Save")}
+                cancelLabel={t("Cancel")}
+                onSubmit={() => void saveSourceEdit()}
             >
-<ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-                            <ThemedText style={{ fontSize: "13px", flex: 1 }}>{editingSource.value?.name}</ThemedText>
-                            <VSwitch
-                                label={t("Active")}
-                                modelValue={sourceForm.value.active}
-                                onUpdate:modelValue={(value: boolean | null) => (sourceForm.value.active = !!value)}
-                                color="primary"
-                                hideDetails
-                            />
-                        </ThemedView>
-                        <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
-                            <VTextField label={t("Schedule cron")} modelValue={sourceForm.value.scheduleCron} onUpdate:modelValue={(value: string) => (sourceForm.value.scheduleCron = value)} style={{ flex: "1 1 240px" }} />
-                            <VTextField label={t("Settlement lag days")} type="number" modelValue={sourceForm.value.settlementLagDays} onUpdate:modelValue={(value: string) => (sourceForm.value.settlementLagDays = value)} style={{ flex: "1 1 180px" }} />
-                        </ThemedView>
-                        <VTextField label={t("Dedupe key template")} modelValue={sourceForm.value.dedupeKeyTemplate} onUpdate:modelValue={(value: string) => (sourceForm.value.dedupeKeyTemplate = value)} />
-                        <VTextarea
-                            label={t("Parser config JSON")}
-                            modelValue={sourceForm.value.parserConfig}
-                            onUpdate:modelValue={(value: string) => (sourceForm.value.parserConfig = value)}
-                            rows={8}
-                            style={{ fontFamily: "ui-monospace, monospace", direction: "ltr" }}
+                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+                    <ThemedText style={{ fontSize: "13px", flex: 1 }}>{editingSource.value?.name}</ThemedText>
+                    <FormField label={t("Active")}>
+                        <VSwitch
+                            modelValue={sourceForm.value.active}
+                            onUpdate:modelValue={(value: boolean | null) => (sourceForm.value.active = !!value)}
+                            color="primary"
+                            hideDetails
                         />
-                        {showChecklists && (
-                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Source edit checklist")}</ThemedText>
-                                {SOURCE_EDIT_CHECKS.map((check) => (
-                                    <VCheckbox
-                                        key={check.key}
-                                        modelValue={sourceEditChecklist.value[check.key] === true}
-                                        onUpdate:modelValue={(value: unknown) => (sourceEditChecklist.value = { ...sourceEditChecklist.value, [check.key]: Boolean(value) })}
-                                        label={t(check.label)}
-                                        density="compact"
-                                        hideDetails
-                                    />
-                                ))}
-                                {!sourceEditChecklistComplete.value && (
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all source checklist items before saving.")}</ThemedText>
-                                )}
-                            </ThemedView>
-                        )}
-                        {sourceError.value && <VAlert type="error" variant="tonal" density="compact">{sourceError.value}</VAlert>}
-                        <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
-                            <VBtn variant="text" onClick={() => (sourceEditOpen.value = false)}>{t("Cancel")}</VBtn>
-                            <VBtn color="primary" loading={sourceSaving.value} disabled={!sourceEditChecklistComplete.value} onClick={() => void saveSourceEdit()}>{t("Save")}</VBtn>
-                        </ThemedView>
+                    </FormField>
+                </ThemedView>
+                <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
+                    <FormField label={t("Schedule cron")}>
+                        <VTextField modelValue={sourceForm.value.scheduleCron} onUpdate:modelValue={(value: string) => (sourceForm.value.scheduleCron = value)} hideDetails style={{ flex: "1 1 240px" }} />
+                    </FormField>
+                    <FormField label={t("Settlement lag days")}>
+                        <VTextField type="number" modelValue={sourceForm.value.settlementLagDays} onUpdate:modelValue={(value: string) => (sourceForm.value.settlementLagDays = value)} hideDetails style={{ flex: "1 1 180px" }} />
+                    </FormField>
+                </ThemedView>
+                <FormField label={t("Dedupe key template")}>
+                    <VTextField modelValue={sourceForm.value.dedupeKeyTemplate} onUpdate:modelValue={(value: string) => (sourceForm.value.dedupeKeyTemplate = value)} hideDetails />
+                </FormField>
+                <FormField label={t("Parser config JSON")}>
+                    <VTextarea
+                        modelValue={sourceForm.value.parserConfig}
+                        onUpdate:modelValue={(value: string) => (sourceForm.value.parserConfig = value)}
+                        rows={8}
+                        hideDetails
+                        style={{ fontFamily: "ui-monospace, monospace", direction: "ltr" }}
+                    />
+                </FormField>
+                <FormChecklist
+                    checks={[...SOURCE_EDIT_CHECKS]}
+                    modelValue={sourceEditChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (sourceEditChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Source edit checklist")}
+                    complete={sourceEditChecklistComplete.value}
+                    incompleteMessage={t("Complete all source checklist items before saving.")}
+                />
             </FormModal>
 
-            <FormModal
+            <SlideOverDrawer
                 modelValue={detailsOpen.value}
                 onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)}
                 title={selectedRun.value?.fileName ?? t("Reconciliation run")}
-                size="lg"
+                subtitle={selectedRun.value?.sourceName ?? ""}
+                width={820}
+                v-slots={{
+                    footer: () => (
+                        <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportRunItems()}>{t("Export items")}</VBtn>
+                            <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
+                        </ThemedView>
+                    ),
+                }}
             >
-{detailLoading.value || !selectedRun.value ? (
-                            <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "280px", gap: "12px" }}>
-                                <VProgressCircular indeterminate size={52} color="primary" />
-                                <ThemedText style={{ opacity: 0.65 }}>{t("Loading reconciliation run")}</ThemedText>
+                {detailLoading.value || !selectedRun.value ? (
+                    <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "280px", gap: "12px" }}>
+                        <VProgressCircular indeterminate size={52} color="primary" />
+                        <ThemedText style={{ opacity: 0.65 }}>{t("Loading reconciliation run")}</ThemedText>
+                    </ThemedView>
+                ) : (
+                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                        <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+                            <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                                <MonoRef value={selectedRun.value.id} />
                             </ThemedView>
-                        ) : (
-                            <>
-                                <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
-                                    <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-                                        <MonoRef value={selectedRun.value.id} />
-                                        <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{selectedRun.value.sourceName}</ThemedText>
-                                    </ThemedView>
-                                    <StatusChip label={selectedRun.value.state} tone={selectedRun.value.state === "COMPLETED" ? "success" : "warning"} />
-                                </ThemedView>
+                            <StatusBadge status={selectedRun.value.state} toneOverride={selectedRun.value.state === "COMPLETED" ? "success" : "warning"} />
+                        </ThemedView>
 
-                                <MetricStrip items={[
-                                    { key: "rows", label: t("Rows"), value: String(selectedRun.value.totalRows) },
-                                    { key: "matched", label: t("Matched"), value: String(selectedRun.value.matchedRows) },
-                                    { key: "unmatched", label: t("Unmatched"), value: String(selectedRun.value.unmatchedRows) },
-                                    { key: "mismatch", label: t("Amount mismatch"), value: String(selectedRun.value.amountMismatch) },
-                                    { key: "matchRate", label: t("Match rate"), value: `${formatPlainNumber(Number(selectedRun.value.matchRate))}%` },
-                                ]} />
+                        <MetricStrip items={[
+                            { key: "rows", label: t("Rows"), value: String(selectedRun.value.totalRows) },
+                            { key: "matched", label: t("Matched"), value: String(selectedRun.value.matchedRows) },
+                            { key: "unmatched", label: t("Unmatched"), value: String(selectedRun.value.unmatchedRows) },
+                            { key: "mismatch", label: t("Amount mismatch"), value: String(selectedRun.value.amountMismatch) },
+                            { key: "matchRate", label: t("Match rate"), value: `${formatPlainNumber(Number(selectedRun.value.matchRate))}%` },
+                        ]} />
 
-                                <DescriptionList columns={2} items={[
-                                    { label: t("Run ID"), value: <MonoRef value={selectedRun.value.id} /> },
-                                    { label: t("Source"), value: selectedRun.value.sourceName },
-                                    { label: t("Missing at gateway"), value: String(selectedRun.value.missingAtGateway) },
-                                    { label: t("Missing locally"), value: String(selectedRun.value.missingLocally) },
-                                    { label: t("Duplicates"), value: String(selectedRun.value.duplicates) },
-                                    { label: t("Fee variances"), value: String(selectedRun.value.feeVariances) },
-                                    { label: t("Created"), value: formatDateTime(selectedRun.value.createdAt) },
-                                    { label: t("Finished"), value: formatDateTime(selectedRun.value.finishedAt) },
-                                ]} />
+                        <DescriptionList columns={2} items={[
+                            { label: t("Run ID"), value: <MonoRef value={selectedRun.value.id} /> },
+                            { label: t("Source"), value: selectedRun.value.sourceName },
+                            { label: t("Missing at gateway"), value: String(selectedRun.value.missingAtGateway) },
+                            { label: t("Missing locally"), value: String(selectedRun.value.missingLocally) },
+                            { label: t("Duplicates"), value: String(selectedRun.value.duplicates) },
+                            { label: t("Fee variances"), value: String(selectedRun.value.feeVariances) },
+                            { label: t("Drift"), value: <MoneyDisplay amount={selectedRun.value.drift} currency="LYD" size="sm" colorSign /> },
+                            { label: t("Created"), value: formatDateTime(selectedRun.value.createdAt) },
+                            { label: t("Finished"), value: formatDateTime(selectedRun.value.finishedAt) },
+                        ]} />
 
-                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-                                    <VSelect
-                                        label={t("Filter by result")}
-                                        items={[
-                                            { title: t("All results"), value: "ALL" },
-                                            ...Object.entries(selectedRun.value.itemResultCounts ?? {}).map(([result, count]) => ({
-                                                title: `${result.replaceAll("_", " ")} (${count})`,
-                                                value: result,
-                                            })),
-                                        ]}
-                                        modelValue={runResultFilter.value}
-                                        onUpdate:modelValue={(value: string | null) => void changeRunResult(value)}
-                                        style={{ maxWidth: "360px" }}
-                                    />
-                                    <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>
-                                        {selectedRun.value.itemsTotal ?? selectedRun.value.items.length} {t("items")}
-                                    </ThemedText>
-                                </ThemedView>
-
-                                {selectedRun.value.itemsTruncated && (
-                                    <VAlert type="info" variant="tonal" density="compact">
-                                        {t("Showing the first 200 filtered items. Export includes all matching rows.")}
-                                    </VAlert>
-                                )}
-
-                                <DataTable
-                                    title={t("Statement items")}
-                                    data={selectedRun.value.items}
-                                    headers={itemHeaders}
-                                    showNumber={true}
-                                    xlsx={false}
-                                    noElevation={true}
+                        <ThemedView style={{ flexDirection: "row", alignItems: "flex-end", gap: "10px", flexWrap: "wrap" }}>
+                            <FormField label={t("Filter by result")}>
+                                <VSelect
+                                    items={[
+                                        { title: t("All results"), value: "ALL" },
+                                        ...Object.entries(selectedRun.value.itemResultCounts ?? {}).map(([result, count]) => ({
+                                            title: `${result.replaceAll("_", " ")} (${count})`,
+                                            value: result,
+                                        })),
+                                    ]}
+                                    modelValue={runResultFilter.value}
+                                    onUpdate:modelValue={(value: string | null) => void changeRunResult(value)}
+                                    hideDetails
+                                    style={{ maxWidth: "360px" }}
                                 />
+                            </FormField>
+                            <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>
+                                {selectedRun.value.itemsTotal ?? selectedRun.value.items.length} {t("items")}
+                            </ThemedText>
+                        </ThemedView>
 
-                                <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
-                                    <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportRunItems()}>{t("Export items")}</VBtn>
-                                    <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
-                                </ThemedView>
-                            </>
+                        {selectedRun.value.itemsTruncated && (
+                            <VAlert type="info" variant="tonal" density="compact">
+                                {t("Showing the first 200 filtered items. Export includes all matching rows.")}
+                            </VAlert>
                         )}
-            </FormModal>
+
+                        <DataTable
+                            title={t("Statement items")}
+                            data={selectedRun.value.items}
+                            headers={itemHeaders}
+                            showNumber={true}
+                            xlsx={false}
+                            noElevation={true}
+                        />
+                    </ThemedView>
+                )}
+            </SlideOverDrawer>
         </ScreenContainer>
     );
 });

@@ -1,8 +1,9 @@
 import { dc } from "kt-dc";
-import { VAlert, VBtn, VIcon, VProgressCircular } from "vuetify/components";
+import { VBtn, VIcon, VProgressCircular } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
+import { EmptyState } from "@/components/ui";
 
 export type StateViewProps = {
     loading?: boolean;
@@ -32,7 +33,9 @@ export const StateView = dc(
                         }}
                     >
                         <VProgressCircular indeterminate size={48} color="primary" width={4} />
-                        <ThemedText style={{ fontSize: "14px", opacity: 0.7 }}>{t("Loading")}</ThemedText>
+                        <ThemedText style={{ fontSize: "14px", color: "var(--pg-ink-muted)" }}>
+                            {t("Loading")}
+                        </ThemedText>
                     </ThemedView>
                 );
             }
@@ -49,8 +52,14 @@ export const StateView = dc(
                             width: "100%",
                         }}
                     >
-                        <VIcon icon={"mdi-alert-circle-outline"} size={40} color="error" />
-                        <ThemedText style={{ fontSize: "15px", textAlign: "center" }}>{props.error}</ThemedText>
+                        <VIcon
+                            icon={"mdi-alert-circle-outline"}
+                            size={40}
+                            style={{ color: "var(--pg-status-danger-text)" }}
+                        />
+                        <ThemedText style={{ fontSize: "15px", textAlign: "center", color: "var(--pg-ink-primary)" }}>
+                            {props.error}
+                        </ThemedText>
                         {props.onRetry && (
                             <VBtn variant="tonal" color="primary" onClick={() => props.onRetry?.()}>
                                 {t("Retry")}
@@ -62,28 +71,21 @@ export const StateView = dc(
 
             if (props.empty) {
                 return (
-                    <ThemedView
+                    <div
                         style={{
-                            alignItems: "center",
-                            justifyContent: "center",
-                            flexDirection: "column",
-                            gap: "10px",
                             minHeight: props.minHeight ?? "240px",
                             width: "100%",
-                            borderRadius: "12px",
-                            border: "1px dashed rgba(100,116,139,0.4)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
                         }}
                     >
-                        <VIcon icon={"mdi-inbox-outline"} size={"38px"} color="on-surface-variant" />
-                        <ThemedText type="defaultSemiBold">
-                            {props.emptyTitle ? t(props.emptyTitle) : t("No Data Found")}
-                        </ThemedText>
-                        {props.emptyDescription && (
-                            <ThemedText style={{ fontSize: "13px", opacity: 0.7, textAlign: "center" }}>
-                                {t(props.emptyDescription)}
-                            </ThemedText>
-                        )}
-                    </ThemedView>
+                        <EmptyState
+                            title={props.emptyTitle ? t(props.emptyTitle) : t("No Data Found")}
+                            description={props.emptyDescription ? t(props.emptyDescription) : ""}
+                            icon="mdi-inbox-outline"
+                        />
+                    </div>
                 );
             }
 

@@ -44,7 +44,10 @@ export const QrOrCodeRenderer = dc(
 
         return () => (
             <ThemedView style={{ gap: "16px", width: "100%", alignItems: "center" }}>
-                <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
+                <ThemedText
+                    type="defaultSemiBold"
+                    style={{ fontSize: "17px", color: "var(--pg-ink-primary)" }}
+                >
                     {t("Scan The QR Code")}
                 </ThemedText>
 
@@ -58,9 +61,9 @@ export const QrOrCodeRenderer = dc(
                     <div
                         style={{
                             padding: "12px",
-                            background: "#ffffff",
-                            borderRadius: "14px",
-                            border: "1px solid rgba(100,116,139,0.25)",
+                            backgroundColor: "var(--pg-bg-surface)",
+                            borderRadius: "var(--pg-radius-md)",
+                            border: "1px solid var(--pg-border-subtle)",
                         }}
                     >
                         <img src={qrDataUrl.value} alt="qr" width={"240px"} height={"240px"} />
@@ -71,10 +74,17 @@ export const QrOrCodeRenderer = dc(
 
                 {props.action.pay_code && (
                     <ThemedView style={{ alignItems: "center", gap: "4px" }}>
-                        <ThemedText style={{ fontSize: "12px", opacity: 0.7 }}>{t("Pay Code")}</ThemedText>
+                        <ThemedText style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>
+                            {t("Pay Code")}
+                        </ThemedText>
                         <ThemedText
                             type="defaultSemiBold"
-                            style={{ fontSize: "22px", letterSpacing: "3px", direction: "ltr" }}
+                            style={{
+                                fontSize: "22px",
+                                letterSpacing: "0.08em",
+                                direction: "ltr",
+                                color: "var(--pg-ink-primary)",
+                            }}
                         >
                             {props.action.pay_code}
                         </ThemedText>
@@ -82,19 +92,32 @@ export const QrOrCodeRenderer = dc(
                 )}
 
                 {instructions() && (
-                    <ThemedText style={{ fontSize: "13px", opacity: 0.8, textAlign: "center" }}>
+                    <ThemedText
+                        style={{
+                            fontSize: "13px",
+                            color: "var(--pg-ink-secondary)",
+                            textAlign: "center",
+                        }}
+                    >
                         {instructions()}
                     </ThemedText>
                 )}
 
                 {props.action.deep_link_url && (
-                    <a href={props.action.deep_link_url} class="text-primary" style={{ fontSize: "13px" }}>
+                    <a
+                        href={props.action.deep_link_url}
+                        style={{
+                            fontSize: "13px",
+                            color: "var(--pg-accent-interactive)",
+                            textDecoration: "none",
+                        }}
+                    >
                         {t("Deep Link")}
                     </a>
                 )}
 
                 {props.action.expires_at && (
-                    <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>
+                    <ThemedText style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>
                         {t("Expires At")}: {props.action.expires_at}
                     </ThemedText>
                 )}

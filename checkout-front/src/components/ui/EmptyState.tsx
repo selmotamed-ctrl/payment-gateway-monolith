@@ -1,4 +1,4 @@
-import { defineComponent, type VNodeChild } from "vue";
+import { defineComponent, type PropType, type VNodeChild } from "vue";
 import { VBtn, VIcon } from "vuetify/components";
 
 export const EmptyState = defineComponent({
@@ -8,11 +8,17 @@ export const EmptyState = defineComponent({
         description: { type: String, default: "" },
         icon: { type: String, default: "mdi-inbox-outline" },
         actionLabel: { type: String, default: "" },
+        actionVariant: { type: String as PropType<"outlined" | "flat" | "tonal" | "text">, default: "outlined" },
+        actionColor: { type: String, default: "" },
+        actionIcon: { type: String, default: "" },
+        actionLoading: { type: Boolean, default: false },
     },
     emits: ["action"],
     setup(props, { emit, slots }) {
         return (): VNodeChild => (
             <div
+                role="status"
+                aria-live="polite"
                 style={{
                     display: "flex",
                     flexDirection: "column",
@@ -24,6 +30,7 @@ export const EmptyState = defineComponent({
                 }}
             >
                 <div
+                    aria-hidden="true"
                     style={{
                         width: "36px",
                         height: "36px",
@@ -48,7 +55,14 @@ export const EmptyState = defineComponent({
                 )}
                 {slots.default?.()}
                 {props.actionLabel && (
-                    <VBtn size="small" variant="outlined" onClick={() => emit("action")}>
+                    <VBtn
+                        size="small"
+                        variant={props.actionVariant}
+                        color={props.actionColor || undefined}
+                        prependIcon={props.actionIcon || undefined}
+                        loading={props.actionLoading}
+                        onClick={() => emit("action")}
+                    >
                         {props.actionLabel}
                     </VBtn>
                 )}

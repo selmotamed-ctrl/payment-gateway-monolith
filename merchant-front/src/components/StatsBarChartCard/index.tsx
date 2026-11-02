@@ -1,9 +1,8 @@
 import { dc } from "kt-dc";
-import { VCard, VIcon, VProgressCircular } from "vuetify/components";
-import { useDisplay } from "vuetify";
+import { VIcon, VProgressCircular } from "vuetify/components";
+import { useDisplay, useTheme } from "vuetify";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
-import colors from "vuetify/util/colors";
 import VChart from "vue-echarts";
 import * as echartsCore from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
@@ -12,8 +11,8 @@ import { GridComponent, TooltipComponent, LegendComponent } from "echarts/compon
 import type { EChartsCoreOption } from "echarts";
 import { ref, computed, onMounted } from "vue";
 import { dashDateFormatter } from "kt-common";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
 
-// Register ECharts components
 echartsCore.use([CanvasRenderer, BarChart, GridComponent, TooltipComponent, LegendComponent]);
 
 export type StatsBarChartCardProps = {
@@ -29,7 +28,10 @@ export type StatsBarChartCardProps = {
 const StatsBarChartCard = dc(
     (props: StatsBarChartCardProps) => {
         const display = useDisplay();
-        const isMobile = display.mobile.value;
+        const theme = useTheme();
+        const isMobile = computed(() => display.mobile.value);
+        const palette = computed(() => theme.current.value.colors);
+        const accent = computed(() => props.color || palette.value.primary);
 
         const loading = ref(props.loading ?? true);
         const data = ref<[number, number][]>([]);
@@ -58,7 +60,6 @@ const StatsBarChartCard = dc(
             fetchData();
         });
 
-        // Format data for bar chart
         const seriesData = computed(() => {
             return data.value.map(([t, v]) => ({
                 value: v,
@@ -71,12 +72,11 @@ const StatsBarChartCard = dc(
         });
 
         const chartOption = computed<EChartsCoreOption>(() => {
-            const color = props.color || colors.blue.base;
             return {
                 tooltip: {
                     trigger: "axis",
-                    backgroundColor: "rgba(30,30,30,0.9)",
-                    textStyle: { color: "#fff" },
+                    backgroundColor: palette.value.surface,
+                    textStyle: { color: palette.value["on-surface"] },
                     formatter: (params: any) => {
                         const d = params[0];
                         const value = typeof d.value === "number" ? d.value.toLocaleString() : String(d.value);
@@ -84,36 +84,35 @@ const StatsBarChartCard = dc(
                     },
                 },
                 grid: {
-                    left: isMobile ? "3%" : "8%",
-                    right: isMobile ? "3%" : "5%",
-                    top: isMobile ? "10%" : "15%",
-                    bottom: isMobile ? "15%" : "20%",
+                    left: isMobile.value ? "3%" : "8%",
+                    right: isMobile.value ? "3%" : "5%",
+                    top: isMobile.value ? "10%" : "15%",
+                    bottom: isMobile.value ? "15%" : "20%",
                 },
                 xAxis: {
                     type: "category",
                     data: xAxisData.value,
                     axisLabel: {
-                        color: "#888",
-                        fontSize: isMobile ? 9 : 11,
-                        rotate: isMobile ? 45 : 30,
+                        color: palette.value["on-surface-variant"],
+                        fontSize: isMobile.value ? 9 : 11,
+                        rotate: isMobile.value ? 45 : 30,
                         formatter: (value: string) => {
-                            // Shorten date for mobile
-                            if (isMobile && value.length > 5) {
+                            if (isMobile.value && value.length > 5) {
                                 return value.substring(5);
                             }
                             return value;
                         },
                     },
                     axisLine: {
-                        lineStyle: { color: "#444" },
+                        lineStyle: { color: palette.value["on-surface-variant"] },
                     },
                     splitLine: { show: false },
                 },
                 yAxis: {
                     type: "value",
                     axisLabel: {
-                        color: "#888",
-                        fontSize: isMobile ? 10 : 11,
+                        color: palette.value["on-surface-variant"],
+                        fontSize: isMobile.value ? 10 : 11,
                         formatter: (v: number) => {
                             if (typeof v !== "number") return String(v);
                             if (v >= 1000000) return (v / 1000000).toFixed(1) + "M";
@@ -122,7 +121,10 @@ const StatsBarChartCard = dc(
                         },
                     },
                     splitLine: {
-                        lineStyle: { color: "rgba(255,255,255,0.05)" },
+                        lineStyle: {
+                            color: palette.value["on-surface-variant"],
+                            opacity: 0.12,
+                        },
                     },
                 },
                 series: [
@@ -130,10 +132,10 @@ const StatsBarChartCard = dc(
                         type: "bar",
                         data: seriesData.value.map((d) => d.value),
                         smooth: false,
-                        barMaxWidth: isMobile ? 20 : 40,
+                        barMaxWidth: isMobile.value ? 20 : 40,
                         itemStyle: {
-                            color: color,
-                            borderRadius: isMobile ? [2, 2, 0, 0] : [4, 4, 0, 0],
+                            color: accent.value,
+                            borderRadius: isMobile.value ? [2, 2, 0, 0] : [4, 4, 0, 0],
                         },
                         emphasis: {
                             focus: "series",
@@ -147,26 +149,34 @@ const StatsBarChartCard = dc(
         });
 
         return () => {
-            const color = props.color || colors.blue.base;
-            const chartHeight = props.height || (isMobile ? 100 : 140);
+            const chartHeight = props.height || (isMobile.value ? 100 : 140);
 
             return (
-                <VCard style={{ width: "100%" }}>
-                    <div style={{ padding: "16px" }}>
-                        <div style={{ display: "flex", "align-items": "center", "justify-content": "space-between", "margin-bottom": "12px" }}>
-                            <div style={{ display: "flex", "align-items": "center", gap: "8px" }}>
-                                {props.icon && <VIcon style={{ color, "font-size": "18px" }}>{props.icon}</VIcon>}
-                                <span style={{ "font-size": isMobile ? "12px" : "14px", opacity: 0.7 }}>{props.title}</span>
-                            </div>
+                <SurfaceCard>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            {props.icon && (
+                                <VIcon size={18} icon={props.icon} style={{ color: accent.value }} />
+                            )}
+                            <span style={{ fontSize: isMobile.value ? "12px" : "13.5px", color: "var(--pg-ink-muted)" }}>
+                                {props.title}
+                            </span>
                         </div>
 
                         {loading.value ? (
-                            <div style={{ display: "flex", "justify-content": "center", padding: "20px" }}>
+                            <div style={{ display: "flex", justifyContent: "center", padding: "20px" }}>
                                 <VProgressCircular indeterminate size="32" color="primary" />
                             </div>
                         ) : (
                             <>
-                                <div style={{ "font-size": isMobile ? "20px" : "24px", "font-weight": "700", color, "margin-bottom": "8px" }}>
+                                <div
+                                    class="pg-tabular"
+                                    style={{
+                                        fontSize: isMobile.value ? "20px" : "24px",
+                                        fontWeight: 600,
+                                        color: "var(--pg-ink-primary)",
+                                    }}
+                                >
                                     {total.value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                                 </div>
                                 <div style={{ height: `${chartHeight}px` }}>
@@ -175,7 +185,7 @@ const StatsBarChartCard = dc(
                             </>
                         )}
                     </div>
-                </VCard>
+                </SurfaceCard>
             );
         };
     },

@@ -7,7 +7,6 @@ import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
@@ -30,6 +29,8 @@ import { MetricStrip } from "@/components/ui/MetricStrip";
 import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { MonoRef } from "@/components/ui/MonoRef";
+import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import { FormField } from "@/components/ui/FormField";
 import { EmptyState } from "@/components/ui/EmptyState";
 const filterDefinitions = tableRegistry.GatewayInquiries?.filters ?? [];
 
@@ -127,7 +128,8 @@ const GatewayInquirySchedulesPage = dc(() => {
     const { t } = useLocale();
     const theme = useTheme();
     const router = useRouter();
-
+    const asBadgeTone = (tone: ReturnType<typeof statusTone>): BadgeTone =>
+        tone === "error" ? "danger" : tone === "primary" ? "info" : tone;
     const search = ref<string | null>(null);
     const filters = ref<FilterValues>({});
     const total = ref(0);
@@ -287,8 +289,8 @@ const GatewayInquirySchedulesPage = dc(() => {
             value: (row) => row.status,
             Value: ({ row }) => (
                 <ThemedView style={{ gap: "3px" }}>
-                    <StatusChip label={statusLabel(row.status)} tone={statusTone(row.status)} size="small" />
-                    {row.isOverdue && <StatusChip label={t("Overdue")} tone="warning" size="x-small" />}
+                    <StatusBadge status={row.status} label={statusLabel(row.status)} toneOverride={asBadgeTone(statusTone(row.status))} />
+                    {row.isOverdue && <StatusBadge status="Overdue" label={t("Overdue")} toneOverride="warning" />}
                 </ThemedView>
             ),
         },
@@ -314,7 +316,7 @@ const GatewayInquirySchedulesPage = dc(() => {
             Value: ({ row }) => (
                 <ThemedView style={{ gap: "3px" }}>
                     <MonoRef value={row.attemptReference ?? ""} truncate={18} />
-                    <StatusChip label={row.attemptStatus || t("Unknown")} tone={statusTone(row.attemptStatus)} size="x-small" />
+                    <StatusBadge status={row.attemptStatus || "Unknown"} label={row.attemptStatus || t("Unknown")} toneOverride={asBadgeTone(statusTone(row.attemptStatus))} />
                 </ThemedView>
             ),
         },
@@ -340,7 +342,7 @@ const GatewayInquirySchedulesPage = dc(() => {
             label: "Source",
             sortKey: "source",
             value: (row) => row.source,
-            Value: ({ row }) => <StatusChip label={sourceLabel(row.source)} tone={row.source === "OPERATOR_CASE" ? "info" : "neutral"} size="x-small" />,
+            Value: ({ row }) => <StatusBadge status={row.source} label={sourceLabel(row.source)} toneOverride={row.source === "OPERATOR_CASE" ? "info" : "neutral"} />,
         },
         {
             key: "scheduledAt",
@@ -374,7 +376,7 @@ const GatewayInquirySchedulesPage = dc(() => {
             value: (row) => row.lastResult ?? row.lastError ?? "",
             Value: ({ row }) => (
                 <ThemedView style={{ gap: "2px", maxWidth: "220px" }}>
-                    {row.lastResult && <StatusChip label={row.lastResult} tone={statusTone(row.lastResult)} size="x-small" />}
+                    {row.lastResult && <StatusBadge status={row.lastResult} label={row.lastResult} toneOverride={asBadgeTone(statusTone(row.lastResult))} />}
                     {row.lastError && <ThemedText style={{ fontSize: "10px", opacity: 0.65 }}>{row.lastError}</ThemedText>}
                     {!row.lastResult && !row.lastError && <ThemedText style={{ fontSize: "11px", opacity: 0.5 }}>—</ThemedText>}
                 </ThemedView>
@@ -503,33 +505,30 @@ const GatewayInquirySchedulesPage = dc(() => {
                 onUpdate:modelValue={(value: boolean) => !value && closeAction()}
                 title={actionTitle.value}
                 size="sm"
+                onSubmit={() => void submitAction()}
+                submitLabel={actionMode.value === "cancel" ? t("Cancel inquiry") : actionMode.value === "retry" ? t("Retry inquiry") : t("Run now")}
+                cancelLabel={t("Close")}
+                loading={actionLoading.value}
+                danger={actionMode.value === "cancel"}
             >
-<ThemedText style={{ fontSize: "12px", opacity: 0.7 }}>{actionDescription.value}</ThemedText>
-                        {actionRow.value && (
-                            <ThemedView style={{ gap: "3px", padding: "10px", borderRadius: "10px", background: "rgba(100,116,139,0.08)" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{actionRow.value.caseRef || actionRow.value.operatorCaseId}</ThemedText>
-                                <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>{actionRow.value.attemptReference} · {actionRow.value.gatewayName || actionRow.value.gatewayCode}</ThemedText>
-                            </ThemedView>
-                        )}
-                        <VTextarea
-                            label={actionMode.value === "cancel" ? t("Cancellation reason") : t("Reason (optional)")}
-                            modelValue={actionReason.value}
-                            onUpdate:modelValue={(value: string) => (actionReason.value = value)}
-                            rows={3}
-                            hint={actionMode.value === "cancel" ? t("At least 3 characters.") : undefined}
-                            persistentHint={actionMode.value === "cancel"}
-                        />
-                        <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
-                            <VBtn variant="text" onClick={closeAction}>{t("Close")}</VBtn>
-                            <VBtn
-                                color={actionMode.value === "cancel" ? "warning" : "primary"}
-                                loading={actionLoading.value}
-                                disabled={actionMode.value === "cancel" && actionReason.value.trim().length < 3}
-                                onClick={() => void submitAction()}
-                            >
-                                {actionMode.value === "cancel" ? t("Cancel inquiry") : actionMode.value === "retry" ? t("Retry inquiry") : t("Run now")}
-                            </VBtn>
-                        </ThemedView>
+                <ThemedText style={{ fontSize: "12px", opacity: 0.7 }}>{actionDescription.value}</ThemedText>
+                {actionRow.value && (
+                    <ThemedView style={{ gap: "3px", padding: "10px", borderRadius: "var(--pg-radius-lg)", background: "var(--pg-bg-surface-subtle)" }}>
+                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{actionRow.value.caseRef || actionRow.value.operatorCaseId}</ThemedText>
+                        <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>{actionRow.value.attemptReference} · {actionRow.value.gatewayName || actionRow.value.gatewayCode}</ThemedText>
+                    </ThemedView>
+                )}
+                <FormField
+                    label={actionMode.value === "cancel" ? t("Cancellation reason") : t("Reason (optional)")}
+                    hint={actionMode.value === "cancel" ? t("At least 3 characters.") : ""}
+                    required={actionMode.value === "cancel"}
+                >
+                    <VTextarea
+                        modelValue={actionReason.value}
+                        onUpdate:modelValue={(value: string) => (actionReason.value = value)}
+                        rows={3}
+                    />
+                </FormField>
             </FormModal>
 
             <SlideOverDrawer
@@ -571,7 +570,7 @@ const GatewayInquirySchedulesPage = dc(() => {
                                     <EmptyState title={t("No audit entries yet.")} icon="mdi-history" />
                                 ) : (
                                     detail.value.auditTrail.map((entry) => (
-                                        <ThemedView key={entry.id} style={{ gap: "3px", borderBottom: "1px solid rgba(100,116,139,0.12)", paddingBottom: "7px" }}>
+                                        <ThemedView key={entry.id} style={{ gap: "3px", borderBottom: "1px solid var(--pg-border-subtle)", paddingBottom: "7px" }}>
                                             <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px" }}>
                                                 <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{entry.action.replaceAll("_", " ")}</ThemedText>
                                                 <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{formatDateTime(entry.createdAt)}</ThemedText>

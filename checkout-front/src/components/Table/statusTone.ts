@@ -23,7 +23,7 @@ const ERROR = new Set([
     "P1", "OVERDUE", "ERROR", "MISSING_AT_GATEWAY",
 ]);
 
-/** One shared colour vocabulary for chips, filter options and row tints. */
+/** One shared colour vocabulary for chips, filter options and row markers. */
 export const statusTone = (value: string | null | undefined): StatusTone => {
     const normalized = String(value ?? "").trim().toUpperCase();
     if (!normalized) return "neutral";
@@ -44,4 +44,86 @@ export const rowTone = (row: Record<string, unknown>): StatusTone => {
         }
     }
     return "neutral";
+};
+
+export type CriticalRowTone = "danger" | "warning" | null;
+
+const CRITICAL_VALUES = new Set([
+    "P1",
+    "CRITICAL",
+    "HIGH_RISK",
+    "OPEN_BREAKER",
+    "CONFIRMED_MATCH",
+    "TRUE_MATCH",
+    "INFECTED",
+    "EMERGENCY_RATIFICATION",
+]);
+
+const OVERDUE_VALUES = new Set([
+    "OVERDUE",
+    "EXPIRED",
+    "EVIDENCE_OVERDUE",
+    "BREACHED",
+]);
+
+const WARNING_VALUES = new Set([
+    "P2",
+    "HIGH",
+    "DEGRADED",
+    "POTENTIAL_MATCH",
+    "DUE_SOON",
+]);
+
+const CRITICAL_KEYS = [
+    "priority",
+    "severity",
+    "status",
+    "state",
+    "result",
+    "riskTier",
+    "riskClass",
+    "healthState",
+    "avStatus",
+    "expiryState",
+    "mode",
+];
+
+const OVERDUE_FLAGS = ["slaOverdue", "isOverdue", "evidenceOverdue", "expired", "overdue"];
+
+const DANGER_COLORS = ["#dc2626", "#ef4444", "#b91c1c", "#e11d48", "#f87171"];
+const WARNING_COLORS = ["#d97706", "#f59e0b", "#b45309", "#fbbf24", "#eab308"];
+
+const isDangerColor = (value: string): boolean =>
+    DANGER_COLORS.some((color) => value.includes(color)) || value.includes("danger") || value.includes("error");
+
+const isWarningColor = (value: string): boolean =>
+    WARNING_COLORS.some((color) => value.includes(color)) || value.includes("warning") || value.includes("amber");
+
+/**
+ * Returns the hairline indicator tone for a genuinely critical row.
+ * Ordinary statuses stay neutral; page-level rowColor hints are honoured only
+ * when they resolve to a danger or warning token.
+ */
+export const criticalRowTone = (row: Record<string, unknown>, rowColor?: string): CriticalRowTone => {
+    for (const key of CRITICAL_KEYS) {
+        const value = row[key];
+        if (typeof value !== "string" || !value) continue;
+        const normalized = value.trim().toUpperCase();
+        if (CRITICAL_VALUES.has(normalized)) return "danger";
+        if (OVERDUE_VALUES.has(normalized)) return "danger";
+    }
+
+    if (OVERDUE_FLAGS.some((key) => row[key] === true)) {
+        return "danger";
+    }
+
+    const routeHealth = row.routeHealth;
+    if (routeHealth && typeof routeHealth === "object" && Number((routeHealth as Record<string, unknown>).openBreaker ?? 0) > 0) {
+        return "danger";
+    }
+
+    // Legacy page-level color hints are intentionally ignored. Only P1,
+    // critical, breaker, and overdue semantics may paint the hairline stripe.
+    void rowColor;
+    return null;
 };

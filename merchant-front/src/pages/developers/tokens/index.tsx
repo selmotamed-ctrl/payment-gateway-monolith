@@ -6,17 +6,18 @@ import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
 import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
-import { copyToClipboard } from "@/utils/common";
 
 import { FormModal } from "@/components/ui/FormModal";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { MonoRef } from "@/components/ui/MonoRef";
 type AccessToken = {
     id: string;
     name: string;
@@ -41,6 +42,7 @@ const DeveloperTokensPage = dc(() => {
     const form = ref({ name: "", scopes: "", ipWhitelistEnabled: false, ipAllowlist: "" });
     const createdSecret = ref<string | null>(null);
     const actionLoading = ref(false);
+    const formError = ref("");
 
     const ipOpen = ref(false);
     const activeToken = ref<AccessToken | null>(null);
@@ -73,6 +75,7 @@ const DeveloperTokensPage = dc(() => {
 
     const createToken = async () => {
         actionLoading.value = true;
+        formError.value = "";
         try {
             const cidrs = form.value.ipAllowlist
                 .split(",")
@@ -92,7 +95,9 @@ const DeveloperTokensPage = dc(() => {
             showSnackBar({ type: "success", message: t("Created") });
             await load();
         } catch (e) {
-            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+            const message = extractApiErrorMessage(e);
+            formError.value = message;
+            showSnackBar({ type: "error", message });
         } finally {
             actionLoading.value = false;
         }
@@ -113,6 +118,7 @@ const DeveloperTokensPage = dc(() => {
             return;
         }
         actionLoading.value = true;
+        formError.value = "";
         try {
             await api.put(urlsMap.tokenIps(activeToken.value.id), {
                 allowedCidrs: ipList.value
@@ -124,7 +130,9 @@ const DeveloperTokensPage = dc(() => {
             showSnackBar({ type: "success", message: t("Saved") });
             await load();
         } catch (e) {
-            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+            const message = extractApiErrorMessage(e);
+            formError.value = message;
+            showSnackBar({ type: "error", message });
         } finally {
             actionLoading.value = false;
         }
@@ -132,23 +140,48 @@ const DeveloperTokensPage = dc(() => {
 
     const headers: TableHeader<AccessToken>[] = [
         { key: "name", label: "Token Name", value: (row) => row.name },
-        { key: "tokenPrefix", label: "Token Prefix", value: (row) => row.tokenPrefix },
+        {
+            key: "tokenPrefix",
+            label: "Token Prefix",
+            Value: ({ row }: { row: AccessToken }) => <MonoRef value={row.tokenPrefix} truncate={14} />,
+        },
         { key: "scopes", label: "Scopes", value: (row) => (row.scopes ?? []).join(", ") },
         {
             key: "ipWhitelistEnabled",
             label: "IP Whitelist",
             Value: ({ row }: { row: AccessToken }) => (
-                <StatusChip label={row.ipWhitelistEnabled ? t("On") : t("Off")} tone={row.ipWhitelistEnabled ? "success" : "neutral"} />
+                <StatusBadge
+                    status={row.ipWhitelistEnabled ? "ON" : "OFF"}
+                    label={row.ipWhitelistEnabled ? t("On") : t("Off")}
+                    toneOverride={row.ipWhitelistEnabled ? "success" : "neutral"}
+                />
             ),
         },
-        { key: "ipAllowlist", label: "CIDR", value: (row) => (row.ipAllowlist ?? []).join(", ") || "-" },
+        {
+            key: "ipAllowlist",
+            label: "CIDR",
+            Value: ({ row }: { row: AccessToken }) =>
+                (row.ipAllowlist ?? []).length ? (
+                    <ThemedView style={{ flexDirection: "row", gap: "4px", flexWrap: "wrap" }}>
+                        {(row.ipAllowlist ?? []).map((cidr) => (
+                            <MonoRef key={cidr} value={cidr} />
+                        ))}
+                    </ThemedView>
+                ) : (
+                    <span style={{ color: "var(--pg-ink-faint)" }}>—</span>
+                ),
+        },
         { key: "lastUsedAt", label: "Last Used", value: (row) => row.lastUsedAt ?? t("Never") },
         { key: "expiresAt", label: "Expires", value: (row) => row.expiresAt ?? t("Never") },
         {
             key: "revokedAt",
             label: "Status",
             Value: ({ row }: { row: AccessToken }) => (
-                <StatusChip label={row.revokedAt ? t("Inactive") : t("Active")} tone={row.revokedAt ? "neutral" : "success"} />
+                <StatusBadge
+                    status={row.revokedAt ? "INACTIVE" : "ACTIVE"}
+                    label={row.revokedAt ? t("Inactive") : t("Active")}
+                    toneOverride={row.revokedAt ? "neutral" : "success"}
+                />
             ),
         },
         {
@@ -162,6 +195,7 @@ const DeveloperTokensPage = dc(() => {
                         onClick={() => {
                             activeToken.value = row;
                             ipList.value = (row.ipAllowlist ?? []).join(", ");
+                            formError.value = "";
                             ipOpen.value = true;
                         }}
                     >
@@ -186,6 +220,7 @@ const DeveloperTokensPage = dc(() => {
                             variant="tonal"
                             onClick={() => {
                                 form.value = { name: "", scopes: "", ipWhitelistEnabled: false, ipAllowlist: "" };
+                                formError.value = "";
                                 createOpen.value = true;
                             }}
                         >
@@ -195,77 +230,67 @@ const DeveloperTokensPage = dc(() => {
                 />
 
                 {createdSecret.value && (
-                    <SurfaceCard>
-                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                            <ThemedText type="defaultSemiBold">{t("Secret")}</ThemedText>
-                            <ThemedText style={{ direction: "ltr", wordBreak: "break-all" }}>{createdSecret.value}</ThemedText>
-                            <ThemedText style={{ fontSize: "12px", opacity: 0.7 }}>
+                    <SurfaceCard title={t("Secret")}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                            <MonoRef
+                                value={createdSecret.value}
+                                onCopied={() => showSnackBar({ type: "success", message: t("Copied") })}
+                            />
+                            <p style={{ fontSize: "12px", color: "var(--pg-ink-muted)", margin: 0 }}>
                                 {t("This secret is shown once. Store it securely.")}
-                            </ThemedText>
-                            <VBtn
-                                variant="tonal"
-                                size="small"
-                                style={{ alignSelf: "flex-start" }}
-                                onClick={() => {
-                                    copyToClipboard(createdSecret.value!);
-                                    showSnackBar({ type: "success", message: t("Copied") });
-                                }}
-                            >
-                                {t("Copy")}
-                            </VBtn>
-                        </SurfaceCardText>
+                            </p>
+                        </div>
                     </SurfaceCard>
                 )}
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : (
-                    <SurfaceCard>
-                        <SurfaceCardText>
-                            <DataTable
-                                title={t("Developer Tokens")}
-                                data={rows.value}
-                                headers={headers}
-                                loading={loading.value}
-                                showNumber={true}
-                                xlsx={false}
-                                noElevation={true}
-                                searchValue={search.value}
-                                setSearchValue={(value) => (search.value = value)}
-                            />
-                        </SurfaceCardText>
-                    </SurfaceCard>
+                    <DataTable
+                        title={t("Developer Tokens")}
+                        data={rows.value}
+                        headers={headers}
+                        loading={loading.value}
+                        showNumber={true}
+                        xlsx={false}
+                        noElevation={true}
+                        searchValue={search.value}
+                        setSearchValue={(value) => (search.value = value)}
+                    />
                 )}
             </ThemedView>
 
             <FormModal
                 modelValue={createOpen.value}
                 onUpdate:modelValue={(v: any) => (createOpen.value = v)}
-                title={"Details"}
+                title={t("Create Token")}
                 size="md"
+                loading={actionLoading.value}
+                errorMessage={formError.value}
+                submitLabel={t("Create Token")}
+                onSubmit={() => void createToken()}
             >
-<VTextField
-                            label={t("Token Name")}
-                            modelValue={form.value.name}
-                            onUpdate:modelValue={(v: string) => (form.value.name = v)}
-                        />
-                        <VTextField
-                            label={t("Scopes")}
-                            modelValue={form.value.scopes}
-                            onUpdate:modelValue={(v: string) => (form.value.scopes = v)}
-                            hint="Comma separated, e.g. links.create,payments.read"
-                            persistentHint
-                        />
-                        <VTextField
-                            label={t("IP Whitelist")}
-                            modelValue={form.value.ipAllowlist}
-                            onUpdate:modelValue={(v: string) => (form.value.ipAllowlist = v)}
-                            hint="Comma separated CIDR ranges"
-                            persistentHint
-                        />
-                        <VBtn color="primary" loading={actionLoading.value} onClick={() => void createToken()}>
-                            {t("Create Token")}
-                        </VBtn>
+                <FormField label={t("Token Name")} required>
+                    <VTextField
+                        modelValue={form.value.name}
+                        onUpdate:modelValue={(v: string) => (form.value.name = v)}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("Scopes")} hint={t("Comma separated, e.g. links.create,payments.read.")}>
+                    <VTextField
+                        modelValue={form.value.scopes}
+                        onUpdate:modelValue={(v: string) => (form.value.scopes = v)}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("IP Whitelist")} hint={t("Comma separated CIDR ranges.")}>
+                    <VTextField
+                        modelValue={form.value.ipAllowlist}
+                        onUpdate:modelValue={(v: string) => (form.value.ipAllowlist = v)}
+                        hideDetails
+                    />
+                </FormField>
             </FormModal>
 
             <FormModal
@@ -273,15 +298,18 @@ const DeveloperTokensPage = dc(() => {
                 onUpdate:modelValue={(v: any) => (ipOpen.value = v)}
                 title={activeToken.value?.name ?? t("API token")}
                 size="sm"
+                loading={actionLoading.value}
+                errorMessage={formError.value}
+                submitLabel={t("Save")}
+                onSubmit={() => void saveIps()}
             >
-<VTextField
-                            label="CIDR"
-                            modelValue={ipList.value}
-                            onUpdate:modelValue={(v: string) => (ipList.value = v)}
-                        />
-                        <VBtn color="primary" loading={actionLoading.value} onClick={() => void saveIps()}>
-                            {t("Save")}
-                        </VBtn>
+                <FormField label={t("CIDR")} hint={t("Comma separated CIDR ranges.")}>
+                    <VTextField
+                        modelValue={ipList.value}
+                        onUpdate:modelValue={(v: string) => (ipList.value = v)}
+                        hideDetails
+                    />
+                </FormField>
             </FormModal>
         </ScreenContainer>
     );

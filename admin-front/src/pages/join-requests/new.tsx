@@ -18,6 +18,7 @@ import { FormModal } from "@/components/ui/FormModal";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import { MonoRef } from "@/components/ui/MonoRef";
+import { FormField } from "@/components/ui/FormField";
 type MerchantOption = {
     id: string;
     title: string;
@@ -291,19 +292,22 @@ const JoinRequestNewPage = dc(() => {
                             }}
                         />
                         {mode.value === "EXISTING" && (
-                            <VAutocomplete
+                            <FormField
                                 label={t("Merchant")}
-                                items={merchantOptions.value}
-                                itemTitle="title"
-                                itemValue="id"
-                                modelValue={merchantId.value}
-                                loading={merchantLoading.value}
-                                clearable
-                                onUpdate:modelValue={(value: unknown) => selectMerchant(value ? String(value) : null)}
-                                onUpdate:search={onMerchantSearch}
                                 hint={t("Only pending or rejected merchants can start a new onboarding request.")}
-                                persistentHint
-                            />
+                                required
+                            >
+                                <VAutocomplete
+                                    items={merchantOptions.value}
+                                    itemTitle="title"
+                                    itemValue="id"
+                                    modelValue={merchantId.value}
+                                    loading={merchantLoading.value}
+                                    clearable
+                                    onUpdate:modelValue={(value: unknown) => selectMerchant(value ? String(value) : null)}
+                                    onUpdate:search={onMerchantSearch}
+                                />
+                            </FormField>
                         )}
                     </SurfaceCardText>
                 </SurfaceCard>
@@ -314,30 +318,49 @@ const JoinRequestNewPage = dc(() => {
                             {t("Applicant profile")}
                         </ThemedText>
                         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "14px" }}>
-                            <VTextField v-model={form.value.legalName} label={`${t("Legal name")} *`} />
-                            <VTextField v-model={form.value.tradeName} label={`${t("Trade name")} *`} />
-                            <VTextField v-model={form.value.country} label={t("Country code (2 letters)")} error={countryInvalid.value} errorMessages={countryInvalid.value ? t("Use exactly 2 letters") : []} />
-                            <VTextField v-model={form.value.businessCategory} label={t("Business category")} />
-                            <VTextField v-model={form.value.registrationNumber} label={t("Registration number")} />
-                            <VTextField v-model={form.value.taxId} label={t("Tax ID")} />
-                            <VTextField v-model={form.value.contactPhone} label={t("Contact phone")} error={phoneInvalid.value} errorMessages={phoneInvalid.value ? t("Enter a phone number with 6-15 digits") : []} />
-                            <VTextField v-model={form.value.contactEmail} label={t("Contact email")} error={emailInvalid.value} errorMessages={emailInvalid.value ? t("Enter a valid email address") : []} />
-                            <VTextField v-model={form.value.expectedMonthlyVolume} label={t("Expected monthly volume")} error={volumeInvalid.value} errorMessages={volumeInvalid.value ? t("Use a number with up to 4 decimals") : []} />
-                            <VTextField v-model={form.value.currency} label={t("Currency (3 letters)")} error={currencyInvalid.value} errorMessages={currencyInvalid.value ? t("Use exactly 3 letters") : []} />
-                            <VSelect
-                                v-model={form.value.riskTier}
-                                label={t("Proposed risk tier")}
-                                items={["LOW", "STANDARD", "HIGH"]}
-                            />
-                            <VTextField v-model={form.value.websiteUrl} label={t("Website URL")} error={websiteInvalid.value} errorMessages={websiteInvalid.value ? t("Enter a full http:// or https:// URL") : []} />
+                            <FormField label={t("Legal name")} required>
+                                <VTextField v-model={form.value.legalName} />
+                            </FormField>
+                            <FormField label={t("Trade name")} required>
+                                <VTextField v-model={form.value.tradeName} />
+                            </FormField>
+                            <FormField label={t("Country code (2 letters)")} error={countryInvalid.value ? t("Use exactly 2 letters") : ""}>
+                                <VTextField v-model={form.value.country} error={countryInvalid.value} />
+                            </FormField>
+                            <FormField label={t("Business category")}>
+                                <VTextField v-model={form.value.businessCategory} />
+                            </FormField>
+                            <FormField label={t("Registration number")}>
+                                <VTextField v-model={form.value.registrationNumber} />
+                            </FormField>
+                            <FormField label={t("Tax ID")}>
+                                <VTextField v-model={form.value.taxId} />
+                            </FormField>
+                            <FormField label={t("Contact phone")} error={phoneInvalid.value ? t("Enter a phone number with 6-15 digits") : ""}>
+                                <VTextField v-model={form.value.contactPhone} error={phoneInvalid.value} />
+                            </FormField>
+                            <FormField label={t("Contact email")} error={emailInvalid.value ? t("Enter a valid email address") : ""}>
+                                <VTextField v-model={form.value.contactEmail} error={emailInvalid.value} />
+                            </FormField>
+                            <FormField label={t("Expected monthly volume")} error={volumeInvalid.value ? t("Use a number with up to 4 decimals") : ""}>
+                                <VTextField v-model={form.value.expectedMonthlyVolume} error={volumeInvalid.value} />
+                            </FormField>
+                            <FormField label={t("Currency (3 letters)")} error={currencyInvalid.value ? t("Use exactly 3 letters") : ""}>
+                                <VTextField v-model={form.value.currency} error={currencyInvalid.value} />
+                            </FormField>
+                            <FormField label={t("Proposed risk tier")}>
+                                <VSelect v-model={form.value.riskTier} items={["LOW", "STANDARD", "HIGH"]} />
+                            </FormField>
+                            <FormField label={t("Website URL")} error={websiteInvalid.value ? t("Enter a full http:// or https:// URL") : ""}>
+                                <VTextField v-model={form.value.websiteUrl} error={websiteInvalid.value} />
+                            </FormField>
                         </div>
-                        <VTextField v-model={form.value.registeredAddress} label={t("Registered address")} />
-                        <VTextarea
-                            v-model={form.value.businessUseDescription}
-                            label={t("Business use description")}
-                            rows={3}
-                            autoGrow
-                        />
+                        <FormField label={t("Registered address")}>
+                            <VTextField v-model={form.value.registeredAddress} />
+                        </FormField>
+                        <FormField label={t("Business use description")}>
+                            <VTextarea v-model={form.value.businessUseDescription} rows={3} autoGrow />
+                        </FormField>
                     </SurfaceCardText>
                 </SurfaceCard>
 
@@ -347,8 +370,12 @@ const JoinRequestNewPage = dc(() => {
                             {t("Payout account")}
                         </ThemedText>
                         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "14px" }}>
-                            <VTextField v-model={form.value.payoutBankName} label={t("Bank name")} error={payoutIncomplete.value} errorMessages={payoutIncomplete.value ? t("Enter both bank name and account number") : []} />
-                            <VTextField v-model={form.value.payoutAccount} label={t("IBAN / account number")} error={payoutIncomplete.value} errorMessages={payoutIncomplete.value ? t("Enter both bank name and account number") : []} />
+                            <FormField label={t("Bank name")} error={payoutIncomplete.value ? t("Enter both bank name and account number") : ""}>
+                                <VTextField v-model={form.value.payoutBankName} error={payoutIncomplete.value} />
+                            </FormField>
+                            <FormField label={t("IBAN / account number")} error={payoutIncomplete.value ? t("Enter both bank name and account number") : ""}>
+                                <VTextField v-model={form.value.payoutAccount} error={payoutIncomplete.value} />
+                            </FormField>
                         </div>
                         <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
                             {t("The payout account is hashed for cross-merchant duplicate detection and reviewed before approval.")}
@@ -371,17 +398,9 @@ const JoinRequestNewPage = dc(() => {
                 onUpdate:modelValue={(value: boolean) => (inviteOpen.value = value)}
                 title={t("Merchant invitation")}
                 size="md"
-            >
-<ThemedText>
-                            {t("Share this one-time invitation token with the merchant administrator. It is shown only once.")}
-                        </ThemedText>
-                        <VAlert type="warning" variant="tonal">
-                            <MonoRef value={created.value?.invitationToken ?? ""} />
-                        </VAlert>
-                        <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
-                            {t("Expires")}: {formatDateTime(created.value?.invitationExpiresAt)}
-                        </ThemedText>
-                        <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
+                v-slots={{
+                    footer: () => (
+                        <>
                             <VBtn
                                 variant="tonal"
                                 prependIcon="mdi-content-copy"
@@ -397,7 +416,19 @@ const JoinRequestNewPage = dc(() => {
                             <VBtn color="primary" onClick={() => void continueToDraft()}>
                                 {t("Continue to draft")}
                             </VBtn>
-                        </ThemedView>
+                        </>
+                    ),
+                }}
+            >
+<ThemedText>
+                            {t("Share this one-time invitation token with the merchant administrator. It is shown only once.")}
+                        </ThemedText>
+                        <VAlert type="warning" variant="tonal">
+                            <MonoRef value={created.value?.invitationToken ?? ""} />
+                        </VAlert>
+                        <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
+                            {t("Expires")}: {formatDateTime(created.value?.invitationExpiresAt)}
+                        </ThemedText>
             </FormModal>
         </ScreenContainer>
     );

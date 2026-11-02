@@ -15,6 +15,7 @@ export const PageHeader = defineComponent({
         title: { type: String, required: true },
         subtitle: { type: String, default: "" },
         badge: { type: String, default: "" },
+        badgeLabel: { type: String, default: "" },
         badgeTone: { type: String as PropType<BadgeTone>, default: "neutral" },
         breadcrumbs: { type: Array as PropType<BreadcrumbItem[]>, default: () => [] },
         helpChapterId: { type: String, default: "" },
@@ -39,7 +40,7 @@ export const PageHeader = defineComponent({
                 <div style={{ minWidth: "240px", flex: "1 1 auto" }}>
                     {props.breadcrumbs.length > 0 && (
                         <nav
-                            aria-label="Breadcrumb"
+                            aria-label={t("Breadcrumb")}
                             style={{
                                 display: "flex",
                                 alignItems: "center",
@@ -49,40 +50,50 @@ export const PageHeader = defineComponent({
                                 marginBottom: "6px",
                             }}
                         >
-                            {props.breadcrumbs.map((crumb, idx) => (
-                                <span key={`${crumb.label}-${idx}`} style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-                                    {idx > 0 && <span style={{ color: "var(--pg-ink-faint)" }}>/</span>}
-                                    {crumb.to ? (
-                                        <RouterLink to={crumb.to} style={{ color: "inherit", textDecoration: "none" }}>
-                                            {crumb.label}
-                                        </RouterLink>
-                                    ) : (
-                                        <span>{crumb.label}</span>
-                                    )}
-                                </span>
-                            ))}
+                            <ol style={{ display: "flex", alignItems: "center", gap: "6px", listStyle: "none", margin: 0, padding: 0 }}>
+                                {props.breadcrumbs.map((crumb, idx) => {
+                                    const last = idx === props.breadcrumbs.length - 1;
+                                    return (
+                                        <li key={`${crumb.label}-${idx}`} style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                                            {idx > 0 && <span aria-hidden="true" style={{ color: "var(--pg-ink-faint)" }}>/</span>}
+                                            {crumb.to && !last ? (
+                                                <RouterLink to={crumb.to} style={{ color: "inherit", textDecoration: "none" }}>
+                                                    {crumb.label}
+                                                </RouterLink>
+                                            ) : (
+                                                <span aria-current={last ? "page" : undefined}>{crumb.label}</span>
+                                            )}
+                                        </li>
+                                    );
+                                })}
+                            </ol>
                         </nav>
                     )}
                     <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                         <h1
+                            class="pg-page-title"
                             style={{
                                 fontSize: "22px",
                                 fontWeight: 600,
-                                lineHeight: 1.25,
                                 color: "var(--pg-ink-primary)",
                                 margin: 0,
-                                letterSpacing: "-0.02em",
                             }}
                         >
                             {props.title}
                         </h1>
-                        {props.badge && <StatusBadge status={props.badge} toneOverride={props.badgeTone} />}
+                        {props.badge && (
+                            <StatusBadge
+                                status={props.badge}
+                                label={props.badgeLabel || undefined}
+                                toneOverride={props.badgeTone}
+                            />
+                        )}
                     </div>
                     {props.subtitle && (
                         <p
+                            class="pg-page-subtitle"
                             style={{
                                 fontSize: "13.5px",
-                                lineHeight: 1.5,
                                 color: "var(--pg-ink-secondary)",
                                 margin: "4px 0 0 0",
                                 maxWidth: "72ch",
@@ -112,6 +123,7 @@ export const PageHeader = defineComponent({
                                 height: "36px",
                             }}
                             onClick={() => props.onOpenHelp?.(props.helpChapterId)}
+                            aria-label={t("SOP & Help")}
                         >
                             {t("SOP & Help")}
                         </VBtn>

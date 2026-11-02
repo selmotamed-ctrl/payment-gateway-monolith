@@ -7,7 +7,11 @@ import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { DescriptionList } from "@/components/ui/DescriptionList";
+import { MonoRef } from "@/components/ui/MonoRef";
+import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import { showSnackBar } from "@/utils/snackBar";
 import { GuideMarkdown } from "@/components/guide/GuideMarkdown";
 import { GlobalGuideSearchModal } from "@/components/guide/GlobalGuideSearchModal";
@@ -148,6 +152,13 @@ const AdminGuidePage = dc(() => {
     const replaceBookmarks = ref(false);
     const checklistState = ref<Record<string, boolean>>(readJson<Record<string, boolean>>(CHECKLIST_KEY, {}));
     const glossaryFilter = ref("");
+
+    const viewTabs = computed(() => [
+        { value: "book", label: isArabic.value ? "الكتب" : "Books", count: GUIDE_BOOKS.length },
+        { value: "glossary", label: isArabic.value ? "القاموس" : "Glossary", count: GLOSSARY_TERMS.length },
+        { value: "simulators", label: isArabic.value ? "المحاكيات" : "Simulators", count: 3 },
+        { value: "checklists", label: isArabic.value ? "القوائم" : "Checklists", count: DAILY_CHECKLISTS.length },
+    ]);
 
     const bookTitle = (book: GuideBook): string => (isArabic.value ? book.titleAr : book.titleEn);
     const chapterTitle = (chapter: GuideChapter): string => (isArabic.value ? chapter.titleAr ?? chapter.titleEn : chapter.titleEn);
@@ -417,12 +428,19 @@ const AdminGuidePage = dc(() => {
                     </VExpansionPanelTitle>
                     <VExpansionPanelText>
                         <ThemedView style={{ gap: "14px", paddingTop: "6px" }}>
+                            {filteredGlossary.value.length === 0 ? (
+                                <EmptyState
+                                    title={isArabic.value ? "لا توجد مصطلحات مطابقة." : "No matching glossary terms."}
+                                    description={isArabic.value ? "جرّب كلمة بحث أخرى." : "Try a different search term."}
+                                    icon="mdi-book-search"
+                                />
+                            ) : null}
                             {filteredGlossary.value.map((term) => (
                                 <SurfaceCard key={term.term} variant="outlined">
                                     <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                         <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                             <TermTooltip term={term.term} label={term.term} tone="primary" size="small" />
-                                            <StatusChip label={term.category} tone="neutral" size="x-small" />
+                                            <StatusBadge status={term.category} label={term.category} showDot={false} />
                                         </ThemedView>
                                         <ThemedText style={{ fontSize: "13px", lineHeight: 1.7 }}>
                                             {isArabic.value && term.definitionAr ? term.definitionAr : term.definitionEn}
@@ -435,8 +453,9 @@ const AdminGuidePage = dc(() => {
                                                 fontSize: "12px",
                                                 lineHeight: 1.6,
                                                 padding: "8px 10px",
-                                                borderRadius: "8px",
-                                                background: "rgba(239,68,68,0.08)",
+                                                borderRadius: "var(--pg-radius-sm)",
+                                                border: "1px solid var(--pg-status-danger-border)",
+                                                background: "var(--pg-status-danger-bg)",
                                                 whiteSpace: "pre-wrap",
                                             }}
                                         >
@@ -454,11 +473,11 @@ const AdminGuidePage = dc(() => {
                     <VExpansionPanelText>
                         <ThemedView style={{ gap: "8px", paddingTop: "6px" }}>
                             {ATTEMPT_STATUS_DEFINITIONS.map((status) => (
-                                <ThemedView key={status.code} style={{ gap: "4px", padding: "8px 0", borderBottom: "1px solid rgba(100,116,139,0.15)" }}>
+                                <ThemedView key={status.code} style={{ gap: "4px", padding: "8px 0", borderBottom: "1px solid var(--pg-border-subtle)" }}>
                                     <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                         <TermTooltip term={status.code} tone="info" size="small" />
-                                        <StatusChip label={status.category} tone="neutral" size="x-small" />
-                                        <StatusChip label={status.slotLocked} tone={status.slotLocked.startsWith("YES") ? "error" : "success"} size="x-small" />
+                                        <StatusBadge status={status.category} label={status.category} showDot={false} />
+                                        <StatusBadge status={status.slotLocked} label={status.slotLocked} toneOverride={status.slotLocked.startsWith("YES") ? "danger" : "success"} showDot={false} />
                                     </ThemedView>
                                     <ThemedText style={{ fontSize: "13px", lineHeight: 1.6 }}>
                                         {isArabic.value && status.meaningAr ? status.meaningAr : status.meaningEn}
@@ -475,10 +494,10 @@ const AdminGuidePage = dc(() => {
                     <VExpansionPanelText>
                         <ThemedView style={{ gap: "8px", paddingTop: "6px" }}>
                             {GL_ACCOUNT_DEFINITIONS.map((account) => (
-                                <ThemedView key={account.code} style={{ gap: "4px", padding: "8px 0", borderBottom: "1px solid rgba(100,116,139,0.15)" }}>
+                                <ThemedView key={account.code} style={{ gap: "4px", padding: "8px 0", borderBottom: "1px solid var(--pg-border-subtle)" }}>
                                     <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                         <TermTooltip term={account.code} tone="warning" size="small" />
-                                        <StatusChip label={account.normalBalance} tone="neutral" size="x-small" />
+                                        <StatusBadge status={account.normalBalance} label={account.normalBalance} showDot={false} />
                                     </ThemedView>
                                     <ThemedText style={{ fontSize: "13px", lineHeight: 1.6 }}>
                                         {isArabic.value && account.meaningAr ? account.meaningAr : account.meaningEn}
@@ -494,10 +513,10 @@ const AdminGuidePage = dc(() => {
                     <VExpansionPanelText>
                         <ThemedView style={{ gap: "8px", paddingTop: "6px" }}>
                             {COLLECTION_MODE_DEFINITIONS.map((mode) => (
-                                <ThemedView key={mode.code} style={{ gap: "4px", padding: "8px 0", borderBottom: "1px solid rgba(100,116,139,0.15)" }}>
+                                <ThemedView key={mode.code} style={{ gap: "4px", padding: "8px 0", borderBottom: "1px solid var(--pg-border-subtle)" }}>
                                     <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                         <TermTooltip term={mode.code} tone="primary" size="small" />
-                                        <StatusChip label={isArabic.value ? mode.titleAr : mode.titleEn} tone="neutral" size="x-small" />
+                                        <StatusBadge status={mode.code} label={isArabic.value ? mode.titleAr : mode.titleEn} showDot={false} />
                                     </ThemedView>
                                     <ThemedText style={{ fontSize: "13px", lineHeight: 1.6 }}>
                                         {isArabic.value ? mode.meaningAr : mode.meaningEn}
@@ -516,11 +535,11 @@ const AdminGuidePage = dc(() => {
                     <VExpansionPanelText>
                         <ThemedView style={{ gap: "8px", paddingTop: "6px" }}>
                             {CONFIRMATION_CHANNEL_DEFINITIONS.map((channel) => (
-                                <ThemedView key={channel.code} style={{ gap: "4px", padding: "8px 0", borderBottom: "1px solid rgba(100,116,139,0.15)" }}>
+                                <ThemedView key={channel.code} style={{ gap: "4px", padding: "8px 0", borderBottom: "1px solid var(--pg-border-subtle)" }}>
                                     <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                         <TermTooltip term={channel.code} tone={channel.trustLevel === "ZERO_TRUST" ? "error" : "success"} size="small" />
-                                        <StatusChip label={channel.trustLevel} tone={channel.trustLevel === "ZERO_TRUST" ? "error" : "success"} size="x-small" />
-                                        <StatusChip label={isArabic.value ? channel.titleAr : channel.titleEn} tone="neutral" size="x-small" />
+                                        <StatusBadge status={channel.trustLevel} label={channel.trustLevel} toneOverride={channel.trustLevel === "ZERO_TRUST" ? "danger" : "success"} showDot={false} />
+                                        <StatusBadge status={channel.code} label={isArabic.value ? channel.titleAr : channel.titleEn} showDot={false} />
                                     </ThemedView>
                                     <ThemedText style={{ fontSize: "13px", lineHeight: 1.6 }}>
                                         {isArabic.value ? channel.meaningAr : channel.meaningEn}
@@ -536,7 +555,7 @@ const AdminGuidePage = dc(() => {
                     <VExpansionPanelText>
                         <ThemedView style={{ gap: "8px", paddingTop: "6px" }}>
                             {ERROR_CODE_GLOSSARY.map((entry) => (
-                                <ThemedView key={entry.code} style={{ gap: "4px", padding: "8px 0", borderBottom: "1px solid rgba(100,116,139,0.15)" }}>
+                                <ThemedView key={entry.code} style={{ gap: "4px", padding: "8px 0", borderBottom: "1px solid var(--pg-border-subtle)" }}>
                                     <TermTooltip term={entry.code} tone="error" size="small" />
                                     <ThemedText style={{ fontSize: "13px", lineHeight: 1.6 }}>
                                         {isArabic.value && entry.meaningAr ? entry.meaningAr : entry.meaningEn}
@@ -575,10 +594,17 @@ const AdminGuidePage = dc(() => {
                     <VExpansionPanelTitle>{`${isArabic.value ? "سجل الحالات الطرفية" : "Edge case registry"} (${filteredEdgeCases.value.length} / 140)`}</VExpansionPanelTitle>
                     <VExpansionPanelText>
                         <ThemedView style={{ gap: "6px", paddingTop: "6px" }}>
+                            {filteredEdgeCases.value.length === 0 ? (
+                                <EmptyState
+                                    title={isArabic.value ? "لا توجد حالات طرفية مطابقة." : "No matching edge cases."}
+                                    description={isArabic.value ? "جرّب كلمة بحث أخرى." : "Try a different search term."}
+                                    icon="mdi-alert-circle-outline"
+                                />
+                            ) : null}
                             {filteredEdgeCases.value.map((edgeCase) => (
-                                <ThemedView key={edgeCase.id} style={{ gap: "2px", padding: "6px 0", borderBottom: "1px solid rgba(100,116,139,0.12)" }}>
+                                <ThemedView key={edgeCase.id} style={{ gap: "2px", padding: "6px 0", borderBottom: "1px solid var(--pg-border-subtle)" }}>
                                     <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                        <StatusChip label={edgeCase.id} tone="neutral" size="x-small" />
+                                        <StatusBadge status={edgeCase.id} label={edgeCase.id} showDot={false} />
                                         <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>
                                             {isArabic.value ? edgeCase.titleAr : edgeCase.titleEn}
                                         </ThemedText>
@@ -600,7 +626,7 @@ const AdminGuidePage = dc(() => {
             <SurfaceCard>
                 <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                     <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-                        <StatusChip label={`Book ${selectedBook.value.number}`} tone="primary" />
+                        <StatusBadge status="BOOK" label={`Book ${selectedBook.value.number}`} toneOverride="info" showDot={false} />
                         <ThemedText type="defaultSemiBold" style={{ fontSize: "22px", flex: "1 1 320px" }}>
                             {bookTitle(selectedBook.value)}
                         </ThemedText>
@@ -670,7 +696,7 @@ const AdminGuidePage = dc(() => {
                     <VExpansionPanel key={chapter.id} value={chapter.id}>
                         <VExpansionPanelTitle>
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                <StatusChip label={chapter.number} tone="info" size="x-small" />
+                                <StatusBadge status={chapter.number} label={chapter.number} toneOverride="info" showDot={false} />
                                 <span>{chapterTitle(chapter)}</span>
                             </ThemedView>
                         </VExpansionPanelTitle>
@@ -804,7 +830,7 @@ const AdminGuidePage = dc(() => {
                 <SurfaceCard key={checklist.id} variant="outlined">
                     <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                         <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                            <StatusChip label={checklist.id.toUpperCase()} tone="primary" size="x-small" />
+                            <StatusBadge status={checklist.id} label={checklist.id.toUpperCase()} toneOverride="info" showDot={false} />
                             <ThemedText type="defaultSemiBold">{isArabic.value ? checklist.titleAr : checklist.titleEn}</ThemedText>
                         </ThemedView>
                         {checklist.steps.map((step, index) => (
@@ -816,9 +842,10 @@ const AdminGuidePage = dc(() => {
                                     alignItems: "flex-start",
                                     gap: "8px",
                                     padding: "8px 10px",
-                                    borderRadius: "8px",
+                                    borderRadius: "var(--pg-radius-sm)",
+                                    border: "1px solid var(--pg-border-subtle)",
                                     cursor: "pointer",
-                                    background: checklistState.value[`${checklist.id}-${index}`] ? "rgba(5,150,105,0.10)" : "rgba(100,116,139,0.06)",
+                                    background: checklistState.value[`${checklist.id}-${index}`] ? "var(--pg-status-success-bg)" : "var(--pg-bg-surface-subtle)",
                                 }}
                             >
                                 <VIcon
@@ -846,7 +873,7 @@ const AdminGuidePage = dc(() => {
                             <VBtn size="small" variant="tonal" prependIcon="mdi-magnify" onClick={() => (searchOpen.value = true)}>
                                 {isArabic.value ? "بحث فوري" : "Instant search"}
                             </VBtn>
-                            <StatusChip label="Ctrl / Cmd + K" tone="neutral" size="x-small" />
+                            <StatusBadge status="KEYBOARD" label="Ctrl / Cmd + K" showDot={false} />
                             <VBtn size="small" variant="tonal" prependIcon="mdi-download" onClick={exportBookmarks}>
                                 {isArabic.value ? "تصدير العلامات" : "Export bookmarks"}
                             </VBtn>
@@ -857,6 +884,12 @@ const AdminGuidePage = dc(() => {
                     )}
                 />
 
+                <SegmentedTabs
+                    modelValue={view.value}
+                    tabs={viewTabs.value}
+                    onUpdate:modelValue={(value: string) => (view.value = value as ViewMode)}
+                />
+
                 <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "16px", alignItems: "flex-start" }}>
                     <SurfaceCard style={{ flex: "1 1 300px", maxWidth: "380px" }}>
                         <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
@@ -864,25 +897,6 @@ const AdminGuidePage = dc(() => {
                                 {isArabic.value ? "شجرة الدليل" : "Guide tree"}
                             </ThemedText>
                             <VList density="compact" nav>
-                                <VListSubheader>{isArabic.value ? "القاموس والمحاكيات" : "Glossary & simulators"}</VListSubheader>
-                                <VListItem
-                                    active={view.value === "glossary"}
-                                    prependIcon="mdi-book-alphabet"
-                                    title={isArabic.value ? "القاموس التأسيسي" : "Zero-assumption glossary"}
-                                    onClick={() => (view.value = "glossary")}
-                                />
-                                <VListItem
-                                    active={view.value === "simulators"}
-                                    prependIcon="mdi-flask-outline"
-                                    title={isArabic.value ? "المحاكيات التفاعلية" : "Interactive simulators"}
-                                    onClick={() => (view.value = "simulators")}
-                                />
-                                <VListItem
-                                    active={view.value === "checklists"}
-                                    prependIcon="mdi-checkbox-marked-circle-outline"
-                                    title={isArabic.value ? "قوائم التحقق اليومية" : "Role-based daily checklists"}
-                                    onClick={() => (view.value = "checklists")}
-                                />
                                 <VListSubheader>{isArabic.value ? "الكتب الاثنا عشر" : "The 12 books"}</VListSubheader>
                                 {GUIDE_BOOKS.map((book) => (
                                     <div key={book.id}>
@@ -918,9 +932,9 @@ const AdminGuidePage = dc(() => {
                                         {bookmarks.value.map((id) => {
                                             const book = GUIDE_BOOKS.find((candidate) => candidate.id === id);
                                             return book ? (
-                                                <MetaPill key={`bookmark-${id}`} size="x-small" variant="tonal" onClick={() => openBook(book)} style={{ cursor: "pointer" }}>
+                                                <VBtn key={`bookmark-${id}`} size="x-small" variant="tonal" onClick={() => openBook(book)}>
                                                     {`Book ${book.number}`}
-                                                </MetaPill>
+                                                </VBtn>
                                             ) : null;
                                         })}
                                     </ThemedView>
@@ -966,9 +980,9 @@ const AdminGuidePage = dc(() => {
                         {importError.value && <VAlert type="error" variant="tonal" density="compact">{importError.value}</VAlert>}
                         {importResult.value && (
                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                                <StatusChip label={`${isArabic.value ? "مستورد" : "Imported"}: ${importResult.value.imported}`} tone="success" />
-                                <StatusChip label={`${isArabic.value ? "متجاهل" : "Skipped"}: ${importResult.value.skipped}`} tone={importResult.value.skipped > 0 ? "warning" : "neutral"} />
-                                <StatusChip label={`${isArabic.value ? "إجمالي" : "Total"}: ${importResult.value.total}`} tone="info" />
+                                <StatusBadge status="IMPORTED" label={`${isArabic.value ? "مستورد" : "Imported"}: ${importResult.value.imported}`} toneOverride="success" showDot={false} />
+                                <StatusBadge status="SKIPPED" label={`${isArabic.value ? "متجاهل" : "Skipped"}: ${importResult.value.skipped}`} toneOverride={importResult.value.skipped > 0 ? "warning" : "neutral"} showDot={false} />
+                                <StatusBadge status="TOTAL" label={`${isArabic.value ? "إجمالي" : "Total"}: ${importResult.value.total}`} toneOverride="info" showDot={false} />
                             </ThemedView>
                         )}
                         <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end" }}>
@@ -988,16 +1002,44 @@ const AdminGuidePage = dc(() => {
                 title={searchSelection.value ? (isArabic.value ? searchSelection.value?.titleAr : searchSelection.value?.titleEn) : ""}
                 size="lg"
             >
-<ThemedView style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                <StatusChip label={searchSelection.value?.kind ?? "guide"} tone="primary" size="x-small" />
-                                
+<ThemedView style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                    <StatusBadge status={searchSelection.value?.kind ?? "guide"} label={searchSelection.value?.kind ?? "guide"} toneOverride="info" showDot={false} />
+                                </ThemedView>
+                                <VBtn icon="mdi-close" variant="text" onClick={() => (searchDetailOpen.value = false)} />
                             </ThemedView>
-                            <VBtn icon="mdi-close" variant="text" onClick={() => (searchDetailOpen.value = false)} />
+                            {searchSelection.value ? (
+                                <>
+                                    <DescriptionList
+                                        columns={2}
+                                        items={[
+                                            {
+                                                label: isArabic.value ? "النوع" : "Type",
+                                                value: <StatusBadge status={searchSelection.value.kind} label={searchSelection.value.kind} toneOverride="info" showDot={false} />,
+                                            },
+                                            {
+                                                label: isArabic.value ? "المرجع" : "Reference",
+                                                value: <MonoRef value={searchSelection.value.id} />,
+                                            },
+                                            {
+                                                label: isArabic.value ? "الكتاب" : "Book",
+                                                value: searchSelection.value.bookNumber ? `Book ${searchSelection.value.bookNumber}` : "—",
+                                            },
+                                            {
+                                                label: isArabic.value ? "الفصل" : "Chapter",
+                                                value: searchSelection.value.chapterId ?? "—",
+                                            },
+                                            {
+                                                label: isArabic.value ? "الوسوم" : "Tags",
+                                                value: searchSelection.value.tags.join(", ") || "—",
+                                            },
+                                        ]}
+                                    />
+                                    <GuideMarkdown source={isArabic.value && searchSelection.value.bodyAr ? searchSelection.value.bodyAr : searchSelection.value.bodyEn} />
+                                </>
+                            ) : null}
                         </ThemedView>
-                        {searchSelection.value ? (
-                            <GuideMarkdown source={isArabic.value && searchSelection.value.bodyAr ? searchSelection.value.bodyAr : searchSelection.value.bodyEn} />
-                        ) : null}
             </FormModal>
         </ScreenContainer>
     );

@@ -1,17 +1,18 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
-import { useLocale } from "vuetify";
+import { useLocale, useTheme } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VCheckbox, VDivider, VSelect, VTextField } from "vuetify/components";
+import { VAlert, VBtn, VCheckbox, VSelect, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import type { MetricItem } from "@/components/ui/MetricStrip";
 import { MonoRef } from "@/components/ui/MonoRef";
+import { DescriptionList } from "@/components/ui/DescriptionList";
 import { statusTone } from "@/components/Table/statusTone";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
@@ -27,7 +28,9 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
 import { FormModal } from "@/components/ui/FormModal";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
 import { MetaPill } from "@/components/ui/MetaPill";
 type UserRow = {
     id: string;
@@ -143,7 +146,10 @@ const INVITE_CHECKS = [
 
 const UsersPage = dc(() => {
     const { t } = useLocale();
+    const theme = useTheme();
     const showChecklists = areChecklistsVisible();
+    const toneColor = (tone: "error" | "warning"): string =>
+        (theme.current.value.colors as Record<string, string>)[tone] ?? "";
     const router = useRouter();
     const rows = ref<UserRow[]>([]);
     const total = ref(0);
@@ -558,7 +564,7 @@ const UsersPage = dc(() => {
             value: (row) => `${row.email} ${row.phone ?? ""}`,
             Value: ({ row }: { row: UserRow }) => (
                 <ThemedView style={{ gap: "2px" }}>
-                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{row.email}</ThemedText>
+                    <ThemedText style={{ fontSize: "12px", fontWeight: 600 }}>{row.email}</ThemedText>
                     <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>
                         {row.phone ?? t("No phone")}
                         {row.isMaker ? ` · ${t("maker")}` : ""}
@@ -572,14 +578,14 @@ const UsersPage = dc(() => {
             label: "Role",
             sortKey: "role",
             value: (row) => row.role,
-            Value: ({ row }: { row: UserRow }) => <StatusChip label={row.role.replaceAll("_", " ")} tone="info" size="small" />,
+            Value: ({ row }: { row: UserRow }) => <StatusBadge status={row.role} label={row.role.replaceAll("_", " ")} toneOverride="info" showDot={false} />,
         },
         {
             key: "status",
             label: "Status",
             sortKey: "status",
             value: (row) => row.status,
-            Value: ({ row }: { row: UserRow }) => <StatusChip label={row.status} tone={statusTone(row.status)} size="small" />,
+            Value: ({ row }: { row: UserRow }) => <StatusBadge status={row.status} toneOverride={statusTone(row.status) === "error" ? "danger" : (statusTone(row.status) as any)} />,
         },
         {
             key: "authorities",
@@ -603,7 +609,7 @@ const UsersPage = dc(() => {
             label: "MFA",
             value: (row) => (row.mfaRequired ? "Required" : "Optional"),
             Value: ({ row }: { row: UserRow }) => (
-                <StatusChip label={row.mfaRequired ? t("Required") : t("Optional")} tone={row.mfaRequired ? "success" : "warning"} size="small" />
+                <StatusBadge status={row.mfaRequired ? "REQUIRED" : "OPTIONAL"} label={row.mfaRequired ? t("Required") : t("Optional")} toneOverride={row.mfaRequired ? "success" : "warning"} showDot={false} />
             ),
         },
         {
@@ -645,41 +651,28 @@ const UsersPage = dc(() => {
                 </VAlert>
 
                 {summary.value && (
-                    <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
-                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Access governance")}</ThemedText>
-                                <div style={{ flex: 1 }} />
-                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
-                            </ThemedView>
-                            <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px" }}>
-                                {showChecklists && (
-                                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
-                                        {SUMMARY_EXPORT_CHECKS.map((check) => (
-                                            <VCheckbox
-                                                key={check.key}
-                                                modelValue={summaryExportChecklist.value[check.key] === true}
-                                                onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
-                                                label={t(check.label)}
-                                                density="compact"
-                                                hideDetails
-                                            />
-                                        ))}
-                                        {!summaryExportChecklistComplete.value && (
-                                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
-                                        )}
-                                    </ThemedView>
-                                )}
-                            </ThemedView>
-                            <MetricStrip items={metricItems.value} />
-                            <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                {Object.entries(summary.value.byRole ?? {}).map(([role, count]) => (
-                                    <StatusChip key={role} label={`${role.replaceAll("_", " ")}: ${count}`} tone="neutral" size="x-small" />
-                                ))}
-                            </ThemedView>
-                        </SurfaceCardText>
-                    </SurfaceCard>
+                    <SummaryExportCard
+                        title={t("Access governance")}
+                        metrics={metricItems.value}
+                        exportLoading={summaryExportLoading.value}
+                        exportDisabled={!summaryExportChecklistComplete.value}
+                        onExport={() => void exportSummary()}
+                    >
+                        <FormChecklist
+                            checks={[...SUMMARY_EXPORT_CHECKS]}
+                            modelValue={summaryExportChecklist.value}
+                            onUpdate:modelValue={(value: Record<string, boolean>) => (summaryExportChecklist.value = value)}
+                            show={showChecklists}
+                            title={t("Summary export checklist")}
+                            complete={summaryExportChecklistComplete.value}
+                            incompleteMessage={t("Complete all summary export checklist items before exporting")}
+                        />
+                        <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                            {Object.entries(summary.value.byRole ?? {}).map(([role, count]) => (
+                                <MetaPill key={role} size="x-small" variant="tonal">{role.replaceAll("_", " ")}: {count}</MetaPill>
+                            ))}
+                        </ThemedView>
+                    </SummaryExportCard>
                 )}
 
                 {selectedCount.value > 0 && (
@@ -690,12 +683,12 @@ const UsersPage = dc(() => {
                             alignItems: "center",
                             flexWrap: "wrap",
                             padding: "10px 14px",
-                            borderRadius: "12px",
-                            border: "1px solid rgba(100,116,139,0.25)",
-                            background: "rgba(100,116,139,0.06)",
+                            borderRadius: "var(--pg-radius-md)",
+                            border: "1px solid var(--pg-border-subtle)",
+                            background: "var(--pg-bg-surface-subtle)",
                         }}
                     >
-                        <ThemedText style={{ fontSize: "13px", fontWeight: 700 }}>{selectedCount.value} {t("selected")}</ThemedText>
+                        <ThemedText style={{ fontSize: "13px", fontWeight: 600 }}>{selectedCount.value} {t("selected")}</ThemedText>
                         <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("Status-only changes apply immediately. Your own account cannot be selected.")}</ThemedText>
                         <div style={{ flex: 1 }} />
                         <VBtn size="small" variant="text" onClick={clearSelection}>{t("Clear selection")}</VBtn>
@@ -719,7 +712,7 @@ const UsersPage = dc(() => {
                     searchValue={search.value}
                     setSearchValue={(value) => (search.value = value)}
                     headers={headers.value}
-                    rowColor={(row) => (row.status === "SUSPENDED" || row.status === "DISABLED" ? "#dc2626" : row.status === "INVITED" ? "#d97706" : undefined)}
+                    rowColor={(row) => (row.status === "SUSPENDED" || row.status === "DISABLED" ? toneColor("error") : row.status === "INVITED" ? toneColor("warning") : undefined)}
                     apiDataExtractor={(data) => {
                         const payload = data as { users?: UserRow[]; rows?: UserRow[] };
                         return payload.users ?? payload.rows ?? [];
@@ -763,46 +756,54 @@ const UsersPage = dc(() => {
                 onUpdate:modelValue={(value: boolean) => (bulkOpen.value = value)}
                 title={t("Change status for selected users")}
                 size="md"
-            >
-<VAlert type="info" variant="tonal">
-                            {t("This changes account status only. Role and authority changes still require checker approval.")}
-                        </VAlert>
-                        <VSelect
-                            label={t("Status")}
-                            items={["ACTIVE", "SUSPENDED", "DISABLED"]}
-                            modelValue={bulkStatus.value}
-                            onUpdate:modelValue={(value: string | null) => (bulkStatus.value = value ?? "SUSPENDED")}
-                        />
-                        <VTextField
-                            label={t("Reason (optional)")}
-                            modelValue={bulkReason.value}
-                            onUpdate:modelValue={(value: string) => (bulkReason.value = value)}
-                        />
-                        {showChecklists && (
-                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Status change checklist")}</ThemedText>
-                                {BULK_STATUS_CHECKS.map((check) => (
-                                    <VCheckbox
-                                        key={check.key}
-                                        modelValue={bulkStatusChecklist.value[check.key] === true}
-                                        onUpdate:modelValue={(value: unknown) => (bulkStatusChecklist.value = { ...bulkStatusChecklist.value, [check.key]: Boolean(value) })}
-                                        label={t(check.label)}
-                                        density="compact"
-                                        hideDetails
-                                    />
-                                ))}
-                                {!bulkStatusChecklistComplete.value && (
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all status checklist items before applying")}</ThemedText>
-                                )}
-                            </ThemedView>
-                        )}
-                        {bulkError.value && <VAlert type="error" variant="tonal" density="compact">{bulkError.value}</VAlert>}
-                        <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
-                            <VBtn variant="text" onClick={() => (bulkOpen.value = false)}>{t("Cancel")}</VBtn>
-                            <VBtn color="warning" loading={bulkLoading.value} disabled={!bulkStatusChecklistComplete.value} onClick={() => void applyBulkStatus()}>
+                onSubmit={() => void applyBulkStatus()}
+                submitLabel={`${t("Apply")} (${selectedCount.value})`}
+                loading={bulkLoading.value}
+                errorMessage={bulkError.value ?? ""}
+                v-slots={{
+                    footer: () => (
+                        <>
+                            <VBtn variant="outlined" disabled={bulkLoading.value} onClick={() => (bulkOpen.value = false)}>
+                                {t("Cancel")}
+                            </VBtn>
+                            <VBtn
+                                color="warning"
+                                variant="flat"
+                                {...{ type: "submit" }}
+                                loading={bulkLoading.value}
+                                disabled={!bulkStatusChecklistComplete.value}
+                            >
                                 {t("Apply")} ({selectedCount.value})
                             </VBtn>
-                        </ThemedView>
+                        </>
+                    ),
+                }}
+            >
+                <VAlert type="info" variant="tonal">
+                    {t("This changes account status only. Role and authority changes still require checker approval.")}
+                </VAlert>
+                <FormField label={t("Status")} sensitiveMakerChecker>
+                    <VSelect
+                        items={["ACTIVE", "SUSPENDED", "DISABLED"]}
+                        modelValue={bulkStatus.value}
+                        onUpdate:modelValue={(value: string | null) => (bulkStatus.value = value ?? "SUSPENDED")}
+                    />
+                </FormField>
+                <FormField label={t("Reason (optional)")} sensitiveMakerChecker>
+                    <VTextField
+                        modelValue={bulkReason.value}
+                        onUpdate:modelValue={(value: string) => (bulkReason.value = value)}
+                    />
+                </FormField>
+                <FormChecklist
+                    checks={[...BULK_STATUS_CHECKS]}
+                    modelValue={bulkStatusChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (bulkStatusChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Status change checklist")}
+                    complete={bulkStatusChecklistComplete.value}
+                    incompleteMessage={t("Complete all status checklist items before applying")}
+                />
             </FormModal>
 
             <FormModal
@@ -810,109 +811,99 @@ const UsersPage = dc(() => {
                 onUpdate:modelValue={(value: boolean) => (detailOpen.value = value)}
                 title={detail.value?.email ?? t("User detail")}
                 size="lg"
-            >
-{detailLoading.value ? (
-                            <StateView loading={true} />
-                        ) : detailError.value ? (
-                            <StateView error={detailError.value} onRetry={() => detail.value && void openDetail(detail.value)} />
-                        ) : detail.value ? (
+                onSubmit={() => void saveDetail()}
+                submitLabel={t("Save changes")}
+                loading={saving.value}
+                errorMessage={detail.value ? (detailError.value ?? "") : ""}
+                v-slots={{
+                    footer: () =>
+                        detail.value ? (
                             <>
-                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-                                    <ThemedView style={{ gap: "2px", flex: 1 }}>
-                                        
-                                        <ThemedText style={{ fontSize: "11px", opacity: 0.6, direction: "ltr" }}><MonoRef value={detail.value.id} /></ThemedText>
-                                    </ThemedView>
-                                    <StatusChip label={detail.value.status} tone={statusTone(detail.value.status)} />
-                                    {detail.value.isMaker && <MetaPill size="small" variant="tonal" color="primary">{t("Maker")}</MetaPill>}
-                                    {detail.value.isChecker && <MetaPill size="small" variant="tonal" color="secondary">{t("Checker")}</MetaPill>}
-                                </ThemedView>
-
-                                <VDivider />
-
-                                <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px" }}>
-                                    <ThemedView style={{ gap: "2px" }}>
-                                        <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{t("Phone")}</ThemedText>
-                                        <ThemedText style={{ fontSize: "12px" }}>{detail.value.phone ?? "—"}</ThemedText>
-                                    </ThemedView>
-                                    <ThemedView style={{ gap: "2px" }}>
-                                        <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{t("MFA")}</ThemedText>
-                                        <ThemedText style={{ fontSize: "12px" }}>{detail.value.mfaRequired ? t("Required") : t("Optional")}</ThemedText>
-                                    </ThemedView>
-                                    <ThemedView style={{ gap: "2px" }}>
-                                        <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{t("Created")}</ThemedText>
-                                        <ThemedText style={{ fontSize: "12px" }}>{formatDateTime(detail.value.createdAt)}</ThemedText>
-                                    </ThemedView>
-                                    <ThemedView style={{ gap: "2px" }}>
-                                        <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{t("Invitation expires")}</ThemedText>
-                                        <ThemedText style={{ fontSize: "12px" }}>{formatDateTime(detail.value.invitationExpiresAt)}</ThemedText>
-                                    </ThemedView>
-                                </ThemedView>
-
-                                <VDivider />
-
-                                <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "12px" }}>
-                                    <VSelect
-                                        label={t("Role")}
-                                        items={[...ADMIN_ROLES] as string[]}
-                                        modelValue={editForm.value.role}
-                                        onUpdate:modelValue={(value: string | null) => (editForm.value.role = value ?? "OPERATOR")}
-                                        style={{ flex: "1 1 240px" }}
-                                    />
-                                    <VSelect
-                                        label={t("Status")}
-                                        items={USER_STATUSES}
-                                        modelValue={editForm.value.status}
-                                        onUpdate:modelValue={(value: string) => (editForm.value.status = value)}
-                                        style={{ flex: "1 1 240px" }}
-                                    />
-                                </ThemedView>
-
-                                <VTextField
-                                    label={t("Authority keys")}
-                                    modelValue={editForm.value.authorities}
-                                    onUpdate:modelValue={(value: string) => (editForm.value.authorities = value)}
-                                    placeholder="user:read, user:write, merchant:read"
-                                    hint={t("Comma-separated keys. Any role or authority change waits for a checker.")}
-                                    persistentHint
-                                />
-
-                                {showChecklists && (
-                                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Edit checklist")}</ThemedText>
-                                        {USER_EDIT_CHECKS.map((check) => (
-                                            <VCheckbox
-                                                key={check.key}
-                                                modelValue={detailChecklist.value[check.key] === true}
-                                                onUpdate:modelValue={(value: unknown) => (detailChecklist.value = { ...detailChecklist.value, [check.key]: Boolean(value) })}
-                                                label={t(check.label)}
-                                                density="compact"
-                                                hideDetails
-                                            />
-                                        ))}
-                                        {!detailChecklistComplete.value && (
-                                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all edit checklist items before saving")}</ThemedText>
-                                        )}
-                                    </ThemedView>
-                                )}
-                                <VAlert type="warning" variant="tonal" density="compact">
-                                    {t("You cannot approve your own change. A different checker must review role and authority updates.")}
-                                </VAlert>
-
-                                <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                                    <VBtn
-                                        variant="text"
-                                        onClick={() => {
-                                            detailOpen.value = false;
-                                            void router.push({ name: "AdminUserDetail", params: { id: detail.value?.id ?? "" } });
-                                        }}
-                                    >
-                                        {t("Full profile")}
-                                    </VBtn>
-                                    <VBtn variant="text" onClick={() => (detailOpen.value = false)}>{t("Cancel")}</VBtn>
-                                    <VBtn color="primary" loading={saving.value} disabled={!detailChecklistComplete.value} onClick={() => void saveDetail()}>{t("Save changes")}</VBtn>
-                                </ThemedView>
+                                <VBtn
+                                    variant="text"
+                                    onClick={() => {
+                                        detailOpen.value = false;
+                                        void router.push({ name: "AdminUserDetail", params: { id: detail.value?.id ?? "" } });
+                                    }}
+                                >
+                                    {t("Full profile")}
+                                </VBtn>
+                                <VBtn variant="outlined" disabled={saving.value} onClick={() => (detailOpen.value = false)}>{t("Cancel")}</VBtn>
+                                <VBtn color="primary" variant="flat" {...{ type: "submit" }} loading={saving.value} disabled={!detailChecklistComplete.value}>
+                                    {t("Save changes")}
+                                </VBtn>
                             </>
-                        ) : null}
+                        ) : null,
+                }}
+            >
+                {detailLoading.value ? (
+                    <StateView loading={true} />
+                ) : detailError.value && !detail.value ? (
+                    <StateView error={detailError.value} onRetry={() => detail.value && void openDetail(detail.value)} />
+                ) : detail.value ? (
+                    <>
+                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                            <ThemedView style={{ gap: "2px", flex: 1 }}>
+                                <ThemedText style={{ fontSize: "11px", opacity: 0.6, direction: "ltr" }}><MonoRef value={detail.value.id} /></ThemedText>
+                            </ThemedView>
+                            <StatusBadge status={detail.value.status} toneOverride={statusTone(detail.value.status) === "error" ? "danger" : (statusTone(detail.value.status) as any)} />
+                            {detail.value.isMaker && <StatusBadge status="MAKER" label={t("Maker")} toneOverride="info" showDot={false} />}
+                            {detail.value.isChecker && <StatusBadge status="CHECKER" label={t("Checker")} toneOverride="neutral" showDot={false} />}
+                        </ThemedView>
+
+                        <DescriptionList
+                            columns={2}
+                            items={[
+                                { label: t("Phone"), value: detail.value.phone ?? "—" },
+                                { label: t("MFA"), value: detail.value.mfaRequired ? t("Required") : t("Optional") },
+                                { label: t("Created"), value: formatDateTime(detail.value.createdAt) },
+                                { label: t("Invitation expires"), value: formatDateTime(detail.value.invitationExpiresAt) },
+                            ]}
+                        />
+
+                        <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "12px" }}>
+                            <FormField label={t("Role")} sensitiveMakerChecker style={{ flex: "1 1 240px" }}>
+                                <VSelect
+                                    items={[...ADMIN_ROLES] as string[]}
+                                    modelValue={editForm.value.role}
+                                    onUpdate:modelValue={(value: string | null) => (editForm.value.role = value ?? "OPERATOR")}
+                                />
+                            </FormField>
+                            <FormField label={t("Status")} sensitiveMakerChecker style={{ flex: "1 1 240px" }}>
+                                <VSelect
+                                    items={USER_STATUSES}
+                                    modelValue={editForm.value.status}
+                                    onUpdate:modelValue={(value: string) => (editForm.value.status = value)}
+                                />
+                            </FormField>
+                        </ThemedView>
+
+                        <FormField
+                            label={t("Authority keys")}
+                            hint={t("Comma-separated keys. Any role or authority change waits for a checker.")}
+                            sensitiveMakerChecker
+                        >
+                            <VTextField
+                                modelValue={editForm.value.authorities}
+                                onUpdate:modelValue={(value: string) => (editForm.value.authorities = value)}
+                                placeholder="user:read, user:write, merchant:read"
+                            />
+                        </FormField>
+
+                        <FormChecklist
+                            checks={[...USER_EDIT_CHECKS]}
+                            modelValue={detailChecklist.value}
+                            onUpdate:modelValue={(value: Record<string, boolean>) => (detailChecklist.value = value)}
+                            show={showChecklists}
+                            title={t("Edit checklist")}
+                            complete={detailChecklistComplete.value}
+                            incompleteMessage={t("Complete all edit checklist items before saving")}
+                        />
+                        <VAlert type="warning" variant="tonal" density="compact">
+                            {t("You cannot approve your own change. A different checker must review role and authority updates.")}
+                        </VAlert>
+                    </>
+                ) : null}
             </FormModal>
 
             <FormModal
@@ -920,57 +911,71 @@ const UsersPage = dc(() => {
                 onUpdate:modelValue={(value: boolean) => (createOpen.value = value)}
                 title={t("Invite internal user")}
                 size="md"
-            >
-<VAlert type="info" variant="tonal" density="compact">
-                            {t("The user starts in INVITED state. Set a temporary password only when hand-delivering credentials.")}
-                        </VAlert>
-                        {createError.value && <VAlert type="error" variant="tonal" density="compact">{createError.value}</VAlert>}
-                        <VTextField label={t("Email")} type="email" modelValue={createForm.value.email} onUpdate:modelValue={(value: string) => (createForm.value.email = value)} />
-                        <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "12px" }}>
-                            <VTextField label={t("Display name")} modelValue={createForm.value.fullName} onUpdate:modelValue={(value: string) => (createForm.value.fullName = value)} style={{ flex: "1 1 220px" }} />
-                            <VTextField label={t("Phone")} modelValue={createForm.value.phone} onUpdate:modelValue={(value: string) => (createForm.value.phone = value)} style={{ flex: "1 1 220px" }} />
-                        </ThemedView>
-                        <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "12px" }}>
-                            <VSelect label={t("Role")} items={[...ADMIN_ROLES] as string[]} modelValue={createForm.value.role} onUpdate:modelValue={(value: string | null) => (createForm.value.role = value ?? "OPERATOR")} style={{ flex: "1 1 220px" }} />
-                            <VTextField label={t("Temporary password")} type="password" modelValue={createForm.value.temporaryPassword} onUpdate:modelValue={(value: string) => (createForm.value.temporaryPassword = value)} style={{ flex: "1 1 220px" }} />
-                        </ThemedView>
-                        <VTextField
-                            label={t("Authority keys")}
-                            modelValue={createForm.value.authorities}
-                            onUpdate:modelValue={(value: string) => (createForm.value.authorities = value)}
-                            placeholder="user:read, merchant:read"
-                            hint={t("Optional. Comma-separated authority keys.")}
-                            persistentHint
-                        />
-                        {showChecklists && (
-                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Invite checklist")}</ThemedText>
-                                {INVITE_CHECKS.map((check) => (
-                                    <VCheckbox
-                                        key={check.key}
-                                        modelValue={inviteChecklist.value[check.key] === true}
-                                        onUpdate:modelValue={(value: unknown) => (inviteChecklist.value = { ...inviteChecklist.value, [check.key]: Boolean(value) })}
-                                        label={t(check.label)}
-                                        density="compact"
-                                        hideDetails
-                                    />
-                                ))}
-                                {!inviteChecklistComplete.value && (
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all invite checklist items before inviting")}</ThemedText>
-                                )}
-                            </ThemedView>
-                        )}
-                        <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                            <VBtn variant="text" onClick={() => (createOpen.value = false)}>{t("Cancel")}</VBtn>
+                onSubmit={() => void createUser()}
+                submitLabel={t("Invite")}
+                loading={creating.value}
+                errorMessage={createError.value ?? ""}
+                v-slots={{
+                    footer: () => (
+                        <>
+                            <VBtn variant="outlined" disabled={creating.value} onClick={() => (createOpen.value = false)}>
+                                {t("Cancel")}
+                            </VBtn>
                             <VBtn
                                 color="primary"
+                                variant="flat"
+                                {...{ type: "submit" }}
                                 loading={creating.value}
                                 disabled={!createForm.value.email.trim() || !createForm.value.email.includes("@") || !inviteChecklistComplete.value}
-                                onClick={() => void createUser()}
                             >
                                 {t("Invite")}
                             </VBtn>
-                        </ThemedView>
+                        </>
+                    ),
+                }}
+            >
+                <VAlert type="info" variant="tonal" density="compact">
+                    {t("The user starts in INVITED state. Set a temporary password only when hand-delivering credentials.")}
+                </VAlert>
+                <FormField label={t("Email")} required>
+                    <VTextField type="email" modelValue={createForm.value.email} onUpdate:modelValue={(value: string) => (createForm.value.email = value)} />
+                </FormField>
+                <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "12px" }}>
+                    <FormField label={t("Display name")} style={{ flex: "1 1 220px" }}>
+                        <VTextField modelValue={createForm.value.fullName} onUpdate:modelValue={(value: string) => (createForm.value.fullName = value)} />
+                    </FormField>
+                    <FormField label={t("Phone")} style={{ flex: "1 1 220px" }}>
+                        <VTextField modelValue={createForm.value.phone} onUpdate:modelValue={(value: string) => (createForm.value.phone = value)} />
+                    </FormField>
+                </ThemedView>
+                <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "12px" }}>
+                    <FormField label={t("Role")} sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
+                        <VSelect items={[...ADMIN_ROLES] as string[]} modelValue={createForm.value.role} onUpdate:modelValue={(value: string | null) => (createForm.value.role = value ?? "OPERATOR")} />
+                    </FormField>
+                    <FormField label={t("Temporary password")} sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
+                        <VTextField type="password" modelValue={createForm.value.temporaryPassword} onUpdate:modelValue={(value: string) => (createForm.value.temporaryPassword = value)} />
+                    </FormField>
+                </ThemedView>
+                <FormField
+                    label={t("Authority keys")}
+                    hint={t("Optional. Comma-separated authority keys.")}
+                    sensitiveMakerChecker
+                >
+                    <VTextField
+                        modelValue={createForm.value.authorities}
+                        onUpdate:modelValue={(value: string) => (createForm.value.authorities = value)}
+                        placeholder="user:read, merchant:read"
+                    />
+                </FormField>
+                <FormChecklist
+                    checks={[...INVITE_CHECKS]}
+                    modelValue={inviteChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (inviteChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Invite checklist")}
+                    complete={inviteChecklistComplete.value}
+                    incompleteMessage={t("Complete all invite checklist items before inviting")}
+                />
             </FormModal>
         </ScreenContainer>
     );

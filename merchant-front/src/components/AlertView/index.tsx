@@ -1,4 +1,4 @@
-import { useLocale, useTheme } from "vuetify";
+import { useLocale } from "vuetify";
 import { ThemedView } from "../ThemedView";
 import { VIcon } from "vuetify/components";
 import { Field } from "../Field";
@@ -13,57 +13,54 @@ export type AlertViewProps = {
     style?: StyleValue;
 };
 
+const TONE = {
+    error: {
+        background: "var(--pg-status-danger-bg)",
+        border: "var(--pg-status-danger-border)",
+        text: "var(--pg-status-danger-text)",
+        prefix: "Error",
+    },
+    success: {
+        background: "var(--pg-status-success-bg)",
+        border: "var(--pg-status-success-border)",
+        text: "var(--pg-status-success-text)",
+        prefix: "Success",
+    },
+    warning: {
+        background: "var(--pg-status-warning-bg)",
+        border: "var(--pg-status-warning-border)",
+        text: "var(--pg-status-warning-text)",
+        prefix: "Warning",
+    },
+    primary: {
+        background: "var(--pg-status-info-bg)",
+        border: "var(--pg-status-info-border)",
+        text: "var(--pg-status-info-text)",
+        prefix: "Info",
+    },
+} as const;
+
 export const AlertView = dc(
     (props: AlertViewProps) => {
-        const theme = useTheme();
         const { t } = useLocale();
         return () => {
             if (!props.message || !props.type) {
                 return <></>;
             }
 
-            let backgroundColor: string;
-            switch (props.type) {
-                case "error":
-                    backgroundColor = theme.current.value.colors.error;
-                    break;
-                case "success":
-                    backgroundColor = theme.current.value.colors.success;
-                    break;
-                case "primary":
-                    backgroundColor = theme.current.value.colors.primary;
-                    break;
-                case "warning":
-                    backgroundColor = theme.current.value.colors.warning;
-                    break;
-            }
-
-            let prefix: string;
-            switch (props.type) {
-                case "error":
-                    prefix = "Error";
-                    break;
-                case "success":
-                    prefix = "Success";
-                    break;
-                case "warning":
-                    prefix = "Warning";
-                    break;
-                case "primary":
-                    prefix = "info";
-                    break;
-            }
+            const tone = TONE[props.type];
 
             return (
                 <ThemedView
+                    role="alert"
                     style={[
                         {
-                            backgroundColor: backgroundColor + "22",
-                            borderRadius: "12px",
+                            backgroundColor: tone.background,
+                            borderRadius: "var(--pg-radius-md)",
                             padding: "12px",
-                            border: `solid 1px ${backgroundColor}`,
+                            border: `1px solid ${tone.border}`,
                             gap: "12px",
-                            color: backgroundColor,
+                            color: tone.text,
                         },
                         props.style,
                     ]}
@@ -76,9 +73,24 @@ export const AlertView = dc(
                         }}
                     >
                         {props.onClear && (
-                            <ThemedView onClick={props.onClear}>
+                            <button
+                                type="button"
+                                class="alert-view__dismiss"
+                                aria-label={t("Close")}
+                                onClick={props.onClear}
+                                style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    border: 0,
+                                    background: "transparent",
+                                    color: "inherit",
+                                    cursor: "pointer",
+                                    padding: 0,
+                                }}
+                            >
                                 <VIcon icon={"mdi-close"}></VIcon>
-                            </ThemedView>
+                            </button>
                         )}
                     </ThemedView>
                     <ThemedView
@@ -88,7 +100,7 @@ export const AlertView = dc(
                             justifyContent: "start",
                         }}
                     >
-                        <Field text={prefix} value={props.message}></Field>
+                        <Field text={tone.prefix} value={props.message}></Field>
                     </ThemedView>
                     {props.messages && (
                         <ThemedView
@@ -102,6 +114,7 @@ export const AlertView = dc(
                                     gap: "12px",
                                     display: "flex",
                                     flexDirection: "column",
+                                    margin: 0,
                                 }}
                             >
                                 {props.messages.map((m, index) => {

@@ -1,4 +1,5 @@
-import { defineComponent, type PropType, type VNodeChild } from "vue";
+import { defineComponent, useId, type PropType, type VNodeChild } from "vue";
+import { useLocale } from "vuetify";
 
 export interface SegmentedTab {
     value: string;
@@ -11,13 +12,37 @@ export const SegmentedTabs = defineComponent({
     props: {
         modelValue: { type: String, required: true },
         tabs: { type: Array as PropType<SegmentedTab[]>, required: true },
+        ariaLabel: { type: String, default: "" },
     },
     emits: ["update:modelValue"],
     setup(props, { emit }) {
+        const { t } = useLocale();
+        const baseId = useId();
+        const select = (index: number) => {
+            const tab = props.tabs[index];
+            if (!tab) return;
+            emit("update:modelValue", tab.value);
+            requestAnimationFrame(() => document.getElementById(`${baseId}-${index}`)?.focus());
+        };
+        const onKeydown = (event: KeyboardEvent, index: number) => {
+            if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+                event.preventDefault();
+                select((index + 1) % props.tabs.length);
+            } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+                event.preventDefault();
+                select((index - 1 + props.tabs.length) % props.tabs.length);
+            } else if (event.key === "Home") {
+                event.preventDefault();
+                select(0);
+            } else if (event.key === "End") {
+                event.preventDefault();
+                select(props.tabs.length - 1);
+            }
+        };
         return (): VNodeChild => (
             <div
                 role="tablist"
-                aria-label="View"
+                aria-label={props.ariaLabel || t("View")}
                 style={{
                     display: "inline-flex",
                     alignItems: "center",
@@ -31,15 +56,19 @@ export const SegmentedTabs = defineComponent({
                     overflowX: "auto",
                 }}
             >
-                {props.tabs.map((tab) => {
+                {props.tabs.map((tab, index) => {
                     const active = tab.value === props.modelValue;
                     return (
                         <button
                             key={tab.value}
+                            id={`${baseId}-${index}`}
                             type="button"
                             role="tab"
+                            class="pg-segmented-tab"
                             aria-selected={active ? "true" : "false"}
+                            tabindex={active ? 0 : -1}
                             onClick={() => emit("update:modelValue", tab.value)}
+                            onKeydown={(event: KeyboardEvent) => onKeydown(event, index)}
                             style={{
                                 display: "inline-flex",
                                 alignItems: "center",

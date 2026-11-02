@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
-import { VAlert, VBtn, VTextField } from "vuetify/components";
+import { VBtn, VTextField } from "vuetify/components";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { FormField } from "@/components/ui";
@@ -24,6 +24,10 @@ export const OtpFormRenderer = dc(
         const localError = ref<string | null>(null);
 
         const maskedTarget = computed(() => props.action.masked_phone ?? "");
+        const fieldError = computed(() => props.error || localError.value || "");
+        const targetHint = computed(() =>
+            maskedTarget.value ? `${t("Enter The Code Sent To")} ${maskedTarget.value}` : "",
+        );
 
         const submit = () => {
             const normalized = normalizeArabicDigits(otp.value).replace(/\s+/g, "");
@@ -49,25 +53,23 @@ export const OtpFormRenderer = dc(
 
         return () => (
             <ThemedView style={{ gap: "14px", width: "100%" }}>
-                <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
+                <ThemedText
+                    type="defaultSemiBold"
+                    style={{ fontSize: "17px", color: "var(--pg-ink-primary)" }}
+                >
                     {t("Enter Verification Code")}
                 </ThemedText>
-                {maskedTarget.value && (
-                    <ThemedText style={{ fontSize: "13px", opacity: 0.75 }}>
-                        {t("Enter The Code Sent To")} {maskedTarget.value}
-                    </ThemedText>
-                )}
 
-                {(props.error || localError.value) && (
-                    <VAlert type="error" variant="tonal" density="compact">
-                        {props.error || localError.value}
-                    </VAlert>
-                )}
-
-                <FormField label={t("One Time Password")} required>
+                <FormField
+                    label={t("One Time Password")}
+                    hint={targetHint.value}
+                    error={fieldError.value}
+                    required
+                >
                     <VTextField
                         aria-label={t("One Time Password")}
                         modelValue={otp.value}
+                        error={!!fieldError.value}
                         onUpdate:modelValue={(v: string) => {
                             otp.value = normalizeArabicDigits(v).replace(/\D/g, "").slice(0, props.action.otp_length);
                             localError.value = null;
@@ -81,7 +83,7 @@ export const OtpFormRenderer = dc(
                 </FormField>
 
                 <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                    <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
+                    <ThemedText style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>
                         {t("Attempts Remaining")}: {attemptsLeft.value}
                     </ThemedText>
                     {props.onResend && (

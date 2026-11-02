@@ -6,17 +6,18 @@ import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
 import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
-import { MoneyText } from "@/components/MoneyText";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
 import { FormModal } from "@/components/ui/FormModal";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
+import { MonoRef } from "@/components/ui/MonoRef";
 type Dispute = {
     id: string;
     disputeRef: string;
@@ -42,6 +43,7 @@ const DisputesPage = dc(() => {
     const note = ref<string>("");
     const file = ref<File | null>(null);
     const actionLoading = ref(false);
+    const formError = ref("");
 
     const load = async () => {
         loading.value = true;
@@ -67,6 +69,7 @@ const DisputesPage = dc(() => {
             return;
         }
         actionLoading.value = true;
+        formError.value = "";
         try {
             const body = new FormData();
             body.append("note", note.value);
@@ -80,7 +83,9 @@ const DisputesPage = dc(() => {
             showSnackBar({ type: "success", message: t("Evidence") });
             await load();
         } catch (e) {
-            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+            const message = extractApiErrorMessage(e);
+            formError.value = message;
+            showSnackBar({ type: "error", message });
         } finally {
             actionLoading.value = false;
         }
@@ -92,24 +97,32 @@ const DisputesPage = dc(() => {
                 return "success" as const;
             case "LOST":
             case "EXPIRED":
-                return "error" as const;
+                return "danger" as const;
             default:
                 return "warning" as const;
         }
     };
 
     const headers: TableHeader<Dispute>[] = [
-        { key: "disputeRef", label: "Reference", value: (row) => row.disputeRef },
+        {
+            key: "disputeRef",
+            label: "Reference",
+            Value: ({ row }: { row: Dispute }) => <MonoRef value={row.disputeRef} truncate={18} />,
+        },
         { key: "source", label: "Dispute Source", value: (row) => row.source },
         {
             key: "state",
             label: "Status",
-            Value: ({ row }: { row: Dispute }) => <StatusChip label={row.state} tone={stateTone(row.state)} />,
+            Value: ({ row }: { row: Dispute }) => (
+                <StatusBadge status={row.state} toneOverride={stateTone(row.state)} />
+            ),
         },
         {
             key: "amount",
             label: "Amount",
-            Value: ({ row }: { row: Dispute }) => <MoneyText value={row.amount} currency={row.currency} bold />,
+            Value: ({ row }: { row: Dispute }) => (
+                <MoneyDisplay amount={row.amount} currency={row.currency} size="sm" />
+            ),
         },
         { key: "reasonCode", label: "Reason Code Label", value: (row) => row.reasonCode },
         { key: "evidenceDueAt", label: "Evidence Deadline", value: (row) => row.evidenceDueAt },
@@ -117,7 +130,11 @@ const DisputesPage = dc(() => {
             key: "evidenceSubmitted",
             label: "Evidence",
             Value: ({ row }: { row: Dispute }) => (
-                <StatusChip label={row.evidenceSubmitted ? t("Submitted") : t("Pending")} tone={row.evidenceSubmitted ? "success" : "warning"} />
+                <StatusBadge
+                    status={row.evidenceSubmitted ? "SUBMITTED" : "PENDING"}
+                    label={row.evidenceSubmitted ? t("Submitted") : t("Pending")}
+                    toneOverride={row.evidenceSubmitted ? "success" : "warning"}
+                />
             ),
         },
         {
@@ -131,6 +148,7 @@ const DisputesPage = dc(() => {
                         selected.value = row;
                         note.value = "";
                         file.value = null;
+                        formError.value = "";
                         dialogOpen.value = true;
                     }}
                 >
@@ -143,27 +161,25 @@ const DisputesPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Disputes")}
-                    subtitle={t("Chargeback cases, evidence, and resolution status.")} />
+                <PageHeader
+                    title={t("Disputes")}
+                    subtitle={t("Chargeback cases, evidence, and resolution status.")}
+                />
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : (
-                    <SurfaceCard>
-                        <SurfaceCardText>
-                            <DataTable
-                                title={t("Disputes")}
-                                data={rows.value}
-                                headers={headers}
-                                loading={loading.value}
-                                showNumber={true}
-                                xlsx={false}
-                                noElevation={true}
-                                searchValue={search.value}
-                                setSearchValue={(value) => (search.value = value)}
-                            />
-                        </SurfaceCardText>
-                    </SurfaceCard>
+                    <DataTable
+                        title={t("Disputes")}
+                        data={rows.value}
+                        headers={headers}
+                        loading={loading.value}
+                        showNumber={true}
+                        xlsx={false}
+                        noElevation={true}
+                        searchValue={search.value}
+                        setSearchValue={(value) => (search.value = value)}
+                    />
                 )}
             </ThemedView>
 
@@ -172,23 +188,28 @@ const DisputesPage = dc(() => {
                 onUpdate:modelValue={(v: any) => (dialogOpen.value = v)}
                 title={selected.value?.disputeRef ?? t("Dispute")}
                 size="md"
+                loading={actionLoading.value}
+                errorMessage={formError.value}
+                submitLabel={t("Submit")}
+                onSubmit={() => void submitEvidence()}
             >
-<VTextarea
-                            label={t("Notes")}
-                            modelValue={note.value}
-                            onUpdate:modelValue={(v: string) => (note.value = v)}
-                            rows={3}
-                        />
-                        <VFileInput
-                            label={t("Evidence")}
-                            modelValue={file.value}
-                            onUpdate:modelValue={(v: File | File[] | null) => {
-                                file.value = Array.isArray(v) ? (v[0] ?? null) : v;
-                            }}
-                        />
-                        <VBtn color="primary" loading={actionLoading.value} onClick={() => void submitEvidence()}>
-                            {t("Submit")}
-                        </VBtn>
+                <FormField label={t("Notes")}>
+                    <VTextarea
+                        modelValue={note.value}
+                        onUpdate:modelValue={(v: string) => (note.value = v)}
+                        rows={3}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField label={t("Evidence")}>
+                    <VFileInput
+                        modelValue={file.value}
+                        onUpdate:modelValue={(v: File | File[] | null) => {
+                            file.value = Array.isArray(v) ? (v[0] ?? null) : v;
+                        }}
+                        hideDetails
+                    />
+                </FormField>
             </FormModal>
         </ScreenContainer>
     );

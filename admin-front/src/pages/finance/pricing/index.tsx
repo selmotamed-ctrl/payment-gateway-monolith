@@ -2,16 +2,18 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute } from "vue-router";
-import { VAlert, VBtn, VBtnToggle, VSelect, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VSelect, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
 import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
+import { MonoRef } from "@/components/ui/MonoRef";
 import { statusTone } from "@/components/Table/statusTone";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
@@ -19,7 +21,9 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
 import { FormModal } from "@/components/ui/FormModal";
+import { FormField } from "@/components/ui/FormField";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { DescriptionList } from "@/components/ui/DescriptionList";
 import { MetaPill } from "@/components/ui/MetaPill";
 type CommissionProfile = {
     id: string;
@@ -404,21 +408,27 @@ const PricingControlsPage = dc(() => {
                                     <SurfaceCard key={profile.id}>
                                         <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                                <ThemedText type="defaultSemiBold" style={{ direction: "ltr" }}>{profile.railCode}</ThemedText>
-                                                <StatusChip label={profile.calcType} tone="info" size="x-small" />
-                                                <StatusChip label={profileScope(profile)} tone={profileScope(profile) === "GLOBAL" ? "neutral" : "primary"} size="x-small" />
+                                                <MonoRef value={profile.railCode} />
+                                                <StatusBadge status={profile.calcType} toneOverride="info" showDot={false} />
+                                                <StatusBadge status={profileScope(profile)} toneOverride={profileScope(profile) === "GLOBAL" ? "neutral" : "info"} showDot={false} />
                                                 <MetaPill size="x-small" variant="tonal">v{profile.version}</MetaPill>
-                                                {profile.effectiveTo && <StatusChip label={t("Expires")} tone="warning" size="x-small" />}
-                                                {profile.pendingApprovalId && <StatusChip label={t("Pending checker")} tone="warning" size="x-small" />}
+                                                {profile.effectiveTo && <StatusBadge status="EXPIRED" label={t("Expires")} toneOverride="warning" showDot={false} />}
+                                                {profile.pendingApprovalId && <StatusBadge status="PENDING_CHECKER" label={t("Pending checker")} toneOverride="warning" showDot={false} />}
                                                 <div style={{ flex: 1 }} />
                                                 <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("Effective")}: {formatDateTime(profile.effectiveFrom)}</ThemedText>
                                             </ThemedView>
-                                            <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap", fontSize: "12px" }}>
-                                                <ThemedText style={{ fontSize: "12px" }}>{t("Flat")}: {profile.flatFee}</ThemedText>
+                                            <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap", alignItems: "center", fontSize: "12px" }}>
+                                                <ThemedText style={{ fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                                                    {t("Flat")}: <MoneyDisplay amount={profile.flatFee} currency="LYD" size="sm" />
+                                                </ThemedText>
                                                 <ThemedText style={{ fontSize: "12px" }}>{t("Rate")}: {profile.percentageRate}</ThemedText>
-                                                <ThemedText style={{ fontSize: "12px" }}>{t("Min")}: {profile.minFee}</ThemedText>
-                                                <ThemedText style={{ fontSize: "12px" }}>{t("Max")}: {profile.maxFee ?? "—"}</ThemedText>
-                                                <ThemedText style={{ fontSize: "12px" }}>{t("Fee bearer")}: {profile.feeBearerDefault}</ThemedText>
+                                                <ThemedText style={{ fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                                                    {t("Min")}: <MoneyDisplay amount={profile.minFee} currency="LYD" size="sm" />
+                                                </ThemedText>
+                                                <ThemedText style={{ fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                                                    {t("Max")}: <MoneyDisplay amount={profile.maxFee} currency="LYD" size="sm" />
+                                                </ThemedText>
+                                                <MetaPill size="x-small" variant="tonal">{profile.feeBearerDefault}</MetaPill>
                                             </ThemedView>
                                             <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "6px", flexWrap: "wrap" }}>
                                                 <VBtn size="small" variant="text" onClick={() => void openHistory("COMMISSION", profile.id, profile.railCode)}>{t("History")}</VBtn>
@@ -440,18 +450,20 @@ const PricingControlsPage = dc(() => {
                                         <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                                 <ThemedText type="defaultSemiBold" style={{ direction: "ltr" }}>{rule.scopeType}</ThemedText>
-                                                <StatusChip label={rule.action} tone={statusTone(rule.action)} size="x-small" />
-                                                <StatusChip label={rule.active ? t("Active") : t("Inactive")} tone={rule.active ? "success" : "neutral"} size="x-small" />
-                                                {rule.pendingApprovalId && <StatusChip label={t("Pending checker")} tone="warning" size="x-small" />}
+                                                <StatusBadge status={rule.action} toneOverride={statusTone(rule.action) === "error" ? "danger" : (statusTone(rule.action) as any)} showDot={false} />
+                                                <StatusBadge status={rule.active ? "ACTIVE" : "INACTIVE"} label={rule.active ? t("Active") : t("Inactive")} toneOverride={rule.active ? "success" : "neutral"} showDot={false} />
+                                                {rule.pendingApprovalId && <StatusBadge status="PENDING_CHECKER" label={t("Pending checker")} toneOverride="warning" showDot={false} />}
                                                 <MetaPill size="x-small" variant="tonal">v{rule.version}</MetaPill>
-                                                {rule.scopeValue && <ThemedText style={{ fontSize: "11px", opacity: 0.65, direction: "ltr" }}>{rule.scopeValue}</ThemedText>}
+                                                {rule.scopeValue && <MonoRef value={rule.scopeValue} />}
                                                 <div style={{ flex: 1 }} />
                                                 <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("Effective")}: {formatDateTime(rule.effectiveFrom)}</ThemedText>
                                             </ThemedView>
-                                            <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
+                                            <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
                                                 <ThemedText style={{ fontSize: "12px" }}>{t("Window")}: {rule.windowSeconds}s</ThemedText>
                                                 <ThemedText style={{ fontSize: "12px" }}>{t("Max count")}: {rule.maxCount}</ThemedText>
-                                                <ThemedText style={{ fontSize: "12px" }}>{t("Max amount")}: {rule.maxAmount ?? "—"}</ThemedText>
+                                                <ThemedText style={{ fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                                                    {t("Max amount")}: <MoneyDisplay amount={rule.maxAmount} currency="LYD" size="sm" />
+                                                </ThemedText>
                                             </ThemedView>
                                             <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "6px", flexWrap: "wrap" }}>
                                                 <VBtn size="small" variant="text" onClick={() => void openHistory("VELOCITY", rule.id, rule.scopeType)}>{t("History")}</VBtn>
@@ -473,30 +485,38 @@ const PricingControlsPage = dc(() => {
                 onUpdate:modelValue={(value: boolean) => (historyOpen.value = value)}
                 title={historyTitle.value}
                 size="lg"
+                errorMessage={historyError.value ?? ""}
+                v-slots={{
+                    footer: () => (
+                        <VBtn variant="outlined" onClick={() => (historyOpen.value = false)}>{t("Close")}</VBtn>
+                    ),
+                }}
             >
-{historyLoading.value && <StateView loading={true} minHeight="120px" />}
-                        {historyError.value && <VAlert type="error" variant="tonal" density="compact">{historyError.value}</VAlert>}
-                        {!historyLoading.value && !historyError.value && historyEntries.value.length === 0 && (
-                            <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("No audit events recorded yet.")}</ThemedText>
-                        )}
-                        {historyEntries.value.map((entry) => (
-                            <ThemedView key={entry.id} style={{ gap: "4px", padding: "8px 10px", borderRadius: "8px", border: "1px solid rgba(100,116,139,0.2)" }}>
-                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700, direction: "ltr" }}>{entry.action.replaceAll("_", " ")}</ThemedText>
-                                    <StatusChip label={entry.role} tone="info" size="x-small" />
-                                    {entry.approvalRequestId && <StatusChip label={t("Approval linked")} tone="warning" size="x-small" />}
-                                    <div style={{ flex: 1 }} />
-                                    <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{formatDateTime(entry.createdAt)}</ThemedText>
-                                </ThemedView>
-                                <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>{entry.actor?.email ?? "—"}</ThemedText>
-                                <ThemedText style={{ fontSize: "11px", opacity: 0.7, direction: "ltr", wordBreak: "break-word" }}>
-                                    {JSON.stringify(entry.afterJson ?? {}).slice(0, 240)}
-                                </ThemedText>
-                            </ThemedView>
-                        ))}
-                        <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end" }}>
-                            <VBtn variant="text" onClick={() => (historyOpen.value = false)}>{t("Close")}</VBtn>
+                {historyLoading.value && <StateView loading={true} minHeight="120px" />}
+                {!historyLoading.value && !historyError.value && historyEntries.value.length === 0 && (
+                    <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("No audit events recorded yet.")}</ThemedText>
+                )}
+                {historyEntries.value.map((entry) => (
+                    <ThemedView key={entry.id} style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "8px 10px", borderRadius: "var(--pg-radius-sm)", border: "1px solid var(--pg-border-subtle)" }}>
+                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                            <ThemedText style={{ fontSize: "12px", fontWeight: 600, direction: "ltr" }}>{entry.action.replaceAll("_", " ")}</ThemedText>
+                            <StatusBadge status={entry.role} toneOverride="info" showDot={false} />
+                            {entry.approvalRequestId && <StatusBadge status="PENDING_CHECKER" label={t("Approval linked")} toneOverride="warning" showDot={false} />}
+                            <div style={{ flex: 1 }} />
+                            <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{formatDateTime(entry.createdAt)}</ThemedText>
                         </ThemedView>
+                        <DescriptionList
+                            columns={2}
+                            items={[
+                                { label: t("Actor"), value: entry.actor?.email ?? "—" },
+                                { label: t("Approval request"), value: entry.approvalRequestId ? <MonoRef value={entry.approvalRequestId} truncate={18} /> : "—" },
+                            ]}
+                        />
+                        <ThemedText style={{ fontSize: "11px", opacity: 0.7, direction: "ltr", wordBreak: "break-word" }}>
+                            {JSON.stringify(entry.afterJson ?? {}).slice(0, 240)}
+                        </ThemedText>
+                    </ThemedView>
+                ))}
             </FormModal>
 
             <FormModal
@@ -504,34 +524,47 @@ const PricingControlsPage = dc(() => {
                 onUpdate:modelValue={(value: boolean) => (commissionOpen.value = value)}
                 title={t("New commission profile")}
                 size="md"
+                onSubmit={() => void saveCommission()}
+                submitLabel={t("Create")}
+                loading={commissionSaving.value}
+                errorMessage={commissionError.value ?? ""}
             >
-<VAlert type="warning" variant="tonal" density="compact">
-                            {t("Commission changes take effect immediately and are audited.")}
-                        </VAlert>
-                        {commissionError.value && <VAlert type="error" variant="tonal" density="compact">{commissionError.value}</VAlert>}
-                        <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
-                            <VTextField label={t("Code")} modelValue={commissionForm.value.code} onUpdate:modelValue={(value: string) => (commissionForm.value.code = value)} style={{ flex: "1 1 220px" }} />
-                            <VTextField label={t("Name")} modelValue={commissionForm.value.name} onUpdate:modelValue={(value: string) => (commissionForm.value.name = value)} style={{ flex: "1 1 220px" }} />
-                        </ThemedView>
-                        <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
-                            <VTextField label={t("Rail code")} modelValue={commissionForm.value.railCode} onUpdate:modelValue={(value: string) => (commissionForm.value.railCode = value)} style={{ flex: "1 1 220px" }} />
-                            <VSelect label={t("Model")} items={["FLAT", "PERCENTAGE", "TIERED", "MIXED"]} modelValue={commissionForm.value.model} onUpdate:modelValue={(value: string | null) => (commissionForm.value.model = value ?? "PERCENTAGE")} style={{ flex: "1 1 220px" }} />
-                        </ThemedView>
-                        <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
-                            {(commissionForm.value.model === "PERCENTAGE" || commissionForm.value.model === "MIXED") && (
-                                <VTextField label={t("Percentage rate")} modelValue={commissionForm.value.percentage} onUpdate:modelValue={(value: string) => (commissionForm.value.percentage = value)} style={{ flex: "1 1 220px" }} />
-                            )}
-                            {(commissionForm.value.model === "FLAT" || commissionForm.value.model === "MIXED") && (
-                                <VTextField label={t("Flat amount")} modelValue={commissionForm.value.flatAmount} onUpdate:modelValue={(value: string) => (commissionForm.value.flatAmount = value)} style={{ flex: "1 1 220px" }} />
-                            )}
-                        </ThemedView>
-                        {(commissionForm.value.model === "TIERED" || commissionForm.value.model === "MIXED") && (
-                            <VTextarea label={t("Tiers JSON")} modelValue={commissionForm.value.tiers} onUpdate:modelValue={(value: string) => (commissionForm.value.tiers = value)} rows={5} style={{ fontFamily: "ui-monospace, monospace", direction: "ltr" }} />
-                        )}
-                        <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
-                            <VBtn variant="text" onClick={() => (commissionOpen.value = false)}>{t("Cancel")}</VBtn>
-                            <VBtn color="primary" loading={commissionSaving.value} onClick={() => void saveCommission()}>{t("Create")}</VBtn>
-                        </ThemedView>
+                <VAlert type="warning" variant="tonal" density="compact">
+                    {t("Commission changes take effect immediately and are audited.")}
+                </VAlert>
+                <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
+                    <FormField label={t("Code")} required sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
+                        <VTextField modelValue={commissionForm.value.code} onUpdate:modelValue={(value: string) => (commissionForm.value.code = value)} />
+                    </FormField>
+                    <FormField label={t("Name")} required style={{ flex: "1 1 220px" }}>
+                        <VTextField modelValue={commissionForm.value.name} onUpdate:modelValue={(value: string) => (commissionForm.value.name = value)} />
+                    </FormField>
+                </ThemedView>
+                <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
+                    <FormField label={t("Rail code")} required sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
+                        <VTextField modelValue={commissionForm.value.railCode} onUpdate:modelValue={(value: string) => (commissionForm.value.railCode = value)} />
+                    </FormField>
+                    <FormField label={t("Model")} sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
+                        <VSelect items={["FLAT", "PERCENTAGE", "TIERED", "MIXED"]} modelValue={commissionForm.value.model} onUpdate:modelValue={(value: string | null) => (commissionForm.value.model = value ?? "PERCENTAGE")} />
+                    </FormField>
+                </ThemedView>
+                <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
+                    {(commissionForm.value.model === "PERCENTAGE" || commissionForm.value.model === "MIXED") && (
+                        <FormField label={t("Percentage rate")} sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
+                            <VTextField modelValue={commissionForm.value.percentage} onUpdate:modelValue={(value: string) => (commissionForm.value.percentage = value)} />
+                        </FormField>
+                    )}
+                    {(commissionForm.value.model === "FLAT" || commissionForm.value.model === "MIXED") && (
+                        <FormField label={t("Flat amount")} sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
+                            <VTextField modelValue={commissionForm.value.flatAmount} onUpdate:modelValue={(value: string) => (commissionForm.value.flatAmount = value)} />
+                        </FormField>
+                    )}
+                </ThemedView>
+                {(commissionForm.value.model === "TIERED" || commissionForm.value.model === "MIXED") && (
+                    <FormField label={t("Tiers JSON")} sensitiveMakerChecker>
+                        <VTextarea modelValue={commissionForm.value.tiers} onUpdate:modelValue={(value: string) => (commissionForm.value.tiers = value)} rows={5} style={{ fontFamily: "ui-monospace, monospace", direction: "ltr" }} />
+                    </FormField>
+                )}
             </FormModal>
 
             <FormModal
@@ -539,24 +572,38 @@ const PricingControlsPage = dc(() => {
                 onUpdate:modelValue={(value: boolean) => (lifecycleOpen.value = value)}
                 title={lifecycleKind.value === "COMMISSION" ? t("Expire commission profile") : t("Deactivate velocity rule")}
                 size="md"
+                onSubmit={() => void saveLifecycle()}
+                submitLabel={t("Submit for approval")}
+                loading={lifecycleSaving.value}
+                errorMessage={lifecycleError.value ?? ""}
+                v-slots={{
+                    footer: () => (
+                        <>
+                            <VBtn variant="outlined" disabled={lifecycleSaving.value} onClick={() => (lifecycleOpen.value = false)}>
+                                {t("Cancel")}
+                            </VBtn>
+                            <VBtn color="warning" variant="flat" {...{ type: "submit" }} loading={lifecycleSaving.value}>
+                                {t("Submit for approval")}
+                            </VBtn>
+                        </>
+                    ),
+                }}
             >
-<VAlert type="info" variant="tonal" density="compact">
-                            {t("This creates a maker-checker request. The change applies only after a different checker approves it.")}
-                        </VAlert>
-                        {lifecycleKind.value === "COMMISSION" && (
-                            <VTextField
-                                label={t("Effective to")}
-                                type="date"
-                                modelValue={lifecycleEffectiveTo.value}
-                                onUpdate:modelValue={(value: string) => (lifecycleEffectiveTo.value = value)}
-                            />
-                        )}
-                        <VTextField label={t("Reason (optional)")} modelValue={lifecycleReason.value} onUpdate:modelValue={(value: string) => (lifecycleReason.value = value)} />
-                        {lifecycleError.value && <VAlert type="error" variant="tonal" density="compact">{lifecycleError.value}</VAlert>}
-                        <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
-                            <VBtn variant="text" onClick={() => (lifecycleOpen.value = false)}>{t("Cancel")}</VBtn>
-                            <VBtn color="warning" loading={lifecycleSaving.value} onClick={() => void saveLifecycle()}>{t("Submit for approval")}</VBtn>
-                        </ThemedView>
+                <VAlert type="info" variant="tonal" density="compact">
+                    {t("This creates a maker-checker request. The change applies only after a different checker approves it.")}
+                </VAlert>
+                {lifecycleKind.value === "COMMISSION" && (
+                    <FormField label={t("Effective to")} sensitiveMakerChecker>
+                        <VTextField
+                            type="date"
+                            modelValue={lifecycleEffectiveTo.value}
+                            onUpdate:modelValue={(value: string) => (lifecycleEffectiveTo.value = value)}
+                        />
+                    </FormField>
+                )}
+                <FormField label={t("Reason (optional)")} sensitiveMakerChecker>
+                    <VTextField modelValue={lifecycleReason.value} onUpdate:modelValue={(value: string) => (lifecycleReason.value = value)} />
+                </FormField>
             </FormModal>
 
             <FormModal
@@ -564,28 +611,41 @@ const PricingControlsPage = dc(() => {
                 onUpdate:modelValue={(value: boolean) => (velocityOpen.value = value)}
                 title={t("New velocity rule")}
                 size="md"
+                onSubmit={() => void saveVelocity()}
+                submitLabel={t("Create")}
+                loading={velocitySaving.value}
+                errorMessage={velocityError.value ?? ""}
             >
-<VAlert type="warning" variant="tonal" density="compact">
-                            {t("Velocity rules take effect immediately and are audited.")}
-                        </VAlert>
-                        {velocityError.value && <VAlert type="error" variant="tonal" density="compact">{velocityError.value}</VAlert>}
-                        <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
-                            <VTextField label={t("Code")} modelValue={velocityForm.value.code} onUpdate:modelValue={(value: string) => (velocityForm.value.code = value)} style={{ flex: "1 1 220px" }} />
-                            <VTextField label={t("Name")} modelValue={velocityForm.value.name} onUpdate:modelValue={(value: string) => (velocityForm.value.name = value)} style={{ flex: "1 1 220px" }} />
-                        </ThemedView>
-                        <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
-                            <VSelect label={t("Scope")} items={["MERCHANT", "APPLICATION", "LINK", "IP"]} modelValue={velocityForm.value.scope} onUpdate:modelValue={(value: string | null) => (velocityForm.value.scope = value ?? "MERCHANT")} style={{ flex: "1 1 220px" }} />
-                            <VSelect label={t("Action")} items={["BLOCK", "REVIEW", "THROTTLE", "CHALLENGE"]} modelValue={velocityForm.value.action} onUpdate:modelValue={(value: string | null) => (velocityForm.value.action = value ?? "BLOCK")} style={{ flex: "1 1 220px" }} />
-                        </ThemedView>
-                        <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
-                            <VTextField label={t("Window seconds")} modelValue={velocityForm.value.windowSeconds} onUpdate:modelValue={(value: string) => (velocityForm.value.windowSeconds = value)} style={{ flex: "1 1 220px" }} />
-                            <VTextField label={t("Max attempts")} modelValue={velocityForm.value.maxAttempts} onUpdate:modelValue={(value: string) => (velocityForm.value.maxAttempts = value)} style={{ flex: "1 1 220px" }} />
-                        </ThemedView>
-                        <VTextField label={t("Max amount (optional)")} modelValue={velocityForm.value.maxAmount} onUpdate:modelValue={(value: string) => (velocityForm.value.maxAmount = value)} />
-                        <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
-                            <VBtn variant="text" onClick={() => (velocityOpen.value = false)}>{t("Cancel")}</VBtn>
-                            <VBtn color="primary" loading={velocitySaving.value} onClick={() => void saveVelocity()}>{t("Create")}</VBtn>
-                        </ThemedView>
+                <VAlert type="warning" variant="tonal" density="compact">
+                    {t("Velocity rules take effect immediately and are audited.")}
+                </VAlert>
+                <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
+                    <FormField label={t("Code")} required sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
+                        <VTextField modelValue={velocityForm.value.code} onUpdate:modelValue={(value: string) => (velocityForm.value.code = value)} />
+                    </FormField>
+                    <FormField label={t("Name")} required style={{ flex: "1 1 220px" }}>
+                        <VTextField modelValue={velocityForm.value.name} onUpdate:modelValue={(value: string) => (velocityForm.value.name = value)} />
+                    </FormField>
+                </ThemedView>
+                <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
+                    <FormField label={t("Scope")} sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
+                        <VSelect items={["MERCHANT", "APPLICATION", "LINK", "IP"]} modelValue={velocityForm.value.scope} onUpdate:modelValue={(value: string | null) => (velocityForm.value.scope = value ?? "MERCHANT")} />
+                    </FormField>
+                    <FormField label={t("Action")} sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
+                        <VSelect items={["BLOCK", "REVIEW", "THROTTLE", "CHALLENGE"]} modelValue={velocityForm.value.action} onUpdate:modelValue={(value: string | null) => (velocityForm.value.action = value ?? "BLOCK")} />
+                    </FormField>
+                </ThemedView>
+                <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
+                    <FormField label={t("Window seconds")} sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
+                        <VTextField modelValue={velocityForm.value.windowSeconds} onUpdate:modelValue={(value: string) => (velocityForm.value.windowSeconds = value)} />
+                    </FormField>
+                    <FormField label={t("Max attempts")} sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
+                        <VTextField modelValue={velocityForm.value.maxAttempts} onUpdate:modelValue={(value: string) => (velocityForm.value.maxAttempts = value)} />
+                    </FormField>
+                </ThemedView>
+                <FormField label={t("Max amount (optional)")} sensitiveMakerChecker>
+                    <VTextField modelValue={velocityForm.value.maxAmount} onUpdate:modelValue={(value: string) => (velocityForm.value.maxAmount = value)} />
+                </FormField>
             </FormModal>
         </ScreenContainer>
     );

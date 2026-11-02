@@ -1,7 +1,8 @@
 import { isEmpty, type RulesList } from "@/utils/clientValidationRules";
 import { dc } from "kt-dc";
-import { useLocale, useTheme } from "vuetify";
-import { VChip, VForm } from "vuetify/components";
+import { useLocale } from "vuetify";
+import { VIcon, VForm } from "vuetify/components";
+import { MetaPill } from "@/components/ui/MetaPill";
 
 export type FilterField<T, Key = string> =
     | {
@@ -52,7 +53,6 @@ const ActiveFilters = dc(
         setFilters: (key: string, value: any) => void;
     }) => {
         const { t } = useLocale();
-        const theme = useTheme();
         const fieldMap = computed(() => {
             return props.filtersDescriptions.reduce(
                 (map, field) => {
@@ -65,89 +65,91 @@ const ActiveFilters = dc(
             );
         });
 
+        const chipLabel = (key: string, value: string) => (
+            <>
+                <span>{t(fieldMap.value[key]?.label || "")}</span>
+                <span style={{ color: "var(--pg-ink-primary)", fontWeight: 600 }}>{t(value)}</span>
+            </>
+        );
+
+        const removeButton = (key: string, value: string, arrayValue?: string[]) => (
+            <button
+                type="button"
+                class="pg-filter-chip__remove"
+                aria-label={`${t("Remove")} ${t(value)}`}
+                onClick={(event: MouseEvent) => {
+                    event.stopPropagation();
+                    if (arrayValue) {
+                        props.setFilters(
+                            key,
+                            arrayValue.filter((entry) => entry !== value),
+                        );
+                    } else {
+                        props.setFilters(key, null);
+                    }
+                }}
+            >
+                <VIcon size={12} icon="mdi-close" />
+            </button>
+        );
+
         return () => {
-            const isDark = theme.current.value.dark;
-            const colors = theme.current.value.colors;
             return (
-                <>
-                    <ThemedView
+                <ThemedView
+                    style={{
+                        flexDirection: "row",
+                        flexWrap: "wrap",
+                        gap: "8px",
+                        alignItems: "center",
+                        padding: "12px 16px",
+                        backgroundColor: "var(--pg-bg-surface-subtle)",
+                        borderRadius: "var(--pg-radius-sm)",
+                        border: "1px solid var(--pg-border-subtle)",
+                    }}
+                >
+                    <ThemedText
                         style={{
-                            flexDirection: "row",
-                            flexWrap: "wrap",
-                            gap: "8px",
-                            alignItems: "center",
-                            padding: "12px 16px",
-                            backgroundColor: isDark ? colors["surface-variant"] : "#f8fafc",
-                            borderRadius: "8px",
-                            border: isDark ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid #e2e8f0",
+                            fontSize: "13px",
+                            fontWeight: 500,
+                            color: "var(--pg-ink-muted)",
+                            marginRight: "4px",
                         }}
                     >
-                        <ThemedText
-                            style={{
-                                fontSize: "14px",
-                                fontWeight: "500",
-                                color: colors["on-surface-variant"],
-                                marginRight: "4px",
-                            }}
-                        >
-                            {t("Active filters")}:
-                        </ThemedText>
-                        {props.showActiveFilters &&
-                            Object.entries(props.filters).map(([key, value], index) => {
-                                let uniqueKey = key;
-                                if (typeof value == "string") {
-                                    return (
-                                        <VChip
-                                            key={uniqueKey}
-                                            closable
-                                            onClick:close={() => {
-                                                props.setFilters(key, null);
-                                            }}
-                                            density="compact"
-                                            variant="tonal"
-                                        >
-                                            {t(fieldMap.value[key]?.label || "")} {t(value)}
-                                        </VChip>
-                                    );
-                                } else if (Array.isArray(value) && value.length > 0 && typeof value[0] == "string") {
-                                    return value.map((v) => {
-                                        let uniqueKey = `${key}${v}`;
+                        {t("Active filters")}:
+                    </ThemedText>
+                    {props.showActiveFilters &&
+                        Object.entries(props.filters).map(([key, value]) => {
+                            if (typeof value == "string") {
+                                return (
+                                    <MetaPill key={key} variant="outlined">
+                                        {chipLabel(key, value)}
+                                        {removeButton(key, value)}
+                                    </MetaPill>
+                                );
+                            } else if (Array.isArray(value) && value.length > 0 && typeof value[0] == "string") {
+                                return value.map((v) => (
+                                    <MetaPill key={`${key}${v}`} variant="outlined">
+                                        {chipLabel(key, v)}
+                                        {removeButton(key, v, value)}
+                                    </MetaPill>
+                                ));
+                            }
+                            return null;
+                        })}
 
-                                        return (
-                                            <VChip
-                                                key={uniqueKey}
-                                                closable
-                                                onClick:close={() => {
-                                                    const filtered = value.filter((_v) => {
-                                                        return v !== _v;
-                                                    });
-                                                    props.setFilters(key, filtered);
-                                                }}
-                                                density="compact"
-                                                variant="tonal"
-                                            >
-                                                {t(fieldMap.value[key]?.label || "")} {t(v)}
-                                            </VChip>
-                                        );
-                                    });
-                                }
-                            })}
-
-                        {/* Clear All Button */}
-                        <Button
-                            variant="text"
-                            label="Clear All"
-                            onClick={props.clear}
-                            style={{
-                                marginLeft: "auto",
-                                color: colors["on-surface-variant"],
-                                fontSize: "14px",
-                                fontWeight: "500",
-                                textTransform: "none",
-                            }}
-                        />
-                    </ThemedView>
-                </>
+                    <Button
+                        variant="text"
+                        label="Clear All"
+                        onClick={props.clear}
+                        style={{
+                            marginLeft: "auto",
+                            color: "var(--pg-ink-secondary)",
+                            fontSize: "13px",
+                            fontWeight: 500,
+                            textTransform: "none",
+                        }}
+                    />
+                </ThemedView>
             );
         };
     },

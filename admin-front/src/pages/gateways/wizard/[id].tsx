@@ -2,17 +2,20 @@ import { dc } from "kt-dc";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute, useRouter } from "vue-router";
-import { VAlert, VBtn, VStepper, VStepperHeader, VStepperItem, VStepperWindow, VStepperWindowItem } from "vuetify/components";
+import { VAlert, VBtn } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { MonoRef } from "@/components/ui/MonoRef";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { emptyDraft, type WizardDraft } from "@/components/gateway-wizard/types";
+import { StepBar } from "@/components/gateway-wizard/StepBar";
 import { StepIdentity } from "@/components/gateway-wizard/StepIdentity";
 import { StepEnvironments } from "@/components/gateway-wizard/StepEnvironments";
 import { StepCustomerCatalog } from "@/components/gateway-wizard/StepCustomerCatalog";
@@ -416,6 +419,29 @@ const GatewayWizardPage = dc(() => {
         error: saveError.value,
     });
 
+    const renderStep = () => {
+        switch (step.value) {
+            case 1:
+                return <StepIdentity {...stepProps()} />;
+            case 2:
+                return <StepEnvironments {...stepProps()} />;
+            case 3:
+                return <StepCustomerCatalog {...stepProps()} />;
+            case 4:
+                return <StepCryptoProfile {...stepProps()} />;
+            case 5:
+                return <StepFlowBuilder {...stepProps()} />;
+            case 6:
+                return <StepClientAction {...stepProps()} />;
+            case 7:
+                return <StepStatusRules {...stepProps()} />;
+            case 8:
+                return <StepSimulator {...stepProps()} />;
+            default:
+                return null;
+        }
+    };
+
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
@@ -424,8 +450,13 @@ const GatewayWizardPage = dc(() => {
                     subtitle={t("Eight steps from identity to a governed live release.")}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", justifyContent: "flex-end" }}>
-                            {gatewayCode.value && <MetaPill variant="tonal" size="small">{gatewayCode.value}</MetaPill>}
-                            {versionNumber.value !== null && <MetaPill variant="tonal" size="small">v{versionNumber.value} · {versionState.value || t("Draft")}</MetaPill>}
+                            {gatewayCode.value && <MonoRef value={gatewayCode.value} />}
+                            {versionNumber.value !== null && (
+                                <StatusBadge
+                                    status={versionState.value || "DRAFT"}
+                                    label={`v${versionNumber.value} · ${versionState.value || t("Draft")}`}
+                                />
+                            )}
                             <MetaPill color={dirty.value ? "warning" : "primary"} variant="tonal" size="small">
                                 {dirty.value ? t("Unsaved changes") : `${t("Step")} ${step.value} ${t("of Steps")} ${STEPS.length}`}
                             </MetaPill>
@@ -444,39 +475,16 @@ const GatewayWizardPage = dc(() => {
                                 {t("You are editing the version that is currently LIVE. Review each change carefully before saving.")}
                             </VAlert>
                         )}
-                        <VStepper modelValue={step.value} onUpdate:modelValue={(v: unknown) => void goToStep(Number(v))} flat style={{ background: "transparent" }}>
-                            <VStepperHeader>
-                                {STEPS.map((item) => (
-                                    <VStepperItem key={item.key} title={t(item.title)} value={STEPS.indexOf(item) + 1} />
-                                ))}
-                            </VStepperHeader>
-                            <VStepperWindow>
-                                <VStepperWindowItem value={1}>
-                                    <StepIdentity {...stepProps()} />
-                                </VStepperWindowItem>
-                                <VStepperWindowItem value={2}>
-                                    <StepEnvironments {...stepProps()} />
-                                </VStepperWindowItem>
-                                <VStepperWindowItem value={3}>
-                                    <StepCustomerCatalog {...stepProps()} />
-                                </VStepperWindowItem>
-                                <VStepperWindowItem value={4}>
-                                    <StepCryptoProfile {...stepProps()} />
-                                </VStepperWindowItem>
-                                <VStepperWindowItem value={5}>
-                                    <StepFlowBuilder {...stepProps()} />
-                                </VStepperWindowItem>
-                                <VStepperWindowItem value={6}>
-                                    <StepClientAction {...stepProps()} />
-                                </VStepperWindowItem>
-                                <VStepperWindowItem value={7}>
-                                    <StepStatusRules {...stepProps()} />
-                                </VStepperWindowItem>
-                                <VStepperWindowItem value={8}>
-                                    <StepSimulator {...stepProps()} />
-                                </VStepperWindowItem>
-                            </VStepperWindow>
-                        </VStepper>
+                        <SurfaceCard noPadding>
+                            <StepBar
+                                modelValue={step.value}
+                                steps={STEPS.map((item) => ({ key: item.key, label: t(item.title) }))}
+                                ariaLabel={t("Step")}
+                                onSelect={(value: number) => void goToStep(value)}
+                            />
+                        </SurfaceCard>
+
+                        {renderStep()}
 
                         {saveError.value && (
                             <VAlert type="error" variant="tonal" density="compact">

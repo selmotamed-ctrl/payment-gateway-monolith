@@ -100,7 +100,7 @@ const KybDocumentPreview = dc(
                         <iframe
                             title={props.document.originalFileName || "KYB document"}
                             src={objectUrl.value}
-                            style={{ width: "100%", height: "72vh", border: "1px solid rgba(100,116,139,0.25)", borderRadius: "10px", background: "#fff" }}
+                            style={{ width: "100%", height: "72vh", border: "1px solid var(--pg-border-subtle)", borderRadius: "var(--pg-radius-lg)", background: "var(--pg-bg-surface)" }}
                         />
                     )}
                     {!loading.value && !error.value && objectUrl.value && kind.value === "image" && (
@@ -108,7 +108,7 @@ const KybDocumentPreview = dc(
                             <img
                                 src={objectUrl.value}
                                 alt={props.document.originalFileName || "KYB document"}
-                                style={{ maxWidth: "100%", height: "auto", borderRadius: "10px" }}
+                                style={{ maxWidth: "100%", height: "auto", borderRadius: "var(--pg-radius-lg)" }}
                             />
                         </div>
                     )}

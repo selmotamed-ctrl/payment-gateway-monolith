@@ -2,23 +2,26 @@ import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute } from "vue-router";
-import { VBtn, VSelect } from "vuetify/components";
+import { VBtn } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
 import { DataTable } from "@/components/Table/DataTable";
+import TableFilters from "@/components/Table/TableFilters";
+import type { TableFilter } from "@/components/Table/filters";
 import type { TableHeader } from "@/components/Table/types";
-import { MoneyText } from "@/components/MoneyText";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
-import { toDecimal } from "@/utils/money";
 
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
+import { MonoRef } from "@/components/ui/MonoRef";
+import { DescriptionList, type DescriptionItem } from "@/components/ui/DescriptionList";
+import { EmptyState } from "@/components/ui/EmptyState";
 type Wallet = {
     id: string;
     name: string;
@@ -108,11 +111,93 @@ const StatementsPage = dc(() => {
         }
     };
 
-    watch([walletId, month], () => {
-        void loadStatement();
-    });
+    watch(
+        [walletId, month],
+        () => {
+            void loadStatement();
+        },
+        { immediate: true },
+    );
 
     const currency = computed(() => statement.value?.currency ?? wallets.value[0]?.currency ?? "LYD");
+
+    const filterDefinitions = computed<TableFilter[]>(() => [
+        {
+            key: "walletId",
+            label: t("Wallet"),
+            type: "data-autocomplete",
+            options: wallets.value.map((wallet) => ({ title: wallet.name, value: wallet.id })),
+        },
+        {
+            key: "month",
+            label: t("Month"),
+            type: "data-autocomplete",
+            options: monthOptions(),
+        },
+    ]);
+
+    const filterValues = () => ({
+        walletId: walletId.value,
+        month: month.value,
+    });
+
+    const applyFilter = (key: string, value: unknown) => {
+        const normalized = typeof value === "string" && value ? value : null;
+        if (key === "walletId") walletId.value = normalized;
+        if (key === "month" && normalized) month.value = normalized;
+    };
+
+    const clearFilters = () => {
+        walletId.value = wallets.value[0]?.id ?? null;
+        month.value = monthOptions()[0]?.value ?? "";
+    };
+
+    const summaryItems = computed<DescriptionItem[]>(() => {
+        const current = statement.value;
+        if (!current) return [];
+        return [
+            {
+                label: t("Opening Balance"),
+                value: (
+                    <MoneyDisplay amount={current.openingBalance} currency={currency.value} size="sm" colorSign />
+                ),
+            },
+            {
+                label: t("Gross"),
+                value: <MoneyDisplay amount={current.grossCredits} currency={currency.value} size="sm" />,
+            },
+            {
+                label: t("Commission"),
+                value: <MoneyDisplay amount={current.commission} currency={currency.value} size="sm" />,
+            },
+            {
+                label: t("Net"),
+                value: <MoneyDisplay amount={current.netCredits} currency={currency.value} size="sm" colorSign />,
+            },
+            {
+                label: t("Adjustments"),
+                value: <MoneyDisplay amount={current.adjustments} currency={currency.value} size="sm" colorSign />,
+            },
+            {
+                label: t("Cash-Outs"),
+                value: <MoneyDisplay amount={current.cashouts} currency={currency.value} size="sm" />,
+            },
+            {
+                label: t("Closing Balance"),
+                value: (
+                    <MoneyDisplay amount={current.closingBalance} currency={currency.value} size="sm" colorSign />
+                ),
+            },
+            ...(current.snapshotHash
+                ? [
+                      {
+                          label: t("Snapshot"),
+                          value: <MonoRef value={current.snapshotHash} truncate={18} />,
+                      },
+                  ]
+                : []),
+        ];
+    });
 
     const exportStatement = async () => {
         if (!walletId.value) {
@@ -132,14 +217,47 @@ const StatementsPage = dc(() => {
         }
     };
 
+    const renderFilters = () => (
+        <TableFilters
+            filters={filterDefinitions.value}
+            values={filterValues()}
+            onChange={applyFilter}
+            onClear={clearFilters}
+        />
+    );
+
     const headers: TableHeader<any>[] = [
         { key: "occurredAt", label: "Created At", value: (row) => row.occurredAt },
         { key: "type", label: "Type", value: (row) => row.type },
-        { key: "description", label: "Merchant Name", value: (row) => row.description },
-        { key: "gross", label: "Gross", value: (row) => row.gross },
-        { key: "commission", label: "Commission", value: (row) => row.commission },
-        { key: "net", label: "Net", value: (row) => row.net },
-        { key: "balance", label: "Closing Balance", value: (row) => row.balance },
+        { key: "description", label: "Description", value: (row) => row.description },
+        {
+            key: "gross",
+            label: "Gross",
+            Value: ({ row }: { row: Statement["lines"][number] }) => (
+                <MoneyDisplay amount={row.gross} currency={currency.value} size="sm" />
+            ),
+        },
+        {
+            key: "commission",
+            label: "Commission",
+            Value: ({ row }: { row: Statement["lines"][number] }) => (
+                <MoneyDisplay amount={row.commission} currency={currency.value} size="sm" />
+            ),
+        },
+        {
+            key: "net",
+            label: "Net",
+            Value: ({ row }: { row: Statement["lines"][number] }) => (
+                <MoneyDisplay amount={row.net} currency={currency.value} size="sm" colorSign />
+            ),
+        },
+        {
+            key: "balance",
+            label: "Closing Balance",
+            Value: ({ row }: { row: Statement["lines"][number] }) => (
+                <MoneyDisplay amount={row.balance} currency={currency.value} size="sm" colorSign />
+            ),
+        },
     ];
 
     return () => (
@@ -149,100 +267,43 @@ const StatementsPage = dc(() => {
                     title={t("Statements")}
                     subtitle={t("Settlement statements and downloadable reconciliation records.")}
                     end={() => (
-                        <ThemedView
-                            style={{
-                                display: "flex",
-                                flexDirection: "row",
-                                flexWrap: "wrap",
-                                gap: "10px",
-                                alignItems: "center",
-                                width: "100%",
-                            }}
-                        >
-                            <VSelect
-                                items={wallets.value.map((wallet) => ({ title: wallet.name, value: wallet.id }))}
-                                modelValue={walletId.value}
-                                onUpdate:modelValue={(v: string | null) => (walletId.value = v)}
-                                label={t("Wallets")}
-                                density="compact"
-                                hideDetails
-                                style={{ minWidth: "140px", flex: "1 1 140px" }}
-                            />
-                            <VSelect
-                                items={monthOptions()}
-                                modelValue={month.value}
-                                onUpdate:modelValue={(v: string) => (month.value = v)}
-                                label={t("Statements")}
-                                density="compact"
-                                hideDetails
-                                style={{ minWidth: "120px", flex: "1 1 120px" }}
-                            />
-                            <VBtn variant="tonal" onClick={() => void exportStatement()}>
-                                {t("Export")}
-                            </VBtn>
-                        </ThemedView>
+                        <VBtn variant="tonal" disabled={!walletId.value} onClick={() => void exportStatement()}>
+                            {t("Export")}
+                        </VBtn>
                     )}
                 />
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void loadStatement()} />
-                ) : loading.value ? (
-                    <StateView loading={true} />
-                ) : statement.value ? (
-                    <>
-                        <SurfaceCard>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                                    {statement.value.walletName} · {statement.value.month}
-                                </ThemedText>
-                                {[
-                                    { label: t("Opening Balance"), value: statement.value.openingBalance },
-                                    { label: t("Gross"), value: statement.value.grossCredits },
-                                    { label: t("Commission"), value: statement.value.commission },
-                                    { label: t("Net"), value: statement.value.netCredits },
-                                    { label: t("Adjustments"), value: statement.value.adjustments },
-                                    { label: t("Cash-Outs"), value: statement.value.cashouts },
-                                    { label: t("Closing Balance"), value: statement.value.closingBalance },
-                                ].map((item) => (
-                                    <ThemedView
-                                        key={item.label}
-                                        style={{ flexDirection: "row", justifyContent: "space-between", gap: "12px" }}
-                                    >
-                                        <ThemedText style={{ fontSize: "13px" }}>{item.label}</ThemedText>
-                                        <MoneyText
-                                            value={item.value}
-                                            currency={currency.value}
-                                            color={
-                                                toDecimal(item.value).isNegative() ? "#dc2626" : undefined
-                                            }
-                                            bold
-                                        />
-                                    </ThemedView>
-                                ))}
-                                {statement.value.snapshotHash && (
-                                    <ThemedText style={{ fontSize: "11px", opacity: 0.6, direction: "ltr" }}>
-                                        snapshot: {statement.value.snapshotHash}
-                                    </ThemedText>
-                                )}
-                            </SurfaceCardText>
-                        </SurfaceCard>
-
-                        <SurfaceCard>
-                            <SurfaceCardText>
-                                <DataTable
-                                    title={t("Statements")}
-                                    data={statement.value.lines ?? []}
-                                    headers={headers}
-                                    loading={false}
-                                    showNumber={true}
-                                    xlsx={false}
-                                    noElevation={true}
-                                />
-                            </SurfaceCardText>
-                        </SurfaceCard>
-                    </>
                 ) : (
-                    <StateView empty={true} emptyTitle={t("No Data Found")} />
+                    <>
+                        {statement.value && (
+                            <SurfaceCard title={`${statement.value.walletName} · ${statement.value.month}`}>
+                                <DescriptionList items={summaryItems.value} columns={2} />
+                            </SurfaceCard>
+                        )}
+
+                        {statement.value || loading.value ? (
+                            <DataTable
+                                title={t("Statements")}
+                                data={statement.value?.lines ?? []}
+                                headers={headers}
+                                loading={loading.value}
+                                showNumber={true}
+                                xlsx={false}
+                                noElevation={true}
+                                TopSlot={renderFilters}
+                            />
+                        ) : (
+                            <SurfaceCard noPadding>
+                                {renderFilters()}
+                                <EmptyState
+                                    title={t("No statement found")}
+                                    description={t("Choose another wallet or month to view a statement.")}
+                                />
+                            </SurfaceCard>
+                        )}
+                    </>
                 )}
             </ThemedView>
         </ScreenContainer>

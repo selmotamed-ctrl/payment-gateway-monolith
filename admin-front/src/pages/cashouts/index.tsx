@@ -3,12 +3,11 @@ import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VCheckbox, VProgressCircular, VSelect, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VProgressCircular, VSelect, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
 import { statusTone } from "@/components/Table/statusTone";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
@@ -22,12 +21,16 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
 import { FormModal } from "@/components/ui/FormModal";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import type { MetricItem } from "@/components/ui/MetricStrip";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { DescriptionList } from "@/components/ui/DescriptionList";
+import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 type Cashout = {
     id: string;
     merchantId: string;
@@ -88,6 +91,10 @@ const PROCESS_CHECKS = [
 const OPEN_STATES = ["PENDING", "PROCESSING"];
 const HISTORY_STATES = ["COMPLETE", "SUBTRACTED", "REJECTED"];
 
+const badgeTone = (value: string): BadgeTone => {
+    const tone = statusTone(value);
+    return tone === "error" ? "danger" : tone === "primary" ? "info" : tone;
+};
 const formatDateTime = (value: string | null | undefined): string => {
     if (!value) return "—";
     const date = new Date(value);
@@ -130,6 +137,8 @@ const CashoutsPage = dc(() => {
     let filterTimer: ReturnType<typeof setTimeout> | undefined;
 
     const detailsOpen = ref(false);
+    const processOpen = ref(false);
+    const actionError = ref("");
     const selected = ref<CashoutDetail | null>(null);
     const detailLoading = ref(false);
     const decision = ref<"APPROVE" | "REJECT">("APPROVE");
@@ -294,6 +303,8 @@ const CashoutsPage = dc(() => {
         };
         decision.value = "APPROVE";
         reason.value = "";
+        processOpen.value = false;
+        actionError.value = "";
         detailsOpen.value = true;
         detailLoading.value = true;
         try {
@@ -313,6 +324,7 @@ const CashoutsPage = dc(() => {
 
     const process = async () => {
         if (!selected.value) return;
+        actionError.value = "";
         if (!selected.value.canProcess) return;
         if (!checklistComplete.value) {
             showSnackBar({ type: "warning", message: t("Complete all checklist items before processing") });
@@ -330,9 +342,11 @@ const CashoutsPage = dc(() => {
                 checklist: PROCESS_CHECKS.filter((check) => checklist.value[check.key]).map((check) => check.key),
             });
             showSnackBar({ type: "success", message: decision.value === "APPROVE" ? t("Cash-out approved") : t("Cash-out rejected") });
+            processOpen.value = false;
             detailsOpen.value = false;
             refreshAll();
         } catch (error) {
+            actionError.value = extractApiErrorMessage(error);
             showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
         } finally {
             actionLoading.value = false;
@@ -360,7 +374,7 @@ const CashoutsPage = dc(() => {
             Value: ({ row }: { row: Cashout }) => (
                 <ThemedView style={{ gap: "2px" }}>
                     <ThemedText style={{ fontSize: "12px" }}>{row.merchantName || "—"}</ThemedText>
-                    <ThemedText style={{ fontSize: "10px", opacity: 0.55, direction: "ltr" }}>{row.merchantId}</ThemedText>
+                    <MonoRef value={row.merchantId} />
                 </ThemedView>
             ),
         },
@@ -376,7 +390,7 @@ const CashoutsPage = dc(() => {
             label: "State",
             sortKey: "state",
             value: (row) => row.state,
-            Value: ({ row }: { row: Cashout }) => <StatusChip label={row.state} tone={statusTone(row.state)} size="small" />,
+            Value: ({ row }: { row: Cashout }) => <StatusBadge status={row.state} toneOverride={badgeTone(row.state)} />,
         },
         {
             key: "destination",
@@ -401,7 +415,7 @@ const CashoutsPage = dc(() => {
             key: "age",
             label: "Age",
             value: (row) => String(row.ageHours),
-            Value: ({ row }: { row: Cashout }) => <StatusChip label={formatHours(row.ageHours)} tone={row.ageHours >= 72 ? "error" : row.ageHours >= 24 ? "warning" : "neutral"} size="x-small" />,
+            Value: ({ row }: { row: Cashout }) => <StatusBadge status={row.ageHours >= 72 ? "OVERDUE" : row.ageHours >= 24 ? "PENDING" : "CLEAR"} label={formatHours(row.ageHours)} toneOverride={row.ageHours >= 72 ? "danger" : row.ageHours >= 24 ? "warning" : "neutral"} />,
         },
         {
             key: "adjustment",
@@ -409,7 +423,7 @@ const CashoutsPage = dc(() => {
             headerTooltip: "The subtraction adjustment created when the cash-out is completed.",
             value: (row) => row.adjustmentState ?? "",
             Value: ({ row }: { row: Cashout }) => row.adjustmentState
-                ? <StatusChip label={row.adjustmentState} tone={statusTone(row.adjustmentState)} size="x-small" />
+                ? <StatusBadge status={row.adjustmentState} toneOverride={badgeTone(row.adjustmentState)} />
                 : <ThemedText style={{ opacity: 0.55 }}>—</ThemedText>,
         },
         {
@@ -445,39 +459,24 @@ const CashoutsPage = dc(() => {
                 </VAlert>
 
                 {summary.value && (
-                    <>
-                        <MetricStrip items={summaryMetrics.value} />
-                        <SurfaceCard title={t("Cash-out health")}>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end" }}>
-                                    <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
-                                </ThemedView>
-                                {showChecklists && (
-                                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
-                                        {SUMMARY_EXPORT_CHECKS.map((check) => (
-                                            <VCheckbox
-                                                key={check.key}
-                                                modelValue={summaryExportChecklist.value[check.key] === true}
-                                                onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
-                                                label={t(check.label)}
-                                                density="compact"
-                                                hideDetails
-                                            />
-                                        ))}
-                                        {!summaryExportChecklistComplete.value && (
-                                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
-                                        )}
-                                    </ThemedView>
-                                )}
-                                <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                    {Object.entries(summary.value.byState ?? {}).map(([state, count]) => (
-                                        <StatusChip key={state} label={`${state}: ${count}`} tone={statusTone(state)} size="x-small" />
-                                    ))}
-                                </ThemedView>
-                            </SurfaceCardText>
-                        </SurfaceCard>
-                    </>
+                    <SummaryExportCard
+                        title={t("Cash-out health")}
+                        metrics={summaryMetrics.value}
+                        checks={[...SUMMARY_EXPORT_CHECKS]}
+                        checklist={summaryExportChecklist.value}
+                        showChecklists={showChecklists}
+                        checklistComplete={summaryExportChecklistComplete.value}
+                        exportLoading={summaryExportLoading.value}
+                        exportDisabled={!summaryExportChecklistComplete.value}
+                        exportLabel={t("Export summary")}
+                        onExport={() => void exportSummary()}
+                    >
+                        <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                            {Object.entries(summary.value.byState ?? {}).map(([state, count]) => (
+                                <StatusBadge key={state} status={state} label={`${state}: ${count}`} toneOverride={badgeTone(state)} />
+                            ))}
+                        </ThemedView>
+                    </SummaryExportCard>
                 )}
 
                 <SegmentedTabs
@@ -545,126 +544,119 @@ const CashoutsPage = dc(() => {
                 />
             </ThemedView>
 
-            <FormModal
+            <SlideOverDrawer
                 modelValue={detailsOpen.value}
                 onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)}
                 title={formatMoney(selected.value?.amount, selected.value?.currency)}
-                size="lg"
+                subtitle={selected.value ? selected.value.merchantName || selected.value.merchantId : ""}
+                width={640}
+                v-slots={{
+                    footer: () => (
+                        <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
+                            {selected.value?.canProcess && (
+                                <VBtn color="primary" onClick={() => { actionError.value = ""; processOpen.value = true; }}>{t("Process")}</VBtn>
+                            )}
+                            <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
+                        </ThemedView>
+                    ),
+                }}
             >
-{detailLoading.value || !selected.value ? (
-                            <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "280px", gap: "12px" }}>
-                                <VProgressCircular indeterminate size={52} color="primary" />
-                                <ThemedText style={{ opacity: 0.65 }}>{t("Loading cash-out")}</ThemedText>
+                {detailLoading.value || !selected.value ? (
+                    <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "280px", gap: "12px" }}>
+                        <VProgressCircular indeterminate size={52} color="primary" />
+                        <ThemedText style={{ opacity: 0.65 }}>{t("Loading cash-out")}</ThemedText>
+                    </ThemedView>
+                ) : (
+                    <>
+                        <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap", marginBottom: "16px" }}>
+                            <MoneyDisplay amount={selected.value.amount} currency={selected.value.currency} size="lg" colorSign />
+                            <ThemedView style={{ flexDirection: "row", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+                                <StatusBadge status={selected.value.state} toneOverride={badgeTone(selected.value.state)} />
+                                {selected.value.adjustmentState && <StatusBadge status={selected.value.adjustmentState} toneOverride={badgeTone(selected.value.adjustmentState)} />}
                             </ThemedView>
-                        ) : (
-                            <>
-                                <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
-                                    <ThemedView style={{ gap: "4px" }}>
-                                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                            <MoneyDisplay amount={selected.value.amount} currency={selected.value.currency} colorSign />
-                                            <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{selected.value.merchantName || selected.value.merchantId}</ThemedText>
-                                        </ThemedView>
-                                    </ThemedView>
-                                    <ThemedView style={{ flexDirection: "row", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
-                                        <StatusChip label={selected.value.state} tone={statusTone(selected.value.state)} />
-                                        {selected.value.adjustmentState && <StatusChip label={selected.value.adjustmentState} tone={statusTone(selected.value.adjustmentState)} size="small" />}
-                                    </ThemedView>
-                                </ThemedView>
+                        </ThemedView>
 
-                                {!selected.value.canProcess && (
-                                    <VAlert type="info" variant="tonal">
-                                        {t("Only a PENDING cash-out can be processed. This request is read-only.")}
-                                    </VAlert>
-                                )}
-
-                                <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "14px" }}>
-                                    <SurfaceCard variant="tonal">
-                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Request context")}</ThemedText>
-                                            <DescriptionList items={[
-                                                { label: t("Merchant"), value: selected.value.merchantName || "—" },
-                                                { label: t("Legal name"), value: selected.value.merchantLegalName || "—" },
-                                                { label: t("Wallet"), value: <MonoRef value={selected.value.walletId} /> },
-                                                { label: t("Wallet status"), value: selected.value.walletStatus || "—" },
-                                                { label: t("Wallet balance"), value: <MoneyDisplay amount={selected.value.walletBalance} currency={selected.value.currency} size="sm" /> },
-                                                { label: t("Destination"), value: destinationText(selected.value.destination) },
-                                                { label: t("Requested"), value: formatDateTime(selected.value.requestedAt) },
-                                                { label: t("Last update"), value: formatDateTime(selected.value.updatedAt) },
-                                                { label: t("Age"), value: formatHours(selected.value.ageHours) },
-                                            ]} />
-                                            <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "MerchantDetail", params: { id: selected.value?.merchantId ?? "" } })}>{t("Open merchant")}</VBtn>
-                                        </SurfaceCardText>
-                                    </SurfaceCard>
-
-                                    <SurfaceCard variant="tonal">
-                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Adjustment")}</ThemedText>
-                                            <DescriptionList items={[
-                                                { label: t("Adjustment state"), value: selected.value.adjustmentState || "—" },
-                                                { label: t("Adjustment amount"), value: <MoneyDisplay amount={selected.value.adjustmentAmount} currency={selected.value.currency} size="sm" colorSign /> },
-                                                { label: t("Adjustment reason"), value: selected.value.adjustmentReason || "—" },
-                                                { label: t("Journal entry"), value: <MonoRef value={selected.value.adjustmentJournalEntryId ?? ""} /> },
-                                            ]} />
-                                        </SurfaceCardText>
-                                    </SurfaceCard>
-                                </ThemedView>
-
-                                {selected.value.canProcess && (
-                                    <SurfaceCard variant="tonal">
-                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                            <ThemedText type="defaultSemiBold">{t("Finance decision")}</ThemedText>
-                                            {showChecklists && (
-                                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Process checklist")}</ThemedText>
-                                                    {PROCESS_CHECKS.map((check) => (
-                                                        <VCheckbox
-                                                            key={check.key}
-                                                            modelValue={checklist.value[check.key] === true}
-                                                            onUpdate:modelValue={(value: unknown) => (checklist.value = { ...checklist.value, [check.key]: Boolean(value) })}
-                                                            label={t(check.label)}
-                                                            density="compact"
-                                                            hideDetails
-                                                        />
-                                                    ))}
-                                                    {!checklistComplete.value && (
-                                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all checklist items before processing")}</ThemedText>
-                                                    )}
-                                                </ThemedView>
-                                            )}
-                                            <VSelect
-                                                items={[
-                                                    { title: t("Approve and execute"), value: "APPROVE" },
-                                                    { title: t("Reject and release"), value: "REJECT" },
-                                                ]}
-                                                modelValue={decision.value}
-                                                onUpdate:modelValue={(value: string) => (decision.value = value as "APPROVE" | "REJECT")}
-                                                label={t("Decision")}
-                                            />
-                                            <VTextarea
-                                                rows={3}
-                                                modelValue={reason.value}
-                                                onUpdate:modelValue={(value: string) => (reason.value = value)}
-                                                label={t("Decision reason")}
-                                                hint={t("Required for rejection.")}
-                                                persistentHint
-                                            />
-                                            <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
-                                                <VBtn color={decision.value === "APPROVE" ? "success" : "error"} loading={actionLoading.value} disabled={!checklistComplete.value} onClick={() => void process()}>
-                                                    {decision.value === "APPROVE" ? t("Approve cash-out") : t("Reject cash-out")}
-                                                </VBtn>
-                                                <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
-                                            </ThemedView>
-                                        </SurfaceCardText>
-                                    </SurfaceCard>
-                                )}
-
-                                {!selected.value.canProcess && (
-                                    <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                                        <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
-                                    </ThemedView>
-                                )}
-                            </>
+                        {!selected.value.canProcess && (
+                            <VAlert type="info" variant="tonal">
+                                {t("Only a PENDING cash-out can be processed. This request is read-only.")}
+                            </VAlert>
                         )}
+
+                        <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "20px" }}>
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Request context")}</ThemedText>
+                                <DescriptionList items={[
+                                    { label: t("Merchant"), value: selected.value.merchantName || "—" },
+                                    { label: t("Legal name"), value: selected.value.merchantLegalName || "—" },
+                                    { label: t("Wallet"), value: <MonoRef value={selected.value.walletId} /> },
+                                    { label: t("Wallet status"), value: selected.value.walletStatus || "—" },
+                                    { label: t("Wallet balance"), value: <MoneyDisplay amount={selected.value.walletBalance} currency={selected.value.currency} size="sm" /> },
+                                    { label: t("Destination"), value: destinationText(selected.value.destination) },
+                                    { label: t("Requested"), value: formatDateTime(selected.value.requestedAt) },
+                                    { label: t("Last update"), value: formatDateTime(selected.value.updatedAt) },
+                                    { label: t("Age"), value: formatHours(selected.value.ageHours) },
+                                ]} />
+                                <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "MerchantDetail", params: { id: selected.value?.merchantId ?? "" } })}>{t("Open merchant")}</VBtn>
+                            </ThemedView>
+
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Adjustment")}</ThemedText>
+                                <DescriptionList items={[
+                                    { label: t("Adjustment state"), value: selected.value.adjustmentState || "—" },
+                                    { label: t("Adjustment amount"), value: <MoneyDisplay amount={selected.value.adjustmentAmount} currency={selected.value.currency} size="sm" colorSign /> },
+                                    { label: t("Adjustment reason"), value: selected.value.adjustmentReason || "—" },
+                                    { label: t("Journal entry"), value: <MonoRef value={selected.value.adjustmentJournalEntryId ?? ""} /> },
+                                ]} />
+                            </ThemedView>
+                        </ThemedView>
+                    </>
+                )}
+            </SlideOverDrawer>
+
+            <FormModal
+                modelValue={processOpen.value}
+                onUpdate:modelValue={(value: boolean) => (processOpen.value = value)}
+                title={t("Finance decision")}
+                size="md"
+                loading={actionLoading.value}
+                danger={decision.value === "REJECT"}
+                errorMessage={actionError.value}
+                submitLabel={decision.value === "APPROVE" ? t("Approve cash-out") : t("Reject cash-out")}
+                cancelLabel={t("Close")}
+                onSubmit={() => void process()}
+            >
+                <FormChecklist
+                    checks={[...PROCESS_CHECKS]}
+                    modelValue={checklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (checklist.value = value)}
+                    show={showChecklists}
+                    title={t("Process checklist")}
+                    complete={checklistComplete.value}
+                    incompleteMessage={t("Complete all checklist items before processing")}
+                />
+                <FormField label={t("Decision")} required sensitiveMakerChecker>
+                    <VSelect
+                        items={[
+                            { title: t("Approve and execute"), value: "APPROVE" },
+                            { title: t("Reject and release"), value: "REJECT" },
+                        ]}
+                        modelValue={decision.value}
+                        onUpdate:modelValue={(value: string) => (decision.value = value as "APPROVE" | "REJECT")}
+                        hideDetails
+                    />
+                </FormField>
+                <FormField
+                    label={t("Decision reason")}
+                    hint={t("Required for rejection.")}
+                    sensitiveMakerChecker
+                >
+                    <VTextarea
+                        rows={3}
+                        modelValue={reason.value}
+                        onUpdate:modelValue={(value: string) => (reason.value = value)}
+                        hideDetails
+                    />
+                </FormField>
             </FormModal>
         </ScreenContainer>
     );

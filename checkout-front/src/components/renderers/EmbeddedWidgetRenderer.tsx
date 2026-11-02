@@ -108,7 +108,10 @@ export const EmbeddedWidgetRenderer = dc(
 
         return () => (
             <ThemedView style={{ gap: "14px", width: "100%" }}>
-                <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
+                <ThemedText
+                    type="defaultSemiBold"
+                    style={{ fontSize: "17px", color: "var(--pg-ink-primary)" }}
+                >
                     {t("Embedded Widget")}
                 </ThemedText>
 
@@ -127,8 +130,9 @@ export const EmbeddedWidgetRenderer = dc(
                         style={{
                             width: "100%",
                             minHeight: "420px",
-                            border: "1px solid rgba(100,116,139,0.3)",
-                            borderRadius: "12px",
+                            border: "1px solid var(--pg-border-subtle)",
+                            borderRadius: "var(--pg-radius-md)",
+                            backgroundColor: "var(--pg-bg-surface)",
                         }}
                     ></iframe>
                 ) : (
@@ -138,14 +142,17 @@ export const EmbeddedWidgetRenderer = dc(
                         style={{
                             width: "100%",
                             minHeight: "260px",
-                            border: "1px dashed rgba(100,116,139,0.4)",
-                            borderRadius: "12px",
+                            border: "1px dashed var(--pg-border-strong)",
+                            borderRadius: "var(--pg-radius-md)",
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
+                            backgroundColor: "var(--pg-bg-surface-subtle)",
                         }}
                     >
-                        <ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>{t("Loading")}</ThemedText>
+                        <ThemedText style={{ fontSize: "13px", color: "var(--pg-ink-muted)" }}>
+                            {t("Loading")}
+                        </ThemedText>
                     </div>
                 )}
 

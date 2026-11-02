@@ -1,15 +1,9 @@
 import { dc } from "kt-dc";
 import { computed } from "vue";
-import {
-    VAlert,
-    VBtn,
-    VChip,
-    VDivider,
-    VIcon,
-    VNavigationDrawer,
-} from "vuetify/components";
+import { VBtn, VIcon } from "vuetify/components";
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
+import { DescriptionList, MetaPill, MonoRef, SlideOverDrawer } from "@/components/ui";
 import { showSnackBar } from "@/utils/snackBar";
 import type { AttemptStatus, PayLinkSummary, RailDescriptor } from "@/components/renderers/types";
 
@@ -42,7 +36,22 @@ const trimmed = (value: string | null | undefined): string =>
 
 const digitsOnly = (value: string): string => value.replace(/[^\d]/g, "");
 
-const sectionTitleStyle = { fontSize: "14px", fontWeight: 800 } as const;
+const sectionTitleStyle = { fontSize: "14px", fontWeight: 600, color: "var(--pg-ink-primary)" } as const;
+
+const STATE_TONE_STYLES = {
+    info: {
+        background: "var(--pg-status-info-bg)",
+        border: "var(--pg-status-info-border)",
+    },
+    warning: {
+        background: "var(--pg-status-warning-bg)",
+        border: "var(--pg-status-warning-border)",
+    },
+    error: {
+        background: "var(--pg-status-danger-bg)",
+        border: "var(--pg-status-danger-border)",
+    },
+} as const;
 
 export const CheckoutHelpDrawer = dc(
     (props: CheckoutHelpDrawerProps) => {
@@ -138,9 +147,10 @@ export const CheckoutHelpDrawer = dc(
         });
 
         const linkKey = computed(() => trimmed(props.summary?.linkKey));
+        const referenceValue = computed(() => trimmed(props.reference));
 
         const helpMessage = computed(() => {
-            const ref = trimmed(props.reference) || "N/A";
+            const ref = referenceValue.value || "N/A";
             return `Hello, I need help with payment link ${linkKey.value || "N/A"} / reference ${ref}`;
         });
 
@@ -210,23 +220,11 @@ export const CheckoutHelpDrawer = dc(
             }
         });
 
-        const copyReference = async () => {
-            const reference = trimmed(props.reference);
-            if (!reference) {
-                return;
-            }
-            try {
-                await navigator.clipboard.writeText(reference);
-                showSnackBar({
-                    type: "success",
-                    message: isArabic.value ? "تم نسخ رقم المرجع" : "Payment reference copied",
-                });
-            } catch {
-                showSnackBar({
-                    type: "error",
-                    message: isArabic.value ? "تعذر نسخ رقم المرجع" : "Could not copy the payment reference",
-                });
-            }
+        const notifyReferenceCopied = () => {
+            showSnackBar({
+                type: "success",
+                message: isArabic.value ? "تم نسخ رقم المرجع" : "Payment reference copied",
+            });
         };
 
         return () => {
@@ -238,319 +236,342 @@ export const CheckoutHelpDrawer = dc(
             const hasGuide = !!guide.value;
             const hasTroubleshooting = troubleshooting.value.length > 0;
             const hasWorkingHours = !!workingHours.value;
+            const stateTone = stateHelp.value ? STATE_TONE_STYLES[stateHelp.value.tone] : null;
 
             return (
-                <VNavigationDrawer
+                <SlideOverDrawer
                     modelValue={props.open}
                     onUpdate:modelValue={(value: boolean) => {
                         if (!value) {
                             props.onClose();
                         }
                     }}
-                    location="end"
-                    temporary
+                    title={ar ? "المساعدة والدعم" : "Help & Support"}
                     width={440}
                 >
                     <div
                         style={{
                             display: "flex",
                             flexDirection: "column",
-                            height: "100%",
-                            minHeight: "100%",
+                            gap: "18px",
                         }}
                     >
-                        <ThemedView
-                            style={{
-                                flexDirection: "row",
-                                alignItems: "center",
-                                gap: "10px",
-                                padding: "18px 18px 14px",
-                            }}
-                        >
-                            <VIcon icon="mdi-lifebuoy" color="primary" size={"24px"} />
-                            <ThemedText type="defaultSemiBold" style={{ flex: 1, fontSize: "18px" }}>
-                                {ar ? "المساعدة والدعم" : "Help & Support"}
-                            </ThemedText>
-                            <VBtn
-                                icon
-                                variant="text"
-                                size="small"
-                                aria-label={ar ? "إغلاق" : "Close"}
-                                onClick={() => props.onClose()}
+                        {stateHelp.value && stateTone && (
+                            <div
+                                role="alert"
+                                style={{
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: "4px",
+                                    padding: "10px 12px",
+                                    borderRadius: "var(--pg-radius-sm)",
+                                    backgroundColor: stateTone.background,
+                                    border: `1px solid ${stateTone.border}`,
+                                }}
                             >
-                                <VIcon icon="mdi-close" />
-                            </VBtn>
-                        </ThemedView>
-                        <VDivider />
-
-                        <div
-                            style={{
-                                display: "flex",
-                                flexDirection: "column",
-                                gap: "18px",
-                                padding: "18px",
-                                overflowY: "auto",
-                                flex: 1,
-                            }}
-                        >
-                            {stateHelp.value && (
-                                <VAlert type={stateHelp.value.tone} variant="tonal" density="comfortable">
-                                    <ThemedView style={{ gap: "4px" }}>
-                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "14px" }}>
-                                            {stateHelp.value.title}
-                                        </ThemedText>
-                                        <ThemedText style={{ fontSize: "13px", lineHeight: "1.7" }}>
-                                            {stateHelp.value.body}
-                                        </ThemedText>
-                                    </ThemedView>
-                                </VAlert>
-                            )}
-
-                            {!!trimmed(props.reference) && (
-                                <VBtn
-                                    variant="tonal"
-                                    prependIcon="mdi-content-copy"
-                                    onClick={() => void copyReference()}
+                                <ThemedText
+                                    type="defaultSemiBold"
+                                    style={{ fontSize: "14px", color: "var(--pg-ink-primary)" }}
                                 >
-                                    {ar ? "نسخ رقم المرجع" : "Copy payment reference"}
-                                </VBtn>
-                            )}
+                                    {stateHelp.value.title}
+                                </ThemedText>
+                                <ThemedText
+                                    style={{ fontSize: "13px", lineHeight: 1.7, color: "var(--pg-ink-secondary)" }}
+                                >
+                                    {stateHelp.value.body}
+                                </ThemedText>
+                            </div>
+                        )}
 
-                            {hasGuide && (
-                                <ThemedView style={{ gap: "12px" }}>
-                                    <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
-                                        <VIcon icon="mdi-credit-card-outline" color="primary" />
-                                        <ThemedText type="defaultSemiBold" style={sectionTitleStyle}>
-                                            {ar ? `دليل الدفع عبر ${railName.value}` : `Guide for ${railName.value}`}
+                        {!!referenceValue.value && (
+                            <DescriptionList
+                                items={[
+                                    {
+                                        label: ar ? "رقم المرجع" : "Payment Reference",
+                                        value: (
+                                            <MonoRef
+                                                value={referenceValue.value}
+                                                onCopied={notifyReferenceCopied}
+                                            />
+                                        ),
+                                    },
+                                ]}
+                            />
+                        )}
+
+                        {hasGuide && (
+                            <ThemedView style={{ gap: "12px" }}>
+                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
+                                    <VIcon
+                                        icon="mdi-credit-card-outline"
+                                        style={{ color: "var(--pg-accent-interactive)" }}
+                                    />
+                                    <ThemedText type="defaultSemiBold" style={sectionTitleStyle}>
+                                        {ar ? `دليل الدفع عبر ${railName.value}` : `Guide for ${railName.value}`}
+                                    </ThemedText>
+                                </ThemedView>
+
+                                {prerequisites.value.length > 0 && (
+                                    <ThemedView style={{ gap: "6px" }}>
+                                        <ThemedText
+                                            type="defaultSemiBold"
+                                            style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}
+                                        >
+                                            {ar ? "ما تحتاجه قبل البدء" : "Before you start"}
                                         </ThemedText>
-                                    </ThemedView>
-
-                                    {prerequisites.value.length > 0 && (
-                                        <ThemedView style={{ gap: "6px" }}>
-                                            <ThemedText
-                                                type="defaultSemiBold"
-                                                style={{ fontSize: "12px", opacity: 0.7 }}
-                                            >
-                                                {ar ? "ما تحتاجه قبل البدء" : "Before you start"}
-                                            </ThemedText>
-                                            <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "6px" }}>
-                                                {prerequisites.value.map((item, index) => (
-                                                    <VChip
-                                                        key={`${item}-${index}`}
-                                                        size="small"
-                                                        variant="tonal"
-                                                        color="primary"
-                                                        prependIcon="mdi-check-circle-outline"
-                                                    >
-                                                        {item}
-                                                    </VChip>
-                                                ))}
-                                            </ThemedView>
+                                        <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "6px" }}>
+                                            {prerequisites.value.map((item, index) => (
+                                                <MetaPill
+                                                    key={`${item}-${index}`}
+                                                    size="small"
+                                                    variant="tonal"
+                                                    prependIcon="mdi-check-circle-outline"
+                                                >
+                                                    {item}
+                                                </MetaPill>
+                                            ))}
                                         </ThemedView>
-                                    )}
+                                    </ThemedView>
+                                )}
 
-                                    {steps.value.length > 0 && (
-                                        <ThemedView style={{ gap: "8px" }}>
-                                            {steps.value.map((step, index) => (
-                                                <ThemedView
-                                                    key={`${step}-${index}`}
+                                {steps.value.length > 0 && (
+                                    <ThemedView style={{ gap: "8px" }}>
+                                        {steps.value.map((step, index) => (
+                                            <ThemedView
+                                                key={`${step}-${index}`}
+                                                style={{
+                                                    flexDirection: "row",
+                                                    alignItems: "flex-start",
+                                                    gap: "10px",
+                                                }}
+                                            >
+                                                <span
                                                     style={{
-                                                        flexDirection: "row",
-                                                        alignItems: "flex-start",
-                                                        gap: "10px",
+                                                        width: "24px",
+                                                        height: "24px",
+                                                        minWidth: "24px",
+                                                        borderRadius: "var(--pg-radius-sm)",
+                                                        background: "var(--pg-accent-primary)",
+                                                        color: "var(--pg-bg-surface)",
+                                                        display: "flex",
+                                                        alignItems: "center",
+                                                        justifyContent: "center",
+                                                        fontSize: "12px",
+                                                        fontWeight: 600,
                                                     }}
                                                 >
-                                                    <span
-                                                        style={{
-                                                            width: "24px",
-                                                            height: "24px",
-                                                            minWidth: "24px",
-                                                            borderRadius: "999px",
-                                                            background: "rgb(var(--v-theme-primary))",
-                                                            color: "white",
-                                                            display: "flex",
-                                                            alignItems: "center",
-                                                            justifyContent: "center",
-                                                            fontSize: "12px",
-                                                            fontWeight: "800",
-                                                        }}
-                                                    >
-                                                        {index + 1}
-                                                    </span>
-                                                    <ThemedText
-                                                        style={{ fontSize: "13px", lineHeight: "1.7", flex: 1 }}
-                                                    >
-                                                        {step}
-                                                    </ThemedText>
-                                                </ThemedView>
-                                            ))}
-                                        </ThemedView>
-                                    )}
-
-                                    {hasTroubleshooting && (
-                                        <ThemedView style={{ gap: "10px" }}>
-                                            <VDivider />
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>
-                                                {ar ? "حل المشكلات" : "Troubleshooting"}
-                                            </ThemedText>
-                                            {troubleshooting.value.map((item, index) => (
-                                                <ThemedView key={`${item.question}-${index}`} style={{ gap: "3px" }}>
-                                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>
-                                                        {item.question}
-                                                    </ThemedText>
-                                                    <ThemedText style={{ fontSize: "13px", opacity: 0.8, lineHeight: "1.7" }}>
-                                                        {item.answer}
-                                                    </ThemedText>
-                                                </ThemedView>
-                                            ))}
-                                        </ThemedView>
-                                    )}
-                                </ThemedView>
-                            )}
-
-                            {hasFaq && (
-                                <ThemedView style={{ gap: "10px" }}>
-                                    <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
-                                        <VIcon icon="mdi-frequently-asked-questions" color="primary" />
-                                        <ThemedText type="defaultSemiBold" style={sectionTitleStyle}>
-                                            {ar ? "الأسئلة الشائعة" : "Frequently asked questions"}
-                                        </ThemedText>
+                                                    {index + 1}
+                                                </span>
+                                                <ThemedText
+                                                    style={{
+                                                        fontSize: "13px",
+                                                        lineHeight: 1.7,
+                                                        flex: 1,
+                                                        color: "var(--pg-ink-secondary)",
+                                                    }}
+                                                >
+                                                    {step}
+                                                </ThemedText>
+                                            </ThemedView>
+                                        ))}
                                     </ThemedView>
-                                    {faqItems.value.map((item, index) => (
-                                        <ThemedView
-                                            key={`${item.question}-${index}`}
+                                )}
+
+                                {hasTroubleshooting && (
+                                    <ThemedView style={{ gap: "10px" }}>
+                                        <div style={{ height: "1px", backgroundColor: "var(--pg-border-subtle)" }} />
+                                        <ThemedText
+                                            type="defaultSemiBold"
+                                            style={{ fontSize: "13px", color: "var(--pg-ink-primary)" }}
+                                        >
+                                            {ar ? "حل المشكلات" : "Troubleshooting"}
+                                        </ThemedText>
+                                        {troubleshooting.value.map((item, index) => (
+                                            <ThemedView key={`${item.question}-${index}`} style={{ gap: "3px" }}>
+                                                <ThemedText
+                                                    type="defaultSemiBold"
+                                                    style={{ fontSize: "13px", color: "var(--pg-ink-primary)" }}
+                                                >
+                                                    {item.question}
+                                                </ThemedText>
+                                                <ThemedText
+                                                    style={{
+                                                        fontSize: "13px",
+                                                        color: "var(--pg-ink-secondary)",
+                                                        lineHeight: 1.7,
+                                                    }}
+                                                >
+                                                    {item.answer}
+                                                </ThemedText>
+                                            </ThemedView>
+                                        ))}
+                                    </ThemedView>
+                                )}
+                            </ThemedView>
+                        )}
+
+                        {hasFaq && (
+                            <ThemedView style={{ gap: "10px" }}>
+                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
+                                    <VIcon
+                                        icon="mdi-frequently-asked-questions"
+                                        style={{ color: "var(--pg-accent-interactive)" }}
+                                    />
+                                    <ThemedText type="defaultSemiBold" style={sectionTitleStyle}>
+                                        {ar ? "الأسئلة الشائعة" : "Frequently asked questions"}
+                                    </ThemedText>
+                                </ThemedView>
+                                {faqItems.value.map((item, index) => (
+                                    <ThemedView
+                                        key={`${item.question}-${index}`}
+                                        style={{
+                                            gap: "3px",
+                                            padding: "10px 12px",
+                                            borderRadius: "var(--pg-radius-sm)",
+                                            background: "var(--pg-bg-surface-subtle)",
+                                            border: "1px solid var(--pg-border-subtle)",
+                                        }}
+                                    >
+                                        <ThemedText
+                                            type="defaultSemiBold"
+                                            style={{ fontSize: "13px", color: "var(--pg-ink-primary)" }}
+                                        >
+                                            {item.question}
+                                        </ThemedText>
+                                        <ThemedText
                                             style={{
-                                                gap: "3px",
-                                                padding: "10px 12px",
-                                                borderRadius: "10px",
-                                                background: "rgba(100,116,139,0.08)",
+                                                fontSize: "13px",
+                                                color: "var(--pg-ink-secondary)",
+                                                lineHeight: 1.7,
                                             }}
                                         >
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>
-                                                {item.question}
-                                            </ThemedText>
-                                            <ThemedText style={{ fontSize: "13px", opacity: 0.8, lineHeight: "1.7" }}>
-                                                {item.answer}
-                                            </ThemedText>
-                                        </ThemedView>
-                                    ))}
-                                </ThemedView>
-                            )}
-
-                            {isSupportEnabled.value && (
-                                <ThemedView style={{ gap: "12px" }}>
-                                    <VDivider />
-                                    <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
-                                        <VIcon icon="mdi-headset" color="primary" />
-                                        <ThemedText type="defaultSemiBold" style={sectionTitleStyle}>
-                                            {ar ? "تواصل مع الدعم" : "Contact Support"}
+                                            {item.answer}
                                         </ThemedText>
                                     </ThemedView>
+                                ))}
+                            </ThemedView>
+                        )}
 
-                                    {hasWorkingHours && (
-                                        <VChip
-                                            size="small"
-                                            variant="tonal"
-                                            color="primary"
-                                            prependIcon="mdi-clock-outline"
-                                            style={{ alignSelf: "flex-start" }}
-                                        >
-                                            {workingHours.value}
-                                        </VChip>
-                                    )}
-
-                                    {hasPlatformContact && (
-                                        <ThemedView style={{ gap: "8px" }}>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "12px", opacity: 0.7 }}>
-                                                {ar ? "فريق المنصة" : "Platform team"}
-                                            </ThemedText>
-                                            <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "8px" }}>
-                                                {!!whatsappHref.value && (
-                                                    <VBtn
-                                                        size="small"
-                                                        color="success"
-                                                        variant="tonal"
-                                                        prependIcon="mdi-whatsapp"
-                                                        href={whatsappHref.value}
-                                                    >
-                                                        WhatsApp
-                                                    </VBtn>
-                                                )}
-                                                {!!platformPhone.value && (
-                                                    <VBtn
-                                                        size="small"
-                                                        variant="tonal"
-                                                        prependIcon="mdi-phone"
-                                                        href={`tel:${platformPhone.value.replace(/\s+/g, "")}`}
-                                                    >
-                                                        {platformPhone.value}
-                                                    </VBtn>
-                                                )}
-                                                {!!platformEmail.value && (
-                                                    <VBtn
-                                                        size="small"
-                                                        variant="tonal"
-                                                        prependIcon="mdi-email-outline"
-                                                        href={`mailto:${platformEmail.value}?subject=${encodeURIComponent(
-                                                            ar ? "طلب مساعدة في الدفع" : "Payment help request",
-                                                        )}&body=${encodeURIComponent(helpMessage.value)}`}
-                                                    >
-                                                        {platformEmail.value}
-                                                    </VBtn>
-                                                )}
-                                            </ThemedView>
-                                        </ThemedView>
-                                    )}
-
-                                    {hasMerchantContact && (
-                                        <ThemedView style={{ gap: "8px" }}>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "12px", opacity: 0.7 }}>
-                                                {ar ? "المتجر" : "Merchant"}
-                                            </ThemedText>
-                                            {!!merchantName.value && (
-                                                <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>
-                                                    {merchantName.value}
-                                                </ThemedText>
-                                            )}
-                                            <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "8px" }}>
-                                                {!!merchantPhone.value && (
-                                                    <VBtn
-                                                        size="small"
-                                                        variant="tonal"
-                                                        prependIcon="mdi-phone"
-                                                        href={`tel:${merchantPhone.value.replace(/\s+/g, "")}`}
-                                                    >
-                                                        {merchantPhone.value}
-                                                    </VBtn>
-                                                )}
-                                                {!!merchantEmail.value && (
-                                                    <VBtn
-                                                        size="small"
-                                                        variant="tonal"
-                                                        prependIcon="mdi-email-outline"
-                                                        href={`mailto:${merchantEmail.value}?subject=${encodeURIComponent(
-                                                            ar ? "طلب مساعدة في الدفع" : "Payment help request",
-                                                        )}&body=${encodeURIComponent(helpMessage.value)}`}
-                                                    >
-                                                        {merchantEmail.value}
-                                                    </VBtn>
-                                                )}
-                                            </ThemedView>
-                                        </ThemedView>
-                                    )}
-
-                                    {!hasPlatformContact && !hasMerchantContact && !hasWorkingHours && (
-                                        <ThemedText style={{ fontSize: "12px", opacity: 0.7 }}>
-                                            {ar
-                                                ? "لا توجد بيانات تواصل متاحة حالياً."
-                                                : "No contact details are available right now."}
-                                        </ThemedText>
-                                    )}
+                        {isSupportEnabled.value && (
+                            <ThemedView style={{ gap: "12px" }}>
+                                <div style={{ height: "1px", backgroundColor: "var(--pg-border-subtle)" }} />
+                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
+                                    <VIcon icon="mdi-headset" style={{ color: "var(--pg-accent-interactive)" }} />
+                                    <ThemedText type="defaultSemiBold" style={sectionTitleStyle}>
+                                        {ar ? "تواصل مع الدعم" : "Contact Support"}
+                                    </ThemedText>
                                 </ThemedView>
-                            )}
-                        </div>
+
+                                {hasWorkingHours && (
+                                    <MetaPill
+                                        size="small"
+                                        variant="tonal"
+                                        prependIcon="mdi-clock-outline"
+                                    >
+                                        {workingHours.value}
+                                    </MetaPill>
+                                )}
+
+                                {hasPlatformContact && (
+                                    <ThemedView style={{ gap: "8px" }}>
+                                        <ThemedText
+                                            type="defaultSemiBold"
+                                            style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}
+                                        >
+                                            {ar ? "فريق المنصة" : "Platform team"}
+                                        </ThemedText>
+                                        <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "8px" }}>
+                                            {!!whatsappHref.value && (
+                                                <VBtn
+                                                    size="small"
+                                                    color="success"
+                                                    variant="tonal"
+                                                    prependIcon="mdi-whatsapp"
+                                                    href={whatsappHref.value}
+                                                >
+                                                    WhatsApp
+                                                </VBtn>
+                                            )}
+                                            {!!platformPhone.value && (
+                                                <VBtn
+                                                    size="small"
+                                                    variant="tonal"
+                                                    prependIcon="mdi-phone"
+                                                    href={`tel:${platformPhone.value.replace(/\s+/g, "")}`}
+                                                >
+                                                    {platformPhone.value}
+                                                </VBtn>
+                                            )}
+                                            {!!platformEmail.value && (
+                                                <VBtn
+                                                    size="small"
+                                                    variant="tonal"
+                                                    prependIcon="mdi-email-outline"
+                                                    href={`mailto:${platformEmail.value}?subject=${encodeURIComponent(
+                                                        ar ? "طلب مساعدة في الدفع" : "Payment help request",
+                                                    )}&body=${encodeURIComponent(helpMessage.value)}`}
+                                                >
+                                                    {platformEmail.value}
+                                                </VBtn>
+                                            )}
+                                        </ThemedView>
+                                    </ThemedView>
+                                )}
+
+                                {hasMerchantContact && (
+                                    <ThemedView style={{ gap: "8px" }}>
+                                        <ThemedText
+                                            type="defaultSemiBold"
+                                            style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}
+                                        >
+                                            {ar ? "المتجر" : "Merchant"}
+                                        </ThemedText>
+                                        {!!merchantName.value && (
+                                            <ThemedText
+                                                type="defaultSemiBold"
+                                                style={{ fontSize: "13px", color: "var(--pg-ink-primary)" }}
+                                            >
+                                                {merchantName.value}
+                                            </ThemedText>
+                                        )}
+                                        <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "8px" }}>
+                                            {!!merchantPhone.value && (
+                                                <VBtn
+                                                    size="small"
+                                                    variant="tonal"
+                                                    prependIcon="mdi-phone"
+                                                    href={`tel:${merchantPhone.value.replace(/\s+/g, "")}`}
+                                                >
+                                                    {merchantPhone.value}
+                                                </VBtn>
+                                            )}
+                                            {!!merchantEmail.value && (
+                                                <VBtn
+                                                    size="small"
+                                                    variant="tonal"
+                                                    prependIcon="mdi-email-outline"
+                                                    href={`mailto:${merchantEmail.value}?subject=${encodeURIComponent(
+                                                        ar ? "طلب مساعدة في الدفع" : "Payment help request",
+                                                    )}&body=${encodeURIComponent(helpMessage.value)}`}
+                                                >
+                                                    {merchantEmail.value}
+                                                </VBtn>
+                                            )}
+                                        </ThemedView>
+                                    </ThemedView>
+                                )}
+
+                                {!hasPlatformContact && !hasMerchantContact && !hasWorkingHours && (
+                                    <ThemedText style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>
+                                        {ar
+                                            ? "لا توجد بيانات تواصل متاحة حالياً."
+                                            : "No contact details are available right now."}
+                                    </ThemedText>
+                                )}
+                            </ThemedView>
+                        )}
                     </div>
-                </VNavigationDrawer>
+                </SlideOverDrawer>
             );
         };
     },

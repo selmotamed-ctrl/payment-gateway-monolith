@@ -7,7 +7,6 @@ import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
@@ -33,10 +32,11 @@ import MerchantHelpPanel from "./components/MerchantHelpPanel";
 import MerchantActionDialog, { type MerchantActionMode } from "./components/MerchantActionDialog";
 
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { MetricStrip } from "@/components/ui/MetricStrip";
 import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { MonoRef } from "@/components/ui/MonoRef";
+import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
 type MerchantsSummary = {
     total: number;
     active: number;
@@ -60,6 +60,8 @@ const MerchantsPage = dc(() => {
     const { t } = useLocale();
     const theme = useTheme();
     const router = useRouter();
+    const asBadgeTone = (tone: ReturnType<typeof statusTone>): BadgeTone =>
+        tone === "error" ? "danger" : tone === "primary" ? "info" : tone;
     const search = ref<string | null>(null);
     const filters = ref<FilterValues>({});
     const rows = ref<MerchantSummary[]>([]);
@@ -120,7 +122,7 @@ const MerchantsPage = dc(() => {
 
     const toneColor = (tone: ReturnType<typeof statusTone>): string => {
         const colors = theme.current.value.colors as Record<string, string>;
-        return colors[tone] ?? colors["on-surface-variant"] ?? "#64748b";
+        return colors[tone] ?? colors["on-surface-variant"] ?? "var(--pg-ink-muted)";
     };
 
     const rowColor = (row: MerchantSummary): string | undefined => {
@@ -156,7 +158,7 @@ const MerchantsPage = dc(() => {
             value: (row) => row.status,
             Value: ({ row }: { row: MerchantSummary }) => {
                 const help = merchantStatusHelp(row.status);
-                return <span title={help.meaning}><StatusChip label={help.label} tone={help.tone} size="small" /></span>;
+                return <span title={help.meaning}><StatusBadge status={row.status} label={help.label} toneOverride={asBadgeTone(help.tone)} /></span>;
             },
         },
         {
@@ -168,7 +170,7 @@ const MerchantsPage = dc(() => {
             Value: ({ row }: { row: MerchantSummary }) => {
                 if (!row.kybStatus) return <ThemedText style={{ opacity: 0.55 }}>{t("Restricted")}</ThemedText>;
                 const help = kybStatusHelp(row.kybStatus);
-                return <span title={help.meaning}><StatusChip label={help.label} tone={help.tone} size="small" /></span>;
+                return <span title={help.meaning}><StatusBadge status={row.kybStatus} label={help.label} toneOverride={asBadgeTone(help.tone)} /></span>;
             },
         },
         {
@@ -180,7 +182,7 @@ const MerchantsPage = dc(() => {
             Value: ({ row }: { row: MerchantSummary }) => {
                 if (!row.riskTier) return <ThemedText style={{ opacity: 0.55 }}>{t("Restricted")}</ThemedText>;
                 const help = riskHelp(row.riskTier);
-                return <span title={help.meaning}><StatusChip label={help.label} tone={help.tone} size="small" /></span>;
+                return <span title={help.meaning}><StatusBadge status={row.riskTier} label={help.label} toneOverride={asBadgeTone(help.tone)} /></span>;
             },
         },
         {
@@ -206,10 +208,10 @@ const MerchantsPage = dc(() => {
             headerTooltip: COLUMN_HELP.channel,
             value: (row) => row.onboardingChannel,
             Value: ({ row }: { row: MerchantSummary }) => (
-                <StatusChip
+                <StatusBadge
+                    status={row.onboardingChannel}
                     label={row.onboardingChannel === "ADMIN_ASSISTED" ? t("Admin assisted") : t("Self service")}
-                    tone={row.onboardingChannel === "ADMIN_ASSISTED" ? "info" : "neutral"}
-                    size="x-small"
+                    toneOverride={row.onboardingChannel === "ADMIN_ASSISTED" ? "info" : "neutral"}
                 />
             ),
         },
@@ -245,7 +247,7 @@ const MerchantsPage = dc(() => {
             Value: ({ row }: { row: MerchantSummary }) =>
                 row.latestJoinRequest ? (
                     <ThemedView style={{ gap: "3px" }}>
-                        <StatusChip label={row.latestJoinRequest.status} tone={statusTone(row.latestJoinRequest.status)} size="x-small" />
+                        <StatusBadge status={row.latestJoinRequest.status} label={row.latestJoinRequest.status} toneOverride={asBadgeTone(statusTone(row.latestJoinRequest.status))} />
                         <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{formatDateTime(row.latestJoinRequest.createdAt)}</ThemedText>
                     </ThemedView>
                 ) : (
@@ -288,7 +290,7 @@ const MerchantsPage = dc(() => {
             value: (row) => String(row.pendingApprovalCount),
             Value: ({ row }: { row: MerchantSummary }) =>
                 row.pendingApprovalCount > 0 ? (
-                    <StatusChip label={`${row.pendingApprovalCount}`} tone="warning" size="x-small" />
+                    <StatusBadge status="pending" label={`${row.pendingApprovalCount}`} toneOverride="warning" />
                 ) : (
                     <ThemedText style={{ opacity: 0.55 }}>—</ThemedText>
                 ),
@@ -512,9 +514,9 @@ const MerchantsPage = dc(() => {
                     badgeTone={summary.value && summary.value.kybPending > 0 ? "warning" : "info"}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                            <StatusChip label={`${total.value} ${t("merchants")}`} tone="info" size="small" />
-                            <StatusChip label={`${suspendedCount.value} ${t("suspended")}`} tone={suspendedCount.value ? "error" : "neutral"} size="small" />
-                            <StatusChip label={`${pendingCount.value} ${t("pending changes")}`} tone={pendingCount.value ? "warning" : "neutral"} size="small" />
+                            <StatusBadge status="info" label={`${total.value} ${t("merchants")}`} toneOverride="info" showDot={false} />
+                            <StatusBadge status="suspended" label={`${suspendedCount.value} ${t("suspended")}`} toneOverride={suspendedCount.value ? "danger" : "neutral"} showDot={false} />
+                            <StatusBadge status="pending" label={`${pendingCount.value} ${t("pending changes")}`} toneOverride={pendingCount.value ? "warning" : "neutral"} showDot={false} />
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
                         </ThemedView>
@@ -522,26 +524,22 @@ const MerchantsPage = dc(() => {
                 />
 
                 {summary.value && (
-                    <ThemedView style={{ gap: "12px" }}>
-                        <MetricStrip items={summaryItems.value} />
-                        <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Merchant portfolio health")}</ThemedText>
-                                    <div style={{ flex: 1 }} />
-                                    <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
-                                </ThemedView>
-                                <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                    {Object.entries(summary.value.byStatus ?? {}).map(([state, count]) => (
-                                        <StatusChip key={state} label={`${state}: ${count}`} tone={statusTone(state)} size="x-small" />
-                                    ))}
-                                    {Object.entries(summary.value.byKyb ?? {}).map(([state, count]) => (
-                                        <StatusChip key={`kyb-${state}`} label={`KYB ${state}: ${count}`} tone={statusTone(state)} size="x-small" />
-                                    ))}
-                                </ThemedView>
-                            </SurfaceCardText>
-                        </SurfaceCard>
-                    </ThemedView>
+                    <SummaryExportCard
+                        title={t("Merchant portfolio health")}
+                        metrics={summaryItems.value}
+                        exportLoading={summaryExportLoading.value}
+                        exportLabel={t("Export summary")}
+                        onExport={() => void exportSummary()}
+                    >
+                        <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                            {Object.entries(summary.value.byStatus ?? {}).map(([state, count]) => (
+                                <StatusBadge key={state} status={state} label={`${state}: ${count}`} toneOverride={asBadgeTone(statusTone(state))} showDot={false} />
+                            ))}
+                            {Object.entries(summary.value.byKyb ?? {}).map(([state, count]) => (
+                                <StatusBadge key={`kyb-${state}`} status={state} label={`KYB ${state}: ${count}`} toneOverride={asBadgeTone(statusTone(state))} showDot={false} />
+                            ))}
+                        </ThemedView>
+                    </SummaryExportCard>
                 )}
 
                 {areHelpPanelsVisible() && (
@@ -614,20 +612,23 @@ const MerchantsPage = dc(() => {
                 {inspectionMerchant.value && (
                     <ThemedView style={{ gap: "16px" }}>
                         <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
-                            <StatusChip
+                            <StatusBadge
+                                status={inspectionMerchant.value.status}
                                 label={merchantStatusHelp(inspectionMerchant.value.status).label}
-                                tone={merchantStatusHelp(inspectionMerchant.value.status).tone}
+                                toneOverride={asBadgeTone(merchantStatusHelp(inspectionMerchant.value.status).tone)}
                             />
                             {inspectionMerchant.value.kybStatus && (
-                                <StatusChip
+                                <StatusBadge
+                                    status={inspectionMerchant.value.kybStatus}
                                     label={kybStatusHelp(inspectionMerchant.value.kybStatus).label}
-                                    tone={kybStatusHelp(inspectionMerchant.value.kybStatus).tone}
+                                    toneOverride={asBadgeTone(kybStatusHelp(inspectionMerchant.value.kybStatus).tone)}
                                 />
                             )}
                             {inspectionMerchant.value.riskTier && (
-                                <StatusChip
+                                <StatusBadge
+                                    status={inspectionMerchant.value.riskTier}
                                     label={riskHelp(inspectionMerchant.value.riskTier).label}
-                                    tone={riskHelp(inspectionMerchant.value.riskTier).tone}
+                                    toneOverride={asBadgeTone(riskHelp(inspectionMerchant.value.riskTier).tone)}
                                 />
                             )}
                         </ThemedView>

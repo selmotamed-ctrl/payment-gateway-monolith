@@ -2,7 +2,7 @@ import { dc } from "kt-dc";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VCheckbox, VDivider, VIcon, VSwitch, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VDivider, VIcon, VSwitch, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -13,6 +13,12 @@ import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
+import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
+import type { MetricItem } from "@/components/ui/MetricStrip";
+import { DescriptionList } from "@/components/ui/DescriptionList";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { MetaPill } from "@/components/ui/MetaPill";
 type FaqItem = {
@@ -208,6 +214,24 @@ const AdminCheckoutHelpPage = dc(() => {
         }
     };
 
+    const summaryMetricItems = computed<MetricItem[]>(() => {
+        const data = summary.value;
+        if (!data) return [];
+        return [
+            {
+                key: "state",
+                label: tr("الحالة", "State"),
+                value: data.enabled ? tr("مفعّل", "Enabled") : tr("متوقف", "Disabled"),
+                badge: data.enabled ? tr("مفعّل", "Enabled") : tr("متوقف", "Disabled"),
+                badgeTone: data.enabled ? "success" : "neutral",
+            },
+            { key: "faq", label: tr("الأسئلة", "FAQ items"), value: String(data.faqItems) },
+            { key: "channels", label: tr("القنوات", "Channels"), value: String(data.channelCount) },
+            { key: "version", label: tr("الإصدار", "Version"), value: String(data.currentVersion) },
+            { key: "versions", label: tr("التحديثات", "Versions"), value: String(data.versions) },
+        ];
+    });
+
     const exportSummary = async () => {
         if (summaryExportLoading.value) return;
         summaryExportLoading.value = true;
@@ -388,10 +412,12 @@ const AdminCheckoutHelpPage = dc(() => {
                     subtitle={t("Payer-facing guidance and per-rail instructions.")}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                            <MetaPill size="small" variant="tonal" color={isDirty.value ? "warning" : "success"}>
-                                {isDirty.value ? tr("تغييرات غير محفوظة", "Unsaved changes") : tr("محفوظ", "Saved")}
-                            </MetaPill>
-                            <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{tr("تصدير الملخص", "Export summary")}</VBtn>
+                            <StatusBadge
+                                status={isDirty.value ? "PENDING" : "SAVED"}
+                                label={isDirty.value ? tr("تغييرات غير محفوظة", "Unsaved changes") : tr("محفوظ", "Saved")}
+                                toneOverride={isDirty.value ? "warning" : "success"}
+                                showDot={false}
+                            />
                         </ThemedView>
                     )}
                 />
@@ -411,27 +437,13 @@ const AdminCheckoutHelpPage = dc(() => {
                 </VAlert>
 
                 {summary.value && (
-                    <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
-                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{tr("صحة إعدادات المساعدة", "Checkout help health")}</ThemedText>
-                            <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px" }}>
-                                {[
-                                    [tr("الحالة", "State"), summary.value.enabled ? tr("مفعّل", "Enabled") : tr("متوقف", "Disabled")],
-                                    [tr("الأسئلة", "FAQ items"), String(summary.value.faqItems)],
-                                    [tr("القنوات", "Channels"), String(summary.value.channelCount)],
-                                    [tr("الإصدار", "Version"), String(summary.value.currentVersion)],
-                                    [tr("التحديثات", "Versions"), String(summary.value.versions)],
-                                ].map(([label, value]) => (
-                                    <SurfaceCard key={label} variant="tonal">
-                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
-                                            <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{label}</ThemedText>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{value}</ThemedText>
-                                        </SurfaceCardText>
-                                    </SurfaceCard>
-                                ))}
-                            </ThemedView>
-                        </SurfaceCardText>
-                    </SurfaceCard>
+                    <SummaryExportCard
+                        title={tr("صحة إعدادات المساعدة", "Checkout help health")}
+                        metrics={summaryMetricItems.value}
+                        exportLoading={summaryExportLoading.value}
+                        exportLabel={tr("تصدير الملخص", "Export summary")}
+                        onExport={() => void exportSummary()}
+                    />
                 )}
 
                 <ThemedView
@@ -509,51 +521,63 @@ const AdminCheckoutHelpPage = dc(() => {
                             />
 
                             <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "12px" }}>
-                                <VTextField
+                                <FormField
                                     label={tr("هاتف الدعم", "Support phone")}
-                                    modelValue={form.value.support_phone}
-                                    onUpdate:modelValue={(value: string) => (form.value.support_phone = value)}
-                                    placeholder="+218..."
-                                    error={phoneInvalid.value}
-                                    errorMessages={phoneInvalid.value ? tr("أدخل رقماً بين 6 و15 رقماً", "Enter a phone number with 6-15 digits") : []}
+                                    error={phoneInvalid.value ? tr("أدخل رقماً بين 6 و15 رقماً", "Enter a phone number with 6-15 digits") : ""}
+                                    sensitiveMakerChecker
                                     style={{ flex: "1 1 260px", minWidth: "220px" }}
-                                />
-                                <VTextField
+                                >
+                                    <VTextField
+                                        modelValue={form.value.support_phone}
+                                        onUpdate:modelValue={(value: string) => (form.value.support_phone = value)}
+                                        placeholder="+218..."
+                                        error={phoneInvalid.value}
+                                    />
+                                </FormField>
+                                <FormField
                                     label={tr("واتساب الدعم", "Support WhatsApp")}
-                                    modelValue={form.value.support_whatsapp}
-                                    onUpdate:modelValue={(value: string) => (form.value.support_whatsapp = value)}
-                                    placeholder="+218..."
-                                    error={whatsappInvalid.value}
-                                    errorMessages={whatsappInvalid.value ? tr("أدخل رقماً بين 6 و15 رقماً", "Enter a phone number with 6-15 digits") : []}
+                                    error={whatsappInvalid.value ? tr("أدخل رقماً بين 6 و15 رقماً", "Enter a phone number with 6-15 digits") : ""}
+                                    sensitiveMakerChecker
                                     style={{ flex: "1 1 260px", minWidth: "220px" }}
-                                />
+                                >
+                                    <VTextField
+                                        modelValue={form.value.support_whatsapp}
+                                        onUpdate:modelValue={(value: string) => (form.value.support_whatsapp = value)}
+                                        placeholder="+218..."
+                                        error={whatsappInvalid.value}
+                                    />
+                                </FormField>
                             </ThemedView>
 
-                            <VTextField
+                            <FormField
                                 label={tr("بريد الدعم الإلكتروني", "Support email")}
-                                modelValue={form.value.support_email}
-                                onUpdate:modelValue={(value: string) => (form.value.support_email = value)}
-                                placeholder="support@example.com"
-                                type="email"
-                                error={emailInvalid.value}
-                                errorMessages={emailInvalid.value ? tr("أدخل بريداً إلكترونياً صحيحاً", "Enter a valid email address") : []}
-                            />
+                                error={emailInvalid.value ? tr("أدخل بريداً إلكترونياً صحيحاً", "Enter a valid email address") : ""}
+                                sensitiveMakerChecker
+                            >
+                                <VTextField
+                                    modelValue={form.value.support_email}
+                                    onUpdate:modelValue={(value: string) => (form.value.support_email = value)}
+                                    placeholder="support@example.com"
+                                    type="email"
+                                    error={emailInvalid.value}
+                                />
+                            </FormField>
 
                             <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "12px" }}>
-                                <VTextField
-                                    label={tr("ساعات العمل (عربي)", "Working hours (Arabic)")}
-                                    modelValue={form.value.working_hours_ar}
-                                    onUpdate:modelValue={(value: string) => (form.value.working_hours_ar = value)}
-                                    placeholder="الأحد - الخميس 9:00 - 17:00"
-                                    style={{ flex: "1 1 260px", minWidth: "220px" }}
-                                />
-                                <VTextField
-                                    label={tr("ساعات العمل (إنجليزي)", "Working hours (English)")}
-                                    modelValue={form.value.working_hours_en}
-                                    onUpdate:modelValue={(value: string) => (form.value.working_hours_en = value)}
-                                    placeholder="Sun - Thu 9:00 - 17:00"
-                                    style={{ flex: "1 1 260px", minWidth: "220px" }}
-                                />
+                                <FormField label={tr("ساعات العمل (عربي)", "Working hours (Arabic)")} style={{ flex: "1 1 260px", minWidth: "220px" }}>
+                                    <VTextField
+                                        modelValue={form.value.working_hours_ar}
+                                        onUpdate:modelValue={(value: string) => (form.value.working_hours_ar = value)}
+                                        placeholder="الأحد - الخميس 9:00 - 17:00"
+                                    />
+                                </FormField>
+                                <FormField label={tr("ساعات العمل (إنجليزي)", "Working hours (English)")} style={{ flex: "1 1 260px", minWidth: "220px" }}>
+                                    <VTextField
+                                        modelValue={form.value.working_hours_en}
+                                        onUpdate:modelValue={(value: string) => (form.value.working_hours_en = value)}
+                                        placeholder="Sun - Thu 9:00 - 17:00"
+                                    />
+                                </FormField>
                             </ThemedView>
 
                             <VDivider />
@@ -589,10 +613,12 @@ const AdminCheckoutHelpPage = dc(() => {
                                     <ThemedView
                                         key={index}
                                         style={{
+                                            display: "flex",
+                                            flexDirection: "column",
                                             gap: "10px",
                                             padding: "12px",
-                                            border: "1px solid rgba(100,116,139,0.2)",
-                                            borderRadius: "12px",
+                                            border: "1px solid var(--pg-border-subtle)",
+                                            borderRadius: "var(--pg-radius-md)",
                                         }}
                                     >
                                         <ThemedView
@@ -617,56 +643,49 @@ const AdminCheckoutHelpPage = dc(() => {
                                         </ThemedView>
 
                                         <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "10px" }}>
-                                            <VTextField
-                                                label={tr("السؤال (عربي)", "Question (Arabic)")}
-                                                modelValue={item.q_ar}
-                                                onUpdate:modelValue={(value: string) => (item.q_ar = value)}
-                                                style={{ flex: "1 1 260px", minWidth: "220px" }}
-                                            />
-                                            <VTextField
-                                                label={tr("السؤال (إنجليزي)", "Question (English)")}
-                                                modelValue={item.q_en}
-                                                onUpdate:modelValue={(value: string) => (item.q_en = value)}
-                                                style={{ flex: "1 1 260px", minWidth: "220px" }}
-                                            />
+                                            <FormField label={tr("السؤال (عربي)", "Question (Arabic)")} style={{ flex: "1 1 260px", minWidth: "220px" }}>
+                                                <VTextField
+                                                    modelValue={item.q_ar}
+                                                    onUpdate:modelValue={(value: string) => (item.q_ar = value)}
+                                                />
+                                            </FormField>
+                                            <FormField label={tr("السؤال (إنجليزي)", "Question (English)")} style={{ flex: "1 1 260px", minWidth: "220px" }}>
+                                                <VTextField
+                                                    modelValue={item.q_en}
+                                                    onUpdate:modelValue={(value: string) => (item.q_en = value)}
+                                                />
+                                            </FormField>
                                         </ThemedView>
 
-                                        <VTextarea
-                                            label={tr("الإجابة (عربي)", "Answer (Arabic)")}
-                                            modelValue={item.a_ar}
-                                            onUpdate:modelValue={(value: string) => (item.a_ar = value)}
-                                            rows={2}
-                                            autoGrow
-                                        />
-                                        <VTextarea
-                                            label={tr("الإجابة (إنجليزي)", "Answer (English)")}
-                                            modelValue={item.a_en}
-                                            onUpdate:modelValue={(value: string) => (item.a_en = value)}
-                                            rows={2}
-                                            autoGrow
-                                        />
+                                        <FormField label={tr("الإجابة (عربي)", "Answer (Arabic)")}>
+                                            <VTextarea
+                                                modelValue={item.a_ar}
+                                                onUpdate:modelValue={(value: string) => (item.a_ar = value)}
+                                                rows={2}
+                                                autoGrow
+                                            />
+                                        </FormField>
+                                        <FormField label={tr("الإجابة (إنجليزي)", "Answer (English)")}>
+                                            <VTextarea
+                                                modelValue={item.a_en}
+                                                onUpdate:modelValue={(value: string) => (item.a_en = value)}
+                                                rows={2}
+                                                autoGrow
+                                            />
+                                        </FormField>
                                     </ThemedView>
                                 ))}
                             </ThemedView>
 
-                            {showChecklists && (
-                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{tr("قائمة التحقق من التعديل", "Edit checklist")}</ThemedText>
-                                    {CHECKOUT_EDIT_CHECKS.map((check) => (
-                                        <VCheckbox
-                                            key={check.key}
-                                            modelValue={editChecklist.value[check.key] === true}
-                                            onUpdate:modelValue={(value: unknown) => (editChecklist.value = { ...editChecklist.value, [check.key]: Boolean(value) })}
-                                            label={tr(check.ar, check.en)}
-                                            density="compact"
-                                            hideDetails
-                                        />
-                                    ))}
-                                    {!editChecklistComplete.value && (
-                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{tr("أكمل قائمة التحقق قبل الحفظ", "Complete the edit checklist before saving")}</ThemedText>
-                                    )}
-                                </ThemedView>
-                            )}
+                            <FormChecklist
+                                checks={CHECKOUT_EDIT_CHECKS.map((check) => ({ key: check.key, label: tr(check.ar, check.en) }))}
+                                modelValue={editChecklist.value}
+                                onUpdate:modelValue={(value: Record<string, boolean>) => (editChecklist.value = value)}
+                                show={showChecklists}
+                                title={tr("قائمة التحقق من التعديل", "Edit checklist")}
+                                complete={editChecklistComplete.value}
+                                incompleteMessage={tr("أكمل قائمة التحقق قبل الحفظ", "Complete the edit checklist before saving")}
+                            />
                             <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
                                 <VBtn
                                     variant="tonal"
@@ -823,10 +842,12 @@ const AdminCheckoutHelpPage = dc(() => {
                                         <ThemedView
                                             key={`${item.question}-${index}`}
                                             style={{
+                                                display: "flex",
+                                                flexDirection: "column",
                                                 gap: "3px",
                                                 padding: "10px 12px",
-                                                borderRadius: "10px",
-                                                background: "rgba(100,116,139,0.08)",
+                                                borderRadius: "var(--pg-radius-md)",
+                                                background: "var(--pg-bg-surface-subtle)",
                                             }}
                                         >
                                             <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>
@@ -864,37 +885,40 @@ const AdminCheckoutHelpPage = dc(() => {
                         {history.value.map((version, index) => (
                             <ThemedView
                                 key={version.id}
-                                style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap", padding: "8px 10px", borderRadius: "8px", border: "1px solid rgba(100,116,139,0.2)" }}
+                                style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "8px 10px", borderRadius: "var(--pg-radius-sm)", border: "1px solid var(--pg-border-subtle)" }}
                             >
-                                <MetaPill size="x-small" variant="tonal" color="primary">v{version.version}</MetaPill>
-                                {index === 0 && <MetaPill size="x-small" variant="tonal" color="success">{tr("الحالي", "Current")}</MetaPill>}
-                                <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>
-                                    {tr("ساري من", "Effective")}: {new Date(version.effectiveFrom).toLocaleString()}
-                                </ThemedText>
-                                <ThemedText style={{ fontSize: "11px", opacity: 0.45 }}>
-                                    {tr("أُنشئ", "Created")}: {new Date(version.createdAt).toLocaleString()}
-                                </ThemedText>
-                                <div style={{ flex: 1 }} />
-                                {index !== 0 && (
+                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                                    <MetaPill size="x-small" variant="tonal" color="primary">v{version.version}</MetaPill>
+                                    {index === 0 && <StatusBadge status="CURRENT" label={tr("الحالي", "Current")} toneOverride="success" showDot={false} />}
+                                    <div style={{ flex: 1 }} />
+                                    {index !== 0 && (
+                                        <VBtn
+                                            size="x-small"
+                                            variant="text"
+                                            onClick={() => (compareVersion.value = version)}
+                                        >
+                                            {tr("مقارنة مع الحالي", "Compare with current")}
+                                        </VBtn>
+                                    )}
                                     <VBtn
                                         size="x-small"
                                         variant="text"
-                                        onClick={() => (compareVersion.value = version)}
+                                        disabled={index === 0}
+                                        onClick={() => {
+                                            applyValue(version.valueJson);
+                                            showSnackBar({ type: "success", message: tr("تم تحميل الإصدار في المحرر", "Version loaded into the editor") });
+                                        }}
                                     >
-                                        {tr("مقارنة مع الحالي", "Compare with current")}
+                                        {tr("تحميل في المحرر", "Load into editor")}
                                     </VBtn>
-                                )}
-                                <VBtn
-                                    size="x-small"
-                                    variant="text"
-                                    disabled={index === 0}
-                                    onClick={() => {
-                                        applyValue(version.valueJson);
-                                        showSnackBar({ type: "success", message: tr("تم تحميل الإصدار في المحرر", "Version loaded into the editor") });
-                                    }}
-                                >
-                                    {tr("تحميل في المحرر", "Load into editor")}
-                                </VBtn>
+                                </ThemedView>
+                                <DescriptionList
+                                    columns={2}
+                                    items={[
+                                        { label: tr("ساري من", "Effective"), value: new Date(version.effectiveFrom).toLocaleString() },
+                                        { label: tr("أُنشئ", "Created"), value: new Date(version.createdAt).toLocaleString() },
+                                    ]}
+                                />
                             </ThemedView>
                         ))}
                         {compareVersion.value && (
@@ -914,10 +938,10 @@ const AdminCheckoutHelpPage = dc(() => {
                                         </ThemedText>
                                     )}
                                     {diffRows.value.map((row) => (
-                                        <ThemedView key={row.path} style={{ gap: "3px", padding: "6px 8px", borderRadius: "8px", background: "rgba(100,116,139,0.08)" }}>
+                                        <ThemedView key={row.path} style={{ display: "flex", flexDirection: "column", gap: "3px", padding: "6px 8px", borderRadius: "var(--pg-radius-sm)", background: "var(--pg-bg-surface-subtle)" }}>
                                             <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center" }}>
-                                                <ThemedText style={{ fontSize: "11px", fontWeight: 700, direction: "ltr" }}>{row.path}</ThemedText>
-                                                <MetaPill size="x-small" variant="tonal" color={row.kind === "ADDED" ? "success" : row.kind === "REMOVED" ? "error" : "warning"}>{row.kind}</MetaPill>
+                                                <ThemedText style={{ fontSize: "11px", fontWeight: 600, direction: "ltr" }}>{row.path}</ThemedText>
+                                                <StatusBadge status={row.kind} toneOverride={row.kind === "ADDED" ? "success" : row.kind === "REMOVED" ? "danger" : "warning"} showDot={false} />
                                             </ThemedView>
                                             <ThemedText style={{ fontSize: "11px", direction: "ltr", opacity: 0.75 }}>{row.before} → {row.after}</ThemedText>
                                         </ThemedView>

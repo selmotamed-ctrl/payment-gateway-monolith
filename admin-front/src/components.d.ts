@@ -40,6 +40,7 @@ declare module 'vue' {
     FieldsSections: typeof import('./components/FieldsSections/index.tsx')['default']
     FileInput: typeof import('./components/FileInput/index.vue')['default']
     FiltersContainer: typeof import('./components/FiltersContainer/index.tsx')['default']
+    FormChecklist: typeof import('./components/ui/FormChecklist.tsx')['default']
     FormField: typeof import('./components/ui/FormField.tsx')['default']
     FormModal: typeof import('./components/ui/FormModal.tsx')['default']
     GlobalGuideSearchModal: typeof import('./components/guide/GlobalGuideSearchModal.tsx')['default']
@@ -80,6 +81,7 @@ declare module 'vue' {
     StatsChartCard: typeof import('./components/StatsChartCard/index.tsx')['default']
     StatusBadge: typeof import('./components/ui/StatusBadge.tsx')['default']
     StatusChip: typeof import('./components/StatusChip/index.tsx')['default']
+    StepBar: typeof import('./components/gateway-wizard/StepBar.tsx')['default']
     StepClientAction: typeof import('./components/gateway-wizard/StepClientAction.tsx')['default']
     StepCryptoProfile: typeof import('./components/gateway-wizard/StepCryptoProfile.tsx')['default']
     StepCustomerCatalog: typeof import('./components/gateway-wizard/StepCustomerCatalog.tsx')['default']
@@ -89,6 +91,7 @@ declare module 'vue' {
     StepSimulator: typeof import('./components/gateway-wizard/StepSimulator.tsx')['default']
     StepStatusRules: typeof import('./components/gateway-wizard/StepStatusRules.tsx')['default']
     SubHeader: typeof import('./components/SubHeader/index.tsx')['default']
+    SummaryExportCard: typeof import('./components/ui/SummaryExportCard.tsx')['default']
     SurfaceCard: typeof import('./components/ui/SurfaceCard.tsx')['default']
     Table: typeof import('./components/Table/Table.tsx')['default']
     TableFilters: typeof import('./components/Table/TableFilters.tsx')['default']
@@ -99,6 +102,7 @@ declare module 'vue' {
     ThemedText: typeof import('./components/ThemedText/index.tsx')['default']
     ThemedView: typeof import('./components/ThemedView/index.tsx')['default']
     TransformPlayground: typeof import('./components/guide/parts/TransformPlayground.tsx')['default']
+    WizardSection: typeof import('./components/gateway-wizard/WizardSection.tsx')['default']
   }
 }
 
@@ -132,6 +136,7 @@ declare global {
   const FieldsSections: typeof import('./components/FieldsSections/index.tsx')['default']
   const FileInput: typeof import('./components/FileInput/index.vue')['default']
   const FiltersContainer: typeof import('./components/FiltersContainer/index.tsx')['default']
+  const FormChecklist: typeof import('./components/ui/FormChecklist.tsx')['default']
   const FormField: typeof import('./components/ui/FormField.tsx')['default']
   const FormModal: typeof import('./components/ui/FormModal.tsx')['default']
   const GlobalGuideSearchModal: typeof import('./components/guide/GlobalGuideSearchModal.tsx')['default']
@@ -172,6 +177,7 @@ declare global {
   const StatsChartCard: typeof import('./components/StatsChartCard/index.tsx')['default']
   const StatusBadge: typeof import('./components/ui/StatusBadge.tsx')['default']
   const StatusChip: typeof import('./components/StatusChip/index.tsx')['default']
+  const StepBar: typeof import('./components/gateway-wizard/StepBar.tsx')['default']
   const StepClientAction: typeof import('./components/gateway-wizard/StepClientAction.tsx')['default']
   const StepCryptoProfile: typeof import('./components/gateway-wizard/StepCryptoProfile.tsx')['default']
   const StepCustomerCatalog: typeof import('./components/gateway-wizard/StepCustomerCatalog.tsx')['default']
@@ -181,6 +187,7 @@ declare global {
   const StepSimulator: typeof import('./components/gateway-wizard/StepSimulator.tsx')['default']
   const StepStatusRules: typeof import('./components/gateway-wizard/StepStatusRules.tsx')['default']
   const SubHeader: typeof import('./components/SubHeader/index.tsx')['default']
+  const SummaryExportCard: typeof import('./components/ui/SummaryExportCard.tsx')['default']
   const SurfaceCard: typeof import('./components/ui/SurfaceCard.tsx')['default']
   const Table: typeof import('./components/Table/Table.tsx')['default']
   const TableFilters: typeof import('./components/Table/TableFilters.tsx')['default']
@@ -191,4 +198,5 @@ declare global {
   const ThemedText: typeof import('./components/ThemedText/index.tsx')['default']
   const ThemedView: typeof import('./components/ThemedView/index.tsx')['default']
   const TransformPlayground: typeof import('./components/guide/parts/TransformPlayground.tsx')['default']
+  const WizardSection: typeof import('./components/gateway-wizard/WizardSection.tsx')['default']
 }

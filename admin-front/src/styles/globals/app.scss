@@ -2,7 +2,6 @@
     font-feature-settings:
         "kern" 1,
         "tnum" 1;
-    letter-spacing: 0;
 }
 
 body {
@@ -15,45 +14,16 @@ body {
 }
 
 .v-theme--light {
-    --fintech-border: rgba(15, 23, 42, 0.08);
-    --fintech-border-strong: rgba(15, 23, 42, 0.12);
-    --fintech-raised: 0 18px 50px rgba(15, 23, 42, 0.08);
     --fintech-soft: 0 8px 24px rgba(15, 23, 42, 0.06);
 }
 
 .v-theme--dark {
-    --fintech-border: rgba(226, 232, 240, 0.09);
-    --fintech-border-strong: rgba(226, 232, 240, 0.14);
-    --fintech-raised: 0 18px 50px rgba(0, 0, 0, 0.34);
     --fintech-soft: 0 8px 24px rgba(0, 0, 0, 0.24);
 }
 
 
 .v-btn {
-    min-height: 38px;
-}
-
-.v-table,
-.v-data-table {
-    border: 1px solid var(--fintech-border);
-    border-radius: var(--pg-radius-md);
-    overflow: hidden;
-    background: var(--pg-bg-surface) !important;
-    box-shadow: none;
-}
-
-.v-table th,
-.v-data-table th {
-    background: rgb(var(--v-theme-surface-variant));
-    color: rgb(var(--v-theme-on-surface-variant)) !important;
-    font-size: 12px;
-    font-weight: 800 !important;
-    letter-spacing: 0;
-}
-
-.v-table td,
-.v-data-table td {
-    border-bottom-color: var(--fintech-border) !important;
+    min-height: 36px;
 }
 
 .hoverable:hover {
@@ -363,17 +333,7 @@ body,
 
 * {
     scrollbar-width: thin !important;
-    font-family: "Plus Jakarta Sans", "Cairo", system-ui, sans-serif;
-    font-optical-sizing: auto;
-    letter-spacing: 0;
     scrollbar-color: rgba(100, 100, 100, 0.4) transparent;
-}
-
-/* Arabic uses Cairo; Latin uses Plus Jakarta Sans. */
-[dir="rtl"] *,
-[dir="rtl"] {
-    font-family: "Cairo", "Plus Jakarta Sans", system-ui, sans-serif;
-    letter-spacing: 0;
 }
 
 .v-theme--dark * {
@@ -434,12 +394,6 @@ html {
  * A fixed app bar + navigation drawer + scrolling main surface. The layout is
  * owned by the shell; pages are plain content inside `.pg-page`.
  * ------------------------------------------------------------------------- */
-.pg-app-bar {
-    border-bottom: 1px solid var(--fintech-border);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-}
-
 .pg-app-bar .v-toolbar__content {
     gap: 8px;
     padding-inline: 12px;
@@ -483,12 +437,11 @@ html {
 
 .pg-avatar {
     background: var(--pg-ink-primary);
-    color: white;
+    color: var(--pg-bg-surface);
     font-weight: 800;
 }
 
 .pg-drawer {
-    border-inline-end: 1px solid var(--fintech-border);
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -569,7 +522,7 @@ html {
 }
 
 .pg-drawer__title {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     line-height: 1.2;
 }
@@ -600,7 +553,7 @@ html {
     gap: 8px;
     min-height: 30px;
     margin-top: 2px;
-    padding: 14px 10px 4px;
+    padding: 14px 12px 4px;
     border-radius: 6px;
     font-size: 11px;
     font-weight: 600;
@@ -663,15 +616,7 @@ html[dir="rtl"] .pg-nav__section {
     letter-spacing: 0;
 }
 
-.pg-nav .v-list-item--active {
-    background: var(--pg-bg-surface) !important;
-    color: var(--pg-ink-primary) !important;
-    font-weight: 600 !important;
-    border: 1px solid var(--pg-border-subtle);
-    box-shadow: var(--pg-shadow-xs);
-}
-
-.pg-nav .v-list-item--active .v-icon {
+.pg-nav .pg-keycap-active .v-icon {
     opacity: 1;
 }
 
@@ -721,7 +666,7 @@ html[dir="rtl"] .pg-nav__section {
 }
 
 .pg-operator-card__email {
-    font-size: 10.5px;
+    font-size: 12.5px;
     color: var(--pg-ink-muted);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -852,8 +797,6 @@ html[dir="rtl"] .pg-nav__section {
     z-index: 10000;
     padding: 10px 16px;
     border-radius: 10px;
-    background: rgb(var(--v-theme-primary));
-    color: rgb(var(--v-theme-on-primary));
     font-size: 13px;
     font-weight: 700;
     text-decoration: none;
@@ -916,7 +859,7 @@ html[dir="rtl"] .pg-nav__section {
 
 .pg-route-progress {
     position: fixed;
-    top: 64px;
+    top: 56px;
     inset-inline: 0;
     z-index: 1000;
     pointer-events: none;

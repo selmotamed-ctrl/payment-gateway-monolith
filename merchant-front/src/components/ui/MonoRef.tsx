@@ -1,5 +1,6 @@
-import { defineComponent, ref, type VNodeChild } from "vue";
+import { defineComponent, onBeforeUnmount, ref, type PropType, type VNodeChild } from "vue";
 import { VIcon } from "vuetify/components";
+import { useLocale } from "vuetify";
 
 export const MonoRef = defineComponent({
     name: "MonoRef",
@@ -7,29 +8,56 @@ export const MonoRef = defineComponent({
         value: { type: String, default: "" },
         truncate: { type: Number, default: 0 },
         copyable: { type: Boolean, default: true },
+        onCopied: { type: Function as PropType<(value: string) => void>, default: undefined },
     },
     setup(props) {
+        const { t } = useLocale();
         const copied = ref(false);
-        const copy = async (event: MouseEvent) => {
-            event.stopPropagation();
-            if (!props.value || !props.copyable) return;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+
+        const fallbackCopy = (value: string): boolean => {
+            const input = document.createElement("textarea");
+            input.value = value;
+            input.setAttribute("readonly", "");
+            input.style.position = "fixed";
+            input.style.opacity = "0";
+            document.body.appendChild(input);
+            input.select();
+            let ok = false;
             try {
-                await navigator.clipboard?.writeText(props.value);
-            } catch {
-                const input = document.createElement("textarea");
-                input.value = props.value;
-                input.style.position = "fixed";
-                input.style.opacity = "0";
-                document.body.appendChild(input);
-                input.select();
-                document.execCommand("copy");
+                ok = document.execCommand("copy");
+            } finally {
                 document.body.removeChild(input);
             }
+            return ok;
+        };
+
+        const copy = async () => {
+            if (!props.value || !props.copyable) return;
+            let ok = false;
+            try {
+                if (navigator.clipboard?.writeText) {
+                    await navigator.clipboard.writeText(props.value);
+                    ok = true;
+                } else {
+                    ok = fallbackCopy(props.value);
+                }
+            } catch {
+                ok = fallbackCopy(props.value);
+            }
+            if (!ok) return;
             copied.value = true;
-            window.setTimeout(() => {
+            props.onCopied?.(props.value);
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(() => {
                 copied.value = false;
             }, 1400);
         };
+
+        onBeforeUnmount(() => {
+            if (timer) clearTimeout(timer);
+        });
+
         return (): VNodeChild => {
             if (!props.value) {
                 return <span style={{ color: "var(--pg-ink-faint)" }}>—</span>;
@@ -38,11 +66,15 @@ export const MonoRef = defineComponent({
                 props.truncate > 0 && props.value.length > props.truncate
                     ? `${props.value.slice(0, props.truncate)}…`
                     : props.value;
+            const label = copied.value ? t("Copied") : `${t("Copy")} ${props.value}`;
             return (
-                <span
-                    class="pg-mono"
+                <button
+                    type="button"
+                    class="pg-mono pg-mono-ref"
                     title={props.value}
-                    onClick={copy}
+                    aria-label={label}
+                    aria-live="polite"
+                    onClick={() => void copy()}
                     style={{
                         display: "inline-flex",
                         alignItems: "center",
@@ -55,6 +87,7 @@ export const MonoRef = defineComponent({
                         color: "var(--pg-ink-primary)",
                         cursor: props.copyable ? "pointer" : "default",
                         userSelect: "all",
+                        fontFamily: "inherit",
                     }}
                 >
                     <span>{shown}</span>
@@ -65,7 +98,7 @@ export const MonoRef = defineComponent({
                             style={{ color: copied.value ? "var(--pg-status-success-dot)" : "var(--pg-ink-muted)" }}
                         />
                     )}
-                </span>
+                </button>
             );
         };
     },

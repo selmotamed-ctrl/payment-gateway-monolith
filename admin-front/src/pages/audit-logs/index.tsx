@@ -2,12 +2,12 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VCheckbox, VDivider } from "vuetify/components";
+import { VAlert, VBtn, VDivider } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
@@ -20,9 +20,11 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
 import { FormModal } from "@/components/ui/FormModal";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
+import { DescriptionList } from "@/components/ui/DescriptionList";
 import { MetaPill } from "@/components/ui/MetaPill";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import type { MetricItem } from "@/components/ui/MetricStrip";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { JsonDiffViewer } from "@/components/ui/JsonDiffViewer";
 type AuditLog = {
@@ -254,7 +256,7 @@ const AuditLogsPage = dc(() => {
             label: "Role",
             sortKey: "role",
             value: (row) => row.role,
-            Value: ({ row }: { row: AuditLog }) => <StatusChip label={row.role} tone="neutral" size="x-small" />,
+            Value: ({ row }: { row: AuditLog }) => <StatusBadge status={row.role} toneOverride="neutral" showDot={false} />,
         },
         {
             key: "action",
@@ -262,7 +264,7 @@ const AuditLogsPage = dc(() => {
             sortKey: "action",
             value: (row) => row.action,
             Value: ({ row }: { row: AuditLog }) => (
-                <ThemedText style={{ fontSize: "12px", fontWeight: 700, direction: "ltr" }}>{row.action}</ThemedText>
+                <ThemedText style={{ fontSize: "12px", fontWeight: 600, direction: "ltr" }}>{row.action}</ThemedText>
             ),
         },
         {
@@ -327,41 +329,28 @@ const AuditLogsPage = dc(() => {
                 </VAlert>
 
                 {summary.value && (
-                    <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
-                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Audit health")}</ThemedText>
-                                <div style={{ flex: 1 }} />
-                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
-                            </ThemedView>
-                            {showChecklists && (
-                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
-                                    {SUMMARY_EXPORT_CHECKS.map((check) => (
-                                        <VCheckbox
-                                            key={check.key}
-                                            modelValue={summaryExportChecklist.value[check.key] === true}
-                                            onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
-                                            label={t(check.label)}
-                                            density="compact"
-                                            hideDetails
-                                        />
-                                    ))}
-                                    {!summaryExportChecklistComplete.value && (
-                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
-                                    )}
-                                </ThemedView>
-                            )}
-                            <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
-                                <MetricStrip items={metricItems.value} />
-                            </ThemedView>
-                            <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                {Object.entries(summary.value.byEntityType ?? {}).slice(0, 10).map(([entity, count]) => (
-                                    <StatusChip key={entity} label={`${entity}: ${count}`} tone="neutral" size="x-small" />
-                                ))}
-                            </ThemedView>
-                        </SurfaceCardText>
-                    </SurfaceCard>
+                    <SummaryExportCard
+                        title={t("Audit health")}
+                        metrics={metricItems.value}
+                        exportLoading={summaryExportLoading.value}
+                        exportDisabled={!summaryExportChecklistComplete.value}
+                        onExport={() => void exportSummary()}
+                    >
+                        <FormChecklist
+                            checks={[...SUMMARY_EXPORT_CHECKS]}
+                            modelValue={summaryExportChecklist.value}
+                            onUpdate:modelValue={(value: Record<string, boolean>) => (summaryExportChecklist.value = value)}
+                            show={showChecklists}
+                            title={t("Summary export checklist")}
+                            complete={summaryExportChecklistComplete.value}
+                            incompleteMessage={t("Complete all summary export checklist items before exporting")}
+                        />
+                        <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                            {Object.entries(summary.value.byEntityType ?? {}).slice(0, 10).map(([entity, count]) => (
+                                <MetaPill key={entity} size="x-small" variant="tonal">{entity}: {count}</MetaPill>
+                            ))}
+                        </ThemedView>
+                    </SummaryExportCard>
                 )}
 
                 <ApiTable<AuditLog>
@@ -423,35 +412,32 @@ const AuditLogsPage = dc(() => {
                 onUpdate:modelValue={(value: boolean) => (detailOpen.value = value)}
                 title={selected.value?.action ?? t("Audit event")}
                 size="lg"
+                v-slots={{
+                    footer: () => (
+                        <VBtn variant="outlined" onClick={() => (detailOpen.value = false)}>{t("Close")}</VBtn>
+                    ),
+                }}
             >
-{selected.value ? (
-                            <>
-                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                    
-                                    <StatusChip label={selected.value.role} tone="neutral" size="small" />
-                                    <div style={{ flex: 1 }} />
-                                    <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{formatDateTime(selected.value.createdAt)}</ThemedText>
-                                </ThemedView>
-                                <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "10px" }}>
-                                    {[
-                                        [t("Actor"), selected.value.actorEmail || selected.value.actorId],
-                                        [t("Entity type"), selected.value.entityType],
-                                        [t("Entity ID"), selected.value.entityId],
-                                        [t("Approval request"), selected.value.approvalRequestId ?? "—"],
-                                    ].map(([label, value]) => (
-                                        <ThemedView key={label} style={{ gap: "2px" }}>
-                                            <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{label}</ThemedText>
-                                            <ThemedText style={{ fontSize: "12px", direction: "ltr", wordBreak: "break-word" }}>{value}</ThemedText>
-                                        </ThemedView>
-                                    ))}
-                                </ThemedView>
-                                <VDivider />
-                                <JsonDiffViewer before={selected.value.beforeJson} after={selected.value.afterJson} />
-                                <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end" }}>
-                                    <VBtn variant="text" onClick={() => (detailOpen.value = false)}>{t("Close")}</VBtn>
-                                </ThemedView>
-                            </>
-                        ) : null}
+                {selected.value ? (
+                    <>
+                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                            <StatusBadge status={selected.value.role} toneOverride="neutral" showDot={false} />
+                            <div style={{ flex: 1 }} />
+                            <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{formatDateTime(selected.value.createdAt)}</ThemedText>
+                        </ThemedView>
+                        <DescriptionList
+                            columns={2}
+                            items={[
+                                { label: t("Actor"), value: selected.value.actorEmail || selected.value.actorId },
+                                { label: t("Entity type"), value: selected.value.entityType },
+                                { label: t("Entity ID"), value: <MonoRef value={selected.value.entityId} truncate={24} /> },
+                                { label: t("Approval request"), value: selected.value.approvalRequestId ? <MonoRef value={selected.value.approvalRequestId} truncate={18} /> : "—" },
+                            ]}
+                        />
+                        <VDivider />
+                        <JsonDiffViewer before={selected.value.beforeJson} after={selected.value.afterJson} />
+                    </>
+                ) : null}
             </FormModal>
         </ScreenContainer>
     );

@@ -1,11 +1,13 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VCard, VCardText, VSelect, VTextField } from "vuetify/components";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
-import type { WizardDraft, WizardRail, WizardRailField } from "./types";
+import { VBtn, VSelect, VTextField } from "vuetify/components";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import { WizardSection } from "./WizardSection";
+import type { WizardRail, WizardRailField } from "./types";
 import type { WizardStepProps } from "./StepIdentity";
 
 const emptyField = (): WizardRailField => ({
@@ -34,16 +36,22 @@ const emptyRail = (): WizardRail => ({
     fields: [emptyField()],
 });
 
-const sensitivityTone = (sensitivity: string) => {
+const sensitivityTone = (sensitivity: string): BadgeTone => {
     switch (sensitivity) {
         case "PAN":
-            return "error" as const;
+            return "danger";
         case "SENSITIVE":
-            return "warning" as const;
+            return "warning";
         default:
-            return "neutral" as const;
+            return "neutral";
     }
 };
+
+const gridStyle = {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+    gap: "14px",
+} as const;
 
 export const StepCustomerCatalog = dc(
     (props: WizardStepProps) => {
@@ -117,227 +125,247 @@ export const StepCustomerCatalog = dc(
             const activeRail = rails[activeRailIndex.value];
 
             return (
-                <ThemedView style={{ gap: "16px" }}>
-                    <VCard>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedView
-                                style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
+                <SurfaceCard
+                    title={t("Customer Catalog")}
+                    v-slots={{
+                        headerActions: () => (
+                            <VBtn variant="tonal" size="small" onClick={addRail}>
+                                {t("Add")}
+                            </VBtn>
+                        ),
+                    }}
+                >
+                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+                        {rails.length > 0 && (
+                            <SegmentedTabs
+                                modelValue={String(activeRailIndex.value)}
+                                tabs={rails.map((rail, index) => ({
+                                    value: String(index),
+                                    label: rail.code || `Rail ${index + 1}`,
+                                }))}
+                                onUpdate:modelValue={(value: string) => (activeRailIndex.value = Number(value))}
+                                ariaLabel={t("Customer Catalog")}
+                            />
+                        )}
+
+                        {activeRail && (
+                            <WizardSection
+                                title={activeRail.code || `Rail ${activeRailIndex.value + 1}`}
+                                v-slots={{
+                                    actions: () => (
+                                        <>
+                                            <StatusBadge
+                                                status={activeRail.collectionMode}
+                                                toneOverride="info"
+                                                showDot={false}
+                                            />
+                                            <VBtn
+                                                size="x-small"
+                                                variant="text"
+                                                color="error"
+                                                onClick={() => removeRail(activeRailIndex.value)}
+                                            >
+                                                ×
+                                            </VBtn>
+                                        </>
+                                    ),
+                                }}
                             >
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                                    {t("Customer Catalog")}
-                                </ThemedText>
-                                <VBtn variant="tonal" size="small" onClick={addRail}>
-                                    {t("Add")}
-                                </VBtn>
-                            </ThemedView>
+                                <div style={gridStyle}>
+                                    <FormField label={t("Rail Code")}>
+                                        <VTextField
+                                            modelValue={activeRail.code}
+                                            onUpdate:modelValue={(v: string) => updateRail(activeRailIndex.value, { code: v })}
+                                        />
+                                    </FormField>
+                                    <FormField label={t("Label (English)")}>
+                                        <VTextField
+                                            modelValue={activeRail.nameEn}
+                                            onUpdate:modelValue={(v: string) => updateRail(activeRailIndex.value, { nameEn: v })}
+                                        />
+                                    </FormField>
+                                    <FormField label={t("Label (Arabic)")}>
+                                        <VTextField
+                                            modelValue={activeRail.nameAr}
+                                            onUpdate:modelValue={(v: string) => updateRail(activeRailIndex.value, { nameAr: v })}
+                                        />
+                                    </FormField>
+                                    <FormField label={t("Type")}>
+                                        <VSelect
+                                            items={["OTP_PULL", "REDIRECT", "EMBEDDED", "PUSH_APPROVAL", "QR_DISPLAY", "PAY_CODE", "DEEP_LINK", "MANUAL", "HYBRID"]}
+                                            modelValue={activeRail.collectionMode}
+                                            onUpdate:modelValue={(v: any) => updateRail(activeRailIndex.value, { collectionMode: v })}
+                                        />
+                                    </FormField>
+                                    <FormField label={t("Currency")}>
+                                        <VTextField
+                                            modelValue={activeRail.currency}
+                                            onUpdate:modelValue={(v: string) =>
+                                                updateRail(activeRailIndex.value, { currency: v.toUpperCase() })
+                                            }
+                                        />
+                                    </FormField>
+                                    <FormField label="min_amount">
+                                        <VTextField
+                                            modelValue={activeRail.minAmount}
+                                            onUpdate:modelValue={(v: string) => updateRail(activeRailIndex.value, { minAmount: v })}
+                                        />
+                                    </FormField>
+                                    <FormField label="max_amount">
+                                        <VTextField
+                                            modelValue={activeRail.maxAmount}
+                                            onUpdate:modelValue={(v: string) => updateRail(activeRailIndex.value, { maxAmount: v })}
+                                        />
+                                    </FormField>
+                                </div>
 
-                            <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
-                                {rails.map((rail, index) => (
-                                    <ThemedView key={index} style={{ flexDirection: "row", alignItems: "center", gap: "6px" }}>
-                                        <VBtn
-                                            size="small"
-                                            variant={index === activeRailIndex.value ? "flat" : "text"}
-                                            color={index === activeRailIndex.value ? "primary" : undefined}
-                                            onClick={() => (activeRailIndex.value = index)}
-                                        >
-                                            {rail.code || `Rail ${index + 1}`}
-                                        </VBtn>
-                                        <VBtn size="x-small" variant="text" color="error" onClick={() => removeRail(index)}>
-                                            ×
-                                        </VBtn>
-                                    </ThemedView>
-                                ))}
-                            </ThemedView>
-                        </VCardText>
-                    </VCard>
-
-                    {activeRail && (
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                                <ThemedView style={{ flexDirection: "row", gap: "14px", flexWrap: "wrap" }}>
-                                    <VTextField
-                                        label={t("Rail Code")}
-                                        modelValue={activeRail.code}
-                                        onUpdate:modelValue={(v: string) => updateRail(activeRailIndex.value, { code: v })}
-                                        style={{ minWidth: "180px" }}
-                                    />
-                                    <VTextField
-                                        label={t("Label (English)")}
-                                        modelValue={activeRail.nameEn}
-                                        onUpdate:modelValue={(v: string) => updateRail(activeRailIndex.value, { nameEn: v })}
-                                        style={{ minWidth: "220px" }}
-                                    />
-                                    <VTextField
-                                        label={t("Label (Arabic)")}
-                                        modelValue={activeRail.nameAr}
-                                        onUpdate:modelValue={(v: string) => updateRail(activeRailIndex.value, { nameAr: v })}
-                                        style={{ minWidth: "220px" }}
-                                    />
-                                    <VSelect
-                                        items={["OTP_PULL", "REDIRECT", "EMBEDDED", "PUSH_APPROVAL", "QR_DISPLAY", "PAY_CODE", "DEEP_LINK", "MANUAL", "HYBRID"]}
-                                        modelValue={activeRail.collectionMode}
-                                        onUpdate:modelValue={(v: any) => updateRail(activeRailIndex.value, { collectionMode: v })}
-                                        label={t("Type")}
-                                        style={{ minWidth: "200px" }}
-                                    />
-                                    <VTextField
-                                        label={t("Currency")}
-                                        modelValue={activeRail.currency}
-                                        onUpdate:modelValue={(v: string) =>
-                                            updateRail(activeRailIndex.value, { currency: v.toUpperCase() })
-                                        }
-                                        style={{ minWidth: "120px" }}
-                                    />
-                                    <VTextField
-                                        label="min_amount"
-                                        modelValue={activeRail.minAmount}
-                                        onUpdate:modelValue={(v: string) => updateRail(activeRailIndex.value, { minAmount: v })}
-                                        style={{ minWidth: "140px" }}
-                                    />
-                                    <VTextField
-                                        label="max_amount"
-                                        modelValue={activeRail.maxAmount}
-                                        onUpdate:modelValue={(v: string) => updateRail(activeRailIndex.value, { maxAmount: v })}
-                                        style={{ minWidth: "140px" }}
-                                    />
-                                </ThemedView>
-
-                                <ThemedView
-                                    style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
+                                <WizardSection
+                                    title={t("Params")}
+                                    divider
+                                    v-slots={{
+                                        actions: () => (
+                                            <VBtn variant="tonal" size="small" onClick={() => addField(activeRailIndex.value)}>
+                                                {t("Add")}
+                                            </VBtn>
+                                        ),
+                                    }}
                                 >
-                                    <ThemedText type="defaultSemiBold">{t("Rail Code")}</ThemedText>
-                                    <VBtn variant="tonal" size="small" onClick={() => addField(activeRailIndex.value)}>
-                                        {t("Add")}
-                                    </VBtn>
-                                </ThemedView>
-
-                                {activeRail.fields.map((field, fieldIndex) => (
-                                    <ThemedView
-                                        key={fieldIndex}
-                                        draggable={true}
-                                        onDragstart={() => (dragIndex.value = fieldIndex)}
-                                        onDragover={(e: any) => e.preventDefault()}
-                                        onDrop={(e: any) => {
-                                            e.preventDefault();
-                                            if (dragIndex.value !== null) {
-                                                moveField(activeRailIndex.value, dragIndex.value, fieldIndex);
-                                                dragIndex.value = null;
-                                            }
-                                        }}
-                                        style={{
-                                            flexDirection: "row",
-                                            gap: "10px",
-                                            flexWrap: "wrap",
-                                            alignItems: "center",
-                                            border: "1px solid rgba(100,116,139,0.2)",
-                                            borderRadius: "12px",
-                                            padding: "10px",
-                                            cursor: "grab",
-                                        }}
-                                    >
-                                        <VIconDrag />
-                                        <VTextField
-                                            label={t("Field Key")}
-                                            modelValue={field.fieldKey}
-                                            onUpdate:modelValue={(v: string) =>
-                                                updateField(activeRailIndex.value, fieldIndex, { fieldKey: v })
-                                            }
-                                            style={{ minWidth: "160px" }}
-                                        />
-                                        <VTextField
-                                            label={t("Label (English)")}
-                                            modelValue={field.labelEn}
-                                            onUpdate:modelValue={(v: string) =>
-                                                updateField(activeRailIndex.value, fieldIndex, { labelEn: v })
-                                            }
-                                            style={{ minWidth: "190px" }}
-                                        />
-                                        <VTextField
-                                            label={t("Label (Arabic)")}
-                                            modelValue={field.labelAr}
-                                            onUpdate:modelValue={(v: string) =>
-                                                updateField(activeRailIndex.value, fieldIndex, { labelAr: v })
-                                            }
-                                            style={{ minWidth: "190px" }}
-                                        />
-                                        <VSelect
-                                            items={["text", "numeric", "phone", "wallet_id", "otp", "select"]}
-                                            modelValue={field.inputType}
-                                            onUpdate:modelValue={(v: any) =>
-                                                updateField(activeRailIndex.value, fieldIndex, { inputType: v })
-                                            }
-                                            label={t("Input Type")}
-                                            style={{ minWidth: "160px" }}
-                                        />
-                                        <VTextField
-                                            label={t("Regex")}
-                                            modelValue={field.regex}
-                                            onUpdate:modelValue={(v: string) =>
-                                                updateField(activeRailIndex.value, fieldIndex, { regex: v })
-                                            }
-                                            style={{ minWidth: "200px" }}
-                                        />
-                                        <VTextField
-                                            label={t("Min Length")}
-                                            type="number"
-                                            modelValue={field.minLength ?? undefined}
-                                            onUpdate:modelValue={(v: any) =>
-                                                updateField(activeRailIndex.value, fieldIndex, {
-                                                    minLength: v === "" || v == null ? null : Number(v),
-                                                })
-                                            }
-                                            style={{ minWidth: "120px" }}
-                                        />
-                                        <VTextField
-                                            label={t("Max Length")}
-                                            type="number"
-                                            modelValue={field.maxLength ?? undefined}
-                                            onUpdate:modelValue={(v: any) =>
-                                                updateField(activeRailIndex.value, fieldIndex, {
-                                                    maxLength: v === "" || v == null ? null : Number(v),
-                                                })
-                                            }
-                                            style={{ minWidth: "120px" }}
-                                        />
-                                        <VSelect
-                                            items={[
-                                                "NONE",
-                                                "ARABIC_DIGITS_TO_ASCII",
-                                                "PHONE_NORMALIZE_LOCAL_09",
-                                                "PHONE_NORMALIZE_INTL_218",
-                                                "PHONE_NORMALIZE_E164",
-                                            ]}
-                                            modelValue={field.normalizer}
-                                            onUpdate:modelValue={(v: any) =>
-                                                updateField(activeRailIndex.value, fieldIndex, { normalizer: v })
-                                            }
-                                            label={t("Normalizer")}
-                                            style={{ minWidth: "240px" }}
-                                        />
-                                        <VSelect
-                                            items={["NORMAL", "SENSITIVE", "PAN"]}
-                                            modelValue={field.sensitivity}
-                                            onUpdate:modelValue={(v: any) =>
-                                                updateField(activeRailIndex.value, fieldIndex, { sensitivity: v })
-                                            }
-                                            label={t("Sensitivity")}
-                                            style={{ minWidth: "160px" }}
-                                        />
-                                        <StatusChip label={field.sensitivity} tone={sensitivityTone(field.sensitivity)} />
-                                        <VBtn
-                                            size="x-small"
-                                            variant="text"
-                                            color="error"
-                                            onClick={() => removeField(activeRailIndex.value, fieldIndex)}
+                                    {activeRail.fields.map((field, fieldIndex) => (
+                                        <div
+                                            key={fieldIndex}
+                                            draggable={true}
+                                            onDragstart={() => (dragIndex.value = fieldIndex)}
+                                            onDragover={(e: any) => e.preventDefault()}
+                                            onDrop={(e: any) => {
+                                                e.preventDefault();
+                                                if (dragIndex.value !== null) {
+                                                    moveField(activeRailIndex.value, dragIndex.value, fieldIndex);
+                                                    dragIndex.value = null;
+                                                }
+                                            }}
+                                            style={{ cursor: "grab" }}
                                         >
-                                            ×
-                                        </VBtn>
-                                    </ThemedView>
-                                ))}
-                            </VCardText>
-                        </VCard>
-                    )}
-                </ThemedView>
+                                            <WizardSection
+                                                title={field.fieldKey || `${t("Field Key")} ${fieldIndex + 1}`}
+                                                divider={fieldIndex > 0}
+                                                v-slots={{
+                                                    actions: () => (
+                                                        <>
+                                                            <VIconDrag />
+                                                            <StatusBadge
+                                                                status={field.sensitivity}
+                                                                toneOverride={sensitivityTone(field.sensitivity)}
+                                                                showDot={false}
+                                                            />
+                                                            <VBtn
+                                                                size="x-small"
+                                                                variant="text"
+                                                                color="error"
+                                                                onClick={() => removeField(activeRailIndex.value, fieldIndex)}
+                                                            >
+                                                                ×
+                                                            </VBtn>
+                                                        </>
+                                                    ),
+                                                }}
+                                            >
+                                                <div style={gridStyle}>
+                                                    <FormField label={t("Field Key")}>
+                                                        <VTextField
+                                                            modelValue={field.fieldKey}
+                                                            onUpdate:modelValue={(v: string) =>
+                                                                updateField(activeRailIndex.value, fieldIndex, { fieldKey: v })
+                                                            }
+                                                        />
+                                                    </FormField>
+                                                    <FormField label={t("Label (English)")}>
+                                                        <VTextField
+                                                            modelValue={field.labelEn}
+                                                            onUpdate:modelValue={(v: string) =>
+                                                                updateField(activeRailIndex.value, fieldIndex, { labelEn: v })
+                                                            }
+                                                        />
+                                                    </FormField>
+                                                    <FormField label={t("Label (Arabic)")}>
+                                                        <VTextField
+                                                            modelValue={field.labelAr}
+                                                            onUpdate:modelValue={(v: string) =>
+                                                                updateField(activeRailIndex.value, fieldIndex, { labelAr: v })
+                                                            }
+                                                        />
+                                                    </FormField>
+                                                    <FormField label={t("Input Type")}>
+                                                        <VSelect
+                                                            items={["text", "numeric", "phone", "wallet_id", "otp", "select"]}
+                                                            modelValue={field.inputType}
+                                                            onUpdate:modelValue={(v: any) =>
+                                                                updateField(activeRailIndex.value, fieldIndex, { inputType: v })
+                                                            }
+                                                        />
+                                                    </FormField>
+                                                    <FormField label={t("Regex")}>
+                                                        <VTextField
+                                                            modelValue={field.regex}
+                                                            onUpdate:modelValue={(v: string) =>
+                                                                updateField(activeRailIndex.value, fieldIndex, { regex: v })
+                                                            }
+                                                        />
+                                                    </FormField>
+                                                    <FormField label={t("Min Length")}>
+                                                        <VTextField
+                                                            type="number"
+                                                            modelValue={field.minLength ?? undefined}
+                                                            onUpdate:modelValue={(v: any) =>
+                                                                updateField(activeRailIndex.value, fieldIndex, {
+                                                                    minLength: v === "" || v == null ? null : Number(v),
+                                                                })
+                                                            }
+                                                        />
+                                                    </FormField>
+                                                    <FormField label={t("Max Length")}>
+                                                        <VTextField
+                                                            type="number"
+                                                            modelValue={field.maxLength ?? undefined}
+                                                            onUpdate:modelValue={(v: any) =>
+                                                                updateField(activeRailIndex.value, fieldIndex, {
+                                                                    maxLength: v === "" || v == null ? null : Number(v),
+                                                                })
+                                                            }
+                                                        />
+                                                    </FormField>
+                                                    <FormField label={t("Normalizer")}>
+                                                        <VSelect
+                                                            items={[
+                                                                "NONE",
+                                                                "ARABIC_DIGITS_TO_ASCII",
+                                                                "PHONE_NORMALIZE_LOCAL_09",
+                                                                "PHONE_NORMALIZE_INTL_218",
+                                                                "PHONE_NORMALIZE_E164",
+                                                            ]}
+                                                            modelValue={field.normalizer}
+                                                            onUpdate:modelValue={(v: any) =>
+                                                                updateField(activeRailIndex.value, fieldIndex, { normalizer: v })
+                                                            }
+                                                        />
+                                                    </FormField>
+                                                    <FormField label={t("Sensitivity")}>
+                                                        <VSelect
+                                                            items={["NORMAL", "SENSITIVE", "PAN"]}
+                                                            modelValue={field.sensitivity}
+                                                            onUpdate:modelValue={(v: any) =>
+                                                                updateField(activeRailIndex.value, fieldIndex, { sensitivity: v })
+                                                            }
+                                                        />
+                                                    </FormField>
+                                                </div>
+                                            </WizardSection>
+                                        </div>
+                                    ))}
+                                </WizardSection>
+                            </WizardSection>
+                        )}
+                    </SurfaceCardText>
+                </SurfaceCard>
             );
         };
     },

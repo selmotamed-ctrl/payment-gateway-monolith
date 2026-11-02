@@ -1,11 +1,14 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
-import { VAlert, VBtn, VCard, VCardText, VSelect, VTextField, VTextarea } from "vuetify/components";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
+import { VAlert, VBtn, VSelect, VTextField, VTextarea } from "vuetify/components";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { FormField } from "@/components/ui/FormField";
+import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { MonoRef } from "@/components/ui/MonoRef";
 import { normalizeArabicText } from "@/utils/arabic";
+import { WizardSection } from "./WizardSection";
 import type { WizardCryptoProfile } from "./types";
 import type { WizardStepProps } from "./StepIdentity";
 
@@ -74,6 +77,12 @@ const canonicalize = (
     }
     return pairs.join("&");
 };
+
+const gridStyle = {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+    gap: "14px",
+} as const;
 
 export const StepCryptoProfile = dc(
     (props: WizardStepProps) => {
@@ -170,153 +179,170 @@ export const StepCryptoProfile = dc(
         const active = computed(() => profiles.value[activeIndex.value]);
 
         return () => (
-            <ThemedView style={{ gap: "16px" }}>
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <ThemedView
-                            style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
+            <SurfaceCard
+                title={t("Crypto Profiles")}
+                v-slots={{
+                    headerActions: () => (
+                        <VBtn variant="tonal" size="small" onClick={addProfile}>
+                            {t("Add")}
+                        </VBtn>
+                    ),
+                }}
+            >
+                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+                    {profiles.value.length > 0 && (
+                        <SegmentedTabs
+                            modelValue={String(activeIndex.value)}
+                            tabs={profiles.value.map((profile, index) => ({
+                                value: String(index),
+                                label: profile.name || `Profile ${index + 1}`,
+                            }))}
+                            onUpdate:modelValue={(value: string) => (activeIndex.value = Number(value))}
+                            ariaLabel={t("Crypto Profiles")}
+                        />
+                    )}
+
+                    {active.value && (
+                        <WizardSection
+                            title={active.value.name || `Profile ${activeIndex.value + 1}`}
+                            v-slots={{
+                                actions: () => (
+                                    <>
+                                        <StatusBadge
+                                            status={active.value!.direction}
+                                            toneOverride="info"
+                                            showDot={false}
+                                        />
+                                        <VBtn
+                                            size="x-small"
+                                            variant="text"
+                                            color="error"
+                                            onClick={() => removeProfile(activeIndex.value)}
+                                        >
+                                            ×
+                                        </VBtn>
+                                    </>
+                                ),
+                            }}
                         >
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                                {t("Crypto Profiles")}
-                            </ThemedText>
-                            <VBtn variant="tonal" size="small" onClick={addProfile}>
-                                {t("Add")}
-                            </VBtn>
-                        </ThemedView>
+                            <div style={gridStyle}>
+                                <FormField label={t("Signature Profile")}>
+                                    <VTextField
+                                        modelValue={active.value.name}
+                                        onUpdate:modelValue={(v: string) => updateProfile(activeIndex.value, { name: v })}
+                                    />
+                                </FormField>
+                                <FormField label={t("Type")}>
+                                    <VSelect
+                                        items={["OUTBOUND_SIGN", "INBOUND_VERIFY"]}
+                                        modelValue={active.value.direction}
+                                        onUpdate:modelValue={(v: any) => updateProfile(activeIndex.value, { direction: v })}
+                                    />
+                                </FormField>
+                                <FormField label={t("Algorithm")}>
+                                    <VSelect
+                                        items={["HMAC_SHA256", "HMAC_SHA512", "RSA_SHA256"]}
+                                        modelValue={active.value.algorithm}
+                                        onUpdate:modelValue={(v: any) => updateProfile(activeIndex.value, { algorithm: v })}
+                                    />
+                                </FormField>
+                                <FormField label={t("Key Encoding")}>
+                                    <VSelect
+                                        items={["utf8", "hex", "base64"]}
+                                        modelValue={active.value.keyEncoding}
+                                        onUpdate:modelValue={(v: any) => updateProfile(activeIndex.value, { keyEncoding: v })}
+                                    />
+                                </FormField>
+                                <FormField label={t("Canonicalization")}>
+                                    <VSelect
+                                        items={[
+                                            "SORTED_KEY_VALUE_AMP",
+                                            "TIMESTAMP_DOT_RAW_BODY",
+                                            "SORTED_VALUES_HASH",
+                                            "RAW_BODY",
+                                        ]}
+                                        modelValue={active.value.canonicalization}
+                                        onUpdate:modelValue={(v: any) =>
+                                            updateProfile(activeIndex.value, { canonicalization: v })
+                                        }
+                                    />
+                                </FormField>
+                                <FormField label="secret_ref" sensitiveMakerChecker>
+                                    <VTextField
+                                        modelValue={active.value.secretRef}
+                                        onUpdate:modelValue={(v: string) => updateProfile(activeIndex.value, { secretRef: v })}
+                                    />
+                                </FormField>
+                                <FormField label={t("Params")}>
+                                    <VTextField
+                                        modelValue={(active.value.fields ?? []).join(",")}
+                                        onUpdate:modelValue={(v: string) =>
+                                            updateProfile(activeIndex.value, {
+                                                fields: v
+                                                    .split(",")
+                                                    .map((entry) => entry.trim())
+                                                    .filter((entry) => !!entry),
+                                            })
+                                        }
+                                    />
+                                </FormField>
+                                <FormField label="tolerance_seconds">
+                                    <VTextField
+                                        type="number"
+                                        modelValue={active.value.toleranceSeconds}
+                                        onUpdate:modelValue={(v: any) =>
+                                            updateProfile(activeIndex.value, { toleranceSeconds: Number(v) })
+                                        }
+                                    />
+                                </FormField>
+                            </div>
+                        </WizardSection>
+                    )}
 
-                        <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
-                            {profiles.value.map((profile, index) => (
-                                <ThemedView key={index} style={{ flexDirection: "row", alignItems: "center", gap: "6px" }}>
-                                    <VBtn
-                                        size="small"
-                                        variant={index === activeIndex.value ? "flat" : "text"}
-                                        color={index === activeIndex.value ? "primary" : undefined}
-                                        onClick={() => (activeIndex.value = index)}
-                                    >
-                                        {profile.name || `Profile ${index + 1}`}
-                                    </VBtn>
-                                    <VBtn size="x-small" variant="text" color="error" onClick={() => removeProfile(index)}>
-                                        ×
-                                    </VBtn>
-                                </ThemedView>
-                            ))}
-                        </ThemedView>
-
-                        {active.value && (
-                            <ThemedView style={{ flexDirection: "row", gap: "14px", flexWrap: "wrap" }}>
-                                <VTextField
-                                    label={t("Signature Profile")}
-                                    modelValue={active.value.name}
-                                    onUpdate:modelValue={(v: string) => updateProfile(activeIndex.value, { name: v })}
-                                    style={{ minWidth: "200px" }}
-                                />
-                                <VSelect
-                                    items={["OUTBOUND_SIGN", "INBOUND_VERIFY"]}
-                                    modelValue={active.value.direction}
-                                    onUpdate:modelValue={(v: any) => updateProfile(activeIndex.value, { direction: v })}
-                                    label={t("Type")}
-                                    style={{ minWidth: "200px" }}
-                                />
-                                <VSelect
-                                    items={["HMAC_SHA256", "HMAC_SHA512", "RSA_SHA256"]}
-                                    modelValue={active.value.algorithm}
-                                    onUpdate:modelValue={(v: any) => updateProfile(activeIndex.value, { algorithm: v })}
-                                    label={t("Algorithm")}
-                                    style={{ minWidth: "180px" }}
-                                />
-                                <VSelect
-                                    items={["utf8", "hex", "base64"]}
-                                    modelValue={active.value.keyEncoding}
-                                    onUpdate:modelValue={(v: any) => updateProfile(activeIndex.value, { keyEncoding: v })}
-                                    label={t("Key Encoding")}
-                                    style={{ minWidth: "160px" }}
-                                />
-                                <VSelect
-                                    items={[
-                                        "SORTED_KEY_VALUE_AMP",
-                                        "TIMESTAMP_DOT_RAW_BODY",
-                                        "SORTED_VALUES_HASH",
-                                        "RAW_BODY",
-                                    ]}
-                                    modelValue={active.value.canonicalization}
-                                    onUpdate:modelValue={(v: any) =>
-                                        updateProfile(activeIndex.value, { canonicalization: v })
-                                    }
-                                    label={t("Canonicalization")}
-                                    style={{ minWidth: "250px" }}
-                                />
-                                <VTextField
-                                    label="secret_ref"
-                                    modelValue={active.value.secretRef}
-                                    onUpdate:modelValue={(v: string) => updateProfile(activeIndex.value, { secretRef: v })}
-                                    style={{ minWidth: "180px" }}
-                                />
-                                <VTextField
-                                    label={t("Params")}
-                                    modelValue={(active.value.fields ?? []).join(",")}
-                                    onUpdate:modelValue={(v: string) =>
-                                        updateProfile(activeIndex.value, {
-                                            fields: v
-                                                .split(",")
-                                                .map((entry) => entry.trim())
-                                                .filter((entry) => !!entry),
-                                        })
-                                    }
-                                    style={{ minWidth: "240px" }}
-                                />
-                                <VTextField
-                                    label="tolerance_seconds"
-                                    type="number"
-                                    modelValue={active.value.toleranceSeconds}
-                                    onUpdate:modelValue={(v: any) =>
-                                        updateProfile(activeIndex.value, { toleranceSeconds: Number(v) })
-                                    }
-                                    style={{ minWidth: "150px" }}
-                                />
-                            </ThemedView>
-                        )}
-                    </VCardText>
-                </VCard>
-
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <ThemedText type="defaultSemiBold">{t("Test Signature")}</ThemedText>
-                        <VTextarea
-                            label={t("Payload")}
-                            modelValue={samplePayload.value}
-                            onUpdate:modelValue={(v: string) => (samplePayload.value = v)}
-                            rows={4}
-                        />
-                        <VTextField
-                            label={t("Secret")}
-                            type="password"
-                            modelValue={sampleKey.value}
-                            onUpdate:modelValue={(v: string) => (sampleKey.value = v)}
-                        />
-                        <VTextField
-                            label={t("Expected Signature")}
-                            modelValue={expectedSignature.value}
-                            onUpdate:modelValue={(v: string) => (expectedSignature.value = v)}
-                        />
-                        <ThemedView style={{ flexDirection: "row", gap: "12px", alignItems: "center" }}>
+                    <WizardSection title={t("Test Signature")} divider>
+                        <FormField label={t("Payload")}>
+                            <VTextarea
+                                modelValue={samplePayload.value}
+                                onUpdate:modelValue={(v: string) => (samplePayload.value = v)}
+                                rows={4}
+                            />
+                        </FormField>
+                        <FormField label={t("Secret")} sensitiveMakerChecker>
+                            <VTextField
+                                type="password"
+                                modelValue={sampleKey.value}
+                                onUpdate:modelValue={(v: string) => (sampleKey.value = v)}
+                            />
+                        </FormField>
+                        <FormField label={t("Expected Signature")}>
+                            <VTextField
+                                modelValue={expectedSignature.value}
+                                onUpdate:modelValue={(v: string) => (expectedSignature.value = v)}
+                            />
+                        </FormField>
+                        <div style={{ display: "flex", flexDirection: "row", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
                             <VBtn color="primary" loading={computing.value} onClick={() => void compute()}>
                                 {t("Test Signature")}
                             </VBtn>
                             {computedSignature.value && (
-                                <StatusChip label={computedSignature.value.slice(0, 24) + "…"} tone="info" />
+                                <MonoRef value={computedSignature.value} truncate={32} />
                             )}
                             {matches.value !== null && (
-                                <StatusChip label={matches.value ? t("Passed") : t("Failed")} tone={matches.value ? "success" : "error"} />
+                                <StatusBadge
+                                    status={matches.value ? "VERIFIED" : "FAILED"}
+                                    label={matches.value ? t("Passed") : t("Failed")}
+                                    toneOverride={matches.value ? "success" : "danger"}
+                                />
                             )}
-                        </ThemedView>
+                        </div>
                         {verifyError.value && (
                             <VAlert type="error" variant="tonal" density="compact">
                                 {verifyError.value}
                             </VAlert>
                         )}
-                    </VCardText>
-                </VCard>
-            </ThemedView>
+                    </WizardSection>
+                </SurfaceCardText>
+            </SurfaceCard>
         );
     },
     {

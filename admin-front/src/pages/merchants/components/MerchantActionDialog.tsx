@@ -2,7 +2,7 @@ import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VCheckbox, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VCheckbox, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { api } from "@/state/api";
@@ -13,6 +13,7 @@ import { CLOSE_REASONS, SUSPENSION_REASONS } from "../merchantHelp";
 import type { MerchantSummary } from "../types";
 
 import { FormModal } from "@/components/ui/FormModal";
+import { FormField } from "@/components/ui/FormField";
 const SUSPEND_CHECKS = [
     { key: "IMPACT_REVIEWED", label: "Merchant impact reviewed" },
     { key: "REASON_DOCUMENTED", label: "Suspension reason documented" },
@@ -141,30 +142,42 @@ const MerchantActionDialog = dc(
                 onUpdate:modelValue={(value: boolean) => props.onUpdate(value)}
                 title={title.value}
                 size="md"
+                onSubmit={() => void submit()}
+                submitLabel={props.mode === "REINSTATE" ? t("Request reinstatement") : props.mode === "CLOSE" ? t("Request closure") : t("Request suspension")}
+                cancelLabel={t("Cancel")}
+                loading={saving.value}
+                danger={props.mode !== "REINSTATE"}
+                errorMessage={error.value ?? ""}
             >
 <ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>
                             {props.merchant?.tradeName} · {props.merchant?.status}
                         </ThemedText>
                         {isSuspend.value && (
                             <>
-                                <VSelect v-model={reasonCode.value} label={t("Reason code")} items={SUSPENSION_REASONS} />
+                                <FormField label={t("Reason code")} required>
+                                    <VSelect v-model={reasonCode.value} items={SUSPENSION_REASONS} />
+                                </FormField>
                                 <VSwitch v-model={emergency.value} label={t("Emergency suspension (immediate effect)")} color="error" hideDetails />
                                 {emergency.value && (
                                     <>
                                         <VAlert type="warning" variant="tonal">
                                             {t("The suspension takes effect now. A compliance or MLRO checker must ratify it within the selected window; it remains in force if ratification is rejected.")}
                                         </VAlert>
-                                        <VTextField v-model={ratifyHours.value} label={t("Ratify within hours")} type="number" />
+                                        <FormField label={t("Ratify within hours")}>
+                                            <VTextField v-model={ratifyHours.value} type="number" />
+                                        </FormField>
                                     </>
                                 )}
                             </>
                         )}
                         {isClose.value && (
                             <>
-                                <VAlert type="error" variant="tonal">
+                                <VAlert type="warning" variant="tonal">
                                     {t("Closing is irreversible and requires zero wallet balance, no open disputes and no pending cash-outs.")}
                                 </VAlert>
-                                <VSelect v-model={reasonCode.value} label={t("Reason code")} items={CLOSE_REASONS} />
+                                <FormField label={t("Reason code")} required>
+                                    <VSelect v-model={reasonCode.value} items={CLOSE_REASONS} />
+                                </FormField>
                             </>
                         )}
                         {showChecklists && checks.value.length > 0 && (
@@ -185,19 +198,9 @@ const MerchantActionDialog = dc(
                                 )}
                             </ThemedView>
                         )}
-                        <VTextarea
-                            v-model={notes.value}
-                            label={props.mode === "REINSTATE" ? t("Reinstatement reason") : t("Notes")}
-                            rows={4}
-                            autoGrow
-                        />
-                        {error.value && <VAlert type="error" variant="tonal">{error.value}</VAlert>}
-                        <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
-                            <VBtn variant="text" onClick={() => props.onUpdate(false)}>{t("Cancel")}</VBtn>
-                            <VBtn color={props.mode === "REINSTATE" ? "success" : "error"} loading={saving.value} disabled={!checklistComplete.value} onClick={() => void submit()}>
-                                {props.mode === "REINSTATE" ? t("Request reinstatement") : props.mode === "CLOSE" ? t("Request closure") : t("Request suspension")}
-                            </VBtn>
-                        </ThemedView>
+                        <FormField label={props.mode === "REINSTATE" ? t("Reinstatement reason") : t("Notes")} required={props.mode === "REINSTATE"}>
+                            <VTextarea v-model={notes.value} rows={4} autoGrow />
+                        </FormField>
             </FormModal>
         );
     },
