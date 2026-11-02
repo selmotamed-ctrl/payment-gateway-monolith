@@ -1130,4 +1130,7 @@ export const appCatalogue: Record<string, [string, string]> = {
     "Effective dates reviewed": ["Effective dates reviewed", "تمت مراجعة تواريخ السريان"],
     "Action breakdown reviewed": ["Action breakdown reviewed", "تمت مراجعة توزيع الإجراءات"],
     "Entity breakdown reviewed": ["Entity breakdown reviewed", "تمت مراجعة توزيع الكيانات"],
+    "AML case scope verified": ["AML case scope verified", "تم التحقق من نطاق حالات مكافحة غسل الأموال"],
+    "Severity and status reviewed": ["Severity and status reviewed", "تمت مراجعة الخطورة والحالة"],
+    "SLA breach posture reviewed": ["SLA breach posture reviewed", "تمت مراجعة وضع خرق اتفاقية الخدمة"],
 };

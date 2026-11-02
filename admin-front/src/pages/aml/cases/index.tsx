@@ -100,6 +100,13 @@ type AmlCaseSummary = {
 
 type AmlCaseView = "open" | "resolved" | "all";
 
+const SUMMARY_EXPORT_CHECKS = [
+    { key: "CASE_SCOPE_VERIFIED", label: "AML case scope verified" },
+    { key: "SEVERITY_STATUS_REVIEWED", label: "Severity and status reviewed" },
+    { key: "SLA_BREACH_REVIEWED", label: "SLA breach posture reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
 const AML_CASE_CHECKS = [
     { key: "EVIDENCE_REVIEWED", label: "Evidence reviewed" },
     { key: "SUBJECT_IDENTIFIED", label: "Subject identified and verified" },
@@ -165,6 +172,7 @@ const AmlCasesPage = dc(() => {
     const actionLoading = ref(false);
     const exportLoading = ref(false);
     const summaryExportLoading = ref(false);
+    const summaryExportChecklist = ref<Record<string, boolean>>({});
 
     const filterDefinitions = computed(() => tableRegistry.AmlCases?.filters ?? []);
 
@@ -337,11 +345,19 @@ const AmlCasesPage = dc(() => {
         }
     };
 
+    const summaryExportChecklistComplete = computed(() => SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
+
     const exportSummary = async () => {
         if (summaryExportLoading.value) return;
+        if (!summaryExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all summary export checklist items before exporting") });
+            return;
+        }
         summaryExportLoading.value = true;
         try {
-            const response = await api.get(urlsMap.amlCasesSummaryExport);
+            const response = await api.get(urlsMap.amlCasesSummaryExport, {
+                params: { checklist: SUMMARY_EXPORT_CHECKS.filter((check) => summaryExportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
             const snapshot = (response.data?.data ?? response.data ?? {}) as AmlCaseSummary;
             const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
             const rows: Array<[string, unknown]> = [
@@ -486,7 +502,23 @@ const AmlCasesPage = dc(() => {
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("AML case health")}</ThemedText>
                                 <div style={{ flex: 1 }} />
-                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
+                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
+                            </ThemedView>
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
+                                {SUMMARY_EXPORT_CHECKS.map((check) => (
+                                    <VCheckbox
+                                        key={check.key}
+                                        modelValue={summaryExportChecklist.value[check.key] === true}
+                                        onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
+                                        label={t(check.label)}
+                                        density="compact"
+                                        hideDetails
+                                    />
+                                ))}
+                                {!summaryExportChecklistComplete.value && (
+                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
+                                )}
                             </ThemedView>
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
                                 {summaryItems.value.map((item) => (

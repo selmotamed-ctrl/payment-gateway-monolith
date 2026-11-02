@@ -6728,6 +6728,15 @@ router.get("/aml/cases/summary/export", async (request: Request, response: Respo
   assertConfidential(request);
   const summary = await buildAmlCaseSummary();
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set([
+    "CASE_SCOPE_VERIFIED",
+    "SEVERITY_STATUS_REVIEWED",
+    "SLA_BREACH_REVIEWED",
+    "EXPORT_APPROVAL_CONFIRMED",
+  ]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
   await client.auditLog.create({
     data: {
       actorId: actor.userId,
@@ -6742,6 +6751,7 @@ router.get("/aml/cases/summary/export", async (request: Request, response: Respo
         criticalOpen: summary.criticalOpen,
         frozen: summary.frozen,
         escalated: summary.escalated,
+        checklist,
       },
     },
   });
