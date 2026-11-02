@@ -28,7 +28,7 @@ import { buildFilterQuery, type FilterValues } from "@/components/Table/filters"
 import { tableRegistry } from "@/components/Table/tableRegistry";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
-import { areChecklistsVisible } from "@/constants/env";
+import { areChecklistsVisible, areHelpPanelsVisible } from "@/constants/env";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -819,7 +819,7 @@ const ApprovalsPage = dc(() => {
                     )}
                 />
 
-                <VCard><VCardText><ApprovalHelpPanel /></VCardText></VCard>
+                {areHelpPanelsVisible() && <VCard><VCardText><ApprovalHelpPanel /></VCardText></VCard>}
             </ThemedView>
 
             <VDialog modelValue={bulkRejectOpen.value} onUpdate:modelValue={(value: boolean) => (bulkRejectOpen.value = value)} maxWidth="520px">

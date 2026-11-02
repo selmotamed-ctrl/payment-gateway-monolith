@@ -3,11 +3,15 @@ import { ref } from "vue";
 import { useLocale } from "vuetify";
 import { VExpansionPanel, VExpansionPanelText, VExpansionPanelTitle, VExpansionPanels } from "vuetify/components";
 import { ThemedText } from "@/components/ThemedText";
+import { areHelpPanelsVisible } from "@/constants/env";
 import { MERCHANT_HELP_SECTIONS } from "../merchantHelp";
 
 const MerchantHelpPanel = dc(() => {
     const { t } = useLocale();
     const open = ref<number[]>([]);
+    if (!areHelpPanelsVisible()) {
+        return () => null;
+    }
     return () => (
         <VExpansionPanels modelValue={open.value} onUpdate:modelValue={(value: unknown) => (open.value = (value as number[]) ?? [])} variant="accordion">
             {MERCHANT_HELP_SECTIONS.map((section, index) => (

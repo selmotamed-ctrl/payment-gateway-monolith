@@ -117,6 +117,7 @@ const base = z.strictObject({
   ADMIN_REMOTE_DIR: z.string().trim().min(1).max(200).default("/var/www/pg-admin"),
   ADMIN_SHOW_CHECKLISTS: booleanish.optional(),
   ADMIN_SHOW_SNAPSHOT_EXPORT_CHECKLIST: booleanish.default(true),
+  ADMIN_SHOW_HELP_PANELS: booleanish.default(true),
 
   // 4. Merchant
   MERCHANT_SSH_HOST: ipv4,

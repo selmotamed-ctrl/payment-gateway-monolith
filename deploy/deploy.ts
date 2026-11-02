@@ -456,6 +456,7 @@ const frontendBuildEnv = (frontend: string, config: DeployConfig): Record<string
     return {
       VITE_SHOW_CHECKLISTS: visible,
       VITE_SHOW_SNAPSHOT_EXPORT_CHECKLIST: visible,
+      VITE_SHOW_HELP_PANELS: String(config.ADMIN_SHOW_HELP_PANELS),
     };
   }
   return {};
@@ -472,6 +473,7 @@ const frontendRuntimeConfig = (frontend: string, config: DeployConfig): Record<s
       showChecklists: visible,
       // Legacy key read by releases built before the master checklist flag.
       showSnapshotExportChecklist: visible,
+      showHelpPanels: config.ADMIN_SHOW_HELP_PANELS,
     };
   }
   return null;

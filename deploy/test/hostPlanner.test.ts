@@ -69,6 +69,7 @@ describe("deploy config validation", () => {
     expect(config.REDIS_URL).toBeUndefined();
     expect(config.ADMIN_SHOW_CHECKLISTS).toBeUndefined();
     expect(config.ADMIN_SHOW_SNAPSHOT_EXPORT_CHECKLIST).toBe(true);
+    expect(config.ADMIN_SHOW_HELP_PANELS).toBe(true);
   });
 
   test("parses the admin checklist visibility flags", () => {
@@ -76,6 +77,11 @@ describe("deploy config validation", () => {
     expect(legacy.ADMIN_SHOW_SNAPSHOT_EXPORT_CHECKLIST).toBe(false);
     const master = requireConfig(withOverrides(`ADMIN_SHOW_CHECKLISTS="false"`));
     expect(master.ADMIN_SHOW_CHECKLISTS).toBe(false);
+  });
+
+  test("parses the admin help panel visibility flag", () => {
+    const config = requireConfig(withOverrides(`ADMIN_SHOW_HELP_PANELS="false"`));
+    expect(config.ADMIN_SHOW_HELP_PANELS).toBe(false);
   });
 
   test("rejects a DATABASE_URL that disagrees with DB_ENGINE", () => {

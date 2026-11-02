@@ -59,10 +59,12 @@ describe("frontend runtime config", () => {
     const config = {
       ADMIN_SHOW_CHECKLISTS: undefined,
       ADMIN_SHOW_SNAPSHOT_EXPORT_CHECKLIST: false,
+      ADMIN_SHOW_HELP_PANELS: true,
     } as unknown as Parameters<typeof frontendRuntimeConfig>[1];
     expect(frontendRuntimeConfig("admin-front", config)).toEqual({
       showChecklists: false,
       showSnapshotExportChecklist: false,
+      showHelpPanels: true,
     });
     expect(frontendRuntimeConfig("merchant-front", config)).toBeNull();
   });
@@ -71,10 +73,12 @@ describe("frontend runtime config", () => {
     const config = {
       ADMIN_SHOW_CHECKLISTS: true,
       ADMIN_SHOW_SNAPSHOT_EXPORT_CHECKLIST: false,
+      ADMIN_SHOW_HELP_PANELS: false,
     } as unknown as Parameters<typeof frontendRuntimeConfig>[1];
     expect(frontendRuntimeConfig("admin-front", config)).toEqual({
       showChecklists: true,
       showSnapshotExportChecklist: true,
+      showHelpPanels: false,
     });
   });
 });

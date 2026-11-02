@@ -17,6 +17,7 @@ import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities, user } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
+import { areHelpPanelsVisible } from "@/constants/env";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
@@ -490,11 +491,13 @@ const MerchantsPage = dc(() => {
                     </VCard>
                 )}
 
-                <VCard>
-                    <VCardText>
-                        <MerchantHelpPanel />
-                    </VCardText>
-                </VCard>
+                {areHelpPanelsVisible() && (
+                    <VCard>
+                        <VCardText>
+                            <MerchantHelpPanel />
+                        </VCardText>
+                    </VCard>
+                )}
                 <ApiTable<MerchantSummary>
                     title={t("Merchants")}
                     url={urlsMap.merchantsList}

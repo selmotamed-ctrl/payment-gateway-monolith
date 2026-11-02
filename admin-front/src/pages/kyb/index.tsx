@@ -16,6 +16,7 @@ import { statusTone } from "@/components/Table/statusTone";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
+import { areHelpPanelsVisible } from "@/constants/env";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
@@ -524,11 +525,13 @@ const KybReviewPage = dc(() => {
                     </VCard>
                 )}
 
-                <VCard>
-                    <VCardText>
-                        <KybHelpPanel />
-                    </VCardText>
-                </VCard>
+                {areHelpPanelsVisible() && (
+                    <VCard>
+                        <VCardText>
+                            <KybHelpPanel />
+                        </VCardText>
+                    </VCard>
+                )}
                 <ApiTable<KybDocumentSummary>
                     title={t("KYB Review")}
                     url={urlsMap.kybDocumentsList}

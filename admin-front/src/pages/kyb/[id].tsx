@@ -14,6 +14,7 @@ import type { FieldProps } from "@/components/Field";
 import { statusTone } from "@/components/Table/statusTone";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
+import { areHelpPanelsVisible } from "@/constants/env";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import {
     COLUMN_HELP,
@@ -285,11 +286,13 @@ const KybReviewDetailPage = dc(() => {
                         </VAlert>
                     )}
 
-                    <VCard>
-                        <VCardText>
-                            <KybHelpPanel />
-                        </VCardText>
-                    </VCard>
+                    {areHelpPanelsVisible() && (
+                        <VCard>
+                            <VCardText>
+                                <KybHelpPanel />
+                            </VCardText>
+                        </VCard>
+                    )}
 
                     <FieldsSections sections={sections.value} />
 

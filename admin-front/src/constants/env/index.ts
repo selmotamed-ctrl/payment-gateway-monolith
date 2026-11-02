@@ -20,3 +20,9 @@ export const areChecklistsVisible = () => {
         true,
     );
 };
+
+export const areHelpPanelsVisible = () => {
+    const runtimeConfig = typeof window === "undefined" ? undefined : window.__PG_RUNTIME_CONFIG__;
+    if (typeof runtimeConfig?.showHelpPanels === "boolean") return runtimeConfig.showHelpPanels;
+    return isEnabled(import.meta.env.VITE_SHOW_HELP_PANELS, true);
+};
