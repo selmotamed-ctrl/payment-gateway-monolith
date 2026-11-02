@@ -2,7 +2,6 @@ import AutoImport from "unplugin-auto-import/vite";
 import VueRouter from "unplugin-vue-router/vite";
 import Layouts from "vite-plugin-vue-layouts-next";
 import Components from "unplugin-vue-components/vite";
-import Fonts from "unplugin-fonts/vite";
 
 import { fileURLToPath, URL } from "node:url";
 
@@ -57,18 +56,10 @@ export default ({ mode }: any) => {
                 },
             }),
 
-            Fonts({
-                fontsource: {
-                    families: [
-                        {
-                            name: "Roboto",
-                            weights: [100, 300, 400, 500, 700, 900],
-                            styles: ["normal", "italic"],
-                        },
-                    ],
-                },
-            }),
         ],
+        build: {
+            assetsInlineLimit: 0,
+        },
         optimizeDeps: {
             exclude: [
                 "vuetify",

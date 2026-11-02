@@ -358,16 +358,16 @@ body,
 
 * {
     scrollbar-width: thin !important;
-    font-family: "Plus Jakarta Sans", "Cairo", system-ui, sans-serif;
+    font-family: "IBM Plex Sans", "IBM Plex Sans Arabic", system-ui, sans-serif;
     font-optical-sizing: auto;
     letter-spacing: 0;
     scrollbar-color: rgba(100, 100, 100, 0.4) transparent;
 }
 
-/* Arabic uses Cairo; Latin keeps Plus Jakarta. No global letter-spacing. */
+/* Arabic uses IBM Plex Sans Arabic; Latin uses IBM Plex Sans. */
 [dir="rtl"] *,
 [dir="rtl"] {
-    font-family: "Cairo", "Plus Jakarta Sans", system-ui, sans-serif;
+    font-family: "IBM Plex Sans Arabic", "IBM Plex Sans", system-ui, sans-serif;
     letter-spacing: 0;
 }
 

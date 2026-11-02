@@ -392,7 +392,7 @@ const DashboardPage = dc(() => {
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : (
                     <>
-                        <VCard variant="tonal">
+                        <VCard>
                             <VCardText style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                                 <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Snapshot export checklist")}</ThemedText>
                                 {EXPORT_CHECKS.map((check) => (

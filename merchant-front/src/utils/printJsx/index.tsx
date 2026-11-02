@@ -69,7 +69,7 @@ export const PrintProvider = dc(
                         <ThemedView
                             style={{
                                 width: "100%",
-                                fontFamily: "Cairo !important",
+                                fontFamily: '"IBM Plex Sans Arabic", "IBM Plex Sans", sans-serif',
                                 direction: "rtl",
                             }}
                         >

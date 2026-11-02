@@ -8,7 +8,7 @@ import { registerPlugins } from "@/plugins";
 import { createApp } from "vue";
 import App from "./App";
 
-import "unfonts.css";
+import "@/assets/fonts/fonts.css";
 
 
 import { VueDatePicker } from '@vuepic/vue-datepicker';

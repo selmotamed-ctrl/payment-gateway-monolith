@@ -1,6 +1,15 @@
 @use "vuetify/settings" with (
-  $color-pack: true
+  $color-pack: true,
+  $body-font-family: ('IBM Plex Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif)
 );
+
+body {
+  font-family: "IBM Plex Sans", "IBM Plex Sans Arabic", system-ui, sans-serif;
+}
+
+[dir="rtl"] body {
+  font-family: "IBM Plex Sans Arabic", "IBM Plex Sans", system-ui, sans-serif;
+}
 
 .pg-portal {
   min-height: 100vh;
