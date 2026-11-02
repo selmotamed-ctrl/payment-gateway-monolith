@@ -15143,6 +15143,15 @@ router.get("/audit-logs/summary/export", async (request: Request, response: Resp
   requireAuthorities(request, ["security:read"]);
   const snapshot = await buildAuditLogSummary();
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set([
+    "ACTIVITY_SCOPE_VERIFIED",
+    "ACTION_BREAKDOWN_REVIEWED",
+    "ENTITY_BREAKDOWN_REVIEWED",
+    "EXPORT_APPROVAL_CONFIRMED",
+  ]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
   await client.auditLog.create({
     data: {
       actorId: actor.userId,
@@ -15155,6 +15164,7 @@ router.get("/audit-logs/summary/export", async (request: Request, response: Resp
         total: snapshot.summary.total,
         last24h: snapshot.summary.last24h,
         actors: snapshot.summary.actors,
+        checklist,
       },
     },
   });
@@ -15409,6 +15419,15 @@ router.get("/settings/summary/export", async (request: Request, response: Respon
   requireAuthorities(request, ["settings:read"]);
   const snapshot = await buildPlatformSettingsSummary();
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set([
+    "SETTINGS_SCOPE_VERIFIED",
+    "VERSIONS_REVIEWED",
+    "EFFECTIVE_DATES_REVIEWED",
+    "EXPORT_APPROVAL_CONFIRMED",
+  ]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
   await client.auditLog.create({
     data: {
       actorId: actor.userId,
@@ -15422,6 +15441,7 @@ router.get("/settings/summary/export", async (request: Request, response: Respon
         versions: snapshot.summary.versions,
         futureEffective: snapshot.summary.futureEffective,
         updatedLast24h: snapshot.summary.updatedLast24h,
+        checklist,
       },
     },
   });

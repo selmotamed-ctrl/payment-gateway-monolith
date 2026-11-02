@@ -1125,4 +1125,9 @@ export const appCatalogue: Record<string, [string, string]> = {
     "Access scope verified": ["Access scope verified", "تم التحقق من نطاق الوصول"],
     "Role and status breakdown reviewed": ["Role and status breakdown reviewed", "تمت مراجعة توزيع الأدوار والحالات"],
     "Maker/checker coverage reviewed": ["Maker/checker coverage reviewed", "تمت مراجعة تغطية الصانع والمدقق"],
+    "Settings scope verified": ["Settings scope verified", "تم التحقق من نطاق الإعدادات"],
+    "Version counts reviewed": ["Version counts reviewed", "تمت مراجعة عدد الإصدارات"],
+    "Effective dates reviewed": ["Effective dates reviewed", "تمت مراجعة تواريخ السريان"],
+    "Action breakdown reviewed": ["Action breakdown reviewed", "تمت مراجعة توزيع الإجراءات"],
+    "Entity breakdown reviewed": ["Entity breakdown reviewed", "تمت مراجعة توزيع الكيانات"],
 };

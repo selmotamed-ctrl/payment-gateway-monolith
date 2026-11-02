@@ -83,6 +83,13 @@ const jsonPreview = (value: unknown): string => {
     }
 };
 
+const SUMMARY_EXPORT_CHECKS = [
+    { key: "SETTINGS_SCOPE_VERIFIED", label: "Settings scope verified" },
+    { key: "VERSIONS_REVIEWED", label: "Version counts reviewed" },
+    { key: "EFFECTIVE_DATES_REVIEWED", label: "Effective dates reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
 const SETTING_EDIT_CHECKS = [
     { key: "KEY_SCOPE_VERIFIED", label: "Key and scope verified" },
     { key: "VALUE_SCHEMA_REVIEWED", label: "Value schema reviewed" },
@@ -113,6 +120,7 @@ const PlatformSettingsPage = dc(() => {
     const saving = ref(false);
     const exportLoading = ref(false);
     const summaryExportLoading = ref(false);
+    const summaryExportChecklist = ref<Record<string, boolean>>({});
     const history = ref<PlatformSetting[]>([]);
     const restoreOpen = ref(false);
     const restoreLoading = ref(false);
@@ -170,11 +178,19 @@ const PlatformSettingsPage = dc(() => {
             .sort((left, right) => left.key.localeCompare(right.key));
     });
 
+    const summaryExportChecklistComplete = computed(() => SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
+
     const exportSummary = async () => {
         if (summaryExportLoading.value) return;
+        if (!summaryExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all summary export checklist items before exporting") });
+            return;
+        }
         summaryExportLoading.value = true;
         try {
-            const response = await api.get(urlsMap.settingsSummaryExport);
+            const response = await api.get(urlsMap.settingsSummaryExport, {
+                params: { checklist: SUMMARY_EXPORT_CHECKS.filter((check) => summaryExportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
             const payload = response.data?.data ?? response.data ?? {};
             const snapshot = (payload.summary ?? payload) as SettingsSummary;
             const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
@@ -451,9 +467,25 @@ const PlatformSettingsPage = dc(() => {
                                     <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                         <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Configuration health")}</ThemedText>
                                         <div style={{ flex: 1 }} />
-                                        <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
+                                        <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
                                     </ThemedView>
                                     <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
+                                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
+                                            {SUMMARY_EXPORT_CHECKS.map((check) => (
+                                                <VCheckbox
+                                                    key={check.key}
+                                                    modelValue={summaryExportChecklist.value[check.key] === true}
+                                                    onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
+                                                    label={t(check.label)}
+                                                    density="compact"
+                                                    hideDetails
+                                                />
+                                            ))}
+                                            {!summaryExportChecklistComplete.value && (
+                                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
+                                            )}
+                                        </ThemedView>
                                         {summaryItems.value.map((item) => (
                                             <VCard key={item.label} variant="tonal">
                                                 <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
