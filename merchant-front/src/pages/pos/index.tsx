@@ -2,9 +2,9 @@ import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
-import { VBtn, VCard, VCardText, VDialog, VTextField } from "vuetify/components";
+import { VBtn, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
@@ -15,6 +15,8 @@ import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 type Terminal = {
     id: string;
     name: string;
@@ -166,6 +168,7 @@ const PosTerminalsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("POS Terminals")}
+                    subtitle={t("Point-of-sale terminals and payment screens.")}
                     end={() => (
                         <VBtn
                             variant="tonal"
@@ -182,8 +185,8 @@ const PosTerminalsPage = dc(() => {
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : (
-                    <VCard>
-                        <VCardText>
+                    <SurfaceCard>
+                        <SurfaceCardText>
                             <DataTable
                                 title={t("POS Terminals")}
                                 data={rows.value}
@@ -195,15 +198,18 @@ const PosTerminalsPage = dc(() => {
                                 searchValue={search.value}
                                 setSearchValue={(value) => (search.value = value)}
                             />
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
                 )}
             </ThemedView>
 
-            <VDialog modelValue={terminalOpen.value} onUpdate:modelValue={(v: any) => (terminalOpen.value = v)} maxWidth="480px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <VTextField
+            <FormModal
+                modelValue={terminalOpen.value}
+                onUpdate:modelValue={(v: any) => (terminalOpen.value = v)}
+                title={"Details"}
+                size="sm"
+            >
+<VTextField
                             label={t("Terminal")}
                             modelValue={terminalForm.value.name}
                             onUpdate:modelValue={(v: string) => (terminalForm.value.name = v)}
@@ -216,15 +222,15 @@ const PosTerminalsPage = dc(() => {
                         <VBtn color="primary" loading={actionLoading.value} onClick={() => void createTerminal()}>
                             {t("Create")}
                         </VBtn>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
 
-            <VDialog modelValue={screenOpen.value} onUpdate:modelValue={(v: any) => (screenOpen.value = v)} maxWidth="480px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <ThemedText type="defaultSemiBold">{activeTerminal.value?.name}</ThemedText>
-                        <VTextField
+            <FormModal
+                modelValue={screenOpen.value}
+                onUpdate:modelValue={(v: any) => (screenOpen.value = v)}
+                title={activeTerminal.value?.name ?? t("POS terminal")}
+                size="sm"
+            >
+<VTextField
                             label={t("Merchant Name")}
                             modelValue={screenForm.value.name}
                             onUpdate:modelValue={(v: string) => (screenForm.value.name = v)}
@@ -237,9 +243,7 @@ const PosTerminalsPage = dc(() => {
                         <VBtn color="primary" loading={actionLoading.value} onClick={() => void createScreen()}>
                             {t("Create")}
                         </VBtn>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         </ScreenContainer>
     );
 });

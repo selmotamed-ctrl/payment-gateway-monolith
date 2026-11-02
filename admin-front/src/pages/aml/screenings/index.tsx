@@ -2,9 +2,9 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VProgressCircular, VSelect, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VCheckbox, VProgressCircular, VSelect, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StatusChip } from "@/components/StatusChip";
@@ -19,7 +19,12 @@ import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
-
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import { MonoRef } from "@/components/ui/MonoRef";
+import { DescriptionList } from "@/components/ui/DescriptionList";
+import { EmptyState } from "@/components/ui/EmptyState";
 type Screening = {
     id: string;
     subjectType: string;
@@ -42,7 +47,6 @@ type Screening = {
     completedAt: string | null;
     ageHours: number;
 };
-
 type ScreeningMatch = {
     id: string;
     listType: string;
@@ -58,13 +62,11 @@ type ScreeningMatch = {
     suppressUntil: string | null;
     createdAt: string;
 };
-
 type ScreeningDetail = Screening & {
     matches: ScreeningMatch[];
     amlCases: Array<{ id: string; status: string; severity: string; createdAt: string }>;
     canDisposition: boolean;
 };
-
 type ScreeningSummary = {
     total: number;
     screened24h: number;
@@ -73,29 +75,24 @@ type ScreeningSummary = {
     byTrigger: Record<string, number>;
     latestScreenedAt: string | null;
 };
-
 const DISPOSITION_CHECKS = [
     { key: "MATCH_DETAILS_REVIEWED", label: "Match details reviewed" },
     { key: "IDENTITY_EVIDENCE_CHECKED", label: "Identity evidence checked" },
     { key: "DISPOSITION_RATIONALE_DOCUMENTED", label: "Disposition rationale documented" },
     { key: "ESCALATION_PATH_CONFIRMED", label: "Escalation path confirmed" },
 ] as const;
-
 const DISPOSITIONS = [
     { title: "False positive", value: "FALSE_POSITIVE" },
     { title: "True match", value: "TRUE_MATCH" },
     { title: "Escalated", value: "ESCALATED" },
 ];
-
 const formatDateTime = (value: string | null | undefined): string => {
     if (!value) return "—";
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "—";
     return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
 };
-
 const resultTone = (result: string) => statusTone(result);
-
 const AmlScreeningsPage = dc(() => {
     const { t } = useLocale();
     const showChecklists = areChecklistsVisible();
@@ -111,7 +108,6 @@ const AmlScreeningsPage = dc(() => {
         refreshAsIs: () => void;
     } | null>(null);
     let filterTimer: ReturnType<typeof setTimeout> | undefined;
-
     const detailsOpen = ref(false);
     const selected = ref<ScreeningDetail | null>(null);
     const detailLoading = ref(false);
@@ -122,10 +118,8 @@ const AmlScreeningsPage = dc(() => {
     const actionLoading = ref(false);
     const exportLoading = ref(false);
     const summaryExportLoading = ref(false);
-
     const filterDefinitions = computed(() => tableRegistry.AmlScreenings?.filters ?? []);
     const unresolvedMatches = computed(() => selected.value?.matches.filter((match) => match.disposition === "UNREVIEWED") ?? []);
-
     const loadSummary = async () => {
         try {
             const response = await api.get(urlsMap.amlScreeningsSummary);
@@ -135,20 +129,16 @@ const AmlScreeningsPage = dc(() => {
             summary.value = null;
         }
     };
-
     void loadSummary();
-
     const onFiltersChanged = (key: string, value: unknown) => {
         filters.value = { ...filters.value, [key]: value };
         if (filterTimer) clearTimeout(filterTimer);
         filterTimer = setTimeout(() => refreshHook.value?.reset(), 300);
     };
-
     const onFiltersCleared = () => {
         filters.value = {};
         refreshHook.value?.reset();
     };
-
     const exportExcel = async () => {
         if (exportLoading.value) return;
         exportLoading.value = true;
@@ -208,12 +198,10 @@ const AmlScreeningsPage = dc(() => {
             exportLoading.value = false;
         }
     };
-
     const refreshAll = () => {
         refreshHook.value?.refreshAsIs();
         void loadSummary();
     };
-
     const openDetails = async (row: Screening) => {
         selected.value = { ...row, matches: [], amlCases: [], canDisposition: false };
         selectedMatchId.value = row.matchId ?? "";
@@ -235,9 +223,7 @@ const AmlScreeningsPage = dc(() => {
             detailLoading.value = false;
         }
     };
-
     const dispositionChecklistComplete = computed(() => !showChecklists || DISPOSITION_CHECKS.every((check) => dispositionChecklist.value[check.key] === true));
-
     const submitDisposition = async () => {
         if (!selectedMatchId.value) {
             showSnackBar({ type: "warning", message: t("Select an unresolved match") });
@@ -273,7 +259,6 @@ const AmlScreeningsPage = dc(() => {
             actionLoading.value = false;
         }
     };
-
     const exportSummary = async () => {
         if (summaryExportLoading.value) return;
         summaryExportLoading.value = true;
@@ -301,20 +286,17 @@ const AmlScreeningsPage = dc(() => {
             summaryExportLoading.value = false;
         }
     };
-
-    const summaryItems = computed(() => {
+    const summaryMetrics = computed<MetricItem[]>(() => {
         const data = summary.value;
         if (!data) return [];
         return [
-            { label: t("Screenings"), value: String(data.total), tone: "info" as const },
-            { label: t("Last 24h"), value: String(data.screened24h), tone: "neutral" as const },
-            { label: t("Unresolved matches"), value: String(data.unresolvedMatches), tone: data.unresolvedMatches > 0 ? "warning" as const : "success" as const },
-            { label: t("Potential matches"), value: String(data.byResult?.POTENTIAL_MATCH ?? 0), tone: (data.byResult?.POTENTIAL_MATCH ?? 0) > 0 ? "warning" as const : "success" as const },
-            { label: t("Confirmed matches"), value: String(data.byResult?.CONFIRMED_MATCH ?? 0), tone: (data.byResult?.CONFIRMED_MATCH ?? 0) > 0 ? "error" as const : "success" as const },
-            { label: t("Provider errors"), value: String(data.byResult?.ERROR ?? 0), tone: (data.byResult?.ERROR ?? 0) > 0 ? "error" as const : "success" as const },
+            { key: "screenings", label: t("Screenings"), value: String(data.total) },
+            { key: "screened24h", label: t("Last 24h"), value: String(data.screened24h) },
+            { key: "unresolved", label: t("Unresolved matches"), value: String(data.unresolvedMatches), badge: data.unresolvedMatches > 0 ? t("Pending") : t("Clear"), badgeTone: data.unresolvedMatches > 0 ? "warning" : "success" },
+            { key: "potential", label: t("Potential matches"), value: String(data.byResult?.POTENTIAL_MATCH ?? 0), badge: (data.byResult?.POTENTIAL_MATCH ?? 0) > 0 ? t("High") : t("Clear"), badgeTone: (data.byResult?.POTENTIAL_MATCH ?? 0) > 0 ? "warning" : "success" },
+            { key: "confirmed", label: t("Confirmed matches"), value: String(data.byResult?.CONFIRMED_MATCH ?? 0), subLabel: `${data.byResult?.ERROR ?? 0} ${t("Provider errors")}`, badge: (data.byResult?.CONFIRMED_MATCH ?? 0) > 0 ? t("Critical") : t("Clear"), badgeTone: (data.byResult?.CONFIRMED_MATCH ?? 0) > 0 ? "danger" : "success" },
         ];
     });
-
     const headers = computed<TableHeader<Screening>[]>(() => [
         {
             key: "subject",
@@ -323,7 +305,10 @@ const AmlScreeningsPage = dc(() => {
             Value: ({ row }: { row: Screening }) => (
                 <ThemedView style={{ gap: "2px" }}>
                     <ThemedText style={{ fontSize: "12px", fontWeight: 600 }}>{row.subjectName || "—"}</ThemedText>
-                    <ThemedText style={{ fontSize: "10px", opacity: 0.55, direction: "ltr" }}>{row.subjectType} · {row.subjectReference}</ThemedText>
+                    <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "4px", flexWrap: "wrap" }}>
+                        <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{row.subjectType}</ThemedText>
+                        <MonoRef value={row.subjectReference} />
+                    </ThemedView>
                 </ThemedView>
             ),
         },
@@ -363,7 +348,7 @@ const AmlScreeningsPage = dc(() => {
             Value: ({ row }: { row: Screening }) => (
                 <ThemedView style={{ gap: "2px" }}>
                     <ThemedText style={{ fontSize: "11px", direction: "ltr" }}>{row.provider}</ThemedText>
-                    <ThemedText style={{ fontSize: "10px", opacity: 0.55, direction: "ltr" }}>{row.providerRequestRef || ""}</ThemedText>
+                    <MonoRef value={row.providerRequestRef ?? ""} />
                 </ThemedView>
             ),
         },
@@ -380,12 +365,14 @@ const AmlScreeningsPage = dc(() => {
             Value: ({ row }: { row: Screening }) => <VBtn size="small" variant="tonal" onClick={() => void openDetails(row)}>{t("Review")}</VBtn>,
         },
     ]);
-
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("AML Screenings")}
+                    subtitle={t("Review sanctions and PEP screening results and disposition unresolved matches.")}
+                    badge="AML-CONFIDENTIAL"
+                    badgeTone="danger"
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
@@ -393,38 +380,26 @@ const AmlScreeningsPage = dc(() => {
                         </ThemedView>
                     )}
                 />
-
                 <VAlert type="error" variant="tonal">
                     {t("AML-CONFIDENTIAL · Screening results and matches are restricted to Compliance, MLRO and authorised AML reviewers.")}
                 </VAlert>
-
                 {summary.value && (
-                    <VCard variant="flat" style={{ borderRadius: "16px" }}>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Screening health")}</ThemedText>
-                                <div style={{ flex: 1 }} />
-                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
-                            </ThemedView>
-                            <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
-                                {summaryItems.value.map((item) => (
-                                    <VCard key={item.label} variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
-                                            <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
-                                        </VCardText>
-                                    </VCard>
-                                ))}
-                            </ThemedView>
-                            <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                {Object.entries(summary.value.byResult ?? {}).map(([result, count]) => (
-                                    <StatusChip key={result} label={`${result}: ${count}`} tone={resultTone(result)} size="x-small" />
-                                ))}
-                            </ThemedView>
-                        </VCardText>
-                    </VCard>
+                    <>
+                        <MetricStrip items={summaryMetrics.value} />
+                        <SurfaceCard title={t("Screening health")}>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                                <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end" }}>
+                                    <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
+                                </ThemedView>
+                                <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                                    {Object.entries(summary.value.byResult ?? {}).map(([result, count]) => (
+                                        <StatusChip key={result} label={`${result}: ${count}`} tone={resultTone(result)} size="x-small" />
+                                    ))}
+                                </ThemedView>
+                            </SurfaceCardText>
+                        </SurfaceCard>
+                    </>
                 )}
-
                 <ApiTable<Screening>
                     title={t("AML screening queue")}
                     url={urlsMap.amlScreenings}
@@ -479,11 +454,13 @@ const AmlScreeningsPage = dc(() => {
                     )}
                 />
             </ThemedView>
-
-            <VDialog modelValue={detailsOpen.value} onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)} maxWidth="1080px" scrollable>
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                        {detailLoading.value || !selected.value ? (
+            <FormModal
+                modelValue={detailsOpen.value}
+                onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)}
+                title={selected.value?.subjectName ?? t("AML screening")}
+                size="lg"
+            >
+{detailLoading.value || !selected.value ? (
                             <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "280px", gap: "12px" }}>
                                 <VProgressCircular indeterminate size={52} color="primary" />
                                 <ThemedText style={{ opacity: 0.65 }}>{t("Loading screening")}</ThemedText>
@@ -492,7 +469,6 @@ const AmlScreeningsPage = dc(() => {
                             <>
                                 <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
                                     <ThemedView style={{ gap: "4px" }}>
-                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "19px" }}>{selected.value.subjectName}</ThemedText>
                                         <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{selected.value.subjectType} · {selected.value.subjectReference}</ThemedText>
                                     </ThemedView>
                                     <ThemedView style={{ flexDirection: "row", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
@@ -500,48 +476,41 @@ const AmlScreeningsPage = dc(() => {
                                         <StatusChip label={`${selected.value.matchCount} ${t("matches")}`} tone="neutral" size="small" />
                                     </ThemedView>
                                 </ThemedView>
-
                                 <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "14px" }}>
-                                    <VCard variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
+                                    <SurfaceCard variant="tonal">
+                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
                                             <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Screening context")}</ThemedText>
-                                            {[
-                                                [t("Provider"), selected.value.provider],
-                                                [t("Provider reference"), selected.value.providerRequestRef || "—"],
-                                                [t("Trigger"), selected.value.trigger],
-                                                [t("Merchant"), selected.value.merchantName || "—"],
-                                                [t("Score"), selected.value.score || "—"],
-                                                [t("Requested"), formatDateTime(selected.value.requestedAt)],
-                                                [t("Completed"), formatDateTime(selected.value.completedAt)],
-                                                [t("List versions"), JSON.stringify(selected.value.lists ?? {})],
-                                            ].map(([label, value]) => (
-                                                <ThemedView key={label} style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", borderBottom: "1px solid rgba(100,116,139,0.12)", paddingBottom: "4px" }}>
-                                                    <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{label}</ThemedText>
-                                                    <ThemedText style={{ fontSize: "11px", textAlign: "right", wordBreak: "break-word", direction: "ltr" }}>{value}</ThemedText>
-                                                </ThemedView>
-                                            ))}
-                                        </VCardText>
-                                    </VCard>
-
-                                    <VCard variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
+                                            <DescriptionList items={[
+                                                { label: t("Provider"), value: selected.value.provider },
+                                                { label: t("Provider reference"), value: <MonoRef value={selected.value.providerRequestRef ?? ""} /> },
+                                                { label: t("Trigger"), value: selected.value.trigger },
+                                                { label: t("Merchant"), value: selected.value.merchantName || "—" },
+                                                { label: t("Score"), value: selected.value.score || "—" },
+                                                { label: t("Requested"), value: formatDateTime(selected.value.requestedAt) },
+                                                { label: t("Completed"), value: formatDateTime(selected.value.completedAt) },
+                                                { label: t("List versions"), value: JSON.stringify(selected.value.lists ?? {}) },
+                                            ]} />
+                                        </SurfaceCardText>
+                                    </SurfaceCard>
+                                    <SurfaceCard variant="tonal">
+                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
                                             <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Related AML cases")}</ThemedText>
-                                            {selected.value.amlCases.length === 0 && <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{t("No AML case linked")}</ThemedText>}
+                                            {selected.value.amlCases.length === 0 && <EmptyState title={t("No AML case linked")} description={t("No AML case has been linked to this screening.")} />}
                                             {selected.value.amlCases.map((entry) => (
                                                 <ThemedView key={entry.id} style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                                                     <StatusChip label={entry.severity} tone={statusTone(entry.severity)} size="x-small" />
                                                     <StatusChip label={entry.status} tone={statusTone(entry.status)} size="x-small" />
+                                                    <MonoRef value={entry.id} />
                                                     <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{formatDateTime(entry.createdAt)}</ThemedText>
                                                 </ThemedView>
                                             ))}
-                                        </VCardText>
-                                    </VCard>
+                                        </SurfaceCardText>
+                                    </SurfaceCard>
                                 </ThemedView>
-
-                                <VCard variant="tonal">
-                                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                                <SurfaceCard variant="tonal">
+                                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                         <ThemedText type="defaultSemiBold">{t("Matches")}</ThemedText>
-                                        {selected.value.matches.length === 0 && <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("No matches returned")}</ThemedText>}
+                                        {selected.value.matches.length === 0 && <EmptyState title={t("No matches returned")} description={t("The screening provider returned no matches.")} />}
                                         {selected.value.matches.map((match) => (
                                             <ThemedView key={match.id} style={{ gap: "4px", borderBottom: "1px solid rgba(100,116,139,0.12)", paddingBottom: "7px" }}>
                                                 <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
@@ -549,17 +518,16 @@ const AmlScreeningsPage = dc(() => {
                                                     <ThemedText style={{ fontSize: "12px", fontWeight: 600 }}>{match.matchedName}</ThemedText>
                                                     <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>{match.listType} · {match.listName} · {match.score}</ThemedText>
                                                 </ThemedView>
-                                                <ThemedText style={{ fontSize: "10px", opacity: 0.55, direction: "ltr" }}>{match.listEntryRef}</ThemedText>
+                                                <MonoRef value={match.listEntryRef} />
                                                 {match.dispositionNotes && <ThemedText style={{ fontSize: "10px", opacity: 0.7 }}>{match.dispositionNotes}</ThemedText>}
                                                 {match.dispositionBy && <ThemedText style={{ fontSize: "10px", opacity: 0.5, direction: "ltr" }}>{match.dispositionBy}</ThemedText>}
                                             </ThemedView>
                                         ))}
-                                    </VCardText>
-                                </VCard>
-
+                                    </SurfaceCardText>
+                                </SurfaceCard>
                                 {unresolvedMatches.value.length > 0 ? (
-                                    <VCard variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                                    <SurfaceCard variant="tonal">
+                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                             <ThemedText type="defaultSemiBold">{t("Disposition an unresolved match")}</ThemedText>
                                             <VSelect
                                                 items={unresolvedMatches.value.map((match) => ({ title: `${match.matchedName} · ${match.listType} · ${match.score}`, value: match.id }))}
@@ -603,8 +571,8 @@ const AmlScreeningsPage = dc(() => {
                                                 <VBtn color="primary" loading={actionLoading.value} disabled={!dispositionChecklistComplete.value} onClick={() => void submitDisposition()}>{t("Save disposition")}</VBtn>
                                                 <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
                                             </ThemedView>
-                                        </VCardText>
-                                    </VCard>
+                                        </SurfaceCardText>
+                                    </SurfaceCard>
                                 ) : (
                                     <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
                                         <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
@@ -612,11 +580,8 @@ const AmlScreeningsPage = dc(() => {
                                 )}
                             </>
                         )}
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         </ScreenContainer>
     );
 });
-
 export default AmlScreeningsPage;

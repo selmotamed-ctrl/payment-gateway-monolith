@@ -6,7 +6,7 @@ import { useDisplay, useLocale, useTheme } from "vuetify";
 import Icon from "@/components/Icon/index.vue";
 import { TableRowActions } from "./TableRowActions";
 import { defineComponent } from "vue";
-import { VDivider, VForm, VIcon, VTooltip } from "vuetify/components";
+import { VForm, VIcon, VTooltip } from "vuetify/components";
 import { extractApiError } from "@/utils/errors/extractor";
 import { showConfirm } from "@/utils/confirm";
 import { adaptedLocale } from "@/plugins/localization";
@@ -29,7 +29,11 @@ const HeaderCell = defineComponent(
         return () => {
             const h = props.header;
             if (h.Header) {
-                return <h.Header key={h.key}></h.Header>;
+                return (
+                    <span title={h.headerTooltip ? t(h.headerTooltip) : undefined}>
+                        <h.Header key={h.key}></h.Header>
+                    </span>
+                );
             }
             const sortKey = h.sortKey ?? h.key;
             const isSortSelected = !!props.sortBy && props.sortBy === sortKey;
@@ -67,6 +71,30 @@ const HeaderCell = defineComponent(
                         </>
                     )}
 
+                    {h.headerTooltip && (
+                        <VTooltip
+                            text={t(h.headerTooltip)}
+                            location="top"
+                            maxWidth={420}
+                        >
+                            {{
+                                activator: ({ props: activatorProps }: any) => (
+                                    <VIcon
+                                        {...activatorProps}
+                                        {...{
+                                            tabindex: 0,
+                                            role: "button",
+                                            "aria-label": `${t(h.label ?? h.key)} ${t("help")}`,
+                                        }}
+                                        icon="mdi-help-circle-outline"
+                                        size={14}
+                                        style={{ opacity: 0.55, cursor: "help", flex: "0 0 auto" }}
+                                    />
+                                ),
+                            }}
+                        </VTooltip>
+                    )}
+
                     {h.headerIcon && (
                         <>
                             <Icon {...headerIconProps} icon={h.headerIcon} size="16px"></Icon>
@@ -83,6 +111,11 @@ const HeaderCell = defineComponent(
                             <Button
                                 variant="text"
                                 color={!isSortSelected ? colors.grey.darken1 : colors.blue.base}
+                                {...{
+                                    "aria-label": isSortSelected
+                                        ? `${t("Sorted")} ${props.sortDirection === "asc" ? t("ascending") : t("descending")} ${t("by")} ${t(h.label ?? h.key)}`
+                                        : `${t("Sort by")} ${t(h.label ?? h.key)}`,
+                                }}
                                 onClick={() => {
                                     if (isSortSelected) {
                                         props.onSetSort(sortKey, props.sortDirection == "asc" ? "desc" : "asc");
@@ -197,6 +230,7 @@ export const Table = defineComponent(
             }
         };
         const theme = useTheme();
+        const { t } = useLocale();
 
         return () => {
             const isMobile = display.mobile.value;
@@ -208,27 +242,41 @@ export const Table = defineComponent(
                 <ThemedView>
                     <ThemedView style={[props.tableContainerStyle]} class="table-wrapper">
                         <table
+                            aria-label={typeof (props as any).title === "string" ? t((props as any).title) : undefined}
                             style={{
                                 borderCollapse: "separate",
                                 borderSpacing: "0",
                                 width: "100%",
                                 padding: "0px",
                             }}
-                            class="modern-table"
+                            class="modern-table pg-unified-table"
                         >
                             <thead>
+                                {typeof (props as any).title === "string" && (
+                                    <caption class="pg-sr-only">{t((props as any).title)}</caption>
+                                )}
                                 <tr class="table-header-row">
                                     {props.headers.map((header) => {
                                         return (
                                             <th
                                                 key={header.key}
+                                                scope="col"
+                                                aria-sort={
+                                                    header.sortable !== false && !header.Header && header.key !== "actions" && header.label
+                                                        ? props.sortBy === (header.sortKey ?? header.key)
+                                                            ? props.sortDirection === "asc"
+                                                                ? "ascending"
+                                                                : "descending"
+                                                            : "none"
+                                                        : undefined
+                                                }
                                                 style={{
                                                     borderInlineEnd: header.endSeparator ? separatorStyle : undefined,
                                                     borderInlineStart: header.startSeparator ? separatorStyle : undefined,
                                                     padding: padding,
                                                     width: header.minWidth ? "1px" : undefined,
-                                                    backgroundColor: isDark ? colors.surface : "#f8fafc",
-                                                    borderBottom: isDark ? `2px solid rgba(255, 255, 255, 0.1)` : "2px solid #e2e8f0",
+                                                    backgroundColor: "var(--pg-bg-surface-subtle)",
+                                                    borderBottom: "1px solid var(--pg-border-subtle)",
                                                     position: "sticky",
                                                     top: 0,
                                                     zIndex: 10,
@@ -255,24 +303,28 @@ export const Table = defineComponent(
                                         <>
                                             <tr
                                                 key={`${index + props.skip}`}
-                                                class="table-data-row"
+                                                class={[
+                                                    "table-data-row",
+                                                    (() => {
+                                                        try {
+                                                            const tone = String(props.rowColor?.(row) ?? "").toLowerCase();
+                                                            return ["#dc2626", "#d97706", "#ef4444", "#f59e0b"].some((entry) =>
+                                                                tone.includes(entry),
+                                                            )
+                                                                ? "pg-critical-row"
+                                                                : "";
+                                                        } catch {
+                                                            return "";
+                                                        }
+                                                    })(),
+                                                ]}
                                                 style={{
-                                                    backgroundColor: props.rowColor?.(row)
-                                                        ? props.rowColor(row) + "15"
-                                                        : index % 2 === 0
-                                                          ? isDark
-                                                              ? colors.surface
-                                                              : "#ffffff"
-                                                          : isDark
-                                                            ? colors["surface-variant"]
-                                                            : "#f8fafc",
+                                                    backgroundColor: "var(--pg-bg-surface)",
                                                     borderBottom:
                                                         index < props.data.length - 1 && props.placeDividers
-                                                            ? isDark
-                                                                ? "1px solid rgba(255, 255, 255, 0.1)"
-                                                                : "1px solid #e2e8f0"
+                                                            ? "1px solid var(--pg-border-subtle)"
                                                             : undefined,
-                                                    transition: "background-color 0.2s ease",
+                                                    transition: "background-color 0.12s ease",
                                                 }}
                                             >
                                                 {props.headers.map((header, headerIndex) => {

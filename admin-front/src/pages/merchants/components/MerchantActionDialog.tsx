@@ -2,7 +2,7 @@ import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VCheckbox, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { api } from "@/state/api";
@@ -12,6 +12,7 @@ import { showSnackBar } from "@/utils/snackBar";
 import { CLOSE_REASONS, SUSPENSION_REASONS } from "../merchantHelp";
 import type { MerchantSummary } from "../types";
 
+import { FormModal } from "@/components/ui/FormModal";
 const SUSPEND_CHECKS = [
     { key: "IMPACT_REVIEWED", label: "Merchant impact reviewed" },
     { key: "REASON_DOCUMENTED", label: "Suspension reason documented" },
@@ -135,11 +136,13 @@ const MerchantActionDialog = dc(
         };
 
         return () => (
-            <VDialog modelValue={props.open} onUpdate:modelValue={(value: boolean) => props.onUpdate(value)} maxWidth="640px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{title.value}</ThemedText>
-                        <ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>
+            <FormModal
+                modelValue={props.open}
+                onUpdate:modelValue={(value: boolean) => props.onUpdate(value)}
+                title={title.value}
+                size="md"
+            >
+<ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>
                             {props.merchant?.tradeName} · {props.merchant?.status}
                         </ThemedText>
                         {isSuspend.value && (
@@ -195,9 +198,7 @@ const MerchantActionDialog = dc(
                                 {props.mode === "REINSTATE" ? t("Request reinstatement") : props.mode === "CLOSE" ? t("Request closure") : t("Request suspension")}
                             </VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         );
     },
     { props: ["open", "mode", "merchant", "onUpdate", "onDone"] },

@@ -66,7 +66,7 @@ export const QrOrCodeRenderer = dc(
                         <img src={qrDataUrl.value} alt="qr" width={"240px"} height={"240px"} />
                     </div>
                 ) : (
-                    <VProgressCircular indeterminate size={"40px"} color="primary" />
+                    <VProgressCircular indeterminate size={40} color="primary" />
                 )}
 
                 {props.action.pay_code && (

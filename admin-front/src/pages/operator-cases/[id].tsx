@@ -3,32 +3,14 @@ import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRoute, useRouter } from "vue-router";
-import {
-    VAlert,
-    VBtn,
-    VCard,
-    VCardText,
-    VCheckbox,
-    VDialog,
-    VExpansionPanel,
-    VExpansionPanelText,
-    VExpansionPanelTitle,
-    VExpansionPanels,
-    VIcon,
-    VSelect,
-    VTextField,
-    VTextarea,
-    VTimeline,
-    VTimelineItem,
-} from "vuetify/components";
+import { VAlert, VBtn, VCheckbox, VExpansionPanel, VExpansionPanelText, VExpansionPanelTitle, VExpansionPanels, VIcon, VSelect, VTextField, VTextarea, VTimeline, VTimelineItem } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
 import FieldsSections from "@/components/FieldsSections";
-import MiniStats from "@/components/MiniStats";
 import type { FieldProps } from "@/components/Field";
 import { api } from "@/state/api";
 import { user, hasOneOfAuthorities } from "@/state/user";
@@ -50,6 +32,13 @@ import {
 import { formatMoney } from "@/utils/money";
 import type { OperatorCaseDetail } from "./types";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { MetricStrip } from "@/components/ui/MetricStrip";
+import { DescriptionList } from "@/components/ui/DescriptionList";
+import { MonoRef } from "@/components/ui/MonoRef";
+import { EmptyState } from "@/components/ui/EmptyState";
+import type { BadgeTone } from "@/components/ui/StatusBadge";
 const parse = (payload: unknown): OperatorCaseDetail => {
     const source = (payload ?? {}) as Record<string, unknown>;
     return (source.operatorCase ?? source) as OperatorCaseDetail;
@@ -147,34 +136,45 @@ const OperatorCaseDetailPage = dc(() => {
     const inquiry = computed(() => detail.value?.inquiryEligibility);
     const sla = computed(() => slaInfo(detail.value?.slaDueAt));
     const narrative = computed(() => (detail.value ? caseNarrative(detail.value) : null));
+    const asBadgeTone = (tone: ReturnType<typeof statusTone>): BadgeTone =>
+        tone === "error" ? "danger" : tone === "primary" ? "info" : tone;
+
     const stats = computed(() => {
         const entry = detail.value;
         const currency = entry?.attempt?.currency ?? entry?.currency ?? "LYD";
         const amount = entry?.chargedAmount ?? entry?.statementAmount ?? "0";
         return [
             {
-                title: t("Charged amount"),
+                key: "amount",
+                label: t("Charged amount"),
                 value: formatMoney(amount, { currency }),
-                icon: "mdi-cash-multiple",
-                subtitle: entry?.statementAmount && !entry?.chargedAmount ? t("Statement amount") : t("Attempt amount"),
+                subLabel: entry?.statementAmount && !entry?.chargedAmount ? t("Statement amount") : t("Attempt amount"),
+                badge: currency,
+                badgeTone: "info" as const,
             },
             {
-                title: t("Attempt status"),
+                key: "attemptStatus",
+                label: t("Attempt status"),
                 value: entry?.attemptStatus ?? "—",
-                icon: "mdi-credit-card-clock-outline",
-                subtitle: entry?.attemptSubstatus ?? t("No substatus"),
+                subLabel: entry?.attemptSubstatus ?? t("No substatus"),
+                badge: entry?.attemptStatus ?? t("Unknown"),
+                badgeTone: asBadgeTone(statusTone(entry?.attemptStatus)),
             },
             {
-                title: t("SLA"),
+                key: "sla",
+                label: t("SLA"),
                 value: sla.value.label,
-                icon: "mdi-timer-outline",
-                subtitle: formatDateTime(entry?.slaDueAt),
+                subLabel: formatDateTime(entry?.slaDueAt),
+                badge: sla.value.label,
+                badgeTone: asBadgeTone(sla.value.tone),
             },
             {
-                title: t("Priority"),
+                key: "priority",
+                label: t("Priority"),
                 value: entry?.priority ?? "—",
-                icon: "mdi-alert-decagram-outline",
-                subtitle: caseStateHelp(entry?.state).label,
+                subLabel: caseStateHelp(entry?.state).label,
+                badge: entry?.priority ?? t("P3"),
+                badgeTone: asBadgeTone(statusTone(entry?.priority)),
             },
         ];
     });
@@ -335,6 +335,13 @@ const OperatorCaseDetailPage = dc(() => {
 
     const statusLabel = computed(() => detail.value?.attempt?.status ?? null);
     const caseRef = computed(() => detail.value?.caseRef ?? caseId.value);
+
+    const identifierItems = computed(() =>
+        identifiers.value.map((item) => ({
+            label: item.text,
+            value: item.value ? <MonoRef value={String(item.value)} truncate={30} /> : "—",
+        })),
+    );
 
     const identifiers = computed<FieldProps[]>(() => {
         const entry = detail.value;
@@ -607,6 +614,9 @@ const OperatorCaseDetailPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={`${t("Operator Case")} ${caseRef.value}`}
+                    subtitle={t("Inspect the case, evidence, identifiers and maker-checker resolution path.")}
+                    badge={detail.value?.priority ?? ""}
+                    badgeTone={asBadgeTone(statusTone(detail.value?.priority))}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => router.push({ name: "OperatorCases" })}>
@@ -673,8 +683,8 @@ const OperatorCaseDetailPage = dc(() => {
                             )}
                         </ThemedView>
 
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                        <SurfaceCard>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>
                                     {t("Workflow")}
                                 </ThemedText>
@@ -693,12 +703,12 @@ const OperatorCaseDetailPage = dc(() => {
                                         {caseStateHelp(detail.value.state).meaning}
                                     </ThemedText>
                                 </ThemedView>
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
 
                         {detail.value.inquirySchedules && detail.value.inquirySchedules.length > 0 && (
-                            <VCard>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                            <SurfaceCard>
+                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                     <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
                                         <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Gateway inquiry schedule")}</ThemedText>
                                         <VBtn size="small" variant="text" prependIcon="mdi-radar" onClick={() => void router.push({ name: "GatewayInquirySchedules" })}>
@@ -718,11 +728,11 @@ const OperatorCaseDetailPage = dc(() => {
                                             </ThemedView>
                                         </ThemedView>
                                     ))}
-                                </VCardText>
-                            </VCard>
+                                </SurfaceCardText>
+                            </SurfaceCard>
                         )}
 
-                        <MiniStats stats={stats.value} />
+                        <MetricStrip items={stats.value} />
 
                         {isPendingChecker.value && (
                             <VAlert type="info" variant="tonal">
@@ -745,8 +755,8 @@ const OperatorCaseDetailPage = dc(() => {
                             </VAlert>
                         )}
 
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                        <SurfaceCard>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>
                                     {t("What this case means")}
                                 </ThemedText>
@@ -769,15 +779,15 @@ const OperatorCaseDetailPage = dc(() => {
                                         </ThemedView>
                                     </ThemedView>
                                 )}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
 
                         {renderAttempt()}
 
                         <FieldsSections sections={sections.value} />
 
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                        <SurfaceCard>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>
                                     {t("Approval decision")}
                                 </ThemedText>
@@ -838,16 +848,16 @@ const OperatorCaseDetailPage = dc(() => {
                                         {t("No Maker-Checker proposal has been created for this case yet.")}
                                     </ThemedText>
                                 )}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
 
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                        <SurfaceCard>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>
                                     {t("Recorded timeline")}
                                 </ThemedText>
                                 {timeline.value.length === 0 ? (
-                                    <ThemedText style={{ opacity: 0.6 }}>{t("No timeline events recorded")}</ThemedText>
+                                    <EmptyState title={t("No timeline events recorded")} icon="mdi-timeline-clock-outline" />
                                 ) : (
                                     <VTimeline density="compact" side="end">
                                         {timeline.value.map((item, index) => (
@@ -866,8 +876,8 @@ const OperatorCaseDetailPage = dc(() => {
                                         ))}
                                     </VTimeline>
                                 )}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
 
                         <VExpansionPanels multiple>
                             <VExpansionPanel value="step-logs">
@@ -876,11 +886,11 @@ const OperatorCaseDetailPage = dc(() => {
                                 </VExpansionPanelTitle>
                                 <VExpansionPanelText>
                                     {(detail.value.attempt?.stepLogs ?? []).length === 0 ? (
-                                        <ThemedText style={{ opacity: 0.6 }}>{t("No step logs recorded")}</ThemedText>
+                                        <EmptyState title={t("No step logs recorded")} icon="mdi-script-text-outline" />
                                     ) : (
                                         (detail.value.attempt?.stepLogs ?? []).map((log) => (
-                                            <VCard key={log.id} variant="outlined" style={{ marginBottom: "10px" }}>
-                                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                            <SurfaceCard key={log.id} variant="outlined" style={{ marginBottom: "10px" }}>
+                                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                                     <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>
                                                         {formatDateTime(log.createdAt)} · {log.phase} · {log.stepId ?? "—"} · HTTP {log.httpStatus ?? "—"} · {log.durationMs ?? "—"}ms · {log.outcome}
                                                     </ThemedText>
@@ -895,8 +905,8 @@ const OperatorCaseDetailPage = dc(() => {
                                                         <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>{t("Redacted response")}</ThemedText>
                                                         <pre style={preStyle}>{log.redactedResponseText}</pre>
                                                     </ThemedView>
-                                                </VCardText>
-                                            </VCard>
+                                                </SurfaceCardText>
+                                            </SurfaceCard>
                                         ))
                                     )}
                                 </VExpansionPanelText>
@@ -908,11 +918,11 @@ const OperatorCaseDetailPage = dc(() => {
                                 </VExpansionPanelTitle>
                                 <VExpansionPanelText>
                                     {(detail.value.attempt?.inboundEvents ?? []).length === 0 ? (
-                                        <ThemedText style={{ opacity: 0.6 }}>{t("No inbound events recorded")}</ThemedText>
+                                        <EmptyState title={t("No inbound events recorded")} icon="mdi-webhook" />
                                     ) : (
                                         (detail.value.attempt?.inboundEvents ?? []).map((event) => (
-                                            <VCard key={event.id} variant="outlined" style={{ marginBottom: "10px" }}>
-                                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                            <SurfaceCard key={event.id} variant="outlined" style={{ marginBottom: "10px" }}>
+                                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                                     <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>
                                                         {formatDateTime(event.receivedAt)} · {event.verified ? t("Verified") : t("Unverified")} · {event.processingResult ?? t("Unprocessed")}
                                                     </ThemedText>
@@ -935,8 +945,8 @@ const OperatorCaseDetailPage = dc(() => {
                                                         <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>{t("Raw body preview")}</ThemedText>
                                                         <pre style={preStyle}>{event.rawBodyPreview || "—"}</pre>
                                                     </ThemedView>
-                                                </VCardText>
-                                            </VCard>
+                                                </SurfaceCardText>
+                                            </SurfaceCard>
                                         ))
                                     )}
                                 </VExpansionPanelText>
@@ -964,7 +974,7 @@ const OperatorCaseDetailPage = dc(() => {
                                         );
                                     })}
                                     {(detail.value.attempt?.adjustments ?? []).length === 0 && (detail.value.attempt?.disputes ?? []).length === 0 && (
-                                        <ThemedText style={{ opacity: 0.6 }}>{t("No adjustments or disputes")}</ThemedText>
+                                        <EmptyState title={t("No adjustments or disputes")} icon="mdi-scale-balance" />
                                     )}
                                 </VExpansionPanelText>
                             </VExpansionPanel>
@@ -993,44 +1003,39 @@ const OperatorCaseDetailPage = dc(() => {
                                         </ThemedView>
                                     ))}
                                     {(detail.value.auditTrail ?? []).length === 0 && (
-                                        <ThemedText style={{ opacity: 0.6 }}>{t("No audit entries recorded")}</ThemedText>
+                                        <EmptyState title={t("No audit entries recorded")} icon="mdi-history" />
                                     )}
                                 </VExpansionPanelText>
                             </VExpansionPanel>
                         </VExpansionPanels>
 
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                        <SurfaceCard>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>
                                     {t("All identifiers")}
                                 </ThemedText>
                                 <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
                                     {t("Every identifier is shown with the entity and database source it belongs to. Click an id to copy it.")}
                                 </ThemedText>
-                                <FieldsSections
-                                    noElevation
-                                    sections={[
-                                        {
-                                            title: t("Database identifiers"),
-                                            description: t("Use these exact ids when cross-referencing the database, logs or support tickets."),
-                                            fields: identifiers.value,
-                                        },
-                                    ]}
-                                />
-                            </VCardText>
-                        </VCard>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Database identifiers")}</ThemedText>
+                                <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
+                                    {t("Use these exact ids when cross-referencing the database, logs or support tickets.")}
+                                </ThemedText>
+                                <DescriptionList columns={2} items={identifierItems.value} />
+                            </SurfaceCardText>
+                        </SurfaceCard>
 
                     </>
                 )}
             </ThemedView>
 
-            <VDialog modelValue={resolveOpen.value} onUpdate:modelValue={(value: boolean | null) => (resolveOpen.value = Boolean(value))} maxWidth="680px" scrollable>
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
-                            {t("Propose resolution")}
-                        </ThemedText>
-                        <VAlert type="info" variant="tonal">
+            <FormModal
+                modelValue={resolveOpen.value}
+                onUpdate:modelValue={(value: boolean | null) => (resolveOpen.value = Boolean(value))}
+                title={t("Propose resolution")}
+                size="md"
+            >
+<VAlert type="info" variant="tonal">
                             {t("This creates a Maker-Checker proposal. A different checker must approve it before the attempt or ledger changes.")}
                         </VAlert>
                         <VSelect
@@ -1108,9 +1113,7 @@ const OperatorCaseDetailPage = dc(() => {
                                 {t("Submit to checker")}
                             </VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         </ScreenContainer>
     );
 });

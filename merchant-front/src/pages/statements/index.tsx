@@ -2,9 +2,9 @@ import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute } from "vue-router";
-import { VBtn, VCard, VCardText, VSelect } from "vuetify/components";
+import { VBtn, VSelect } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
@@ -18,6 +18,7 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { toDecimal } from "@/utils/money";
 
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 type Wallet = {
     id: string;
     name: string;
@@ -146,6 +147,7 @@ const StatementsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Statements")}
+                    subtitle={t("Settlement statements and downloadable reconciliation records.")}
                     end={() => (
                         <ThemedView
                             style={{
@@ -188,8 +190,8 @@ const StatementsPage = dc(() => {
                     <StateView loading={true} />
                 ) : statement.value ? (
                     <>
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <SurfaceCard>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
                                     {statement.value.walletName} · {statement.value.month}
                                 </ThemedText>
@@ -222,11 +224,11 @@ const StatementsPage = dc(() => {
                                         snapshot: {statement.value.snapshotHash}
                                     </ThemedText>
                                 )}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
 
-                        <VCard>
-                            <VCardText>
+                        <SurfaceCard>
+                            <SurfaceCardText>
                                 <DataTable
                                     title={t("Statements")}
                                     data={statement.value.lines ?? []}
@@ -236,8 +238,8 @@ const StatementsPage = dc(() => {
                                     xlsx={false}
                                     noElevation={true}
                                 />
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
                     </>
                 ) : (
                     <StateView empty={true} emptyTitle={t("No Data Found")} />

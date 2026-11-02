@@ -2,13 +2,10 @@ import { dc } from "kt-dc";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute } from "vue-router";
-import { VAlert, VBtn, VCard, VCardText, VDivider, VProgressCircular } from "vuetify/components";
-import { ThemedView } from "@/components/ThemedView";
+import { VAlert, VBtn, VIcon, VProgressCircular } from "vuetify/components";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
 import CheckoutLayout from "@/layouts/checkout";
-import { StatusChip } from "@/components/StatusChip";
-import { MoneyText } from "@/components/MoneyText";
 import { RailCards } from "@/components/rail-cards";
 import { RailFieldForm } from "@/components/rail-fields";
 import { OtpFormRenderer } from "@/components/renderers/OtpFormRenderer";
@@ -32,6 +29,7 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { buildRailFormSchema, normalizeFormValues } from "@/utils/zReady";
 import { adaptedLocale } from "@/plugins/localization";
 
+import { MoneyDisplay, MonoRef, StatusBadge, SurfaceCard } from "@/components/ui";
 type Phase = "SUMMARY" | "FORM" | "ACTION" | "CONFIRMING" | "RECEIPT" | "ERROR";
 
 const newIdempotencyKey = () =>
@@ -394,95 +392,185 @@ const PayPage = dc(() => {
         }
     };
 
+    const renderReference = () => {
+        if (!reference.value) {
+            return null;
+        }
+        return (
+            <div
+                style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: "6px",
+                    maxWidth: "100%",
+                    minWidth: 0,
+                }}
+            >
+                <span style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>{t("Payment Reference")}</span>
+                <div style={{ maxWidth: "100%", overflowX: "auto" }}>
+                    <MonoRef value={reference.value} />
+                </div>
+            </div>
+        );
+    };
+
     return () => (
         <CheckoutLayout>
-            <div style={{ width: "100%", maxWidth: "560px", display: "flex", flexDirection: "column", gap: "16px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontSize: "15px", fontWeight: "800" }}>{summary.value?.merchantTradeName ?? ""}</span>
-                    <VBtn
-                        variant="text"
-                        size="small"
-                        onClick={() => {
-                            const next = adaptedLocale.current.value === "ar" ? "en" : "ar";
-                            localStorage.setItem("locale-name", next);
-                            location.reload();
+            <div
+                style={{
+                    width: "100%",
+                    maxWidth: "560px",
+                    minWidth: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "16px",
+                }}
+            >
+                <div
+                    style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: "8px",
+                        flexWrap: "wrap",
+                        minWidth: 0,
+                    }}
+                >
+                    <span
+                        style={{
+                            fontSize: "15px",
+                            fontWeight: 600,
+                            color: "var(--pg-ink-primary)",
+                            minWidth: 0,
+                            overflowWrap: "anywhere",
                         }}
                     >
-                        {adaptedLocale.current.value === "ar" ? "English" : "العربية"}
-                    </VBtn>
+                        {summary.value?.merchantTradeName ?? ""}
+                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: "2px", flexShrink: 0 }}>
+                        <VBtn
+                            icon
+                            variant="text"
+                            size="small"
+                            aria-label={t("Help & Support")}
+                            onClick={() => (helpOpen.value = true)}
+                        >
+                            <VIcon icon="mdi-help-circle-outline" size={18} />
+                        </VBtn>
+                        <VBtn
+                            variant="text"
+                            size="small"
+                            onClick={() => {
+                                const next = adaptedLocale.current.value === "ar" ? "en" : "ar";
+                                localStorage.setItem("locale-name", next);
+                                location.reload();
+                            }}
+                        >
+                            {adaptedLocale.current.value === "ar" ? "English" : "العربية"}
+                        </VBtn>
+                    </div>
                 </div>
 
                 {loading.value ? (
                     <StateView loading={true} minHeight="320px" />
                 ) : loadError.value ? (
-                    <VCard>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px", alignItems: "center" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
+                    <SurfaceCard>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "14px", alignItems: "center" }}>
+                            <ThemedText
+                                type="defaultSemiBold"
+                                style={{ fontSize: "17px", color: "var(--pg-ink-primary)" }}
+                            >
                                 {t("This Payment Link Is No Longer Available")}
                             </ThemedText>
-                            <ThemedText style={{ fontSize: "13px", opacity: 0.7, textAlign: "center" }}>
+                            <ThemedText style={{ fontSize: "13px", color: "var(--pg-ink-muted)", textAlign: "center" }}>
                                 {t("Cannot process this payment")}
                             </ThemedText>
-                        </VCardText>
-                    </VCard>
+                        </div>
+                    </SurfaceCard>
                 ) : (
                     <>
-                        <VCard style={{ position: "relative" }}>
-                            <VBtn
-                                icon
-                                size="small"
-                                variant="tonal"
-                                color="primary"
-                                aria-label={t("Help & Support")}
-                                style={{
-                                    position: "absolute",
-                                    top: "10px",
-                                    insetInlineEnd: "10px",
-                                    zIndex: 1,
-                                    fontWeight: 800,
-                                }}
-                                onClick={() => (helpOpen.value = true)}
-                            >
-                                ?
-                            </VBtn>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                                <ThemedText style={{ fontSize: "13px", opacity: 0.7, paddingInlineEnd: "40px" }}>
+                        <SurfaceCard title={t("Payment Summary")}>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "12px", minWidth: 0 }}>
+                                <span
+                                    style={{
+                                        fontSize: "13px",
+                                        color: "var(--pg-ink-secondary)",
+                                        overflowWrap: "anywhere",
+                                    }}
+                                >
                                     {summary.value?.description ?? t("Payment Link")}
-                                </ThemedText>
-                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "22px" }}>
-                                        {t("Amount Charged")}
-                                    </ThemedText>
-                                    <MoneyText value={summary.value?.totalAmount ?? "0"} currency={currency.value} bold />
-                                </div>
-                                <VDivider />
-                                {feeRows.value.map((row) => (
-                                    <div
-                                        key={row.label}
-                                        style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}
+                                </span>
+                                <div
+                                    style={{
+                                        display: "flex",
+                                        justifyContent: "space-between",
+                                        alignItems: "flex-end",
+                                        gap: "12px",
+                                        flexWrap: "wrap",
+                                    }}
+                                >
+                                    <span
+                                        style={{
+                                            fontSize: "13px",
+                                            fontWeight: 500,
+                                            color: "var(--pg-ink-secondary)",
+                                        }}
                                     >
-                                        <ThemedText style={{ fontSize: "13px", opacity: row.emphasis ? 1 : 0.75 }}>
-                                            {row.label}
-                                        </ThemedText>
-                                        <MoneyText
-                                            value={row.value}
-                                            currency={currency.value}
-                                            bold={!!row.emphasis}
-                                            color={row.emphasis ? "#0f6bff" : undefined}
-                                        />
-                                    </div>
-                                ))}
+                                        {t("Amount Charged")}
+                                    </span>
+                                    <MoneyDisplay
+                                        amount={summary.value?.totalAmount ?? "0"}
+                                        currency={currency.value}
+                                        size="xl"
+                                    />
+                                </div>
+                                <div style={{ height: "1px", backgroundColor: "var(--pg-border-subtle)" }} />
+                                <span style={{ fontSize: "11px", fontWeight: 600, color: "var(--pg-ink-muted)" }}>
+                                    {t("Amount Breakdown")}
+                                </span>
+                                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                                    {feeRows.value.map((row) => (
+                                        <div
+                                            key={row.label}
+                                            style={{
+                                                display: "flex",
+                                                justifyContent: "space-between",
+                                                alignItems: "baseline",
+                                                gap: "12px",
+                                                flexWrap: "wrap",
+                                            }}
+                                        >
+                                            <span
+                                                style={{
+                                                    fontSize: "13px",
+                                                    color: row.emphasis
+                                                        ? "var(--pg-ink-primary)"
+                                                        : "var(--pg-ink-secondary)",
+                                                    fontWeight: row.emphasis ? 500 : 400,
+                                                }}
+                                            >
+                                                {row.label}
+                                            </span>
+                                            <MoneyDisplay
+                                                amount={row.value}
+                                                currency={currency.value}
+                                                size={row.emphasis ? "lg" : "md"}
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
                                 {summary.value?.expiresAt && (
-                                    <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>
+                                    <span style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>
                                         {t("Expires At")}: {summary.value.expiresAt}
-                                    </ThemedText>
+                                    </span>
                                 )}
-                            </VCardText>
-                        </VCard>
+                            </div>
+                        </SurfaceCard>
 
                         {phase.value === "FORM" && (
-                            <VCard>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                            <SurfaceCard>
+                                <div style={{ display: "flex", flexDirection: "column", gap: "16px", minWidth: 0 }}>
                                     <RailCards
                                         rails={summary.value?.visibleRails ?? []}
                                         selectedCode={selectedRail.value?.code ?? null}
@@ -531,60 +619,84 @@ const PayPage = dc(() => {
                                     >
                                         {t("Pay Now")}
                                     </VBtn>
-                                </VCardText>
-                            </VCard>
+                                </div>
+                            </SurfaceCard>
                         )}
 
                         {phase.value === "ACTION" && (
-                            <VCard>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                            <SurfaceCard>
+                                <div style={{ display: "flex", flexDirection: "column", gap: "16px", minWidth: 0 }}>
                                     {remainingSeconds.value != null && (
-                                        <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
+                                        <ThemedText style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>
                                             {t("Expires At")}: {Math.floor(remainingSeconds.value / 60)}:
                                             {String(remainingSeconds.value % 60).padStart(2, "0")}
                                         </ThemedText>
                                     )}
                                     {renderAction()}
-                                </VCardText>
-                            </VCard>
+                                </div>
+                            </SurfaceCard>
                         )}
 
                         {phase.value === "CONFIRMING" && (
-                            <VCard>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "16px", alignItems: "center" }}>
-                                    <VProgressCircular indeterminate size={"48px"} color="primary" width={4} />
+                            <SurfaceCard>
+                                <div
+                                    style={{
+                                        display: "flex",
+                                        flexDirection: "column",
+                                        gap: "16px",
+                                        alignItems: "center",
+                                        minWidth: 0,
+                                    }}
+                                >
+                                    <VProgressCircular indeterminate size={48} color="primary" width={4} />
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
                                         {t("Confirming your payment")}
                                     </ThemedText>
-                                    <ThemedText style={{ fontSize: "13px", opacity: 0.7, textAlign: "center" }}>
+                                    <ThemedText style={{ fontSize: "13px", color: "var(--pg-ink-muted)", textAlign: "center" }}>
                                         {t("You will be redirected")}
                                     </ThemedText>
-                                    <StatusChip label={attemptStatus.value} tone="warning" />
-                                    {reference.value && (
-                                        <ThemedText style={{ fontSize: "12px", opacity: 0.6, direction: "ltr" }}>
-                                            {reference.value}
-                                        </ThemedText>
-                                    )}
+                                    <div
+                                        style={{
+                                            display: "flex",
+                                            flexDirection: "column",
+                                            alignItems: "center",
+                                            gap: "6px",
+                                        }}
+                                    >
+                                        <span style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>
+                                            {t("Payment Status")}
+                                        </span>
+                                        <StatusBadge status={attemptStatus.value} toneOverride="warning" />
+                                    </div>
+                                    {renderReference()}
                                     <VBtn variant="tonal" onClick={() => void cancelAttempt()}>
                                         {t("Cancel")}
                                     </VBtn>
-                                </VCardText>
-                            </VCard>
+                                </div>
+                            </SurfaceCard>
                         )}
 
                         {phase.value === "RECEIPT" && (
-                            <VCard>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px", alignItems: "center" }}>
+                            <SurfaceCard>
+                                <div
+                                    style={{
+                                        display: "flex",
+                                        flexDirection: "column",
+                                        gap: "14px",
+                                        alignItems: "center",
+                                        minWidth: 0,
+                                    }}
+                                >
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "19px" }}>
                                         {t("Payment Receipt")}
                                     </ThemedText>
-                                    <StatusChip label={t("Payment Complete")} tone="success" />
-                                    <MoneyText value={summary.value?.totalAmount ?? "0"} currency={currency.value} bold />
-                                    {reference.value && (
-                                        <ThemedText style={{ fontSize: "12px", opacity: 0.65, direction: "ltr" }}>
-                                            {reference.value}
-                                        </ThemedText>
-                                    )}
+                                    <StatusBadge status="SUCCEEDED" label={t("Payment Complete")} />
+                                    <MoneyDisplay
+                                        amount={summary.value?.totalAmount ?? "0"}
+                                        currency={currency.value}
+                                        size="xl"
+                                    />
+                                    {renderReference()}
                                     {summary.value?.redirectUrl && isAllowedRedirect(summary.value.redirectUrl, summary.value.allowlistedRedirectHosts) && (
                                         <VBtn
                                             color="primary"
@@ -593,30 +705,50 @@ const PayPage = dc(() => {
                                             {t("Return To Merchant")}
                                         </VBtn>
                                     )}
-                                </VCardText>
-                            </VCard>
+                                </div>
+                            </SurfaceCard>
                         )}
 
                         {phase.value === "ERROR" && (
-                            <VCard>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px", alignItems: "center" }}>
+                            <SurfaceCard>
+                                <div
+                                    style={{
+                                        display: "flex",
+                                        flexDirection: "column",
+                                        gap: "14px",
+                                        alignItems: "center",
+                                        minWidth: 0,
+                                    }}
+                                >
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
                                         {t("Payment Failed")}
                                     </ThemedText>
-                                    <ThemedText style={{ fontSize: "13px", opacity: 0.75, textAlign: "center" }}>
+                                    <ThemedText style={{ fontSize: "13px", color: "var(--pg-ink-muted)", textAlign: "center" }}>
                                         {t("Cannot process this payment")}
                                     </ThemedText>
-                                    <StatusChip label={attemptStatus.value} tone="error" />
+                                    <div
+                                        style={{
+                                            display: "flex",
+                                            flexDirection: "column",
+                                            alignItems: "center",
+                                            gap: "6px",
+                                        }}
+                                    >
+                                        <span style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>
+                                            {t("Payment Status")}
+                                        </span>
+                                        <StatusBadge status={attemptStatus.value} toneOverride="danger" />
+                                    </div>
                                     <VBtn variant="tonal" onClick={() => (phase.value = "FORM")}>
                                         {t("Try Another Method")}
                                     </VBtn>
-                                </VCardText>
-                            </VCard>
+                                </div>
+                            </SurfaceCard>
                         )}
                     </>
                 )}
 
-                <div style={{ textAlign: "center", fontSize: "11px", opacity: 0.55 }}>
+                <div style={{ textAlign: "center", fontSize: "11px", color: "var(--pg-ink-faint)" }}>
                     {t("Powered By")} · {t("Payment Gateway")}
                 </div>
             </div>

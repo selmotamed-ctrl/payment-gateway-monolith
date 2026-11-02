@@ -1,10 +1,10 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale, useTheme } from "vuetify";
-import { VBtn, VCard, VCardText, VDialog } from "vuetify/components";
+import { VBtn } from "vuetify/components";
 import { useRouter } from "vue-router";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StatusChip } from "@/components/StatusChip";
@@ -35,6 +35,10 @@ import KybDocumentPreview from "./components/KybDocumentPreview";
 import KybReviewDialog from "./components/KybReviewDialog";
 import KybActionDialog, { type KybActionMode } from "./components/KybActionDialog";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { MetricStrip } from "@/components/ui/MetricStrip";
+import { MonoRef } from "@/components/ui/MonoRef";
 type KybDocumentsSummary = {
     total: number;
     pending: number;
@@ -206,12 +210,54 @@ const KybReviewPage = dc(() => {
         const data = summary.value;
         if (!data) return [];
         return [
-            { label: t("Awaiting review"), value: String(data.pending), tone: "warning" as const },
-            { label: t("Accepted"), value: String(data.accepted), tone: "success" as const },
-            { label: t("Expiring in 30d"), value: String(data.expiringSoon), tone: data.expiringSoon > 0 ? "warning" as const : "success" as const },
-            { label: t("Expired"), value: String(data.expired), tone: data.expired > 0 ? "error" as const : "success" as const },
-            { label: t("Duplicates"), value: String(data.duplicates), tone: data.duplicates > 0 ? "warning" as const : "success" as const },
-            { label: t("Infected"), value: String(data.infected), tone: data.infected > 0 ? "error" as const : "success" as const },
+            {
+                key: "pending",
+                label: t("Awaiting review"),
+                value: String(data.pending),
+                subLabel: t("Document review"),
+                badge: data.pending > 0 ? t("P2") : t("Clear"),
+                badgeTone: data.pending > 0 ? "warning" as const : "success" as const,
+            },
+            {
+                key: "accepted",
+                label: t("Accepted"),
+                value: String(data.accepted),
+                subLabel: t("Verified evidence"),
+                badge: t("Clean"),
+                badgeTone: "success" as const,
+            },
+            {
+                key: "expiring",
+                label: t("Expiring in 30d"),
+                value: String(data.expiringSoon),
+                subLabel: t("Expiry posture"),
+                badge: data.expiringSoon > 0 ? t("Attention") : t("Clear"),
+                badgeTone: data.expiringSoon > 0 ? "warning" as const : "success" as const,
+            },
+            {
+                key: "expired",
+                label: t("Expired"),
+                value: String(data.expired),
+                subLabel: t("Past expiry"),
+                badge: data.expired > 0 ? t("P1") : t("Clear"),
+                badgeTone: data.expired > 0 ? "danger" as const : "success" as const,
+            },
+            {
+                key: "duplicates",
+                label: t("Duplicates"),
+                value: String(data.duplicates),
+                subLabel: t("Reused file hashes"),
+                badge: data.duplicates > 0 ? t("Review") : t("Clear"),
+                badgeTone: data.duplicates > 0 ? "warning" as const : "success" as const,
+            },
+            {
+                key: "infected",
+                label: t("Infected"),
+                value: String(data.infected),
+                subLabel: t("Malware blocked"),
+                badge: data.infected > 0 ? t("Critical") : t("Clear"),
+                badgeTone: data.infected > 0 ? "danger" as const : "success" as const,
+            },
         ];
     });
 
@@ -405,9 +451,7 @@ const KybReviewPage = dc(() => {
                     <ThemedView style={{ gap: "3px" }}>
                         <StatusChip label={row.joinRequest.status} tone={statusTone(row.joinRequest.status)} size="x-small" />
                         <StatusChip label={`SLA ${sla.label}`} tone={sla.tone} size="x-small" />
-                        <ThemedText style={{ fontSize: "10px", opacity: 0.5, direction: "ltr" }}>
-                            {row.joinRequest.id}
-                        </ThemedText>
+                        <MonoRef value={row.joinRequest.id} truncate={18} />
                     </ThemedView>
                 );
             },
@@ -484,6 +528,9 @@ const KybReviewPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("KYB Review")}
+                    subtitle={t("Review KYB evidence, document integrity and expiry posture before accepting or rejecting a merchant.")}
+                    badge={t("KYB review")}
+                    badgeTone="info"
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                             <StatusChip label={`${total.value} ${t("documents")}`} tone="info" size="small" />
@@ -496,41 +543,34 @@ const KybReviewPage = dc(() => {
                 />
 
                 {summary.value && (
-                    <VCard variant="flat" style={{ borderRadius: "16px" }}>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Document review health")}</ThemedText>
-                                <div style={{ flex: 1 }} />
-                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
-                            </ThemedView>
-                            <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px" }}>
-                                {summaryItems.value.map((item) => (
-                                    <VCard key={item.label} variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
-                                            <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
-                                        </VCardText>
-                                    </VCard>
-                                ))}
-                            </ThemedView>
-                            <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                {Object.entries(summary.value.byStatus ?? {}).map(([state, count]) => (
-                                    <StatusChip key={state} label={`${state}: ${count}`} tone={statusTone(state)} size="x-small" />
-                                ))}
-                                {Object.entries(summary.value.byAvStatus ?? {}).map(([state, count]) => (
-                                    <StatusChip key={`av-${state}`} label={`AV ${state}: ${count}`} tone={statusTone(state)} size="x-small" />
-                                ))}
-                            </ThemedView>
-                        </VCardText>
-                    </VCard>
+                    <ThemedView style={{ gap: "12px" }}>
+                        <MetricStrip items={summaryItems.value} />
+                        <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Document review health")}</ThemedText>
+                                    <div style={{ flex: 1 }} />
+                                    <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
+                                </ThemedView>
+                                <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                                    {Object.entries(summary.value.byStatus ?? {}).map(([state, count]) => (
+                                        <StatusChip key={state} label={`${state}: ${count}`} tone={statusTone(state)} size="x-small" />
+                                    ))}
+                                    {Object.entries(summary.value.byAvStatus ?? {}).map(([state, count]) => (
+                                        <StatusChip key={`av-${state}`} label={`AV ${state}: ${count}`} tone={statusTone(state)} size="x-small" />
+                                    ))}
+                                </ThemedView>
+                            </SurfaceCardText>
+                        </SurfaceCard>
+                    </ThemedView>
                 )}
 
                 {areHelpPanelsVisible() && (
-                    <VCard>
-                        <VCardText>
+                    <SurfaceCard>
+                        <SurfaceCardText>
                             <KybHelpPanel />
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
                 )}
                 <ApiTable<KybDocumentSummary>
                     title={t("KYB Review")}
@@ -587,13 +627,14 @@ const KybReviewPage = dc(() => {
                 />
             </ThemedView>
 
-            <VDialog modelValue={previewOpen.value} onUpdate:modelValue={(value: boolean) => (previewOpen.value = value)} maxWidth="1100px" scrollable>
-                <VCard>
-                    <VCardText>
-                        <KybDocumentPreview document={previewDocument.value} />
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            <FormModal
+                modelValue={previewOpen.value}
+                onUpdate:modelValue={(value: boolean) => (previewOpen.value = value)}
+                title={"Details"}
+                size="lg"
+            >
+<KybDocumentPreview document={previewDocument.value} />
+            </FormModal>
 
             <KybReviewDialog
                 open={reviewOpen.value}

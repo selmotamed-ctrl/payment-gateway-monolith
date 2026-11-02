@@ -17,7 +17,7 @@ test("merchant login posts `identifier` (not `identity`) and lands on the portal
   await page.addInitScript(() => window.localStorage.setItem("locale-name", "en"));
   await page.goto("/login");
   await page.getByLabel("Phone Or Email").fill("acme@example.com");
-  await page.getByLabel("Password").fill("DeployTest!2026");
+  await page.getByLabel("Password", { exact: true }).fill("DeployTest!2026");
   await page.getByRole("button", { name: "Login", exact: true }).click();
 
   await expect(page).toHaveURL(/\/portal\/dashboard/);
@@ -39,7 +39,7 @@ test("merchant login shows the MFA step when the server asks for it", async ({ p
   await page.addInitScript(() => window.localStorage.setItem("locale-name", "en"));
   await page.goto("/login");
   await page.getByLabel("Phone Or Email").fill("acme@example.com");
-  await page.getByLabel("Password").fill("DeployTest!2026");
+  await page.getByLabel("Password", { exact: true }).fill("DeployTest!2026");
   await page.getByRole("button", { name: "Login", exact: true }).click();
   await expect(page.getByLabel("Verification Code")).toBeVisible();
   await expect(page.getByRole("button", { name: "Verify" })).toBeVisible();

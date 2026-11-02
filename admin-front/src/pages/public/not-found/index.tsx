@@ -1,10 +1,11 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
-import { VBtn, VCard, VCardText, VIcon } from "vuetify/components";
+import { VBtn, VIcon } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { useRoute, useRouter } from "vue-router";
 import { isAuthenticated } from "@/state/user";
 
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 const NotFoundPage = dc(() => {
     const { t } = useLocale();
     const route = useRoute();
@@ -43,8 +44,8 @@ const NotFoundPage = dc(() => {
                 padding: "24px",
             }}
         >
-            <VCard style={{ width: "100%", maxWidth: "440px" }}>
-                <VCardText style={{ display: "flex", flexDirection: "column", gap: "16px", alignItems: "center", textAlign: "center" }}>
+            <SurfaceCard style={{ width: "100%", maxWidth: "440px" }}>
+                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "16px", alignItems: "center", textAlign: "center" }}>
                     <VIcon icon="mdi-map-marker-question-outline" size="54" color="primary" />
                     <div style={{ fontSize: "48px", fontWeight: "800", lineHeight: 1 }}>404</div>
                     <div style={{ fontSize: "15px", fontWeight: 700 }}>{t("The page you are looking for does not exist")}</div>
@@ -76,8 +77,8 @@ const NotFoundPage = dc(() => {
                             </VBtn>
                         )}
                     </div>
-                </VCardText>
-            </VCard>
+                </SurfaceCardText>
+            </SurfaceCard>
         </div>
     );
 });

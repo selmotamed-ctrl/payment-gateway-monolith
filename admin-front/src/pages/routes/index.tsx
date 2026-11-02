@@ -2,12 +2,15 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VSelect, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VCheckbox, VSelect, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { MonoRef } from "@/components/ui/MonoRef";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
+import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
@@ -19,6 +22,8 @@ import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 const SUMMARY_EXPORT_CHECKS = [
     { key: "ROUTE_SCOPE_VERIFIED", label: "Route portfolio scope verified" },
     { key: "STATUS_HEALTH_REVIEWED", label: "Status and health reviewed" },
@@ -366,24 +371,47 @@ const RoutesPage = dc(() => {
         }
     };
 
+    const metricItems = computed<MetricItem[]>(() => {
+        const data = summary.value;
+        if (!data) return [];
+        return [
+            { key: "routes", label: t("Routes"), value: String(data.total) },
+            { key: "active", label: t("Active"), value: String(data.active), badge: t("Active"), badgeTone: "success" },
+            { key: "paused", label: t("Paused"), value: String(data.paused), badge: (data.paused ?? 0) > 0 ? t("Watch") : t("Clear"), badgeTone: (data.paused ?? 0) > 0 ? "warning" : "success" },
+            { key: "draining", label: t("Draining"), value: String(data.draining) },
+            { key: "breakers", label: t("Open breakers"), value: String(data.openBreaker), badge: (data.openBreaker ?? 0) > 0 ? t("Critical") : t("Clear"), badgeTone: (data.openBreaker ?? 0) > 0 ? "danger" : "success" },
+        ];
+    });
+
     const headers: TableHeader<GatewayRoute>[] = [
-        { key: "railCode", label: "Rail Code", value: (row) => row.railCode },
-        { key: "gatewayCode", label: "Gateway Code", value: (row) => row.gatewayCode },
+        { key: "railCode", label: "Rail Code", value: (row) => row.railCode, Value: ({ row }) => <MonoRef value={row.railCode} /> },
+        { key: "gatewayCode", label: "Gateway Code", value: (row) => row.gatewayCode, Value: ({ row }) => <MonoRef value={row.gatewayCode} /> },
         { key: "credentialPolicy", label: "Credential Policy", value: (row) => row.credentialPolicy },
         { key: "priority", label: "Priority", value: (row) => String(row.priority ?? "") },
         { key: "costModel", label: "Cost Model", value: (row) => (typeof row.costModel === "string" ? row.costModel : JSON.stringify(row.costModel ?? {})) },
-        { key: "minAmount", label: "Amount", value: (row) => `${row.minAmount ?? ""} - ${row.maxAmount ?? ""}` },
-        { key: "dailyCapAmount", label: "Amount Due", value: (row) => row.dailyCapAmount },
+        {
+            key: "minAmount",
+            label: "Amount",
+            value: (row) => `${row.minAmount ?? ""} - ${row.maxAmount ?? ""}`,
+            Value: ({ row }: { row: GatewayRoute }) => (
+                <div style={{ display: "flex", gap: "4px", alignItems: "center", flexWrap: "wrap" }}>
+                    <MoneyDisplay amount={row.minAmount ?? "0"} currency={"LYD"} size="sm" />
+                    <span style={{ color: "var(--pg-ink-faint)" }}>–</span>
+                    <MoneyDisplay amount={row.maxAmount ?? "0"} currency={"LYD"} size="sm" />
+                </div>
+            ),
+        },
+        { key: "dailyCapAmount", label: "Amount Due", value: (row) => row.dailyCapAmount, Value: ({ row }) => <MoneyDisplay amount={row.dailyCapAmount ?? "0"} currency={"LYD"} size="sm" /> },
         {
             key: "status",
             label: "Status",
-            Value: ({ row }: { row: GatewayRoute }) => <StatusChip label={row.status} tone={statusTone(row.status)} />,
+            Value: ({ row }: { row: GatewayRoute }) => <StatusBadge status={row.status} toneOverride={statusTone(row.status) as any} />,
         },
         {
             key: "healthState",
             label: "Invariant Status",
             Value: ({ row }: { row: GatewayRoute }) => (
-                <StatusChip label={row.healthState} tone={healthTone(row.healthState)} />
+                <StatusBadge status={row.healthState} toneOverride={healthTone(row.healthState) === "error" ? "danger" : (healthTone(row.healthState) as any)} />
             ),
         },
         {
@@ -406,6 +434,7 @@ const RoutesPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Routes")}
+                    subtitle={t("Routing priority, limits, and circuit-breaker health.")}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
@@ -421,8 +450,8 @@ const RoutesPage = dc(() => {
                 </VAlert>
 
                 {summary.value && (
-                    <VCard variant="flat" style={{ borderRadius: "16px" }}>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Route health")}</ThemedText>
                                 <div style={{ flex: 1 }} />
@@ -447,24 +476,10 @@ const RoutesPage = dc(() => {
                                         )}
                                     </ThemedView>
                                 )}
-                                {[
-                                    { label: t("Routes"), value: String(summary.value.total), tone: "info" as const },
-                                    { label: t("Active"), value: String(summary.value.active), tone: "success" as const },
-                                    { label: t("Paused"), value: String(summary.value.paused), tone: summary.value.paused > 0 ? "warning" as const : "success" as const },
-                                    { label: t("Draining"), value: String(summary.value.draining), tone: summary.value.draining > 0 ? "info" as const : "success" as const },
-                                    { label: t("Open breakers"), value: String(summary.value.openBreaker), tone: summary.value.openBreaker > 0 ? "error" as const : "success" as const },
-                                    { label: t("Rail/gateway pairs"), value: String(summary.value.railGatewayPairs), tone: "neutral" as const },
-                                ].map((item) => (
-                                    <VCard key={item.label} variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
-                                            <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
-                                        </VCardText>
-                                    </VCard>
-                                ))}
                             </ThemedView>
-                        </VCardText>
-                    </VCard>
+                            <MetricStrip items={metricItems.value} />
+                        </SurfaceCardText>
+                    </SurfaceCard>
                 )}
 
                 <ApiTable<GatewayRoute>
@@ -517,13 +532,13 @@ const RoutesPage = dc(() => {
                 />
             </ThemedView>
 
-            <VDialog modelValue={dialogOpen.value} onUpdate:modelValue={(v: any) => (dialogOpen.value = v)} maxWidth="680px" scrollable>
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                            {t("Edit route")} {editingRoute.value?.railCode} → {editingRoute.value?.gatewayCode}
-                        </ThemedText>
-                        <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
+            <FormModal
+                modelValue={dialogOpen.value}
+                onUpdate:modelValue={(v: any) => (dialogOpen.value = v)}
+                title={[t("Edit route"), editingRoute.value?.railCode, "→", editingRoute.value?.gatewayCode].filter(Boolean).join(" · ")}
+                size="md"
+            >
+<ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <StatusChip label={editingRoute.value?.credentialPolicy ?? "-"} tone="info" />
                             <StatusChip label={editingRoute.value?.healthState ?? "-"} tone="neutral" />
                         </ThemedView>
@@ -604,17 +619,15 @@ const RoutesPage = dc(() => {
                                 {t("Save")}
                             </VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
 
-            <VDialog modelValue={createOpen.value} onUpdate:modelValue={(v: any) => (createOpen.value = v)} maxWidth="560px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                            {t("Add Route")}
-                        </ThemedText>
-                        <VSelect
+            <FormModal
+                modelValue={createOpen.value}
+                onUpdate:modelValue={(v: any) => (createOpen.value = v)}
+                title={t("Add Route")}
+                size="md"
+            >
+<VSelect
                             label={t("Rails")}
                             items={railOptions.value}
                             modelValue={routeForm.value.railId}
@@ -651,9 +664,7 @@ const RoutesPage = dc(() => {
                                 {t("Create")}
                             </VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         </ScreenContainer>
     );
 });

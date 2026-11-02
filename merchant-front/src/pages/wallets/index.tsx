@@ -2,9 +2,9 @@ import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
-import { VAutocomplete, VBtn, VCard, VCardText, VDialog, VTextField } from "vuetify/components";
+import { VAutocomplete, VBtn, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
@@ -17,6 +17,8 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { toDecimal } from "@/utils/money";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 type Wallet = {
     id: string;
     name: string;
@@ -160,6 +162,7 @@ const WalletsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Wallets")}
+                    subtitle={t("Available, pending, and reserved balances by wallet.")}
                     end={() => (
                         <VBtn
                             variant="tonal"
@@ -177,8 +180,8 @@ const WalletsPage = dc(() => {
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : (
-                    <VCard>
-                        <VCardText>
+                    <SurfaceCard>
+                        <SurfaceCardText>
                             <DataTable
                                 title={t("Wallets")}
                                 data={rows.value}
@@ -190,15 +193,18 @@ const WalletsPage = dc(() => {
                                 searchValue={search.value}
                                 setSearchValue={(value) => (search.value = value)}
                             />
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
                 )}
             </ThemedView>
 
-            <VDialog modelValue={dialogOpen.value} onUpdate:modelValue={(v: any) => (dialogOpen.value = v)} maxWidth="480px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <VAutocomplete
+            <FormModal
+                modelValue={dialogOpen.value}
+                onUpdate:modelValue={(v: any) => (dialogOpen.value = v)}
+                title={"Details"}
+                size="sm"
+            >
+<VAutocomplete
                             label={t("Applications")}
                             items={applicationOptions.value}
                             itemTitle="title"
@@ -219,9 +225,7 @@ const WalletsPage = dc(() => {
                         <VBtn color="primary" loading={actionLoading.value} onClick={() => void createWallet()}>
                             {t("Create")}
                         </VBtn>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         </ScreenContainer>
     );
 });

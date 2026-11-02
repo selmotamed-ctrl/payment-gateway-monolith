@@ -2,9 +2,9 @@ import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute, useRouter } from "vue-router";
-import { VAlert, VBtn, VCard, VCardText } from "vuetify/components";
+import { VAlert, VBtn } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
@@ -32,6 +32,11 @@ import KybDocumentPreview from "./components/KybDocumentPreview";
 import KybReviewDialog from "./components/KybReviewDialog";
 import KybActionDialog, { type KybActionMode } from "./components/KybActionDialog";
 
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { DescriptionList } from "@/components/ui/DescriptionList";
+import { MonoRef } from "@/components/ui/MonoRef";
+import { EmptyState } from "@/components/ui/EmptyState";
+import type { BadgeTone } from "@/components/ui/StatusBadge";
 const parse = (payload: unknown): KybDocumentDetail => {
     const source = (payload ?? {}) as Record<string, unknown>;
     return (source.kybDocument ?? source) as KybDocumentDetail;
@@ -192,6 +197,8 @@ const KybReviewDetailPage = dc(() => {
     });
 
     const readiness = computed(() => document.value?.readiness ?? null);
+    const asBadgeTone = (tone: ReturnType<typeof statusTone>): BadgeTone =>
+        tone === "error" ? "danger" : tone === "primary" ? "info" : tone;
 
     return () => {
         if (loading.value) {
@@ -218,6 +225,9 @@ const KybReviewDetailPage = dc(() => {
                 <ThemedView style={{ gap: "18px" }}>
                     <PageHeader
                         title={`${typeHelp.label} · ${entry.merchantName}`}
+                        subtitle={t("Inspect document identity, scanning status, expiry evidence and duplicate-document risk.")}
+                        badge={statusHelp.label}
+                        badgeTone={asBadgeTone(statusHelp.tone)}
                         end={() => (
                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                                 <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "KybReview" })}>
@@ -270,6 +280,23 @@ const KybReviewDetailPage = dc(() => {
                         )}
                     </ThemedView>
 
+                    <SurfaceCard>
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Document identifiers")}</ThemedText>
+                            <DescriptionList
+                                columns={2}
+                                items={[
+                                    { label: t("Document ID"), value: <MonoRef value={entry.id} /> },
+                                    { label: t("SHA-256"), value: <MonoRef value={entry.sha256} truncate={32} /> },
+                                    { label: t("Merchant ID"), value: <MonoRef value={entry.merchantId} /> },
+                                    { label: t("Join request ID"), value: <MonoRef value={entry.joinRequestId ?? ""} /> },
+                                    { label: t("File name"), value: entry.originalFileName || "—" },
+                                    { label: t("Document status"), value: statusHelp.label },
+                                ]}
+                            />
+                        </SurfaceCardText>
+                    </SurfaceCard>
+
                     {entry.avStatus !== "CLEAN" && (
                         <VAlert type={entry.avStatus === "INFECTED" ? "error" : "warning"} variant="tonal">
                             {t(avHelp.meaning)}
@@ -287,17 +314,17 @@ const KybReviewDetailPage = dc(() => {
                     )}
 
                     {areHelpPanelsVisible() && (
-                        <VCard>
-                            <VCardText>
+                        <SurfaceCard>
+                            <SurfaceCardText>
                                 <KybHelpPanel />
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
                     )}
 
                     <FieldsSections sections={sections.value} />
 
-                    <VCard>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    <SurfaceCard>
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px", flex: 1 }}>{t("Audit trail")}</ThemedText>
                                 <StatusChip label={`${entry.auditTrail?.length ?? 0} ${t("events")}`} tone="neutral" size="x-small" />
@@ -306,7 +333,7 @@ const KybReviewDetailPage = dc(() => {
                                 {t("Last 100 recorded actions on this document, newest first.")}
                             </ThemedText>
                             {(entry.auditTrail ?? []).length === 0 && (
-                                <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("No audit events recorded yet.")}</ThemedText>
+                                <EmptyState title={t("No audit events recorded yet.")} icon="mdi-history" />
                             )}
                             {(entry.auditTrail ?? []).map((event) => {
                                 const change = auditChangeSummary(event);
@@ -342,29 +369,33 @@ const KybReviewDetailPage = dc(() => {
                                     </ThemedView>
                                 );
                             })}
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
 
-                    <VCard>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    <SurfaceCard>
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                             <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Secure preview")}</ThemedText>
                             <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
                                 {t("Only clean, scanned files can be opened. Every preview is written to the audit log.")}
                             </ThemedText>
                             <KybDocumentPreview document={entry} />
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
 
-                    <VCard>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    <SurfaceCard>
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                             <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Duplicate investigation")}</ThemedText>
                             <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{COLUMN_HELP.duplicate}</ThemedText>
                             {entry.duplicateMatches.length === 0 ? (
-                                <ThemedText style={{ opacity: 0.6 }}>{t("No cross-merchant duplicate was found for this hash.")}</ThemedText>
+                                <EmptyState
+                                    title={t("No cross-merchant duplicate was found for this hash.")}
+                                    description={COLUMN_HELP.duplicate}
+                                    icon="mdi-content-duplicate"
+                                />
                             ) : (
                                 entry.duplicateMatches.map((match) => (
-                                    <VCard key={match.id} variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                                    <SurfaceCard key={match.id} variant="tonal">
+                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                                                 <ThemedText type="defaultSemiBold">
                                                     {match.merchant.tradeName || match.merchant.legalName}
@@ -375,9 +406,12 @@ const KybReviewDetailPage = dc(() => {
                                                     <StatusChip label={match.joinRequest.status} tone={statusTone(match.joinRequest.status)} size="x-small" />
                                                 )}
                                             </ThemedView>
-                                            <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
-                                                {documentTypeHelp(match.docType).label} · {formatDateTime(match.createdAt)} · {match.merchantId}
-                                            </ThemedText>
+                                            <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+                                                <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
+                                                    {documentTypeHelp(match.docType).label} · {formatDateTime(match.createdAt)}
+                                                </ThemedText>
+                                                <MonoRef value={match.merchantId} truncate={18} />
+                                            </ThemedView>
                                             <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
                                                 <VBtn size="x-small" variant="text" onClick={() => void router.push({ name: "KybReviewDetail", params: { id: match.id } })}>
                                                     {t("Open duplicate document")}
@@ -392,16 +426,16 @@ const KybReviewDetailPage = dc(() => {
                                                     </VBtn>
                                                 )}
                                             </ThemedView>
-                                        </VCardText>
-                                    </VCard>
+                                        </SurfaceCardText>
+                                    </SurfaceCard>
                                 ))
                             )}
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
 
                     {readiness.value && (
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <SurfaceCard>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Join request readiness")}</ThemedText>
                                 <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
                                     <StatusChip label={readiness.value.ready ? t("Ready") : t("Blocked")} tone={readiness.value.ready ? "success" : "warning"} />
@@ -432,17 +466,17 @@ const KybReviewDetailPage = dc(() => {
                                         {t("Open checklist and decision")}
                                     </VBtn>
                                 )}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
                     )}
 
                     {entry.openRevalidations.length > 0 && (
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <SurfaceCard>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Open re-verification requests")}</ThemedText>
                                 {entry.openRevalidations.map((revalidation) => (
-                                    <VCard key={revalidation.id} variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                                    <SurfaceCard key={revalidation.id} variant="tonal">
+                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                                                 <StatusChip label={revalidation.status} tone={statusTone(revalidation.status)} size="x-small" />
                                                 <ThemedText style={{ fontSize: "13px", fontWeight: 600 }}>{revalidation.docType}</ThemedText>
@@ -451,11 +485,11 @@ const KybReviewDetailPage = dc(() => {
                                             <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>
                                                 {t("Due")}: {formatDateTime(revalidation.dueAt)}
                                             </ThemedText>
-                                        </VCardText>
-                                    </VCard>
+                                        </SurfaceCardText>
+                                    </SurfaceCard>
                                 ))}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
                     )}
                 </ThemedView>
 

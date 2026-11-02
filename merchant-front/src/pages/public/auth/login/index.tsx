@@ -1,8 +1,7 @@
 import { dc } from "kt-dc";
-import { VAlert, VBtn, VCard, VCardText, VTextField } from "vuetify/components";
+import { VAlert, VBtn, VTextField } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { ref } from "vue";
-import LogoSvg from "@/assets/images/logo.svg";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { setUserState, type UserState } from "@/state/user";
@@ -10,6 +9,9 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { setLocale } from "@/plugins/localization";
 import router from "@/router";
 import { RouterLink } from "vue-router";
+import AuthLayout from "@/layouts/auth";
+import { FormField } from "@/components/ui/FormField";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
 
 const LoginPage = dc(() => {
     const { t } = useLocale();
@@ -107,22 +109,25 @@ const LoginPage = dc(() => {
     };
 
     return () => (
-        <div
-            style={{
-                minHeight: "100vh",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: "24px",
-                background: "linear-gradient(135deg, #0f172a 0%, #123a6b 55%, #0b7d72 100%)",
-            }}
-        >
-            <VCard style={{ width: "100%", maxWidth: "420px", borderRadius: "20px" }}>
-                <VCardText style={{ display: "flex", flexDirection: "column", gap: "16px", padding: "20px" }}>
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
-                        <img src={LogoSvg} alt="logo" width={"52px"} height={"52px"} />
-                        <div style={{ fontSize: "19px", fontWeight: "800" }}>{t("Payment Gateway")}</div>
-                        <div style={{ fontSize: "13px", opacity: 0.65 }}>{t("Sign in to continue")}</div>
+        <AuthLayout>
+            <SurfaceCard>
+                <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                        <h1
+                            style={{
+                                margin: 0,
+                                fontSize: "20px",
+                                fontWeight: 600,
+                                lineHeight: 1.3,
+                                color: "var(--pg-ink-primary)",
+                                letterSpacing: "-0.02em",
+                            }}
+                        >
+                            {t("Merchant Portal")}
+                        </h1>
+                        <p style={{ margin: 0, fontSize: "13px", color: "var(--pg-ink-muted)" }}>
+                            {t("Sign in to continue")}
+                        </p>
                     </div>
 
                     {error.value && (
@@ -131,76 +136,113 @@ const LoginPage = dc(() => {
                         </VAlert>
                     )}
 
-                    <VTextField
-                        label={t("Phone Or Email")}
-                        prependInnerIcon="mdi-account-outline"
-                        modelValue={identity.value}
-                        onUpdate:modelValue={(v: string) => (identity.value = v)}
-                        hideDetails
-                    />
-
-                    <VTextField
-                        label={t("Password")}
-                        prependInnerIcon="mdi-lock-outline"
-                        type={showPassword.value ? "text" : "password"}
-                        modelValue={password.value}
-                        onUpdate:modelValue={(v: string) => (password.value = v)}
-                        appendInnerIcon={showPassword.value ? "mdi-eye-off-outline" : "mdi-eye-outline"}
-                        onClick:append-inner={() => (showPassword.value = !showPassword.value)}
-                        hideDetails
-                    />
-
-                    {challengeId.value && (
+                    {challengeId.value ? (
                         <>
                             <VAlert type="info" variant="tonal" density="compact">
                                 {t("Enter the six-digit code sent to your registered phone.")}
                             </VAlert>
-                            <VTextField
-                                label={t("Verification Code")}
-                                prependInnerIcon="mdi-shield-key-outline"
-                                modelValue={mfaCode.value}
-                                onUpdate:modelValue={(v: string) => (mfaCode.value = v)}
-                                hideDetails
-                            />
+                            <FormField label={t("Verification Code")} required>
+                                <VTextField
+                                    aria-label={t("Verification Code")}
+                                    prependInnerIcon="mdi-shield-key-outline"
+                                    autocomplete="one-time-code"
+                                    {...{ inputmode: "numeric", maxlength: "6", autofocus: true }}
+                                    modelValue={mfaCode.value}
+                                    onUpdate:modelValue={(v: string) => (mfaCode.value = v)}
+                                    hideDetails
+                                />
+                            </FormField>
+                            <VBtn
+                                block
+                                size="large"
+                                loading={loading.value}
+                                disabled={mfaCode.value.trim().length !== 6}
+                                onClick={() => void submit()}
+                                style={{ height: "38px" }}
+                            >
+                                {t("Verify")}
+                            </VBtn>
+                            <VBtn
+                                variant="text"
+                                size="small"
+                                onClick={() => {
+                                    challengeId.value = null;
+                                    mfaCode.value = "";
+                                    error.value = null;
+                                }}
+                            >
+                                {t("Back")}
+                            </VBtn>
+                        </>
+                    ) : (
+                        <>
+                            <FormField label={t("Phone Or Email")} required>
+                                <VTextField
+                                    aria-label={t("Phone Or Email")}
+                                    prependInnerIcon="mdi-account-outline"
+                                    autocomplete="username"
+                                    {...{ autofocus: true }}
+                                    modelValue={identity.value}
+                                    onUpdate:modelValue={(v: string) => (identity.value = v)}
+                                    hideDetails
+                                />
+                            </FormField>
+
+                            <FormField label={t("Password")} required>
+                                <VTextField
+                                    aria-label={t("Password")}
+                                    prependInnerIcon="mdi-lock-outline"
+                                    type={showPassword.value ? "text" : "password"}
+                                    autocomplete="current-password"
+                                    modelValue={password.value}
+                                    onUpdate:modelValue={(v: string) => (password.value = v)}
+                                    appendInnerIcon={showPassword.value ? "mdi-eye-off-outline" : "mdi-eye-outline"}
+                                    onClick:append-inner={() => (showPassword.value = !showPassword.value)}
+                                    hideDetails
+                                />
+                            </FormField>
+
+                            <VBtn
+                                block
+                                size="large"
+                                loading={loading.value}
+                                disabled={!identity.value || !password.value}
+                                onClick={() => void submit()}
+                                style={{ height: "38px" }}
+                            >
+                                {t("Login")}
+                            </VBtn>
+
+                            <VBtn
+                                block
+                                variant="tonal"
+                                prependIcon="mdi-google"
+                                loading={loading.value}
+                                onClick={() => void loginWithGoogle()}
+                                style={{ height: "38px" }}
+                            >
+                                {t("Login With Google")}
+                            </VBtn>
                         </>
                     )}
 
-                    <VBtn
-                        block
-                        size="large"
-                        loading={loading.value}
-                        disabled={challengeId.value ? mfaCode.value.trim().length !== 6 : !identity.value || !password.value}
-                        onClick={() => void submit()}
+                    <div
+                        style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: "8px",
+                            flexWrap: "wrap",
+                        }}
                     >
-                        {challengeId.value ? t("Verify") : t("Login")}
-                    </VBtn>
-
-                    {challengeId.value && (
-                        <VBtn
-                            variant="text"
-                            size="small"
-                            onClick={() => {
-                                challengeId.value = null;
-                                mfaCode.value = "";
-                                error.value = null;
+                        <RouterLink
+                            to={{ name: "Register" }}
+                            style={{
+                                fontSize: "13px",
+                                color: "var(--pg-accent-interactive)",
+                                textDecoration: "none",
                             }}
                         >
-                            {t("Back")}
-                        </VBtn>
-                    )}
-
-                    <VBtn
-                        block
-                        variant="tonal"
-                        prependIcon="mdi-google"
-                        loading={loading.value}
-                        onClick={() => void loginWithGoogle()}
-                    >
-                        {t("Login With Google")}
-                    </VBtn>
-
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <RouterLink to={{ name: "Register" }} style={{ fontSize: "13px" }}>
                             {t("Create Account")}
                         </RouterLink>
                         <div style={{ display: "flex", gap: "4px" }}>
@@ -212,9 +254,9 @@ const LoginPage = dc(() => {
                             </VBtn>
                         </div>
                     </div>
-                </VCardText>
-            </VCard>
-        </div>
+                </div>
+            </SurfaceCard>
+        </AuthLayout>
     );
 });
 

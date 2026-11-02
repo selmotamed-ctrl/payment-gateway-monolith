@@ -209,6 +209,7 @@ export const useSections = () => {
                     label: t("Pricing & Limits"),
                     name: "PricingControls",
                     icon: "mdi-tune-variant",
+                    if: () => hasOneOfAuthorities(["profit.read", "liquidity.read"]),
                 },
                 {
                     label: t("Profitability"),

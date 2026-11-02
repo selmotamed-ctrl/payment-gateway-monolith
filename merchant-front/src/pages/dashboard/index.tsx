@@ -1,15 +1,19 @@
 import { dc } from "kt-dc";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
-import { VCard, VCardText, VSelect } from "vuetify/components";
+
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
 import { EChart } from "@/components/EChart";
-import { MiniStats, type StatItem } from "@/components/MiniStats";
-import { MoneyText } from "@/components/MoneyText";
+import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { MonoRef } from "@/components/ui/MonoRef";
+
 import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
@@ -17,6 +21,7 @@ import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { formatPlainNumber, toDecimal } from "@/utils/money";
 
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 type Overview = {
     currency?: string;
     walletBalance?: string;
@@ -62,31 +67,38 @@ const DashboardPage = dc(() => {
 
     const currency = () => overview.value?.currency ?? "LYD";
 
-    const stats = (): StatItem[] => [
+    const metricItems = computed<MetricItem[]>(() => [
         {
-            title: t("Wallet Balance"),
-            value: overview.value?.walletBalance ?? "0",
-            icon: "mdi-wallet-outline",
-            color: "#0f6bff",
+            key: "balance",
+            label: t("Wallet Balance"),
+            moneyAmount: overview.value?.walletBalance ?? "0",
+            currency: currency(),
         },
         {
-            title: t("Monthly Volume"),
-            value: overview.value?.todayVolume ?? "0",
-            icon: "mdi-chart-bar",
-            color: "#059669",
+            key: "volume",
+            label: t("Monthly Volume"),
+            moneyAmount: overview.value?.todayVolume ?? "0",
+            currency: currency(),
         },
         {
-            title: t("Success Rate"),
+            key: "success",
+            label: t("Success Rate"),
             value: `${overview.value?.successRate ?? "0"}%`,
-            icon: "mdi-check-circle-outline",
-            color: "#00b8a9",
+            badge: Number(overview.value?.successRate ?? 0) >= 90 ? t("Healthy") : t("Watch"),
+            badgeTone: Number(overview.value?.successRate ?? 0) >= 90 ? "success" : "warning",
         },
         {
-            title: t("Cash-Outs"),
+            key: "cashouts",
+            label: t("Cash-Outs"),
             value: overview.value?.pendingCashouts ?? "0",
-            icon: "mdi-cash-fast",
-            color: "#d97706",
         },
+    ]);
+
+    const periodTabs = [
+        { value: "today", label: t("Today") },
+        { value: "last_7d", label: t("7D") },
+        { value: "last_30d", label: t("30D") },
+        { value: "last_90d", label: t("90D") },
     ];
 
     const volumeChart = () => {
@@ -139,10 +151,10 @@ const DashboardPage = dc(() => {
     };
 
     const paymentHeaders: TableHeader<any>[] = [
-        { key: "reference", label: "Reference", value: (row) => row.reference },
+        { key: "reference", label: "Reference", value: (row) => row.reference, Value: ({ row }) => <MonoRef value={row.reference} truncate={18} /> },
         { key: "railCode", label: "Rail Code", value: (row) => row.railCode },
-        { key: "amount", label: "Amount", value: (row) => `${row.amount ?? ""} ${row.currency ?? ""}` },
-        { key: "status", label: "Status", value: (row) => row.status },
+        { key: "amount", label: "Amount", value: (row) => row.amount, Value: ({ row }) => <MoneyDisplay amount={row.amount} currency={row.currency} size="sm" /> },
+        { key: "status", label: "Status", value: (row) => row.status, Value: ({ row }) => <StatusBadge status={row.status} /> },
         { key: "createdAt", label: "Created At", value: (row) => row.createdAt },
     ];
 
@@ -151,22 +163,15 @@ const DashboardPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Dashboard")}
+                    subtitle={t("Your wallet, payment volume, and settlement posture.")}
                     end={() => (
-                        <VSelect
-                            items={[
-                                { title: t("Today"), value: "today" },
-                                { title: t("Last 7 days"), value: "last_7d" },
-                                { title: t("Last 30 days"), value: "last_30d" },
-                                { title: t("Last 90 days"), value: "last_90d" },
-                            ]}
+                        <SegmentedTabs
                             modelValue={period.value}
-                            onUpdate:modelValue={(v: string) => {
-                                period.value = v;
+                            tabs={periodTabs}
+                            onUpdate:modelValue={(value: string) => {
+                                period.value = value;
                                 void load();
                             }}
-                            density="compact"
-                            hideDetails
-                            style={{ minWidth: "170px" }}
                         />
                     )}
                 />
@@ -175,29 +180,29 @@ const DashboardPage = dc(() => {
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : (
                     <>
-                        <MiniStats stats={stats()} loading={loading.value} />
+                        <MetricStrip items={metricItems.value} loading={loading.value} />
 
                         <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "18px" }}>
-                            <VCard style={{ flex: "1 1 440px" }}>
-                                <VCardText>
+                            <SurfaceCard style={{ flex: "1 1 440px" }}>
+                                <SurfaceCardText>
                                     <ThemedText type="defaultSemiBold" style={{ marginBottom: "10px" }}>
                                         {t("Monthly Volume")}
                                     </ThemedText>
                                     <EChart option={volumeChart()} height="300px" />
-                                </VCardText>
-                            </VCard>
-                            <VCard style={{ flex: "1 1 340px" }}>
-                                <VCardText>
+                                </SurfaceCardText>
+                            </SurfaceCard>
+                            <SurfaceCard style={{ flex: "1 1 340px" }}>
+                                <SurfaceCardText>
                                     <ThemedText type="defaultSemiBold" style={{ marginBottom: "10px" }}>
                                         {t("By Rail")}
                                     </ThemedText>
                                     <EChart option={railChart()} height="300px" />
-                                </VCardText>
-                            </VCard>
+                                </SurfaceCardText>
+                            </SurfaceCard>
                         </ThemedView>
 
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <SurfaceCard>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <DataTable
                                     title={t("Recent Payments")}
                                     data={overview.value?.recentPayments ?? []}
@@ -207,12 +212,12 @@ const DashboardPage = dc(() => {
                                     xlsx={false}
                                     noElevation={true}
                                 />
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
 
                         <ThemedView style={{ flexDirection: "row", justifyContent: "space-between" }}>
                             <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>
-                                {t("Gross")}: <MoneyText value={overview.value?.todayVolume ?? "0"} currency={currency()} />
+                                {t("Gross")}: <MoneyDisplay amount={overview.value?.todayVolume ?? "0"} currency={currency()} />
                             </ThemedText>
                             <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>
                                 {formatPlainNumber(overview.value?.volumeByRail?.length ?? 0)} {t("By Rail")}

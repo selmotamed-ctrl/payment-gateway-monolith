@@ -1,18 +1,9 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
-import {
-    VBtn,
-    VCard,
-    VCardText,
-    VChip,
-    VTab,
-    VTabs,
-    VWindow,
-    VWindowItem,
-} from "vuetify/components";
+import { VBtn, VTab, VTabs, VWindow, VWindowItem } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StatusChip } from "@/components/StatusChip";
@@ -21,6 +12,8 @@ import { MERCHANT_DEVELOPER_CHAPTERS } from "@/content/guide/merchantDeveloperAp
 import type { DeveloperCodeLanguage } from "@/content/guide/types";
 import { showSnackBar } from "@/utils/snackBar";
 
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { MetaPill } from "@/components/ui/MetaPill";
 const LANGUAGES: { value: DeveloperCodeLanguage; label: string }[] = [
     { value: "typescript", label: "TypeScript / Node / Bun" },
     { value: "php", label: "PHP (Laravel)" },
@@ -60,9 +53,12 @@ const MerchantDeveloperGuidePage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "16px" }}>
-                <PageHeader title={isArabic.value ? "دليل المطوّر وواجهة API" : "Developer & API Integration Guide"} />
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <PageHeader
+                    title={isArabic.value ? "دليل المطوّر وواجهة API" : "Developer & API Integration Guide"}
+                    subtitle={isArabic.value ? "التكامل الآمن وواجهات API وأمثلة الشيفرة." : "Secure integration patterns, API reference, and code examples."}
+                />
+                <SurfaceCard>
+                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                         <ThemedText style={{ fontSize: "13px", opacity: 0.72 }}>
                             {isArabic.value
                                 ? "مرجع كامل من الصفر إلى الإنتاج: المصادقة، دقة المبالغ، نقاط النهاية، والـ webhooks."
@@ -70,7 +66,7 @@ const MerchantDeveloperGuidePage = dc(() => {
                         </ThemedText>
                         <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
                             {MERCHANT_DEVELOPER_CHAPTERS.map((chapter) => (
-                                <VChip
+                                <MetaPill
                                     key={chapter.id}
                                     color={selectedId.value === chapter.id ? "primary" : undefined}
                                     variant={selectedId.value === chapter.id ? "flat" : "tonal"}
@@ -78,15 +74,15 @@ const MerchantDeveloperGuidePage = dc(() => {
                                     style={{ cursor: "pointer" }}
                                 >
                                     {`${chapter.id} · ${isArabic.value && chapter.titleAr ? chapter.titleAr : chapter.titleEn}`}
-                                </VChip>
+                                </MetaPill>
                             ))}
                         </ThemedView>
-                    </VCardText>
-                </VCard>
+                    </SurfaceCardText>
+                </SurfaceCard>
 
                 {selected.value ? (
-                    <VCard>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    <SurfaceCard>
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                 <StatusChip label={selected.value.id} tone="primary" />
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "20px" }}>
@@ -116,8 +112,8 @@ const MerchantDeveloperGuidePage = dc(() => {
                                     </VWindow>
                                 </ThemedView>
                             ) : null}
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
                 ) : null}
             </ThemedView>
         </ScreenContainer>

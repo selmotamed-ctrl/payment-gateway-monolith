@@ -51,7 +51,7 @@ export const StateView = dc(
                             width: "100%",
                         }}
                     >
-                        <VIcon icon={"mdi-alert-circle-outline"} size={"40px"} color="error" aria-hidden="true" />
+                        <VIcon icon={"mdi-alert-circle-outline"} size={40} color="error" aria-hidden="true" />
                         <ThemedText style={{ fontSize: "15px", textAlign: "center" }}>{props.error}</ThemedText>
                         {props.onRetry && (
                             <VBtn variant="tonal" color="primary" onClick={() => props.onRetry?.()} aria-label={t("Retry")}>

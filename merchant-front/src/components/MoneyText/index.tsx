@@ -1,8 +1,6 @@
-import { dc } from "kt-dc";
-import { formatMoney, type MoneyInput } from "@/utils/money";
-import { adaptedLocale } from "@/plugins/localization";
-import { ThemedText } from "@/components/ThemedText";
-import type { StyleValue } from "vue";
+import { defineComponent, type PropType, type StyleValue } from "vue";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
+import type { MoneyInput } from "@/utils/money";
 
 export type MoneyTextProps = {
     value: MoneyInput;
@@ -13,35 +11,28 @@ export type MoneyTextProps = {
     bold?: boolean;
 };
 
-export const MoneyText = dc(
-    (props: MoneyTextProps) => {
-        return () => {
-            const text = formatMoney(props.value, {
-                currency: props.currency,
-                locale: adaptedLocale.current.value === "ar" ? "ar" : "en",
-                showCurrency: props.showCurrency !== false,
-            });
-            return (
-                <ThemedText
-                    type={props.bold ? "defaultSemiBold" : "default"}
-                    style={[
-                        {
-                            color: props.color,
-                            direction: "ltr",
-                            unicodeBidi: "isolate",
-                            display: "inline-block",
-                        },
-                        props.style,
-                    ]}
-                >
-                    {text}
-                </ThemedText>
-            );
-        };
+export const MoneyText = defineComponent({
+    name: "MoneyText",
+    props: {
+        value: { type: [String, Number, Object] as PropType<MoneyInput>, default: null },
+        currency: { type: String as PropType<string | null>, default: null },
+        showCurrency: { type: Boolean, default: true },
+        color: { type: String, default: "" },
+        style: { type: [Object, String, Array] as PropType<StyleValue>, default: undefined },
+        bold: { type: Boolean, default: false },
     },
-    {
-        props: ["value", "currency", "showCurrency", "color", "style", "bold"],
+    setup(props) {
+        return () => (
+            <span style={props.style}>
+                <MoneyDisplay
+                    amount={props.value as any}
+                    currency={(props.currency || "LYD").toUpperCase()}
+                    showCurrency={props.showCurrency}
+                    size={props.bold ? "lg" : "md"}
+                />
+            </span>
+        );
     },
-);
+});
 
 export default MoneyText;

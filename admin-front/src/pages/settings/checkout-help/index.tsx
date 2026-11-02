@@ -2,21 +2,9 @@ import { dc } from "kt-dc";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
-import {
-    VAlert,
-    VBtn,
-    VCard,
-    VCardText,
-    VCheckbox,
-    VChip,
-    VDivider,
-    VIcon,
-    VSwitch,
-    VTextField,
-    VTextarea,
-} from "vuetify/components";
+import { VAlert, VBtn, VCheckbox, VDivider, VIcon, VSwitch, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { api } from "@/state/api";
@@ -25,6 +13,8 @@ import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { MetaPill } from "@/components/ui/MetaPill";
 type FaqItem = {
     q_ar: string;
     a_ar: string;
@@ -395,11 +385,12 @@ const AdminCheckoutHelpPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Checkout Help")}
+                    subtitle={t("Payer-facing guidance and per-rail instructions.")}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                            <VChip size="small" variant="tonal" color={isDirty.value ? "warning" : "success"}>
+                            <MetaPill size="small" variant="tonal" color={isDirty.value ? "warning" : "success"}>
                                 {isDirty.value ? tr("تغييرات غير محفوظة", "Unsaved changes") : tr("محفوظ", "Saved")}
-                            </VChip>
+                            </MetaPill>
                             <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{tr("تصدير الملخص", "Export summary")}</VBtn>
                         </ThemedView>
                     )}
@@ -420,8 +411,8 @@ const AdminCheckoutHelpPage = dc(() => {
                 </VAlert>
 
                 {summary.value && (
-                    <VCard variant="flat" style={{ borderRadius: "16px" }}>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                             <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{tr("صحة إعدادات المساعدة", "Checkout help health")}</ThemedText>
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px" }}>
                                 {[
@@ -431,16 +422,16 @@ const AdminCheckoutHelpPage = dc(() => {
                                     [tr("الإصدار", "Version"), String(summary.value.currentVersion)],
                                     [tr("التحديثات", "Versions"), String(summary.value.versions)],
                                 ].map(([label, value]) => (
-                                    <VCard key={label} variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
+                                    <SurfaceCard key={label} variant="tonal">
+                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
                                             <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{label}</ThemedText>
                                             <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{value}</ThemedText>
-                                        </VCardText>
-                                    </VCard>
+                                        </SurfaceCardText>
+                                    </SurfaceCard>
                                 ))}
                             </ThemedView>
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
                 )}
 
                 <ThemedView
@@ -451,8 +442,8 @@ const AdminCheckoutHelpPage = dc(() => {
                         gap: "18px",
                     }}
                 >
-                    <VCard style={{ flex: "2 1 640px", minWidth: "320px" }}>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                    <SurfaceCard style={{ flex: "2 1 640px", minWidth: "320px" }}>
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                             <ThemedView
                                 style={{
                                     flexDirection: "row",
@@ -464,9 +455,9 @@ const AdminCheckoutHelpPage = dc(() => {
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "17px", flex: 1 }}>
                                     {tr("إعدادات المساعدة في الدفع", "Checkout support settings")}
                                 </ThemedText>
-                                <VChip size="small" variant="tonal" color="primary">
+                                <MetaPill size="small" variant="tonal" color="primary">
                                     {tr("الإصدار", "Version")}: {version.value ?? "-"}
-                                </VChip>
+                                </MetaPill>
                             </ThemedView>
 
                             <ThemedText style={{ fontSize: "12px", opacity: 0.7 }}>
@@ -688,11 +679,11 @@ const AdminCheckoutHelpPage = dc(() => {
                                     {tr("حفظ", "Save")}
                                 </VBtn>
                             </ThemedView>
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
 
-                    <VCard style={{ flex: "1 1 340px", minWidth: "300px" }}>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                    <SurfaceCard style={{ flex: "1 1 340px", minWidth: "300px" }}>
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
                                 <VIcon icon="mdi-eye-outline" color="primary" />
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
@@ -723,7 +714,7 @@ const AdminCheckoutHelpPage = dc(() => {
                                 ) : (
                                     <>
                                         {!!previewWorkingHours.value && (
-                                            <VChip
+                                            <MetaPill
                                                 size="small"
                                                 variant="tonal"
                                                 color="primary"
@@ -731,7 +722,7 @@ const AdminCheckoutHelpPage = dc(() => {
                                                 style={{ alignSelf: "flex-start" }}
                                             >
                                                 {previewWorkingHours.value}
-                                            </VChip>
+                                            </MetaPill>
                                         )}
 
                                         {form.value.show_platform_contact && (
@@ -850,17 +841,17 @@ const AdminCheckoutHelpPage = dc(() => {
                                     ))
                                 )}
                             </ThemedView>
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
                 </ThemedView>
 
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                <SurfaceCard>
+                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                         <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
                             <ThemedText type="defaultSemiBold" style={{ fontSize: "16px", flex: 1 }}>
                                 {tr("سجل إصدارات الإعدادات", "Configuration version history")}
                             </ThemedText>
-                            <VChip size="x-small" variant="tonal">{history.value.length}</VChip>
+                            <MetaPill size="x-small" variant="tonal">{history.value.length}</MetaPill>
                             <VBtn size="small" variant="text" loading={historyLoading.value} onClick={() => void loadHistory()}>
                                 {tr("تحديث", "Refresh")}
                             </VBtn>
@@ -875,8 +866,8 @@ const AdminCheckoutHelpPage = dc(() => {
                                 key={version.id}
                                 style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap", padding: "8px 10px", borderRadius: "8px", border: "1px solid rgba(100,116,139,0.2)" }}
                             >
-                                <VChip size="x-small" variant="tonal" color="primary">v{version.version}</VChip>
-                                {index === 0 && <VChip size="x-small" variant="tonal" color="success">{tr("الحالي", "Current")}</VChip>}
+                                <MetaPill size="x-small" variant="tonal" color="primary">v{version.version}</MetaPill>
+                                {index === 0 && <MetaPill size="x-small" variant="tonal" color="success">{tr("الحالي", "Current")}</MetaPill>}
                                 <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>
                                     {tr("ساري من", "Effective")}: {new Date(version.effectiveFrom).toLocaleString()}
                                 </ThemedText>
@@ -907,8 +898,8 @@ const AdminCheckoutHelpPage = dc(() => {
                             </ThemedView>
                         ))}
                         {compareVersion.value && (
-                            <VCard variant="tonal">
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                            <SurfaceCard variant="tonal">
+                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                     <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
                                         <ThemedText type="defaultSemiBold" style={{ fontSize: "13px", flex: 1 }}>
                                             {tr("مقارنة", "Comparing")} v{compareVersion.value.version} → v{history.value[0]?.version}
@@ -926,16 +917,16 @@ const AdminCheckoutHelpPage = dc(() => {
                                         <ThemedView key={row.path} style={{ gap: "3px", padding: "6px 8px", borderRadius: "8px", background: "rgba(100,116,139,0.08)" }}>
                                             <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center" }}>
                                                 <ThemedText style={{ fontSize: "11px", fontWeight: 700, direction: "ltr" }}>{row.path}</ThemedText>
-                                                <VChip size="x-small" variant="tonal" color={row.kind === "ADDED" ? "success" : row.kind === "REMOVED" ? "error" : "warning"}>{row.kind}</VChip>
+                                                <MetaPill size="x-small" variant="tonal" color={row.kind === "ADDED" ? "success" : row.kind === "REMOVED" ? "error" : "warning"}>{row.kind}</MetaPill>
                                             </ThemedView>
                                             <ThemedText style={{ fontSize: "11px", direction: "ltr", opacity: 0.75 }}>{row.before} → {row.after}</ThemedText>
                                         </ThemedView>
                                     ))}
-                                </VCardText>
-                            </VCard>
+                                </SurfaceCardText>
+                            </SurfaceCard>
                         )}
-                    </VCardText>
-                </VCard>
+                    </SurfaceCardText>
+                </SurfaceCard>
             </ThemedView>
         </ScreenContainer>
     );

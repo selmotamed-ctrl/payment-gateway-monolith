@@ -3,24 +3,15 @@ import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import {
-    VAlert,
-    VBtn,
-    VCard,
-    VCardText,
-    VCheckbox,
-    VChip,
-    VDialog,
-    VDivider,
-    VSelect,
-    VTextField,
-} from "vuetify/components";
+import { VAlert, VBtn, VCheckbox, VDivider, VSelect, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
+import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import { MonoRef } from "@/components/ui/MonoRef";
 import { statusTone } from "@/components/Table/statusTone";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
@@ -35,6 +26,9 @@ import { ADMIN_ROLES } from "@/utils/authorities";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { MetaPill } from "@/components/ui/MetaPill";
 type UserRow = {
     id: string;
     email: string;
@@ -318,16 +312,17 @@ const UsersPage = dc(() => {
         }
     };
 
-    const summaryItems = computed(() => {
+    const metricItems = computed<MetricItem[]>(() => {
         const data = summary.value;
         if (!data) return [];
+        const suspended = data.suspended + data.disabled;
         return [
-            { label: t("Admin users"), value: String(data.total), tone: "info" as const },
-            { label: t("Active"), value: String(data.active), tone: "success" as const },
-            { label: t("Invited"), value: String(data.invited), tone: data.invited > 0 ? "warning" as const : "success" as const },
-            { label: t("Suspended"), value: String(data.suspended + data.disabled), tone: data.suspended + data.disabled > 0 ? "error" as const : "success" as const },
-            { label: t("Makers"), value: String(data.makers), tone: "primary" as const },
-            { label: t("Checkers"), value: String(data.checkers), tone: "primary" as const },
+            { key: "total", label: t("Admin users"), value: String(data.total) },
+            { key: "active", label: t("Active"), value: String(data.active), badge: t("Active"), badgeTone: "success" },
+            { key: "invited", label: t("Invited"), value: String(data.invited), badge: data.invited > 0 ? t("Watch") : t("Clear"), badgeTone: data.invited > 0 ? "warning" : "success" },
+            { key: "suspended", label: t("Suspended"), value: String(suspended), badge: suspended > 0 ? t("Critical") : t("Clear"), badgeTone: suspended > 0 ? "danger" : "success" },
+            { key: "makers", label: t("Makers"), value: String(data.makers) },
+            { key: "checkers", label: t("Checkers"), value: String(data.checkers) },
         ];
     });
 
@@ -635,6 +630,7 @@ const UsersPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Admin Users")}
+                    subtitle={t("Platform operators, makers, checkers, and access posture.")}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
@@ -649,8 +645,8 @@ const UsersPage = dc(() => {
                 </VAlert>
 
                 {summary.value && (
-                    <VCard variant="flat" style={{ borderRadius: "16px" }}>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Access governance")}</ThemedText>
                                 <div style={{ flex: 1 }} />
@@ -675,22 +671,15 @@ const UsersPage = dc(() => {
                                         )}
                                     </ThemedView>
                                 )}
-                                {summaryItems.value.map((item) => (
-                                    <VCard key={item.label} variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
-                                            <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
-                                        </VCardText>
-                                    </VCard>
-                                ))}
                             </ThemedView>
+                            <MetricStrip items={metricItems.value} />
                             <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
                                 {Object.entries(summary.value.byRole ?? {}).map(([role, count]) => (
                                     <StatusChip key={role} label={`${role.replaceAll("_", " ")}: ${count}`} tone="neutral" size="x-small" />
                                 ))}
                             </ThemedView>
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
                 )}
 
                 {selectedCount.value > 0 && (
@@ -769,11 +758,13 @@ const UsersPage = dc(() => {
                 />
             </ThemedView>
 
-            <VDialog modelValue={bulkOpen.value} onUpdate:modelValue={(value: boolean) => (bulkOpen.value = value)} maxWidth="560px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{t("Change status for selected users")}</ThemedText>
-                        <VAlert type="info" variant="tonal">
+            <FormModal
+                modelValue={bulkOpen.value}
+                onUpdate:modelValue={(value: boolean) => (bulkOpen.value = value)}
+                title={t("Change status for selected users")}
+                size="md"
+            >
+<VAlert type="info" variant="tonal">
                             {t("This changes account status only. Role and authority changes still require checker approval.")}
                         </VAlert>
                         <VSelect
@@ -812,14 +803,15 @@ const UsersPage = dc(() => {
                                 {t("Apply")} ({selectedCount.value})
                             </VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
 
-            <VDialog modelValue={detailOpen.value} onUpdate:modelValue={(value: boolean) => (detailOpen.value = value)} maxWidth="760px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        {detailLoading.value ? (
+            <FormModal
+                modelValue={detailOpen.value}
+                onUpdate:modelValue={(value: boolean) => (detailOpen.value = value)}
+                title={detail.value?.email ?? t("User detail")}
+                size="lg"
+            >
+{detailLoading.value ? (
                             <StateView loading={true} />
                         ) : detailError.value ? (
                             <StateView error={detailError.value} onRetry={() => detail.value && void openDetail(detail.value)} />
@@ -827,12 +819,12 @@ const UsersPage = dc(() => {
                             <>
                                 <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                                     <ThemedView style={{ gap: "2px", flex: 1 }}>
-                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>{detail.value.email}</ThemedText>
-                                        <ThemedText style={{ fontSize: "11px", opacity: 0.6, direction: "ltr" }}>{detail.value.id}</ThemedText>
+                                        
+                                        <ThemedText style={{ fontSize: "11px", opacity: 0.6, direction: "ltr" }}><MonoRef value={detail.value.id} /></ThemedText>
                                     </ThemedView>
                                     <StatusChip label={detail.value.status} tone={statusTone(detail.value.status)} />
-                                    {detail.value.isMaker && <VChip size="small" variant="tonal" color="primary">{t("Maker")}</VChip>}
-                                    {detail.value.isChecker && <VChip size="small" variant="tonal" color="secondary">{t("Checker")}</VChip>}
+                                    {detail.value.isMaker && <MetaPill size="small" variant="tonal" color="primary">{t("Maker")}</MetaPill>}
+                                    {detail.value.isChecker && <MetaPill size="small" variant="tonal" color="secondary">{t("Checker")}</MetaPill>}
                                 </ThemedView>
 
                                 <VDivider />
@@ -921,15 +913,15 @@ const UsersPage = dc(() => {
                                 </ThemedView>
                             </>
                         ) : null}
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
 
-            <VDialog modelValue={createOpen.value} onUpdate:modelValue={(value: boolean) => (createOpen.value = value)} maxWidth="620px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>{t("Invite internal user")}</ThemedText>
-                        <VAlert type="info" variant="tonal" density="compact">
+            <FormModal
+                modelValue={createOpen.value}
+                onUpdate:modelValue={(value: boolean) => (createOpen.value = value)}
+                title={t("Invite internal user")}
+                size="md"
+            >
+<VAlert type="info" variant="tonal" density="compact">
                             {t("The user starts in INVITED state. Set a temporary password only when hand-delivering credentials.")}
                         </VAlert>
                         {createError.value && <VAlert type="error" variant="tonal" density="compact">{createError.value}</VAlert>}
@@ -979,9 +971,7 @@ const UsersPage = dc(() => {
                                 {t("Invite")}
                             </VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         </ScreenContainer>
     );
 });

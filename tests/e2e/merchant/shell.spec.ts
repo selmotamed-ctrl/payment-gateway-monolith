@@ -25,7 +25,7 @@ test.describe("merchant shell", () => {
     await page.getByRole("button", { name: "Toggle navigation" }).click();
     await page.waitForTimeout(400);
     const collapsed = await page.locator(".pg-drawer").boundingBox();
-    expect(collapsed === null || collapsed.x <= -250).toBe(true);
+    expect(collapsed === null || collapsed.x <= -240).toBe(true);
 
     await page.getByRole("button", { name: "Toggle navigation" }).click();
     await page.waitForTimeout(400);
@@ -67,7 +67,7 @@ test.describe("merchant shell", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/portal/dashboard");
     const closed = await page.locator(".pg-drawer").boundingBox();
-    expect(closed === null || closed.x <= -250).toBe(true);
+    expect(closed === null || closed.x <= -240).toBe(true);
 
     await page.getByRole("button", { name: "Toggle navigation" }).click();
     await page.waitForTimeout(400);
@@ -76,7 +76,7 @@ test.describe("merchant shell", () => {
     await page.locator(".pg-drawer a", { hasText: "Wallets" }).first().click();
     await page.waitForTimeout(500);
     const after = await page.locator(".pg-drawer").boundingBox();
-    expect(after === null || after.x <= -250).toBe(true);
+    expect(after === null || after.x <= -240).toBe(true);
   });
 
   test("every navigation destination renders", async ({ page }) => {

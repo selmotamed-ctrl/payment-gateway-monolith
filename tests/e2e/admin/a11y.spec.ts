@@ -31,6 +31,6 @@ test("admin login: form controls are labelled", async ({ page }) => {
   await page.addInitScript(() => window.localStorage.setItem("locale-name", "en"));
   await page.goto("/login");
   await expect(page.getByLabel("Email or phone")).toBeVisible();
-  await expect(page.getByLabel("Password")).toBeVisible();
+  await expect(page.getByLabel("Password", { exact: true })).toBeVisible();
   expect(await imagesWithoutAlt(page)).toBe(0);
 });

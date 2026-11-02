@@ -2,19 +2,9 @@ import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute, useRouter } from "vue-router";
-import {
-    VAlert,
-    VBtn,
-    VCard,
-    VCardText,
-    VDialog,
-    VTab,
-    VTabs,
-    VTextField,
-    VTextarea,
-} from "vuetify/components";
+import { VAlert, VBtn, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
@@ -51,7 +41,6 @@ import type {
     MerchantNotification,
     MerchantPendingChange,
     MerchantStats,
-    MerchantSummary,
     MerchantTransaction,
     MerchantWalletRow,
 } from "./types";
@@ -71,9 +60,37 @@ import {
     walletFilters,
 } from "./merchantTableFilters";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
+import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { MetricStrip } from "@/components/ui/MetricStrip";
+import { DescriptionList } from "@/components/ui/DescriptionList";
+import { MonoRef } from "@/components/ui/MonoRef";
+import type { BadgeTone } from "@/components/ui/StatusBadge";
 const parse = (payload: unknown): MerchantDetail => {
     const source = (payload ?? {}) as Record<string, unknown>;
-    return (source.merchant ?? source) as MerchantDetail;
+    const merchant = ((source.merchant ?? source) ?? {}) as Record<string, any>;
+    const arrays = [
+        "redactedFields",
+        "fieldHistory",
+        "pendingChanges",
+        "amlCases",
+        "joinRequests",
+        "kybDocuments",
+        "beneficialOwners",
+        "users",
+        "wallets",
+        "applications",
+        "accessTokens",
+        "credentialSets",
+        "revalidations",
+        "metrics",
+    ];
+    for (const key of arrays) {
+        if (!Array.isArray(merchant[key])) merchant[key] = [];
+    }
+    return merchant as MerchantDetail;
 };
 
 const field = (text: string, value: unknown, hint?: string, source?: string, copy = false): FieldProps => ({
@@ -136,6 +153,8 @@ const MerchantDetailPage = dc(() => {
     const statusHelp = computed(() => merchantStatusHelp(merchant.value?.status ?? ""));
     const balance = computed(() => merchant.value?.walletBalance?.balance ?? null);
     const currency = computed(() => merchant.value?.walletBalance?.wallets?.[0]?.currency ?? "LYD");
+    const asBadgeTone = (tone: ReturnType<typeof statusTone>): BadgeTone =>
+        tone === "error" ? "danger" : tone === "primary" ? "info" : tone;
 
     const exportSummary = async () => {
         if (summaryExportLoading.value) return;
@@ -334,18 +353,90 @@ const MerchantDetailPage = dc(() => {
     const healthItems = computed(() => {
         const current = stats.value;
         if (!current) return [];
-        const totals = current.totals;
+        const totals = current.totals ?? ({} as Record<string, any>);
+        const pendingCashouts = current.pendingCashouts ?? ({ count: 0, amount: 0 } as Record<string, any>);
+        const successRate = Number(totals.successRate ?? 0);
         return [
-            { label: "30-day gross volume", value: formatMoney(totals.grossVolume, currency.value), tone: "info" as const },
-            { label: "Net credited", value: formatMoney(totals.netCredited, currency.value), tone: "success" as const },
-            { label: "Platform commission", value: formatMoney(totals.commission, currency.value), tone: "neutral" as const },
-            { label: "Attempts", value: String(totals.attemptCount), tone: "neutral" as const },
-            { label: "Success rate", value: `${totals.successRate.toFixed(2)}%`, tone: totals.successRate >= 90 ? "success" as const : totals.successRate >= 70 ? "warning" as const : "error" as const },
-            { label: "Average ticket", value: formatMoney(totals.averageTicket, currency.value), tone: "neutral" as const },
-            { label: "Open disputes", value: String(current.openDisputes), tone: current.openDisputes > 0 ? "warning" as const : "success" as const },
-            { label: "Pending cash-outs", value: `${current.pendingCashouts.count} · ${formatMoney(current.pendingCashouts.amount, currency.value)}`, tone: current.pendingCashouts.count > 0 ? "warning" as const : "success" as const },
-            { label: "Pending changes", value: String(current.pendingApprovals), tone: current.pendingApprovals > 0 ? "warning" as const : "success" as const },
-            { label: "Unknown outcomes", value: String(totals.unknownCount), tone: totals.unknownCount > 0 ? "error" as const : "success" as const },
+            {
+                key: "grossVolume",
+                label: t("30-day gross volume"),
+                value: formatMoney(totals.grossVolume ?? 0, currency.value),
+                subLabel: t("Last 30 days"),
+                badge: t("Gross"),
+                badgeTone: "info" as const,
+            },
+            {
+                key: "netCredited",
+                label: t("Net credited"),
+                value: formatMoney(totals.netCredited ?? 0, currency.value),
+                subLabel: t("Settled to merchant"),
+                badge: t("Net"),
+                badgeTone: "success" as const,
+            },
+            {
+                key: "commission",
+                label: t("Platform commission"),
+                value: formatMoney(totals.commission ?? 0, currency.value),
+                subLabel: t("Platform revenue"),
+                badge: t("Fee"),
+                badgeTone: "neutral" as const,
+            },
+            {
+                key: "attempts",
+                label: t("Attempts"),
+                value: String(totals.attemptCount ?? 0),
+                subLabel: t("Payment attempts"),
+                badge: t("30D"),
+                badgeTone: "neutral" as const,
+            },
+            {
+                key: "successRate",
+                label: t("Success rate"),
+                value: `${successRate.toFixed(2)}%`,
+                subLabel: t("Authorization quality"),
+                badge: successRate >= 90 ? t("Healthy") : t("Attention"),
+                badgeTone: successRate >= 90 ? "success" as const : successRate >= 70 ? "warning" as const : "danger" as const,
+            },
+            {
+                key: "averageTicket",
+                label: t("Average ticket"),
+                value: formatMoney(totals.averageTicket ?? 0, currency.value),
+                subLabel: t("Per attempt"),
+                badge: t("30D"),
+                badgeTone: "neutral" as const,
+            },
+            {
+                key: "openDisputes",
+                label: t("Open disputes"),
+                value: String(current.openDisputes ?? 0),
+                subLabel: t("Dispute exposure"),
+                badge: (current.openDisputes ?? 0) > 0 ? t("P1") : t("Clear"),
+                badgeTone: (current.openDisputes ?? 0) > 0 ? "danger" as const : "success" as const,
+            },
+            {
+                key: "pendingCashouts",
+                label: t("Pending cash-outs"),
+                value: `${pendingCashouts.count ?? 0} · ${formatMoney(pendingCashouts.amount ?? 0, currency.value)}`,
+                subLabel: t("Awaiting processing"),
+                badge: (pendingCashouts.count ?? 0) > 0 ? t("Attention") : t("Clear"),
+                badgeTone: (pendingCashouts.count ?? 0) > 0 ? "warning" as const : "success" as const,
+            },
+            {
+                key: "pendingChanges",
+                label: t("Pending changes"),
+                value: String(current.pendingApprovals ?? 0),
+                subLabel: t("Awaiting independent checker"),
+                badge: (current.pendingApprovals ?? 0) > 0 ? t("Four eyes") : t("Clear"),
+                badgeTone: (current.pendingApprovals ?? 0) > 0 ? "warning" as const : "success" as const,
+            },
+            {
+                key: "unknownOutcomes",
+                label: t("Unknown outcomes"),
+                value: String(totals.unknownCount ?? 0),
+                subLabel: t("Operator attention"),
+                badge: (totals.unknownCount ?? 0) > 0 ? t("P1") : t("Clear"),
+                badgeTone: (totals.unknownCount ?? 0) > 0 ? "danger" as const : "success" as const,
+            },
         ];
     });
 
@@ -405,7 +496,7 @@ const MerchantDetailPage = dc(() => {
                 sortKey: "totalChargedAmount",
                 headerTooltip: COLUMN_HELP.transactionAmount,
                 value: (row) => row.totalChargedAmount ?? "",
-                Value: ({ row }: { row: MerchantTransaction }) => <ThemedText style={{ fontSize: "12px" }}>{formatMoney(row.totalChargedAmount, row.currency)}</ThemedText>,
+                Value: ({ row }: { row: MerchantTransaction }) => <MoneyDisplay amount={row.totalChargedAmount} currency={row.currency} size="sm" />,
             });
         }
         if (canFinancial.value) {
@@ -416,7 +507,7 @@ const MerchantDetailPage = dc(() => {
                 value: (row) => row.netMerchantAmount ?? "",
                 Value: ({ row }: { row: MerchantTransaction }) => (
                     <ThemedView style={{ gap: "2px" }}>
-                        <ThemedText style={{ fontSize: "12px" }}>{formatMoney(row.netMerchantAmount, row.currency)}</ThemedText>
+                        <MoneyDisplay amount={row.netMerchantAmount} currency={row.currency} size="sm" />
                         <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{t("fee")} {formatMoney(row.gatewayFeeAmount, row.currency)}</ThemedText>
                     </ThemedView>
                 ),
@@ -472,7 +563,7 @@ const MerchantDetailPage = dc(() => {
                 sortKey: "expectedMonthlyVolume",
                 headerTooltip: COLUMN_HELP.applicationVolume,
                 value: (row) => row.expectedMonthlyVolume ?? "",
-                Value: ({ row }: { row: MerchantApplicationRow }) => <ThemedText style={{ fontSize: "12px" }}>{formatMoney(row.expectedMonthlyVolume, row.assignedWallet.currency)}</ThemedText>,
+                Value: ({ row }: { row: MerchantApplicationRow }) => <MoneyDisplay amount={row.expectedMonthlyVolume} currency={row.assignedWallet.currency} size="sm" />,
             });
         }
         return headers;
@@ -486,7 +577,7 @@ const MerchantDetailPage = dc(() => {
         ];
         if (canFinancial.value) {
             headers.push(
-                { key: "balance", label: "Ledger balance", headerTooltip: COLUMN_HELP.walletBalance, value: (row) => row.balance ?? "", Value: ({ row }: { row: MerchantWalletRow }) => <ThemedText style={{ fontSize: "12px", fontWeight: Number(row.balance ?? 0) < 0 ? 700 : 500 }}>{formatMoney(row.balance, row.currency)}</ThemedText> },
+                { key: "balance", label: "Ledger balance", headerTooltip: COLUMN_HELP.walletBalance, value: (row) => row.balance ?? "", Value: ({ row }: { row: MerchantWalletRow }) => <MoneyDisplay amount={row.balance} currency={row.currency} size="sm" /> },
                 { key: "checkpoint", label: "Checkpoint", headerTooltip: COLUMN_HELP.walletCheckpoint, value: (row) => row.checkpointBalance ?? "" },
             );
         }
@@ -501,7 +592,7 @@ const MerchantDetailPage = dc(() => {
 
     const cashoutHeaders: TableHeader<MerchantCashout>[] = [
         { key: "id", label: "Cash-out", value: (row) => row.id, Value: ({ row }) => <ThemedText style={{ fontSize: "11px", direction: "ltr" }}>{row.id}</ThemedText> },
-        { key: "amount", label: "Amount", sortKey: "amount", value: (row) => row.amount, Value: ({ row }) => <ThemedText style={{ fontSize: "12px" }}>{formatMoney(row.amount, row.currency)}</ThemedText> },
+        { key: "amount", label: "Amount", sortKey: "amount", value: (row) => row.amount, Value: ({ row }) => <MoneyDisplay amount={row.amount} currency={row.currency} size="sm" /> },
         { key: "state", label: "State", sortKey: "state", value: (row) => row.state, Value: ({ row }) => <StatusChip label={row.state} tone={statusTone(row.state)} size="x-small" /> },
         { key: "wallet", label: "Wallet", value: (row) => row.wallet.id, Value: ({ row }) => <ThemedText style={{ fontSize: "11px", direction: "ltr" }}>{row.wallet.id}</ThemedText> },
         { key: "destination", label: "Destination", headerTooltip: COLUMN_HELP.cashoutDestination, value: (row) => JSON.stringify(row.destination), Value: ({ row }) => <ThemedText style={{ fontSize: "11px" }}>{String(row.destination.bank ?? row.destination.bankName ?? "—")} · {String(row.destination.account ?? row.destination.accountNumber ?? row.destination.iban ?? "—")}</ThemedText> },
@@ -511,7 +602,7 @@ const MerchantDetailPage = dc(() => {
 
     const disputeHeaders: TableHeader<MerchantDispute>[] = [
         { key: "externalDisputeRef", label: "Dispute", value: (row) => row.externalDisputeRef, Value: ({ row }) => <ThemedView style={{ gap: "2px" }}><ThemedText style={{ fontSize: "11px", direction: "ltr" }}>{row.externalDisputeRef}</ThemedText><ThemedText style={{ fontSize: "10px", opacity: 0.55, direction: "ltr" }}>{row.attempt.reference}</ThemedText></ThemedView> },
-        { key: "amount", label: "Amount", sortKey: "amount", value: (row) => row.amount, Value: ({ row }) => <ThemedText style={{ fontSize: "12px" }}>{formatMoney(row.amount, row.currency)}</ThemedText> },
+        { key: "amount", label: "Amount", sortKey: "amount", value: (row) => row.amount, Value: ({ row }) => <MoneyDisplay amount={row.amount} currency={row.currency} size="sm" /> },
         { key: "status", label: "Status", sortKey: "status", value: (row) => row.status, Value: ({ row }) => <StatusChip label={row.status} tone={statusTone(row.status)} size="x-small" /> },
         { key: "reason", label: "Reason", headerTooltip: COLUMN_HELP.disputeReason, value: (row) => row.reasonCode ?? "" },
         { key: "rail", label: "Rail / gateway", value: (row) => `${row.rail.code} ${row.gateway.code}` },
@@ -523,7 +614,7 @@ const MerchantDetailPage = dc(() => {
     const adjustmentHeaders: TableHeader<MerchantAdjustment>[] = [
         { key: "id", label: "Adjustment", value: (row) => row.id, Value: ({ row }) => <ThemedText style={{ fontSize: "11px", direction: "ltr" }}>{row.id}</ThemedText> },
         { key: "type", label: "Type", sortKey: "type", value: (row) => row.type },
-        { key: "amount", label: "Amount", sortKey: "amount", value: (row) => row.amount, Value: ({ row }) => <ThemedText style={{ fontSize: "12px" }}>{formatMoney(row.amount, row.currency)}</ThemedText> },
+        { key: "amount", label: "Amount", sortKey: "amount", value: (row) => row.amount, Value: ({ row }) => <MoneyDisplay amount={row.amount} currency={row.currency} size="sm" /> },
         { key: "state", label: "State", sortKey: "state", value: (row) => row.state, Value: ({ row }) => <StatusChip label={row.state} tone={statusTone(row.state)} size="x-small" /> },
         { key: "attempt", label: "Source attempt", value: (row) => row.sourceAttempt?.reference ?? "", Value: ({ row }) => <ThemedText style={{ fontSize: "11px", direction: "ltr" }}>{row.sourceAttempt?.reference ?? "—"}</ThemedText> },
         { key: "dispute", label: "Dispute", value: (row) => row.dispute?.externalDisputeRef ?? "" },
@@ -552,6 +643,17 @@ const MerchantDetailPage = dc(() => {
         { key: "createdAt", label: "Created", sortKey: "createdAt", value: (row) => row.createdAt, Value: ({ row }) => <ThemedText style={{ fontSize: "11px" }}>{formatDateTime(row.createdAt)}</ThemedText> },
     ];
 
+    const detailTabs = computed(() => [
+        { value: "all", label: t("All") },
+        { value: "details", label: t("Details") },
+        { value: "transactions", label: t("Transactions") },
+        ...(canFinancial.value ? [{ value: "wallets", label: t("Wallets") }] : []),
+        { value: "applications", label: t("Applications") },
+        ...(canFinancial.value ? [{ value: "finance", label: t("Finance") }] : []),
+        ...(!isSupport.value ? [{ value: "compliance", label: t("Compliance") }] : []),
+        { value: "access", label: t("Access & activity") },
+    ]);
+
     const show = (tab: MerchantDetailTab) => activeTab.value === "all" || activeTab.value === tab;
 
     return () => {
@@ -567,6 +669,9 @@ const MerchantDetailPage = dc(() => {
                 <ThemedView style={{ gap: "18px" }}>
                     <PageHeader
                         title={entry.displayName || entry.tradeName || t("Merchant")}
+                        subtitle={t("Inspect the merchant profile, payment activity, compliance evidence and governed change history.")}
+                        badge={statusHelp.value.label}
+                        badgeTone={asBadgeTone(statusHelp.value.tone)}
                         end={() => (
                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                                 <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "Merchants" })}>{t("Queue")}</VBtn>
@@ -606,6 +711,25 @@ const MerchantDetailPage = dc(() => {
                         {entry.redactedFields.length > 0 && <StatusChip label={t("Some fields restricted")} tone="neutral" size="small" />}
                     </ThemedView>
 
+                    <SurfaceCard>
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Merchant identifiers")}</ThemedText>
+                            <DescriptionList
+                                columns={2}
+                                items={[
+                                    { label: t("Merchant ID"), value: <MonoRef value={entry.id} /> },
+                                    { label: t("Legal name"), value: entry.legalName || "—" },
+                                    { label: t("Status"), value: statusHelp.value.label },
+                                    { label: t("KYB status"), value: entry.kybStatus ? kybStatusHelp(entry.kybStatus).label : "—" },
+                                    { label: t("Risk tier"), value: entry.riskTier ? riskHelp(entry.riskTier).label : "—" },
+                                    { label: t("Version"), value: `v${entry.version}` },
+                                    { label: t("Contact email"), value: entry.contactEmail || "—" },
+                                    { label: t("Next KYB review"), value: formatDateTime(entry.nextKybReviewAt) },
+                                ]}
+                            />
+                        </SurfaceCardText>
+                    </SurfaceCard>
+
                     {entry.redactedFields.length > 0 && (
                         <VAlert type="info" variant="tonal">
                             {t("Sensitive tax, registration, payout, ceiling, risk or AML information is hidden for your role.")}
@@ -617,20 +741,13 @@ const MerchantDetailPage = dc(() => {
                         </VAlert>
                     )}
 
-                    <VCard variant="flat" style={{ borderRadius: "14px", overflow: "hidden" }}>
-                        <VTabs v-model={activeTab.value} color="primary" density="comfortable" showArrows>
-                            <VTab value="all" prependIcon="mdi-view-dashboard-outline">{t("All")}</VTab>
-                            <VTab value="details" prependIcon="mdi-account-details-outline">{t("Details")}</VTab>
-                            <VTab value="transactions" prependIcon="mdi-swap-horizontal">{t("Transactions")}</VTab>
-                            {canFinancial.value && <VTab value="wallets" prependIcon="mdi-wallet-outline">{t("Wallets")}</VTab>}
-                            <VTab value="applications" prependIcon="mdi-apps">{t("Applications")}</VTab>
-                            {canFinancial.value && <VTab value="finance" prependIcon="mdi-bank-outline">{t("Finance")}</VTab>}
-                            {!isSupport.value && <VTab value="compliance" prependIcon="mdi-shield-check-outline">{t("Compliance")}</VTab>}
-                            <VTab value="access" prependIcon="mdi-account-key-outline">{t("Access & activity")}</VTab>
-                        </VTabs>
-                    </VCard>
+                    <SegmentedTabs
+                        modelValue={activeTab.value}
+                        tabs={detailTabs.value}
+                        onUpdate:modelValue={(value: string) => (activeTab.value = value as MerchantDetailTab)}
+                    />
 
-                    {activeTab.value === "all" && areHelpPanelsVisible() && <VCard><VCardText><MerchantHelpPanel /></VCardText></VCard>}
+                    {activeTab.value === "all" && areHelpPanelsVisible() && <SurfaceCard><SurfaceCardText><MerchantHelpPanel /></SurfaceCardText></SurfaceCard>}
 
                     {show("details") && (
                         <FieldsSections
@@ -655,19 +772,10 @@ const MerchantDetailPage = dc(() => {
                         {healthItems.value.length === 0 ? (
                             <VAlert type="info" variant="tonal">{t("Health statistics are available to financial roles and could not be loaded.")}</VAlert>
                         ) : (
-                            <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "10px" }}>
-                                {healthItems.value.map((item) => (
-                                    <VCard key={item.label} variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "5px", padding: "14px" }}>
-                                            <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{t(item.label)}</ThemedText>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
-                                        </VCardText>
-                                    </VCard>
-                                ))}
-                            </ThemedView>
+                            <MetricStrip items={healthItems.value} />
                         )}
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", marginTop: "10px" }}>
-                            <StatusChip label={`${t("Ledger balance")}: ${formatMoney(stats.value?.walletBalance.balance ?? balance.value, currency.value)}`} tone={Number(stats.value?.walletBalance.balance ?? balance.value ?? 0) < 0 ? "error" : "success"} />
+                            <StatusChip label={`${t("Ledger balance")}: ${formatMoney(stats.value?.walletBalance?.balance ?? balance.value, currency.value)}`} tone={Number(stats.value?.walletBalance?.balance ?? balance.value ?? 0) < 0 ? "error" : "success"} />
                             <StatusChip label={`${t("Negative ceiling")}: ${formatMoney(stats.value?.negativeBalanceCeiling ?? entry.negativeBalanceCeiling, currency.value)}`} tone="neutral" />
                             <StatusChip label={`${t("Next KYB review")}: ${formatDateTime(stats.value?.nextKybReviewAt ?? entry.nextKybReviewAt)}`} tone="neutral" />
                         </ThemedView>
@@ -680,7 +788,7 @@ const MerchantDetailPage = dc(() => {
                         subtitle={t("Payment attempts for this merchant. Open a reference for the full masked transaction context; inquiries are limited to eligible UNKNOWN or VERIFYING attempts.")}
                         defaultOpen={true}
                         storageKey={`merchant:${merchantId.value}:transactions`}
-                        count={stats.value?.totals.attemptCount}
+                        count={stats.value?.totals?.attemptCount}
                         tone="info"
                     >
                         <MerchantResourceTable<MerchantTransaction>
@@ -802,12 +910,12 @@ const MerchantDetailPage = dc(() => {
                     )}
 
                     {show("details") && entry.pendingChanges && entry.pendingChanges.length > 0 && (
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <SurfaceCard>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Pending changes")}</ThemedText>
                                 {entry.pendingChanges.map((change) => (
-                                    <VCard key={change.id} variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                                    <SurfaceCard key={change.id} variant="tonal">
+                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
                                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                                                 <StatusChip label={change.state} tone={statusTone(change.state)} size="x-small" />
                                                 <ThemedText style={{ fontSize: "12px" }}>{change.maker?.email ?? change.makerUserId}</ThemedText>
@@ -818,16 +926,16 @@ const MerchantDetailPage = dc(() => {
                                             {change.makerUserId === currentUserId.value && ["DRAFT", "PENDING_REVIEW"].includes(change.state) && (
                                                 <VBtn size="x-small" variant="text" color="error" onClick={() => openWithdraw(change)}>{t("Withdraw")}</VBtn>
                                             )}
-                                        </VCardText>
-                                    </VCard>
+                                        </SurfaceCardText>
+                                    </SurfaceCard>
                                 ))}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
                     )}
 
                     {show("compliance") && entry.amlCases && entry.amlCases.length > 0 && canAml.value && (
-                        <VCard variant="tonal" color="error">
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        <SurfaceCard variant="tonal" color="error">
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("AML cases")}</ThemedText>
                                 {entry.amlCases.map((amlCase) => (
                                     <ThemedView key={amlCase.id} style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
@@ -837,13 +945,13 @@ const MerchantDetailPage = dc(() => {
                                         <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{formatDateTime(amlCase.createdAt)}</ThemedText>
                                     </ThemedView>
                                 ))}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
                     )}
 
                     {show("compliance") && entry.joinRequests && entry.joinRequests.length > 0 && (
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <SurfaceCard>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Join requests")}</ThemedText>
                                     <VBtn size="small" variant="text" onClick={() => void router.push({ name: "JoinRequests" })}>{t("Open queue")}</VBtn>
@@ -858,13 +966,13 @@ const MerchantDetailPage = dc(() => {
                                         </VBtn>
                                     </ThemedView>
                                 ))}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
                     )}
 
                     {show("compliance") && entry.kybDocuments && entry.kybDocuments.length > 0 && (
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        <SurfaceCard>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                 <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("KYB evidence")}</ThemedText>
                                     <VBtn size="small" variant="text" onClick={() => void router.push({ name: "KybReview" })}>{t("Open KYB review")}</VBtn>
@@ -877,13 +985,13 @@ const MerchantDetailPage = dc(() => {
                                         <VBtn size="x-small" variant="text" onClick={() => void router.push({ name: "KybReviewDetail", params: { id: document.id } })}>{t("Open")}</VBtn>
                                     </ThemedView>
                                 ))}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
                     )}
 
                     {show("compliance") && entry.beneficialOwners && entry.beneficialOwners.length > 0 && (
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        <SurfaceCard>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Beneficial owners")}</ThemedText>
                                 {entry.beneficialOwners.map((owner) => (
                                     <ThemedView key={owner.id} style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
@@ -892,13 +1000,13 @@ const MerchantDetailPage = dc(() => {
                                         <ThemedText style={{ fontSize: "12px" }}>{owner.fullNameEn || owner.fullNameAr} · {owner.role} · {owner.ownershipPercent ?? "—"}%</ThemedText>
                                     </ThemedView>
                                 ))}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
                     )}
 
                     {show("access") && entry.users && entry.users.length > 0 && canWrite.value && (
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        <SurfaceCard>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Merchant users and access")}</ThemedText>
                                 {entry.users.map((merchantUser) => (
                                     <ThemedText key={merchantUser.id} style={{ fontSize: "12px" }}>
@@ -915,8 +1023,8 @@ const MerchantDetailPage = dc(() => {
                                         {t("Credential set")} {credential.id} · {credential.env} · {credential.status}
                                     </ThemedText>
                                 ))}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
                     )}
 
                     {show("access") && (
@@ -962,8 +1070,8 @@ const MerchantDetailPage = dc(() => {
                     )}
 
                     {show("access") && (
-                    <VCard>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    <SurfaceCard>
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                             <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Field history")}</ThemedText>
                                 <VBtn size="small" variant="text" onClick={() => (historyOpen.value = true)}>{t("View all")}</VBtn>
@@ -980,8 +1088,8 @@ const MerchantDetailPage = dc(() => {
                                     </ThemedText>
                                 </ThemedView>
                             ))}
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
                     )}
                 </ThemedView>
 
@@ -1010,23 +1118,26 @@ const MerchantDetailPage = dc(() => {
                         void router.push({ name: "OperatorCaseDetail", params: { id: caseId } });
                     }}
                 />
-                <VDialog modelValue={withdrawOpen.value} onUpdate:modelValue={(value: boolean) => (withdrawOpen.value = value)} maxWidth="560px">
-                    <VCard>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{t("Withdraw pending change")}</ThemedText>
-                            <ThemedText style={{ fontSize: "13px" }}>{withdrawTarget.value?.id}</ThemedText>
+                <FormModal
+                modelValue={withdrawOpen.value}
+                onUpdate:modelValue={(value: boolean) => (withdrawOpen.value = value)}
+                title={t("Withdraw pending change")}
+                size="md"
+            >
+<ThemedText style={{ fontSize: "13px" }}>{withdrawTarget.value?.id}</ThemedText>
                             <VTextarea v-model={withdrawReason.value} label={t("Withdrawal reason (optional)")} rows={3} autoGrow />
                             <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
                                 <VBtn variant="text" onClick={() => (withdrawOpen.value = false)}>{t("Cancel")}</VBtn>
                                 <VBtn color="error" onClick={() => void withdraw()}>{t("Withdraw")}</VBtn>
                             </ThemedView>
-                        </VCardText>
-                    </VCard>
-                </VDialog>
-                <VDialog modelValue={historyOpen.value} onUpdate:modelValue={(value: boolean) => (historyOpen.value = value)} maxWidth="1100px" scrollable>
-                    <VCard>
-                        <VCardText>
-                            <ApiTable<MerchantDetailChange>
+            </FormModal>
+                <FormModal
+                modelValue={historyOpen.value}
+                onUpdate:modelValue={(value: boolean) => (historyOpen.value = value)}
+                title={"Details"}
+                size="lg"
+            >
+<ApiTable<MerchantDetailChange>
                                 title={t("Field history")}
                                 url={urlsMap.merchantDetailChanges(merchantId.value)}
                                 localSearch={false}
@@ -1059,9 +1170,7 @@ const MerchantDetailPage = dc(() => {
                                     });
                                 }}
                             />
-                        </VCardText>
-                    </VCard>
-                </VDialog>
+            </FormModal>
             </ScreenContainer>
         );
     };

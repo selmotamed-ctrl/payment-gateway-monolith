@@ -183,6 +183,11 @@ export type BaseTableProps<T> = {
 export type ApiTableProps<T, RawData extends JsonValue = any> = BaseTableProps<T> & {
     url: string; // --
     title: string | ((data: RawData) => string);
+    filters?: import("./filters").TableFilter[];
+    filterValues?: import("./filters").FilterValues;
+    onFilterChange?: (key: string, value: unknown) => void;
+    onFilterClear?: () => void;
+    filterTotal?: number;
     /**
      * Whether the already-fetched page is also filtered by the search text.
      * Set false when the server performs the search, so the current page is

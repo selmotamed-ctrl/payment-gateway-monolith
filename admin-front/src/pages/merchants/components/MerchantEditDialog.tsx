@@ -2,7 +2,7 @@ import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VSelect, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VCheckbox, VSelect, VTextField, VTextarea } from "vuetify/components";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { api } from "@/state/api";
@@ -11,6 +11,7 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import type { MerchantDetail, MerchantSummary } from "../types";
 
+import { FormModal } from "@/components/ui/FormModal";
 const EDIT_CHECKS = [
     { key: "PATCH_REVIEWED", label: "Proposed changes reviewed" },
     { key: "SOURCE_DOCUMENT_VERIFIED", label: "Source document verified" },
@@ -212,13 +213,13 @@ const MerchantEditDialog = dc(
         };
 
         return () => (
-            <VDialog modelValue={props.open} onUpdate:modelValue={(value: boolean) => props.onUpdate(value)} maxWidth="900px" scrollable>
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
-                            {isDescriptive.value ? t("Edit descriptive fields") : t("Propose sensitive change")}
-                        </ThemedText>
-                        <ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>
+            <FormModal
+                modelValue={props.open}
+                onUpdate:modelValue={(value: boolean) => props.onUpdate(value)}
+                title={isDescriptive.value ? t("Edit descriptive fields") : t("Propose sensitive change")}
+                size="lg"
+            >
+<ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>
                             {props.merchant?.tradeName} · v{props.merchant?.version}
                         </ThemedText>
                         {isDescriptive.value ? (
@@ -277,9 +278,7 @@ const MerchantEditDialog = dc(
                                 {isDescriptive.value ? t("Save descriptive fields") : t("Submit for approval")}
                             </VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         );
     },
     { props: ["open", "mode", "merchant", "onUpdate", "onDone"] },

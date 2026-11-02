@@ -334,6 +334,7 @@ export const DataTable = defineComponent(
                         key: "__no",
                         label: "No.",
                         minWidth: true,
+                        sortable: false,
                     });
                 } else {
                     props.headers[0] = {
@@ -341,6 +342,7 @@ export const DataTable = defineComponent(
                         key: "__no",
                         label: "No",
                         minWidth: true,
+                        sortable: false,
                     };
                 }
             }
@@ -349,12 +351,13 @@ export const DataTable = defineComponent(
                     <ThemedView
                         style={{
                             flexDirection: "column",
-                            gap: "16px",
-                            padding: isMobile.value ? "16px" : "24px",
-                            backgroundColor: isDark ? colors.surface : "#ffffff",
-                            borderRadius: "12px",
-                            boxShadow: props.noElevation ? undefined : defaultBoxShadow,
-                            border: props.noElevation ? undefined : isDark ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid #e2e8f0",
+                            gap: "0",
+                            padding: "0",
+                            backgroundColor: "var(--pg-bg-surface)",
+                            borderRadius: "var(--pg-radius-md)",
+                            boxShadow: props.noElevation ? undefined : "var(--pg-shadow-xs)",
+                            border: "1px solid var(--pg-border-subtle)",
+                            overflow: "hidden",
                         }}
                     >
                         {props.TopSlot ? (

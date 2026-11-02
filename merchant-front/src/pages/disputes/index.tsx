@@ -1,9 +1,9 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VCard, VCardText, VDialog, VFileInput, VTextarea } from "vuetify/components";
+import { VBtn, VFileInput, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
@@ -15,6 +15,8 @@ import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 type Dispute = {
     id: string;
     disputeRef: string;
@@ -141,13 +143,14 @@ const DisputesPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Disputes")} />
+                <PageHeader title={t("Disputes")}
+                    subtitle={t("Chargeback cases, evidence, and resolution status.")} />
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : (
-                    <VCard>
-                        <VCardText>
+                    <SurfaceCard>
+                        <SurfaceCardText>
                             <DataTable
                                 title={t("Disputes")}
                                 data={rows.value}
@@ -159,18 +162,18 @@ const DisputesPage = dc(() => {
                                 searchValue={search.value}
                                 setSearchValue={(value) => (search.value = value)}
                             />
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
                 )}
             </ThemedView>
 
-            <VDialog modelValue={dialogOpen.value} onUpdate:modelValue={(v: any) => (dialogOpen.value = v)} maxWidth="560px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                            {selected.value?.disputeRef}
-                        </ThemedText>
-                        <VTextarea
+            <FormModal
+                modelValue={dialogOpen.value}
+                onUpdate:modelValue={(v: any) => (dialogOpen.value = v)}
+                title={selected.value?.disputeRef ?? t("Dispute")}
+                size="md"
+            >
+<VTextarea
                             label={t("Notes")}
                             modelValue={note.value}
                             onUpdate:modelValue={(v: string) => (note.value = v)}
@@ -186,9 +189,7 @@ const DisputesPage = dc(() => {
                         <VBtn color="primary" loading={actionLoading.value} onClick={() => void submitEvidence()}>
                             {t("Submit")}
                         </VBtn>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         </ScreenContainer>
     );
 });

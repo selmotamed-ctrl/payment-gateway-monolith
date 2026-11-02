@@ -3,24 +3,9 @@ import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import {
-    VAlert,
-    VAutocomplete,
-    VBtn,
-    VCard,
-    VCardText,
-    VCheckbox,
-    VDialog,
-    VProgressCircular,
-    VSelect,
-    VSwitch,
-    VTab,
-    VTabs,
-    VTextField,
-    VTextarea,
-} from "vuetify/components";
+import { VAlert, VAutocomplete, VBtn, VCheckbox, VProgressCircular, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StatusChip } from "@/components/StatusChip";
@@ -36,6 +21,13 @@ import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
+import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { MonoRef } from "@/components/ui/MonoRef";
+import { DescriptionList } from "@/components/ui/DescriptionList";
 type Adjustment = {
     id: string;
     type: string;
@@ -419,14 +411,14 @@ const AdjustmentsPage = dc(() => {
         }
     };
 
-    const summaryItems = computed(() => {
+    const summaryMetrics = computed<MetricItem[]>(() => {
         const data = summary.value;
         if (!data) return [];
         return [
-            { label: t("Open adjustments"), value: String(data.totalOpen), tone: data.totalOpen > 0 ? "warning" as const : "success" as const },
-            { label: t("Open amount"), value: formatMoney(data.openAmount), tone: "info" as const },
-            { label: t("Executed"), value: String(data.executedCount), tone: "success" as const },
-            { label: t("Executed amount"), value: formatMoney(data.executedAmount), tone: "neutral" as const },
+            { key: "open", label: t("Open adjustments"), value: String(data.totalOpen), badge: data.totalOpen > 0 ? t("Open") : t("Clear"), badgeTone: data.totalOpen > 0 ? "warning" : "success" },
+            { key: "openAmount", label: t("Open amount"), moneyAmount: data.openAmount, currency: "LYD" },
+            { key: "executed", label: t("Executed"), value: String(data.executedCount), badge: t("Executed"), badgeTone: "success" },
+            { key: "executedAmount", label: t("Executed amount"), moneyAmount: data.executedAmount, currency: "LYD" },
         ];
     });
 
@@ -455,7 +447,7 @@ const AdjustmentsPage = dc(() => {
             label: "Amount",
             sortKey: "amount",
             value: (row) => row.amount,
-            Value: ({ row }: { row: Adjustment }) => <ThemedText style={{ fontSize: "12px", fontWeight: 600 }}>{formatMoney(row.amount, row.currency)}</ThemedText>,
+            Value: ({ row }: { row: Adjustment }) => <MoneyDisplay amount={row.amount} currency={row.currency} size="sm" />,
         },
         {
             key: "merchant",
@@ -474,8 +466,8 @@ const AdjustmentsPage = dc(() => {
             value: (row) => `${row.sourceAttemptReference ?? ""} ${row.disputeReference ?? ""}`,
             Value: ({ row }: { row: Adjustment }) => (
                 <ThemedView style={{ gap: "2px" }}>
-                    <ThemedText style={{ fontSize: "10px", direction: "ltr", opacity: row.sourceAttemptReference ? 1 : 0.55 }}>{row.sourceAttemptReference || "—"}</ThemedText>
-                    <ThemedText style={{ fontSize: "10px", direction: "ltr", opacity: row.disputeReference ? 1 : 0.55 }}>{row.disputeReference || "—"}</ThemedText>
+                    {row.sourceAttemptReference ? <MonoRef value={row.sourceAttemptReference} /> : <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>—</ThemedText>}
+                    {row.disputeReference ? <MonoRef value={row.disputeReference} /> : <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>—</ThemedText>}
                 </ThemedView>
             ),
         },
@@ -513,6 +505,9 @@ const AdjustmentsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Adjustments")}
+                    subtitle={t("Draft and review adjustments under maker-checker governance. Every adjustment requires independent finance approval before execution.")}
+                    badge={t("Four-Eyes Required")}
+                    badgeTone="warning"
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
@@ -527,58 +522,53 @@ const AdjustmentsPage = dc(() => {
                 </VAlert>
 
                 {summary.value && (
-                    <VCard variant="flat" style={{ borderRadius: "16px" }}>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Adjustment health")}</ThemedText>
-                                <div style={{ flex: 1 }} />
-                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
-                            </ThemedView>
-                            {showChecklists && (
-                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
-                                    {SUMMARY_EXPORT_CHECKS.map((check) => (
-                                        <VCheckbox
-                                            key={check.key}
-                                            modelValue={summaryExportChecklist.value[check.key] === true}
-                                            onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
-                                            label={t(check.label)}
-                                            density="compact"
-                                            hideDetails
-                                        />
-                                    ))}
-                                    {!summaryExportChecklistComplete.value && (
-                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
-                                    )}
+                    <>
+                        <MetricStrip items={summaryMetrics.value} />
+                        <SurfaceCard title={t("Adjustment health")}>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                                <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end" }}>
+                                    <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
                                 </ThemedView>
-                            )}
-                            <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "10px" }}>
-                                {summaryItems.value.map((item) => (
-                                    <VCard key={item.label} variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
-                                            <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
-                                        </VCardText>
-                                    </VCard>
-                                ))}
-                            </ThemedView>
-                            <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                {Object.entries(summary.value.byState ?? {}).map(([state, count]) => (
-                                    <StatusChip key={state} label={`${state}: ${count}`} tone={statusTone(state)} size="x-small" />
-                                ))}
-                                {Object.entries(summary.value.byType ?? {}).map(([type, count]) => (
-                                    <StatusChip key={type} label={`${type}: ${count}`} tone="neutral" size="x-small" />
-                                ))}
-                            </ThemedView>
-                        </VCardText>
-                    </VCard>
+                                {showChecklists && (
+                                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
+                                        {SUMMARY_EXPORT_CHECKS.map((check) => (
+                                            <VCheckbox
+                                                key={check.key}
+                                                modelValue={summaryExportChecklist.value[check.key] === true}
+                                                onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
+                                                label={t(check.label)}
+                                                density="compact"
+                                                hideDetails
+                                            />
+                                        ))}
+                                        {!summaryExportChecklistComplete.value && (
+                                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
+                                        )}
+                                    </ThemedView>
+                                )}
+                                <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                                    {Object.entries(summary.value.byState ?? {}).map(([state, count]) => (
+                                        <StatusChip key={state} label={`${state}: ${count}`} tone={statusTone(state)} size="x-small" />
+                                    ))}
+                                    {Object.entries(summary.value.byType ?? {}).map(([type, count]) => (
+                                        <StatusChip key={type} label={`${type}: ${count}`} tone="neutral" size="x-small" />
+                                    ))}
+                                </ThemedView>
+                            </SurfaceCardText>
+                        </SurfaceCard>
+                    </>
                 )}
 
-                <VTabs modelValue={activeView.value} onUpdate:modelValue={(value: unknown) => setView(value as AdjustmentView)} color="primary" density="comfortable" showArrows>
-                    <VTab value="open" prependIcon="mdi-clock-alert-outline">{t("Open")}</VTab>
-                    <VTab value="executed" prependIcon="mdi-check-circle-outline">{t("Executed")}</VTab>
-                    <VTab value="all" prependIcon="mdi-view-list-outline">{t("All")}</VTab>
-                </VTabs>
+                <SegmentedTabs
+                    modelValue={activeView.value}
+                    onUpdate:modelValue={(value: string) => setView(value as AdjustmentView)}
+                    tabs={[
+                        { value: "open", label: t("Open") },
+                        { value: "executed", label: t("Executed") },
+                        { value: "all", label: t("All") },
+                    ]}
+                />
 
                 <ApiTable<Adjustment>
                     title={t("Adjustment queue")}
@@ -635,10 +625,13 @@ const AdjustmentsPage = dc(() => {
                 />
             </ThemedView>
 
-            <VDialog modelValue={detailsOpen.value} onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)} maxWidth="1000px" scrollable>
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                        {detailLoading.value || !selected.value ? (
+            <FormModal
+                modelValue={detailsOpen.value}
+                onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)}
+                title={[selected.value?.type, "·", formatMoney(selected.value?.amount, selected.value?.currency)].filter(Boolean).join(" · ")}
+                size="lg"
+            >
+{detailLoading.value || !selected.value ? (
                             <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "280px", gap: "12px" }}>
                                 <VProgressCircular indeterminate size={52} color="primary" />
                                 <ThemedText style={{ opacity: 0.65 }}>{t("Loading adjustment")}</ThemedText>
@@ -647,8 +640,10 @@ const AdjustmentsPage = dc(() => {
                             <>
                                 <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
                                     <ThemedView style={{ gap: "4px" }}>
-                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "19px" }}>{selected.value.type} · {formatMoney(selected.value.amount, selected.value.currency)}</ThemedText>
-                                        <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{selected.value.merchantName || selected.value.merchantId || "—"}</ThemedText>
+                                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                            <MoneyDisplay amount={selected.value.amount} currency={selected.value.currency} colorSign />
+                                            <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{selected.value.merchantName || selected.value.merchantId || "—"}</ThemedText>
+                                        </ThemedView>
                                     </ThemedView>
                                     <ThemedView style={{ flexDirection: "row", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
                                         <StatusChip label={selected.value.state} tone={statusTone(selected.value.state)} />
@@ -658,57 +653,47 @@ const AdjustmentsPage = dc(() => {
                                 </ThemedView>
 
                                 <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "14px" }}>
-                                    <VCard variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
+                                    <SurfaceCard variant="tonal">
+                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
                                             <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Adjustment context")}</ThemedText>
-                                            {[
-                                                [t("Merchant"), selected.value.merchantName || "—"],
-                                                [t("Source attempt"), selected.value.sourceAttemptReference || selected.value.sourceAttemptId || "—"],
-                                                [t("Attempt status"), selected.value.sourceAttemptStatus || "—"],
-                                                [t("Dispute"), selected.value.disputeReference || selected.value.disputeId || "—"],
-                                                [t("Dispute status"), selected.value.disputeStatus || "—"],
-                                                [t("Dispute amount"), formatMoney(selected.value.disputeAmount, selected.value.currency)],
-                                                [t("Target account"), `${selected.value.targetAccountType || "—"} · ${selected.value.currency}`],
-                                                [t("Reverse commission"), selected.value.reverseCommission ? t("Yes") : t("No")],
-                                                [t("Reason"), selected.value.reason],
-                                                [t("Created"), formatDateTime(selected.value.createdAt)],
-                                                [t("Executed"), formatDateTime(selected.value.executedAt)],
-                                            ].map(([label, value]) => (
-                                                <ThemedView key={label} style={{ flexDirection: "row", gap: "10px", justifyContent: "space-between", borderBottom: "1px solid rgba(100,116,139,0.12)", paddingBottom: "4px" }}>
-                                                    <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{label}</ThemedText>
-                                                    <ThemedText style={{ fontSize: "11px", textAlign: "right", wordBreak: "break-word", direction: "ltr" }}>{value}</ThemedText>
-                                                </ThemedView>
-                                            ))}
+                                            <DescriptionList items={[
+                                                { label: t("Merchant"), value: selected.value.merchantName || "—" },
+                                                { label: t("Source attempt"), value: <MonoRef value={selected.value.sourceAttemptReference || selected.value.sourceAttemptId || ""} /> },
+                                                { label: t("Attempt status"), value: selected.value.sourceAttemptStatus || "—" },
+                                                { label: t("Dispute"), value: <MonoRef value={selected.value.disputeReference || selected.value.disputeId || ""} /> },
+                                                { label: t("Dispute status"), value: selected.value.disputeStatus || "—" },
+                                                { label: t("Dispute amount"), value: <MoneyDisplay amount={selected.value.disputeAmount} currency={selected.value.currency} size="sm" /> },
+                                                { label: t("Target account"), value: `${selected.value.targetAccountType || "—"} · ${selected.value.currency}` },
+                                                { label: t("Reverse commission"), value: selected.value.reverseCommission ? t("Yes") : t("No") },
+                                                { label: t("Reason"), value: selected.value.reason },
+                                                { label: t("Created"), value: formatDateTime(selected.value.createdAt) },
+                                                { label: t("Executed"), value: formatDateTime(selected.value.executedAt) },
+                                            ]} />
                                             {selected.value.merchantId && (
                                                 <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "MerchantDetail", params: { id: selected.value?.merchantId ?? "" } })}>{t("Open merchant")}</VBtn>
                                             )}
-                                        </VCardText>
-                                    </VCard>
+                                        </SurfaceCardText>
+                                    </SurfaceCard>
 
-                                    <VCard variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
+                                    <SurfaceCard variant="tonal">
+                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
                                             <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Approval and ledger")}</ThemedText>
-                                            {[
-                                                [t("Approval request"), selected.value.approvalRequestId || "—"],
-                                                [t("Approval state"), selected.value.approvalState || "—"],
-                                                [t("Checker"), selected.value.approval?.checkerUserId || selected.value.checkerUserId || "—"],
-                                                [t("Rejection reason"), selected.value.approval?.rejectionReason || "—"],
-                                                [t("Journal entry"), selected.value.journalEntryId || "—"],
-                                                [t("Journal type"), selected.value.journalEntry?.refType || "—"],
-                                                [t("Journal reference"), selected.value.journalEntry?.refId || "—"],
-                                                [t("External dispute ref"), selected.value.externalDisputeRef || "—"],
-                                                [t("Provider refund ref"), selected.value.providerRefundRef || "—"],
-                                            ].map(([label, value]) => (
-                                                <ThemedView key={label} style={{ flexDirection: "row", gap: "10px", justifyContent: "space-between", borderBottom: "1px solid rgba(100,116,139,0.12)", paddingBottom: "4px" }}>
-                                                    <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{label}</ThemedText>
-                                                    <ThemedText style={{ fontSize: "11px", textAlign: "right", wordBreak: "break-word", direction: "ltr" }}>{value}</ThemedText>
-                                                </ThemedView>
-                                            ))}
+                                            <DescriptionList items={[
+                                                { label: t("Approval request"), value: <MonoRef value={selected.value.approvalRequestId ?? ""} /> },
+                                                { label: t("Approval state"), value: selected.value.approvalState || "—" },
+                                                { label: t("Checker"), value: selected.value.approval?.checkerUserId || selected.value.checkerUserId || "—" },
+                                                { label: t("Rejection reason"), value: selected.value.approval?.rejectionReason || "—" },
+                                                { label: t("Journal entry"), value: <MonoRef value={selected.value.journalEntryId ?? ""} /> },
+                                                { label: t("Journal type"), value: selected.value.journalEntry?.refType || "—" },
+                                                { label: t("Journal reference"), value: <MonoRef value={selected.value.journalEntry?.refId ?? ""} /> },
+                                                { label: t("External dispute ref"), value: <MonoRef value={selected.value.externalDisputeRef ?? ""} /> },
+                                                { label: t("Provider refund ref"), value: <MonoRef value={selected.value.providerRefundRef ?? ""} /> },
+                                            ]} />
                                             {selected.value.approvalRequestId && (
                                                 <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "Approvals" })}>{t("Open approvals")}</VBtn>
                                             )}
-                                        </VCardText>
-                                    </VCard>
+                                        </SurfaceCardText>
+                                    </SurfaceCard>
                                 </ThemedView>
 
                                 <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
@@ -716,15 +701,15 @@ const AdjustmentsPage = dc(() => {
                                 </ThemedView>
                             </>
                         )}
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
 
-            <VDialog modelValue={createOpen.value} onUpdate:modelValue={(value: boolean) => (createOpen.value = value)} maxWidth="720px" scrollable>
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{t("Propose adjustment")}</ThemedText>
-                        <VAlert type="info" variant="tonal">
+            <FormModal
+                modelValue={createOpen.value}
+                onUpdate:modelValue={(value: boolean) => (createOpen.value = value)}
+                title={t("Propose adjustment")}
+                size="md"
+            >
+<VAlert type="info" variant="tonal">
                             {t("The draft creates an approval request. The adjustment does not execute until a different finance checker approves it.")}
                         </VAlert>
                         <VSelect
@@ -814,9 +799,7 @@ const AdjustmentsPage = dc(() => {
                                 {t("Create draft")}
                             </VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         </ScreenContainer>
     );
 });

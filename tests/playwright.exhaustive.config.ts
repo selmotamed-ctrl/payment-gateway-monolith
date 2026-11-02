@@ -1,6 +1,6 @@
 import { defineConfig } from "@playwright/test";
 
-const chrome = "/usr/bin/google-chrome-stable";
+const chrome = process.env.PLAYWRIGHT_CHROME_PATH || undefined;
 
 export default defineConfig({
   testDir: "./e2e/exhaustive",
@@ -12,7 +12,7 @@ export default defineConfig({
   use: {
     headless: true,
     ignoreHTTPSErrors: true,
-    launchOptions: { executablePath: chrome, args: ["--no-sandbox"] },
+    launchOptions: { ...(chrome ? { executablePath: chrome } : {}), args: ["--no-sandbox"] },
     trace: "off",
     screenshot: "only-on-failure",
   },

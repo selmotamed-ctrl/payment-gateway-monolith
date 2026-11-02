@@ -1,9 +1,9 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VCard, VCardText, VDialog, VSelect, VTextField } from "vuetify/components";
+import { VBtn, VSelect, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
@@ -14,6 +14,8 @@ import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 type TeamMember = {
     id: string;
     name: string;
@@ -161,6 +163,7 @@ const TeamPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Team & Roles")}
+                    subtitle={t("Merchant users, authorities, and access posture.")}
                     end={() => (
                         <VBtn variant="tonal" onClick={() => openDialog(null)}>
                             {t("Invite Member")}
@@ -171,8 +174,8 @@ const TeamPage = dc(() => {
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : (
-                    <VCard>
-                        <VCardText>
+                    <SurfaceCard>
+                        <SurfaceCardText>
                             <DataTable
                                 title={t("Team & Roles")}
                                 data={rows.value}
@@ -184,16 +187,18 @@ const TeamPage = dc(() => {
                                 searchValue={search.value}
                                 setSearchValue={(value) => (search.value = value)}
                             />
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
                 )}
             </ThemedView>
 
-            <VDialog modelValue={dialogOpen.value} onUpdate:modelValue={(v: any) => (dialogOpen.value = v)} maxWidth="640px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <ThemedText type="defaultSemiBold">{editing.value ? t("Edit") : t("Invite Member")}</ThemedText>
-                        <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
+            <FormModal
+                modelValue={dialogOpen.value}
+                onUpdate:modelValue={(v: any) => (dialogOpen.value = v)}
+                title={editing.value ? t("Edit") : t("Invite Member")}
+                size="md"
+            >
+<ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
                             <VTextField
                                 label={t("Full Name")}
                                 modelValue={form.value.name}
@@ -267,9 +272,7 @@ const TeamPage = dc(() => {
                         >
                             {t("Save")}
                         </VBtn>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         </ScreenContainer>
     );
 });

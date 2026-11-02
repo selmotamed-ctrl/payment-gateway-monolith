@@ -2,27 +2,9 @@ import { dc } from "kt-dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute } from "vue-router";
-import {
-    VAlert,
-    VBtn,
-    VCard,
-    VCardText,
-    VChip,
-    VDialog,
-    VExpansionPanel,
-    VExpansionPanelText,
-    VExpansionPanelTitle,
-    VExpansionPanels,
-    VFileInput,
-    VIcon,
-    VList,
-    VListItem,
-    VListSubheader,
-    VSwitch,
-    VTextField,
-} from "vuetify/components";
+import { VAlert, VBtn, VExpansionPanel, VExpansionPanelText, VExpansionPanelTitle, VExpansionPanels, VFileInput, VIcon, VList, VListItem, VListSubheader, VSwitch, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StatusChip } from "@/components/StatusChip";
@@ -49,6 +31,9 @@ import {
     type GuideSearchEntry,
 } from "@/content/guide";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { MetaPill } from "@/components/ui/MetaPill";
 type ViewMode = "glossary" | "book" | "simulators" | "checklists";
 
 type DailyChecklist = {
@@ -399,8 +384,8 @@ const AdminGuidePage = dc(() => {
 
     const renderGlossary = () => (
         <ThemedView style={{ gap: "14px" }}>
-            <VCard>
-                <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            <SurfaceCard>
+                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                     <ThemedView style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
                         <ThemedView style={{ gap: "4px" }}>
                             <ThemedText type="defaultSemiBold" style={{ fontSize: "20px" }}>
@@ -422,8 +407,8 @@ const AdminGuidePage = dc(() => {
                             style={{ maxWidth: "320px" }}
                         />
                     </ThemedView>
-                </VCardText>
-            </VCard>
+                </SurfaceCardText>
+            </SurfaceCard>
 
             <VExpansionPanels multiple>
                 <VExpansionPanel value="terms">
@@ -433,8 +418,8 @@ const AdminGuidePage = dc(() => {
                     <VExpansionPanelText>
                         <ThemedView style={{ gap: "14px", paddingTop: "6px" }}>
                             {filteredGlossary.value.map((term) => (
-                                <VCard key={term.term} variant="outlined">
-                                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                                <SurfaceCard key={term.term} variant="outlined">
+                                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                         <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                             <TermTooltip term={term.term} label={term.term} tone="primary" size="small" />
                                             <StatusChip label={term.category} tone="neutral" size="x-small" />
@@ -457,8 +442,8 @@ const AdminGuidePage = dc(() => {
                                         >
                                             {`${isArabic.value ? "خطأ قاتل يجب تجنبه:" : "Fatal human error to avoid:"} ${isArabic.value && term.fatalErrorAr ? term.fatalErrorAr : term.fatalErrorEn}`}
                                         </div>
-                                    </VCardText>
-                                </VCard>
+                                    </SurfaceCardText>
+                                </SurfaceCard>
                             ))}
                         </ThemedView>
                     </VExpansionPanelText>
@@ -567,8 +552,8 @@ const AdminGuidePage = dc(() => {
                     <VExpansionPanelText>
                         <ThemedView style={{ gap: "12px", paddingTop: "6px" }}>
                             {RUNBOOK_DEFINITIONS.map((runbook) => (
-                                <VCard key={runbook.id} variant="outlined">
-                                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                                <SurfaceCard key={runbook.id} variant="outlined">
+                                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                                         <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                             <TermTooltip term={runbook.id} tone="error" size="small" />
                                             <ThemedText type="defaultSemiBold">{isArabic.value ? runbook.titleAr : runbook.titleEn}</ThemedText>
@@ -579,8 +564,8 @@ const AdminGuidePage = dc(() => {
                                                 <li key={`${runbook.id}-${index}`}>{step}</li>
                                             ))}
                                         </ol>
-                                    </VCardText>
-                                </VCard>
+                                    </SurfaceCardText>
+                                </SurfaceCard>
                             ))}
                         </ThemedView>
                     </VExpansionPanelText>
@@ -612,8 +597,8 @@ const AdminGuidePage = dc(() => {
 
     const renderBook = () => (
         <ThemedView style={{ gap: "14px" }}>
-            <VCard>
-                <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            <SurfaceCard>
+                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                     <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                         <StatusChip label={`Book ${selectedBook.value.number}`} tone="primary" />
                         <ThemedText type="defaultSemiBold" style={{ fontSize: "22px", flex: "1 1 320px" }}>
@@ -652,11 +637,11 @@ const AdminGuidePage = dc(() => {
                     </ThemedText>
                     <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
                         {selectedBook.value.tags.slice(0, 12).map((tag) => (
-                            <VChip key={`book-tag-${tag}`} size="x-small" variant="tonal">{tag}</VChip>
+                            <MetaPill key={`book-tag-${tag}`} size="x-small" variant="tonal">{tag}</MetaPill>
                         ))}
                     </ThemedView>
-                </VCardText>
-            </VCard>
+                </SurfaceCardText>
+            </SurfaceCard>
 
             {selectedBook.value.humanErrorWarning ? (
                 <VAlert type="error" variant="tonal" border="start">
@@ -669,16 +654,16 @@ const AdminGuidePage = dc(() => {
                 </VAlert>
             ) : null}
 
-            <VCard variant="outlined">
-                <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            <SurfaceCard variant="outlined">
+                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                     <ThemedText type="defaultSemiBold">{isArabic.value ? "قائمة SOP لهذا الكتاب" : "SOP checklist for this book"}</ThemedText>
                     <ol style={{ margin: 0, paddingInlineStart: "22px", lineHeight: 1.7, fontSize: "13px" }}>
                         {selectedBook.value.sopChecklist.map((step, index) => (
                             <li key={`book-sop-${index}`}>{step}</li>
                         ))}
                     </ol>
-                </VCardText>
-            </VCard>
+                </SurfaceCardText>
+            </SurfaceCard>
 
             <VExpansionPanels modelValue={expandedChapters.value} onUpdate:modelValue={(value: any) => (expandedChapters.value = value as string[])} multiple>
                 {selectedBook.value.chapters.map((chapter) => (
@@ -698,9 +683,9 @@ const AdminGuidePage = dc(() => {
                                         </ThemedText>
                                         <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
                                             {chapterRoutes(chapterBody(chapter)).map((route) => (
-                                                <VChip key={`${chapter.id}-route-${route}`} size="x-small" variant="tonal" prependIcon="mdi-map-marker-path">
+                                                <MetaPill key={`${chapter.id}-route-${route}`} size="x-small" variant="tonal" prependIcon="mdi-map-marker-path">
                                                     {route}
-                                                </VChip>
+                                                </MetaPill>
                                             ))}
                                         </ThemedView>
                                     </ThemedView>
@@ -768,8 +753,8 @@ const AdminGuidePage = dc(() => {
 
     const renderSimulators = () => (
         <ThemedView style={{ gap: "14px" }}>
-            <VCard>
-                <VCardText style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+            <SurfaceCard>
+                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                     <ThemedText type="defaultSemiBold" style={{ fontSize: "20px" }}>
                         {isArabic.value ? "المحاكيات التفاعلية الثلاثة" : "The three interactive simulators"}
                     </ThemedText>
@@ -778,33 +763,33 @@ const AdminGuidePage = dc(() => {
                             ? "جرّب التحويلات والتوقيع التشفيري والقيود المحاسبية بأمان قبل لمس الإنتاج."
                             : "Exercise transforms, cryptographic signing, and double-entry journals safely before touching production."}
                     </ThemedText>
-                </VCardText>
-            </VCard>
-            <VCard>
-                <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                </SurfaceCardText>
+            </SurfaceCard>
+            <SurfaceCard>
+                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                     <ThemedText type="defaultSemiBold">{isArabic.value ? "مختبر TransformPipe" : "TransformPipe Playground"}</ThemedText>
                     <TransformPlayground />
-                </VCardText>
-            </VCard>
-            <VCard>
-                <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                </SurfaceCardText>
+            </SurfaceCard>
+            <SurfaceCard>
+                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                     <ThemedText type="defaultSemiBold">{isArabic.value ? "مختبر التوقيع التشفيري" : "Crypto Signature Lab"}</ThemedText>
                     <CryptoSignatureLab />
-                </VCardText>
-            </VCard>
-            <VCard>
-                <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                </SurfaceCardText>
+            </SurfaceCard>
+            <SurfaceCard>
+                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                     <ThemedText type="defaultSemiBold">{isArabic.value ? "مصور حسابات الدفتر" : "Ledger T-Account Visualizer"}</ThemedText>
                     <LedgerTAccountVisualizer />
-                </VCardText>
-            </VCard>
+                </SurfaceCardText>
+            </SurfaceCard>
         </ThemedView>
     );
 
     const renderChecklists = () => (
         <ThemedView style={{ gap: "14px" }}>
-            <VCard>
-                <VCardText style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+            <SurfaceCard>
+                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                     <ThemedText type="defaultSemiBold" style={{ fontSize: "20px" }}>
                         {isArabic.value ? "قوائم التحقق اليومية حسب الدور" : "Role-based daily checklists"}
                     </ThemedText>
@@ -813,11 +798,11 @@ const AdminGuidePage = dc(() => {
                             ? "التحقق من هذه البنود كل صباح يحمي المنصة والعملاء من الأخطاء البشرية."
                             : "Checking these items every morning protects the platform and customers from human error."}
                     </ThemedText>
-                </VCardText>
-            </VCard>
+                </SurfaceCardText>
+            </SurfaceCard>
             {DAILY_CHECKLISTS.map((checklist) => (
-                <VCard key={checklist.id} variant="outlined">
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <SurfaceCard key={checklist.id} variant="outlined">
+                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                         <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                             <StatusChip label={checklist.id.toUpperCase()} tone="primary" size="x-small" />
                             <ThemedText type="defaultSemiBold">{isArabic.value ? checklist.titleAr : checklist.titleEn}</ThemedText>
@@ -844,8 +829,8 @@ const AdminGuidePage = dc(() => {
                                 <ThemedText style={{ fontSize: "13px", lineHeight: 1.6 }}>{step}</ThemedText>
                             </ThemedView>
                         ))}
-                    </VCardText>
-                </VCard>
+                    </SurfaceCardText>
+                </SurfaceCard>
             ))}
         </ThemedView>
     );
@@ -855,6 +840,7 @@ const AdminGuidePage = dc(() => {
             <ThemedView style={{ gap: "16px" }}>
                 <PageHeader
                     title={isArabic.value ? "دليل النظام التفاعلي" : "Interactive System Guide"}
+                    subtitle={isArabic.value ? "إجراءات التشغيل والمعجم والمحاكيات والضوابط." : "Operational procedures, glossary, simulators, and controls."}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn size="small" variant="tonal" prependIcon="mdi-magnify" onClick={() => (searchOpen.value = true)}>
@@ -872,8 +858,8 @@ const AdminGuidePage = dc(() => {
                 />
 
                 <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "16px", alignItems: "flex-start" }}>
-                    <VCard style={{ flex: "1 1 300px", maxWidth: "380px" }}>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    <SurfaceCard style={{ flex: "1 1 300px", maxWidth: "380px" }}>
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                             <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>
                                 {isArabic.value ? "شجرة الدليل" : "Guide tree"}
                             </ThemedText>
@@ -932,16 +918,16 @@ const AdminGuidePage = dc(() => {
                                         {bookmarks.value.map((id) => {
                                             const book = GUIDE_BOOKS.find((candidate) => candidate.id === id);
                                             return book ? (
-                                                <VChip key={`bookmark-${id}`} size="x-small" variant="tonal" onClick={() => openBook(book)} style={{ cursor: "pointer" }}>
+                                                <MetaPill key={`bookmark-${id}`} size="x-small" variant="tonal" onClick={() => openBook(book)} style={{ cursor: "pointer" }}>
                                                     {`Book ${book.number}`}
-                                                </VChip>
+                                                </MetaPill>
                                             ) : null;
                                         })}
                                     </ThemedView>
                                 </ThemedView>
                             ) : null}
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
 
                     <ThemedView style={{ flex: "3 1 620px", minWidth: "320px" }}>
                         {view.value === "glossary" ? renderGlossary() : null}
@@ -952,13 +938,13 @@ const AdminGuidePage = dc(() => {
                 </ThemedView>
             </ThemedView>
 
-            <VDialog modelValue={importOpen.value} onUpdate:modelValue={(value: boolean) => (importOpen.value = value)} maxWidth="620px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
-                            {isArabic.value ? "استيراد العلامات" : "Import bookmarks"}
-                        </ThemedText>
-                        <VAlert type="info" variant="tonal" density="compact">
+            <FormModal
+                modelValue={importOpen.value}
+                onUpdate:modelValue={(value: boolean) => (importOpen.value = value)}
+                title={isArabic.value ? "استيراد العلامات" : "Import bookmarks"}
+                size="md"
+            >
+<VAlert type="info" variant="tonal" density="compact">
                             {isArabic.value
                                 ? "اختر ملف نسخة العلامات الذي تم تصديره من هذا الدليل. سيتم تجاهل الكتب غير المعروفة."
                                 : "Choose a bookmark backup exported from this guide. Unknown books are skipped."}
@@ -988,9 +974,7 @@ const AdminGuidePage = dc(() => {
                         <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end" }}>
                             <VBtn variant="text" onClick={() => (importOpen.value = false)}>{isArabic.value ? "إغلاق" : "Close"}</VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
 
             <GlobalGuideSearchModal
                 modelValue={searchOpen.value}
@@ -998,24 +982,23 @@ const AdminGuidePage = dc(() => {
                 onSelect={handleSearchSelect}
             />
 
-            <VDialog modelValue={searchDetailOpen.value} onUpdate:modelValue={(value: boolean) => (searchDetailOpen.value = value)} maxWidth="820px" scrollable>
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                        <ThemedView style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+            <FormModal
+                modelValue={searchDetailOpen.value}
+                onUpdate:modelValue={(value: boolean) => (searchDetailOpen.value = value)}
+                title={searchSelection.value ? (isArabic.value ? searchSelection.value?.titleAr : searchSelection.value?.titleEn) : ""}
+                size="lg"
+            >
+<ThemedView style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                 <StatusChip label={searchSelection.value?.kind ?? "guide"} tone="primary" size="x-small" />
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
-                                    {searchSelection.value ? (isArabic.value ? searchSelection.value.titleAr : searchSelection.value.titleEn) : ""}
-                                </ThemedText>
+                                
                             </ThemedView>
                             <VBtn icon="mdi-close" variant="text" onClick={() => (searchDetailOpen.value = false)} />
                         </ThemedView>
                         {searchSelection.value ? (
                             <GuideMarkdown source={isArabic.value && searchSelection.value.bodyAr ? searchSelection.value.bodyAr : searchSelection.value.bodyEn} />
                         ) : null}
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         </ScreenContainer>
     );
 });

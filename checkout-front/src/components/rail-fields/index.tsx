@@ -4,6 +4,7 @@ import { useLocale } from "vuetify";
 import { VTextField, VSelect } from "vuetify/components";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
+import { FormField } from "@/components/ui";
 import { normalizeFieldValue } from "@/utils/zReady";
 import type { RailFieldDescriptor } from "@/components/renderers/types";
 
@@ -37,42 +38,39 @@ export const RailFieldForm = dc(
                 {visibleFields.value.map((field) => {
                     const value = props.values[field.key] ?? "";
                     const error = props.errors[field.key];
+                    const label = labelFor(field);
                     const shared = {
-                        label: labelFor(field),
+                        "aria-label": label,
                         placeholder: placeholderFor(field) ?? undefined,
                         modelValue: value,
                         error: !!error,
                         errorMessages: error ? [error] : undefined,
+                        required: field.required,
                     };
                     if (field.inputType === "select") {
                         return (
-                            <VSelect
-                                key={field.key}
-                                items={(field.options ?? []).map((option) => ({ title: option, value: option }))}
-                                label={shared.label}
-                                modelValue={value}
-                                error={shared.error}
-                                errorMessages={shared.errorMessages}
+                            <FormField key={field.key} label={label} required={field.required}>
+                                <VSelect
+                                    items={(field.options ?? []).map((option) => ({ title: option, value: option }))}
+                                    {...shared}
+                                    onUpdate:modelValue={(raw: string) =>
+                                        props.onChange(field.key, normalizeFieldValue(field, raw))
+                                    }
+                                />
+                            </FormField>
+                        );
+                    }
+                    return (
+                        <FormField key={field.key} label={label} required={field.required}>
+                            <VTextField
+                                {...shared}
+                                type={field.sensitivity === "PAN" ? "password" : "text"}
+                                autocomplete="off"
                                 onUpdate:modelValue={(raw: string) =>
                                     props.onChange(field.key, normalizeFieldValue(field, raw))
                                 }
                             />
-                        );
-                    }
-                    return (
-                        <VTextField
-                            key={field.key}
-                            label={shared.label}
-                            placeholder={shared.placeholder}
-                            modelValue={value}
-                            error={shared.error}
-                            errorMessages={shared.errorMessages}
-                            type={field.sensitivity === "PAN" ? "password" : "text"}
-                            autocomplete="off"
-                            onUpdate:modelValue={(raw: string) =>
-                                props.onChange(field.key, normalizeFieldValue(field, raw))
-                            }
-                        />
+                        </FormField>
                     );
                 })}
                 {visibleFields.value.length === 0 && (

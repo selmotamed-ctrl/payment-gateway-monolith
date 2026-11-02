@@ -41,7 +41,7 @@ export const ContextualHelpDrawer = dc(
             >
                 <ThemedView style={{ padding: "20px", gap: "14px", height: "100%", overflowY: "auto" }}>
                     <ThemedView style={{ flexDirection: "row", alignItems: "flex-start", gap: "8px" }}>
-                        <VBtn icon="mdi-close" variant="text" onClick={() => setOpen(false)} />
+                        <VBtn icon="mdi-close" variant="text" aria-label={isArabic() ? "إغلاق" : "Close"} onClick={() => setOpen(false)} />
                         <ThemedView style={{ flex: 1, gap: "6px" }}>
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                 <StatusChip label={isArabic() ? "المساعدة وإجراءات التشغيل" : "Help & SOP"} tone="primary" size="x-small" />

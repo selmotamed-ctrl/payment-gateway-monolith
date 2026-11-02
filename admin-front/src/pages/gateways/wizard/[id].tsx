@@ -2,9 +2,9 @@ import { dc } from "kt-dc";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute, useRouter } from "vue-router";
-import { VAlert, VBtn, VChip, VStepper, VStepperHeader, VStepperItem, VStepperWindow, VStepperWindowItem } from "vuetify/components";
+import { VAlert, VBtn, VStepper, VStepperHeader, VStepperItem, VStepperWindow, VStepperWindowItem } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
@@ -22,6 +22,7 @@ import { StepClientAction } from "@/components/gateway-wizard/StepClientAction";
 import { StepStatusRules } from "@/components/gateway-wizard/StepStatusRules";
 import { StepSimulator } from "@/components/gateway-wizard/StepSimulator";
 
+import { MetaPill } from "@/components/ui/MetaPill";
 const STEPS = [
     { key: "identity", title: "Identity & Basics" },
     { key: "environments", title: "Environments & Auth" },
@@ -420,13 +421,14 @@ const GatewayWizardPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Gateway Wizard")}
+                    subtitle={t("Eight steps from identity to a governed live release.")}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", justifyContent: "flex-end" }}>
-                            {gatewayCode.value && <VChip variant="tonal" size="small">{gatewayCode.value}</VChip>}
-                            {versionNumber.value !== null && <VChip variant="tonal" size="small">v{versionNumber.value} · {versionState.value || t("Draft")}</VChip>}
-                            <VChip color={dirty.value ? "warning" : "primary"} variant="tonal" size="small">
+                            {gatewayCode.value && <MetaPill variant="tonal" size="small">{gatewayCode.value}</MetaPill>}
+                            {versionNumber.value !== null && <MetaPill variant="tonal" size="small">v{versionNumber.value} · {versionState.value || t("Draft")}</MetaPill>}
+                            <MetaPill color={dirty.value ? "warning" : "primary"} variant="tonal" size="small">
                                 {dirty.value ? t("Unsaved changes") : `${t("Step")} ${step.value} ${t("of Steps")} ${STEPS.length}`}
-                            </VChip>
+                            </MetaPill>
                         </ThemedView>
                     )}
                 />

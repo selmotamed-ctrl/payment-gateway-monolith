@@ -2,21 +2,9 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
-import {
-    VAlert,
-    VBtn,
-    VCard,
-    VCardText,
-    VChip,
-    VDialog,
-    VCheckbox,
-    VDivider,
-    VFileInput,
-    VTextField,
-    VTextarea,
-} from "vuetify/components";
+import { VAlert, VBtn, VCheckbox, VDivider, VFileInput, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
@@ -26,6 +14,9 @@ import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { MetaPill } from "@/components/ui/MetaPill";
 type PlatformSetting = {
     id: string;
     key: string;
@@ -431,6 +422,7 @@ const PlatformSettingsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Platform Settings")}
+                    subtitle={t("Governed platform configuration with versioned changes.")}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>
@@ -460,8 +452,8 @@ const PlatformSettingsPage = dc(() => {
                 ) : (
                     <>
                         {summary.value && (
-                            <VCard variant="flat" style={{ borderRadius: "16px" }}>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                            <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
+                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                     <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                         <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Configuration health")}</ThemedText>
                                         <div style={{ flex: 1 }} />
@@ -487,21 +479,21 @@ const PlatformSettingsPage = dc(() => {
                                             </ThemedView>
                                         )}
                                         {summaryItems.value.map((item) => (
-                                            <VCard key={item.label} variant="tonal">
-                                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
+                                            <SurfaceCard key={item.label} variant="tonal">
+                                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
                                                     <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
                                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
-                                                </VCardText>
-                                            </VCard>
+                                                </SurfaceCardText>
+                                            </SurfaceCard>
                                         ))}
                                     </ThemedView>
                                     <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
                                         {Object.entries(summary.value.scopes ?? {}).map(([scope, count]) => (
-                                            <VChip key={scope} size="x-small" variant="tonal">{scope}: {count}</VChip>
+                                            <MetaPill key={scope} size="x-small" variant="tonal">{scope}: {count}</MetaPill>
                                         ))}
                                     </ThemedView>
-                                </VCardText>
-                            </VCard>
+                                </SurfaceCardText>
+                            </SurfaceCard>
                         )}
 
                         <VTextField
@@ -514,22 +506,22 @@ const PlatformSettingsPage = dc(() => {
                         />
 
                         {rows.value.length === 0 && (
-                            <VCard>
-                                <VCardText>
+                            <SurfaceCard>
+                                <SurfaceCardText>
                                     <StateView empty={true} emptyTitle={t("No settings found")} emptyDescription={t("Create the first platform setting.")} minHeight="180px" />
-                                </VCardText>
-                            </VCard>
+                                </SurfaceCardText>
+                            </SurfaceCard>
                         )}
 
                         {rows.value.map((entry) => (
-                            <VCard key={entry.key}>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                            <SurfaceCard key={entry.key}>
+                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                     <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                         <ThemedText type="defaultSemiBold" style={{ fontSize: "14px", direction: "ltr" }}>{entry.key}</ThemedText>
-                                        <VChip size="x-small" variant="tonal" color="primary">v{entry.latest.version}</VChip>
-                                        <VChip size="x-small" variant="tonal">{entry.latest.scope}</VChip>
+                                        <MetaPill size="x-small" variant="tonal" color="primary">v{entry.latest.version}</MetaPill>
+                                        <MetaPill size="x-small" variant="tonal">{entry.latest.scope}</MetaPill>
                                         {entry.versions.length > 1 && (
-                                            <VChip size="x-small" variant="text">{entry.versions.length} {t("versions")}</VChip>
+                                            <MetaPill size="x-small" variant="text">{entry.versions.length} {t("versions")}</MetaPill>
                                         )}
                                         <div style={{ flex: 1 }} />
                                         <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>
@@ -542,18 +534,20 @@ const PlatformSettingsPage = dc(() => {
                                     <ThemedView style={{ flexDirection: "row", gap: "6px", justifyContent: "flex-end", flexWrap: "wrap" }}>
                                         <VBtn size="small" variant="tonal" onClick={() => openEdit(entry)}>{t("History & edit")}</VBtn>
                                     </ThemedView>
-                                </VCardText>
-                            </VCard>
+                                </SurfaceCardText>
+                            </SurfaceCard>
                         ))}
                     </>
                 )}
             </ThemedView>
 
-            <VDialog modelValue={restoreOpen.value} onUpdate:modelValue={(value: boolean) => (restoreOpen.value = value)} maxWidth="900px" scrollable>
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{t("Restore preview")}</ThemedText>
-                        <VAlert type="info" variant="tonal">
+            <FormModal
+                modelValue={restoreOpen.value}
+                onUpdate:modelValue={(value: boolean) => (restoreOpen.value = value)}
+                title={t("Restore preview")}
+                size="lg"
+            >
+<VAlert type="info" variant="tonal">
                             {t("Choose a settings backup JSON. This preview does not write anything.")}
                         </VAlert>
                         <VFileInput
@@ -577,18 +571,18 @@ const PlatformSettingsPage = dc(() => {
                                         { label: t("Invalid"), value: restorePreview.value.summary.invalid, tone: "error" as const },
                                         { label: t("Missing in backup"), value: restorePreview.value.summary.missingInBackup, tone: "warning" as const },
                                     ].map((item) => (
-                                        <VCard key={item.label} variant="tonal">
-                                            <VCardText style={{ padding: "10px" }}>
+                                        <SurfaceCard key={item.label} variant="tonal">
+                                            <SurfaceCardText style={{ padding: "10px" }}>
                                                 <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{item.label}</ThemedText>
                                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
-                                            </VCardText>
-                                        </VCard>
+                                            </SurfaceCardText>
+                                        </SurfaceCard>
                                     ))}
                                 </ThemedView>
                                 <ThemedView style={{ gap: "6px" }}>
                                     {restorePreview.value.entries.map((entry) => (
                                         <ThemedView key={`${entry.index}-${entry.key}`} style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap", padding: "7px 9px", borderRadius: "8px", border: "1px solid rgba(100,116,139,0.2)" }}>
-                                            <VChip size="x-small" variant="tonal" color={entry.status === "ADDED" ? "success" : entry.status === "CHANGED" ? "warning" : entry.status === "INVALID" ? "error" : "neutral"}>{entry.status}</VChip>
+                                            <MetaPill size="x-small" variant="tonal" color={entry.status === "ADDED" ? "success" : entry.status === "CHANGED" ? "warning" : entry.status === "INVALID" ? "error" : "neutral"}>{entry.status}</MetaPill>
                                             <ThemedText style={{ fontSize: "12px", fontWeight: 700, direction: "ltr" }}>{entry.key}</ThemedText>
                                             <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{entry.scope}</ThemedText>
                                             {entry.currentVersion !== undefined && (
@@ -660,18 +654,17 @@ const PlatformSettingsPage = dc(() => {
                                 </VBtn>
                             )}
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
 
-            <VDialog modelValue={dialogOpen.value} onUpdate:modelValue={(value: boolean) => (dialogOpen.value = value)} maxWidth="860px" scrollable>
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "18px", flex: 1 }}>
-                                {history.value.length > 0 ? t("Edit setting") : t("New setting")}
-                            </ThemedText>
-                            {history.value.length > 0 && <VChip size="small" variant="tonal" color="primary">v{history.value[0]?.version}</VChip>}
+            <FormModal
+                modelValue={dialogOpen.value}
+                onUpdate:modelValue={(value: boolean) => (dialogOpen.value = value)}
+                title={history.value?.length > 0 ? t("Edit setting") : t("New setting")}
+                size="lg"
+            >
+<ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                            
+                            {history.value.length > 0 && <MetaPill size="small" variant="tonal" color="primary">v{history.value[0]?.version}</MetaPill>}
                         </ThemedView>
 
                         <VTextField
@@ -719,7 +712,7 @@ const PlatformSettingsPage = dc(() => {
                                         key={row.id}
                                         style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap", padding: "8px 10px", borderRadius: "8px", border: "1px solid rgba(100,116,139,0.2)" }}
                                     >
-                                        <VChip size="x-small" variant="tonal" color="primary">v{row.version}</VChip>
+                                        <MetaPill size="x-small" variant="tonal" color="primary">v{row.version}</MetaPill>
                                         <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>{formatDateTime(row.effectiveFrom)}</ThemedText>
                                         <ThemedText style={{ fontSize: "11px", opacity: 0.45 }}>{formatDateTime(row.updatedAt)}</ThemedText>
                                         <div style={{ flex: 1 }} />
@@ -733,8 +726,8 @@ const PlatformSettingsPage = dc(() => {
                         )}
 
                         {compareRow.value && (
-                            <VCard variant="tonal">
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                            <SurfaceCard variant="tonal">
+                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                     <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
                                         <ThemedText type="defaultSemiBold" style={{ fontSize: "13px", flex: 1 }}>
                                             {t("Comparing")} v{compareRow.value.version} → v{history.value[0]?.version}
@@ -748,22 +741,20 @@ const PlatformSettingsPage = dc(() => {
                                         <ThemedView key={row.path} style={{ gap: "3px", padding: "6px 8px", borderRadius: "8px", background: "rgba(100,116,139,0.08)" }}>
                                             <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center" }}>
                                                 <ThemedText style={{ fontSize: "11px", fontWeight: 700, direction: "ltr" }}>{row.path}</ThemedText>
-                                                <VChip size="x-small" variant="tonal" color={row.kind === "ADDED" ? "success" : row.kind === "REMOVED" ? "error" : "warning"}>{row.kind}</VChip>
+                                                <MetaPill size="x-small" variant="tonal" color={row.kind === "ADDED" ? "success" : row.kind === "REMOVED" ? "error" : "warning"}>{row.kind}</MetaPill>
                                             </ThemedView>
                                             <ThemedText style={{ fontSize: "11px", direction: "ltr", opacity: 0.75 }}>{row.before} → {row.after}</ThemedText>
                                         </ThemedView>
                                     ))}
-                                </VCardText>
-                            </VCard>
+                                </SurfaceCardText>
+                            </SurfaceCard>
                         )}
 
                         <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end", gap: "10px" }}>
                             <VBtn variant="text" onClick={() => (dialogOpen.value = false)}>{t("Cancel")}</VBtn>
                             <VBtn color="primary" loading={saving.value} disabled={!editChecklistComplete.value} onClick={() => void save()}>{t("Save new version")}</VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         </ScreenContainer>
     );
 });

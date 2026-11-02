@@ -1,9 +1,9 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VCard, VCardText, VDialog, VTextField } from "vuetify/components";
+import { VBtn, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
@@ -15,6 +15,8 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { copyToClipboard } from "@/utils/common";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 type AccessToken = {
     id: string;
     name: string;
@@ -178,6 +180,7 @@ const DeveloperTokensPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Developer Tokens")}
+                    subtitle={t("API credentials and IP allow-lists for integrations.")}
                     end={() => (
                         <VBtn
                             variant="tonal"
@@ -192,8 +195,8 @@ const DeveloperTokensPage = dc(() => {
                 />
 
                 {createdSecret.value && (
-                    <VCard>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    <SurfaceCard>
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                             <ThemedText type="defaultSemiBold">{t("Secret")}</ThemedText>
                             <ThemedText style={{ direction: "ltr", wordBreak: "break-all" }}>{createdSecret.value}</ThemedText>
                             <ThemedText style={{ fontSize: "12px", opacity: 0.7 }}>
@@ -210,15 +213,15 @@ const DeveloperTokensPage = dc(() => {
                             >
                                 {t("Copy")}
                             </VBtn>
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
                 )}
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : (
-                    <VCard>
-                        <VCardText>
+                    <SurfaceCard>
+                        <SurfaceCardText>
                             <DataTable
                                 title={t("Developer Tokens")}
                                 data={rows.value}
@@ -230,15 +233,18 @@ const DeveloperTokensPage = dc(() => {
                                 searchValue={search.value}
                                 setSearchValue={(value) => (search.value = value)}
                             />
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
                 )}
             </ThemedView>
 
-            <VDialog modelValue={createOpen.value} onUpdate:modelValue={(v: any) => (createOpen.value = v)} maxWidth="560px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <VTextField
+            <FormModal
+                modelValue={createOpen.value}
+                onUpdate:modelValue={(v: any) => (createOpen.value = v)}
+                title={"Details"}
+                size="md"
+            >
+<VTextField
                             label={t("Token Name")}
                             modelValue={form.value.name}
                             onUpdate:modelValue={(v: string) => (form.value.name = v)}
@@ -260,15 +266,15 @@ const DeveloperTokensPage = dc(() => {
                         <VBtn color="primary" loading={actionLoading.value} onClick={() => void createToken()}>
                             {t("Create Token")}
                         </VBtn>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
 
-            <VDialog modelValue={ipOpen.value} onUpdate:modelValue={(v: any) => (ipOpen.value = v)} maxWidth="520px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <ThemedText type="defaultSemiBold">{activeToken.value?.name}</ThemedText>
-                        <VTextField
+            <FormModal
+                modelValue={ipOpen.value}
+                onUpdate:modelValue={(v: any) => (ipOpen.value = v)}
+                title={activeToken.value?.name ?? t("API token")}
+                size="sm"
+            >
+<VTextField
                             label="CIDR"
                             modelValue={ipList.value}
                             onUpdate:modelValue={(v: string) => (ipList.value = v)}
@@ -276,9 +282,7 @@ const DeveloperTokensPage = dc(() => {
                         <VBtn color="primary" loading={actionLoading.value} onClick={() => void saveIps()}>
                             {t("Save")}
                         </VBtn>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         </ScreenContainer>
     );
 });

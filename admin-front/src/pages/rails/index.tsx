@@ -2,12 +2,15 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VCheckbox, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { MonoRef } from "@/components/ui/MonoRef";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
+import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
@@ -19,6 +22,8 @@ import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 type RailField = {
     id?: string;
     key?: string;
@@ -501,13 +506,36 @@ const RailsPage = dc(() => {
         }
     };
 
+    const metricItems = computed<MetricItem[]>(() => {
+        const data = summary.value;
+        if (!data) return [];
+        return [
+            { key: "rails", label: t("Rails"), value: String(data.total) },
+            { key: "active", label: t("Active"), value: String(data.active), badge: t("Active"), badgeTone: "success" },
+            { key: "blocked", label: t("Blocked"), value: String(data.blocked), badge: (data.blocked ?? 0) > 0 ? t("Critical") : t("Clear"), badgeTone: (data.blocked ?? 0) > 0 ? "danger" : "success" },
+            { key: "degraded", label: t("Degraded routes"), value: String(data.routes?.degraded ?? 0), badge: (data.routes?.degraded ?? 0) > 0 ? t("Watch") : t("Clear"), badgeTone: (data.routes?.degraded ?? 0) > 0 ? "warning" : "success" },
+            { key: "breakers", label: t("Open breakers"), value: String(data.routes?.openBreaker ?? 0), badge: (data.routes?.openBreaker ?? 0) > 0 ? t("Critical") : t("Clear"), badgeTone: (data.routes?.openBreaker ?? 0) > 0 ? "danger" : "success" },
+        ];
+    });
+
     const headers: TableHeader<Rail>[] = [
-        { key: "code", label: "Rail Code", value: (row) => row.code },
+        { key: "code", label: "Rail Code", value: (row) => row.code, Value: ({ row }) => <MonoRef value={row.code} /> },
         { key: "nameEn", label: "Label (English)", value: (row) => row.nameEn },
         { key: "nameAr", label: "Label (Arabic)", value: (row) => row.nameAr },
         { key: "collectionMode", label: "Type", value: (row) => row.collectionMode },
         { key: "currency", label: "Currency", value: (row) => row.currency },
-        { key: "limits", label: "Amount", value: (row) => `${row.minAmount ?? ""} - ${row.maxAmount ?? ""}` },
+        {
+            key: "limits",
+            label: "Amount",
+            value: (row) => `${row.minAmount ?? ""} - ${row.maxAmount ?? ""}`,
+            Value: ({ row }: { row: Rail }) => (
+                <div style={{ display: "flex", alignItems: "center", gap: "4px", flexWrap: "wrap" }}>
+                    <MoneyDisplay amount={row.minAmount ?? "0"} currency={row.currency} size="sm" />
+                    <span style={{ color: "var(--pg-ink-faint)" }}>–</span>
+                    <MoneyDisplay amount={row.maxAmount ?? "0"} currency={row.currency} size="sm" />
+                </div>
+            ),
+        },
         {
             key: "routes",
             label: "Routes / health",
@@ -526,7 +554,7 @@ const RailsPage = dc(() => {
             key: "status",
             label: "Status",
             Value: ({ row }: { row: Rail }) => (
-                <StatusChip label={row.blocked ? "Blocked" : "Active"} tone={row.blocked ? "error" : "success"} />
+                <StatusBadge status={row.blocked ? "BLOCKED" : "ACTIVE"} label={row.blocked ? t("Blocked") : t("Active")} toneOverride={row.blocked ? "danger" : "success"} />
             ),
         },
         { key: "capabilities", label: "Capabilities", value: (row) => formatCapabilities(row.capabilities) },
@@ -551,6 +579,7 @@ const RailsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Rails")}
+                    subtitle={t("Customer payment methods, collection modes, and catalog fields.")}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
@@ -566,8 +595,8 @@ const RailsPage = dc(() => {
                 </VAlert>
 
                 {summary.value && (
-                    <VCard variant="flat" style={{ borderRadius: "16px" }}>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Rail health")}</ThemedText>
                                 <div style={{ flex: 1 }} />
@@ -592,24 +621,10 @@ const RailsPage = dc(() => {
                                         )}
                                     </ThemedView>
                                 )}
-                                {[
-                                    { label: t("Rails"), value: String(summary.value.total), tone: "info" as const },
-                                    { label: t("Active"), value: String(summary.value.active), tone: "success" as const },
-                                    { label: t("Blocked"), value: String(summary.value.blocked), tone: summary.value.blocked > 0 ? "error" as const : "success" as const },
-                                    { label: t("Healthy routes"), value: String(summary.value.routes.healthy), tone: "success" as const },
-                                    { label: t("Degraded routes"), value: String(summary.value.routes.degraded), tone: summary.value.routes.degraded > 0 ? "warning" as const : "success" as const },
-                                    { label: t("Open breakers"), value: String(summary.value.routes.openBreaker), tone: summary.value.routes.openBreaker > 0 ? "error" as const : "success" as const },
-                                ].map((item) => (
-                                    <VCard key={item.label} variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
-                                            <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
-                                        </VCardText>
-                                    </VCard>
-                                ))}
                             </ThemedView>
-                        </VCardText>
-                    </VCard>
+                            <MetricStrip items={metricItems.value} />
+                        </SurfaceCardText>
+                    </SurfaceCard>
                 )}
 
                 <ApiTable<Rail>
@@ -663,13 +678,14 @@ const RailsPage = dc(() => {
             </ThemedView>
 
             {/* Customer catalog: list + add/edit/delete fields */}
-            <VDialog modelValue={dialogOpen.value} onUpdate:modelValue={(v: any) => (dialogOpen.value = v)} maxWidth="760px" scrollable>
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedView style={{ flexDirection: "row", gap: "10px", alignItems: "center" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                                {selected.value?.nameEn} ({selected.value?.code})
-                            </ThemedText>
+            <FormModal
+                modelValue={dialogOpen.value}
+                onUpdate:modelValue={(v: any) => (dialogOpen.value = v)}
+                title={[selected.value?.nameEn, selected.value?.code ? `(${selected.value.code})` : ""].filter(Boolean).join(" ")}
+                size="lg"
+            >
+<ThemedView style={{ flexDirection: "row", gap: "10px", alignItems: "center" }}>
+                            
                             <StatusChip label={selected.value?.collectionMode ?? "-"} tone="info" />
                         </ThemedView>
 
@@ -798,18 +814,16 @@ const RailsPage = dc(() => {
                                 {editingFieldIndex.value === null ? t("Add") : t("Save")}
                             </VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
 
             {/* Update rail */}
-            <VDialog modelValue={editOpen.value} onUpdate:modelValue={(v: any) => (editOpen.value = v)} maxWidth="640px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                            {t("Edit")} {editingRail.value?.code}
-                        </ThemedText>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 14px" }}>
+            <FormModal
+                modelValue={editOpen.value}
+                onUpdate:modelValue={(v: any) => (editOpen.value = v)}
+                title={[t("Edit"), editingRail.value?.code].filter(Boolean).join(" · ")}
+                size="md"
+            >
+<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 14px" }}>
                             <VTextField
                                 label={t("Label (English)")}
                                 modelValue={railEditForm.value.nameEn}
@@ -891,18 +905,16 @@ const RailsPage = dc(() => {
                                 {t("Save")}
                             </VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
 
             {/* Add rail */}
-            <VDialog modelValue={createOpen.value} onUpdate:modelValue={(v: any) => (createOpen.value = v)} maxWidth="520px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                            {t("Add Rail")}
-                        </ThemedText>
-                        <VTextField
+            <FormModal
+                modelValue={createOpen.value}
+                onUpdate:modelValue={(v: any) => (createOpen.value = v)}
+                title={t("Add Rail")}
+                size="sm"
+            >
+<VTextField
                             label={t("Rail Code")}
                             hint="lowercase letters, digits, - and _"
                             modelValue={railForm.value.code}
@@ -932,9 +944,7 @@ const RailsPage = dc(() => {
                                 {t("Create")}
                             </VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         </ScreenContainer>
     );
 });

@@ -1,7 +1,6 @@
-import { dc } from "kt-dc";
-import { VChip } from "vuetify/components";
-import { useTheme } from "vuetify";
+import { defineComponent, type PropType } from "vue";
 import { lookupTerm } from "@/content/guide";
+import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 
 export type StatusTone = "success" | "error" | "warning" | "info" | "primary" | "neutral";
 
@@ -12,28 +11,22 @@ export type StatusChipProps = {
     variant?: "tonal" | "flat" | "outlined" | "text";
 };
 
-const toneColor = (tone: StatusTone, theme: any): string => {
-    switch (tone) {
-        case "success":
-            return theme.current.value.colors.success;
-        case "error":
-            return theme.current.value.colors.error;
-        case "warning":
-            return theme.current.value.colors.warning;
-        case "info":
-            return theme.current.value.colors.info;
-        case "primary":
-            return theme.current.value.colors.primary;
-        default:
-            return theme.current.value.colors["on-surface-variant"];
-    }
+const toBadgeTone = (tone: StatusTone | undefined): BadgeTone => {
+    if (tone === "error") return "danger";
+    if (tone === "primary") return "info";
+    return tone ?? "neutral";
 };
 
-export const StatusChip = dc(
-    (props: StatusChipProps) => {
-        const theme = useTheme();
+export const StatusChip = defineComponent({
+    name: "StatusChip",
+    props: {
+        label: { type: String, required: true },
+        tone: { type: String as PropType<StatusTone>, default: "neutral" },
+        size: { type: String, default: "small" },
+        variant: { type: String, default: "tonal" },
+    },
+    setup(props) {
         return () => {
-            const color = toneColor(props.tone ?? "neutral", theme);
             const label = String(props.label ?? "");
             const explanation = label ? lookupTerm(label) : undefined;
             return (
@@ -41,21 +34,15 @@ export const StatusChip = dc(
                     title={explanation ? `${explanation.title} — ${explanation.meaningEn}` : undefined}
                     style={{ display: "inline-flex", cursor: explanation ? "help" : undefined }}
                 >
-                    <VChip
-                        size={props.size ?? "small"}
-                        variant={props.variant ?? "tonal"}
-                        color={color}
-                        style={{ fontWeight: "700", letterSpacing: "0.2px" }}
-                    >
-                        {label}
-                    </VChip>
+                    <StatusBadge
+                        status={label}
+                        label={label}
+                        toneOverride={toBadgeTone(props.tone)}
+                    />
                 </span>
             );
         };
     },
-    {
-        props: ["label", "tone", "size", "variant"],
-    },
-);
+});
 
 export default StatusChip;

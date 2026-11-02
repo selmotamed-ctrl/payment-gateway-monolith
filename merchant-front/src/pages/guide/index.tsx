@@ -2,23 +2,9 @@ import { dc } from "kt-dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
-import {
-    VBtn,
-    VCard,
-    VCardText,
-    VCheckbox,
-    VChip,
-    VDialog,
-    VIcon,
-    VProgressLinear,
-    VTab,
-    VTabs,
-    VTextField,
-    VWindow,
-    VWindowItem,
-} from "vuetify/components";
+import { VBtn, VCheckbox, VIcon, VProgressLinear, VTab, VTabs, VTextField, VWindow, VWindowItem } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
@@ -32,6 +18,9 @@ import { urlsMap } from "@/constants/urlsMap";
 import { getBaseUrl } from "@/constants/baseUrl";
 import { api } from "@/state/api";
 import { showSnackBar } from "@/utils/snackBar";
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { MetaPill } from "@/components/ui/MetaPill";
 
 type ChecklistStep = {
     id: string;
@@ -450,7 +439,10 @@ curl ${shellQuote(paymentEndpoint.value)} \\
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={isArabic.value ? "دليل التاجر التفاعلي والمطوّر" : "Merchant Interactive User & Developer Guide"} />
+                <PageHeader
+                    title={isArabic.value ? "دليل التاجر التفاعلي والمطوّر" : "Merchant Interactive User & Developer Guide"}
+                    subtitle={isArabic.value ? "إجراءات المتجر والرسوم والنزاعات وواجهة API." : "Store operations, fees, disputes, and API guidance."}
+                />
 
                 <ThemedText style={{ fontSize: "14px", opacity: 0.72, maxWidth: "980px" }}>
                     {isArabic.value
@@ -458,8 +450,8 @@ curl ${shellQuote(paymentEndpoint.value)} \\
                         : "Everything a business owner, manager, cashier, and developer needs: first steps, fees, statuses, disputes, and the full API reference."}
                 </ThemedText>
 
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                <SurfaceCard>
+                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                         <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
                             <ThemedView style={{ gap: "4px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
@@ -510,11 +502,11 @@ curl ${shellQuote(paymentEndpoint.value)} \\
                                 </ThemedView>
                             ))}
                         </ThemedView>
-                    </VCardText>
-                </VCard>
+                    </SurfaceCardText>
+                </SurfaceCard>
 
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                <SurfaceCard>
+                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                         <ThemedView style={{ gap: "4px" }}>
                             <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{isArabic.value ? "الفصول" : "Chapters"}</ThemedText>
                             <ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>
@@ -531,7 +523,7 @@ curl ${shellQuote(paymentEndpoint.value)} \\
                         />
                         <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "8px" }}>
                             {ROLE_FILTERS.map((role) => (
-                                <VChip
+                                <MetaPill
                                     key={role.value}
                                     onClick={() => (selectedRole.value = role.value)}
                                     color={selectedRole.value === role.value ? "primary" : undefined}
@@ -539,7 +531,7 @@ curl ${shellQuote(paymentEndpoint.value)} \\
                                     style={{ cursor: "pointer", fontWeight: "700" }}
                                 >
                                     {isArabic.value ? role.labelAr : role.labelEn}
-                                </VChip>
+                                </MetaPill>
                             ))}
                         </ThemedView>
                         {filteredChapters.value.length === 0 ? (
@@ -547,8 +539,8 @@ curl ${shellQuote(paymentEndpoint.value)} \\
                         ) : (
                             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "12px" }}>
                                 {filteredChapters.value.map((chapter) => (
-                                    <VCard key={chapter.id} variant="outlined" style={{ cursor: "pointer" }} onClick={() => openChapter(chapter)}>
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px", height: "100%" }}>
+                                    <SurfaceCard key={chapter.id} variant="outlined" style={{ cursor: "pointer" }} onClick={() => openChapter(chapter)}>
+                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px", height: "100%" }}>
                                             <ThemedView style={{ flexDirection: "row", alignItems: "flex-start", gap: "8px" }}>
                                                 <VIcon icon="mdi-book-open-page-variant-outline" color="primary" size="20px" style={{ marginTop: "2px" }} />
                                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "15px", lineHeight: 1.35 }}>{chapterTitle(chapter)}</ThemedText>
@@ -559,21 +551,21 @@ curl ${shellQuote(paymentEndpoint.value)} \\
                                             <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "6px", alignItems: "center" }}>
                                                 <StatusChip label={t(ROLE_LABELS[chapter.role])} tone={chapter.role === "ALL" ? "info" : "primary"} size="x-small" />
                                                 {chapter.tags.slice(0, 3).map((tag) => (
-                                                    <VChip key={`${chapter.id}-${tag}`} size="x-small" variant="text">{tag}</VChip>
+                                                    <MetaPill key={`${chapter.id}-${tag}`} size="x-small" variant="text">{tag}</MetaPill>
                                                 ))}
                                             </ThemedView>
-                                        </VCardText>
-                                    </VCard>
+                                        </SurfaceCardText>
+                                    </SurfaceCard>
                                 ))}
                             </div>
                         )}
-                    </VCardText>
-                </VCard>
+                    </SurfaceCardText>
+                </SurfaceCard>
 
                 <MerchantFeeCalculator modelValue={calc.value} onUpdate:modelValue={(value: MerchantFeeCalculatorForm) => (calc.value = value)} />
 
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                <SurfaceCard>
+                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                         <ThemedView style={{ gap: "4px" }}>
                             <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
                                 {isArabic.value ? "مولّد كود واجهة API" : "Developer API code generator"}
@@ -632,17 +624,18 @@ ${webhookPayload.value}`}</pre>
                                 ))}
                             </ThemedView>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
+                    </SurfaceCardText>
+                </SurfaceCard>
             </ThemedView>
 
-            <VDialog modelValue={chapterOpen.value} onUpdate:modelValue={(value: boolean) => (chapterOpen.value = value)} maxWidth="860px" scrollable>
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedView style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: "12px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "20px", lineHeight: 1.35 }}>
-                                {selectedChapter.value ? chapterTitle(selectedChapter.value) : ""}
-                            </ThemedText>
+            <FormModal
+                modelValue={chapterOpen.value}
+                onUpdate:modelValue={(value: boolean) => (chapterOpen.value = value)}
+                title={selectedChapter.value ? chapterTitle(selectedChapter.value) : ""}
+                size="lg"
+            >
+<ThemedView style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: "12px" }}>
+                            
                             <VBtn icon variant="text" size="small" onClick={() => (chapterOpen.value = false)}>
                                 <VIcon icon="mdi-close" />
                             </VBtn>
@@ -652,7 +645,7 @@ ${webhookPayload.value}`}</pre>
                                 <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: "6px" }}>
                                     <StatusChip label={t(ROLE_LABELS[selectedChapter.value.role])} tone={selectedChapter.value.role === "ALL" ? "info" : "primary"} size="x-small" />
                                     {selectedChapter.value.tags.map((tag) => (
-                                        <VChip key={`${selectedChapter.value?.id}-dialog-${tag}`} size="x-small" variant="tonal">{tag}</VChip>
+                                        <MetaPill key={`${selectedChapter.value?.id}-dialog-${tag}`} size="x-small" variant="tonal">{tag}</MetaPill>
                                     ))}
                                 </ThemedView>
                                 <GuideMarkdown source={chapterBody(selectedChapter.value)} />
@@ -676,9 +669,7 @@ ${webhookPayload.value}`}</pre>
                                 ) : null}
                             </>
                         ) : null}
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         </ScreenContainer>
     );
 });

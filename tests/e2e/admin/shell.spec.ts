@@ -24,7 +24,7 @@ test.describe("admin shell", () => {
     await page.goto("/dashboard");
     const { drawer, content } = await geometry(page);
     expect(drawer).not.toBeNull();
-    expect(drawer!.width).toBeGreaterThan(250);
+    expect(drawer!.width).toBeGreaterThan(240);
     expect(drawer!.width).toBeLessThan(320);
     // The test seeds English (LTR): the drawer is on the left, content right of it.
     expect(drawer!.x).toBeLessThanOrEqual(2);
@@ -40,7 +40,7 @@ test.describe("admin shell", () => {
     await page.getByRole("button", { name: "Toggle navigation" }).click();
     await page.waitForTimeout(400);
     const collapsed = await page.locator(".pg-drawer").boundingBox();
-    expect(collapsed === null || collapsed.x <= -250).toBe(true);
+    expect(collapsed === null || collapsed.x <= -240).toBe(true);
 
     await page.getByRole("button", { name: "Toggle navigation" }).click();
     await page.waitForTimeout(400);
@@ -85,7 +85,7 @@ test.describe("admin shell", () => {
     await expect(page.locator(".pg-page")).toBeVisible();
 
     const closed = await page.locator(".pg-drawer").boundingBox();
-    expect(closed === null || closed.x <= -250).toBe(true);
+    expect(closed === null || closed.x <= -240).toBe(true);
 
     await page.getByRole("button", { name: "Toggle navigation" }).click();
     await page.waitForTimeout(400);
@@ -96,7 +96,7 @@ test.describe("admin shell", () => {
     await page.locator(".pg-drawer a", { hasText: "Gateways" }).first().click();
     await page.waitForTimeout(500);
     const afterNav = await page.locator(".pg-drawer").boundingBox();
-    expect(afterNav === null || afterNav.x <= -250).toBe(true);
+    expect(afterNav === null || afterNav.x <= -240).toBe(true);
     await expect(page.locator(".pg-page")).toBeVisible();
   });
 

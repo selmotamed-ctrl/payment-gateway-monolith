@@ -16,11 +16,10 @@
         "lint:eslint": "eslint . --fix --cache",
         "lint": "run-s lint:*",
         "format": "prettier --write src/",
-        "test:unit": "bun test src/content/__tests__",
+        "test:unit": "bun test src/content/__tests__ && vitest run",
         "test:unit:watch": "bun test --watch src/content/__tests__"
     },
     "dependencies": {
-        "@fontsource/roboto": "^5.2.8",
         "@mdi/font": "^7.4.47",
         "@prisma/client": "^7.4.0",
         "@types/file-saver": "^2.0.7",
@@ -69,13 +68,13 @@
         "sass-embedded": "^1.86.3",
         "typescript": "~5.9.0",
         "unplugin-auto-import": "^20.2.0",
-        "unplugin-fonts": "^1.4.0",
         "unplugin-vue-components": "^30.0.0",
         "unplugin-vue-router": "^0.16.0",
         "vite": "npm:rolldown-vite@latest",
         "vite-plugin-vue-devtools": "^8.0.3",
         "vite-plugin-vue-layouts-next": "^1.1.1",
         "vite-plugin-vuetify": "^2.1.2",
+        "vitest": "^5.0.5",
         "vue-tsc": "^3.1.1"
     }
 }

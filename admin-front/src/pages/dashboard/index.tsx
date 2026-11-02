@@ -2,14 +2,17 @@ import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
-import { VBtn, VCard, VCardText, VCheckbox, VChip, VIcon, VProgressLinear, VSelect } from "vuetify/components";
+import { VBtn, VCheckbox, VIcon, VProgressLinear, VSelect } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
-import { MiniStats, type StatItem } from "@/components/MiniStats";
+import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { MonoRef } from "@/components/ui/MonoRef";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities } from "@/state/user";
 import { areChecklistsVisible } from "@/constants/env";
@@ -19,6 +22,9 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { formatPlainNumber } from "@/utils/money";
 import { showSnackBar } from "@/utils/snackBar";
 
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { MetaPill } from "@/components/ui/MetaPill";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 const ACTIVITY_EXPORT_CHECKS = [
     { key: "ACTIVITY_SCOPE_VERIFIED", label: "Activity scope verified" },
     { key: "ACTORS_REVIEWED", label: "Actor list reviewed" },
@@ -255,81 +261,48 @@ const DashboardPage = dc(() => {
     void load();
     void loadRecentActivity();
 
-    const stats = (): StatItem[] => {
+    const metricItems = computed<MetricItem[]>(() => {
         const data = overview.value;
+        const openQueues =
+            (data?.approvalPending ?? 0) +
+            (data?.operatorOpen ?? 0) +
+            (data?.joinRequestOpen ?? 0) +
+            (data?.amlOpen ?? 0);
+        const successRate = Number(data?.successRate ?? 0);
         return [
             {
-                title: t("Gross volume"),
-                value: formatAmount(data?.grossVolume),
-                icon: "mdi-chart-line",
-                color: "#0f6bff",
-                subtitle: `${formatPlainNumber(data?.attemptsTotal ?? 0)} ${t("attempts")}`,
+                key: "volume",
+                label: t("Gross Volume"),
+                moneyAmount: data?.grossVolume ?? "0",
+                currency: "LYD",
+                subLabel: `${formatPlainNumber(data?.attemptsTotal ?? 0)} ${t("attempts")}`,
             },
             {
-                title: t("Success rate"),
-                value: `${formatPlainNumber(data?.successRate ?? 0)}%`,
-                icon: "mdi-check-decagram-outline",
-                color: (data?.successRate ?? 0) >= 90 ? "#059669" : (data?.successRate ?? 0) >= 70 ? "#d97706" : "#dc2626",
-                subtitle: `${formatPlainNumber(data?.attemptsSucceeded ?? 0)} ${t("succeeded")}`,
+                key: "success",
+                label: t("Success Rate"),
+                value: `${formatPlainNumber(successRate)}%`,
+                badge: successRate >= 90 ? t("Healthy") : successRate >= 70 ? t("Watch") : t("Critical"),
+                badgeTone: successRate >= 90 ? "success" : successRate >= 70 ? "warning" : "danger",
+                subLabel: `${formatPlainNumber(data?.attemptsSucceeded ?? 0)} ${t("succeeded")}`,
             },
             {
-                title: t("Active merchants"),
-                value: formatPlainNumber(data?.merchantsActive ?? 0),
-                icon: "mdi-storefront-outline",
-                color: "#0f6bff",
-                subtitle: `${formatPlainNumber(data?.merchantsPending ?? 0)} ${t("Pending")}`,
+                key: "queues",
+                label: t("Open Action Queues"),
+                value: formatPlainNumber(openQueues),
+                subLabel: `${formatPlainNumber(data?.approvalPending ?? 0)} ${t("approvals")} · ${formatPlainNumber(data?.operatorOpen ?? 0)} ${t("operator cases")}`,
             },
             {
-                title: t("Unknown backlog"),
+                key: "unknown",
+                label: t("Unknown Backlog"),
                 value: formatPlainNumber(data?.unknownBacklog ?? 0),
-                icon: "mdi-help-circle-outline",
-                color: "#d97706",
-                subtitle: `${formatDuration(data?.unknownOldestAgeSeconds ?? 0)} ${t("Oldest")}`,
-            },
-            {
-                title: t("Pending approvals"),
-                value: formatPlainNumber(data?.approvalPending ?? 0),
-                icon: "mdi-clipboard-check-outline",
-                color: (data?.approvalExpired ?? 0) > 0 ? "#dc2626" : "#2563eb",
-                subtitle: `${formatPlainNumber(data?.approvalExpired ?? 0)} ${t("Expired")} · ${formatPlainNumber(data?.approvalEmergencyDue ?? 0)} ${t("Emergency due")}`,
-            },
-            {
-                title: t("Open circuit breakers"),
-                value: formatPlainNumber(data?.openCircuitBreakers ?? 0),
-                icon: "mdi-electric-switch",
-                color: (data?.openCircuitBreakers ?? 0) > 0 ? "#dc2626" : "#059669",
-                subtitle: `${formatPlainNumber(data?.routeHealth?.degraded ?? 0)} ${t("degraded")}`,
-            },
-            {
-                title: t("Join request SLA"),
-                value: formatPlainNumber(data?.joinRequestSlaBreaches ?? 0),
-                icon: "mdi-clipboard-account-outline",
-                color: (data?.joinRequestSlaBreaches ?? 0) > 0 ? "#d97706" : "#059669",
-                subtitle: `${formatPlainNumber(data?.joinRequestOpen ?? 0)} ${t("open")}`,
-            },
-            {
-                title: t("AML SLA"),
-                value: formatPlainNumber(data?.amlSlaBreaches ?? 0),
-                icon: "mdi-scale-balance",
-                color: (data?.amlSlaBreaches ?? 0) > 0 ? "#dc2626" : "#059669",
-                subtitle: `${formatPlainNumber(data?.amlOpen ?? 0)} ${t("open")}`,
-            },
-            {
-                title: t("Webhook inbox lag"),
-                value: formatDuration(data?.webhookInboxLagSeconds ?? 0),
-                icon: "mdi-webhook",
-                color: (data?.webhookInboxLagSeconds ?? 0) > 60 ? "#d97706" : "#2563eb",
-                subtitle: t("Oldest unprocessed event"),
-            },
-            {
-                title: t("Reconciliation match"),
-                value: `${formatPlainNumber(Number(data?.reconciliationMatchRate ?? 0))}%`,
-                icon: "mdi-file-compare-outline",
-                color: Number(data?.reconciliationMatchRate ?? 0) >= 99 ? "#059669" : "#d97706",
-                subtitle: `${formatPlainNumber(data?.reconciliationItems ?? 0)} ${t("items")}`,
+                badge: (data?.unknownBacklog ?? 0) > 0 ? t("Needs review") : t("Clear"),
+                badgeTone: (data?.unknownBacklog ?? 0) > 0 ? "warning" : "success",
+                subLabel: `${formatDuration(data?.unknownOldestAgeSeconds ?? 0)} ${t("oldest")}`,
             },
         ];
-    };
+    });
+
+    const periodTabs = PERIODS.map((entry) => ({ value: entry.value, label: entry.title }));
 
     const attemptsTotal = computed(() =>
         Object.values(overview.value?.attemptsByState ?? {}).reduce((sum, count) => sum + count, 0),
@@ -364,19 +337,17 @@ const DashboardPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Dashboard")}
+                    subtitle={t("Live platform health, volume, and operational queues.")}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-                            <VSelect
+                            <SegmentedTabs
                                 modelValue={period.value}
+                                tabs={periodTabs}
                                 onUpdate:modelValue={(value: string) => (period.value = value)}
-                                items={PERIODS}
-                                density="compact"
-                                hideDetails
-                                style={{ minWidth: "150px" }}
                             />
                             <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => { void load(); void loadRecentActivity(); }}>{t("Refresh")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} disabled={!exportChecklistComplete.value} onClick={() => void exportSnapshot()}>{t("Export snapshot")}</VBtn>
-                            <VChip color="primary" variant="tonal" size="small">{t("Operational")}</VChip>
+                            <MetaPill color="primary" variant="tonal" size="small">{t("Operational")}</MetaPill>
                         </ThemedView>
                     )}
                 />
@@ -386,8 +357,8 @@ const DashboardPage = dc(() => {
                 ) : (
                     <>
                         {showChecklists && (
-                            <VCard>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <SurfaceCard>
+                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                                     <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Snapshot export checklist")}</ThemedText>
                                     {EXPORT_CHECKS.map((check) => (
                                         <VCheckbox
@@ -402,15 +373,15 @@ const DashboardPage = dc(() => {
                                     {!exportChecklistComplete.value && (
                                         <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all export checklist items before exporting")}</ThemedText>
                                     )}
-                                </VCardText>
-                            </VCard>
+                                </SurfaceCardText>
+                            </SurfaceCard>
                         )}
 
-                        <MiniStats stats={stats()} loading={loading.value} />
+                        <MetricStrip items={metricItems.value} loading={loading.value} />
 
                         <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "18px" }}>
-                            <VCard style={{ flex: "1 1 420px" }}>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                            <SurfaceCard style={{ flex: "1 1 420px" }}>
+                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                                     <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
                                         <ThemedView style={{ gap: "3px" }}>
                                             <ThemedText type="defaultSemiBold">{t("Attempts by state")}</ThemedText>
@@ -428,7 +399,7 @@ const DashboardPage = dc(() => {
                                                 <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px" }}>
                                                     <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "7px" }}>
                                                         <StatusChip label={row.state} tone={row.state === "SUCCEEDED" ? "success" : row.state === "UNKNOWN" ? "error" : "neutral"} size="x-small" />
-                                                        <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{formatAmount(row.amount)}</ThemedText>
+                                                        <MoneyDisplay amount={row.amount} currency={"LYD"} size="sm" />
                                                     </ThemedView>
                                                     <ThemedText style={{ fontSize: "13px", fontWeight: "700" }}>{formatPlainNumber(row.count)}</ThemedText>
                                                 </ThemedView>
@@ -436,11 +407,11 @@ const DashboardPage = dc(() => {
                                             </ThemedView>
                                         ))
                                     )}
-                                </VCardText>
-                            </VCard>
+                                </SurfaceCardText>
+                            </SurfaceCard>
 
-                            <VCard style={{ flex: "1 1 340px" }}>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                            <SurfaceCard style={{ flex: "1 1 340px" }}>
+                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                                     <ThemedView style={{ gap: "3px" }}>
                                         <ThemedText type="defaultSemiBold">{t("Route health")}</ThemedText>
                                         <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{t("Active routes by health state")}</ThemedText>
@@ -456,11 +427,11 @@ const DashboardPage = dc(() => {
                                         </ThemedView>
                                     ))}
                                     <VBtn size="small" variant="text" prependIcon="mdi-arrow-right" onClick={() => void router.push({ name: "GatewayRoutes" })}>{t("Open routes")}</VBtn>
-                                </VCardText>
-                            </VCard>
+                                </SurfaceCardText>
+                            </SurfaceCard>
 
-                            <VCard style={{ flex: "1 1 340px" }}>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                            <SurfaceCard style={{ flex: "1 1 340px" }}>
+                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                     <ThemedView style={{ gap: "3px" }}>
                                         <ThemedText type="defaultSemiBold">{t("Approval queue by domain")}</ThemedText>
                                         <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{t("Pending and draft requests by domain")}</ThemedText>
@@ -479,13 +450,13 @@ const DashboardPage = dc(() => {
                                         ))
                                     )}
                                     <VBtn size="small" variant="text" prependIcon="mdi-arrow-right" onClick={() => void router.push({ name: "Approvals" })}>{t("Open approvals")}</VBtn>
-                                </VCardText>
-                            </VCard>
+                                </SurfaceCardText>
+                            </SurfaceCard>
                         </ThemedView>
 
                         {canViewActivity.value && (
-                            <VCard>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                            <SurfaceCard>
+                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                     <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                                         <ThemedView style={{ gap: "3px" }}>
                                             <ThemedText type="defaultSemiBold">{t("Recent privileged activity")}</ThemedText>
@@ -517,41 +488,42 @@ const DashboardPage = dc(() => {
                                     {activityLoading.value ? (
                                         <VProgressLinear indeterminate color="primary" />
                                     ) : recentActivity.value.length === 0 ? (
-                                        <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("No activity recorded yet.")}</ThemedText>
+                                        <EmptyState title={t("No activity recorded yet.")} description={t("Privileged actions will appear here as operators work.")} icon="mdi-shield-search" />
                                     ) : (
                                         recentActivity.value.map((event) => (
                                             <ThemedView key={event.id} style={{ flexDirection: "row", alignItems: "center", gap: "10px", justifyContent: "space-between", borderBottom: "1px solid rgba(100,116,139,0.14)", paddingBottom: "7px", flexWrap: "wrap" }}>
                                                 <ThemedView style={{ gap: "2px", minWidth: "220px", flex: 1 }}>
                                                     <ThemedText style={{ fontSize: "12px", fontWeight: 700, direction: "ltr" }}>{event.action}</ThemedText>
                                                     <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{event.actorEmail || t("System")} · {event.entityType}</ThemedText>
+                                                    {event.entityId && <MonoRef value={event.entityId} truncate={14} />}
                                                 </ThemedView>
                                                 <StatusChip label={event.role} tone="neutral" size="x-small" />
                                                 <ThemedText style={{ fontSize: "10px", opacity: 0.55, minWidth: "90px", textAlign: "right" }}>{formatEventTime(event.createdAt)}</ThemedText>
                                             </ThemedView>
                                         ))
                                     )}
-                                </VCardText>
-                            </VCard>
+                                </SurfaceCardText>
+                            </SurfaceCard>
                         )}
 
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                        <SurfaceCard>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                 <ThemedText type="defaultSemiBold">{t("Queues needing attention")}</ThemedText>
                                 <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "10px" }}>
                                     {queueLinks.map((link) => (
-                                        <VCard key={link.title} variant="tonal" style={{ cursor: "pointer" }} onClick={() => void router.push({ name: link.route })}>
-                                            <VCardText style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "10px", padding: "12px" }}>
+                                        <SurfaceCard key={link.title} variant="tonal" style={{ cursor: "pointer" }} onClick={() => void router.push({ name: link.route })}>
+                                            <SurfaceCardText style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "10px", padding: "12px" }}>
                                                 <VIcon icon={link.icon} size="22" color="primary" />
                                                 <ThemedView style={{ gap: "2px" }}>
                                                     <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{link.title}</ThemedText>
                                                     <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{link.subtitle}</ThemedText>
                                                 </ThemedView>
-                                            </VCardText>
-                                        </VCard>
+                                            </SurfaceCardText>
+                                        </SurfaceCard>
                                     ))}
                                 </ThemedView>
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
                     </>
                 )}
             </ThemedView>

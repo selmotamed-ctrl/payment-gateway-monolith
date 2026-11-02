@@ -249,7 +249,7 @@ export const Table = defineComponent(
                                 width: "100%",
                                 padding: "0px",
                             }}
-                            class="modern-table"
+                            class="modern-table pg-unified-table"
                         >
                             <thead>
                                 {typeof (props as any).title === "string" && (
@@ -275,8 +275,8 @@ export const Table = defineComponent(
                                                     borderInlineStart: header.startSeparator ? separatorStyle : undefined,
                                                     padding: padding,
                                                     width: header.minWidth ? "1px" : undefined,
-                                                    backgroundColor: isDark ? colors.surface : "#f8fafc",
-                                                    borderBottom: isDark ? `2px solid rgba(255, 255, 255, 0.1)` : "2px solid #e2e8f0",
+                                                    backgroundColor: "var(--pg-bg-surface-subtle)",
+                                                    borderBottom: "1px solid var(--pg-border-subtle)",
                                                     position: "sticky",
                                                     top: 0,
                                                     zIndex: 10,
@@ -303,24 +303,28 @@ export const Table = defineComponent(
                                         <>
                                             <tr
                                                 key={`${index + props.skip}`}
-                                                class="table-data-row"
+                                                class={[
+                                                    "table-data-row",
+                                                    (() => {
+                                                        try {
+                                                            const tone = String(props.rowColor?.(row) ?? "").toLowerCase();
+                                                            return ["#dc2626", "#d97706", "#ef4444", "#f59e0b"].some((entry) =>
+                                                                tone.includes(entry),
+                                                            )
+                                                                ? "pg-critical-row"
+                                                                : "";
+                                                        } catch {
+                                                            return "";
+                                                        }
+                                                    })(),
+                                                ]}
                                                 style={{
-                                                    backgroundColor: props.rowColor?.(row)
-                                                        ? props.rowColor(row) + "15"
-                                                        : index % 2 === 0
-                                                          ? isDark
-                                                              ? colors.surface
-                                                              : "#ffffff"
-                                                          : isDark
-                                                            ? colors["surface-variant"]
-                                                            : "#f8fafc",
+                                                    backgroundColor: "var(--pg-bg-surface)",
                                                     borderBottom:
                                                         index < props.data.length - 1 && props.placeDividers
-                                                            ? isDark
-                                                                ? "1px solid rgba(255, 255, 255, 0.1)"
-                                                                : "1px solid #e2e8f0"
+                                                            ? "1px solid var(--pg-border-subtle)"
                                                             : undefined,
-                                                    transition: "background-color 0.2s ease",
+                                                    transition: "background-color 0.12s ease",
                                                 }}
                                             >
                                                 {props.headers.map((header, headerIndex) => {

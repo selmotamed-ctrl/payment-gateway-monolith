@@ -2,14 +2,15 @@ import { dc } from "kt-dc";
 import { onBeforeUnmount, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute } from "vue-router";
-import { VBtn, VCard, VCardText } from "vuetify/components";
-import { ThemedText } from "@/components/ThemedText";
+import { VBtn } from "vuetify/components";
 import { StateView } from "@/components/StateView";
-import { StatusChip } from "@/components/StatusChip";
-import { MoneyText } from "@/components/MoneyText";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
+import { MonoRef } from "@/components/ui/MonoRef";
 
 type ScreenState = {
     screenCode: string;
@@ -87,46 +88,148 @@ const PosScreenPage = dc(() => {
                 alignItems: "center",
                 justifyContent: "center",
                 padding: "24px",
-                background: "linear-gradient(160deg, #0b1524 0%, #123a6b 60%, #0b7d72 100%)",
+                background: "var(--pg-bg-canvas)",
             }}
         >
             <div style={{ width: "100%", maxWidth: "680px", display: "flex", flexDirection: "column", gap: "16px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <ThemedText style={{ color: "#ffffff", fontSize: "18px", fontWeight: "800" }}>
-                        {t("POS Screen")} · {code()}
-                    </ThemedText>
-                    <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                        <StatusChip label={connected.value ? t("Live") : t("Pending")} tone={connected.value ? "success" : "warning"} />
-                        <VBtn variant="tonal" size="small" onClick={() => void load()}>
+                <header
+                    style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: "12px",
+                        flexWrap: "wrap",
+                    }}
+                >
+                    <h1
+                        style={{
+                            margin: 0,
+                            color: "var(--pg-ink-primary)",
+                            fontSize: "18px",
+                            fontWeight: 600,
+                            letterSpacing: "-0.02em",
+                        }}
+                    >
+                        {t("POS Screen")} · <span class="pg-mono">{code()}</span>
+                    </h1>
+                    <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                        <StatusBadge
+                            status={connected.value ? "LIVE" : "PENDING"}
+                            label={connected.value ? t("Live") : t("Pending")}
+                            toneOverride={connected.value ? "success" : "warning"}
+                        />
+                        <VBtn variant="outlined" size="small" onClick={() => void load()} style={{ height: "32px" }}>
                             {t("Refresh")}
                         </VBtn>
                     </div>
-                </div>
+                </header>
 
                 {error.value ? (
-                    <StateView error={error.value} onRetry={() => void load()} />
+                    <SurfaceCard>
+                        <StateView error={error.value} onRetry={() => void load()} />
+                    </SurfaceCard>
                 ) : loading.value ? (
-                    <StateView loading={true} />
+                    <SurfaceCard>
+                        <StateView loading={true} />
+                    </SurfaceCard>
                 ) : (
-                    <VCard style={{ background: "rgba(255,255,255,0.96)" }}>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px", alignItems: "center" }}>
-                            <ThemedText style={{ fontSize: "22px", fontWeight: "800" }}>
-                                {state.value?.merchantName ?? "-"}
-                            </ThemedText>
-                            {state.value?.amount != null && (
-                                <MoneyText value={state.value.amount} currency={state.value.currency} bold />
-                            )}
-                            {state.value?.status && <StatusChip label={state.value.status} tone="info" />}
-                            {state.value?.railCode && (
-                                <ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>{state.value.railCode}</ThemedText>
-                            )}
+                    <SurfaceCard>
+                        <div
+                            style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                alignItems: "center",
+                                gap: "20px",
+                                textAlign: "center",
+                            }}
+                        >
+                            <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                                <span
+                                    style={{
+                                        color: "var(--pg-ink-muted)",
+                                        fontSize: "11.5px",
+                                        fontWeight: 600,
+                                        letterSpacing: "0.05em",
+                                        textTransform: "uppercase",
+                                    }}
+                                >
+                                    {t("Merchant Name")}
+                                </span>
+                                <span
+                                    style={{
+                                        color: "var(--pg-ink-primary)",
+                                        fontSize: "22px",
+                                        fontWeight: 600,
+                                        letterSpacing: "-0.02em",
+                                    }}
+                                >
+                                    {state.value?.merchantName ?? "—"}
+                                </span>
+                            </div>
+
+                            <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                                <span
+                                    style={{
+                                        color: "var(--pg-ink-muted)",
+                                        fontSize: "11.5px",
+                                        fontWeight: 600,
+                                        letterSpacing: "0.05em",
+                                        textTransform: "uppercase",
+                                    }}
+                                >
+                                    {t("Amount")}
+                                </span>
+                                {state.value?.amount != null ? (
+                                    <MoneyDisplay
+                                        amount={state.value.amount}
+                                        currency={state.value.currency || "LYD"}
+                                        size="xl"
+                                    />
+                                ) : (
+                                    <span style={{ color: "var(--pg-ink-faint)", fontSize: "24px" }}>—</span>
+                                )}
+                            </div>
+
+                            <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", justifyContent: "center" }}>
+                                {state.value?.status && <StatusBadge status={state.value.status} />}
+                                {state.value?.railCode && (
+                                    <StatusBadge
+                                        status={state.value.railCode}
+                                        label={state.value.railCode}
+                                        toneOverride="neutral"
+                                        showDot={false}
+                                    />
+                                )}
+                            </div>
+
                             {state.value?.reference && (
-                                <ThemedText style={{ fontSize: "12px", opacity: 0.6, direction: "ltr" }}>
-                                    {state.value.reference}
-                                </ThemedText>
+                                <div
+                                    style={{
+                                        display: "flex",
+                                        flexDirection: "column",
+                                        alignItems: "center",
+                                        gap: "5px",
+                                        paddingTop: "16px",
+                                        borderTop: "1px solid var(--pg-border-subtle)",
+                                        width: "100%",
+                                    }}
+                                >
+                                    <span
+                                        style={{
+                                            color: "var(--pg-ink-muted)",
+                                            fontSize: "11.5px",
+                                            fontWeight: 600,
+                                            letterSpacing: "0.05em",
+                                            textTransform: "uppercase",
+                                        }}
+                                    >
+                                        {t("Reference")}
+                                    </span>
+                                    <MonoRef value={state.value?.reference ?? ""} />
+                                </div>
                             )}
-                        </VCardText>
-                    </VCard>
+                        </div>
+                    </SurfaceCard>
                 )}
             </div>
         </div>

@@ -9,6 +9,7 @@ import { createApp } from "vue";
 import App from "./App";
 
 import "@/assets/fonts/fonts.css";
+import "@/styles/fintech-minimal.css";
 
 
 import { VueDatePicker } from '@vuepic/vue-datepicker';

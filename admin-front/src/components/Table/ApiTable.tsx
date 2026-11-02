@@ -1,4 +1,5 @@
 import { Table } from "./Table";
+import TableFilters from "./TableFilters";
 import {
     type ApiTableProps,
     defaultNumberOfItemsPerPageChoices,
@@ -302,26 +303,15 @@ export const ApiTable = defineComponent(
                 <ThemedView
                     style={{
                         flexDirection: "column",
-                        gap: "16px",
-                        padding: isMobile.value ? "16px" : "24px",
-                        backgroundColor: isDark ? colors.surface : "#ffffff",
-                        borderRadius: "12px",
-                        boxShadow: props.noElevation ? undefined : defaultBoxShadow,
-                        border: props.noElevation ? undefined : isDark ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid #e2e8f0",
+                        gap: "0",
+                        padding: "0",
+                        backgroundColor: "var(--pg-bg-surface)",
+                        borderRadius: "var(--pg-radius-md)",
+                        boxShadow: props.noElevation ? undefined : "var(--pg-shadow-xs)",
+                        border: "1px solid var(--pg-border-subtle)",
+                        overflow: "hidden",
                     }}
                 >
-                    {props.TopSlot ? (
-                        <ThemedView
-                            style={{
-                                gap: "12px",
-                            }}
-                        >
-                            {props.TopSlot({ loading: loading.value, refresh, reset, refreshAsIs })}
-                            <VDivider></VDivider>
-                        </ThemedView>
-                    ) : (
-                        <></>
-                    )}
                     <TableHeader
                         loading={loading.value}
                         onSearch={onSearch}
@@ -341,6 +331,27 @@ export const ApiTable = defineComponent(
                         Icon={props.Icon}
                         iconName={props.iconName}
                     ></TableHeader>
+                    {props.TopSlot ? (
+                        <ThemedView
+                            style={{
+                                gap: "12px",
+                            }}
+                        >
+                            {props.TopSlot({ loading: loading.value, refresh, reset, refreshAsIs })}
+                            <VDivider></VDivider>
+                        </ThemedView>
+                    ) : (
+                        <></>
+                    )}
+                    {props.filters?.length ? (
+                        <TableFilters
+                            filters={props.filters}
+                            values={props.filterValues ?? {}}
+                            total={props.filterTotal}
+                            onChange={(key, value) => props.onFilterChange?.(key, value)}
+                            onClear={() => props.onFilterClear?.()}
+                        />
+                    ) : null}
                     {loading.value ? (
                         <>
                             <ThemedView

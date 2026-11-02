@@ -1,9 +1,9 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VCard, VCardText, VSelect, VTextField } from "vuetify/components";
+import { VSelect, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
@@ -14,6 +14,7 @@ import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 type Payment = {
     id: string;
     reference: string;
@@ -110,6 +111,7 @@ const PaymentsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Payments")}
+                    subtitle={t("Payment attempts, statuses, and settlement references.")}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "10px" }}>
                             <VSelect
@@ -155,8 +157,8 @@ const PaymentsPage = dc(() => {
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : (
-                    <VCard>
-                        <VCardText>
+                    <SurfaceCard>
+                        <SurfaceCardText>
                             <DataTable
                                 title={t("Payments")}
                                 data={rows.value}
@@ -168,8 +170,8 @@ const PaymentsPage = dc(() => {
                                 searchValue={search.value}
                                 setSearchValue={(value) => (search.value = value)}
                             />
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
                 )}
             </ThemedView>
         </ScreenContainer>

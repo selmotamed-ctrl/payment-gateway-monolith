@@ -3,9 +3,9 @@ import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VProgressCircular, VSelect, VTab, VTabs, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VCheckbox, VProgressCircular, VSelect, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StatusChip } from "@/components/StatusChip";
@@ -21,6 +21,13 @@ import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
+import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { MonoRef } from "@/components/ui/MonoRef";
+import { DescriptionList } from "@/components/ui/DescriptionList";
 type AmlCase = {
     id: string;
     caseRef: string;
@@ -130,13 +137,6 @@ const formatDateTime = (value: string | null | undefined): string => {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "—";
     return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
-};
-
-const formatMoney = (value: string | null | undefined, currency = "LYD"): string => {
-    if (value === null || value === undefined || value === "") return "—";
-    const number = Number(value);
-    if (!Number.isFinite(number)) return String(value);
-    return `${number.toFixed(4)} ${currency}`;
 };
 
 const formatHours = (hours: number): string => (hours < 24 ? `${hours}h` : `${Math.round(hours / 24)}d`);
@@ -381,16 +381,16 @@ const AmlCasesPage = dc(() => {
         }
     };
 
-    const summaryItems = computed(() => {
+    const summaryMetrics = computed<MetricItem[]>(() => {
         const data = summary.value;
         if (!data) return [];
+        const severity = data.bySeverity ?? {};
         return [
-            { label: t("Open cases"), value: String(data.totalOpen), tone: data.totalOpen > 0 ? "warning" as const : "success" as const },
-            { label: t("Critical open"), value: String(data.criticalOpen), tone: data.criticalOpen > 0 ? "error" as const : "success" as const },
-            { label: t("SLA overdue"), value: String(data.overdue), tone: data.overdue > 0 ? "error" as const : "success" as const },
-            { label: t("Frozen"), value: String(data.frozen), tone: data.frozen > 0 ? "warning" as const : "success" as const },
-            { label: t("Escalated STR"), value: String(data.escalated), tone: data.escalated > 0 ? "error" as const : "success" as const },
-            { label: t("Oldest open"), value: formatHours(data.oldestOpenAgeHours), tone: data.oldestOpenAgeHours >= 72 ? "error" as const : data.oldestOpenAgeHours >= 24 ? "warning" as const : "success" as const },
+            { key: "critical", label: t("Critical"), value: String(severity.CRITICAL ?? data.criticalOpen ?? 0), badge: (severity.CRITICAL ?? data.criticalOpen ?? 0) > 0 ? t("Critical") : t("Clear"), badgeTone: (severity.CRITICAL ?? data.criticalOpen ?? 0) > 0 ? "danger" : "success" },
+            { key: "high", label: t("High"), value: String(severity.HIGH ?? 0), badge: (severity.HIGH ?? 0) > 0 ? t("High") : t("Clear"), badgeTone: (severity.HIGH ?? 0) > 0 ? "warning" : "success" },
+            { key: "medium", label: t("Medium"), value: String(severity.MEDIUM ?? 0) },
+            { key: "low", label: t("Low"), value: String(severity.LOW ?? 0) },
+            { key: "overdue", label: t("SLA overdue"), value: String(data.overdue), subLabel: `${t("Oldest open")}: ${formatHours(data.oldestOpenAgeHours)}`, badge: data.overdue > 0 ? t("Overdue") : t("Clear"), badgeTone: data.overdue > 0 ? "danger" : "success" },
         ];
     });
 
@@ -401,7 +401,7 @@ const AmlCasesPage = dc(() => {
             value: (row) => row.caseRef,
             Value: ({ row }: { row: AmlCase }) => (
                 <ThemedView style={{ gap: "2px" }}>
-                    <ThemedText style={{ fontSize: "11px", fontWeight: 600, direction: "ltr" }}>{row.caseRef}</ThemedText>
+                    <MonoRef value={row.caseRef} />
                     <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{row.subjectType}</ThemedText>
                 </ThemedView>
             ),
@@ -414,7 +414,7 @@ const AmlCasesPage = dc(() => {
             Value: ({ row }: { row: AmlCase }) => (
                 <ThemedView style={{ gap: "2px" }}>
                     <ThemedText style={{ fontSize: "12px" }}>{row.subjectName || "—"}</ThemedText>
-                    <ThemedText style={{ fontSize: "10px", opacity: 0.55, direction: "ltr" }}>{row.subjectReference}</ThemedText>
+                    <MonoRef value={row.subjectReference} />
                 </ThemedView>
             ),
         },
@@ -438,7 +438,7 @@ const AmlCasesPage = dc(() => {
             value: (row) => row.ruleCode ?? "",
             Value: ({ row }: { row: AmlCase }) => (
                 <ThemedView style={{ gap: "2px" }}>
-                    <ThemedText style={{ fontSize: "11px", direction: "ltr" }}>{row.ruleCode || "—"}</ThemedText>
+                    <MonoRef value={row.ruleCode ?? ""} copyable={false} />
                     <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{row.ruleName || ""}</ThemedText>
                 </ThemedView>
             ),
@@ -447,7 +447,7 @@ const AmlCasesPage = dc(() => {
             key: "amount",
             label: "Amount",
             value: (row) => row.amount ?? "",
-            Value: ({ row }: { row: AmlCase }) => <ThemedText style={{ fontSize: "12px" }}>{formatMoney(row.amount, row.currency ?? "LYD")}</ThemedText>,
+            Value: ({ row }: { row: AmlCase }) => <MoneyDisplay amount={row.amount} currency={row.currency ?? "LYD"} size="sm" />,
         },
         {
             key: "sla",
@@ -477,6 +477,9 @@ const AmlCasesPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("AML Cases")}
+                    subtitle={t("Investigate, disposition, and escalate AML cases under restricted compliance access.")}
+                    badge="AML-CONFIDENTIAL"
+                    badgeTone="danger"
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
@@ -490,55 +493,50 @@ const AmlCasesPage = dc(() => {
                 </VAlert>
 
                 {summary.value && (
-                    <VCard variant="flat" style={{ borderRadius: "16px" }}>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("AML case health")}</ThemedText>
-                                <div style={{ flex: 1 }} />
-                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
-                            </ThemedView>
-                            {showChecklists && (
-                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
-                                    {SUMMARY_EXPORT_CHECKS.map((check) => (
-                                        <VCheckbox
-                                            key={check.key}
-                                            modelValue={summaryExportChecklist.value[check.key] === true}
-                                            onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
-                                            label={t(check.label)}
-                                            density="compact"
-                                            hideDetails
-                                        />
-                                    ))}
-                                    {!summaryExportChecklistComplete.value && (
-                                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
-                                    )}
+                    <>
+                        <MetricStrip items={summaryMetrics.value} />
+                        <SurfaceCard title={t("AML case health")} subtitle={`${summary.value.totalOpen} ${t("Open cases")} · ${summary.value.frozen} ${t("Frozen")} · ${summary.value.escalated} ${t("Escalated STR")}`}>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                                <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end" }}>
+                                    <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!summaryExportChecklistComplete.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
                                 </ThemedView>
-                            )}
-                            <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
-                                {summaryItems.value.map((item) => (
-                                    <VCard key={item.label} variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
-                                            <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
-                                        </VCardText>
-                                    </VCard>
-                                ))}
-                            </ThemedView>
-                            <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                {Object.entries(summary.value.byStatus ?? {}).map(([state, count]) => (
-                                    <StatusChip key={state} label={`${state}: ${count}`} tone={statusTone(state)} size="x-small" />
-                                ))}
-                            </ThemedView>
-                        </VCardText>
-                    </VCard>
+                                {showChecklists && (
+                                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
+                                        {SUMMARY_EXPORT_CHECKS.map((check) => (
+                                            <VCheckbox
+                                                key={check.key}
+                                                modelValue={summaryExportChecklist.value[check.key] === true}
+                                                onUpdate:modelValue={(value: unknown) => (summaryExportChecklist.value = { ...summaryExportChecklist.value, [check.key]: Boolean(value) })}
+                                                label={t(check.label)}
+                                                density="compact"
+                                                hideDetails
+                                            />
+                                        ))}
+                                        {!summaryExportChecklistComplete.value && (
+                                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all summary export checklist items before exporting")}</ThemedText>
+                                        )}
+                                    </ThemedView>
+                                )}
+                                <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                                    {Object.entries(summary.value.byStatus ?? {}).map(([state, count]) => (
+                                        <StatusChip key={state} label={`${state}: ${count}`} tone={statusTone(state)} size="x-small" />
+                                    ))}
+                                </ThemedView>
+                            </SurfaceCardText>
+                        </SurfaceCard>
+                    </>
                 )}
 
-                <VTabs modelValue={activeView.value} onUpdate:modelValue={(value: unknown) => setView(value as AmlCaseView)} color="primary" density="comfortable" showArrows>
-                    <VTab value="open" prependIcon="mdi-shield-alert-outline">{t("Open")}</VTab>
-                    <VTab value="resolved" prependIcon="mdi-check-circle-outline">{t("Resolved")}</VTab>
-                    <VTab value="all" prependIcon="mdi-view-list-outline">{t("All")}</VTab>
-                </VTabs>
+                <SegmentedTabs
+                    modelValue={activeView.value}
+                    onUpdate:modelValue={(value: string) => setView(value as AmlCaseView)}
+                    tabs={[
+                        { value: "open", label: t("Open") },
+                        { value: "resolved", label: t("Resolved") },
+                        { value: "all", label: t("All") },
+                    ]}
+                />
 
                 <ApiTable<AmlCase>
                     title={t("AML case queue")}
@@ -595,10 +593,13 @@ const AmlCasesPage = dc(() => {
                 />
             </ThemedView>
 
-            <VDialog modelValue={detailsOpen.value} onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)} maxWidth="1080px" scrollable>
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                        {detailLoading.value || !selected.value ? (
+            <FormModal
+                modelValue={detailsOpen.value}
+                onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)}
+                title={selected.value?.caseRef ?? t("AML case")}
+                size="lg"
+            >
+{detailLoading.value || !selected.value ? (
                             <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "300px", gap: "12px" }}>
                                 <VProgressCircular indeterminate size={52} color="primary" />
                                 <ThemedText style={{ opacity: 0.65 }}>{t("Loading AML case")}</ThemedText>
@@ -607,8 +608,10 @@ const AmlCasesPage = dc(() => {
                             <>
                                 <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
                                     <ThemedView style={{ gap: "4px" }}>
-                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "19px" }}>{selected.value.caseRef}</ThemedText>
-                                        <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{selected.value.subjectName} · {selected.value.triggerReason}</ThemedText>
+                                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                            <MoneyDisplay amount={selected.value.amount} currency={selected.value.currency ?? "LYD"} colorSign />
+                                            <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{selected.value.subjectName} · {selected.value.triggerReason}</ThemedText>
+                                        </ThemedView>
                                     </ThemedView>
                                     <ThemedView style={{ flexDirection: "row", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
                                         <StatusChip label={selected.value.severity} tone={severityTone(selected.value.severity)} />
@@ -618,57 +621,49 @@ const AmlCasesPage = dc(() => {
                                 </ThemedView>
 
                                 <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "14px" }}>
-                                    <VCard variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
+                                    <SurfaceCard variant="tonal">
+                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
                                             <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Case context")}</ThemedText>
-                                            {[
-                                                [t("Subject type"), selected.value.subjectType],
-                                                [t("Subject"), selected.value.subjectName],
-                                                [t("Reference"), selected.value.subjectReference],
-                                                [t("Subject status"), selected.value.subjectStatus || "—"],
-                                                [t("Merchant"), selected.value.merchantName || "—"],
-                                                [t("Amount"), formatMoney(selected.value.amount, selected.value.currency ?? "LYD")],
-                                                [t("Rule"), selected.value.ruleCode ? `${selected.value.ruleCode} · ${selected.value.ruleName ?? ""}` : "—"],
-                                                [t("Rule version"), selected.value.ruleVersion ?? "—"],
-                                                [t("Opened"), formatDateTime(selected.value.openedAt)],
-                                                [t("SLA due"), formatDateTime(selected.value.slaDueAt)],
-                                                [t("Reviewer"), selected.value.assignedReviewerName || "—"],
-                                            ].map(([label, value]) => (
-                                                <ThemedView key={label} style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", borderBottom: "1px solid rgba(100,116,139,0.12)", paddingBottom: "4px" }}>
-                                                    <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{label}</ThemedText>
-                                                    <ThemedText style={{ fontSize: "11px", textAlign: "right", wordBreak: "break-word", direction: "ltr" }}>{value}</ThemedText>
-                                                </ThemedView>
-                                            ))}
-                                        </VCardText>
-                                    </VCard>
+                                            <DescriptionList items={[
+                                                { label: t("Subject type"), value: selected.value.subjectType },
+                                                { label: t("Subject"), value: selected.value.subjectName },
+                                                { label: t("Reference"), value: <MonoRef value={selected.value.subjectReference} /> },
+                                                { label: t("Subject status"), value: selected.value.subjectStatus || "—" },
+                                                { label: t("Merchant"), value: selected.value.merchantName || "—" },
+                                                { label: t("Amount"), value: <MoneyDisplay amount={selected.value.amount} currency={selected.value.currency ?? "LYD"} size="sm" colorSign /> },
+                                                { label: t("Rule"), value: selected.value.ruleCode ? <ThemedView style={{ flexDirection: "row", gap: "4px", alignItems: "center", justifyContent: "flex-end" }}><MonoRef value={selected.value.ruleCode} copyable={false} /><ThemedText style={{ fontSize: "11px" }}>{selected.value.ruleName ?? ""}</ThemedText></ThemedView> : "—" },
+                                                { label: t("Rule version"), value: selected.value.ruleVersion ?? "—" },
+                                                { label: t("Opened"), value: formatDateTime(selected.value.openedAt) },
+                                                { label: t("SLA due"), value: formatDateTime(selected.value.slaDueAt) },
+                                                { label: t("Reviewer"), value: selected.value.assignedReviewerName || "—" },
+                                            ]} />
+                                        </SurfaceCardText>
+                                    </SurfaceCard>
 
-                                    <VCard variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
+                                    <SurfaceCard variant="tonal">
+                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "14px" }}>
                                             <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Investigation context")}</ThemedText>
-                                            {[
-                                                [t("Screening result"), selected.value.screening?.result ?? selected.value.screeningResult ?? "—"],
-                                                [t("Screening score"), selected.value.screening?.highestScore ?? selected.value.screeningScore ?? "—"],
-                                                [t("Screening provider"), selected.value.screening?.providerCode ?? "—"],
-                                                [t("Hold journal"), selected.value.holdJournalEntryId || "—"],
-                                                [t("Regulatory report"), selected.value.regulatoryReport ? `${selected.value.regulatoryReport.reportType} · ${selected.value.regulatoryReport.status}` : selected.value.regulatoryReportId || "—"],
-                                                [t("Approval state"), selected.value.approval?.state ?? "—"],
-                                                [t("Rejection reason"), selected.value.approval?.rejectionReason ?? "—"],
-                                            ].map(([label, value]) => (
-                                                <ThemedView key={label} style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", borderBottom: "1px solid rgba(100,116,139,0.12)", paddingBottom: "4px" }}>
-                                                    <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{label}</ThemedText>
-                                                    <ThemedText style={{ fontSize: "11px", textAlign: "right", wordBreak: "break-word", direction: "ltr" }}>{value}</ThemedText>
-                                                </ThemedView>
-                                            ))}
+                                            <DescriptionList items={[
+                                                { label: t("Screening result"), value: selected.value.screening?.result ?? selected.value.screeningResult ?? "—" },
+                                                { label: t("Screening score"), value: selected.value.screening?.highestScore ?? selected.value.screeningScore ?? "—" },
+                                                { label: t("Screening provider"), value: selected.value.screening?.providerCode ?? "—" },
+                                                { label: t("Screening ID"), value: <MonoRef value={selected.value.screening?.id ?? selected.value.screeningId ?? ""} /> },
+                                                { label: t("Hold journal"), value: <MonoRef value={selected.value.holdJournalEntryId ?? ""} /> },
+                                                { label: t("Regulatory report"), value: selected.value.regulatoryReport ? <ThemedView style={{ flexDirection: "row", gap: "4px", alignItems: "center", justifyContent: "flex-end" }}><StatusChip label={`${selected.value.regulatoryReport.reportType} · ${selected.value.regulatoryReport.status}`} tone={statusTone(selected.value.regulatoryReport.status)} size="x-small" /><MonoRef value={selected.value.regulatoryReport.id} /></ThemedView> : <MonoRef value={selected.value.regulatoryReportId ?? ""} /> },
+                                                { label: t("Approval request"), value: <MonoRef value={selected.value.approval?.id ?? ""} /> },
+                                                { label: t("Approval state"), value: selected.value.approval?.state ?? "—" },
+                                                { label: t("Rejection reason"), value: selected.value.approval?.rejectionReason ?? "—" },
+                                            ]} />
                                             {selected.value.approval && (
                                                 <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "Approvals" })}>{t("Open approvals")}</VBtn>
                                             )}
-                                        </VCardText>
-                                    </VCard>
+                                        </SurfaceCardText>
+                                    </SurfaceCard>
                                 </ThemedView>
 
                                 {selected.value.screening?.matches?.length ? (
-                                    <VCard variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                                    <SurfaceCard variant="tonal">
+                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                             <ThemedText type="defaultSemiBold">{t("Screening matches")}</ThemedText>
                                             {selected.value.screening.matches.map((match) => (
                                                 <ThemedView key={match.id} style={{ gap: "3px", borderBottom: "1px solid rgba(100,116,139,0.12)", paddingBottom: "6px" }}>
@@ -677,26 +672,26 @@ const AmlCasesPage = dc(() => {
                                                         <ThemedText style={{ fontSize: "12px", fontWeight: 600 }}>{match.matchedName}</ThemedText>
                                                         <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{match.listType} · {match.listName} · {match.score}</ThemedText>
                                                     </ThemedView>
-                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.55, direction: "ltr" }}>{match.listEntryRef}</ThemedText>
+                                                    <MonoRef value={match.listEntryRef} />
                                                     {match.dispositionNotes && <ThemedText style={{ fontSize: "10px", opacity: 0.7 }}>{match.dispositionNotes}</ThemedText>}
                                                 </ThemedView>
                                             ))}
-                                        </VCardText>
-                                    </VCard>
+                                        </SurfaceCardText>
+                                    </SurfaceCard>
                                 ) : null}
 
-                                <VCard variant="tonal">
-                                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                                <SurfaceCard variant="tonal">
+                                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                         <ThemedText type="defaultSemiBold">{t("Severity inputs")}</ThemedText>
                                         <pre style={{ margin: 0, padding: "8px 10px", borderRadius: "8px", background: "rgba(15,23,42,0.06)", fontSize: "10px", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", direction: "ltr", maxHeight: "160px", overflow: "auto" }}>
                                             {JSON.stringify(selected.value.severityInputs ?? {}, null, 2)}
                                         </pre>
-                                    </VCardText>
-                                </VCard>
+                                    </SurfaceCardText>
+                                </SurfaceCard>
 
                                 {canPropose.value ? (
-                                    <VCard variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                                    <SurfaceCard variant="tonal">
+                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                             <ThemedText type="defaultSemiBold">{t("Propose resolution")}</ThemedText>
                                             <VAlert type="info" variant="tonal">{t("The resolution is proposed to a different MLRO checker. No ledger posting occurs until approval.")}</VAlert>
                                             <VSelect
@@ -735,8 +730,8 @@ const AmlCasesPage = dc(() => {
                                                 <VBtn color="primary" loading={actionLoading.value} disabled={!caseChecklistComplete.value} onClick={() => void propose()}>{t("Propose resolution")}</VBtn>
                                                 <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
                                             </ThemedView>
-                                        </VCardText>
-                                    </VCard>
+                                        </SurfaceCardText>
+                                    </SurfaceCard>
                                 ) : (
                                     <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
                                         <VBtn variant="text" onClick={() => (detailsOpen.value = false)}>{t("Close")}</VBtn>
@@ -744,9 +739,7 @@ const AmlCasesPage = dc(() => {
                                 )}
                             </>
                         )}
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         </ScreenContainer>
     );
 });

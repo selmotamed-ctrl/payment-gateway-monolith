@@ -1,4 +1,5 @@
 import { Table } from "./Table";
+import TableFilters from "./TableFilters";
 import {
     type ApiTableProps,
     defaultNumberOfItemsPerPageChoices,
@@ -18,6 +19,7 @@ import { defaultBoxShadow } from "@/constants/styling";
 import type { JsonValue } from "@/utils/common";
 import { xlsxUIPipeline, type XlsxHeader } from "@/utils/xlsx";
 import { colors } from "@/plugins/vuetify";
+import { extractApiErrorMessage } from "@/utils/errors/extractor";
 
 export const ApiTable = defineComponent(
     <T, RawData extends JsonValue = any>(props: ApiTableProps<T>) => {
@@ -82,19 +84,19 @@ export const ApiTable = defineComponent(
                 });
                 const extracted = props.apiDataExtractor(result.data);
                 const search = effectiveSearch.value;
-                const searched = search
-                    ? extracted.filter((row: T) => JSON.stringify(row).toLowerCase().includes(search.toLowerCase()))
-                    : extracted;
+                const searched = props.localSearch === false || !search
+                    ? extracted
+                    : extracted.filter((row: T) => JSON.stringify(row).toLowerCase().includes(search.toLowerCase()));
                 skip.value = nextSkip;
                 data.value = sortRowsByHeader(searched, props.headers, sortBy.value, sortDirection.value);
                 total.value = props.apiTotalExtractor(result.data);
+                props.onData?.(data.value as T[], total.value);
                 if (props.apiPageSizeExtractor) {
-                    console.log("Setting page size from data", props.apiPageSizeExtractor(result.data));
                     props.setNumberOfItemsPerPage?.(props.apiPageSizeExtractor(result.data));
                 }
             } catch (error) {
-                console.log("Refresh Error", error);
-                errMsg.value = "Something Went Wrong!";
+                console.error("Refresh Error", error);
+                errMsg.value = extractApiErrorMessage(error);
             } finally {
                 loading.value = false;
             }
@@ -157,9 +159,6 @@ export const ApiTable = defineComponent(
         const onSearch = () => reset();
 
         const currentTheme = useTheme();
-        const theme = computed(() => {
-            return currentTheme.current.value.colors;
-        });
 
         const numberOfPages = computed(() => {
             return numberOfItemsPerPage.value < 1 ? 1 : Math.ceil(Math.abs(total.value / numberOfItemsPerPage.value)) || 1;
@@ -288,6 +287,7 @@ export const ApiTable = defineComponent(
                         key: "__no",
                         label: "No.",
                         minWidth: true,
+                        sortable: false,
                     });
                 } else {
                     props.headers[0] = {
@@ -295,6 +295,7 @@ export const ApiTable = defineComponent(
                         key: "__no",
                         label: "No",
                         minWidth: true,
+                        sortable: false,
                     };
                 }
             }
@@ -302,28 +303,17 @@ export const ApiTable = defineComponent(
                 <ThemedView
                     style={{
                         flexDirection: "column",
-                        gap: "16px",
-                        padding: isMobile.value ? "16px" : "24px",
-                        backgroundColor: isDark ? colors.surface : "#ffffff",
-                        borderRadius: "12px",
-                        boxShadow: props.noElevation ? undefined : defaultBoxShadow,
-                        border: props.noElevation ? undefined : isDark ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid #e2e8f0",
+                        gap: "0",
+                        padding: "0",
+                        backgroundColor: "var(--pg-bg-surface)",
+                        borderRadius: "var(--pg-radius-md)",
+                        boxShadow: props.noElevation ? undefined : "var(--pg-shadow-xs)",
+                        border: "1px solid var(--pg-border-subtle)",
+                        overflow: "hidden",
                     }}
                 >
-                    {props.TopSlot ? (
-                        <ThemedView
-                            style={{
-                                gap: "12px",
-                            }}
-                        >
-                            {props.TopSlot({ loading: loading.value, refresh, reset, refreshAsIs })}
-                            <VDivider></VDivider>
-                        </ThemedView>
-                    ) : (
-                        <></>
-                    )}
                     <TableHeader
-                        loading={!!props.loading}
+                        loading={loading.value}
                         onSearch={onSearch}
                         xlsx={
                             (props.xlsx ?? true)
@@ -341,6 +331,27 @@ export const ApiTable = defineComponent(
                         Icon={props.Icon}
                         iconName={props.iconName}
                     ></TableHeader>
+                    {props.TopSlot ? (
+                        <ThemedView
+                            style={{
+                                gap: "12px",
+                            }}
+                        >
+                            {props.TopSlot({ loading: loading.value, refresh, reset, refreshAsIs })}
+                            <VDivider></VDivider>
+                        </ThemedView>
+                    ) : (
+                        <></>
+                    )}
+                    {props.filters?.length ? (
+                        <TableFilters
+                            filters={props.filters}
+                            values={props.filterValues ?? {}}
+                            total={props.filterTotal}
+                            onChange={(key, value) => props.onFilterChange?.(key, value)}
+                            onClear={() => props.onFilterClear?.()}
+                        />
+                    ) : null}
                     {loading.value ? (
                         <>
                             <ThemedView
@@ -481,6 +492,8 @@ export const ApiTable = defineComponent(
             "title",
             "url",
             "apiPageSizeExtractor",
+            "localSearch",
+            "onData",
         ] as any[],
     },
 );

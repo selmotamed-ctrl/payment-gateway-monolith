@@ -30,7 +30,7 @@ test("creates a gateway and opens its wizard", async ({ page }) => {
   await page.getByRole("button", { name: "New Gateway" }).click();
 
   await page.getByLabel("Gateway Code").fill("test-gw");
-  await page.getByLabel("Gateway", { exact: true }).fill("Test Gateway");
+  await page.getByLabel("Gateway name", { exact: true }).fill("Test Gateway");
   await page.getByLabel("Operator").fill("Test Operator");
   await page.getByRole("button", { name: "Create", exact: true }).click();
 

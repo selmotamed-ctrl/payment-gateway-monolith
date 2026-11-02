@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
-import { VAlert, VBtn, VBtnToggle, VCard, VCardText, VDialog, VSelect, VTextarea, VTextField } from "vuetify/components";
+import { VAlert, VBtn, VSelect, VTextarea, VTextField } from "vuetify/components";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { api } from "@/state/api";
@@ -11,6 +11,8 @@ import { showSnackBar } from "@/utils/snackBar";
 import { REVIEW_REASON_CODES } from "../kybReviewHelp";
 import type { KybDocumentSummary } from "../types";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 const KybReviewDialog = dc(
     (props: {
         open: boolean;
@@ -81,18 +83,13 @@ const KybReviewDialog = dc(
         };
 
         return () => (
-            <VDialog
+            <FormModal
                 modelValue={props.open}
                 onUpdate:modelValue={(value: boolean) => props.onUpdate(value)}
-                maxWidth="680px"
-                scrollable
+                title={t("Review KYB document")}
+                size="md"
             >
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
-                            {t("Review KYB document")}
-                        </ThemedText>
-                        <ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>
+<ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>
                             {props.document?.docType} · {props.document?.originalFileName || props.document?.id}
                         </ThemedText>
                         {duplicate.value && (
@@ -100,16 +97,14 @@ const KybReviewDialog = dc(
                                 {t("This file hash is also present under another merchant. Acceptance requires a written justification.")}
                             </VAlert>
                         )}
-                        <VBtnToggle
+                        <SegmentedTabs
                             modelValue={decision.value}
-                            onUpdate:modelValue={(value: unknown) => value && (decision.value = value as "ACCEPTED" | "REJECTED")}
-                            mandatory
-                            divided
-                            variant="outlined"
-                        >
-                            <VBtn value="ACCEPTED">{t("Accept")}</VBtn>
-                            <VBtn value="REJECTED">{t("Reject")}</VBtn>
-                        </VBtnToggle>
+                            tabs={[
+                                { value: "ACCEPTED", label: t("Accept") },
+                                { value: "REJECTED", label: t("Reject") },
+                            ]}
+                            onUpdate:modelValue={(value: string) => (decision.value = value === "REJECTED" ? "REJECTED" : "ACCEPTED")}
+                        />
                         {decision.value === "ACCEPTED" ? (
                             <>
                                 <VTextField v-model={expiresOn.value} label={t("Expiry date (YYYY-MM-DD, optional)")} />
@@ -138,9 +133,7 @@ const KybReviewDialog = dc(
                                 {t("Save decision")}
                             </VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         );
     },
     { props: ["open", "document", "initialDecision", "onUpdate", "onDone"] },

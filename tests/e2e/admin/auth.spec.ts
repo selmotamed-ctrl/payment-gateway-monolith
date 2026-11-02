@@ -17,7 +17,7 @@ test("admin login posts `identifier` (not `username`) and lands on the dashboard
   await page.addInitScript(() => window.localStorage.setItem("locale-name", "en"));
   await page.goto("/login");
   await page.getByLabel("Email or phone").fill("admin@pgtest.lan");
-  await page.getByLabel("Password").fill("DeployTest!2026");
+  await page.getByLabel("Password", { exact: true }).fill("DeployTest!2026");
   await page.getByRole("button", { name: "Login", exact: true }).click();
 
   await expect(page).toHaveURL(/\/dashboard/);
@@ -40,7 +40,7 @@ test("admin login surfaces a validation error and stays on the login page", asyn
   await page.addInitScript(() => window.localStorage.setItem("locale-name", "en"));
   await page.goto("/login");
   await page.getByLabel("Email or phone").fill("admin@pgtest.lan");
-  await page.getByLabel("Password").fill("wrong");
+  await page.getByLabel("Password", { exact: true }).fill("wrong");
   await page.getByRole("button", { name: "Login", exact: true }).click();
   await expect(page.locator(".v-alert")).toBeVisible();
   await expect(page).toHaveURL(/\/login/);

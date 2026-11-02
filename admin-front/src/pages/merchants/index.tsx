@@ -1,10 +1,10 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale, useTheme } from "vuetify";
-import { VBtn, VCard, VCardText } from "vuetify/components";
+import { VBtn } from "vuetify/components";
 import { useRouter } from "vue-router";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StatusChip } from "@/components/StatusChip";
@@ -32,6 +32,11 @@ import type { MerchantSummary } from "./types";
 import MerchantHelpPanel from "./components/MerchantHelpPanel";
 import MerchantActionDialog, { type MerchantActionMode } from "./components/MerchantActionDialog";
 
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { MetricStrip } from "@/components/ui/MetricStrip";
+import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
+import { DescriptionList } from "@/components/ui/DescriptionList";
+import { MonoRef } from "@/components/ui/MonoRef";
 type MerchantsSummary = {
     total: number;
     active: number;
@@ -70,6 +75,8 @@ const MerchantsPage = dc(() => {
     const actionOpen = ref(false);
     const actionMode = ref<MerchantActionMode>("SUSPEND");
     const actionMerchant = ref<MerchantSummary | null>(null);
+    const inspectionOpen = ref(false);
+    const inspectionMerchant = ref<MerchantSummary | null>(null);
     const exportLoading = ref(false);
     const summaryExportLoading = ref(false);
 
@@ -106,6 +113,11 @@ const MerchantsPage = dc(() => {
         actionOpen.value = true;
     };
 
+    const openInspection = (row: MerchantSummary) => {
+        inspectionMerchant.value = row;
+        inspectionOpen.value = true;
+    };
+
     const toneColor = (tone: ReturnType<typeof statusTone>): string => {
         const colors = theme.current.value.colors as Record<string, string>;
         return colors[tone] ?? colors["on-surface-variant"] ?? "#64748b";
@@ -132,7 +144,7 @@ const MerchantsPage = dc(() => {
                         {row.displayName || row.tradeName || "—"}
                     </ThemedText>
                     <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{row.legalName}</ThemedText>
-                    <ThemedText style={{ fontSize: "10px", opacity: 0.5, direction: "ltr" }}>{row.id}</ThemedText>
+                    <MonoRef value={row.id} truncate={16} />
                 </ThemedView>
             ),
         },
@@ -288,6 +300,9 @@ const MerchantsPage = dc(() => {
             headerTooltip: COLUMN_HELP.actions,
             Value: ({ row }: { row: MerchantSummary }) => (
                 <ThemedView style={{ flexDirection: "row", gap: "4px", flexWrap: "wrap" }}>
+                    <VBtn size="x-small" variant="text" prependIcon="mdi-eye-outline" onClick={() => openInspection(row)}>
+                        {t("Inspect")}
+                    </VBtn>
                     <VBtn size="x-small" variant="text" prependIcon="mdi-open-in-new" onClick={() => openDetail(row)}>
                         {t("Open")}
                     </VBtn>
@@ -433,12 +448,54 @@ const MerchantsPage = dc(() => {
         const data = summary.value;
         if (!data) return [];
         return [
-            { label: t("Active"), value: String(data.active), tone: "success" as const },
-            { label: t("High risk"), value: String(data.highRisk), tone: data.highRisk > 0 ? "warning" as const : "success" as const },
-            { label: t("KYB pending"), value: String(data.kybPending), tone: data.kybPending > 0 ? "warning" as const : "success" as const },
-            { label: t("Review overdue"), value: String(data.reviewOverdue), tone: data.reviewOverdue > 0 ? "error" as const : "success" as const },
-            { label: t("Review due in 30d"), value: String(data.reviewDueSoon), tone: data.reviewDueSoon > 0 ? "warning" as const : "success" as const },
-            { label: t("Pending changes"), value: String(data.pendingApprovals), tone: data.pendingApprovals > 0 ? "warning" as const : "success" as const },
+            {
+                key: "active",
+                label: t("Active"),
+                value: String(data.active),
+                subLabel: t("Live portfolio"),
+                badge: t("LIVE"),
+                badgeTone: "success" as const,
+            },
+            {
+                key: "highRisk",
+                label: t("High risk"),
+                value: String(data.highRisk),
+                subLabel: t("Enhanced monitoring"),
+                badge: data.highRisk > 0 ? t("P1") : t("Clear"),
+                badgeTone: data.highRisk > 0 ? "danger" as const : "success" as const,
+            },
+            {
+                key: "kybPending",
+                label: t("KYB pending"),
+                value: String(data.kybPending),
+                subLabel: t("Document review"),
+                badge: data.kybPending > 0 ? t("P2") : t("Clear"),
+                badgeTone: data.kybPending > 0 ? "warning" as const : "success" as const,
+            },
+            {
+                key: "reviewOverdue",
+                label: t("Review overdue"),
+                value: String(data.reviewOverdue),
+                subLabel: t("Past KYB review"),
+                badge: data.reviewOverdue > 0 ? t("P1") : t("Clear"),
+                badgeTone: data.reviewOverdue > 0 ? "danger" as const : "success" as const,
+            },
+            {
+                key: "reviewDueSoon",
+                label: t("Review due in 30d"),
+                value: String(data.reviewDueSoon),
+                subLabel: t("Next review window"),
+                badge: data.reviewDueSoon > 0 ? t("Attention") : t("Clear"),
+                badgeTone: data.reviewDueSoon > 0 ? "warning" as const : "success" as const,
+            },
+            {
+                key: "pendingApprovals",
+                label: t("Pending changes"),
+                value: String(data.pendingApprovals),
+                subLabel: t("Awaiting independent checker"),
+                badge: data.pendingApprovals > 0 ? t("Four eyes") : t("Clear"),
+                badgeTone: data.pendingApprovals > 0 ? "warning" as const : "success" as const,
+            },
         ];
     });
 
@@ -450,6 +507,9 @@ const MerchantsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Merchants")}
+                    subtitle={t("Search the merchant portfolio, inspect KYB and risk posture, and propose governed changes.")}
+                    badge={summary.value ? `${summary.value.kybPending} ${t("KYB pending")}` : t("KYB review")}
+                    badgeTone={summary.value && summary.value.kybPending > 0 ? "warning" : "info"}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                             <StatusChip label={`${total.value} ${t("merchants")}`} tone="info" size="small" />
@@ -462,41 +522,34 @@ const MerchantsPage = dc(() => {
                 />
 
                 {summary.value && (
-                    <VCard variant="flat" style={{ borderRadius: "16px" }}>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Merchant portfolio health")}</ThemedText>
-                                <div style={{ flex: 1 }} />
-                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
-                            </ThemedView>
-                            <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px" }}>
-                                {summaryItems.value.map((item) => (
-                                    <VCard key={item.label} variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
-                                            <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
-                                        </VCardText>
-                                    </VCard>
-                                ))}
-                            </ThemedView>
-                            <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                {Object.entries(summary.value.byStatus ?? {}).map(([state, count]) => (
-                                    <StatusChip key={state} label={`${state}: ${count}`} tone={statusTone(state)} size="x-small" />
-                                ))}
-                                {Object.entries(summary.value.byKyb ?? {}).map(([state, count]) => (
-                                    <StatusChip key={`kyb-${state}`} label={`KYB ${state}: ${count}`} tone={statusTone(state)} size="x-small" />
-                                ))}
-                            </ThemedView>
-                        </VCardText>
-                    </VCard>
+                    <ThemedView style={{ gap: "12px" }}>
+                        <MetricStrip items={summaryItems.value} />
+                        <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Merchant portfolio health")}</ThemedText>
+                                    <div style={{ flex: 1 }} />
+                                    <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
+                                </ThemedView>
+                                <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                                    {Object.entries(summary.value.byStatus ?? {}).map(([state, count]) => (
+                                        <StatusChip key={state} label={`${state}: ${count}`} tone={statusTone(state)} size="x-small" />
+                                    ))}
+                                    {Object.entries(summary.value.byKyb ?? {}).map(([state, count]) => (
+                                        <StatusChip key={`kyb-${state}`} label={`KYB ${state}: ${count}`} tone={statusTone(state)} size="x-small" />
+                                    ))}
+                                </ThemedView>
+                            </SurfaceCardText>
+                        </SurfaceCard>
+                    </ThemedView>
                 )}
 
                 {areHelpPanelsVisible() && (
-                    <VCard>
-                        <VCardText>
+                    <SurfaceCard>
+                        <SurfaceCardText>
                             <MerchantHelpPanel />
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
                 )}
                 <ApiTable<MerchantSummary>
                     title={t("Merchants")}
@@ -552,6 +605,65 @@ const MerchantsPage = dc(() => {
                     )}
                 />
             </ThemedView>
+            <SlideOverDrawer
+                modelValue={inspectionOpen.value}
+                onUpdate:modelValue={(value: boolean) => (inspectionOpen.value = value)}
+                title={inspectionMerchant.value?.displayName || inspectionMerchant.value?.tradeName || t("Merchant")}
+                subtitle={inspectionMerchant.value?.legalName || ""}
+            >
+                {inspectionMerchant.value && (
+                    <ThemedView style={{ gap: "16px" }}>
+                        <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+                            <StatusChip
+                                label={merchantStatusHelp(inspectionMerchant.value.status).label}
+                                tone={merchantStatusHelp(inspectionMerchant.value.status).tone}
+                            />
+                            {inspectionMerchant.value.kybStatus && (
+                                <StatusChip
+                                    label={kybStatusHelp(inspectionMerchant.value.kybStatus).label}
+                                    tone={kybStatusHelp(inspectionMerchant.value.kybStatus).tone}
+                                />
+                            )}
+                            {inspectionMerchant.value.riskTier && (
+                                <StatusChip
+                                    label={riskHelp(inspectionMerchant.value.riskTier).label}
+                                    tone={riskHelp(inspectionMerchant.value.riskTier).tone}
+                                />
+                            )}
+                        </ThemedView>
+                        <DescriptionList
+                            columns={2}
+                            items={[
+                                { label: t("Merchant ID"), value: <MonoRef value={inspectionMerchant.value.id} /> },
+                                { label: t("Legal name"), value: inspectionMerchant.value.legalName || "—" },
+                                { label: t("Trade name"), value: inspectionMerchant.value.tradeName || "—" },
+                                { label: t("Country"), value: inspectionMerchant.value.country || "—" },
+                                { label: t("Onboarding channel"), value: inspectionMerchant.value.onboardingChannel },
+                                { label: t("Contact email"), value: inspectionMerchant.value.contactEmail || "—" },
+                                { label: t("Contact phone"), value: inspectionMerchant.value.contactPhone || "—" },
+                                { label: t("Business category"), value: inspectionMerchant.value.businessCategory || t("Restricted") },
+                                { label: t("Next KYB review"), value: formatDateTime(inspectionMerchant.value.nextKybReviewAt) },
+                                { label: t("Pending changes"), value: String(inspectionMerchant.value.pendingApprovalCount) },
+                            ]}
+                        />
+                        <ThemedView style={{ flexDirection: "row", gap: "8px", justifyContent: "flex-end" }}>
+                            <VBtn variant="text" onClick={() => (inspectionOpen.value = false)}>{t("Close")}</VBtn>
+                            <VBtn
+                                color="primary"
+                                prependIcon="mdi-open-in-new"
+                                onClick={() => {
+                                    const row = inspectionMerchant.value;
+                                    inspectionOpen.value = false;
+                                    if (row) openDetail(row);
+                                }}
+                            >
+                                {t("Open")}
+                            </VBtn>
+                        </ThemedView>
+                    </ThemedView>
+                )}
+            </SlideOverDrawer>
+
             <MerchantActionDialog
                 open={actionOpen.value}
                 mode={actionMode.value}

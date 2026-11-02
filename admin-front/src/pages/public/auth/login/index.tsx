@@ -1,15 +1,17 @@
 import { dc } from "kt-dc";
-import { VAlert, VBtn, VCard, VCardText, VTextField } from "vuetify/components";
+import { VAlert, VBtn, VTextField } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { ref } from "vue";
 import { useRoute } from "vue-router";
-import LogoSvg from "@/assets/images/logo.svg";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { setUserState, type UserState } from "@/state/user";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { setLocale } from "@/plugins/localization";
 import router from "@/router";
+import AuthLayout from "@/layouts/auth";
+import { FormField } from "@/components/ui/FormField";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
 
 const LoginPage = dc(() => {
     const { t } = useLocale();
@@ -91,36 +93,23 @@ const LoginPage = dc(() => {
     };
 
     return () => (
-        <div
-            style={{
-                minHeight: "100vh",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: "24px",
-                background: "linear-gradient(135deg, #0f172a 0%, #123a6b 55%, #0b7d72 100%)",
-            }}
-        >
-            <VCard
-                style={{
-                    width: "100%",
-                    maxWidth: "420px",
-                    padding: "8px",
-                    borderRadius: "20px",
-                }}
-            >
-                <VCardText style={{ display: "flex", flexDirection: "column", gap: "18px", padding: "18px" }}>
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
-                        <img src={LogoSvg} alt="logo" width={"56px"} height={"56px"} />
-                        <div style={{ fontSize: "20px", fontWeight: "800" }}>{t("Admin Back Office")}</div>
-                        <div style={{ fontSize: "13px", opacity: 0.6 }}>{t("Sign in to continue")}</div>
+        <AuthLayout>
+            <SurfaceCard>
+                <div style={{ display: "flex", flexDirection: "column", gap: "18px", padding: "6px" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                        <div style={{ fontSize: "20px", fontWeight: 600, color: "var(--pg-ink-primary)", letterSpacing: "-0.02em" }}>
+                            {t("Admin Back Office")}
+                        </div>
+                        <div style={{ fontSize: "13px", color: "var(--pg-ink-muted)" }}>{t("Sign in to continue")}</div>
                     </div>
 
-                    {typeof route.query.redirect === "string" && route.query.redirect.startsWith("/") && !route.query.redirect.startsWith("//") && (
-                        <VAlert type="info" variant="tonal" density="compact">
-                            {t("Sign in to continue to your previous page.")}
-                        </VAlert>
-                    )}
+                    {typeof route.query.redirect === "string" &&
+                        route.query.redirect.startsWith("/") &&
+                        !route.query.redirect.startsWith("//") && (
+                            <VAlert type="info" variant="tonal" density="compact">
+                                {t("Sign in to continue to your previous page.")}
+                            </VAlert>
+                        )}
 
                     {error.value && (
                         <VAlert type="error" variant="tonal" density="compact">
@@ -139,16 +128,19 @@ const LoginPage = dc(() => {
                             <VAlert type="info" variant="tonal" density="compact">
                                 {t("Enter the six-digit code sent to your registered phone.")}
                             </VAlert>
-                            <VTextField
-                                label={t("MFA code")}
-                                prependInnerIcon="mdi-shield-key-outline"
-                                autocomplete="one-time-code"
-                                {...{ inputmode: "numeric", maxlength: "6", autofocus: true }}
-                                modelValue={mfaCode.value}
-                                onUpdate:modelValue={(v: string) => (mfaCode.value = v.replace(/\D/g, "").slice(0, 6))}
-                                onKeydown={submitOnEnter}
-                                hideDetails
-                            />
+                            <FormField label={t("MFA code")} required>
+                                <VTextField
+                                    prependInnerIcon="mdi-shield-key-outline"
+                                    autocomplete="one-time-code"
+                                    {...{ inputmode: "numeric", maxlength: "6", autofocus: true }}
+                                    modelValue={mfaCode.value}
+                                    onUpdate:modelValue={(value: string) =>
+                                        (mfaCode.value = value.replace(/\D/g, "").slice(0, 6))
+                                    }
+                                    onKeydown={submitOnEnter}
+                                    hideDetails
+                                />
+                            </FormField>
                             <VBtn
                                 block
                                 size="large"
@@ -172,38 +164,43 @@ const LoginPage = dc(() => {
                         </>
                     ) : (
                         <>
-                            <VTextField
-                                label={t("Email or phone")}
-                                prependInnerIcon="mdi-account-outline"
-                                autocomplete="username"
-                                {...{ autofocus: true }}
-                                modelValue={username.value}
-                                onUpdate:modelValue={(v: string) => (username.value = v)}
-                                onKeydown={submitOnEnter}
-                                hideDetails
-                            />
-                            <VTextField
-                                label={t("Password")}
-                                prependInnerIcon="mdi-lock-outline"
-                                type={showPassword.value ? "text" : "password"}
-                                autocomplete="current-password"
-                                modelValue={password.value}
-                                onUpdate:modelValue={(v: string) => (password.value = v)}
-                                appendInnerIcon={showPassword.value ? "mdi-eye-off-outline" : "mdi-eye-outline"}
-                                onClick:append-inner={() => (showPassword.value = !showPassword.value)}
-                                onKeydown={(event: KeyboardEvent) => {
-                                    onKeyState(event);
-                                    submitOnEnter(event);
-                                }}
-                                onKeyup={onKeyState}
-                                hideDetails
-                            />
+                            <FormField label={t("Email or phone")} required>
+                                <VTextField
+                                    aria-label={t("Email or phone")}
+                                    prependInnerIcon="mdi-account-outline"
+                                    autocomplete="username"
+                                    {...{ autofocus: true }}
+                                    modelValue={username.value}
+                                    onUpdate:modelValue={(value: string) => (username.value = value)}
+                                    onKeydown={submitOnEnter}
+                                    hideDetails
+                                />
+                            </FormField>
+                            <FormField label={t("Password")} required>
+                                <VTextField
+                                    aria-label={t("Password")}
+                                    prependInnerIcon="mdi-lock-outline"
+                                    type={showPassword.value ? "text" : "password"}
+                                    autocomplete="current-password"
+                                    modelValue={password.value}
+                                    onUpdate:modelValue={(value: string) => (password.value = value)}
+                                    appendInnerIcon={showPassword.value ? "mdi-eye-off-outline" : "mdi-eye-outline"}
+                                    onClick:append-inner={() => (showPassword.value = !showPassword.value)}
+                                    onKeydown={(event: KeyboardEvent) => {
+                                        onKeyState(event);
+                                        submitOnEnter(event);
+                                    }}
+                                    onKeyup={onKeyState}
+                                    hideDetails
+                                />
+                            </FormField>
                             <VBtn
                                 block
                                 size="large"
                                 loading={loading.value}
                                 disabled={!username.value || !password.value}
                                 onClick={() => void submit()}
+                                style={{ height: "38px" }}
                             >
                                 {t("Login")}
                             </VBtn>
@@ -218,9 +215,9 @@ const LoginPage = dc(() => {
                             English
                         </VBtn>
                     </div>
-                </VCardText>
-            </VCard>
-        </div>
+                </div>
+            </SurfaceCard>
+        </AuthLayout>
     );
 });
 

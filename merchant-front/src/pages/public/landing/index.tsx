@@ -1,9 +1,11 @@
 import { dc } from "kt-dc";
 import { useLocale } from "vuetify";
 import { RouterLink } from "vue-router";
-import { VBtn, VCard, VCardText } from "vuetify/components";
+import { VBtn, VIcon } from "vuetify/components";
 import LogoSvg from "@/assets/images/logo.svg";
 import { setLocale } from "@/plugins/localization";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
 
 const FEATURES = [
     {
@@ -28,91 +30,262 @@ const FEATURES = [
     },
 ];
 
+const PRICING = [
+    { label: "Commission", value: "3.00%" },
+    { label: "Platform Clearing", value: "T+N" },
+    { label: "Supported Currencies", value: "LYD · USD · EUR" },
+];
+
 const LandingPage = dc(() => {
     const { t } = useLocale();
 
     return () => (
-        <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #0b1524 0%, #0f2f5c 55%, #0b7d72 100%)" }}>
-            <div style={{ maxWidth: "1100px", margin: "0 auto", padding: "28px 20px 60px" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                        <img src={LogoSvg} alt="logo" width={"42px"} height={"42px"} />
-                        <span style={{ color: "#ffffff", fontSize: "18px", fontWeight: "800" }}>
-                            {t("Payment Gateway")}
-                        </span>
+        <div style={{ minHeight: "100vh", background: "var(--pg-bg-canvas)" }}>
+            <header
+                style={{
+                    backgroundColor: "var(--pg-bg-surface)",
+                    borderBottom: "1px solid var(--pg-border-subtle)",
+                }}
+            >
+                <div
+                    style={{
+                        maxWidth: "1100px",
+                        margin: "0 auto",
+                        padding: "14px 20px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: "12px",
+                        flexWrap: "wrap",
+                    }}
+                >
+                    <div style={{ display: "flex", alignItems: "center", gap: "11px" }}>
+                        <div
+                            style={{
+                                width: "36px",
+                                height: "36px",
+                                borderRadius: "8px",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                backgroundColor: "var(--pg-ink-primary)",
+                            }}
+                        >
+                            <img
+                                src={LogoSvg}
+                                alt=""
+                                width={22}
+                                height={22}
+                                style={{ filter: "brightness(0) invert(1)" }}
+                            />
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column" }}>
+                            <span style={{ color: "var(--pg-ink-primary)", fontSize: "14px", fontWeight: 600 }}>
+                                {t("Payment Gateway")}
+                            </span>
+                            <span style={{ color: "var(--pg-ink-muted)", fontSize: "11.5px" }}>
+                                {t("Merchant Portal")}
+                            </span>
+                        </div>
                     </div>
-                    <div style={{ display: "flex", gap: "8px" }}>
-                        <VBtn variant="text" style={{ color: "#ffffff" }} onClick={() => setLocale("ar")}>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                        <StatusBadge status="LIVE" label={t("Live")} toneOverride="success" />
+                        <VBtn variant="text" size="small" onClick={() => setLocale("ar")}>
                             العربية
                         </VBtn>
-                        <VBtn variant="text" style={{ color: "#ffffff" }} onClick={() => setLocale("en")}>
+                        <VBtn variant="text" size="small" onClick={() => setLocale("en")}>
                             English
                         </VBtn>
                     </div>
                 </div>
+            </header>
 
-                <section style={{ display: "flex", flexDirection: "column", gap: "18px", padding: "64px 0 36px" }}>
-                    <span style={{ color: "#7dd3fc", fontWeight: "700", fontSize: "13px", letterSpacing: "1px" }}>
-                        {t("Featured")}
-                    </span>
-                    <h1 style={{ color: "#ffffff", fontSize: "38px", lineHeight: 1.2, margin: 0, maxWidth: "760px" }}>
-                        {t("Multi-rail collection for Libyan merchants")}
-                    </h1>
-                    <p style={{ color: "#cbd5e1", fontSize: "16px", maxWidth: "640px", margin: 0 }}>
-                        {t("Accept OTP, redirect, QR, wallet and card rails through a single integration with transparent pricing and instant settlement visibility.")}
-                    </p>
-                    <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginTop: "8px" }}>
-                        <RouterLink to={{ name: "Register" }}>
-                            <VBtn color="primary" size="large">
-                                {t("Start Now")}
-                            </VBtn>
-                        </RouterLink>
-                        <RouterLink to={{ name: "Login" }}>
-                            <VBtn variant="outlined" size="large" style={{ color: "#ffffff" }}>
-                                {t("Login")}
-                            </VBtn>
-                        </RouterLink>
+            <main style={{ maxWidth: "1100px", margin: "0 auto", padding: "0 20px 60px" }}>
+                <section
+                    style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))",
+                        gap: "40px",
+                        alignItems: "center",
+                        padding: "64px 0 48px",
+                    }}
+                >
+                    <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <span
+                                style={{
+                                    color: "var(--pg-ink-muted)",
+                                    fontWeight: 600,
+                                    fontSize: "11.5px",
+                                    letterSpacing: "0.06em",
+                                    textTransform: "uppercase",
+                                }}
+                            >
+                                {t("Featured")}
+                            </span>
+                            <StatusBadge status="LIVE" label={t("Live")} toneOverride="success" showDot={false} />
+                        </div>
+
+                        <h1
+                            style={{
+                                color: "var(--pg-ink-primary)",
+                                fontSize: "clamp(30px, 4vw, 42px)",
+                                fontWeight: 600,
+                                lineHeight: 1.15,
+                                letterSpacing: "-0.03em",
+                                margin: 0,
+                                maxWidth: "760px",
+                            }}
+                        >
+                            {t("Multi-rail collection for Libyan merchants")}
+                        </h1>
+
+                        <p
+                            style={{
+                                color: "var(--pg-ink-secondary)",
+                                fontSize: "15.5px",
+                                lineHeight: 1.6,
+                                maxWidth: "620px",
+                                margin: 0,
+                            }}
+                        >
+                            {t(
+                                "Accept OTP, redirect, QR, wallet and card rails through a single integration with transparent pricing and instant settlement visibility.",
+                            )}
+                        </p>
+
+                        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginTop: "8px" }}>
+                            <RouterLink to={{ name: "Register" }} style={{ textDecoration: "none" }}>
+                                <VBtn color="primary" size="large" style={{ height: "38px" }}>
+                                    {t("Start Now")}
+                                </VBtn>
+                            </RouterLink>
+                            <RouterLink to={{ name: "Login" }} style={{ textDecoration: "none" }}>
+                                <VBtn
+                                    variant="outlined"
+                                    size="large"
+                                    style={{
+                                        height: "38px",
+                                        color: "var(--pg-ink-primary)",
+                                        borderColor: "var(--pg-border-strong)",
+                                    }}
+                                >
+                                    {t("Login")}
+                                </VBtn>
+                            </RouterLink>
+                        </div>
                     </div>
+
+                    <SurfaceCard title={t("Pricing Summary")} subtitle={t("Transparent merchant pricing.")}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                            {PRICING.map((item) => (
+                                <div
+                                    key={item.label}
+                                    style={{
+                                        display: "flex",
+                                        alignItems: "baseline",
+                                        justifyContent: "space-between",
+                                        gap: "16px",
+                                        paddingBottom: "12px",
+                                        borderBottom: "1px solid var(--pg-border-subtle)",
+                                    }}
+                                >
+                                    <span style={{ color: "var(--pg-ink-muted)", fontSize: "12.5px" }}>
+                                        {t(item.label)}
+                                    </span>
+                                    <span
+                                        class="pg-tabular"
+                                        style={{
+                                            color: "var(--pg-ink-primary)",
+                                            fontSize: "18px",
+                                            fontWeight: 600,
+                                            whiteSpace: "nowrap",
+                                        }}
+                                    >
+                                        {item.value}
+                                    </span>
+                                </div>
+                            ))}
+                            <div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
+                                <span
+                                    aria-hidden="true"
+                                    style={{
+                                        width: "6px",
+                                        height: "6px",
+                                        borderRadius: "9999px",
+                                        backgroundColor: "var(--pg-status-success-dot)",
+                                    }}
+                                />
+                                <span style={{ color: "var(--pg-ink-muted)", fontSize: "12px" }}>
+                                    {t("All systems operational")}
+                                </span>
+                            </div>
+                        </div>
+                    </SurfaceCard>
                 </section>
 
-                <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px" }}>
+                <section
+                    style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 240px), 1fr))",
+                        gap: "16px",
+                    }}
+                >
                     {FEATURES.map((feature) => (
-                        <VCard key={feature.title} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)" }}>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                                <span style={{ color: "#5ea1ff", fontSize: "26px" }}>{feature.icon}</span>
-                                <span style={{ color: "#ffffff", fontWeight: "700" }}>{feature.title}</span>
-                                <span style={{ color: "#cbd5e1", fontSize: "13px" }}>{feature.description}</span>
-                            </VCardText>
-                        </VCard>
+                        <SurfaceCard key={feature.title}>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                <span
+                                    style={{
+                                        width: "34px",
+                                        height: "34px",
+                                        borderRadius: "7px",
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        backgroundColor: "var(--pg-bg-surface-subtle)",
+                                        border: "1px solid var(--pg-border-subtle)",
+                                        color: "var(--pg-ink-secondary)",
+                                    }}
+                                >
+                                    <VIcon icon={feature.icon} size={18} />
+                                </span>
+                                <span
+                                    style={{
+                                        color: "var(--pg-ink-primary)",
+                                        fontWeight: 600,
+                                        fontSize: "14px",
+                                    }}
+                                >
+                                    {t(feature.title)}
+                                </span>
+                                <span
+                                    style={{
+                                        color: "var(--pg-ink-muted)",
+                                        fontSize: "13px",
+                                        lineHeight: 1.55,
+                                    }}
+                                >
+                                    {t(feature.description)}
+                                </span>
+                            </div>
+                        </SurfaceCard>
                     ))}
                 </section>
 
-                <section style={{ marginTop: "44px" }}>
-                    <VCard style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)" }}>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                            <span style={{ color: "#ffffff", fontWeight: "800", fontSize: "18px" }}>
-                                {t("Pricing Summary")}
-                            </span>
-                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px" }}>
-                                {[
-                                    { label: t("Commission"), value: "3.00%" },
-                                    { label: t("Platform Clearing"), value: "T+N" },
-                                    { label: t("Supported Currencies"), value: "LYD · USD · EUR" },
-                                ].map((item) => (
-                                    <div key={item.label} style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                                        <span style={{ color: "#94a3b8", fontSize: "12px" }}>{item.label}</span>
-                                        <span style={{ color: "#ffffff", fontSize: "20px", fontWeight: "700" }}>{item.value}</span>
-                                    </div>
-                                ))}
-                            </div>
-                        </VCardText>
-                    </VCard>
-                </section>
-
-                <footer style={{ marginTop: "40px", color: "#94a3b8", fontSize: "12px", textAlign: "center" }}>
+                <footer
+                    style={{
+                        marginTop: "48px",
+                        paddingTop: "20px",
+                        borderTop: "1px solid var(--pg-border-subtle)",
+                        color: "var(--pg-ink-muted)",
+                        fontSize: "12px",
+                        textAlign: "center",
+                    }}
+                >
                     {t("Powered By")} · {t("Payment Gateway")}
                 </footer>
-            </div>
+            </main>
         </div>
     );
 });

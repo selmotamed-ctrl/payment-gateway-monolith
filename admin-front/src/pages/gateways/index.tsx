@@ -3,12 +3,14 @@ import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VCard, VCardText, VCheckbox, VDialog, VSelect, VTextField } from "vuetify/components";
+import { VAlert, VBtn, VCheckbox, VSelect, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { StatusChip } from "@/components/StatusChip";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { MonoRef } from "@/components/ui/MonoRef";
+import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
 import { statusTone } from "@/components/Table/statusTone";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
@@ -21,6 +23,8 @@ import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 const ROLLBACK_CHECKS = [
     { key: "TARGET_VERSION_VERIFIED", label: "Target version verified" },
     { key: "GATES_VERIFIED", label: "Rollback target gates verified" },
@@ -321,17 +325,15 @@ const GatewaysPage = dc(() => {
         }
     };
 
-    const summaryItems = computed(() => {
+    const metricItems = computed<MetricItem[]>(() => {
         const data = summary.value;
         if (!data) return [];
         return [
-            { label: t("Gateways"), value: String(data.total), tone: "info" as const },
-            { label: t("Live"), value: String(data.byStatus?.LIVE ?? 0), tone: "success" as const },
-            { label: t("Draft"), value: String(data.byStatus?.DRAFT ?? 0), tone: "neutral" as const },
-            { label: t("Suspended"), value: String(data.byStatus?.SUSPENDED ?? 0), tone: (data.byStatus?.SUSPENDED ?? 0) > 0 ? "error" as const : "success" as const },
-            { label: t("Verified"), value: String(data.byVerification?.VERIFIED ?? 0), tone: "success" as const },
-            { label: t("Pending versions"), value: String(data.pendingVersions), tone: data.pendingVersions > 0 ? "warning" as const : "success" as const },
-            { label: t("Open breakers"), value: String(data.routes?.openBreaker ?? 0), tone: (data.routes?.openBreaker ?? 0) > 0 ? "error" as const : "success" as const },
+            { key: "total", label: t("Gateways"), value: String(data.total) },
+            { key: "live", label: t("Live"), value: String(data.byStatus?.LIVE ?? 0), badge: t("Live"), badgeTone: "success" },
+            { key: "verified", label: t("Verified"), value: String(data.byVerification?.VERIFIED ?? 0), badge: t("Verified"), badgeTone: "success" },
+            { key: "pending", label: t("Pending versions"), value: String(data.pendingVersions), badge: (data.pendingVersions ?? 0) > 0 ? t("Review") : t("Clear"), badgeTone: (data.pendingVersions ?? 0) > 0 ? "warning" : "success" },
+            { key: "breakers", label: t("Open breakers"), value: String(data.routes?.openBreaker ?? 0), badge: (data.routes?.openBreaker ?? 0) > 0 ? t("Critical") : t("Clear"), badgeTone: (data.routes?.openBreaker ?? 0) > 0 ? "danger" : "success" },
         ];
     });
 
@@ -344,7 +346,10 @@ const GatewaysPage = dc(() => {
             Value: ({ row }: { row: Gateway }) => (
                 <ThemedView style={{ gap: "2px" }}>
                     <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{row.name}</ThemedText>
-                    <ThemedText style={{ fontSize: "10px", opacity: 0.55, direction: "ltr" }}>{row.code} · {row.operator}</ThemedText>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                        <MonoRef value={row.code} />
+                        <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{row.operator}</ThemedText>
+                    </div>
                     {row.aliases?.length > 0 && <ThemedText style={{ fontSize: "10px", opacity: 0.45 }}>{row.aliases.join(", ")}</ThemedText>}
                 </ThemedView>
             ),
@@ -354,7 +359,7 @@ const GatewaysPage = dc(() => {
             label: "Kind",
             sortKey: "kind",
             value: (row) => row.kind,
-            Value: ({ row }: { row: Gateway }) => <StatusChip label={row.kind} tone={kindTone(row.kind)} size="small" />,
+            Value: ({ row }: { row: Gateway }) => <StatusBadge status={row.kind} toneOverride={kindTone(row.kind) === "primary" ? "info" : (kindTone(row.kind) as any)} />,
         },
         { key: "country", label: "Country", value: (row) => row.country },
         {
@@ -362,21 +367,21 @@ const GatewaysPage = dc(() => {
             label: "Verification",
             sortKey: "verificationState",
             value: (row) => row.verificationState,
-            Value: ({ row }: { row: Gateway }) => <StatusChip label={row.verificationState} tone={row.verificationState === "VERIFIED" ? "success" : "warning"} size="small" />,
+            Value: ({ row }: { row: Gateway }) => <StatusBadge status={row.verificationState} toneOverride={row.verificationState === "VERIFIED" ? "success" : "warning"} />,
         },
         {
             key: "risk",
             label: "Risk",
             sortKey: "riskClass",
             value: (row) => row.riskClass,
-            Value: ({ row }: { row: Gateway }) => <StatusChip label={row.riskClass} tone={statusTone(row.riskClass)} size="small" />,
+            Value: ({ row }: { row: Gateway }) => <StatusBadge status={row.riskClass} toneOverride={statusTone(row.riskClass) === "error" ? "danger" : statusTone(row.riskClass) as any} />,
         },
         {
             key: "status",
             label: "Status",
             sortKey: "status",
             value: (row) => row.status,
-            Value: ({ row }: { row: Gateway }) => <StatusChip label={row.status} tone={statusTone(row.status)} size="small" />,
+            Value: ({ row }: { row: Gateway }) => <StatusBadge status={row.status} toneOverride={statusTone(row.status) === "error" ? "danger" : statusTone(row.status) as any} />,
         },
         {
             key: "versions",
@@ -435,6 +440,7 @@ const GatewaysPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Gateways")}
+                    subtitle={t("Gateway portfolio, version state, and live route health.")}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
@@ -450,8 +456,8 @@ const GatewaysPage = dc(() => {
                 </VAlert>
 
                 {summary.value && (
-                    <VCard variant="flat" style={{ borderRadius: "16px" }}>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Gateway health")}</ThemedText>
                                 <div style={{ flex: 1 }} />
@@ -475,23 +481,14 @@ const GatewaysPage = dc(() => {
                                     )}
                                 </ThemedView>
                             )}
-                            <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px" }}>
-                                {summaryItems.value.map((item) => (
-                                    <VCard key={item.label} variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
-                                            <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
-                                        </VCardText>
-                                    </VCard>
-                                ))}
-                            </ThemedView>
+                            <MetricStrip items={metricItems.value} />
                             <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
                                 {Object.entries(summary.value.byKind ?? {}).map(([kind, count]) => (
                                     <StatusChip key={kind} label={`${kind}: ${count}`} tone={kindTone(kind)} size="x-small" />
                                 ))}
                             </ThemedView>
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
                 )}
 
                 <ApiTable<Gateway>
@@ -549,11 +546,13 @@ const GatewaysPage = dc(() => {
                 />
             </ThemedView>
 
-            <VDialog modelValue={rollbackOpen.value} onUpdate:modelValue={(value: boolean) => (rollbackOpen.value = value)} maxWidth="620px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{t("Rollback gateway")}</ThemedText>
-                        <VAlert type="warning" variant="tonal">
+            <FormModal
+                modelValue={rollbackOpen.value}
+                onUpdate:modelValue={(value: boolean) => (rollbackOpen.value = value)}
+                title={t("Rollback gateway")}
+                size="md"
+            >
+<VAlert type="warning" variant="tonal">
                             {t("Rollback changes the live version immediately. Verify the target version and operational impact first.")}
                         </VAlert>
                         <VSelect
@@ -593,15 +592,15 @@ const GatewaysPage = dc(() => {
                             <VBtn variant="text" onClick={() => (rollbackOpen.value = false)}>{t("Cancel")}</VBtn>
                             <VBtn color="warning" loading={rollbackLoading.value} disabled={!rollbackChecklistComplete.value} onClick={() => void applyRollback()}>{t("Rollback")}</VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
 
-            <VDialog modelValue={createOpen.value} onUpdate:modelValue={(value: boolean) => (createOpen.value = value)} maxWidth="560px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>{t("New Gateway")}</ThemedText>
-                        <VTextField label={t("Gateway code")} hint="lowercase letters, digits, - and _" modelValue={form.value.code} onUpdate:modelValue={(value: string) => (form.value.code = value)} />
+            <FormModal
+                modelValue={createOpen.value}
+                onUpdate:modelValue={(value: boolean) => (createOpen.value = value)}
+                title={t("New Gateway")}
+                size="md"
+            >
+<VTextField label={t("Gateway code")} hint="lowercase letters, digits, - and _" modelValue={form.value.code} onUpdate:modelValue={(value: string) => (form.value.code = value)} />
                         <VTextField label={t("Gateway name")} modelValue={form.value.name} onUpdate:modelValue={(value: string) => (form.value.name = value)} />
                         <VTextField label={t("Operator")} modelValue={form.value.operator} onUpdate:modelValue={(value: string) => (form.value.operator = value)} />
                         <VSelect label={t("Kind")} items={["DIRECT", "AGGREGATOR", "NATIVE_ADAPTER", "INTERNAL"]} modelValue={form.value.kind} onUpdate:modelValue={(value: string) => (form.value.kind = value)} />
@@ -611,9 +610,7 @@ const GatewaysPage = dc(() => {
                             <VBtn variant="text" onClick={() => (createOpen.value = false)}>{t("Cancel")}</VBtn>
                             <VBtn color="primary" loading={creating.value} disabled={!form.value.code.trim() || !form.value.name.trim()} onClick={() => void createGateway()}>{t("Create")}</VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         </ScreenContainer>
     );
 });

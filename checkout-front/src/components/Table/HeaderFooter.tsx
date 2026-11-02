@@ -29,7 +29,6 @@ export const TableFooter = defineComponent<{
             return display.mobile.value;
         });
 
-        console.log("props.numberOfItemsPerPageChoices", props.numberOfItemsPerPageChoices);
         return () => {
             if (isMobile.value) {
                 return (
@@ -287,6 +286,7 @@ const Search = defineComponent<{
                     rounded
                     onUpdate:modelValue={(text) => props.setSearchValue?.(text)}
                     modelValue={props.searchValue || null}
+                    {...{ "aria-label": t("Search") }}
                     placeholder={t("Search")}
                     // @ts-ignore
                     onKeyup={(e) => {
@@ -359,6 +359,7 @@ const TableFooterLeft = defineComponent(
         goToPage: (targetPageNumber: number) => void;
     }) => {
         const display = useDisplay();
+        const { t } = useLocale();
         return () => {
             const isMobile = display.mobile.value;
 
@@ -368,6 +369,7 @@ const TableFooterLeft = defineComponent(
 
             return (
                 <ThemedView
+                    {...{ role: "navigation", "aria-label": t("Pagination") }}
                     style={{
                         gap: isMobile ? "12px" : "16px",
                         flexDirection: "row",
@@ -405,6 +407,14 @@ const PagesNumbers = defineComponent(
                 startSection = (
                     <ThemedView
                         class="page-number-button"
+                        role="button"
+                        tabindex={props.loading ? -1 : 0}
+                        onKeydown={(event: KeyboardEvent) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                (event.currentTarget as HTMLElement).click();
+                            }
+                        }}
                         style={{
                             borderRadius: "6px",
                             padding: "6px 12px",
@@ -436,6 +446,14 @@ const PagesNumbers = defineComponent(
                 lastSection = (
                     <ThemedView
                         class="page-number-button"
+                        role="button"
+                        tabindex={props.loading ? -1 : 0}
+                        onKeydown={(event: KeyboardEvent) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                (event.currentTarget as HTMLElement).click();
+                            }
+                        }}
                         style={{
                             borderRadius: "6px",
                             padding: "6px 12px",
@@ -469,6 +487,14 @@ const PagesNumbers = defineComponent(
                     <ThemedView
                         key={`${i}`}
                         class="page-number-button"
+                        role="button"
+                        tabindex={props.loading ? -1 : 0}
+                        onKeydown={(event: KeyboardEvent) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                (event.currentTarget as HTMLElement).click();
+                            }
+                        }}
                         style={{
                             borderRadius: "6px",
                             padding: "6px 12px",
@@ -501,6 +527,14 @@ const PagesNumbers = defineComponent(
                     <ThemedView
                         key={`${i}`}
                         class="page-number-button"
+                        role="button"
+                        tabindex={props.loading ? -1 : 0}
+                        onKeydown={(event: KeyboardEvent) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                (event.currentTarget as HTMLElement).click();
+                            }
+                        }}
                         style={{
                             borderRadius: "6px",
                             padding: "6px 12px",
@@ -538,6 +572,7 @@ const PagesNumbers = defineComponent(
                     {startSection}
                     {previousPagesNumbers}
                     <ThemedView
+                        {...{ "aria-current": "page" }}
                         style={{
                             backgroundColor: theme.primary,
                             borderRadius: "6px",
@@ -573,7 +608,6 @@ const PrevButton = defineComponent(
     (props: { loading: boolean; hasPrev: boolean; prev: () => void }) => {
         const locale = useLocale();
         const theme = useTheme();
-        console.log("is rtl", locale.isRtl.value);
         return () => {
             const colors = theme.current.value.colors;
             const isDark = theme.current.value.dark;
@@ -581,6 +615,15 @@ const PrevButton = defineComponent(
             return (
                 <ThemedView
                     class="pagination-button"
+                    role="button"
+                    tabindex={isDisabled ? -1 : 0}
+                    {...{ "aria-label": locale.t("Previous page"), "aria-disabled": isDisabled ? "true" : "false" }}
+                    onKeydown={(event: KeyboardEvent) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            if (!isDisabled) props.prev();
+                        }
+                    }}
                     style={{
                         borderRadius: "8px",
                         borderWidth: "1px",
@@ -624,6 +667,15 @@ const NextButton = defineComponent(
             return (
                 <ThemedView
                     class="pagination-button"
+                    role="button"
+                    tabindex={isDisabled ? -1 : 0}
+                    {...{ "aria-label": locale.t("Next page"), "aria-disabled": isDisabled ? "true" : "false" }}
+                    onKeydown={(event: KeyboardEvent) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            if (!isDisabled) props.next();
+                        }
+                    }}
                     style={{
                         borderRadius: "8px",
                         borderWidth: "1px",
@@ -677,7 +729,6 @@ const TableFooterRight = defineComponent(
                 }) || null;
         });
 
-        console.log("Footer right", props);
         return () => {
             if (!props.dataLength || !props.setNumberOfItemsPerPage || !props.numberOfItemsPerPageChoices) {
                 return <></>;

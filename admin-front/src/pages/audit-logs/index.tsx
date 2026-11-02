@@ -2,9 +2,9 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VCard, VCardText, VCheckbox, VChip, VDialog, VDivider } from "vuetify/components";
+import { VAlert, VBtn, VCheckbox, VDivider } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StatusChip } from "@/components/StatusChip";
@@ -19,6 +19,12 @@ import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { MetaPill } from "@/components/ui/MetaPill";
+import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import { MonoRef } from "@/components/ui/MonoRef";
+import { JsonDiffViewer } from "@/components/ui/JsonDiffViewer";
 type AuditLog = {
     id: string;
     createdAt: string;
@@ -213,15 +219,15 @@ const AuditLogsPage = dc(() => {
         }
     };
 
-    const summaryItems = computed(() => {
+    const metricItems = computed<MetricItem[]>(() => {
         const data = summary.value;
         if (!data) return [];
         const topAction = Object.entries(data.byAction ?? {}).sort((left, right) => right[1] - left[1])[0];
         return [
-            { label: t("Audit events"), value: String(data.total), tone: "info" as const },
-            { label: t("Last 24h"), value: String(data.last24h), tone: "primary" as const },
-            { label: t("Actors"), value: String(data.actors), tone: "neutral" as const },
-            { label: t("Top action"), value: topAction ? `${topAction[0]} (${topAction[1]})` : "—", tone: "warning" as const },
+            { key: "events", label: t("Audit events"), value: String(data.total) },
+            { key: "last24", label: t("Last 24h"), value: String(data.last24h) },
+            { key: "actors", label: t("Actors"), value: String(data.actors) },
+            { key: "top", label: t("Top action"), value: topAction ? `${topAction[0]} (${topAction[1]})` : "—" },
         ];
     });
 
@@ -267,7 +273,7 @@ const AuditLogsPage = dc(() => {
             Value: ({ row }: { row: AuditLog }) => (
                 <ThemedView style={{ gap: "2px" }}>
                     <ThemedText style={{ fontSize: "12px" }}>{row.entityType}</ThemedText>
-                    <ThemedText style={{ fontSize: "10px", opacity: 0.55, direction: "ltr" }}>{row.entityId}</ThemedText>
+                    <MonoRef value={row.entityId} truncate={18} />
                 </ThemedView>
             ),
         },
@@ -287,7 +293,7 @@ const AuditLogsPage = dc(() => {
             value: (row) => row.approvalRequestId ?? "",
             Value: ({ row }: { row: AuditLog }) =>
                 row.approvalRequestId ? (
-                    <VChip size="x-small" variant="tonal" color="warning" style={{ direction: "ltr" }}>{row.approvalRequestId.slice(0, 8)}</VChip>
+                    <MonoRef value={row.approvalRequestId} truncate={12} />
                 ) : (
                     <ThemedText style={{ opacity: 0.5 }}>—</ThemedText>
                 ),
@@ -307,6 +313,7 @@ const AuditLogsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Audit Log")}
+                    subtitle={t("Immutable operator and system activity across the platform.")}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
@@ -320,8 +327,8 @@ const AuditLogsPage = dc(() => {
                 </VAlert>
 
                 {summary.value && (
-                    <VCard variant="flat" style={{ borderRadius: "16px" }}>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Audit health")}</ThemedText>
                                 <div style={{ flex: 1 }} />
@@ -346,22 +353,15 @@ const AuditLogsPage = dc(() => {
                                 </ThemedView>
                             )}
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
-                                {summaryItems.value.map((item) => (
-                                    <VCard key={item.label} variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
-                                            <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px", direction: /^[A-Za-z0-9_ ()-]+$/.test(item.value) ? "ltr" : undefined }}>{item.value}</ThemedText>
-                                        </VCardText>
-                                    </VCard>
-                                ))}
+                                <MetricStrip items={metricItems.value} />
                             </ThemedView>
                             <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
                                 {Object.entries(summary.value.byEntityType ?? {}).slice(0, 10).map(([entity, count]) => (
                                     <StatusChip key={entity} label={`${entity}: ${count}`} tone="neutral" size="x-small" />
                                 ))}
                             </ThemedView>
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
                 )}
 
                 <ApiTable<AuditLog>
@@ -418,13 +418,16 @@ const AuditLogsPage = dc(() => {
                 />
             </ThemedView>
 
-            <VDialog modelValue={detailOpen.value} onUpdate:modelValue={(value: boolean) => (detailOpen.value = value)} maxWidth="900px" scrollable>
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        {selected.value ? (
+            <FormModal
+                modelValue={detailOpen.value}
+                onUpdate:modelValue={(value: boolean) => (detailOpen.value = value)}
+                title={selected.value?.action ?? t("Audit event")}
+                size="lg"
+            >
+{selected.value ? (
                             <>
                                 <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "18px", direction: "ltr" }}>{selected.value.action}</ThemedText>
+                                    
                                     <StatusChip label={selected.value.role} tone="neutral" size="small" />
                                     <div style={{ flex: 1 }} />
                                     <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{formatDateTime(selected.value.createdAt)}</ThemedText>
@@ -443,22 +446,13 @@ const AuditLogsPage = dc(() => {
                                     ))}
                                 </ThemedView>
                                 <VDivider />
-                                <ThemedText type="defaultSemiBold">{t("Before")}</ThemedText>
-                                <pre style={{ margin: 0, padding: "10px 12px", borderRadius: "8px", background: "rgba(15,23,42,0.06)", fontSize: "11px", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", direction: "ltr", maxHeight: "220px", overflow: "auto" }}>
-                                    {JSON.stringify(selected.value.beforeJson ?? {}, null, 2)}
-                                </pre>
-                                <ThemedText type="defaultSemiBold">{t("After")}</ThemedText>
-                                <pre style={{ margin: 0, padding: "10px 12px", borderRadius: "8px", background: "rgba(15,23,42,0.06)", fontSize: "11px", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", direction: "ltr", maxHeight: "300px", overflow: "auto" }}>
-                                    {JSON.stringify(selected.value.afterJson ?? {}, null, 2)}
-                                </pre>
+                                <JsonDiffViewer before={selected.value.beforeJson} after={selected.value.afterJson} />
                                 <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end" }}>
                                     <VBtn variant="text" onClick={() => (detailOpen.value = false)}>{t("Close")}</VBtn>
                                 </ThemedView>
                             </>
                         ) : null}
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         </ScreenContainer>
     );
 });

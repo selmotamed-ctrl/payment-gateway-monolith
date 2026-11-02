@@ -4,6 +4,7 @@ import { useLocale } from "vuetify";
 import { VAlert, VBtn, VTextField } from "vuetify/components";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
+import { FormField } from "@/components/ui";
 import { normalizeArabicDigits } from "@/utils/arabic";
 import type { OtpClientAction } from "./types";
 
@@ -63,19 +64,21 @@ export const OtpFormRenderer = dc(
                     </VAlert>
                 )}
 
-                <VTextField
-                    label={t("One Time Password")}
-                    modelValue={otp.value}
-                    onUpdate:modelValue={(v: string) => {
-                        otp.value = normalizeArabicDigits(v).replace(/\D/g, "").slice(0, props.action.otp_length);
-                        localError.value = null;
-                    }}
-                    onKeydown={(e: any) => {
-                        if (e?.key === "Enter") {
-                            submit();
-                        }
-                    }}
-                />
+                <FormField label={t("One Time Password")} required>
+                    <VTextField
+                        aria-label={t("One Time Password")}
+                        modelValue={otp.value}
+                        onUpdate:modelValue={(v: string) => {
+                            otp.value = normalizeArabicDigits(v).replace(/\D/g, "").slice(0, props.action.otp_length);
+                            localError.value = null;
+                        }}
+                        onKeydown={(e: KeyboardEvent) => {
+                            if (e.key === "Enter") {
+                                submit();
+                            }
+                        }}
+                    />
+                </FormField>
 
                 <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
                     <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>

@@ -3,19 +3,9 @@ import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRoute, useRouter } from "vue-router";
-import {
-    VAlert,
-    VBtn,
-    VCard,
-    VCardText,
-    VCheckbox,
-    VDialog,
-    VSelect,
-    VTextField,
-    VTextarea,
-} from "vuetify/components";
+import { VAlert, VBtn, VCheckbox, VSelect, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
@@ -48,6 +38,11 @@ import type {
     KybDocument,
 } from "./types";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { DescriptionList } from "@/components/ui/DescriptionList";
+import { MonoRef } from "@/components/ui/MonoRef";
+import { EmptyState } from "@/components/ui/EmptyState";
 const parse = (payload: unknown): JoinRequestDetail => {
     const source = (payload ?? {}) as Record<string, unknown>;
     return (source.joinRequest ?? source) as JoinRequestDetail;
@@ -676,6 +671,9 @@ const JoinRequestDetailPage = dc(() => {
                 <ThemedView style={{ gap: "18px" }}>
                     <PageHeader
                         title={merchant.value?.tradeName || t("Join request")}
+                        subtitle={t("Inspect merchant and owner evidence, keep the review checklist current, and record a defensible decision.")}
+                        badge={entry.fourEyesRequired ? t("Four eyes") : t("KYB review")}
+                        badgeTone={entry.fourEyesRequired ? "warning" : "info"}
                         end={() => (
                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                                 <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "JoinRequests" })}>
@@ -707,6 +705,26 @@ const JoinRequestDetailPage = dc(() => {
                         {entry.fourEyesRequired && <StatusChip label={t("Four eyes")} tone="warning" />}
                     </ThemedView>
 
+                    <SurfaceCard>
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                            <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Request at a glance")}</ThemedText>
+                            <DescriptionList
+                                columns={2}
+                                items={[
+                                    { label: t("Merchant ID"), value: <MonoRef value={entry.merchantId} /> },
+                                    { label: t("Join request ID"), value: <MonoRef value={entry.id} /> },
+                                    { label: t("Status"), value: statusHelp.value.label },
+                                    { label: t("SLA due"), value: formatDateTime(entry.slaDueAt) },
+                                    { label: t("Assignee"), value: entry.assignedReviewer?.email || entry.reviewer || t("Unassigned") },
+                                    { label: t("Decision"), value: entry.decision || "—" },
+                                    ...(entry.approvalRequest
+                                        ? [{ label: t("Approval request ID"), value: <MonoRef value={entry.approvalRequest.id} /> }]
+                                        : []),
+                                ]}
+                            />
+                        </SurfaceCardText>
+                    </SurfaceCard>
+
                     {entry.status === "INFO_REQUESTED" && (
                         <VAlert type="warning" variant="tonal">
                             <ThemedText type="defaultSemiBold">{t("Information requested")}</ThemedText>
@@ -719,8 +737,8 @@ const JoinRequestDetailPage = dc(() => {
                     )}
 
                     {entry.approvalRequest?.state === "PENDING_REVIEW" && (
-                        <VCard variant="tonal" color="warning">
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                        <SurfaceCard variant="tonal" color="warning">
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                 <ThemedText type="defaultSemiBold">{t("Awaiting independent checker")}</ThemedText>
                                 <ThemedText style={{ fontSize: "13px" }}>
                                     {t("Maker")}: {entry.approvalRequest.makerUserId} · {t("Proposed decision")}: {entry.decision || t("pending")}
@@ -742,39 +760,39 @@ const JoinRequestDetailPage = dc(() => {
                                         {t("You cannot check an approval you made. Open the Approvals queue with an independent checker.")}
                                     </ThemedText>
                                 )}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
                     )}
 
                     {(readiness.value?.blockers?.length ?? 0) > 0 && (
-                        <VCard variant="tonal" color="warning">
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        <SurfaceCard variant="tonal" color="warning">
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                 <ThemedText type="defaultSemiBold">{t("Approval blockers")}</ThemedText>
                                 {readiness.value?.blockers.map((blocker) => (
                                     <ThemedText key={blocker} style={{ fontSize: "13px" }}>
                                         • {blockerLabel(blocker)}
                                     </ThemedText>
                                 ))}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
                     )}
 
                     {!!entry.fourEyesReasons?.length && (
-                        <VCard variant="tonal" color="info">
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                        <SurfaceCard variant="tonal" color="info">
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                                 <ThemedText type="defaultSemiBold">{t("Four-eyes reasons")}</ThemedText>
                                 {entry.fourEyesReasons.map((reason) => (
                                     <ThemedText key={reason} style={{ fontSize: "13px" }}>
                                         • {blockerLabel(reason)}
                                     </ThemedText>
                                 ))}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
                     )}
 
                     {duplicateFlags.value.length > 0 && (
-                        <VCard variant="tonal" color="warning">
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        <SurfaceCard variant="tonal" color="warning">
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                 <ThemedText type="defaultSemiBold">{t("Duplicate and related-party flags")}</ThemedText>
                                 <ThemedText style={{ fontSize: "12px", opacity: 0.75 }}>{COLUMN_HELP.duplicates}</ThemedText>
                                 {duplicateFlags.value.map((flag, index) => (
@@ -782,14 +800,14 @@ const JoinRequestDetailPage = dc(() => {
                                         • {duplicateLabel(flag)}
                                     </ThemedText>
                                 ))}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
                     )}
 
                     <FieldsSections sections={sections.value} />
 
-                    <VCard>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    <SurfaceCard>
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px", flex: 1 }}>{t("Audit trail")}</ThemedText>
                                 <StatusChip label={`${entry.auditTrail?.length ?? 0} ${t("events")}`} tone="neutral" size="x-small" />
@@ -798,7 +816,7 @@ const JoinRequestDetailPage = dc(() => {
                                 {t("Last 100 recorded actions on this join request, newest first.")}
                             </ThemedText>
                             {(entry.auditTrail ?? []).length === 0 && (
-                                <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("No audit events recorded yet.")}</ThemedText>
+                                <EmptyState title={t("No audit events recorded yet.")} icon="mdi-history" />
                             )}
                             {(entry.auditTrail ?? []).map((event) => {
                                 const change = auditChangeSummary(event);
@@ -834,11 +852,11 @@ const JoinRequestDetailPage = dc(() => {
                                     </ThemedView>
                                 );
                             })}
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
 
-                    <VCard>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                    <SurfaceCard>
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                             <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                                 <ThemedView style={{ gap: "3px" }}>
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Screening")}</ThemedText>
@@ -861,8 +879,8 @@ const JoinRequestDetailPage = dc(() => {
                                     </ThemedView>
                                     {entry.amlDetailsRedacted && <ThemedText style={{ fontSize: "12px", color: "rgb(var(--v-theme-warning))" }}>{t("Match details are redacted for your role.")}</ThemedText>}
                                     {entry.screening.matches.map((match) => (
-                                        <VCard key={match.id} variant="tonal">
-                                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                                        <SurfaceCard key={match.id} variant="tonal">
+                                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                                                 <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                                                     <StatusChip label={match.listType} tone="warning" size="x-small" />
                                                     <StatusChip label={match.disposition} tone={statusTone(match.disposition)} size="x-small" />
@@ -871,8 +889,8 @@ const JoinRequestDetailPage = dc(() => {
                                                 <ThemedText style={{ fontSize: "13px" }}>{match.matchedName} · {match.listName}</ThemedText>
                                                 <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{match.listEntryRef}</ThemedText>
                                                 {match.dispositionNotes && <ThemedText style={{ fontSize: "12px" }}>{match.dispositionNotes}</ThemedText>}
-                                            </VCardText>
-                                        </VCard>
+                                            </SurfaceCardText>
+                                        </SurfaceCard>
                                     ))}
                                     {(entry.screening.amlCases ?? []).length > 0 && (
                                         <ThemedView style={{ gap: "6px" }}>
@@ -888,11 +906,11 @@ const JoinRequestDetailPage = dc(() => {
                                     )}
                                 </ThemedView>
                             )}
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
 
-                    <VCard>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                    <SurfaceCard>
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                             <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                                 <ThemedView style={{ gap: "3px" }}>
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Beneficial owners")}</ThemedText>
@@ -906,10 +924,12 @@ const JoinRequestDetailPage = dc(() => {
                                     </VBtn>
                                 )}
                             </ThemedView>
-                            {activeOwners.value.length === 0 && <ThemedText style={{ opacity: 0.6 }}>{t("No active beneficial owners")}</ThemedText>}
+                            {activeOwners.value.length === 0 && (
+                                <EmptyState title={t("No active beneficial owners")} description={COLUMN_HELP.owners} icon="mdi-account-group-outline" />
+                            )}
                             {activeOwners.value.map((owner) => (
-                                <VCard key={owner.id} variant="tonal">
-                                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                                <SurfaceCard key={owner.id} variant="tonal">
+                                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                         <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
                                             <ThemedView style={{ gap: "2px" }}>
                                                 <ThemedText type="defaultSemiBold">{owner.fullNameAr}</ThemedText>
@@ -928,17 +948,22 @@ const JoinRequestDetailPage = dc(() => {
                                                 )}
                                             </ThemedView>
                                         </ThemedView>
-                                        <ThemedText style={{ fontSize: "11px", opacity: 0.55, direction: "ltr" }}>
-                                            {owner.id} · {owner.nationalIdHash ?? t("no identity hash")}
-                                        </ThemedText>
-                                    </VCardText>
-                                </VCard>
+                                        <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+                                            <MonoRef value={owner.id} truncate={18} />
+                                            {owner.nationalIdHash ? (
+                                                <MonoRef value={owner.nationalIdHash} truncate={22} />
+                                            ) : (
+                                                <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("no identity hash")}</ThemedText>
+                                            )}
+                                        </ThemedView>
+                                    </SurfaceCardText>
+                                </SurfaceCard>
                             ))}
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
 
-                    <VCard>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                    <SurfaceCard>
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                             <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                                 <ThemedView style={{ gap: "3px" }}>
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("KYB documents")}</ThemedText>
@@ -963,10 +988,12 @@ const JoinRequestDetailPage = dc(() => {
                                     );
                                 })}
                             </ThemedView>
-                            {entry.kybDocuments.length === 0 && <ThemedText style={{ opacity: 0.6 }}>{t("No documents uploaded")}</ThemedText>}
+                            {entry.kybDocuments.length === 0 && (
+                                <EmptyState title={t("No documents uploaded")} description={COLUMN_HELP.documents} icon="mdi-file-document-outline" />
+                            )}
                             {entry.kybDocuments.map((document) => (
-                                <VCard key={document.id} variant="tonal">
-                                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                                <SurfaceCard key={document.id} variant="tonal">
+                                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                         <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
                                             <ThemedView style={{ gap: "3px" }}>
                                                 <ThemedText type="defaultSemiBold">{document.docType}</ThemedText>
@@ -980,7 +1007,7 @@ const JoinRequestDetailPage = dc(() => {
                                                 {document.expiresOn && <StatusChip label={`exp ${document.expiresOn.slice(0, 10)}`} tone="neutral" size="x-small" />}
                                             </ThemedView>
                                         </ThemedView>
-                                        <ThemedText style={{ fontSize: "11px", opacity: 0.55, direction: "ltr" }}>{document.sha256}</ThemedText>
+                                        <MonoRef value={document.sha256} truncate={28} />
                                         {document.reviewNotes && <ThemedText style={{ fontSize: "12px" }}>{document.reviewNotes}</ThemedText>}
                                         <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
                                             {document.avStatus === "CLEAN" && (
@@ -1007,15 +1034,15 @@ const JoinRequestDetailPage = dc(() => {
                                                 </VBtn>
                                             )}
                                         </ThemedView>
-                                    </VCardText>
-                                </VCard>
+                                    </SurfaceCardText>
+                                </SurfaceCard>
                             ))}
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
 
                     {showChecklists && (
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                        <SurfaceCard>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                 <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                                     <ThemedView style={{ gap: "3px" }}>
                                         <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Review checklist")}</ThemedText>
@@ -1040,13 +1067,13 @@ const JoinRequestDetailPage = dc(() => {
                                         disabled={!canChecklist.value}
                                     />
                                 ))}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
                     )}
 
                     {canWrite.value && !isFinal.value && (
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                        <SurfaceCard>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Actions")}</ThemedText>
                                 <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
                                     {canAssign.value && (
@@ -1085,16 +1112,18 @@ const JoinRequestDetailPage = dc(() => {
                                         {t("You prepared this admin-assisted request, so an independent operator must decide it.")}
                                     </ThemedText>
                                 )}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
                     )}
                 </ThemedView>
 
-                <VDialog modelValue={profileOpen.value} onUpdate:modelValue={(value: boolean) => (profileOpen.value = value)} maxWidth="860px" scrollable>
-                    <VCard>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{t("Edit applicant profile")}</ThemedText>
-                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "12px" }}>
+                <FormModal
+                modelValue={profileOpen.value}
+                onUpdate:modelValue={(value: boolean) => (profileOpen.value = value)}
+                title={t("Edit applicant profile")}
+                size="lg"
+            >
+<div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "12px" }}>
                                 <VTextField v-model={profileForm.value.legalName} label={t("Legal name")} />
                                 <VTextField v-model={profileForm.value.tradeName} label={t("Trade name")} />
                                 <VTextField v-model={profileForm.value.country} label={t("Country code")} />
@@ -1115,17 +1144,15 @@ const JoinRequestDetailPage = dc(() => {
                                 <VBtn variant="text" onClick={() => (profileOpen.value = false)}>{t("Cancel")}</VBtn>
                                 <VBtn color="primary" loading={actionLoading.value} onClick={saveProfile}>{t("Save")}</VBtn>
                             </ThemedView>
-                        </VCardText>
-                    </VCard>
-                </VDialog>
+            </FormModal>
 
-                <VDialog modelValue={ownerOpen.value} onUpdate:modelValue={(value: boolean) => (ownerOpen.value = value)} maxWidth="720px">
-                    <VCard>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
-                                {editingOwnerId.value ? t("Edit beneficial owner") : t("Add beneficial owner")}
-                            </ThemedText>
-                            <VAlert type="info" variant="tonal" density="compact">
+                <FormModal
+                modelValue={ownerOpen.value}
+                onUpdate:modelValue={(value: boolean) => (ownerOpen.value = value)}
+                title={editingOwnerId.value ? t("Edit beneficial owner") : t("Add beneficial owner")}
+                size="md"
+            >
+<VAlert type="info" variant="tonal" density="compact">
                                 {t("The identity number is encrypted at rest and only its hash is used for duplicate detection.")}
                             </VAlert>
                             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px" }}>
@@ -1143,15 +1170,15 @@ const JoinRequestDetailPage = dc(() => {
                                 <VBtn variant="text" onClick={() => (ownerOpen.value = false)}>{t("Cancel")}</VBtn>
                                 <VBtn color="primary" loading={actionLoading.value} onClick={saveOwner}>{t("Save")}</VBtn>
                             </ThemedView>
-                        </VCardText>
-                    </VCard>
-                </VDialog>
+            </FormModal>
 
-                <VDialog modelValue={uploadOpen.value} onUpdate:modelValue={(value: boolean) => (uploadOpen.value = value)} maxWidth="560px">
-                    <VCard>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{t("Upload KYB document")}</ThemedText>
-                            <VSelect v-model={docType.value} label={t("Document type")} items={DOCUMENT_TYPES} />
+                <FormModal
+                modelValue={uploadOpen.value}
+                onUpdate:modelValue={(value: boolean) => (uploadOpen.value = value)}
+                title={t("Upload KYB document")}
+                size="md"
+            >
+<VSelect v-model={docType.value} label={t("Document type")} items={DOCUMENT_TYPES} />
                             <VTextField v-model={docExpiresOn.value} label={t("Expiry date (YYYY-MM-DD, optional)")} />
                             <input ref={docFileInput} type="file" accept="application/pdf,image/png,image/jpeg" />
                             <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
@@ -1161,15 +1188,15 @@ const JoinRequestDetailPage = dc(() => {
                                 <VBtn variant="text" onClick={() => (uploadOpen.value = false)}>{t("Cancel")}</VBtn>
                                 <VBtn color="primary" loading={actionLoading.value} onClick={uploadDocument}>{t("Upload")}</VBtn>
                             </ThemedView>
-                        </VCardText>
-                    </VCard>
-                </VDialog>
+            </FormModal>
 
-                <VDialog modelValue={reviewOpen.value} onUpdate:modelValue={(value: boolean) => (reviewOpen.value = value)} maxWidth="560px">
-                    <VCard>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{t("Review document")}</ThemedText>
-                            <ThemedText style={{ fontSize: "13px" }}>{reviewTarget.value?.docType} · {reviewTarget.value?.originalFileName}</ThemedText>
+                <FormModal
+                modelValue={reviewOpen.value}
+                onUpdate:modelValue={(value: boolean) => (reviewOpen.value = value)}
+                title={t("Review document")}
+                size="md"
+            >
+<ThemedText style={{ fontSize: "13px" }}>{reviewTarget.value?.docType} · {reviewTarget.value?.originalFileName}</ThemedText>
                             <VSelect v-model={reviewDecision.value} label={t("Decision")} items={[{ title: "Accept", value: "ACCEPTED" }, { title: "Reject", value: "REJECTED" }]} />
                             <VTextField v-model={reviewExpiresOn.value} label={t("Expiry date (YYYY-MM-DD, optional)")} />
                             <VTextarea v-model={reviewNotes.value} label={t("Review notes")} rows={3} autoGrow />
@@ -1177,15 +1204,15 @@ const JoinRequestDetailPage = dc(() => {
                                 <VBtn variant="text" onClick={() => (reviewOpen.value = false)}>{t("Cancel")}</VBtn>
                                 <VBtn color="primary" loading={actionLoading.value} onClick={saveReview}>{t("Save review")}</VBtn>
                             </ThemedView>
-                        </VCardText>
-                    </VCard>
-                </VDialog>
+            </FormModal>
 
-                <VDialog modelValue={infoOpen.value} onUpdate:modelValue={(value: boolean) => (infoOpen.value = value)} maxWidth="620px">
-                    <VCard>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{t("Request information")}</ThemedText>
-                            <VTextField v-model={infoItems.value} label={t("Requested items (comma separated)")} />
+                <FormModal
+                modelValue={infoOpen.value}
+                onUpdate:modelValue={(value: boolean) => (infoOpen.value = value)}
+                title={t("Request information")}
+                size="md"
+            >
+<VTextField v-model={infoItems.value} label={t("Requested items (comma separated)")} />
                             <VTextarea v-model={infoMessage.value} label={t("Message")} rows={4} autoGrow />
                             <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
                                 {t("The onboarding SLA is paused while the request is in INFO_REQUESTED.")}
@@ -1194,17 +1221,15 @@ const JoinRequestDetailPage = dc(() => {
                                 <VBtn variant="text" onClick={() => (infoOpen.value = false)}>{t("Cancel")}</VBtn>
                                 <VBtn color="warning" loading={actionLoading.value} onClick={requestInfo}>{t("Request")}</VBtn>
                             </ThemedView>
-                        </VCardText>
-                    </VCard>
-                </VDialog>
+            </FormModal>
 
-                <VDialog modelValue={decisionOpen.value} onUpdate:modelValue={(value: boolean) => (decisionOpen.value = value)} maxWidth="620px">
-                    <VCard>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
-                                {decision.value === "APPROVED" ? t("Approve join request") : t("Reject join request")}
-                            </ThemedText>
-                            {decision.value === "APPROVED" && !readiness.value?.ready && (
+                <FormModal
+                modelValue={decisionOpen.value}
+                onUpdate:modelValue={(value: boolean) => (decisionOpen.value = value)}
+                title={decision.value === "APPROVED" ? t("Approve join request") : t("Reject join request")}
+                size="md"
+            >
+{decision.value === "APPROVED" && !readiness.value?.ready && (
                                 <VAlert type="warning" variant="tonal">{t("All approval blockers must be cleared before approval.")}</VAlert>
                             )}
                             {decision.value === "APPROVED" && (
@@ -1225,22 +1250,20 @@ const JoinRequestDetailPage = dc(() => {
                                     {decision.value === "APPROVED" ? t("Propose approval") : t("Propose rejection")}
                                 </VBtn>
                             </ThemedView>
-                        </VCardText>
-                    </VCard>
-                </VDialog>
+            </FormModal>
 
-                <VDialog modelValue={withdrawOpen.value} onUpdate:modelValue={(value: boolean) => (withdrawOpen.value = value)} maxWidth="520px">
-                    <VCard>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{t("Withdraw join request")}</ThemedText>
-                            <ThemedText>{t("The request will be closed as withdrawn. A pending checker approval is cancelled.")}</ThemedText>
+                <FormModal
+                modelValue={withdrawOpen.value}
+                onUpdate:modelValue={(value: boolean) => (withdrawOpen.value = value)}
+                title={t("Withdraw join request")}
+                size="sm"
+            >
+<ThemedText>{t("The request will be closed as withdrawn. A pending checker approval is cancelled.")}</ThemedText>
                             <ThemedView style={{ flexDirection: "row", gap: "10px", justifyContent: "flex-end" }}>
                                 <VBtn variant="text" onClick={() => (withdrawOpen.value = false)}>{t("Cancel")}</VBtn>
                                 <VBtn color="error" loading={actionLoading.value} onClick={withdraw}>{t("Withdraw")}</VBtn>
                             </ThemedView>
-                        </VCardText>
-                    </VCard>
-                </VDialog>
+            </FormModal>
             </ScreenContainer>
         );
     };

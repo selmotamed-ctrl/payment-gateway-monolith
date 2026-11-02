@@ -111,6 +111,8 @@ export type TableHeader<T> = {
         onClick?: (row: T) => void;
     };
     headerIcon?: string; // --
+    /** Plain-language help shown from an info icon beside the header label. */
+    headerTooltip?: string;
     HeaderIcon?: (iconProps: Omit<IconProps, "name">) => JSX.Element; // --
     headerTextStyle?: StyleValue; // --
     rowTextStyle?: StyleValue;
@@ -181,6 +183,19 @@ export type BaseTableProps<T> = {
 export type ApiTableProps<T, RawData extends JsonValue = any> = BaseTableProps<T> & {
     url: string; // --
     title: string | ((data: RawData) => string);
+    filters?: import("./filters").TableFilter[];
+    filterValues?: import("./filters").FilterValues;
+    onFilterChange?: (key: string, value: unknown) => void;
+    onFilterClear?: () => void;
+    filterTotal?: number;
+    /**
+     * Whether the already-fetched page is also filtered by the search text.
+     * Set false when the server performs the search, so the current page is
+     * not filtered a second time.
+     */
+    localSearch?: boolean;
+    /** Called after each successful refresh with the rendered rows and total. */
+    onData?: (rows: T[], total: number) => void;
 
     TopSlot?: (props: { loading: boolean; reset: () => void; refresh: RefreshMethodWithNextSkip; refreshAsIs: () => void }) => JSX.Element;
     setRefreshHook?: (props: { reset: () => void; refresh: RefreshMethodWithNextSkip; refreshAsIs: () => void }) => void;

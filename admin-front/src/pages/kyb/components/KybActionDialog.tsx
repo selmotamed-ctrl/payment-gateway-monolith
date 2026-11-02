@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
-import { VAlert, VBtn, VCard, VCardText, VDialog, VSelect, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VSelect, VTextarea } from "vuetify/components";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { api } from "@/state/api";
@@ -11,6 +11,7 @@ import { showSnackBar } from "@/utils/snackBar";
 import { REVIEW_REASON_CODES } from "../kybReviewHelp";
 import type { KybDocumentSummary } from "../types";
 
+import { FormModal } from "@/components/ui/FormModal";
 export type KybActionMode = "REPLACEMENT" | "REVALIDATION";
 
 const KybActionDialog = dc(
@@ -68,17 +69,13 @@ const KybActionDialog = dc(
         };
 
         return () => (
-            <VDialog
+            <FormModal
                 modelValue={props.open}
                 onUpdate:modelValue={(value: boolean) => props.onUpdate(value)}
-                maxWidth="620px"
+                title={t(isReplacement.value ? "Request document replacement" : "Request KYB re-verification")}
+                size="md"
             >
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
-                            {t(isReplacement.value ? "Request document replacement" : "Request KYB re-verification")}
-                        </ThemedText>
-                        <ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>
+<ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>
                             {props.document?.docType} · {props.document?.merchantName}
                         </ThemedText>
                         <VAlert type={isReplacement.value ? "warning" : "info"} variant="tonal">
@@ -95,9 +92,7 @@ const KybActionDialog = dc(
                                 {t(isReplacement.value ? "Reject and request replacement" : "Open re-verification")}
                             </VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         );
     },
     { props: ["open", "mode", "document", "onUpdate", "onDone"] },

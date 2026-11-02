@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, onMounted, ref } from "vue";
-import { useDisplay, useLocale, useTheme } from "vuetify";
-import { VAutocomplete, VBtn, VChip, VIcon, VTextField } from "vuetify/components";
+import { useDisplay, useLocale } from "vuetify";
+import { VAutocomplete, VBtn, VIcon, VTextField } from "vuetify/components";
 import DateInput from "@/components/DateInput";
 import type { StatusTone } from "@/components/StatusChip";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -18,23 +18,6 @@ const toIsoDate = (value: Date): string => {
     const month = String(value.getMonth() + 1).padStart(2, "0");
     const day = String(value.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
-};
-
-const toneColor = (theme: ReturnType<typeof useTheme>, tone: StatusTone | undefined): string | undefined => {
-    if (!tone) return undefined;
-    const colors = theme.current.value.colors as Record<string, string>;
-    return colors[tone] ?? colors["on-surface-variant"];
-};
-
-const optionTone = (filter: TableFilter, value: unknown): StatusTone | undefined => {
-    if (filter.type === "boolean") {
-        return value === "true" || value === true ? "success" : "error";
-    }
-    if (filter.type === "data-autocomplete") {
-        const first = Array.isArray(value) ? value[0] : value;
-        return filter.options.find((option) => option.value === String(first))?.tone;
-    }
-    return undefined;
 };
 
 const filterSummary = (filter: TableFilter, value: unknown): string => {
@@ -69,6 +52,7 @@ const filterSummary = (filter: TableFilter, value: unknown): string => {
 
 const ApiAutocompleteControl = dc(
     (props: { filter: Extract<TableFilter, { type: "api-autocomplete" }>; value: unknown; onChange: (value: unknown) => void }) => {
+        const { t } = useLocale();
         const options = ref<FilterOption[]>([]);
         const loading = ref(false);
         const error = ref<string | null>(null);
@@ -119,7 +103,7 @@ const ApiAutocompleteControl = dc(
                                 icon
                                 size="x-small"
                                 variant="text"
-                                aria-label="Refresh options"
+                                aria-label={t("Refresh options")}
                                 onClick={() => void load("")}
                             >
                                 <VIcon icon="mdi-refresh" size="18" />
@@ -128,11 +112,11 @@ const ApiAutocompleteControl = dc(
                     }}
                 </VAutocomplete>
                 {error.value && (
-                    <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "rgb(var(--v-theme-error))", fontSize: "11px" }}>
-                        <VIcon icon="mdi-alert-circle-outline" size="14" />
+                    <div role="alert" aria-live="assertive" style={{ display: "flex", alignItems: "center", gap: "6px", color: "rgb(var(--v-theme-error))", fontSize: "11px" }}>
+                        <VIcon icon="mdi-alert-circle-outline" size="14" aria-hidden="true" />
                         <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{error.value}</span>
                         <VBtn size="x-small" variant="text" onClick={() => void load("")}>
-                            Retry
+                            {t("Retry")}
                         </VBtn>
                     </div>
                 )}
@@ -258,9 +242,9 @@ const TableFilters = dc(
         total?: number;
     }) => {
         const { t } = useLocale();
-        const theme = useTheme();
         const display = useDisplay();
         const open = ref(!display.mobile.value);
+        const contentId = `pg-table-filters-${Math.random().toString(36).slice(2, 10)}`;
 
         // LG gets three roomy columns, XL four; never cram.
         const columns = computed(() => {
@@ -283,11 +267,10 @@ const TableFilters = dc(
                     style={{
                         display: "flex",
                         flexDirection: "column",
-                        gap: "14px",
-                        padding: "18px 20px 20px",
-                        borderRadius: "16px",
-                        border: "1px solid var(--fintech-border)",
-                        background: "linear-gradient(180deg, rgba(var(--v-theme-surface-variant), 0.5), rgba(var(--v-theme-surface), 0.85))",
+                        gap: "12px",
+                        padding: "14px 16px",
+                        borderBottom: "1px solid var(--pg-border-subtle)",
+                        background: "var(--pg-bg-surface-subtle)",
                     }}
                 >
                     <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
@@ -296,6 +279,8 @@ const TableFilters = dc(
                             variant={count > 0 ? "flat" : "tonal"}
                             color={count > 0 ? "primary" : undefined}
                             prependIcon="mdi-filter-variant"
+                            aria-expanded={open.value ? "true" : "false"}
+                            aria-controls={contentId}
                             onClick={() => (open.value = !open.value)}
                         >
                             {t("Filters")}
@@ -320,23 +305,50 @@ const TableFilters = dc(
                     {active.length > 0 && (
                         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
                             {active.map((filter) => (
-                                <VChip
+                                <span
                                     key={filter.key}
-                                    size="small"
-                                    variant="tonal"
-                                    color={toneColor(theme, optionTone(filter, props.values[filter.key]))}
-                                    closable
-                                    onClick:close={() => props.onChange(filter.key, undefined)}
+                                    style={{
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        gap: "6px",
+                                        minHeight: "24px",
+                                        padding: "2px 4px 2px 8px",
+                                        borderRadius: "var(--pg-radius-sm)",
+                                        border: "1px solid var(--pg-border-subtle)",
+                                        backgroundColor: "var(--pg-bg-surface)",
+                                        color: "var(--pg-ink-secondary)",
+                                        fontSize: "12px",
+                                    }}
                                 >
-                                    <span style={{ fontWeight: 700, opacity: 0.7, marginInlineEnd: "6px" }}>{filter.label}:</span>
-                                    {filterSummary(filter, props.values[filter.key])}
-                                </VChip>
+                                    <span style={{ fontWeight: 600, color: "var(--pg-ink-primary)" }}>{filter.label}:</span>
+                                    <span>{filterSummary(filter, props.values[filter.key])}</span>
+                                    <button
+                                        type="button"
+                                        aria-label={t("Remove filter")}
+                                        onClick={() => props.onChange(filter.key, undefined)}
+                                        style={{
+                                            display: "inline-flex",
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                            width: "18px",
+                                            height: "18px",
+                                            borderRadius: "var(--pg-radius-xs)",
+                                            border: "0",
+                                            background: "transparent",
+                                            color: "var(--pg-ink-muted)",
+                                            cursor: "pointer",
+                                        }}
+                                    >
+                                        <VIcon icon="mdi-close" size={12} />
+                                    </button>
+                                </span>
                             ))}
                         </div>
                     )}
 
                     {open.value && (
                         <div
+                            id={contentId}
                             style={{
                                 display: "grid",
                                 gridTemplateColumns: `repeat(${columns.value}, minmax(0, 1fr))`,
@@ -361,12 +373,12 @@ const TableFilters = dc(
                                     >
                                         <span
                                             style={{
-                                                fontSize: "11px",
-                                                fontWeight: 800,
-                                                letterSpacing: "0.06em",
+                                                fontSize: "11.5px",
+                                                fontWeight: 600,
+                                                letterSpacing: "0.04em",
                                                 textTransform: "uppercase",
                                                 lineHeight: "16px",
-                                                opacity: 0.55,
+                                                color: "var(--pg-ink-muted)",
                                             }}
                                         >
                                             {filter.label}

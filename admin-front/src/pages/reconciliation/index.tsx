@@ -3,22 +3,9 @@ import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import {
-    VAlert,
-    VBtn,
-    VCard,
-    VCardText,
-    VCheckbox,
-    VDialog,
-    VFileInput,
-    VProgressCircular,
-    VSelect,
-    VSwitch,
-    VTextField,
-    VTextarea,
-} from "vuetify/components";
+import { VAlert, VBtn, VCheckbox, VFileInput, VProgressCircular, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
@@ -36,6 +23,13 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { formatPlainNumber } from "@/utils/money";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
+import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { MonoRef } from "@/components/ui/MonoRef";
+import { DescriptionList } from "@/components/ui/DescriptionList";
 const UPLOAD_CHECKS = [
     { key: "SOURCE_VERIFIED", label: "Statement source verified" },
     { key: "FILE_REVIEWED", label: "Statement file reviewed" },
@@ -180,6 +174,7 @@ const ReconciliationPage = dc(() => {
     const loading = ref(true);
     const error = ref<string | null>(null);
 
+    const activeMode = ref<"runs" | "sources" | "upload">("runs");
     const selectedSourceId = ref<string | null>(null);
     const file = ref<File | null>(null);
     const uploadLoading = ref(false);
@@ -518,16 +513,15 @@ const ReconciliationPage = dc(() => {
         }
     };
 
-    const summaryItems = computed(() => {
+    const summaryMetrics = computed<MetricItem[]>(() => {
         const data = summary.value;
         if (!data) return [];
         return [
-            { label: t("Statement sources"), value: String(data.sources), tone: "info" as const },
-            { label: t("Runs in 30d"), value: String(data.runs), tone: "neutral" as const },
-            { label: t("Processing"), value: String(data.processingRuns), tone: data.processingRuns > 0 ? "warning" as const : "success" as const },
-            { label: t("Matched rows"), value: formatPlainNumber(data.matchedRows), tone: "success" as const },
-            { label: t("Mismatch rows"), value: formatPlainNumber(data.mismatchedRows), tone: data.mismatchedRows > 0 ? "error" as const : "success" as const },
-            { label: t("Match rate"), value: `${formatPlainNumber(Number(data.matchRate))}%`, tone: Number(data.matchRate) >= 99 ? "success" as const : "warning" as const },
+            { key: "sources", label: t("Statement sources"), value: String(data.sources), badge: t("Sources"), badgeTone: "info" },
+            { key: "runs", label: t("Runs in 30d"), value: String(data.runs) },
+            { key: "processing", label: t("Processing"), value: String(data.processingRuns), badge: data.processingRuns > 0 ? t("Processing") : t("Clear"), badgeTone: data.processingRuns > 0 ? "warning" : "success" },
+            { key: "matched", label: t("Matched rows"), value: formatPlainNumber(data.matchedRows), subLabel: `${formatPlainNumber(data.mismatchedRows)} ${t("Mismatch rows")}` },
+            { key: "matchRate", label: t("Match rate"), value: `${formatPlainNumber(Number(data.matchRate))}%`, badge: Number(data.matchRate) >= 99 ? t("Healthy") : t("Review"), badgeTone: Number(data.matchRate) >= 99 ? "success" : "warning" },
         ];
     });
 
@@ -539,7 +533,10 @@ const ReconciliationPage = dc(() => {
             Value: ({ row }: { row: StatementSource }) => (
                 <ThemedView style={{ gap: "2px" }}>
                     <ThemedText style={{ fontSize: "12px", fontWeight: 600 }}>{row.name}</ThemedText>
-                    <ThemedText style={{ fontSize: "10px", opacity: 0.55, direction: "ltr" }}>{row.gatewayCode} · {row.type}</ThemedText>
+                    <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "4px", flexWrap: "wrap" }}>
+                        <MonoRef value={row.gatewayCode} copyable={false} />
+                        <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>· {row.type}</ThemedText>
+                    </ThemedView>
                 </ThemedView>
             ),
         },
@@ -587,6 +584,12 @@ const ReconciliationPage = dc(() => {
             ),
         },
         {
+            key: "id",
+            label: "Run ID",
+            value: (row) => row.id,
+            Value: ({ row }: { row: ReconciliationRun }) => <MonoRef value={row.id} />,
+        },
+        {
             key: "state",
             label: "State",
             value: (row) => row.state,
@@ -615,25 +618,28 @@ const ReconciliationPage = dc(() => {
 
     const itemHeaders: TableHeader<ReconciliationItem>[] = [
         { key: "result", label: "Result", Value: ({ row }: { row: ReconciliationItem }) => <StatusChip label={row.result} tone={row.result === "MATCHED" ? "success" : row.result === "DUPLICATE" ? "warning" : "error"} size="x-small" /> },
-        { key: "ourReference", label: "Our reference", value: (row) => row.ourReference },
-        { key: "providerReference", label: "Provider reference", value: (row) => row.providerReference },
-        { key: "batch", label: "Batch", value: (row) => row.batchReference ?? "—" },
-        { key: "amount", label: "Statement amount", value: (row) => row.statementAmount },
-        { key: "fee", label: "Statement fee", value: (row) => row.statementFee },
+        { key: "ourReference", label: "Our reference", value: (row) => row.ourReference, Value: ({ row }: { row: ReconciliationItem }) => <MonoRef value={row.ourReference} /> },
+        { key: "providerReference", label: "Provider reference", value: (row) => row.providerReference, Value: ({ row }: { row: ReconciliationItem }) => <MonoRef value={row.providerReference} /> },
+        { key: "batch", label: "Batch", value: (row) => row.batchReference ?? "—", Value: ({ row }: { row: ReconciliationItem }) => <MonoRef value={row.batchReference ?? ""} /> },
+        { key: "amount", label: "Statement amount", value: (row) => row.statementAmount, Value: ({ row }: { row: ReconciliationItem }) => <MoneyDisplay amount={row.statementAmount} currency="LYD" size="sm" /> },
+        { key: "fee", label: "Statement fee", value: (row) => row.statementFee, Value: ({ row }: { row: ReconciliationItem }) => <MoneyDisplay amount={row.statementFee} currency="LYD" size="sm" colorSign /> },
         {
             key: "case",
             label: "Operator case",
             value: (row) => row.operatorCase?.state ?? (row.operatorCaseId ? "LINKED" : ""),
             Value: ({ row }: { row: ReconciliationItem }) =>
                 row.operatorCaseId ? (
-                    <VBtn
-                        size="x-small"
-                        variant="text"
-                        prependIcon="mdi-lifebuoy"
-                        onClick={() => void router.push({ name: "OperatorCaseDetail", params: { id: row.operatorCaseId ?? "" } })}
-                    >
-                        {row.operatorCase?.state ?? t("Open case")}
-                    </VBtn>
+                    <ThemedView style={{ gap: "2px" }}>
+                        <VBtn
+                            size="x-small"
+                            variant="text"
+                            prependIcon="mdi-lifebuoy"
+                            onClick={() => void router.push({ name: "OperatorCaseDetail", params: { id: row.operatorCaseId ?? "" } })}
+                        >
+                            {row.operatorCase?.state ?? t("Open case")}
+                        </VBtn>
+                        <MonoRef value={row.operatorCaseId} />
+                    </ThemedView>
                 ) : (
                     <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>—</ThemedText>
                 ),
@@ -647,6 +653,9 @@ const ReconciliationPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Reconciliation")}
+                    subtitle={t("Upload statements, monitor reconciliation runs, and resolve mismatches between gateway and ledger records.")}
+                    badge={t("Daily control")}
+                    badgeTone="info"
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => { void load(); runRefreshHook.value?.refreshAsIs(); }}>{t("Refresh")}</VBtn>
@@ -664,10 +673,10 @@ const ReconciliationPage = dc(() => {
                         </VAlert>
 
                         {summary.value && (
-                            <VCard variant="flat" style={{ borderRadius: "16px" }}>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Reconciliation health")}</ThemedText>
-                                    <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
+                            <>
+                                <MetricStrip items={summaryMetrics.value} />
+                                <SurfaceCard title={t("Reconciliation health")}>
+                                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                         {showChecklists && (
                                             <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                                                 <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Summary export checklist")}</ThemedText>
@@ -686,164 +695,174 @@ const ReconciliationPage = dc(() => {
                                                 )}
                                             </ThemedView>
                                         )}
-                                        {summaryItems.value.map((item) => (
-                                            <VCard key={item.label} variant="tonal">
-                                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
-                                                    <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
-                                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
-                                                </VCardText>
-                                            </VCard>
-                                        ))}
-                                    </ThemedView>
-                                    <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                        {Object.entries(summary.value.resultCounts ?? {}).map(([result, count]) => (
-                                            <StatusChip key={result} label={`${result}: ${count}`} tone={resultTone(result)} size="x-small" />
-                                        ))}
-                                    </ThemedView>
-                                </VCardText>
-                            </VCard>
+                                        <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                                            {Object.entries(summary.value.resultCounts ?? {}).map(([result, count]) => (
+                                                <StatusChip key={result} label={`${result}: ${count}`} tone={resultTone(result)} size="x-small" />
+                                            ))}
+                                        </ThemedView>
+                                    </SurfaceCardText>
+                                </SurfaceCard>
+                            </>
                         )}
 
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                                <ThemedText type="defaultSemiBold">{t("Upload a statement")}</ThemedText>
-                                <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap", alignItems: "flex-start" }}>
-                                    <VSelect
-                                        items={sources.value.map((source) => ({ title: source.name, value: source.id }))}
-                                        modelValue={selectedSourceId.value}
-                                        onUpdate:modelValue={(value: string | null) => {
-                                            selectedSourceId.value = value;
-                                            preview.value = null;
-                                        }}
-                                        label={t("Statement source")}
-                                        style={{ minWidth: "220px" }}
-                                    />
-                                    <VTextField type="date" label={t("Period start")} modelValue={periodStart.value} onUpdate:modelValue={(value: string) => (periodStart.value = value)} style={{ minWidth: "170px" }} />
-                                    <VTextField type="date" label={t("Period end")} modelValue={periodEnd.value} onUpdate:modelValue={(value: string) => (periodEnd.value = value)} style={{ minWidth: "170px" }} />
-                                    <VFileInput label={t("Statement file")} modelValue={file.value} onUpdate:modelValue={(value: File | File[] | null) => void onFileChanged(value)} style={{ minWidth: "260px" }} />
-                                    {showChecklists && (
-                                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Upload checklist")}</ThemedText>
-                                            {UPLOAD_CHECKS.map((check) => (
-                                                <VCheckbox
-                                                    key={check.key}
-                                                    modelValue={uploadChecklist.value[check.key] === true}
-                                                    onUpdate:modelValue={(value: unknown) => (uploadChecklist.value = { ...uploadChecklist.value, [check.key]: Boolean(value) })}
-                                                    label={t(check.label)}
-                                                    density="compact"
-                                                    hideDetails
-                                                />
-                                            ))}
-                                            {!uploadChecklistComplete.value && (
-                                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all upload checklist items before uploading")}</ThemedText>
-                                            )}
-                                        </ThemedView>
-                                    )}
-                                    <VBtn color="primary" loading={uploadLoading.value} disabled={!selectedSourceId.value || !file.value || !uploadChecklistComplete.value} onClick={() => void upload()}>{t("Upload")}</VBtn>
-                                </ThemedView>
-                            </VCardText>
-                        </VCard>
+                        <SegmentedTabs
+                            modelValue={activeMode.value}
+                            onUpdate:modelValue={(value: string) => (activeMode.value = value as "runs" | "sources" | "upload")}
+                            tabs={[
+                                { value: "runs", label: t("Reconciliation Runs") },
+                                { value: "sources", label: t("Statement Sources") },
+                                { value: "upload", label: t("Upload & Preview") },
+                            ]}
+                        />
 
-                        {preview.value && (
-                            <VCard>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                    <ThemedText type="defaultSemiBold">{t("File preview")}</ThemedText>
-                                    <div style={{ overflowX: "auto" }}>
-                                        <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "12px", direction: "ltr" }}>
-                                            <thead>
-                                                <tr>
-                                                    {preview.value.columns.map((column) => (
-                                                        <th key={column} style={{ border: "1px solid rgba(100,116,139,0.3)", padding: "6px 10px", textAlign: "left" }}>{column}</th>
-                                                    ))}
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {preview.value.rows.map((row, index) => (
-                                                    <tr key={index}>
-                                                        {row.map((cell, cellIndex) => (
-                                                            <td key={cellIndex} style={{ border: "1px solid rgba(100,116,139,0.2)", padding: "6px 10px" }}>{cell}</td>
+                        <ThemedView style={{ display: activeMode.value === "upload" ? "flex" : "none", flexDirection: "column", gap: "18px" }}>
+                            <SurfaceCard>
+                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                                    <ThemedText type="defaultSemiBold">{t("Upload a statement")}</ThemedText>
+                                    <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap", alignItems: "flex-start" }}>
+                                        <VSelect
+                                            items={sources.value.map((source) => ({ title: source.name, value: source.id }))}
+                                            modelValue={selectedSourceId.value}
+                                            onUpdate:modelValue={(value: string | null) => {
+                                                selectedSourceId.value = value;
+                                                preview.value = null;
+                                            }}
+                                            label={t("Statement source")}
+                                            style={{ minWidth: "220px" }}
+                                        />
+                                        <VTextField type="date" label={t("Period start")} modelValue={periodStart.value} onUpdate:modelValue={(value: string) => (periodStart.value = value)} style={{ minWidth: "170px" }} />
+                                        <VTextField type="date" label={t("Period end")} modelValue={periodEnd.value} onUpdate:modelValue={(value: string) => (periodEnd.value = value)} style={{ minWidth: "170px" }} />
+                                        <VFileInput label={t("Statement file")} modelValue={file.value} onUpdate:modelValue={(value: File | File[] | null) => void onFileChanged(value)} style={{ minWidth: "260px" }} />
+                                        {showChecklists && (
+                                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                                <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Upload checklist")}</ThemedText>
+                                                {UPLOAD_CHECKS.map((check) => (
+                                                    <VCheckbox
+                                                        key={check.key}
+                                                        modelValue={uploadChecklist.value[check.key] === true}
+                                                        onUpdate:modelValue={(value: unknown) => (uploadChecklist.value = { ...uploadChecklist.value, [check.key]: Boolean(value) })}
+                                                        label={t(check.label)}
+                                                        density="compact"
+                                                        hideDetails
+                                                    />
+                                                ))}
+                                                {!uploadChecklistComplete.value && (
+                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all upload checklist items before uploading")}</ThemedText>
+                                                )}
+                                            </ThemedView>
+                                        )}
+                                        <VBtn color="primary" loading={uploadLoading.value} disabled={!selectedSourceId.value || !file.value || !uploadChecklistComplete.value} onClick={() => void upload()}>{t("Upload")}</VBtn>
+                                    </ThemedView>
+                                </SurfaceCardText>
+                            </SurfaceCard>
+
+                            {preview.value && (
+                                <SurfaceCard>
+                                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                                        <ThemedText type="defaultSemiBold">{t("File preview")}</ThemedText>
+                                        <div style={{ overflowX: "auto" }}>
+                                            <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "12px", direction: "ltr" }}>
+                                                <thead>
+                                                    <tr>
+                                                        {preview.value.columns.map((column) => (
+                                                            <th key={column} style={{ border: "1px solid rgba(100,116,139,0.3)", padding: "6px 10px", textAlign: "left" }}>{column}</th>
                                                         ))}
                                                     </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </VCardText>
-                            </VCard>
-                        )}
-
-                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Statement sources")}</ThemedText>
-                            <StatusChip label={String(sources.value.length)} tone="neutral" size="x-small" />
-                        </ThemedView>
-                        <DataTable
-                            title={t("Statement sources")}
-                            data={sources.value}
-                            headers={sourceHeaders.value}
-                            loading={loading.value}
-                            showNumber={true}
-                            xlsx={false}
-                            noElevation={false}
-                        />
-
-                        <ApiTable<ReconciliationRun>
-                            title={t("Reconciliation runs")}
-                            url={urlsMap.reconciliationRuns}
-                            localSearch={false}
-                            xlsx={false}
-                            showNumber={true}
-                            numberOfItemsPerPage={runPageSize.value}
-                            numberOfItemsPerPageChoices={[
-                                { label: "10", value: 10 },
-                                { label: "20", value: 20 },
-                                { label: "50", value: 50 },
-                            ]}
-                            setNumberOfItemsPerPage={(value) => (runPageSize.value = value)}
-                            headers={runHeaders.value}
-                            apiDataExtractor={(data) => {
-                                const payload = data as { runs?: ReconciliationRun[]; rows?: ReconciliationRun[] };
-                                return payload.runs ?? payload.rows ?? [];
-                            }}
-                            apiTotalExtractor={(data) => Number((data as { total?: number }).total ?? 0)}
-                            onData={(nextRows, nextTotal) => {
-                                runs.value = nextRows;
-                                runTotal.value = nextTotal;
-                            }}
-                            setRefreshHook={(hook) => {
-                                runRefreshHook.value = hook as typeof runRefreshHook.value;
-                            }}
-                            clearRefreshHook={() => {
-                                runRefreshHook.value = null;
-                            }}
-                            onRefresh={(table, refresh) => {
-                                void refresh({
-                                    queryParams: {
-                                        page: table.page,
-                                        pageSize: runPageSize.value,
-                                        ...buildFilterQuery(filterDefinitions.value, runFilters.value),
-                                        ...(table.sortKey ? { sortKey: table.sortKey, sortDirection: table.sortDirection } : {}),
-                                    },
-                                });
-                            }}
-                            TopSlot={() => (
-                                <TableFilters
-                                    filters={filterDefinitions.value}
-                                    values={runFilters.value}
-                                    total={runTotal.value}
-                                    onChange={onFiltersChanged}
-                                    onClear={onFiltersCleared}
-                                />
+                                                </thead>
+                                                <tbody>
+                                                    {preview.value.rows.map((row, index) => (
+                                                        <tr key={index}>
+                                                            {row.map((cell, cellIndex) => (
+                                                                <td key={cellIndex} style={{ border: "1px solid rgba(100,116,139,0.2)", padding: "6px 10px" }}>{cell}</td>
+                                                            ))}
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </SurfaceCardText>
+                                </SurfaceCard>
                             )}
-                        />
+                        </ThemedView>
+
+                        <ThemedView style={{ display: activeMode.value === "sources" ? "flex" : "none", flexDirection: "column", gap: "18px" }}>
+                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Statement sources")}</ThemedText>
+                                <StatusChip label={String(sources.value.length)} tone="neutral" size="x-small" />
+                            </ThemedView>
+                            <DataTable
+                                title={t("Statement sources")}
+                                data={sources.value}
+                                headers={sourceHeaders.value}
+                                loading={loading.value}
+                                showNumber={true}
+                                xlsx={false}
+                                noElevation={false}
+                            />
+                        </ThemedView>
+
+                        <ThemedView style={{ display: activeMode.value === "runs" ? "flex" : "none", flexDirection: "column", gap: "18px" }}>
+                            <ApiTable<ReconciliationRun>
+                                title={t("Reconciliation runs")}
+                                url={urlsMap.reconciliationRuns}
+                                localSearch={false}
+                                xlsx={false}
+                                showNumber={true}
+                                numberOfItemsPerPage={runPageSize.value}
+                                numberOfItemsPerPageChoices={[
+                                    { label: "10", value: 10 },
+                                    { label: "20", value: 20 },
+                                    { label: "50", value: 50 },
+                                ]}
+                                setNumberOfItemsPerPage={(value) => (runPageSize.value = value)}
+                                headers={runHeaders.value}
+                                apiDataExtractor={(data) => {
+                                    const payload = data as { runs?: ReconciliationRun[]; rows?: ReconciliationRun[] };
+                                    return payload.runs ?? payload.rows ?? [];
+                                }}
+                                apiTotalExtractor={(data) => Number((data as { total?: number }).total ?? 0)}
+                                onData={(nextRows, nextTotal) => {
+                                    runs.value = nextRows;
+                                    runTotal.value = nextTotal;
+                                }}
+                                setRefreshHook={(hook) => {
+                                    runRefreshHook.value = hook as typeof runRefreshHook.value;
+                                }}
+                                clearRefreshHook={() => {
+                                    runRefreshHook.value = null;
+                                }}
+                                onRefresh={(table, refresh) => {
+                                    void refresh({
+                                        queryParams: {
+                                            page: table.page,
+                                            pageSize: runPageSize.value,
+                                            ...buildFilterQuery(filterDefinitions.value, runFilters.value),
+                                            ...(table.sortKey ? { sortKey: table.sortKey, sortDirection: table.sortDirection } : {}),
+                                        },
+                                    });
+                                }}
+                                TopSlot={() => (
+                                    <TableFilters
+                                        filters={filterDefinitions.value}
+                                        values={runFilters.value}
+                                        total={runTotal.value}
+                                        onChange={onFiltersChanged}
+                                        onClear={onFiltersCleared}
+                                    />
+                                )}
+                            />
+                        </ThemedView>
                     </>
                 )}
             </ThemedView>
 
-            <VDialog modelValue={sourceEditOpen.value} onUpdate:modelValue={(value: boolean) => (sourceEditOpen.value = value)} maxWidth="720px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{t("Edit statement source")}</ThemedText>
-                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+            <FormModal
+                modelValue={sourceEditOpen.value}
+                onUpdate:modelValue={(value: boolean) => (sourceEditOpen.value = value)}
+                title={t("Edit statement source")}
+                size="md"
+            >
+<ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
                             <ThemedText style={{ fontSize: "13px", flex: 1 }}>{editingSource.value?.name}</ThemedText>
                             <VSwitch
                                 label={t("Active")}
@@ -888,52 +907,47 @@ const ReconciliationPage = dc(() => {
                             <VBtn variant="text" onClick={() => (sourceEditOpen.value = false)}>{t("Cancel")}</VBtn>
                             <VBtn color="primary" loading={sourceSaving.value} disabled={!sourceEditChecklistComplete.value} onClick={() => void saveSourceEdit()}>{t("Save")}</VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
 
-            <VDialog modelValue={detailsOpen.value} onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)} maxWidth="1100px" scrollable>
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                        {detailLoading.value || !selectedRun.value ? (
+            <FormModal
+                modelValue={detailsOpen.value}
+                onUpdate:modelValue={(value: boolean) => (detailsOpen.value = value)}
+                title={selectedRun.value?.fileName ?? t("Reconciliation run")}
+                size="lg"
+            >
+{detailLoading.value || !selectedRun.value ? (
                             <ThemedView style={{ alignItems: "center", justifyContent: "center", minHeight: "280px", gap: "12px" }}>
                                 <VProgressCircular indeterminate size={52} color="primary" />
                                 <ThemedText style={{ opacity: 0.65 }}>{t("Loading reconciliation run")}</ThemedText>
                             </ThemedView>
                         ) : (
                             <>
-                                <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
-                                    <ThemedView style={{ gap: "4px" }}>
-                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "19px" }}>{selectedRun.value.fileName}</ThemedText>
+                                <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+                                    <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                                        <MonoRef value={selectedRun.value.id} />
                                         <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{selectedRun.value.sourceName}</ThemedText>
                                     </ThemedView>
                                     <StatusChip label={selectedRun.value.state} tone={selectedRun.value.state === "COMPLETED" ? "success" : "warning"} />
                                 </ThemedView>
 
-                                <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
-                                    {[
-                                        [t("Rows"), selectedRun.value.totalRows],
-                                        [t("Matched"), selectedRun.value.matchedRows],
-                                        [t("Unmatched"), selectedRun.value.unmatchedRows],
-                                        [t("Amount mismatch"), selectedRun.value.amountMismatch],
-                                        [t("Missing at gateway"), selectedRun.value.missingAtGateway],
-                                        [t("Missing locally"), selectedRun.value.missingLocally],
-                                        [t("Duplicates"), selectedRun.value.duplicates],
-                                        [t("Fee variances"), selectedRun.value.feeVariances],
-                                        [t("Match rate"), `${formatPlainNumber(Number(selectedRun.value.matchRate))}%`],
-                                    ].map(([label, value]) => (
-                                        <VCard key={String(label)} variant="tonal">
-                                            <VCardText style={{ padding: "10px" }}>
-                                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{label}</ThemedText>
-                                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{String(value)}</ThemedText>
-                                            </VCardText>
-                                        </VCard>
-                                    ))}
-                                </ThemedView>
+                                <MetricStrip items={[
+                                    { key: "rows", label: t("Rows"), value: String(selectedRun.value.totalRows) },
+                                    { key: "matched", label: t("Matched"), value: String(selectedRun.value.matchedRows) },
+                                    { key: "unmatched", label: t("Unmatched"), value: String(selectedRun.value.unmatchedRows) },
+                                    { key: "mismatch", label: t("Amount mismatch"), value: String(selectedRun.value.amountMismatch) },
+                                    { key: "matchRate", label: t("Match rate"), value: `${formatPlainNumber(Number(selectedRun.value.matchRate))}%` },
+                                ]} />
 
-                                <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>
-                                    {t("Created")} {formatDateTime(selectedRun.value.createdAt)} · {t("Finished")} {formatDateTime(selectedRun.value.finishedAt)}
-                                </ThemedText>
+                                <DescriptionList columns={2} items={[
+                                    { label: t("Run ID"), value: <MonoRef value={selectedRun.value.id} /> },
+                                    { label: t("Source"), value: selectedRun.value.sourceName },
+                                    { label: t("Missing at gateway"), value: String(selectedRun.value.missingAtGateway) },
+                                    { label: t("Missing locally"), value: String(selectedRun.value.missingLocally) },
+                                    { label: t("Duplicates"), value: String(selectedRun.value.duplicates) },
+                                    { label: t("Fee variances"), value: String(selectedRun.value.feeVariances) },
+                                    { label: t("Created"), value: formatDateTime(selectedRun.value.createdAt) },
+                                    { label: t("Finished"), value: formatDateTime(selectedRun.value.finishedAt) },
+                                ]} />
 
                                 <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                                     <VSelect
@@ -975,9 +989,7 @@ const ReconciliationPage = dc(() => {
                                 </ThemedView>
                             </>
                         )}
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         </ScreenContainer>
     );
 });

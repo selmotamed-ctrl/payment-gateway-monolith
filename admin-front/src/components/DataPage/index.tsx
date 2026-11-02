@@ -3,7 +3,7 @@ import { ref, watch } from "vue";
 import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
 import { api } from "@/state/api";

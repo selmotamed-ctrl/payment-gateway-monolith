@@ -1,9 +1,9 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VAutocomplete, VBtn, VCard, VCardText, VDialog, VTextField } from "vuetify/components";
+import { VAutocomplete, VBtn, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
@@ -15,6 +15,8 @@ import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 type Cashout = {
     id: string;
     state: string;
@@ -132,6 +134,7 @@ const CashoutsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Cash-Outs")}
+                    subtitle={t("Settlement withdrawals and payout status.")}
                     end={() => (
                         <VBtn
                             variant="tonal"
@@ -154,8 +157,8 @@ const CashoutsPage = dc(() => {
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : (
-                    <VCard>
-                        <VCardText>
+                    <SurfaceCard>
+                        <SurfaceCardText>
                             <DataTable
                                 title={t("Cash-Outs")}
                                 data={rows.value}
@@ -167,16 +170,18 @@ const CashoutsPage = dc(() => {
                                 searchValue={search.value}
                                 setSearchValue={(value) => (search.value = value)}
                             />
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
                 )}
             </ThemedView>
 
-            <VDialog modelValue={dialogOpen.value} onUpdate:modelValue={(v: any) => (dialogOpen.value = v)} maxWidth="480px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <ThemedText type="defaultSemiBold">{t("Request Cash-Out")}</ThemedText>
-                        <VAutocomplete
+            <FormModal
+                modelValue={dialogOpen.value}
+                onUpdate:modelValue={(v: any) => (dialogOpen.value = v)}
+                title={t("Request Cash-Out")}
+                size="sm"
+            >
+<VAutocomplete
                             label={t("Wallet")}
                             items={walletOptions.value}
                             itemTitle="title"
@@ -217,9 +222,7 @@ const CashoutsPage = dc(() => {
                         >
                             {t("Request Cash-Out")}
                         </VBtn>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         </ScreenContainer>
     );
 });

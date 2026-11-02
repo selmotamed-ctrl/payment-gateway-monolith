@@ -31,7 +31,7 @@ export const StateView = dc(
                             width: "100%",
                         }}
                     >
-                        <VProgressCircular indeterminate size={"48px"} color="primary" width={4} />
+                        <VProgressCircular indeterminate size={48} color="primary" width={4} />
                         <ThemedText style={{ fontSize: "14px", opacity: 0.7 }}>{t("Loading")}</ThemedText>
                     </ThemedView>
                 );
@@ -49,7 +49,7 @@ export const StateView = dc(
                             width: "100%",
                         }}
                     >
-                        <VIcon icon={"mdi-alert-circle-outline"} size={"40px"} color="error" />
+                        <VIcon icon={"mdi-alert-circle-outline"} size={40} color="error" />
                         <ThemedText style={{ fontSize: "15px", textAlign: "center" }}>{props.error}</ThemedText>
                         {props.onRetry && (
                             <VBtn variant="tonal" color="primary" onClick={() => props.onRetry?.()}>

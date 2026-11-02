@@ -19,6 +19,7 @@ const ALL_ADMIN_UI_AUTHORITIES = [
   "liquidity.read",
   "gateways.edit",
   "users_admin.propose",
+  "merchant:write",
 ];
 
 export const adminSession = {

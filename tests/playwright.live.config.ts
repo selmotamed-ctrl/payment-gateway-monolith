@@ -1,5 +1,7 @@
 import { defineConfig } from "@playwright/test";
 
+const chrome = process.env.PLAYWRIGHT_CHROME_PATH || undefined;
+
 /** Runs against the deployed single-node box over the LAN (self-signed TLS). */
 export default defineConfig({
   testDir: "./e2e-live",
@@ -10,7 +12,7 @@ export default defineConfig({
   use: {
     headless: true,
     ignoreHTTPSErrors: true,
-    launchOptions: { executablePath: "/usr/bin/google-chrome-stable", args: ["--no-sandbox"] },
+    launchOptions: { ...(chrome ? { executablePath: chrome } : {}), args: ["--no-sandbox"] },
     screenshot: "only-on-failure",
   },
 });

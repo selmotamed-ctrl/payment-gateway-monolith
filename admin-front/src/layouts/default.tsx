@@ -1,11 +1,10 @@
 import { dc } from "kt-dc";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { RouterView, useRoute, useRouter } from "vue-router";
+import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 import {
     VAppBar,
     VAvatar,
     VBtn,
-    VChip,
     VDivider,
     VIcon,
     VList,
@@ -19,7 +18,7 @@ import {
 } from "vuetify/components";
 import { useDisplay, useLocale, useTheme } from "vuetify";
 import LogoSvg from "@/assets/images/logo.svg";
-import { logout, user } from "@/state/user";
+import { hasOneOfAuthorities, logout, user } from "@/state/user";
 import { routeLoading } from "@/state/route";
 import { toggleTheme } from "@/state/app/index";
 import { setLocale } from "@/plugins/localization";
@@ -27,6 +26,10 @@ import { showSnackBar } from "@/utils/snackBar";
 import { GlobalGuideSearchModal } from "@/components/guide/GlobalGuideSearchModal";
 import { ContextualHelpDrawer } from "@/components/guide/ContextualHelpDrawer";
 import { useSections } from "./sections";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
+import { api } from "@/state/api";
+import { urlsMap } from "@/constants/urlsMap";
 
 const DefaultLayout = dc(() => {
     const { t, current: locale } = useLocale();
@@ -90,6 +93,44 @@ const DefaultLayout = dc(() => {
     );
     const role = computed(() => user.value?.userInfo?.role || "");
     const initial = computed(() => displayName.value.charAt(0).toUpperCase());
+    const isMaker = computed(() => Boolean(user.value?.userInfo?.isMaker));
+    const isChecker = computed(() => Boolean(user.value?.userInfo?.isChecker));
+    const canViewLedger = computed(() => hasOneOfAuthorities(["profit.read", "liquidity.read"]));
+    const ledgerInvariant = ref<{ drift: string; currency: string; ok: boolean } | null>(null);
+    let invariantTimer: ReturnType<typeof setInterval> | undefined;
+
+    const loadLedgerInvariant = async () => {
+        if (!canViewLedger.value) return;
+        try {
+            const response = await api.get(urlsMap.financeInvariantCheck);
+            const data = response.data?.data ?? response.data ?? {};
+            ledgerInvariant.value = {
+                drift: String(data.drift ?? "0"),
+                currency: String(data.currency ?? "LYD"),
+                ok: data.ok !== false,
+            };
+        } catch {
+            ledgerInvariant.value = null;
+        }
+    };
+
+    const breadcrumbs = computed(() => {
+        const list: { label: string; to?: string }[] = [{ label: t("Payment Gateway"), to: "/" }];
+        const parentName = route.meta.parentName ? String(route.meta.parentName) : "";
+        if (parentName) {
+            for (const section of sections.value) {
+                const parent = section.routes.find((item) => item.name === parentName);
+                if (parent) {
+                    list.push({ label: parent.label, to: `/` });
+                    break;
+                }
+            }
+        }
+        if (activeLabel.value && list[list.length - 1]?.label !== activeLabel.value) {
+            list.push({ label: activeLabel.value });
+        }
+        return list;
+    });
 
     const onGlobalKeydown = (event: KeyboardEvent) => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
@@ -111,8 +152,15 @@ const DefaultLayout = dc(() => {
         }
     };
 
-    onMounted(() => window.addEventListener("keydown", onGlobalKeydown));
-    onBeforeUnmount(() => window.removeEventListener("keydown", onGlobalKeydown));
+    onMounted(() => {
+        window.addEventListener("keydown", onGlobalKeydown);
+        void loadLedgerInvariant();
+        invariantTimer = setInterval(() => void loadLedgerInvariant(), 60_000);
+    });
+    onBeforeUnmount(() => {
+        window.removeEventListener("keydown", onGlobalKeydown);
+        if (invariantTimer) clearInterval(invariantTimer);
+    });
 
     return () => (
         <>
@@ -128,7 +176,7 @@ const DefaultLayout = dc(() => {
             >
                 {t("Skip to content")}
             </a>
-            <VAppBar flat height={64} color="surface" class="pg-app-bar">
+            <VAppBar flat height={56} color="surface" class="pg-app-bar">
                 <VBtn
                     icon
                     variant="text"
@@ -141,11 +189,39 @@ const DefaultLayout = dc(() => {
                 </VBtn>
 
                 <div class="pg-app-bar__brand">
-                    <img src={LogoSvg} alt="" width={26} height={26} />
+                    <img src={LogoSvg} alt="" width={24} height={24} />
                     <span class="pg-app-bar__title">{activeLabel.value || t("Payment Gateway")}</span>
                 </div>
 
+                <nav class="pg-breadcrumb" aria-label={t("Breadcrumb")}>
+                    {breadcrumbs.value.map((crumb, idx) => (
+                        <span key={`${crumb.label}-${idx}`} class="pg-breadcrumb__item">
+                            {idx > 0 && <span class="pg-breadcrumb__sep">/</span>}
+                            {crumb.to ? <RouterLink to={crumb.to}>{crumb.label}</RouterLink> : <span>{crumb.label}</span>}
+                        </span>
+                    ))}
+                </nav>
+
                 <div class="pg-spacer" />
+
+                {ledgerInvariant.value && (
+                    <RouterLink
+                        to="/finance/liquidity"
+                        class="pg-invariant-pill"
+                        title={t("Live ledger invariant drift")}
+                    >
+                        <span
+                            class="pg-invariant-pill__dot"
+                            style={{ background: ledgerInvariant.value.ok ? "var(--pg-status-success-dot)" : "var(--pg-status-danger-dot)" }}
+                        />
+                        <MoneyDisplay
+                            amount={ledgerInvariant.value.drift}
+                            currency={ledgerInvariant.value.currency}
+                            size="sm"
+                        />
+                        <span>{t("Drift")}</span>
+                    </RouterLink>
+                )}
 
                 <VBtn
                     icon
@@ -163,7 +239,7 @@ const DefaultLayout = dc(() => {
                     aria-label={t("Help & SOP")}
                     onClick={() => (helpDrawerOpen.value = true)}
                 >
-                    {t("Help & SOP (?)")}
+                    <span class="pg-help-btn__label">{t("Help & SOP (?)")}</span>
                 </VBtn>
 
                 <VTooltip text={isDark.value ? t("Light Mode") : t("Dark Mode")} location="bottom">
@@ -174,7 +250,7 @@ const DefaultLayout = dc(() => {
                                 icon
                                 variant="text"
                                 {...{
-                                    "aria-label": isDark.value ? t("Switch to light mode") : t("Switch to dark mode"),
+                                    "aria-label": t("Toggle theme"),
                                     "aria-pressed": isDark.value ? "true" : "false",
                                 }}
                                 onClick={() => toggleTheme()}
@@ -260,16 +336,26 @@ const DefaultLayout = dc(() => {
                 onUpdate:modelValue={(value: boolean) => (drawerOpen.value = value)}
                 permanent={!isCompact.value}
                 temporary={isCompact.value}
-                width={280}
+                width={248}
                 color="surface"
                 class="pg-drawer"
             >
                 <div class="pg-drawer__brand">
-                    <img src={LogoSvg} alt="" width={38} height={38} />
+                    <div class="pg-drawer__brand-mark">
+                        <img src={LogoSvg} alt="" width={18} height={18} />
+                    </div>
                     <div class="pg-drawer__brand-text">
                         <span class="pg-drawer__title">{t("Payment Gateway")}</span>
                         <span class="pg-drawer__subtitle">{t("Admin Back Office")}</span>
                     </div>
+                    <StatusBadge status="LAN" label="LAN" toneOverride="neutral" showDot={false} />
+                </div>
+                <div class="pg-drawer__search">
+                    <button type="button" class="pg-search-pill" onClick={() => (guideSearchOpen.value = true)}>
+                        <VIcon icon="mdi-magnify" size={16} />
+                        <span class="pg-search-pill__label">{t("Search guide, rails, cases…")}</span>
+                        <span class="pg-search-pill__kbd">Ctrl K</span>
+                    </button>
                 </div>
                 <VDivider />
 
@@ -308,8 +394,13 @@ const DefaultLayout = dc(() => {
                                             to={{ name: item.name }}
                                             prependIcon={item.icon}
                                             title={item.label}
-                                            rounded="lg"
-                                            activeColor="primary"
+                                            rounded="md"
+                                            class={[
+                                                "pg-nav-item",
+                                                route.name === item.name || route.meta.parentName === item.name
+                                                    ? "pg-keycap-active"
+                                                    : "",
+                                            ]}
                                             active={route.name === item.name || route.meta.parentName === item.name}
                                         />
                                     ))}
@@ -319,9 +410,30 @@ const DefaultLayout = dc(() => {
                 </VList>
 
                 <div class="pg-drawer__footer">
-                    <VChip size="small" variant="tonal" color="primary" prependIcon="mdi-shield-account-outline">
-                        {role.value || t("Operator")}
-                    </VChip>
+                    <div class="pg-operator-card">
+                        <div class="pg-operator-card__avatar">{initial.value}</div>
+                        <div class="pg-operator-card__identity">
+                            <span class="pg-operator-card__name">{displayName.value}</span>
+                            <span class="pg-operator-card__email">
+                                {user.value?.userInfo?.email || user.value?.userInfo?.phone || role.value || t("Operator")}
+                            </span>
+                            <div class="pg-operator-card__meta">
+                                <StatusBadge status={role.value || "OPERATOR"} label={role.value || t("Operator")} />
+                                <span class="pg-operator-card__dot" title={t("Maker")} style={{ opacity: isMaker.value ? 1 : 0.25 }} />
+                                <span class="pg-operator-card__dot pg-operator-card__dot--checker" title={t("Checker")} style={{ opacity: isChecker.value ? 1 : 0.25 }} />
+                            </div>
+                        </div>
+                        <VBtn
+                            icon="mdi-logout"
+                            variant="text"
+                            size="x-small"
+                            aria-label={t("Logout")}
+                            onClick={() => {
+                                showSnackBar({ type: "primary", message: t("Logout") });
+                                void logout();
+                            }}
+                        />
+                    </div>
                 </div>
             </VNavigationDrawer>
 

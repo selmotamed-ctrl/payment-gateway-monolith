@@ -2,20 +2,9 @@ import { dc } from "kt-dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
-import {
-    VAlert,
-    VAutocomplete,
-    VBtn,
-    VBtnToggle,
-    VCard,
-    VCardText,
-    VDialog,
-    VSelect,
-    VTextField,
-    VTextarea,
-} from "vuetify/components";
+import { VAlert, VAutocomplete, VBtn, VSelect, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { api } from "@/state/api";
@@ -25,6 +14,10 @@ import { showSnackBar } from "@/utils/snackBar";
 import { copyToClipboard } from "@/utils/common";
 import { formatDateTime } from "./joinRequestHelp";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { MonoRef } from "@/components/ui/MonoRef";
 type MerchantOption = {
     id: string;
     title: string;
@@ -265,6 +258,9 @@ const JoinRequestNewPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("New admin-assisted join request")}
+                    subtitle={t("Prepare a complete onboarding package on behalf of a merchant without bypassing maker-checker controls.")}
+                    badge={t("Admin assisted")}
+                    badgeTone="info"
                     end={() => (
                         <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "JoinRequests" })}>
                             {t("Back to queue")}
@@ -278,26 +274,22 @@ const JoinRequestNewPage = dc(() => {
                     )}
                 </VAlert>
 
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+                <SurfaceCard>
+                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
                         <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>
                             {t("Onboarding target")}
                         </ThemedText>
-                        <VBtnToggle
+                        <SegmentedTabs
                             modelValue={mode.value}
-                            onUpdate:modelValue={(value: unknown) => {
-                                if (!value) return;
-                                mode.value = value as "NEW" | "EXISTING";
+                            tabs={[
+                                { value: "NEW", label: t("New merchant") },
+                                { value: "EXISTING", label: t("Existing pending merchant") },
+                            ]}
+                            onUpdate:modelValue={(value: string) => {
+                                mode.value = value === "EXISTING" ? "EXISTING" : "NEW";
                                 if (mode.value === "EXISTING") void loadMerchants("");
                             }}
-                            mandatory
-                            divided
-                            variant="outlined"
-                            style={{ maxWidth: "520px" }}
-                        >
-                            <VBtn value="NEW">{t("New merchant")}</VBtn>
-                            <VBtn value="EXISTING">{t("Existing pending merchant")}</VBtn>
-                        </VBtnToggle>
+                        />
                         {mode.value === "EXISTING" && (
                             <VAutocomplete
                                 label={t("Merchant")}
@@ -313,11 +305,11 @@ const JoinRequestNewPage = dc(() => {
                                 persistentHint
                             />
                         )}
-                    </VCardText>
-                </VCard>
+                    </SurfaceCardText>
+                </SurfaceCard>
 
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+                <SurfaceCard>
+                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
                         <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>
                             {t("Applicant profile")}
                         </ThemedText>
@@ -346,11 +338,11 @@ const JoinRequestNewPage = dc(() => {
                             rows={3}
                             autoGrow
                         />
-                    </VCardText>
-                </VCard>
+                    </SurfaceCardText>
+                </SurfaceCard>
 
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+                <SurfaceCard>
+                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
                         <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>
                             {t("Payout account")}
                         </ThemedText>
@@ -361,8 +353,8 @@ const JoinRequestNewPage = dc(() => {
                         <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
                             {t("The payout account is hashed for cross-merchant duplicate detection and reviewed before approval.")}
                         </ThemedText>
-                    </VCardText>
-                </VCard>
+                    </SurfaceCardText>
+                </SurfaceCard>
 
                 <ThemedView style={{ flexDirection: "row", gap: "12px", justifyContent: "flex-end" }}>
                     <VBtn variant="text" onClick={() => void router.push({ name: "JoinRequests" })}>
@@ -374,17 +366,17 @@ const JoinRequestNewPage = dc(() => {
                 </ThemedView>
             </ThemedView>
 
-            <VDialog modelValue={inviteOpen.value} onUpdate:modelValue={(value: boolean) => (inviteOpen.value = value)} maxWidth="620px" persistent>
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
-                            {t("Merchant invitation")}
-                        </ThemedText>
-                        <ThemedText>
+            <FormModal
+                modelValue={inviteOpen.value}
+                onUpdate:modelValue={(value: boolean) => (inviteOpen.value = value)}
+                title={t("Merchant invitation")}
+                size="md"
+            >
+<ThemedText>
                             {t("Share this one-time invitation token with the merchant administrator. It is shown only once.")}
                         </ThemedText>
                         <VAlert type="warning" variant="tonal">
-                            <code style={{ wordBreak: "break-all" }}>{created.value?.invitationToken}</code>
+                            <MonoRef value={created.value?.invitationToken ?? ""} />
                         </VAlert>
                         <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
                             {t("Expires")}: {formatDateTime(created.value?.invitationExpiresAt)}
@@ -406,9 +398,7 @@ const JoinRequestNewPage = dc(() => {
                                 {t("Continue to draft")}
                             </VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         </ScreenContainer>
     );
 });

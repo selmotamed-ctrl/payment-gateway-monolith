@@ -2,9 +2,9 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale, useTheme } from "vuetify";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VCard, VCardText, VDialog, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StatusChip } from "@/components/StatusChip";
@@ -23,9 +23,14 @@ import { formatDateTime } from "../operatorCaseHelp";
 import type {
     GatewayInquirySchedule,
     GatewayInquiryScheduleSummary,
-    GatewayInquiryScheduleStatus,
 } from "../types";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { MetricStrip } from "@/components/ui/MetricStrip";
+import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
+import { DescriptionList } from "@/components/ui/DescriptionList";
+import { MonoRef } from "@/components/ui/MonoRef";
+import { EmptyState } from "@/components/ui/EmptyState";
 const filterDefinitions = tableRegistry.GatewayInquiries?.filters ?? [];
 
 const statusLabel = (status: string): string =>
@@ -37,14 +42,70 @@ const statusLabel = (status: string): string =>
 const summaryCards = (summary: GatewayInquiryScheduleSummary | null, t: (key: string) => string) => {
     if (!summary) return [];
     return [
-        { key: "SCHEDULED", label: t("Scheduled"), value: summary.scheduled, tone: "info" as const },
-        { key: "RUNNING", label: t("Running"), value: summary.running, tone: "primary" as const },
-        { key: "RETRYING", label: t("Retrying"), value: summary.retrying, tone: "warning" as const },
-        { key: "COMPLETED", label: t("Completed"), value: summary.completed, tone: "success" as const },
-        { key: "FAILED", label: t("Failed"), value: summary.failed, tone: "error" as const },
-        { key: "CANCELLED", label: t("Cancelled"), value: summary.cancelled, tone: "neutral" as const },
-        { key: "EXPIRED", label: t("Expired"), value: summary.expired, tone: "error" as const },
-        { key: "OVERDUE", label: t("Overdue"), value: summary.overdue, tone: "warning" as const },
+        {
+            key: "SCHEDULED",
+            label: t("Scheduled"),
+            value: String(summary.scheduled),
+            subLabel: t("Queued inquiries"),
+            badge: t("Queued"),
+            badgeTone: "info" as const,
+        },
+        {
+            key: "RUNNING",
+            label: t("Running"),
+            value: String(summary.running),
+            subLabel: t("In flight"),
+            badge: t("Live"),
+            badgeTone: "info" as const,
+        },
+        {
+            key: "RETRYING",
+            label: t("Retrying"),
+            value: String(summary.retrying),
+            subLabel: t("Retry window"),
+            badge: t("P2"),
+            badgeTone: "warning" as const,
+        },
+        {
+            key: "COMPLETED",
+            label: t("Completed"),
+            value: String(summary.completed),
+            subLabel: t("Settled inquiries"),
+            badge: t("Complete"),
+            badgeTone: "success" as const,
+        },
+        {
+            key: "FAILED",
+            label: t("Failed"),
+            value: String(summary.failed),
+            subLabel: t("Needs operator review"),
+            badge: summary.failed > 0 ? t("P1") : t("Clear"),
+            badgeTone: summary.failed > 0 ? "danger" as const : "success" as const,
+        },
+        {
+            key: "CANCELLED",
+            label: t("Cancelled"),
+            value: String(summary.cancelled),
+            subLabel: t("Stopped schedules"),
+            badge: t("Closed"),
+            badgeTone: "neutral" as const,
+        },
+        {
+            key: "EXPIRED",
+            label: t("Expired"),
+            value: String(summary.expired),
+            subLabel: t("Past window"),
+            badge: summary.expired > 0 ? t("P1") : t("Clear"),
+            badgeTone: summary.expired > 0 ? "danger" as const : "success" as const,
+        },
+        {
+            key: "OVERDUE",
+            label: t("Overdue"),
+            value: String(summary.overdue),
+            subLabel: t("Past SLA"),
+            badge: summary.overdue > 0 ? t("P1") : t("Clear"),
+            badgeTone: summary.overdue > 0 ? "danger" as const : "success" as const,
+        },
     ];
 };
 
@@ -252,7 +313,7 @@ const GatewayInquirySchedulesPage = dc(() => {
             value: (row) => row.attemptReference ?? "",
             Value: ({ row }) => (
                 <ThemedView style={{ gap: "3px" }}>
-                    <ThemedText style={{ fontSize: "12px", fontWeight: 700, direction: "ltr" }}>{row.attemptReference || "—"}</ThemedText>
+                    <MonoRef value={row.attemptReference ?? ""} truncate={18} />
                     <StatusChip label={row.attemptStatus || t("Unknown")} tone={statusTone(row.attemptStatus)} size="x-small" />
                 </ThemedView>
             ),
@@ -364,6 +425,9 @@ const GatewayInquirySchedulesPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Gateway Inquiry Schedule")}
+                    subtitle={t("Monitor and operate gateway status inquiry schedules created by operator cases.")}
+                    badge={summary.value ? `${summary.value.overdue} ${t("Overdue")}` : t("Gateway inquiries")}
+                    badgeTone={summary.value && summary.value.overdue > 0 ? "danger" : "info"}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
                             <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "OperatorCases" })}>
@@ -380,16 +444,7 @@ const GatewayInquirySchedulesPage = dc(() => {
                     {t("Schedules are created when an operator requests a gateway status inquiry. The platform poll worker performs the inquiry and updates the schedule status.")}
                 </VAlert>
 
-                <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px" }}>
-                    {cards.value.map((item) => (
-                        <VCard key={item.key} variant="tonal">
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
-                                <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "20px" }}>{item.value}</ThemedText>
-                            </VCardText>
-                        </VCard>
-                    ))}
-                </ThemedView>
+                {cards.value.length > 0 && <MetricStrip items={cards.value} loading={summaryLoading.value} />}
 
                 <ApiTable<GatewayInquirySchedule>
                     title={t("Gateway Inquiry Schedule")}
@@ -443,11 +498,13 @@ const GatewayInquirySchedulesPage = dc(() => {
                 />
             </ThemedView>
 
-            <VDialog modelValue={actionMode.value !== null} onUpdate:modelValue={(value: boolean) => !value && closeAction()} maxWidth="520px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{actionTitle.value}</ThemedText>
-                        <ThemedText style={{ fontSize: "12px", opacity: 0.7 }}>{actionDescription.value}</ThemedText>
+            <FormModal
+                modelValue={actionMode.value !== null}
+                onUpdate:modelValue={(value: boolean) => !value && closeAction()}
+                title={actionTitle.value}
+                size="sm"
+            >
+<ThemedText style={{ fontSize: "12px", opacity: 0.7 }}>{actionDescription.value}</ThemedText>
                         {actionRow.value && (
                             <ThemedView style={{ gap: "3px", padding: "10px", borderRadius: "10px", background: "rgba(100,116,139,0.08)" }}>
                                 <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{actionRow.value.caseRef || actionRow.value.operatorCaseId}</ThemedText>
@@ -473,50 +530,45 @@ const GatewayInquirySchedulesPage = dc(() => {
                                 {actionMode.value === "cancel" ? t("Cancel inquiry") : actionMode.value === "retry" ? t("Retry inquiry") : t("Run now")}
                             </VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
 
-            <VDialog modelValue={detailOpen.value} onUpdate:modelValue={(value: boolean) => (detailOpen.value = value)} maxWidth="760px" scrollable>
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", alignItems: "center" }}>
-                            <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{t("Gateway inquiry detail")}</ThemedText>
-                            <VBtn icon="mdi-close" variant="text" onClick={() => (detailOpen.value = false)} />
-                        </ThemedView>
-                        {detailLoading.value ? (
+            <SlideOverDrawer
+                modelValue={detailOpen.value}
+                onUpdate:modelValue={(value: boolean) => (detailOpen.value = value)}
+                title={t("Gateway inquiry detail")}
+                subtitle={detail.value?.schedule.caseRef || detail.value?.schedule.attemptReference || ""}
+                width={620}
+            >
+{detailLoading.value ? (
                             <ThemedText style={{ opacity: 0.65 }}>{t("Loading")}</ThemedText>
                         ) : detail.value ? (
                             <>
-                                <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: "10px" }}>
-                                    {[
-                                        [t("Status"), statusLabel(detail.value.schedule.status)],
-                                        [t("Source"), sourceLabel(detail.value.schedule.source)],
-                                        [t("Case"), detail.value.schedule.caseRef || detail.value.schedule.operatorCaseId || "—"],
-                                        [t("Attempt"), detail.value.schedule.attemptReference || "—"],
-                                        [t("Merchant"), detail.value.schedule.merchantName || "—"],
-                                        [t("Gateway"), detail.value.schedule.gatewayName || detail.value.schedule.gatewayCode || "—"],
-                                        [t("Scheduled"), formatDateTime(detail.value.schedule.scheduledAt)],
-                                        [t("Next run"), formatDateTime(detail.value.schedule.nextRunAt)],
-                                        [t("Last run"), formatDateTime(detail.value.schedule.lastRunAt)],
-                                        [t("Attempts"), String(detail.value.schedule.attempts)],
-                                        [t("Last result"), detail.value.schedule.lastResult || "—"],
-                                        [t("Last error"), detail.value.schedule.lastError || "—"],
-                                        [t("Scheduled by"), detail.value.schedule.scheduledByEmail || "—"],
-                                        [t("Cancelled by"), detail.value.schedule.cancelledByEmail || "—"],
-                                        [t("Cancel reason"), detail.value.schedule.cancelReason || "—"],
-                                    ].map(([label, value]) => (
-                                        <VCard key={label} variant="tonal">
-                                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "3px", padding: "10px" }}>
-                                                <ThemedText style={{ fontSize: "10px", opacity: 0.6, textTransform: "uppercase" }}>{label}</ThemedText>
-                                                <ThemedText style={{ fontSize: "12px", fontWeight: 600 }}>{value}</ThemedText>
-                                            </VCardText>
-                                        </VCard>
-                                    ))}
-                                </ThemedView>
+                                <DescriptionList
+                                    columns={2}
+                                    items={[
+                                        { label: t("Schedule ID"), value: <MonoRef value={detail.value.schedule.id} /> },
+                                        { label: t("Status"), value: statusLabel(detail.value.schedule.status) },
+                                        { label: t("Source"), value: sourceLabel(detail.value.schedule.source) },
+                                        { label: t("Case"), value: <MonoRef value={detail.value.schedule.caseRef || detail.value.schedule.operatorCaseId || ""} /> },
+                                        { label: t("Attempt"), value: <MonoRef value={detail.value.schedule.attemptReference || detail.value.schedule.attemptId} /> },
+                                        { label: t("Merchant"), value: detail.value.schedule.merchantName || "—" },
+                                        { label: t("Merchant ID"), value: <MonoRef value={detail.value.schedule.merchantId ?? ""} /> },
+                                        { label: t("Gateway"), value: detail.value.schedule.gatewayName || detail.value.schedule.gatewayCode || "—" },
+                                        { label: t("Gateway ID"), value: <MonoRef value={detail.value.schedule.gatewayId ?? ""} /> },
+                                        { label: t("Scheduled"), value: formatDateTime(detail.value.schedule.scheduledAt) },
+                                        { label: t("Next run"), value: formatDateTime(detail.value.schedule.nextRunAt) },
+                                        { label: t("Last run"), value: formatDateTime(detail.value.schedule.lastRunAt) },
+                                        { label: t("Attempts"), value: String(detail.value.schedule.attempts) },
+                                        { label: t("Last result"), value: detail.value.schedule.lastResult || "—" },
+                                        { label: t("Last error"), value: detail.value.schedule.lastError || "—" },
+                                        { label: t("Scheduled by"), value: detail.value.schedule.scheduledByEmail || "—" },
+                                        { label: t("Cancelled by"), value: detail.value.schedule.cancelledByEmail || "—" },
+                                        { label: t("Cancel reason"), value: detail.value.schedule.cancelReason || "—" },
+                                    ]}
+                                />
                                 <ThemedText type="defaultSemiBold">{t("Schedule audit trail")}</ThemedText>
                                 {detail.value.auditTrail.length === 0 ? (
-                                    <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("No audit entries yet.")}</ThemedText>
+                                    <EmptyState title={t("No audit entries yet.")} icon="mdi-history" />
                                 ) : (
                                     detail.value.auditTrail.map((entry) => (
                                         <ThemedView key={entry.id} style={{ gap: "3px", borderBottom: "1px solid rgba(100,116,139,0.12)", paddingBottom: "7px" }}>
@@ -532,9 +584,7 @@ const GatewayInquirySchedulesPage = dc(() => {
                                 )}
                             </>
                         ) : null}
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </SlideOverDrawer>
         </ScreenContainer>
     );
 });

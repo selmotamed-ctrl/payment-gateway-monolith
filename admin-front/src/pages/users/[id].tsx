@@ -2,9 +2,9 @@ import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute, useRouter } from "vue-router";
-import { VAlert, VBtn, VCard, VCardText, VChip, VDivider } from "vuetify/components";
+import { VAlert, VBtn, VDivider } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
@@ -16,6 +16,8 @@ import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { MetaPill } from "@/components/ui/MetaPill";
 type UserDetail = {
     id: string;
     createdAt: string;
@@ -205,6 +207,7 @@ const UserDetailPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Admin User")}
+                    subtitle={t("Operator identity, authorities, and audited access history.")}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "AdminUsers" })}>{t("Back to users")}</VBtn>
@@ -223,12 +226,12 @@ const UserDetailPage = dc(() => {
                             <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>{user.value.email}</ThemedText>
                             <StatusChip label={user.value.status} tone={statusTone(user.value.status)} />
                             <StatusChip label={user.value.role.replaceAll("_", " ")} tone="info" />
-                            {user.value.isMaker && <VChip size="small" variant="tonal" color="primary">{t("Maker")}</VChip>}
-                            {user.value.isChecker && <VChip size="small" variant="tonal" color="secondary">{t("Checker")}</VChip>}
+                            {user.value.isMaker && <MetaPill size="small" variant="tonal" color="primary">{t("Maker")}</MetaPill>}
+                            {user.value.isChecker && <MetaPill size="small" variant="tonal" color="secondary">{t("Checker")}</MetaPill>}
                         </ThemedView>
 
-                        <VCard variant="flat" style={{ borderRadius: "16px" }}>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Access summary")}</ThemedText>
                                 <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
                                     {[
@@ -237,33 +240,33 @@ const UserDetailPage = dc(() => {
                                         { label: t("Audit events"), value: String(auditTrail.value.length) },
                                         { label: t("Academy lessons"), value: String(academy.value.completedLessonIds?.length ?? 0) },
                                     ].map((item) => (
-                                        <VCard key={item.label} variant="tonal">
-                                            <VCardText style={{ padding: "12px" }}>
+                                        <SurfaceCard key={item.label} variant="tonal">
+                                            <SurfaceCardText style={{ padding: "12px" }}>
                                                 <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
                                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
-                                            </VCardText>
-                                        </VCard>
+                                            </SurfaceCardText>
+                                        </SurfaceCard>
                                     ))}
                                 </ThemedView>
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
 
                         <FieldsSections sections={sections.value} />
 
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <SurfaceCard>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Authorities")}</ThemedText>
                                 {authorityList.value.length === 0 && <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("No authorities assigned.")}</ThemedText>}
                                 <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
                                     {authorityList.value.map((key) => (
-                                        <VChip key={key} size="x-small" variant="tonal" style={{ direction: "ltr" }}>{key}</VChip>
+                                        <MetaPill key={key} size="x-small" variant="tonal" style={{ direction: "ltr" }}>{key}</MetaPill>
                                     ))}
                                 </ThemedView>
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
 
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <SurfaceCard>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "16px", flex: 1 }}>{t("Recent approvals")}</ThemedText>
                                     <StatusChip label={`${approvals.value.length}`} tone="neutral" size="x-small" />
@@ -283,11 +286,11 @@ const UserDetailPage = dc(() => {
                                         </ThemedText>
                                     </ThemedView>
                                 ))}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
 
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <SurfaceCard>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Academy progress")}</ThemedText>
                                 <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
                                     <StatusChip label={`${academy.value.completedLessonIds?.length ?? 0} ${t("lessons")}`} tone="info" size="x-small" />
@@ -298,16 +301,16 @@ const UserDetailPage = dc(() => {
                                 {(academy.value.earnedBadges ?? []).length > 0 && (
                                     <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
                                         {(academy.value.earnedBadges ?? []).map((badge) => (
-                                            <VChip key={badge} size="x-small" variant="tonal" color="primary">{badge}</VChip>
+                                            <MetaPill key={badge} size="x-small" variant="tonal" color="primary">{badge}</MetaPill>
                                         ))}
                                     </ThemedView>
                                 )}
                                 <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("Last academy update")}: {formatDateTime(academy.value.updatedAt)}</ThemedText>
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
 
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <SurfaceCard>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Audit trail")}</ThemedText>
                                 <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("Last 50 actions performed by this user.")}</ThemedText>
                                 {auditTrail.value.length === 0 && <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("No audit events recorded yet.")}</ThemedText>}
@@ -328,8 +331,8 @@ const UserDetailPage = dc(() => {
                                         </ThemedView>
                                     );
                                 })}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
                     </>
                 ) : null}
             </ThemedView>

@@ -72,7 +72,7 @@ const PageStatCard = dc(
                                     "line-height": 1.1,
                                     textAlign: "center",
                                     "margin-top": "4px",
-                                    background: `linear-gradient(135deg, #fff 0%, ${color}80 100%)`,
+                                    color: `var(--pg-ink-primary)`,
                                     "-webkit-background-clip": "text",
                                     "-webkit-text-fill-color": "transparent",
                                 }}

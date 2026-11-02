@@ -1,10 +1,10 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale, useTheme } from "vuetify";
-import { VBtn, VCard, VCardText } from "vuetify/components";
+import { VBtn } from "vuetify/components";
 import { useRouter } from "vue-router";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StatusChip } from "@/components/StatusChip";
@@ -29,6 +29,12 @@ import {
 } from "./joinRequestHelp";
 import type { JoinRequestSummary } from "./types";
 
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { MetricStrip } from "@/components/ui/MetricStrip";
+import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
+import { DescriptionList } from "@/components/ui/DescriptionList";
+import { MonoRef } from "@/components/ui/MonoRef";
+import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 type JoinRequestsSummary = {
     total: number;
     open: number;
@@ -186,14 +192,59 @@ const JoinRequestsPage = dc(() => {
         const data = summary.value;
         if (!data) return [];
         return [
-            { label: t("Open queue"), value: String(data.open), tone: "info" as const },
-            { label: t("Overdue"), value: String(data.overdue), tone: data.overdue > 0 ? "error" as const : "success" as const },
-            { label: t("Due within 24h"), value: String(data.dueSoon), tone: data.dueSoon > 0 ? "warning" as const : "success" as const },
-            { label: t("Unassigned"), value: String(data.unassigned), tone: data.unassigned > 0 ? "warning" as const : "success" as const },
-            { label: t("Pending checker"), value: String(data.pendingChecker), tone: data.pendingChecker > 0 ? "warning" as const : "success" as const },
-            { label: t("Four-eyes"), value: String(data.fourEyes), tone: data.fourEyes > 0 ? "error" as const : "success" as const },
+            {
+                key: "open",
+                label: t("Open queue"),
+                value: String(data.open),
+                subLabel: t("SLA-bound requests"),
+                badge: t("Live"),
+                badgeTone: "info" as const,
+            },
+            {
+                key: "overdue",
+                label: t("Overdue"),
+                value: String(data.overdue),
+                subLabel: t("Past SLA"),
+                badge: data.overdue > 0 ? t("P1") : t("Clear"),
+                badgeTone: data.overdue > 0 ? "danger" as const : "success" as const,
+            },
+            {
+                key: "dueSoon",
+                label: t("Due within 24h"),
+                value: String(data.dueSoon),
+                subLabel: t("Within 24h"),
+                badge: data.dueSoon > 0 ? t("P2") : t("Clear"),
+                badgeTone: data.dueSoon > 0 ? "warning" as const : "success" as const,
+            },
+            {
+                key: "unassigned",
+                label: t("Unassigned"),
+                value: String(data.unassigned),
+                subLabel: t("No owner"),
+                badge: data.unassigned > 0 ? t("Attention") : t("Clear"),
+                badgeTone: data.unassigned > 0 ? "warning" as const : "success" as const,
+            },
+            {
+                key: "pendingChecker",
+                label: t("Pending checker"),
+                value: String(data.pendingChecker),
+                subLabel: t("Awaiting independent checker"),
+                badge: data.pendingChecker > 0 ? t("Four eyes") : t("Clear"),
+                badgeTone: data.pendingChecker > 0 ? "warning" as const : "success" as const,
+            },
+            {
+                key: "fourEyes",
+                label: t("Four-eyes"),
+                value: String(data.fourEyes),
+                subLabel: t("Required four-eyes reviews"),
+                badge: data.fourEyes > 0 ? t("Required") : t("Clear"),
+                badgeTone: data.fourEyes > 0 ? "danger" as const : "success" as const,
+            },
         ];
     });
+
+    const asBadgeTone = (tone: ReturnType<typeof statusTone>): BadgeTone =>
+        tone === "error" ? "danger" : tone === "primary" ? "info" : tone;
 
     const canWrite = computed(() => hasOneOfAuthorities(["joinrequests.review", "kyb.review"]));
 
@@ -210,6 +261,13 @@ const JoinRequestsPage = dc(() => {
 
     const openRequest = (row: JoinRequestSummary) => {
         void router.push({ name: "JoinRequestDetail", params: { id: row.id } });
+    };
+
+    const inspectionOpen = ref(false);
+    const inspectionRow = ref<JoinRequestSummary | null>(null);
+    const openInspection = (row: JoinRequestSummary) => {
+        inspectionRow.value = row;
+        inspectionOpen.value = true;
     };
 
     const toneColor = (tone: ReturnType<typeof statusTone>): string => {
@@ -239,8 +297,9 @@ const JoinRequestsPage = dc(() => {
                         {row.merchant?.tradeName || row.merchantName || "—"}
                     </ThemedText>
                     <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>
-                        {row.merchant?.legalName || row.merchantId}
+                        {row.merchant?.legalName || "—"}
                     </ThemedText>
+                    <MonoRef value={row.merchantId} truncate={14} />
                 </ThemedView>
             ),
         },
@@ -357,9 +416,14 @@ const JoinRequestsPage = dc(() => {
             label: "Actions",
             sortable: false,
             Value: ({ row }: { row: JoinRequestSummary }) => (
-                <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => openRequest(row)}>
-                    {t("Open")}
-                </VBtn>
+                <ThemedView style={{ flexDirection: "row", gap: "4px", flexWrap: "wrap" }}>
+                    <VBtn size="small" variant="text" prependIcon="mdi-eye-outline" onClick={() => openInspection(row)}>
+                        {t("Inspect")}
+                    </VBtn>
+                    <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => openRequest(row)}>
+                        {t("Open")}
+                    </VBtn>
+                </ThemedView>
             ),
         },
     ];
@@ -369,6 +433,9 @@ const JoinRequestsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Join Requests")}
+                    subtitle={t("Review onboarding applications, KYB evidence and SLA-bound decisions in one queue.")}
+                    badge={t("KYB review")}
+                    badgeTone="info"
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
                             <StatusChip label={`${total.value} ${t("requests")}`} tone="info" size="small" />
@@ -388,33 +455,26 @@ const JoinRequestsPage = dc(() => {
                 />
 
                 {summary.value && (
-                    <VCard variant="flat" style={{ borderRadius: "16px" }}>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px", flex: 1 }}>{t("Onboarding SLA health")}</ThemedText>
-                                <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
-                                <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("Paused SLAs are excluded from overdue counts.")}</ThemedText>
-                            </ThemedView>
-                            <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px" }}>
-                                {summaryItems.value.map((item) => (
-                                    <VCard key={item.label} variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
-                                            <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
-                                        </VCardText>
-                                    </VCard>
-                                ))}
-                            </ThemedView>
-                            <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                {Object.entries(summary.value.byStatus ?? {}).map(([state, count]) => (
-                                    <StatusChip key={state} label={`${state.replaceAll("_", " ")}: ${count}`} tone={statusTone(state)} size="x-small" />
-                                ))}
-                                {Object.entries(summary.value.byRisk ?? {}).map(([risk, count]) => (
-                                    <StatusChip key={risk} label={`${risk}: ${count}`} tone={statusTone(risk)} size="x-small" />
-                                ))}
-                            </ThemedView>
-                        </VCardText>
-                    </VCard>
+                    <ThemedView style={{ gap: "12px" }}>
+                        <MetricStrip items={summaryItems.value} />
+                        <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "15px", flex: 1 }}>{t("Onboarding SLA health")}</ThemedText>
+                                    <VBtn size="small" variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
+                                    <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("Paused SLAs are excluded from overdue counts.")}</ThemedText>
+                                </ThemedView>
+                                <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+                                    {Object.entries(summary.value.byStatus ?? {}).map(([state, count]) => (
+                                        <StatusChip key={state} label={`${state.replaceAll("_", " ")}: ${count}`} tone={statusTone(state)} size="x-small" />
+                                    ))}
+                                    {Object.entries(summary.value.byRisk ?? {}).map(([risk, count]) => (
+                                        <StatusChip key={risk} label={`${risk}: ${count}`} tone={statusTone(risk)} size="x-small" />
+                                    ))}
+                                </ThemedView>
+                            </SurfaceCardText>
+                        </SurfaceCard>
+                    </ThemedView>
                 )}
 
                 <ApiTable<JoinRequestSummary>
@@ -471,6 +531,70 @@ const JoinRequestsPage = dc(() => {
                     )}
                 />
             </ThemedView>
+
+            <SlideOverDrawer
+                modelValue={inspectionOpen.value}
+                onUpdate:modelValue={(value: boolean) => (inspectionOpen.value = value)}
+                title={inspectionRow.value?.merchant?.tradeName || inspectionRow.value?.merchantName || t("Join request")}
+                subtitle={inspectionRow.value ? `${t("Onboarding review")} · ${t("SLA")} ${slaInfo(inspectionRow.value).label}` : ""}
+            >
+                {inspectionRow.value && (
+                    <ThemedView style={{ gap: "16px" }}>
+                        <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+                            <StatusBadge
+                                status={inspectionRow.value.status}
+                                label={joinStatusHelp(inspectionRow.value.status).label}
+                                toneOverride={asBadgeTone(statusTone(inspectionRow.value.status))}
+                            />
+                            <StatusBadge
+                                status={inspectionRow.value.proposedRiskTier || inspectionRow.value.riskTier}
+                                toneOverride={asBadgeTone(statusTone(inspectionRow.value.proposedRiskTier || inspectionRow.value.riskTier))}
+                            />
+                            <StatusBadge
+                                status={channelLabel(inspectionRow.value.onboardingChannel)}
+                                toneOverride={inspectionRow.value.onboardingChannel === "ADMIN_ASSISTED" ? "info" : "neutral"}
+                            />
+                            {inspectionRow.value.fourEyesRequired && (
+                                <StatusBadge status="Four eyes" toneOverride="warning" />
+                            )}
+                        </ThemedView>
+                        <DescriptionList
+                            columns={2}
+                            items={[
+                                { label: t("Merchant ID"), value: <MonoRef value={inspectionRow.value.merchantId} /> },
+                                { label: t("Legal name"), value: inspectionRow.value.merchant?.legalName || "—" },
+                                { label: t("Contact email"), value: inspectionRow.value.merchant?.contactEmail || "—" },
+                                { label: t("Contact phone"), value: inspectionRow.value.merchant?.contactPhone || "—" },
+                                { label: t("Onboarding channel"), value: channelLabel(inspectionRow.value.onboardingChannel) },
+                                { label: t("Business category"), value: inspectionRow.value.merchant?.businessCategory || "—" },
+                                { label: t("Submitted"), value: formatDateTime(inspectionRow.value.submittedAt ?? inspectionRow.value.createdAt) },
+                                { label: t("SLA due"), value: formatDateTime(inspectionRow.value.slaDueAt) },
+                                { label: t("Assignee"), value: inspectionRow.value.reviewer || t("Unassigned") },
+                                {
+                                    label: t("Expected monthly volume"),
+                                    value: [inspectionRow.value.profileJson?.expectedMonthlyVolume, inspectionRow.value.profileJson?.currency]
+                                        .filter(Boolean)
+                                        .join(" ") || "—",
+                                },
+                            ]}
+                        />
+                        <ThemedView style={{ flexDirection: "row", gap: "8px", justifyContent: "flex-end" }}>
+                            <VBtn variant="text" onClick={() => (inspectionOpen.value = false)}>{t("Close")}</VBtn>
+                            <VBtn
+                                color="primary"
+                                prependIcon="mdi-open-in-new"
+                                onClick={() => {
+                                    const row = inspectionRow.value;
+                                    inspectionOpen.value = false;
+                                    if (row) openRequest(row);
+                                }}
+                            >
+                                {t("Open")}
+                            </VBtn>
+                        </ThemedView>
+                    </ThemedView>
+                )}
+            </SlideOverDrawer>
         </ScreenContainer>
     );
 });

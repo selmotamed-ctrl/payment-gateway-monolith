@@ -1,9 +1,9 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
-import { VAlert, VBtn, VCard, VCardText, VFileInput, VSelect, VTextField, VTextarea, VTimeline, VTimelineItem } from "vuetify/components";
+import { VAlert, VBtn, VFileInput, VSelect, VTextField, VTextarea, VTimeline, VTimelineItem } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
@@ -14,6 +14,7 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { percentOf, toDecimal } from "@/utils/money";
 
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 type BusinessProfile = {
     legalName: string;
     tradeName: string;
@@ -280,6 +281,7 @@ const OnboardingPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Merchant Onboarding")}
+                    subtitle={t("Complete KYB, payout, and storefront details for activation.")}
                     end={() =>
                         joinStatus.value ? <StatusChip label={joinStatus.value} tone="info" /> : (<></>)
                     }
@@ -292,8 +294,8 @@ const OnboardingPage = dc(() => {
                 )}
 
                 {revalidations.value.length > 0 && (
-                    <VCard variant="tonal" color="warning">
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    <SurfaceCard variant="tonal" color="warning">
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                             <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>
                                 {t("KYB re-verification required")}
                             </ThemedText>
@@ -338,8 +340,8 @@ const OnboardingPage = dc(() => {
                                     </ThemedView>
                                 </ThemedView>
                             ))}
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
                 )}
 
                 {error.value ? (
@@ -348,8 +350,8 @@ const OnboardingPage = dc(() => {
                     <StateView loading={true} />
                 ) : (
                     <>
-                        <VCard>
-                            <VCardText>
+                        <SurfaceCard>
+                            <SurfaceCardText>
                                 <VTimeline density="compact" side="end" align="start">
                                     {STEPS.map((item, index) => (
                                         <VTimelineItem key={item.key} size="small">
@@ -367,12 +369,12 @@ const OnboardingPage = dc(() => {
                                         </VTimelineItem>
                                     ))}
                                 </VTimeline>
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
 
                         {step.value === 1 && (
-                            <VCard>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                            <SurfaceCard>
+                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
                                         {t("Business Profile")}
                                     </ThemedText>
@@ -453,13 +455,13 @@ const OnboardingPage = dc(() => {
                                     <VBtn variant="tonal" loading={saving.value} onClick={() => void saveProfile()}>
                                         {t("Save")}
                                     </VBtn>
-                                </VCardText>
-                            </VCard>
+                                </SurfaceCardText>
+                            </SurfaceCard>
                         )}
 
                         {step.value === 2 && (
-                            <VCard>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                            <SurfaceCard>
+                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                     <ThemedView
                                         style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
                                     >
@@ -544,13 +546,13 @@ const OnboardingPage = dc(() => {
                                     <VBtn variant="tonal" loading={saving.value} onClick={() => void saveOwners()}>
                                         {t("Save")}
                                     </VBtn>
-                                </VCardText>
-                            </VCard>
+                                </SurfaceCardText>
+                            </SurfaceCard>
                         )}
 
                         {step.value === 3 && (
-                            <VCard>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                            <SurfaceCard>
+                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                     <ThemedView
                                         style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
                                     >
@@ -609,13 +611,13 @@ const OnboardingPage = dc(() => {
                                             </VBtn>
                                         </ThemedView>
                                     ))}
-                                </VCardText>
-                            </VCard>
+                                </SurfaceCardText>
+                            </SurfaceCard>
                         )}
 
                         {step.value === 4 && (
-                            <VCard>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                            <SurfaceCard>
+                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
                                         {t("Bank Details")}
                                     </ThemedText>
@@ -651,13 +653,13 @@ const OnboardingPage = dc(() => {
                                             style={{ minWidth: "170px" }}
                                         />
                                     </ThemedView>
-                                </VCardText>
-                            </VCard>
+                                </SurfaceCardText>
+                            </SurfaceCard>
                         )}
 
                         {step.value === 5 && (
-                            <VCard>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                            <SurfaceCard>
+                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
                                         {t("Submit Application")}
                                     </ThemedText>
@@ -685,8 +687,8 @@ const OnboardingPage = dc(() => {
                                     <VBtn color="primary" loading={saving.value} onClick={() => void submit()}>
                                         {t("Submit Application")}
                                     </VBtn>
-                                </VCardText>
-                            </VCard>
+                                </SurfaceCardText>
+                            </SurfaceCard>
                         )}
 
                         <ThemedView style={{ flexDirection: "row", justifyContent: "space-between" }}>

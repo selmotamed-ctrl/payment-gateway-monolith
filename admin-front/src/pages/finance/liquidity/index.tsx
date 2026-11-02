@@ -1,20 +1,24 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VAlert, VBtn, VCard, VCardText } from "vuetify/components";
+import { VAlert, VBtn } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
-import { MoneyText } from "@/components/MoneyText";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
+import { MetricStrip } from "@/components/ui/MetricStrip";
+import { MonoRef } from "@/components/ui/MonoRef";
+import { EmptyState } from "@/components/ui/EmptyState";
 type Liquidity = {
     currency?: string;
     treasuryBalance?: string;
@@ -101,10 +105,10 @@ const LiquidityPage = dc(() => {
 
     const currency = () => data.value?.currency ?? "LYD";
 
-    const line = (label: string, value: string | undefined, color?: string) => (
+    const line = (label: string, value: string | undefined, sign = false) => (
         <ThemedView key={label} style={{ flexDirection: "row", justifyContent: "space-between", gap: "12px" }}>
             <ThemedText style={{ fontSize: "13px" }}>{t(label)}</ThemedText>
-            <MoneyText value={value ?? "0"} currency={currency()} color={color} bold />
+            <MoneyDisplay amount={value ?? "0"} currency={currency()} size="lg" colorSign={sign} />
         </ThemedView>
     );
 
@@ -113,6 +117,9 @@ const LiquidityPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Liquidity")}
+                    subtitle={t("Monitor treasury cover, clearing ageing, cash-out demand, and held balances.")}
+                    badge={t("Treasury control")}
+                    badgeTone="info"
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                             {data.value?.checkedAt && <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("Updated")} {new Date(data.value.checkedAt).toLocaleTimeString()}</ThemedText>}
@@ -133,34 +140,27 @@ const LiquidityPage = dc(() => {
                                 {t("Treasury cover is below 1. Review clearing balances and cash-out demand before releasing payouts.")}
                             </VAlert>
                         )}
-                        <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "18px" }}>
-                        <VCard style={{ flex: "1 1 340px" }}>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                                <ThemedText type="defaultSemiBold">{t("Treasury Cover")}</ThemedText>
-                                {line("Treasury Balance", data.value?.treasuryBalance)}
-                                {line("Clearing Ageing", data.value?.clearingBalances)}
-                                {line("Receivables", data.value?.obligations)}
-                                <ThemedView style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                                    <ThemedText style={{ fontSize: "13px" }}>{t("Treasury Cover")}</ThemedText>
-                                    <ThemedText style={{ fontSize: "14px", fontWeight: "700" }}>
-                                        {data.value?.coverRatio ?? "-"}
-                                    </ThemedText>
-                                </ThemedView>
-                            </VCardText>
-                        </VCard>
 
-                        <VCard style={{ flex: "1 1 340px" }}>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <MetricStrip items={[
+                            { key: "treasury", label: t("Treasury Balance"), moneyAmount: data.value?.treasuryBalance ?? "0", currency: currency() },
+                            { key: "clearing", label: t("Clearing Ageing"), moneyAmount: data.value?.clearingBalances ?? "0", currency: currency() },
+                            { key: "receivables", label: t("Receivables"), moneyAmount: data.value?.obligations ?? "0", currency: currency() },
+                            { key: "cover", label: t("Treasury Cover"), value: data.value?.coverRatio ?? "-", badge: Number(data.value?.coverRatio ?? 1) < 1 ? t("Failed") : t("Passed"), badgeTone: Number(data.value?.coverRatio ?? 1) < 1 ? "danger" : "success" },
+                        ]} />
+
+                        <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "18px" }}>
+                        <SurfaceCard style={{ flex: "1 1 340px" }}>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedText type="defaultSemiBold">{t("Cash-Out Queue")}</ThemedText>
                                 {line("Pending", data.value?.cashoutQueue?.pending)}
                                 {line("Processing", data.value?.cashoutQueue?.processing)}
                                 {line("Complete", data.value?.cashoutQueue?.completed)}
                                 {line("Amount Due", data.value?.cashoutQueue?.nextDayDemand)}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
 
-                        <VCard style={{ flex: "1 1 340px" }}>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <SurfaceCard style={{ flex: "1 1 340px" }}>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedText type="defaultSemiBold">{t("Holds And Reserves")}</ThemedText>
                                 {line("Holds And Reserves", data.value?.holdsAndReserves?.amlHold)}
                                 {line("Chargeback", data.value?.holdsAndReserves?.chargebackReserve)}
@@ -173,44 +173,44 @@ const LiquidityPage = dc(() => {
                                         tone="warning"
                                     />
                                 </ThemedView>
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
 
-                        <VCard style={{ flex: "1 1 100%" }}>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <SurfaceCard style={{ flex: "1 1 100%" }}>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedText type="defaultSemiBold">{t("Clearing by gateway")}</ThemedText>
-                                {(data.value?.clearingByGateway ?? []).length === 0 && <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("No gateway clearing balances")}</ThemedText>}
+                                {(data.value?.clearingByGateway ?? []).length === 0 && <EmptyState title={t("No gateway clearing balances")} description={t("No gateway clearing balances are available for this snapshot.")} />}
                                 {(data.value?.clearingByGateway ?? []).map((row) => (
                                     <ThemedView
                                         key={row.gatewayId}
                                         style={{ flexDirection: "row", gap: "14px", alignItems: "center", fontSize: "13px", borderBottom: "1px solid rgba(100,116,139,0.12)", paddingBottom: "6px" }}
                                     >
                                         <ThemedView style={{ flex: 1, gap: "2px" }}>
-                                            <ThemedText style={{ fontSize: "12px", fontWeight: 600 }}>{row.gatewayCode}</ThemedText>
+                                            <MonoRef value={row.gatewayCode} copyable={false} />
                                             <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{row.gatewayName}</ThemedText>
                                         </ThemedView>
-                                        <MoneyText value={row.balance} currency={currency()} bold />
+                                        <MoneyDisplay amount={row.balance} currency={currency()} size="lg" />
                                         <span style={{ opacity: 0.55 }}>{t("T+0")}: {row.t0}</span>
                                         <span style={{ opacity: 0.55 }}>{t("T+1")}: {row.t1}</span>
                                         <span style={{ opacity: 0.55 }}>{t("T+2")}: {row.t2}</span>
                                         <span style={{ opacity: 0.55 }}>{t("Older")}: {row.older}</span>
                                     </ThemedView>
                                 ))}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
 
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        <SurfaceCard>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                 <ThemedText type="defaultSemiBold">{t("Settlement ageing")}</ThemedText>
                                 {(data.value?.clearingAgeing ?? []).map((row) => (
                                     <ThemedView key={row.bucket} style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", fontSize: "13px" }}>
                                         <ThemedText>{row.bucket}</ThemedText>
                                         <ThemedText>{row.count} {t("attempts")}</ThemedText>
-                                        <MoneyText value={row.amount} currency={currency()} />
+                                        <MoneyDisplay amount={row.amount} currency={currency()} size="md" />
                                     </ThemedView>
                                 ))}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
                         </ThemedView>
                     </ThemedView>
                 )}

@@ -1,20 +1,24 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VAlert, VBtn, VCard, VCardText } from "vuetify/components";
+import { VAlert, VBtn } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
-import { MoneyText } from "@/components/MoneyText";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
+import { MetricStrip } from "@/components/ui/MetricStrip";
+import { MonoRef } from "@/components/ui/MonoRef";
+import { EmptyState } from "@/components/ui/EmptyState";
 type InvariantResult = {
     ok?: boolean;
     drift?: string;
@@ -102,7 +106,7 @@ const InvariantPage = dc(() => {
     const sideRow = (label: string, value: string | undefined) => (
         <ThemedView key={label} style={{ flexDirection: "row", justifyContent: "space-between", gap: "12px" }}>
             <ThemedText style={{ fontSize: "13px" }}>{t(label)}</ThemedText>
-            <MoneyText value={value ?? "0"} currency={currency()} />
+            <MoneyDisplay amount={value ?? "0"} currency={currency()} size="md" colorSign />
         </ThemedView>
     );
 
@@ -111,6 +115,9 @@ const InvariantPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Invariant Status")}
+                    subtitle={t("Verify the double-entry ledger invariant and inspect account-level balances.")}
+                    badge={t("Ledger control")}
+                    badgeTone="info"
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                             {data.value?.checkedAt && <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("Last run")} {new Date(data.value.checkedAt).toLocaleTimeString()}</ThemedText>}
@@ -132,58 +139,39 @@ const InvariantPage = dc(() => {
                                 : t("Ledger drift detected. Automated payouts must halt until finance resolves the drift.")}
                         </VAlert>
 
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "12px" }}>
-                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                                        {t("Invariant Status")}
-                                    </ThemedText>
+                        <MetricStrip items={[
+                            { key: "drift", label: t("Drift"), moneyAmount: data.value?.drift ?? "0", currency: currency(), badge: data.value?.ok ? t("Passed") : t("Failed"), badgeTone: data.value?.ok ? "success" : "danger" },
+                            { key: "debit", label: t("Debit side"), moneyAmount: data.value?.leftSide ?? "0.0000", currency: currency() },
+                            { key: "credit", label: t("Credit side"), moneyAmount: data.value?.rightSide ?? "0.0000", currency: currency() },
+                            { key: "accounts", label: t("Accounts"), value: String(data.value?.accounts?.length ?? 0) },
+                        ]} />
+
+                        <SurfaceCard title={t("Invariant Status")}>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                                <ThemedView style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
                                     <StatusChip
                                         label={data.value?.ok ? t("Passed") : t("Failed")}
                                         tone={data.value?.ok ? "success" : "error"}
                                     />
+                                    <ThemedText style={{ fontSize: "13px" }}>
+                                        {t("Last Run")}: {data.value?.checkedAt ? new Date(data.value.checkedAt).toLocaleString() : "-"}
+                                    </ThemedText>
                                 </ThemedView>
-                                <ThemedView style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                                    <ThemedText style={{ fontSize: "13px" }}>{t("Drift")}</ThemedText>
-                                    <MoneyText
-                                        value={data.value?.drift ?? "0"}
-                                        currency={currency()}
-                                        color={data.value?.ok ? "#059669" : "#dc2626"}
-                                        bold
-                                    />
-                                </ThemedView>
-                                <ThemedView style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                                    <ThemedText style={{ fontSize: "13px" }}>{t("Last Run")}</ThemedText>
-                                    <ThemedText style={{ fontSize: "13px" }}>{data.value?.checkedAt ? new Date(data.value.checkedAt).toLocaleString() : "-"}</ThemedText>
-                                </ThemedView>
-                                <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "10px" }}>
-                                    {[
-                                        { label: t("Debit side"), value: data.value?.leftSide ?? "0.0000" },
-                                        { label: t("Credit side"), value: data.value?.rightSide ?? "0.0000" },
-                                        { label: t("Accounts"), value: String(data.value?.accounts?.length ?? 0) },
-                                    ].map((item) => (
-                                        <VCard key={item.label} variant="tonal">
-                                            <VCardText style={{ padding: "12px" }}>
-                                                <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{item.label}</ThemedText>
-                                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{item.value}</ThemedText>
-                                            </VCardText>
-                                        </VCard>
-                                    ))}
-                                </ThemedView>
-                            </VCardText>
-                        </VCard>
+                                <MoneyDisplay amount={data.value?.drift ?? "0"} currency={currency()} size="xl" colorSign />
+                            </SurfaceCardText>
+                        </SurfaceCard>
 
                         <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "18px" }}>
-                            <VCard style={{ flex: "1 1 380px" }}>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                            <SurfaceCard style={{ flex: "1 1 380px" }}>
+                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                     <ThemedText type="defaultSemiBold">{t("Treasury Cover")}</ThemedText>
                                     {sideRow("Treasury Balance", data.value?.sides?.treasury)}
                                     {sideRow("GATEWAY_CLEARING", data.value?.sides?.clearing)}
                                     {sideRow("Commission Receivable", data.value?.sides?.commissionReceivable)}
-                                </VCardText>
-                            </VCard>
-                            <VCard style={{ flex: "1 1 380px" }}>
-                                <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                                </SurfaceCardText>
+                            </SurfaceCard>
+                            <SurfaceCard style={{ flex: "1 1 380px" }}>
+                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                     <ThemedText type="defaultSemiBold">{t("Ledger")}</ThemedText>
                                     {sideRow("MERCHANT_WALLET", data.value?.sides?.merchantWallet)}
                                     {sideRow("PLATFORM_INCOME", data.value?.sides?.platformIncome)}
@@ -193,12 +181,12 @@ const InvariantPage = dc(() => {
                                     {sideRow("AML_HOLD", data.value?.sides?.amlHold)}
                                     {sideRow("CHARGEBACK_RESERVE", data.value?.sides?.chargebackReserve)}
                                     {sideRow("SUSPENSE", data.value?.sides?.suspense)}
-                                </VCardText>
-                            </VCard>
+                                </SurfaceCardText>
+                            </SurfaceCard>
                         </ThemedView>
 
-                        <VCard>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        <SurfaceCard>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                 <ThemedText type="defaultSemiBold">{t("Ledger accounts")}</ThemedText>
                                 <ThemedView style={{ flexDirection: "row", gap: "12px", fontSize: "11px", opacity: 0.6, borderBottom: "1px solid rgba(100,116,139,0.2)", paddingBottom: "4px" }}>
                                     <span style={{ flex: 1 }}>{t("Account")}</span>
@@ -206,17 +194,17 @@ const InvariantPage = dc(() => {
                                     <span style={{ width: "140px", textAlign: "right" }}>{t("Live balance")}</span>
                                     <span style={{ width: "140px", textAlign: "right" }}>{t("Natural balance")}</span>
                                 </ThemedView>
-                                {(data.value?.accounts ?? []).length === 0 && <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("No Data Found")}</ThemedText>}
+                                {(data.value?.accounts ?? []).length === 0 && <EmptyState title={t("No Data Found")} description={t("No ledger accounts returned by the invariant check.")} />}
                                 {(data.value?.accounts ?? []).map((row) => (
                                     <ThemedView key={row.accountId} style={{ flexDirection: "row", gap: "12px", alignItems: "center", fontSize: "12px", borderBottom: "1px solid rgba(100,116,139,0.1)", paddingBottom: "5px" }}>
-                                        <span style={{ flex: 1, direction: "ltr", opacity: 0.75 }}>{row.accountId}</span>
+                                        <span style={{ flex: 1 }}><MonoRef value={row.accountId} /></span>
                                         <span style={{ width: "170px" }}>{row.accountType}</span>
-                                        <span style={{ width: "140px", textAlign: "right" }}><MoneyText value={row.liveBalance} currency={currency()} showCurrency={false} /></span>
-                                        <span style={{ width: "140px", textAlign: "right" }}><MoneyText value={row.naturalBalance} currency={currency()} showCurrency={false} bold /></span>
+                                        <span style={{ width: "140px", textAlign: "right" }}><MoneyDisplay amount={row.liveBalance} currency={currency()} size="sm" showCurrency={false} /></span>
+                                        <span style={{ width: "140px", textAlign: "right" }}><MoneyDisplay amount={row.naturalBalance} currency={currency()} size="sm" showCurrency={false} colorSign /></span>
                                     </ThemedView>
                                 ))}
-                            </VCardText>
-                        </VCard>
+                            </SurfaceCardText>
+                        </SurfaceCard>
                     </>
                 )}
             </ThemedView>

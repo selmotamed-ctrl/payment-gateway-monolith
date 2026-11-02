@@ -3,30 +3,9 @@ import { Fragment, computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import {
-    VAlert,
-    VBtn,
-    VCard,
-    VCardText,
-    VCheckbox,
-    VChip,
-    VDivider,
-    VExpansionPanel,
-    VExpansionPanelText,
-    VExpansionPanelTitle,
-    VExpansionPanels,
-    VFileInput,
-    VIcon,
-    VSelect,
-    VStepper,
-    VStepperHeader,
-    VStepperItem,
-    VStepperWindow,
-    VStepperWindowItem,
-    VTextField,
-} from "vuetify/components";
+import { VAlert, VBtn, VCheckbox, VDivider, VExpansionPanel, VExpansionPanelText, VExpansionPanelTitle, VExpansionPanels, VFileInput, VIcon, VSelect, VStepper, VStepperHeader, VStepperItem, VStepperWindow, VStepperWindowItem, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
@@ -36,6 +15,8 @@ import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { MetaPill } from "@/components/ui/MetaPill";
 type RailKind = "OTP_PULL" | "REDIRECT" | "EMBEDDED" | "QR_DISPLAY" | "PUSH_APPROVAL" | "HYBRID";
 
 const RAIL_KINDS: RailKind[] = ["OTP_PULL", "REDIRECT", "EMBEDDED", "QR_DISPLAY", "PUSH_APPROVAL", "HYBRID"];
@@ -463,8 +444,8 @@ const GatewayAiImportPage = dc(() => {
     const renderTranscriptPreview = (payload: TranscriptResponse) => {
         const vocabularyEntries = Object.entries(payload.vocabulary ?? {});
         return (
-            <VCard>
-                <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            <SurfaceCard>
+                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                     <ThemedView
                         style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}
                     >
@@ -476,9 +457,9 @@ const GatewayAiImportPage = dc(() => {
                     {vocabularyEntries.length > 0 && (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             {vocabularyEntries.map(([key, values]) => (
-                                <VChip key={key} size="small" variant="tonal" color="primary">
+                                <MetaPill key={key} size="small" variant="tonal" color="primary">
                                     {key}: {(values ?? []).join(", ")}
-                                </VChip>
+                                </MetaPill>
                             ))}
                         </ThemedView>
                     )}
@@ -488,16 +469,16 @@ const GatewayAiImportPage = dc(() => {
                     <div style={{ ...monoStyle, maxHeight: "320px", overflowY: "auto" }}>
                         {payload.markdown || t("No transcript content returned.")}
                     </div>
-                </VCardText>
-            </VCard>
+                </SurfaceCardText>
+            </SurfaceCard>
         );
     };
 
     const renderScorecard = (nextReport: VerificationReport) => {
         const layers = nextReport.layers ?? [];
         return (
-            <VCard>
-                <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            <SurfaceCard>
+                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                     <ThemedView
                         style={{
                             flexDirection: "row",
@@ -535,9 +516,9 @@ const GatewayAiImportPage = dc(() => {
                                         flexWrap: "wrap",
                                     }}
                                 >
-                                    <VChip size="small" variant="tonal" color="primary">
+                                    <MetaPill size="small" variant="tonal" color="primary">
                                         {t("Layer")} {layer.layer}
-                                    </VChip>
+                                    </MetaPill>
                                     <ThemedText type="defaultSemiBold" style={{ flex: 1 }}>
                                         {t(layer.name)}
                                     </ThemedText>
@@ -547,31 +528,31 @@ const GatewayAiImportPage = dc(() => {
                                     />
                                 </ThemedView>
                                 <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                                    <VChip size="x-small" variant="text" color="error">
+                                    <MetaPill size="x-small" variant="text" color="error">
                                         {t("Errors")}: {layer.errorCount}
-                                    </VChip>
-                                    <VChip size="x-small" variant="text" color="warning">
+                                    </MetaPill>
+                                    <MetaPill size="x-small" variant="text" color="warning">
                                         {t("Warnings")}: {layer.warningCount}
-                                    </VChip>
+                                    </MetaPill>
                                 </ThemedView>
                             </ThemedView>
                         ))
                     )}
-                </VCardText>
-            </VCard>
+                </SurfaceCardText>
+            </SurfaceCard>
         );
     };
 
     const renderIssueList = (issues: VerificationIssue[] | undefined, title: string, tone: "error" | "warning") => {
         const list = issues ?? [];
         return (
-            <VCard>
-                <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            <SurfaceCard>
+                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                     <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
                         <ThemedText type="defaultSemiBold">{title}</ThemedText>
-                        <VChip size="x-small" variant="tonal" color={tone}>
+                        <MetaPill size="x-small" variant="tonal" color={tone}>
                             {list.length}
-                        </VChip>
+                        </MetaPill>
                     </ThemedView>
 
                     {list.length === 0 ? (
@@ -609,8 +590,8 @@ const GatewayAiImportPage = dc(() => {
                             </ThemedView>
                         ))
                     )}
-                </VCardText>
-            </VCard>
+                </SurfaceCardText>
+            </SurfaceCard>
         );
     };
 
@@ -684,8 +665,8 @@ const GatewayAiImportPage = dc(() => {
         const vectors = nextReport.vectorResults ?? [];
         const passed = vectors.filter((vector) => vector.passed).length;
         return (
-            <VCard>
-                <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            <SurfaceCard>
+                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                     <ThemedView
                         style={{
                             flexDirection: "row",
@@ -724,9 +705,9 @@ const GatewayAiImportPage = dc(() => {
                                                 size="x-small"
                                             />
                                             {vector.status && (
-                                                <VChip size="x-small" variant="outlined">
+                                                <MetaPill size="x-small" variant="outlined">
                                                     {vector.status}
-                                                </VChip>
+                                                </MetaPill>
                                             )}
                                         </ThemedView>
                                     </VExpansionPanelTitle>
@@ -752,16 +733,16 @@ const GatewayAiImportPage = dc(() => {
                             ))}
                         </VExpansionPanels>
                     )}
-                </VCardText>
-            </VCard>
+                </SurfaceCardText>
+            </SurfaceCard>
         );
     };
 
     const renderSummary = (nextReport: VerificationReport) => {
         const summary = nextReport.summary;
         return (
-            <VCard>
-                <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            <SurfaceCard>
+                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                     <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                         <ThemedText type="defaultSemiBold">{t("Verification Summary")}</ThemedText>
                         <StatusChip
@@ -771,32 +752,32 @@ const GatewayAiImportPage = dc(() => {
                         <StatusChip label={nextReport.specVersion || "-"} tone="info" />
                     </ThemedView>
                     <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                        <VChip size="small" variant="tonal">
+                        <MetaPill size="small" variant="tonal">
                             {t("Gateway")}: {summary?.gatewayCode ?? "-"}
-                        </VChip>
-                        <VChip size="small" variant="tonal">
+                        </MetaPill>
+                        <MetaPill size="small" variant="tonal">
                             {t("Rail")}: {summary?.railCode ?? "-"}
-                        </VChip>
-                        <VChip size="small" variant="tonal">
+                        </MetaPill>
+                        <MetaPill size="small" variant="tonal">
                             {t("Collection Mode")}: {summary?.collectionMode ?? "-"}
-                        </VChip>
-                        <VChip size="small" variant="tonal">
+                        </MetaPill>
+                        <MetaPill size="small" variant="tonal">
                             {t("Vectors")}: {summary?.passedVectors ?? 0} / {summary?.vectorCount ?? 0}
-                        </VChip>
-                        <VChip size="small" variant="tonal" color="error">
+                        </MetaPill>
+                        <MetaPill size="small" variant="tonal" color="error">
                             {t("Errors")}: {summary?.errorCount ?? 0}
-                        </VChip>
-                        <VChip size="small" variant="tonal" color="warning">
+                        </MetaPill>
+                        <MetaPill size="small" variant="tonal" color="warning">
                             {t("Warnings")}: {summary?.warningCount ?? 0}
-                        </VChip>
+                        </MetaPill>
                     </ThemedView>
                     {(summary?.flowPhases ?? []).length > 0 && (
                         <ThemedText style={{ fontSize: "12px", opacity: 0.8 }}>
                             <strong>{t("Flow Phases")}:</strong> {(summary?.flowPhases ?? []).join(" → ")}
                         </ThemedText>
                     )}
-                </VCardText>
-            </VCard>
+                </SurfaceCardText>
+            </SurfaceCard>
         );
     };
 
@@ -822,8 +803,8 @@ const GatewayAiImportPage = dc(() => {
     };
 
     const renderStepDownload = () => (
-        <VCard>
-            <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+        <SurfaceCard>
+            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                 <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
                     {t("Download the AI Integration Kit")}
                 </ThemedText>
@@ -875,14 +856,14 @@ const GatewayAiImportPage = dc(() => {
                         minHeight="180px"
                     />
                 )}
-            </VCardText>
-        </VCard>
+            </SurfaceCardText>
+        </SurfaceCard>
     );
 
     const renderStepVerify = () => (
         <ThemedView style={{ gap: "14px" }}>
-            <VCard>
-                <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            <SurfaceCard>
+                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                     <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
                         {t("Upload & Verify the Spec")}
                     </ThemedText>
@@ -928,8 +909,8 @@ const GatewayAiImportPage = dc(() => {
                             minHeight="180px"
                         />
                     )}
-                </VCardText>
-            </VCard>
+                </SurfaceCardText>
+            </SurfaceCard>
 
             {report.value && (
                 <>
@@ -961,13 +942,13 @@ const GatewayAiImportPage = dc(() => {
     const renderCredentials = (nextReport: VerificationReport) => {
         const credentials = nextReport.requiredCredentials ?? [];
         return (
-            <VCard>
-                <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            <SurfaceCard>
+                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                     <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
                         <ThemedText type="defaultSemiBold">{t("Required Credentials")}</ThemedText>
-                        <VChip size="x-small" variant="tonal" color="primary">
+                        <MetaPill size="x-small" variant="tonal" color="primary">
                             {credentials.length}
-                        </VChip>
+                        </MetaPill>
                     </ThemedView>
 
                     {credentials.length === 0 ? (
@@ -1004,9 +985,9 @@ const GatewayAiImportPage = dc(() => {
                                             size="x-small"
                                         />
                                         {credential.type && (
-                                            <VChip size="x-small" variant="text">
+                                            <MetaPill size="x-small" variant="text">
                                                 {credential.type}
-                                            </VChip>
+                                            </MetaPill>
                                         )}
                                     </ThemedView>
 
@@ -1050,8 +1031,8 @@ const GatewayAiImportPage = dc(() => {
                             );
                         })
                     )}
-                </VCardText>
-            </VCard>
+                </SurfaceCardText>
+            </SurfaceCard>
         );
     };
 
@@ -1063,9 +1044,9 @@ const GatewayAiImportPage = dc(() => {
         return (
             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                 {entries.map(([key, value]) => (
-                    <VChip key={key} size="small" variant="tonal" color="primary">
+                    <MetaPill key={key} size="small" variant="tonal" color="primary">
                         {key}: {formatValue(value)}
-                    </VChip>
+                    </MetaPill>
                 ))}
             </ThemedView>
         );
@@ -1074,8 +1055,8 @@ const GatewayAiImportPage = dc(() => {
     const renderSuccess = (result: ImportResponse) => {
         const credentialCheck = result.credentialCheck;
         return (
-            <VCard>
-                <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            <SurfaceCard>
+                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                     <ThemedView
                         style={{ flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}
                     >
@@ -1087,18 +1068,18 @@ const GatewayAiImportPage = dc(() => {
                     </ThemedView>
 
                     <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                        <VChip size="small" variant="tonal">
+                        <MetaPill size="small" variant="tonal">
                             {t("Gateway")}: {result.gatewayCode}
-                        </VChip>
-                        <VChip size="small" variant="tonal">
+                        </MetaPill>
+                        <MetaPill size="small" variant="tonal">
                             {t("Rail")}: {result.railCode}
-                        </VChip>
-                        <VChip size="small" variant="tonal">
+                        </MetaPill>
+                        <MetaPill size="small" variant="tonal">
                             {t("Version")}: {result.versionNumber}
-                        </VChip>
-                        <VChip size="small" variant="tonal">
+                        </MetaPill>
+                        <MetaPill size="small" variant="tonal">
                             {t("State")}: {result.versionState}
-                        </VChip>
+                        </MetaPill>
                         {credentialCheck && (
                             <StatusChip
                                 label={`${t("Credentials")}: ${credentialCheck.status}`}
@@ -1146,24 +1127,24 @@ const GatewayAiImportPage = dc(() => {
                             {t("Start another import")}
                         </VBtn>
                     </ThemedView>
-                </VCardText>
-            </VCard>
+                </SurfaceCardText>
+            </SurfaceCard>
         );
     };
 
     const renderStepImport = () => {
         if (!report.value) {
             return (
-                <VCard>
-                    <VCardText>
+                <SurfaceCard>
+                    <SurfaceCardText>
                         <StateView
                             empty={true}
                             emptyTitle={t("Verify a spec first")}
                             emptyDescription={t("Upload and verify a JSON spec in step 2 before binding credentials.")}
                             minHeight="200px"
                         />
-                    </VCardText>
-                </VCard>
+                    </SurfaceCardText>
+                </SurfaceCard>
             );
         }
 
@@ -1173,8 +1154,8 @@ const GatewayAiImportPage = dc(() => {
 
         return (
             <ThemedView style={{ gap: "14px" }}>
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                <SurfaceCard>
+                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                         <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
                             {t("Bind Secrets & Create the Draft")}
                         </ThemedText>
@@ -1197,8 +1178,8 @@ const GatewayAiImportPage = dc(() => {
                             }}
                             style={{ maxWidth: "360px" }}
                         />
-                    </VCardText>
-                </VCard>
+                    </SurfaceCardText>
+                </SurfaceCard>
 
                 {renderCredentials(report.value)}
 
@@ -1252,6 +1233,7 @@ const GatewayAiImportPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Smart AI Integration")}
+                    subtitle={t("Verify an AI-generated gateway specification before binding live secrets.")}
                     end={() => (
                         <VBtn
                             variant="text"

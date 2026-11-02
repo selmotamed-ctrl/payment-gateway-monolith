@@ -1,14 +1,16 @@
 import { dc } from "kt-dc";
-import { VAlert, VBtn, VCard, VCardText, VTextField } from "vuetify/components";
+import { VAlert, VBtn, VTextField } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { ref } from "vue";
-import LogoSvg from "@/assets/images/logo.svg";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { setLocale } from "@/plugins/localization";
 import { RouterLink } from "vue-router";
 import { normalizePhone } from "@/utils/arabic";
+import AuthLayout from "@/layouts/auth";
+import { FormField } from "@/components/ui/FormField";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
 
 const RegisterPage = dc(() => {
     const { t } = useLocale();
@@ -71,22 +73,25 @@ const RegisterPage = dc(() => {
     };
 
     return () => (
-        <div
-            style={{
-                minHeight: "100vh",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: "24px",
-                background: "linear-gradient(135deg, #0f172a 0%, #123a6b 55%, #0b7d72 100%)",
-            }}
-        >
-            <VCard style={{ width: "100%", maxWidth: "460px", borderRadius: "20px" }}>
-                <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px", padding: "20px" }}>
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
-                        <img src={LogoSvg} alt="logo" width={"52px"} height={"52px"} />
-                        <div style={{ fontSize: "19px", fontWeight: "800" }}>{t("Create Account")}</div>
-                        <div style={{ fontSize: "13px", opacity: 0.65 }}>{t("Register")}</div>
+        <AuthLayout>
+            <SurfaceCard>
+                <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                        <h1
+                            style={{
+                                margin: 0,
+                                fontSize: "20px",
+                                fontWeight: 600,
+                                lineHeight: 1.3,
+                                color: "var(--pg-ink-primary)",
+                                letterSpacing: "-0.02em",
+                            }}
+                        >
+                            {t("Create Account")}
+                        </h1>
+                        <p style={{ margin: 0, fontSize: "13px", color: "var(--pg-ink-muted)" }}>
+                            {t("Register")}
+                        </p>
                     </div>
 
                     {error.value && (
@@ -100,43 +105,63 @@ const RegisterPage = dc(() => {
                         </VAlert>
                     )}
 
-                    <VTextField
-                        label={t("Full Name")}
-                        modelValue={fullName.value}
-                        onUpdate:modelValue={(v: string) => (fullName.value = v)}
-                        hideDetails
-                    />
-                    <VTextField
-                        label={t("Phone")}
-                        prependInnerIcon="mdi-phone"
-                        modelValue={phone.value}
-                        onUpdate:modelValue={(v: string) => (phone.value = v)}
-                        hideDetails
-                    />
-                    <VTextField
-                        label={t("Email")}
-                        prependInnerIcon="mdi-email-outline"
-                        type="email"
-                        modelValue={email.value}
-                        onUpdate:modelValue={(v: string) => (email.value = v)}
-                        hideDetails
-                    />
-                    <VTextField
-                        label={t("Password")}
-                        prependInnerIcon="mdi-lock-outline"
-                        type="password"
-                        modelValue={password.value}
-                        onUpdate:modelValue={(v: string) => (password.value = v)}
-                        hideDetails
-                    />
-                    <VTextField
-                        label={t("Confirm Password")}
-                        prependInnerIcon="mdi-lock-check-outline"
-                        type="password"
-                        modelValue={confirmPassword.value}
-                        onUpdate:modelValue={(v: string) => (confirmPassword.value = v)}
-                        hideDetails
-                    />
+                    <FormField label={t("Full Name")} required>
+                        <VTextField
+                            aria-label={t("Full Name")}
+                            prependInnerIcon="mdi-account-outline"
+                            autocomplete="name"
+                            modelValue={fullName.value}
+                            onUpdate:modelValue={(v: string) => (fullName.value = v)}
+                            hideDetails
+                        />
+                    </FormField>
+
+                    <FormField label={t("Phone")} required>
+                        <VTextField
+                            aria-label={t("Phone")}
+                            prependInnerIcon="mdi-phone"
+                            autocomplete="tel"
+                            modelValue={phone.value}
+                            onUpdate:modelValue={(v: string) => (phone.value = v)}
+                            hideDetails
+                        />
+                    </FormField>
+
+                    <FormField label={t("Email")} required>
+                        <VTextField
+                            aria-label={t("Email")}
+                            prependInnerIcon="mdi-email-outline"
+                            type="email"
+                            autocomplete="email"
+                            modelValue={email.value}
+                            onUpdate:modelValue={(v: string) => (email.value = v)}
+                            hideDetails
+                        />
+                    </FormField>
+
+                    <FormField label={t("Password")} required>
+                        <VTextField
+                            aria-label={t("Password")}
+                            prependInnerIcon="mdi-lock-outline"
+                            type="password"
+                            autocomplete="new-password"
+                            modelValue={password.value}
+                            onUpdate:modelValue={(v: string) => (password.value = v)}
+                            hideDetails
+                        />
+                    </FormField>
+
+                    <FormField label={t("Confirm Password")} required>
+                        <VTextField
+                            aria-label={t("Confirm Password")}
+                            prependInnerIcon="mdi-lock-check-outline"
+                            type="password"
+                            autocomplete="new-password"
+                            modelValue={confirmPassword.value}
+                            onUpdate:modelValue={(v: string) => (confirmPassword.value = v)}
+                            hideDetails
+                        />
+                    </FormField>
 
                     <VBtn
                         block
@@ -144,6 +169,7 @@ const RegisterPage = dc(() => {
                         loading={loading.value}
                         disabled={!fullName.value || !phone.value || !email.value || !password.value}
                         onClick={() => void submit()}
+                        style={{ height: "38px" }}
                     >
                         {t("Register")}
                     </VBtn>
@@ -154,12 +180,28 @@ const RegisterPage = dc(() => {
                         prependIcon="mdi-google"
                         loading={loading.value}
                         onClick={() => void registerWithGoogle()}
+                        style={{ height: "38px" }}
                     >
                         {t("Login With Google")}
                     </VBtn>
 
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <RouterLink to={{ name: "Login" }} style={{ fontSize: "13px" }}>
+                    <div
+                        style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: "8px",
+                            flexWrap: "wrap",
+                        }}
+                    >
+                        <RouterLink
+                            to={{ name: "Login" }}
+                            style={{
+                                fontSize: "13px",
+                                color: "var(--pg-accent-interactive)",
+                                textDecoration: "none",
+                            }}
+                        >
                             {t("Already Registered")}
                         </RouterLink>
                         <div style={{ display: "flex", gap: "4px" }}>
@@ -171,9 +213,9 @@ const RegisterPage = dc(() => {
                             </VBtn>
                         </div>
                     </div>
-                </VCardText>
-            </VCard>
-        </div>
+                </div>
+            </SurfaceCard>
+        </AuthLayout>
     );
 });
 

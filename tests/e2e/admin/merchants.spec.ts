@@ -55,20 +55,32 @@ test("merchant editing uses a form instead of a raw JSON patch", async ({ page }
 
   await page.goto("/merchants");
   await expect(page.locator("table")).toContainText("Acme Store");
-  await page.getByRole("button", { name: "Edit", exact: true }).first().click();
+  await page.locator("tbody tr").first().getByRole("button", { name: "Open", exact: true }).click();
+  await expect(page).toHaveURL(/\/merchants\/mch_1/);
+  await page.getByRole("button", { name: "Propose sensitive change", exact: true }).click();
 
   await expect(page.getByText("JSON-Patch", { exact: true })).toHaveCount(0);
-  await expect(page.getByLabel("Legal Name")).toHaveValue("Acme Trading LLC");
-  await page.getByLabel("Trade Name").fill("Acme Store Updated");
-  await page.getByLabel("Contact Email").fill("updated@example.com");
-  await page.getByRole("button", { name: "Submit For Approval" }).click();
+  await expect(page.getByLabel("Legal name", { exact: true })).toHaveValue("Acme Trading LLC");
+  await page.getByLabel("Contact email", { exact: true }).fill("updated@example.com");
+  await page.getByLabel("Maker reason (required)").fill("Update the merchant contact email");
+  const editChecklist = page.getByLabel("Proposed changes reviewed");
+  if ((await editChecklist.count()) > 0) {
+    for (const label of [
+      "Proposed changes reviewed",
+      "Source document verified",
+      "Maker reason documented",
+      "Checker scope confirmed",
+    ]) {
+      await page.getByLabel(label).check();
+    }
+  }
+  await page.getByRole("button", { name: "Submit for approval", exact: true }).click();
 
   await expect.poll(() => submitted).not.toBeNull();
   expect(submitted.patch).toEqual(
     expect.arrayContaining([
-      { op: "replace", path: "/tradeName", value: "Acme Store Updated" },
       { op: "replace", path: "/contactEmail", value: "updated@example.com" },
     ]),
   );
-  expect(submitted.patch).toHaveLength(2);
+  expect(submitted.patch).toHaveLength(1);
 });

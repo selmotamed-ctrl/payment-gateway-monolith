@@ -2,25 +2,9 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
-import {
-    VAlert,
-    VBtn,
-    VCard,
-    VCardText,
-    VCheckbox,
-    VChip,
-    VExpansionPanel,
-    VExpansionPanelText,
-    VExpansionPanelTitle,
-    VExpansionPanels,
-    VProgressLinear,
-    VRadio,
-    VRadioGroup,
-    VSelect,
-    VTextField,
-} from "vuetify/components";
+import { VAlert, VBtn, VCheckbox, VExpansionPanel, VExpansionPanelText, VExpansionPanelTitle, VExpansionPanels, VProgressLinear, VRadio, VRadioGroup, VSelect, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
@@ -50,6 +34,8 @@ import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { MetaPill } from "@/components/ui/MetaPill";
 type SubmittedQuiz = {
     correct: number;
     total: number;
@@ -503,6 +489,7 @@ const AcademyPage = dc(() => {
             <ThemedView style={{ gap: "16px" }}>
                 <PageHeader
                     title={isArabic.value ? "أكاديمية الموظفين" : "Employee Academy"}
+                    subtitle={t("Structured learning paths for operators and compliance staff.")}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                             <StatusChip label={`${completedModules.value} / ${ACADEMY_MODULES.length} ${isArabic.value ? "وحدات" : "modules"}`} tone="info" />
@@ -518,8 +505,8 @@ const AcademyPage = dc(() => {
                 />
 
                 {showChecklists && (
-                    <VCard variant="tonal">
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                    <SurfaceCard variant="tonal">
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                             <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{isArabic.value ? "قائمة التحقق من تصدير الفريق" : "Team export checklist"}</ThemedText>
                             {TEAM_EXPORT_CHECKS.map((check) => (
                                 <VCheckbox
@@ -534,13 +521,13 @@ const AcademyPage = dc(() => {
                             {!teamExportChecklistComplete.value && (
                                 <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{isArabic.value ? "أكمل قائمة التحقق قبل التصدير" : "Complete the export checklist before exporting"}</ThemedText>
                             )}
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
                 )}
 
                 {summary.value && (
-                    <VCard variant="flat" style={{ borderRadius: "16px" }}>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    <SurfaceCard variant="flat" style={{ borderRadius: "16px" }}>
+                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                             <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{isArabic.value ? "صحة الأكاديمية" : "Academy health"}</ThemedText>
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
                                 {[
@@ -552,16 +539,16 @@ const AcademyPage = dc(() => {
                                     [isArabic.value ? "الشارات" : "Badges", String(summary.value.earnedBadges)],
                                     [isArabic.value ? "نشط 7 أيام" : "Active 7d", String(summary.value.activeLast7d)],
                                 ].map(([label, value]) => (
-                                    <VCard key={label} variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
+                                    <SurfaceCard key={label} variant="tonal">
+                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
                                             <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{label}</ThemedText>
                                             <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{value}</ThemedText>
-                                        </VCardText>
-                                    </VCard>
+                                        </SurfaceCardText>
+                                    </SurfaceCard>
                                 ))}
                             </ThemedView>
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
                 )}
 
                 <VExpansionPanels
@@ -595,13 +582,13 @@ const AcademyPage = dc(() => {
                                     <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{isArabic.value ? "لا توجد نتائج." : "No results."}</ThemedText>
                                 )}
                                 {teamRows.value.map((row) => (
-                                    <VCard key={row.id} variant="tonal">
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                                    <SurfaceCard key={row.id} variant="tonal">
+                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{row.email}</ThemedText>
                                                 <StatusChip label={row.role.replaceAll("_", " ")} tone="neutral" size="x-small" />
-                                                {row.isMaker && <VChip size="x-small" variant="tonal" color="primary">{isArabic.value ? "صانع" : "Maker"}</VChip>}
-                                                {row.isChecker && <VChip size="x-small" variant="tonal" color="secondary">{isArabic.value ? "مدقق" : "Checker"}</VChip>}
+                                                {row.isMaker && <MetaPill size="x-small" variant="tonal" color="primary">{isArabic.value ? "صانع" : "Maker"}</MetaPill>}
+                                                {row.isChecker && <MetaPill size="x-small" variant="tonal" color="secondary">{isArabic.value ? "مدقق" : "Checker"}</MetaPill>}
                                                 <div style={{ flex: 1 }} />
                                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{row.percent}%</ThemedText>
                                             </ThemedView>
@@ -609,7 +596,7 @@ const AcademyPage = dc(() => {
                                             <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
                                                 <StatusChip label={`${row.completed}/${ACADEMY_MODULES.length} ${isArabic.value ? "وحدات" : "modules"}`} tone="neutral" size="x-small" />
                                                 {row.badges.map((badge) => (
-                                                    <VChip key={badge} size="x-small" variant="tonal" color="success">{badge}</VChip>
+                                                    <MetaPill key={badge} size="x-small" variant="tonal" color="success">{badge}</MetaPill>
                                                 ))}
                                                 {row.updatedAt && (
                                                     <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>
@@ -617,16 +604,16 @@ const AcademyPage = dc(() => {
                                                     </ThemedText>
                                                 )}
                                             </ThemedView>
-                                        </VCardText>
-                                    </VCard>
+                                        </SurfaceCardText>
+                                    </SurfaceCard>
                                 ))}
                             </ThemedView>
                         </VExpansionPanelText>
                     </VExpansionPanel>
                 </VExpansionPanels>
 
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                <SurfaceCard>
+                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                         <ThemedView style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
                             <ThemedText type="defaultSemiBold">{isArabic.value ? "التقدم الكلي" : "Overall progress"}</ThemedText>
                             <ThemedText type="defaultSemiBold">{`${overallPercent.value}%`}</ThemedText>
@@ -644,7 +631,7 @@ const AcademyPage = dc(() => {
                             {ACADEMY_TRACKS.map((track) => {
                                 const earned = badgeEarned(track.badge);
                                 return (
-                                    <VChip
+                                    <MetaPill
                                         key={track.badge}
                                         color={earned ? "success" : undefined}
                                         variant={earned ? "flat" : "outlined"}
@@ -654,13 +641,13 @@ const AcademyPage = dc(() => {
                                         style={{ cursor: "pointer" }}
                                     >
                                         {`${isArabic.value ? BADGE_LABELS_AR[track.badge] : BADGE_LABELS[track.badge]} · ${trackProgressPercent(progress.value, track)}%`}
-                                    </VChip>
+                                    </MetaPill>
                                 );
                             })}
                         </ThemedView>
                         {saving.value ? <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{t("Saving progress")}</ThemedText> : null}
-                    </VCardText>
-                </VCard>
+                    </SurfaceCardText>
+                </SurfaceCard>
 
                 {persistWarning.value ? (
                     <VAlert type="warning" variant="tonal" density="compact">
@@ -687,7 +674,7 @@ const AcademyPage = dc(() => {
                                     const active = module.id === selectedModule.value.id;
                                     const mastered = moduleMastered(progress.value, module);
                                     return (
-                                        <VCard
+                                        <SurfaceCard
                                             key={module.id}
                                             onClick={() => selectModule(module.id)}
                                             style={{
@@ -695,7 +682,7 @@ const AcademyPage = dc(() => {
                                                 border: active ? "2px solid var(--v-theme-primary)" : "1px solid rgba(100,116,139,0.18)",
                                             }}
                                         >
-                                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                                                 <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                                     <StatusChip label={module.letter || module.id} tone={active ? "primary" : "neutral"} size="x-small" />
                                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "14px", flex: "1 1 180px" }}>
@@ -713,15 +700,15 @@ const AcademyPage = dc(() => {
                                                     <StatusChip label={moduleLabPassed(progress.value, module) ? "Lab passed" : "Lab locked"} tone={moduleLabPassed(progress.value, module) ? "success" : "neutral"} size="x-small" />
                                                     <StatusChip label={moduleQuizPerfect(progress.value, module) ? "Quiz 100%" : "Quiz locked"} tone={moduleQuizPerfect(progress.value, module) ? "success" : "neutral"} size="x-small" />
                                                 </ThemedView>
-                                            </VCardText>
-                                        </VCard>
+                                            </SurfaceCardText>
+                                        </SurfaceCard>
                                     );
                                 })}
                             </ThemedView>
 
                             <ThemedView style={{ flex: "3 1 620px", minWidth: "320px", gap: "14px" }}>
-                                <VCard>
-                                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                                <SurfaceCard>
+                                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                         <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                             <StatusChip label={selectedModule.value.id} tone="primary" />
                                             <ThemedText type="defaultSemiBold" style={{ fontSize: "20px" }}>{moduleTitle(selectedModule.value)}</ThemedText>
@@ -730,14 +717,14 @@ const AcademyPage = dc(() => {
                                         <ThemedText style={{ fontSize: "13px", opacity: 0.8 }}>{moduleSummary(selectedModule.value)}</ThemedText>
                                         <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
                                             {selectedModule.value.tracks.map((track) => (
-                                                <VChip key={`${selectedModule.value.id}-${track}`} size="x-small" variant="tonal">{trackTitle(track)}</VChip>
+                                                <MetaPill key={`${selectedModule.value.id}-${track}`} size="x-small" variant="tonal">{trackTitle(track)}</MetaPill>
                                             ))}
                                         </ThemedView>
-                                    </VCardText>
-                                </VCard>
+                                    </SurfaceCardText>
+                                </SurfaceCard>
 
-                                <VCard>
-                                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                <SurfaceCard>
+                                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                         <ThemedText type="defaultSemiBold">{isArabic.value ? "الخطوة 1 — الدروس" : "Step 1 — Lessons"}</ThemedText>
                                         <VExpansionPanels multiple>
                                             {selectedModule.value.lessons.map((lesson) => {
@@ -762,11 +749,11 @@ const AcademyPage = dc(() => {
                                                 );
                                             })}
                                         </VExpansionPanels>
-                                    </VCardText>
-                                </VCard>
+                                    </SurfaceCardText>
+                                </SurfaceCard>
 
-                                <VCard>
-                                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                <SurfaceCard>
+                                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                         <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                             <ThemedText type="defaultSemiBold">{isArabic.value ? "الخطوة 2 — المختبر التفاعلي" : "Step 2 — Interactive lab"}</ThemedText>
                                             <StatusChip label={selectedLab.value.id} tone="info" size="x-small" />
@@ -791,8 +778,8 @@ const AcademyPage = dc(() => {
                                                     </VAlert>
                                                 ) : null}
                                                 {currentScenario.value ? (
-                                                    <VCard variant="outlined">
-                                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                                                    <SurfaceCard variant="outlined">
+                                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                                             <ThemedView style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
                                                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "14px" }}>
                                                                     {isArabic.value && currentScenario.value.titleAr ? currentScenario.value.titleAr : currentScenario.value.titleEn}
@@ -824,8 +811,8 @@ const AcademyPage = dc(() => {
                                                                     <ThemedText style={{ fontSize: "13px" }}>{labFeedback.value}</ThemedText>
                                                                 </VAlert>
                                                             ) : null}
-                                                        </VCardText>
-                                                    </VCard>
+                                                        </SurfaceCardText>
+                                                    </SurfaceCard>
                                                 ) : (
                                                     <VAlert type="success" variant="tonal" density="compact">
                                                         {isArabic.value ? "اكتمل المختبر بنجاح." : "Lab completed successfully."}
@@ -839,11 +826,11 @@ const AcademyPage = dc(() => {
                                                 </ThemedView>
                                             </>
                                         )}
-                                    </VCardText>
-                                </VCard>
+                                    </SurfaceCardText>
+                                </SurfaceCard>
 
-                                <VCard>
-                                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                                <SurfaceCard>
+                                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                                         <ThemedView style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
                                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                                 <ThemedText type="defaultSemiBold">{isArabic.value ? "الخطوة 3 — الاختبار" : "Step 3 — Verification quiz"}</ThemedText>
@@ -915,8 +902,8 @@ const AcademyPage = dc(() => {
                                                 {t("Retry")}
                                             </VBtn>
                                         </ThemedView>
-                                    </VCardText>
-                                </VCard>
+                                    </SurfaceCardText>
+                                </SurfaceCard>
                             </ThemedView>
                         </ThemedView>
                     </>

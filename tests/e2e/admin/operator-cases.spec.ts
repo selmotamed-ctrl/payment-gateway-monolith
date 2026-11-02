@@ -140,6 +140,18 @@ test("filters by merchant name and runs a bulk inquiry with case ids", async ({ 
   await page.getByLabel("Select case PA-1001").check();
   await expect(page.getByRole("button", { name: /Inquire selected \(1\)/ })).toBeEnabled();
   await page.getByRole("button", { name: /Inquire selected \(1\)/ }).click();
+  const checklist = page.getByLabel("Inquiry eligibility reviewed");
+  if ((await checklist.count()) > 0) {
+    for (const label of [
+      "Inquiry eligibility reviewed",
+      "Attempt status verified",
+      "Gateway inquiry support confirmed",
+      "Inquiry scope confirmed",
+    ]) {
+      await page.getByLabel(label).check();
+    }
+  }
+  await page.getByRole("button", { name: /^Inquire \(1\)$/ }).click();
 
   await expect.poll(() => bulkBody).not.toBeNull();
   expect(bulkBody.caseIds).toEqual(["oc_1"]);

@@ -1,10 +1,10 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VCard, VCardText, VDialog, VTextField, VTextarea } from "vuetify/components";
+import { VBtn, VTextField, VTextarea } from "vuetify/components";
 import QRCode from "qrcode";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
@@ -18,6 +18,8 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { copyToClipboard } from "@/utils/common";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 type PaymentLink = {
     id: string;
     linkKey: string;
@@ -233,6 +235,7 @@ const LinksPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Payment Links")}
+                    subtitle={t("Create, track, and expire customer payment links.")}
                     end={() => (
                         <VBtn
                             variant="tonal"
@@ -257,8 +260,8 @@ const LinksPage = dc(() => {
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : (
-                    <VCard>
-                        <VCardText>
+                    <SurfaceCard>
+                        <SurfaceCardText>
                             <DataTable
                                 title={t("Payment Links")}
                                 data={rows.value}
@@ -270,18 +273,18 @@ const LinksPage = dc(() => {
                                 searchValue={search.value}
                                 setSearchValue={(value) => (search.value = value)}
                             />
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
                 )}
             </ThemedView>
 
-            <VDialog modelValue={createOpen.value} onUpdate:modelValue={(v: any) => (createOpen.value = v)} maxWidth="620px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                            {t("Payment Link")}
-                        </ThemedText>
-                        <VTextField
+            <FormModal
+                modelValue={createOpen.value}
+                onUpdate:modelValue={(v: any) => (createOpen.value = v)}
+                title={t("Payment Link")}
+                size="md"
+            >
+<VTextField
                             label={t("Merchant Name")}
                             modelValue={form.value.description}
                             onUpdate:modelValue={(v: string) => (form.value.description = v)}
@@ -328,15 +331,15 @@ const LinksPage = dc(() => {
                         <VBtn color="primary" loading={actionLoading.value} onClick={() => void createLink()}>
                             {t("Create")}
                         </VBtn>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
 
-            <VDialog modelValue={qrOpen.value} onUpdate:modelValue={(v: any) => (qrOpen.value = v)} maxWidth="460px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px" }}>
-                        <ThemedText type="defaultSemiBold">{t("QR Code")}</ThemedText>
-                        {qrDataUrl.value ? (
+            <FormModal
+                modelValue={qrOpen.value}
+                onUpdate:modelValue={(v: any) => (qrOpen.value = v)}
+                title={t("QR Code")}
+                size="sm"
+            >
+{qrDataUrl.value ? (
                             <img src={qrDataUrl.value} alt="qr" width={"280px"} height={"280px"} />
                         ) : (
                             <StateView loading={true} minHeight="200px" />
@@ -344,17 +347,15 @@ const LinksPage = dc(() => {
                         <ThemedText style={{ fontSize: "12px", opacity: 0.7, direction: "ltr" }}>
                             {qrLink.value ? checkoutUrl(qrLink.value) : ""}
                         </ThemedText>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
 
-            <VDialog modelValue={attemptsOpen.value} onUpdate:modelValue={(v: any) => (attemptsOpen.value = v)} maxWidth="900px" scrollable>
-                <VCard>
-                    <VCardText>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "17px", marginBottom: "10px" }}>
-                            {t("Attempts Inspector")}
-                        </ThemedText>
-                        {attemptsLoading.value ? (
+            <FormModal
+                modelValue={attemptsOpen.value}
+                onUpdate:modelValue={(v: any) => (attemptsOpen.value = v)}
+                title={t("Attempts Inspector")}
+                size="lg"
+            >
+{attemptsLoading.value ? (
                             <StateView loading={true} />
                         ) : (
                             <DataTable
@@ -367,9 +368,7 @@ const LinksPage = dc(() => {
                                 noElevation={true}
                             />
                         )}
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         </ScreenContainer>
     );
 });

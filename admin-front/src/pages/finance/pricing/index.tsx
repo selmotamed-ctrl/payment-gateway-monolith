@@ -2,30 +2,25 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute } from "vue-router";
-import {
-    VAlert,
-    VBtn,
-    VBtnToggle,
-    VCard,
-    VCardText,
-    VChip,
-    VDialog,
-    VSelect,
-    VTextField,
-    VTextarea,
-} from "vuetify/components";
+import { VAlert, VBtn, VBtnToggle, VSelect, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
 import { StatusChip } from "@/components/StatusChip";
+import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { statusTone } from "@/components/Table/statusTone";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { MetaPill } from "@/components/ui/MetaPill";
 type CommissionProfile = {
     id: string;
     merchantId: string | null;
@@ -176,20 +171,24 @@ const PricingControlsPage = dc(() => {
 
     void load();
 
-    const summaryItems = computed(() => {
+    const metricItems = computed<MetricItem[]>(() => {
         const commissions = commissionSummary.value;
         const velocity = velocitySummary.value;
         if (!commissions || !velocity) return [];
+        const pending = commissions.pendingLifecycle + velocity.pendingLifecycle;
         return [
-            { label: t("Commission profiles"), value: String(commissions.total), tone: "info" as const },
-            { label: t("Scoped profiles"), value: String(commissions.merchantScoped + commissions.applicationScoped), tone: "primary" as const },
-            { label: t("Velocity rules"), value: String(velocity.total), tone: "info" as const },
-            { label: t("Reject rules"), value: String(velocity.reject), tone: velocity.reject > 0 ? "error" as const : "success" as const },
-            { label: t("Amount-capped rules"), value: String(velocity.withAmountCap), tone: "warning" as const },
-            { label: t("Pending lifecycle"), value: String(commissions.pendingLifecycle + velocity.pendingLifecycle), tone: commissions.pendingLifecycle + velocity.pendingLifecycle > 0 ? "warning" as const : "success" as const },
-            { label: t("Longest window"), value: `${velocity.longestWindowSeconds}s`, tone: "neutral" as const },
+            { key: "profiles", label: t("Commission profiles"), value: String(commissions.total) },
+            { key: "scoped", label: t("Scoped profiles"), value: String(commissions.merchantScoped + commissions.applicationScoped) },
+            { key: "rules", label: t("Velocity rules"), value: String(velocity.total) },
+            { key: "reject", label: t("Reject rules"), value: String(velocity.reject), badge: velocity.reject > 0 ? t("Watch") : t("Clear"), badgeTone: velocity.reject > 0 ? "warning" : "success" },
+            { key: "pending", label: t("Pending lifecycle"), value: String(pending), badge: pending > 0 ? t("Review") : t("Clear"), badgeTone: pending > 0 ? "warning" : "success" },
         ];
     });
+
+    const tabItems = computed(() => [
+        { value: "COMMISSION", label: t("Commission profiles"), count: commissionSummary.value?.total },
+        { value: "VELOCITY", label: t("Velocity rules"), count: velocitySummary.value?.total },
+    ]);
 
     const openCommission = () => {
         commissionError.value = null;
@@ -369,6 +368,7 @@ const PricingControlsPage = dc(() => {
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
                     title={t("Pricing & Limits")}
+                    subtitle={t("Commission profiles and velocity controls under four-eyes governance.")}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</VBtn>
@@ -389,47 +389,25 @@ const PricingControlsPage = dc(() => {
                     <StateView loading={true} />
                 ) : (
                     <>
-                        <VCard variant="flat" style={{ borderRadius: "16px" }}>
-                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Pricing and risk controls")}</ThemedText>
-                                <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px" }}>
-                                    {summaryItems.value.map((item) => (
-                                        <VCard key={item.label} variant="tonal">
-                                            <VCardText style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "12px" }}>
-                                                <ThemedText style={{ fontSize: "11px", opacity: 0.62 }}>{item.label}</ThemedText>
-                                                <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{item.value}</ThemedText>
-                                            </VCardText>
-                                        </VCard>
-                                    ))}
-                                </ThemedView>
-                            </VCardText>
-                        </VCard>
+                        <MetricStrip items={metricItems.value} />
 
-                        <VBtnToggle
+                        <SegmentedTabs
                             modelValue={tab.value}
-                            onUpdate:modelValue={(value: unknown) => {
-                                if (value) tab.value = value as "COMMISSION" | "VELOCITY";
-                            }}
-                            mandatory
-                            divided
-                            variant="outlined"
-                            style={{ maxWidth: "520px" }}
-                        >
-                            <VBtn value="COMMISSION">{t("Commission profiles")}</VBtn>
-                            <VBtn value="VELOCITY">{t("Velocity rules")}</VBtn>
-                        </VBtnToggle>
+                            tabs={tabItems.value}
+                            onUpdate:modelValue={(value: string) => (tab.value = value as "COMMISSION" | "VELOCITY")}
+                        />
 
                         {tab.value === "COMMISSION" && (
                             <ThemedView style={{ gap: "10px" }}>
-                                {profiles.value.length === 0 && <StateView empty={true} emptyTitle={t("No commission profiles")} emptyDescription={t("Create a profile to price a rail.")} minHeight="160px" />}
+                                {profiles.value.length === 0 && <EmptyState title={t("No commission profiles")} description={t("Create a profile to price a rail.")} icon="mdi-tune-variant" />}
                                 {profiles.value.map((profile) => (
-                                    <VCard key={profile.id}>
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                                    <SurfaceCard key={profile.id}>
+                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                                 <ThemedText type="defaultSemiBold" style={{ direction: "ltr" }}>{profile.railCode}</ThemedText>
                                                 <StatusChip label={profile.calcType} tone="info" size="x-small" />
                                                 <StatusChip label={profileScope(profile)} tone={profileScope(profile) === "GLOBAL" ? "neutral" : "primary"} size="x-small" />
-                                                <VChip size="x-small" variant="tonal">v{profile.version}</VChip>
+                                                <MetaPill size="x-small" variant="tonal">v{profile.version}</MetaPill>
                                                 {profile.effectiveTo && <StatusChip label={t("Expires")} tone="warning" size="x-small" />}
                                                 {profile.pendingApprovalId && <StatusChip label={t("Pending checker")} tone="warning" size="x-small" />}
                                                 <div style={{ flex: 1 }} />
@@ -448,24 +426,24 @@ const PricingControlsPage = dc(() => {
                                                     <VBtn size="small" variant="text" color="warning" onClick={() => openLifecycle("COMMISSION", profile.id)}>{t("Expire profile")}</VBtn>
                                                 )}
                                             </ThemedView>
-                                        </VCardText>
-                                    </VCard>
+                                        </SurfaceCardText>
+                                    </SurfaceCard>
                                 ))}
                             </ThemedView>
                         )}
 
                         {tab.value === "VELOCITY" && (
                             <ThemedView style={{ gap: "10px" }}>
-                                {rules.value.length === 0 && <StateView empty={true} emptyTitle={t("No velocity rules")} emptyDescription={t("Create a rule to cap attempts or amount.")} minHeight="160px" />}
+                                {rules.value.length === 0 && <EmptyState title={t("No velocity rules")} description={t("Create a rule to cap attempts or amount.")} icon="mdi-speedometer" />}
                                 {rules.value.map((rule) => (
-                                    <VCard key={rule.id}>
-                                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                                    <SurfaceCard key={rule.id}>
+                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                             <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                                                 <ThemedText type="defaultSemiBold" style={{ direction: "ltr" }}>{rule.scopeType}</ThemedText>
                                                 <StatusChip label={rule.action} tone={statusTone(rule.action)} size="x-small" />
                                                 <StatusChip label={rule.active ? t("Active") : t("Inactive")} tone={rule.active ? "success" : "neutral"} size="x-small" />
                                                 {rule.pendingApprovalId && <StatusChip label={t("Pending checker")} tone="warning" size="x-small" />}
-                                                <VChip size="x-small" variant="tonal">v{rule.version}</VChip>
+                                                <MetaPill size="x-small" variant="tonal">v{rule.version}</MetaPill>
                                                 {rule.scopeValue && <ThemedText style={{ fontSize: "11px", opacity: 0.65, direction: "ltr" }}>{rule.scopeValue}</ThemedText>}
                                                 <div style={{ flex: 1 }} />
                                                 <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("Effective")}: {formatDateTime(rule.effectiveFrom)}</ThemedText>
@@ -481,8 +459,8 @@ const PricingControlsPage = dc(() => {
                                                     <VBtn size="small" variant="text" color="warning" onClick={() => openLifecycle("VELOCITY", rule.id)}>{t("Deactivate rule")}</VBtn>
                                                 )}
                                             </ThemedView>
-                                        </VCardText>
-                                    </VCard>
+                                        </SurfaceCardText>
+                                    </SurfaceCard>
                                 ))}
                             </ThemedView>
                         )}
@@ -490,11 +468,13 @@ const PricingControlsPage = dc(() => {
                 )}
             </ThemedView>
 
-            <VDialog modelValue={historyOpen.value} onUpdate:modelValue={(value: boolean) => (historyOpen.value = value)} maxWidth="780px" scrollable>
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{historyTitle.value}</ThemedText>
-                        {historyLoading.value && <StateView loading={true} minHeight="120px" />}
+            <FormModal
+                modelValue={historyOpen.value}
+                onUpdate:modelValue={(value: boolean) => (historyOpen.value = value)}
+                title={historyTitle.value}
+                size="lg"
+            >
+{historyLoading.value && <StateView loading={true} minHeight="120px" />}
                         {historyError.value && <VAlert type="error" variant="tonal" density="compact">{historyError.value}</VAlert>}
                         {!historyLoading.value && !historyError.value && historyEntries.value.length === 0 && (
                             <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("No audit events recorded yet.")}</ThemedText>
@@ -517,15 +497,15 @@ const PricingControlsPage = dc(() => {
                         <ThemedView style={{ flexDirection: "row", justifyContent: "flex-end" }}>
                             <VBtn variant="text" onClick={() => (historyOpen.value = false)}>{t("Close")}</VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
 
-            <VDialog modelValue={commissionOpen.value} onUpdate:modelValue={(value: boolean) => (commissionOpen.value = value)} maxWidth="680px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{t("New commission profile")}</ThemedText>
-                        <VAlert type="warning" variant="tonal" density="compact">
+            <FormModal
+                modelValue={commissionOpen.value}
+                onUpdate:modelValue={(value: boolean) => (commissionOpen.value = value)}
+                title={t("New commission profile")}
+                size="md"
+            >
+<VAlert type="warning" variant="tonal" density="compact">
                             {t("Commission changes take effect immediately and are audited.")}
                         </VAlert>
                         {commissionError.value && <VAlert type="error" variant="tonal" density="compact">{commissionError.value}</VAlert>}
@@ -552,17 +532,15 @@ const PricingControlsPage = dc(() => {
                             <VBtn variant="text" onClick={() => (commissionOpen.value = false)}>{t("Cancel")}</VBtn>
                             <VBtn color="primary" loading={commissionSaving.value} onClick={() => void saveCommission()}>{t("Create")}</VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
 
-            <VDialog modelValue={lifecycleOpen.value} onUpdate:modelValue={(value: boolean) => (lifecycleOpen.value = value)} maxWidth="560px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>
-                            {lifecycleKind.value === "COMMISSION" ? t("Expire commission profile") : t("Deactivate velocity rule")}
-                        </ThemedText>
-                        <VAlert type="info" variant="tonal" density="compact">
+            <FormModal
+                modelValue={lifecycleOpen.value}
+                onUpdate:modelValue={(value: boolean) => (lifecycleOpen.value = value)}
+                title={lifecycleKind.value === "COMMISSION" ? t("Expire commission profile") : t("Deactivate velocity rule")}
+                size="md"
+            >
+<VAlert type="info" variant="tonal" density="compact">
                             {t("This creates a maker-checker request. The change applies only after a different checker approves it.")}
                         </VAlert>
                         {lifecycleKind.value === "COMMISSION" && (
@@ -579,15 +557,15 @@ const PricingControlsPage = dc(() => {
                             <VBtn variant="text" onClick={() => (lifecycleOpen.value = false)}>{t("Cancel")}</VBtn>
                             <VBtn color="warning" loading={lifecycleSaving.value} onClick={() => void saveLifecycle()}>{t("Submit for approval")}</VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
 
-            <VDialog modelValue={velocityOpen.value} onUpdate:modelValue={(value: boolean) => (velocityOpen.value = value)} maxWidth="680px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{t("New velocity rule")}</ThemedText>
-                        <VAlert type="warning" variant="tonal" density="compact">
+            <FormModal
+                modelValue={velocityOpen.value}
+                onUpdate:modelValue={(value: boolean) => (velocityOpen.value = value)}
+                title={t("New velocity rule")}
+                size="md"
+            >
+<VAlert type="warning" variant="tonal" density="compact">
                             {t("Velocity rules take effect immediately and are audited.")}
                         </VAlert>
                         {velocityError.value && <VAlert type="error" variant="tonal" density="compact">{velocityError.value}</VAlert>}
@@ -608,9 +586,7 @@ const PricingControlsPage = dc(() => {
                             <VBtn variant="text" onClick={() => (velocityOpen.value = false)}>{t("Cancel")}</VBtn>
                             <VBtn color="primary" loading={velocitySaving.value} onClick={() => void saveVelocity()}>{t("Create")}</VBtn>
                         </ThemedView>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         </ScreenContainer>
     );
 });

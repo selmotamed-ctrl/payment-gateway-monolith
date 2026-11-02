@@ -1,9 +1,9 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VCard, VCardText, VDialog, VSelect, VTextField, VTextarea } from "vuetify/components";
+import { VBtn, VSelect, VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
@@ -15,6 +15,8 @@ import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 
+import { FormModal } from "@/components/ui/FormModal";
+import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 type Application = {
     id: string;
     name: string;
@@ -166,13 +168,14 @@ const ApplicationsPage = dc(() => {
     return () => (
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
-                <PageHeader title={t("Applications")} />
+                <PageHeader title={t("Applications")}
+                    subtitle={t("Payment applications, environments, and configuration.")} />
 
                 {error.value ? (
                     <StateView error={error.value} onRetry={() => void load()} />
                 ) : (
-                    <VCard>
-                        <VCardText>
+                    <SurfaceCard>
+                        <SurfaceCardText>
                             <DataTable
                                 title={t("Applications")}
                                 data={rows.value}
@@ -184,19 +187,18 @@ const ApplicationsPage = dc(() => {
                                 searchValue={search.value}
                                 setSearchValue={(value) => (search.value = value)}
                             />
-                        </VCardText>
-                    </VCard>
+                        </SurfaceCardText>
+                    </SurfaceCard>
                 )}
             </ThemedView>
 
-            <VDialog modelValue={dialogOpen.value} onUpdate:modelValue={(v: any) => (dialogOpen.value = v)} maxWidth="620px">
-                <VCard>
-                    <VCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <ThemedText type="defaultSemiBold" style={{ fontSize: "17px" }}>
-                            {selected.value?.name}
-                        </ThemedText>
-
-                        {mode.value === "DESCRIPTIVE" ? (
+            <FormModal
+                modelValue={dialogOpen.value}
+                onUpdate:modelValue={(v: any) => (dialogOpen.value = v)}
+                title={selected.value?.name ?? t("Application")}
+                size="md"
+            >
+{mode.value === "DESCRIPTIVE" ? (
                             <>
                                 <VTextField
                                     label={t("Merchant Name")}
@@ -248,9 +250,7 @@ const ApplicationsPage = dc(() => {
                         <VBtn color="primary" loading={actionLoading.value} onClick={() => void submit()}>
                             {mode.value === "DESCRIPTIVE" ? t("Save Changes") : t("Propose")}
                         </VBtn>
-                    </VCardText>
-                </VCard>
-            </VDialog>
+            </FormModal>
         </ScreenContainer>
     );
 });

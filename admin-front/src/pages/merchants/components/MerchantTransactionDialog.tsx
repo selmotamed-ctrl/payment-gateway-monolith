@@ -1,6 +1,6 @@
 import { dc } from "kt-dc";
 import { useLocale } from "vuetify";
-import { VAlert, VBtn, VCard, VCardText, VDialog } from "vuetify/components";
+import { VAlert, VBtn } from "vuetify/components";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StatusChip } from "@/components/StatusChip";
@@ -8,20 +8,9 @@ import { statusTone } from "@/components/Table/statusTone";
 import { formatDateTime, formatMoney } from "../merchantHelp";
 import type { MerchantTransaction } from "../types";
 
-const Row = (props: { label: string; value: string; copy?: boolean; ltr?: boolean }) => (
-    <ThemedView style={{ flexDirection: "row", gap: "12px", alignItems: "flex-start", borderBottom: "1px solid rgba(100,116,139,0.12)", paddingBottom: "6px" }}>
-        <ThemedText style={{ fontSize: "12px", opacity: 0.62, minWidth: "150px" }}>{props.label}</ThemedText>
-        <ThemedText
-            style={{ fontSize: "12px", wordBreak: "break-word", direction: props.ltr ? "ltr" : undefined, cursor: props.copy && props.value ? "copy" : undefined }}
-            onClick={() => {
-                if (!props.copy || !props.value || props.value === "—") return;
-                void navigator.clipboard?.writeText(props.value);
-            }}
-        >
-            {props.value || "—"}
-        </ThemedText>
-    </ThemedView>
-);
+import { FormModal } from "@/components/ui/FormModal";
+import { DescriptionList } from "@/components/ui/DescriptionList";
+import { MonoRef } from "@/components/ui/MonoRef";
 
 const MerchantTransactionDialog = dc(
     (props: {
@@ -38,12 +27,14 @@ const MerchantTransactionDialog = dc(
             if (!tx) return <></>;
             const currency = tx.currency;
             return (
-                <VDialog modelValue={props.open} onUpdate:modelValue={(value: boolean) => props.onUpdate(value)} maxWidth="980px" scrollable>
-                    <VCard>
-                        <VCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                            <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
+                <FormModal
+                modelValue={props.open}
+                onUpdate:modelValue={(value: boolean) => props.onUpdate(value)}
+                title={t("Transaction detail")}
+                size="lg"
+            >
+<ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
                                 <ThemedView style={{ gap: "4px" }}>
-                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "18px" }}>{t("Transaction detail")}</ThemedText>
                                     <ThemedText style={{ fontSize: "12px", opacity: 0.65, direction: "ltr" }}>{tx.reference}</ThemedText>
                                 </ThemedView>
                                 <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
@@ -60,28 +51,44 @@ const MerchantTransactionDialog = dc(
                             )}
 
                             <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "16px" }}>
-                                <ThemedView style={{ gap: "6px" }}>
+                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Payment")}</ThemedText>
-                                    <Row label={t("Created")} value={formatDateTime(tx.createdAt)} />
-                                    <Row label={t("Terminal")} value={formatDateTime(tx.terminalAt)} />
-                                    <Row label={t("Application")} value={`${tx.application.name} (${tx.application.id})`} ltr />
-                                    <Row label={t("Rail")} value={`${tx.rail.code} · ${tx.rail.nameEn}`} />
-                                    <Row label={t("Gateway")} value={`${tx.gateway.code} · ${tx.gateway.name}`} />
-                                    <Row label={t("Link key")} value={tx.link?.key ?? "—"} ltr copy />
-                                    <Row label={t("Ledger entry")} value={tx.ledgerEntryId ?? "—"} ltr copy />
+                                    <DescriptionList
+                                        items={[
+                                            { label: t("Created"), value: formatDateTime(tx.createdAt) },
+                                            { label: t("Terminal"), value: formatDateTime(tx.terminalAt) },
+                                            {
+                                                label: t("Application"),
+                                                value: (
+                                                    <ThemedView style={{ flexDirection: "row", gap: "6px", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                                                        <span>{tx.application.name}</span>
+                                                        <MonoRef value={tx.application.id} truncate={14} />
+                                                    </ThemedView>
+                                                ),
+                                            },
+                                            { label: t("Rail"), value: `${tx.rail.code} · ${tx.rail.nameEn}` },
+                                            { label: t("Gateway"), value: `${tx.gateway.code} · ${tx.gateway.name}` },
+                                            { label: t("Link key"), value: <MonoRef value={tx.link?.key ?? ""} /> },
+                                            { label: t("Ledger entry"), value: <MonoRef value={tx.ledgerEntryId ?? ""} /> },
+                                        ]}
+                                    />
                                 </ThemedView>
-                                <ThemedView style={{ gap: "6px" }}>
+                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Amounts and references")}</ThemedText>
-                                    <Row label={t("Requested")} value={formatMoney(tx.requestedAmount, currency)} />
-                                    <Row label={t("Surcharge")} value={formatMoney(tx.surchargeAmount, currency)} />
-                                    <Row label={t("Total charged")} value={formatMoney(tx.totalChargedAmount, currency)} />
-                                    <Row label={t("Settled")} value={formatMoney(tx.settledAmount, currency)} />
-                                    <Row label={t("Gateway fee")} value={formatMoney(tx.gatewayFeeAmount, currency)} />
-                                    <Row label={t("Platform commission")} value={formatMoney(tx.platformCommissionAmount, currency)} />
-                                    <Row label={t("Net to merchant")} value={formatMoney(tx.netMerchantAmount, currency)} />
-                                    <Row label={t("Provider reference")} value={tx.providerReference ?? "—"} ltr copy />
-                                    <Row label={t("Network reference")} value={tx.networkReference ?? "—"} ltr copy />
-                                    <Row label={t("Gateway reference")} value={tx.gatewayReference ?? "—"} ltr copy />
+                                    <DescriptionList
+                                        items={[
+                                            { label: t("Requested"), value: formatMoney(tx.requestedAmount, currency) },
+                                            { label: t("Surcharge"), value: formatMoney(tx.surchargeAmount, currency) },
+                                            { label: t("Total charged"), value: formatMoney(tx.totalChargedAmount, currency) },
+                                            { label: t("Settled"), value: formatMoney(tx.settledAmount, currency) },
+                                            { label: t("Gateway fee"), value: formatMoney(tx.gatewayFeeAmount, currency) },
+                                            { label: t("Platform commission"), value: formatMoney(tx.platformCommissionAmount, currency) },
+                                            { label: t("Net to merchant"), value: formatMoney(tx.netMerchantAmount, currency) },
+                                            { label: t("Provider reference"), value: <MonoRef value={tx.providerReference ?? ""} /> },
+                                            { label: t("Network reference"), value: <MonoRef value={tx.networkReference ?? ""} /> },
+                                            { label: t("Gateway reference"), value: <MonoRef value={tx.gatewayReference ?? ""} /> },
+                                        ]}
+                                    />
                                 </ThemedView>
                             </ThemedView>
 
@@ -104,9 +111,7 @@ const MerchantTransactionDialog = dc(
                                 )}
                                 <VBtn variant="text" onClick={() => props.onUpdate(false)}>{t("Close")}</VBtn>
                             </ThemedView>
-                        </VCardText>
-                    </VCard>
-                </VDialog>
+            </FormModal>
             );
         };
     },
