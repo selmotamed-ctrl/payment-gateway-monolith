@@ -15,6 +15,7 @@ import { MonoRef } from "@/components/ui/MonoRef";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { statusTone } from "@/components/Table/statusTone";
 import { ApiTable } from "@/components/Table/ApiTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
 import { tableRegistry } from "@/components/Table/tableRegistry";
@@ -32,6 +33,7 @@ import { FormField } from "@/components/ui/FormField";
 import { FormChecklist } from "@/components/ui/FormChecklist";
 import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
 import { MetaPill } from "@/components/ui/MetaPill";
+import { SectionFields } from "@/components/SectionFields";
 type UserRow = {
     id: string;
     email: string;
@@ -624,9 +626,13 @@ const UsersPage = dc(() => {
             label: "Actions",
             sortable: false,
             Value: ({ row }: { row: UserRow }) => (
-                <VBtn size="small" variant="tonal" color="primary" onClick={() => void openDetail(row)}>
-                    {t("Open")}
-                </VBtn>
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Open"),
+                        icon: "mdi-account-details-outline",
+                        onClick: () => void openDetail(row),
+                    }}
+                />
             ),
         },
     ]);
@@ -782,19 +788,21 @@ const UsersPage = dc(() => {
                 <VAlert type="info" variant="tonal">
                     {t("This changes account status only. Role and authority changes still require checker approval.")}
                 </VAlert>
-                <FormField label={t("Status")} sensitiveMakerChecker>
-                    <VSelect
-                        items={["ACTIVE", "SUSPENDED", "DISABLED"]}
-                        modelValue={bulkStatus.value}
-                        onUpdate:modelValue={(value: string | null) => (bulkStatus.value = value ?? "SUSPENDED")}
-                    />
-                </FormField>
-                <FormField label={t("Reason (optional)")} sensitiveMakerChecker>
-                    <VTextField
-                        modelValue={bulkReason.value}
-                        onUpdate:modelValue={(value: string) => (bulkReason.value = value)}
-                    />
-                </FormField>
+                <SectionFields title={t("Status change")}>
+                    <FormField label={t("Status")} sensitiveMakerChecker>
+                        <VSelect
+                            items={["ACTIVE", "SUSPENDED", "DISABLED"]}
+                            modelValue={bulkStatus.value}
+                            onUpdate:modelValue={(value: string | null) => (bulkStatus.value = value ?? "SUSPENDED")}
+                        />
+                    </FormField>
+                    <FormField label={t("Reason (optional)")} sensitiveMakerChecker>
+                        <VTextField
+                            modelValue={bulkReason.value}
+                            onUpdate:modelValue={(value: string) => (bulkReason.value = value)}
+                        />
+                    </FormField>
+                </SectionFields>
                 <FormChecklist
                     checks={[...BULK_STATUS_CHECKS]}
                     modelValue={bulkStatusChecklist.value}
@@ -861,34 +869,33 @@ const UsersPage = dc(() => {
                             ]}
                         />
 
-                        <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "12px" }}>
-                            <FormField label={t("Role")} sensitiveMakerChecker style={{ flex: "1 1 240px" }}>
+                        <SectionFields title={t("Role and access")}>
+                            <FormField label={t("Role")} sensitiveMakerChecker>
                                 <VSelect
                                     items={[...ADMIN_ROLES] as string[]}
                                     modelValue={editForm.value.role}
                                     onUpdate:modelValue={(value: string | null) => (editForm.value.role = value ?? "OPERATOR")}
                                 />
                             </FormField>
-                            <FormField label={t("Status")} sensitiveMakerChecker style={{ flex: "1 1 240px" }}>
+                            <FormField label={t("Status")} sensitiveMakerChecker>
                                 <VSelect
                                     items={USER_STATUSES}
                                     modelValue={editForm.value.status}
                                     onUpdate:modelValue={(value: string) => (editForm.value.status = value)}
                                 />
                             </FormField>
-                        </ThemedView>
-
-                        <FormField
-                            label={t("Authority keys")}
-                            hint={t("Comma-separated keys. Any role or authority change waits for a checker.")}
-                            sensitiveMakerChecker
-                        >
-                            <VTextField
-                                modelValue={editForm.value.authorities}
-                                onUpdate:modelValue={(value: string) => (editForm.value.authorities = value)}
-                                placeholder="user:read, user:write, merchant:read"
-                            />
-                        </FormField>
+                            <FormField
+                                label={t("Authority keys")}
+                                hint={t("Comma-separated keys. Any role or authority change waits for a checker.")}
+                                sensitiveMakerChecker
+                            >
+                                <VTextField
+                                    modelValue={editForm.value.authorities}
+                                    onUpdate:modelValue={(value: string) => (editForm.value.authorities = value)}
+                                    placeholder="user:read, user:write, merchant:read"
+                                />
+                            </FormField>
+                        </SectionFields>
 
                         <FormChecklist
                             checks={[...USER_EDIT_CHECKS]}
@@ -937,36 +944,36 @@ const UsersPage = dc(() => {
                 <VAlert type="info" variant="tonal" density="compact">
                     {t("The user starts in INVITED state. Set a temporary password only when hand-delivering credentials.")}
                 </VAlert>
-                <FormField label={t("Email")} required>
-                    <VTextField type="email" modelValue={createForm.value.email} onUpdate:modelValue={(value: string) => (createForm.value.email = value)} />
-                </FormField>
-                <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "12px" }}>
-                    <FormField label={t("Display name")} style={{ flex: "1 1 220px" }}>
+                <SectionFields title={t("User details")}>
+                    <FormField label={t("Email")} required>
+                        <VTextField type="email" modelValue={createForm.value.email} onUpdate:modelValue={(value: string) => (createForm.value.email = value)} />
+                    </FormField>
+                    <FormField label={t("Display name")}>
                         <VTextField modelValue={createForm.value.fullName} onUpdate:modelValue={(value: string) => (createForm.value.fullName = value)} />
                     </FormField>
-                    <FormField label={t("Phone")} style={{ flex: "1 1 220px" }}>
+                    <FormField label={t("Phone")}>
                         <VTextField modelValue={createForm.value.phone} onUpdate:modelValue={(value: string) => (createForm.value.phone = value)} />
                     </FormField>
-                </ThemedView>
-                <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "12px" }}>
-                    <FormField label={t("Role")} sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
+                </SectionFields>
+                <SectionFields title={t("Access")}>
+                    <FormField label={t("Role")} sensitiveMakerChecker>
                         <VSelect items={[...ADMIN_ROLES] as string[]} modelValue={createForm.value.role} onUpdate:modelValue={(value: string | null) => (createForm.value.role = value ?? "OPERATOR")} />
                     </FormField>
-                    <FormField label={t("Temporary password")} sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
+                    <FormField label={t("Temporary password")} sensitiveMakerChecker>
                         <VTextField type="password" modelValue={createForm.value.temporaryPassword} onUpdate:modelValue={(value: string) => (createForm.value.temporaryPassword = value)} />
                     </FormField>
-                </ThemedView>
-                <FormField
-                    label={t("Authority keys")}
-                    hint={t("Optional. Comma-separated authority keys.")}
-                    sensitiveMakerChecker
-                >
-                    <VTextField
-                        modelValue={createForm.value.authorities}
-                        onUpdate:modelValue={(value: string) => (createForm.value.authorities = value)}
-                        placeholder="user:read, merchant:read"
-                    />
-                </FormField>
+                    <FormField
+                        label={t("Authority keys")}
+                        hint={t("Optional. Comma-separated authority keys.")}
+                        sensitiveMakerChecker
+                    >
+                        <VTextField
+                            modelValue={createForm.value.authorities}
+                            onUpdate:modelValue={(value: string) => (createForm.value.authorities = value)}
+                            placeholder="user:read, merchant:read"
+                        />
+                    </FormField>
+                </SectionFields>
                 <FormChecklist
                     checks={[...INVITE_CHECKS]}
                     modelValue={inviteChecklist.value}

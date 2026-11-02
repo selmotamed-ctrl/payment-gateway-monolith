@@ -41,7 +41,8 @@ export type Field<T, Form> = (
 ) & {
     required?: boolean;
     disabled?: boolean;
-    label: string;
+    label?: string;
+    placeholder?: string;
     constantSet?:
         | {
               key: string;
@@ -94,6 +95,7 @@ export type InputFieldDescriptor<
 ) & {
     required?: boolean;
     label: string;
+    placeholder?: string;
     rules?: RulesList;
     constantSet?:
         | {
@@ -143,7 +145,8 @@ const InputField = dc(
                             }
                         }}
                         name={f.fieldKey as string}
-                        label={t(f.label)}
+                        label={undefined}
+
                         showSize
                         rules={[
                             ...(f.rules || []),
@@ -188,7 +191,8 @@ const InputField = dc(
                 return (
                     <TextField
                         name={f.fieldKey as string}
-                        label={t(f.label)}
+                        label={undefined}
+
                         onUpdate:modelValue={(v) => {
                             if (isEmpty(v)) {
                                 props.setField((f.clearKey || f.fieldKey) as any, null);
@@ -208,36 +212,40 @@ const InputField = dc(
                     ></TextField>
                 );
             } else if (f.type == "api-autocomplete") {
-                <ApiAutocomplete
-                    apiDataExtractor={f.apiDataExtractor}
-                    url={f.url}
-                    name={f.fieldKey?.toString()}
-                    label={t(f.label)}
-                    itemTitle={f.itemTitle}
-                    itemValue={f.itemValue}
-                    modelValue={f.form[f.fieldKey]}
-                    onUpdate:modelValue={(v) => {
-                        if (isEmpty(v)) {
+                return (
+                    <ApiAutocomplete
+                        apiDataExtractor={f.apiDataExtractor}
+                        url={f.url}
+                        name={f.fieldKey?.toString()}
+                        label={undefined}
+
+                        itemTitle={f.itemTitle}
+                        itemValue={f.itemValue}
+                        modelValue={f.form[f.fieldKey]}
+                        onUpdate:modelValue={(v) => {
+                            if (isEmpty(v)) {
+                                props.setField((f.clearKey || f.fieldKey) as any, null);
+                                return;
+                            }
+                            f.setField(props.fieldKey, v);
+                            setConstants(v);
+                        }}
+                        multiple={f.multiple}
+                        chips={f.multiple}
+                        closableChips={f.multiple}
+                        clearable
+                        onClick:clear={() => {
                             props.setField((f.clearKey || f.fieldKey) as any, null);
-                            return;
-                        }
-                        f.setField(props.fieldKey, v);
-                        setConstants(v);
-                    }}
-                    multiple={f.multiple}
-                    chips={f.multiple}
-                    closableChips={f.multiple}
-                    clearable
-                    onClick:clear={() => {
-                        props.setField((f.clearKey || f.fieldKey) as any, null);
-                    }}
-                    rules={f.rules}
-                ></ApiAutocomplete>;
+                        }}
+                        rules={f.rules}
+                    ></ApiAutocomplete>
+                );
             } else if (f.type == "data-autocomplete") {
                 return (
                     <Autocomplete
                         name={f.fieldKey?.toString()}
-                        label={t(f.label)}
+                        label={undefined}
+
                         items={f.items}
                         itemTitle={f.itemTitle}
                         itemValue={f.itemValue}
@@ -265,7 +273,8 @@ const InputField = dc(
                     <DateInput
                         name={f.fieldKey?.toString()}
                         rules={f.rules}
-                        label={t(f.label)}
+                        label={undefined}
+
                         modelValue={props.form[f.fieldKey]}
                         onUpdate:modelValue={(v) => {
                             if (isEmpty(v)) {
@@ -343,23 +352,45 @@ const InputFields = dc(
         disabled?: boolean;
         loading?: boolean;
     }) => {
+        const locale = useLocale();
         return () => {
+            const t = locale.t;
             return (
-                <ThemedView style={{ gap: "22px" }}>
+                <ThemedView
+                    style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+                        gap: "16px 20px",
+                        alignItems: "start",
+                    }}
+                >
                     {props.fields.map((f) => {
                         return (
-                            <>
+                            <div
+                                key={String(f.fieldKey)}
+                                style={{ display: "flex", flexDirection: "column", gap: "6px", minWidth: 0 }}
+                            >
                                 {f.upperSlot?.()}
-                                <InputField
-                                    {...(f as any)}
-                                    fieldKey={f.fieldKey}
-                                    setField={props.setField}
-                                    form={props.form}
-                                    disabled={props.disabled}
-                                    loading={props.loading}
-                                ></InputField>
+                                <div class="pg-field-wrapper" style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                                    <label style={{ fontSize: "12.5px", fontWeight: 500, color: "var(--pg-ink-primary)" }}>
+                                        {t(f.label)}
+                                        {f.required && (
+                                            <span style={{ color: "var(--pg-status-danger-dot)", marginInlineStart: "3px" }}>*</span>
+                                        )}
+                                    </label>
+                                    <InputField
+                                        {...(f as any)}
+                                        label={undefined}
+
+                                        fieldKey={f.fieldKey}
+                                        setField={props.setField}
+                                        form={props.form}
+                                        disabled={props.disabled}
+                                        loading={props.loading}
+                                    ></InputField>
+                                </div>
                                 {f.lowerSlot?.()}
-                            </>
+                            </div>
                         );
                     })}
                 </ThemedView>

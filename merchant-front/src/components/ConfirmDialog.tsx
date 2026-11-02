@@ -6,6 +6,7 @@ import { extractApiError, UnknownError, type ApiError } from "@/utils/errors/ext
 import { AlertView } from "./AlertView";
 import { FormModal } from "@/components/ui/FormModal";
 import type { JSONObject } from "kt-common";
+
 export interface ConfirmOptions {
     title: string;
     message: string;
@@ -20,7 +21,7 @@ export const AwaitedConfirmationDialog = dc<{}, { show(opts: ConfirmOptions): Pr
     const title = ref<string>("");
     const message = ref<string>("");
     let resolver: (value: boolean) => void = () => {};
-    const type = ref("primary" as string);
+    const type = ref<ConfirmOptions["type"]>("primary");
     const valid = ref(true);
     const slot = ref(null as null | ((props: { form: globalThis.Ref<JSONObject, JSONObject> }) => JSX.Element));
     const submitButtonLabel = ref(null as null | string);
@@ -77,18 +78,28 @@ export const AwaitedConfirmationDialog = dc<{}, { show(opts: ConfirmOptions): Pr
 
     expose({ show });
 
+    const submitLabel = () => t(submitButtonLabel.value || "Confirm");
+
     return (): VNode => (
         <FormModal
             modelValue={visible.value}
             onUpdate:modelValue={(value: boolean) => {
-                if (!value) {
-                    onCancel();
+                if (value) {
+                    visible.value = true;
+                    return;
                 }
+                if (loading.value) {
+                    visible.value = true;
+                    return;
+                }
+                if (visible.value) onCancel();
             }}
             title={t(title.value)}
-            submitLabel={t(submitButtonLabel.value || "Confirm")}
             loading={loading.value}
             danger={type.value === "error"}
+            onSubmit={() => {
+                if (valid.value && !loading.value) void onConfirm();
+            }}
             v-slots={{
                 footer: () => (
                     <>
@@ -100,15 +111,16 @@ export const AwaitedConfirmationDialog = dc<{}, { show(opts: ConfirmOptions): Pr
                             color={type.value}
                             loading={loading.value}
                             disabled={!valid.value || loading.value}
+                            aria-label={submitLabel()}
                             onClick={() => void onConfirm()}
                         >
-                            {t(submitButtonLabel.value || "Confirm")}
+                            {submitLabel()}
                         </VBtn>
                     </>
                 ),
             }}
         >
-            <p style={{ margin: 0, fontSize: "13.5px", lineHeight: 1.6, color: "var(--pg-ink-secondary)" }}>
+            <p style={{ margin: 0, fontSize: "13.5px", lineHeight: 1.6, color: "var(--pg-ink-secondary)", whiteSpace: "pre-wrap" }}>
                 {t(message.value)}
             </p>
             {slot.value && (
@@ -125,3 +137,5 @@ export const AwaitedConfirmationDialog = dc<{}, { show(opts: ConfirmOptions): Pr
         </FormModal>
     );
 });
+
+export default AwaitedConfirmationDialog;

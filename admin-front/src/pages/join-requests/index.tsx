@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { ApiTable } from "@/components/Table/ApiTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
 import { tableRegistry } from "@/components/Table/tableRegistry";
@@ -417,14 +418,21 @@ const JoinRequestsPage = dc(() => {
             label: "Actions",
             sortable: false,
             Value: ({ row }: { row: JoinRequestSummary }) => (
-                <ThemedView style={{ flexDirection: "row", gap: "4px", flexWrap: "wrap" }}>
-                    <VBtn size="small" variant="text" prependIcon="mdi-eye-outline" onClick={() => openInspection(row)}>
-                        {t("Inspect")}
-                    </VBtn>
-                    <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => openRequest(row)}>
-                        {t("Open")}
-                    </VBtn>
-                </ThemedView>
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Open"),
+                        icon: "mdi-open-in-new",
+                        onClick: () => openRequest(row),
+                    }}
+                    items={[
+                        {
+                            key: "inspect",
+                            label: t("Inspect"),
+                            icon: "mdi-eye-outline",
+                            onClick: () => openInspection(row),
+                        },
+                    ]}
+                />
             ),
         },
     ];

@@ -7,7 +7,9 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
 import { DataTable } from "@/components/Table/DataTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import type { TableHeader } from "@/components/Table/types";
+import { SectionFields } from "@/components/SectionFields";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -188,23 +190,29 @@ const DeveloperTokensPage = dc(() => {
             key: "actions",
             label: "Actions Column",
             Value: ({ row }: { row: AccessToken }) => (
-                <ThemedView style={{ flexDirection: "row", gap: "6px" }}>
-                    <VBtn
-                        size="small"
-                        variant="tonal"
-                        onClick={() => {
+                <TableRowActions
+                    primaryAction={{
+                        label: t("IP Whitelist"),
+                        icon: "mdi-shield-edit-outline",
+                        onClick: () => {
                             activeToken.value = row;
                             ipList.value = (row.ipAllowlist ?? []).join(", ");
                             formError.value = "";
                             ipOpen.value = true;
-                        }}
-                    >
-                        {t("IP Whitelist")}
-                    </VBtn>
-                    <VBtn size="small" variant="tonal" color="error" disabled={!!row.revokedAt} onClick={() => void revoke(row)}>
-                        {t("Revoke")}
-                    </VBtn>
-                </ThemedView>
+                        },
+                    }}
+                    items={[
+                        {
+                            key: "revoke",
+                            label: t("Revoke"),
+                            icon: "mdi-key-remove",
+                            danger: true,
+                            disabled: !!row.revokedAt,
+                            dividerBefore: true,
+                            onClick: () => void revoke(row),
+                        },
+                    ]}
+                />
             ),
         },
     ];
@@ -270,27 +278,29 @@ const DeveloperTokensPage = dc(() => {
                 submitLabel={t("Create Token")}
                 onSubmit={() => void createToken()}
             >
-                <FormField label={t("Token Name")} required>
-                    <VTextField
-                        modelValue={form.value.name}
-                        onUpdate:modelValue={(v: string) => (form.value.name = v)}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Scopes")} hint={t("Comma separated, e.g. links.create,payments.read.")}>
-                    <VTextField
-                        modelValue={form.value.scopes}
-                        onUpdate:modelValue={(v: string) => (form.value.scopes = v)}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("IP Whitelist")} hint={t("Comma separated CIDR ranges.")}>
-                    <VTextField
-                        modelValue={form.value.ipAllowlist}
-                        onUpdate:modelValue={(v: string) => (form.value.ipAllowlist = v)}
-                        hideDetails
-                    />
-                </FormField>
+                <SectionFields title={t("Details")}>
+                    <FormField label={t("Token Name")} required>
+                        <VTextField
+                            modelValue={form.value.name}
+                            onUpdate:modelValue={(v: string) => (form.value.name = v)}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Scopes")} hint={t("Comma separated, e.g. links.create,payments.read.")}>
+                        <VTextField
+                            modelValue={form.value.scopes}
+                            onUpdate:modelValue={(v: string) => (form.value.scopes = v)}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("IP Whitelist")} hint={t("Comma separated CIDR ranges.")}>
+                        <VTextField
+                            modelValue={form.value.ipAllowlist}
+                            onUpdate:modelValue={(v: string) => (form.value.ipAllowlist = v)}
+                            hideDetails
+                        />
+                    </FormField>
+                </SectionFields>
             </FormModal>
 
             <FormModal

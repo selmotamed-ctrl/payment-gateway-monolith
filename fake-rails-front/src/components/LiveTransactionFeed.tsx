@@ -1,6 +1,8 @@
 import { dc } from "kt-dc";
 import { onBeforeUnmount, onMounted, ref } from "vue";
-import { VCard, VCardText, VChip, VList, VListItem, VListItemTitle, VListItemSubtitle } from "vuetify/components";
+import { VList, VListItem, VListItemSubtitle, VListItemTitle } from "vuetify/components";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { streamUrl } from "@/utils/api";
 
 export interface LiveEvent {
@@ -37,13 +39,19 @@ export const LiveTransactionFeed = dc(
     onBeforeUnmount(() => source?.close());
 
     return () => (
-      <VCard color="surface">
-        <VCardText class="d-flex align-center">
-          <strong>Live wire feed</strong>
-          <VChip size="small" class="ml-3" color={connected.value ? "success" : "error"} variant="tonal">
-            {connected.value ? "SSE connected" : "reconnecting"}
-          </VChip>
-        </VCardText>
+      <SurfaceCard
+        title="Live wire feed"
+        v-slots={{
+          headerActions: () => (
+            <StatusBadge
+              status={connected.value ? "CONNECTED" : "RECONNECTING"}
+              label={connected.value ? "SSE connected" : "reconnecting"}
+              toneOverride={connected.value ? "success" : "danger"}
+              showDot={false}
+            />
+          ),
+        }}
+      >
         <VList density="compact" style={{ maxHeight: props.compact ? "240px" : "520px", overflowY: "auto" }}>
           {events.value.length === 0 ? (
             <VListItem><VListItemTitle class="text-medium-emphasis">Waiting for gateway calls…</VListItemTitle></VListItem>
@@ -59,7 +67,7 @@ export const LiveTransactionFeed = dc(
             </VListItem>
           ))}
         </VList>
-      </VCard>
+      </SurfaceCard>
     );
   },
   { props: ["max", "compact"] },

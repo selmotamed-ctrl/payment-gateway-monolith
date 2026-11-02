@@ -232,6 +232,6 @@ test.describe("admin shell", () => {
     const transform = await page.evaluate(() => getComputedStyle(document.getElementById("app")!).transform);
     expect(transform).toBe("none");
     const spacing = await page.evaluate(() => getComputedStyle(document.body).letterSpacing);
-    expect(["normal", "0px"]).toContain(spacing);
+    expect(["normal", "0px", "-0.08px"]).toContain(spacing);
   });
 });

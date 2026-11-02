@@ -8,7 +8,9 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
 import { DataTable } from "@/components/Table/DataTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import type { TableHeader } from "@/components/Table/types";
+import { SectionFields } from "@/components/SectionFields";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -140,33 +142,31 @@ const PosTerminalsPage = dc(() => {
             key: "actions",
             label: "Actions Column",
             Value: ({ row }: { row: Terminal }) => (
-                <ThemedView style={{ flexDirection: "row", gap: "6px" }}>
-                    <VBtn
-                        size="small"
-                        variant="tonal"
-                        onClick={() => {
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Screens"),
+                        icon: "mdi-monitor-multiple",
+                        onClick: () => {
                             activeTerminal.value = row;
                             screenForm.value = { name: "", role: "CASHIER" };
                             formError.value = "";
                             screenOpen.value = true;
-                        }}
-                    >
-                        {t("Screens")}
-                    </VBtn>
-                    <VBtn
-                        size="small"
-                        variant="tonal"
-                        disabled={!(row.screens ?? []).length}
-                        onClick={() =>
-                            void router.push({
-                                name: "PosScreen",
-                                params: { code: row.screens?.[0]?.code ?? "" },
-                            })
-                        }
-                    >
-                        {t("Fullscreen")}
-                    </VBtn>
-                </ThemedView>
+                        },
+                    }}
+                    items={[
+                        {
+                            key: "fullscreen",
+                            label: t("Fullscreen"),
+                            icon: "mdi-fullscreen",
+                            disabled: !(row.screens ?? []).length,
+                            onClick: () =>
+                                void router.push({
+                                    name: "PosScreen",
+                                    params: { code: row.screens?.[0]?.code ?? "" },
+                                }),
+                        },
+                    ]}
+                />
             ),
         },
     ];
@@ -218,20 +218,22 @@ const PosTerminalsPage = dc(() => {
                 submitLabel={t("Create")}
                 onSubmit={() => void createTerminal()}
             >
-                <FormField label={t("Terminal Name")} required>
-                    <VTextField
-                        modelValue={terminalForm.value.name}
-                        onUpdate:modelValue={(v: string) => (terminalForm.value.name = v)}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Location")}>
-                    <VTextField
-                        modelValue={terminalForm.value.location}
-                        onUpdate:modelValue={(v: string) => (terminalForm.value.location = v)}
-                        hideDetails
-                    />
-                </FormField>
+                <SectionFields title={t("Terminal")}>
+                    <FormField label={t("Terminal Name")} required>
+                        <VTextField
+                            modelValue={terminalForm.value.name}
+                            onUpdate:modelValue={(v: string) => (terminalForm.value.name = v)}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Location")}>
+                        <VTextField
+                            modelValue={terminalForm.value.location}
+                            onUpdate:modelValue={(v: string) => (terminalForm.value.location = v)}
+                            hideDetails
+                        />
+                    </FormField>
+                </SectionFields>
             </FormModal>
 
             <FormModal
@@ -244,20 +246,22 @@ const PosTerminalsPage = dc(() => {
                 submitLabel={t("Create")}
                 onSubmit={() => void createScreen()}
             >
-                <FormField label={t("Screen Name")} required>
-                    <VTextField
-                        modelValue={screenForm.value.name}
-                        onUpdate:modelValue={(v: string) => (screenForm.value.name = v)}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Type")}>
-                    <VTextField
-                        modelValue={screenForm.value.role}
-                        onUpdate:modelValue={(v: string) => (screenForm.value.role = v.toUpperCase())}
-                        hideDetails
-                    />
-                </FormField>
+                <SectionFields title={t("POS Screen")}>
+                    <FormField label={t("Screen Name")} required>
+                        <VTextField
+                            modelValue={screenForm.value.name}
+                            onUpdate:modelValue={(v: string) => (screenForm.value.name = v)}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Type")}>
+                        <VTextField
+                            modelValue={screenForm.value.role}
+                            onUpdate:modelValue={(v: string) => (screenForm.value.role = v.toUpperCase())}
+                            hideDetails
+                        />
+                    </FormField>
+                </SectionFields>
             </FormModal>
         </ScreenContainer>
     );

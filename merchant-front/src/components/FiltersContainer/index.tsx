@@ -95,24 +95,13 @@ const ActiveFilters = dc(
 
         return () => {
             return (
-                <ThemedView
-                    style={{
-                        flexDirection: "row",
-                        flexWrap: "wrap",
-                        gap: "8px",
-                        alignItems: "center",
-                        padding: "12px 16px",
-                        backgroundColor: "var(--pg-bg-surface-subtle)",
-                        borderRadius: "var(--pg-radius-sm)",
-                        border: "1px solid var(--pg-border-subtle)",
-                    }}
-                >
+                <div class="pg-filters-container__active">
                     <ThemedText
                         style={{
                             fontSize: "13px",
                             fontWeight: 500,
                             color: "var(--pg-ink-muted)",
-                            marginRight: "4px",
+                            marginInlineEnd: "4px",
                         }}
                     >
                         {t("Active filters")}:
@@ -142,14 +131,14 @@ const ActiveFilters = dc(
                         label="Clear All"
                         onClick={props.clear}
                         style={{
-                            marginLeft: "auto",
+                            marginInlineStart: "auto",
                             color: "var(--pg-ink-secondary)",
                             fontSize: "13px",
                             fontWeight: 500,
                             textTransform: "none",
                         }}
                     />
-                </ThemedView>
+                </div>
             );
         };
     },
@@ -180,12 +169,7 @@ const FilterContainer = dc(
                 return <></>;
             }
             return (
-                <ThemedView
-                    style={{
-                        gap: "16px",
-                        padding: "16px 0px",
-                    }}
-                >
+                <div class="pg-filters-container">
                     <ActiveFilters<any>
                         clear={props.onClear}
                         filters={props.filters}
@@ -204,14 +188,7 @@ const FilterContainer = dc(
                             valid.value = !!v;
                         }}
                     >
-                        <ThemedView
-                            style={{
-                                flexDirection: "row",
-                                gap: "16px",
-                                alignItems: "flex-start",
-                                flexWrap: "wrap",
-                            }}
-                        >
+                        <div class="pg-filters-container__grid">
                             {props.filtersDescription.map((f) => {
                                 let filterField: JSX.Element = <></>;
 
@@ -228,7 +205,8 @@ const FilterContainer = dc(
                                             }}
                                             type={f.fieldType}
                                             rules={f.rules}
-                                            label={t(f.label)}
+                                            label={undefined}
+                                            placeholder={t(f.label)}
                                             name={f.key?.toString()}
                                         ></TextField>
                                     );
@@ -236,7 +214,8 @@ const FilterContainer = dc(
                                     filterField = (
                                         <Autocomplete
                                             name={f.key?.toString()}
-                                            label={t(f.label)}
+                                            label={undefined}
+                                            placeholder={t(f.label)}
                                             items={f.items}
                                             itemTitle={f.itemTitle}
                                             itemValue={f.itemValue}
@@ -260,7 +239,8 @@ const FilterContainer = dc(
                                             apiDataExtractor={f.apiDataExtractor}
                                             url={f.url}
                                             name={f.key?.toString()}
-                                            label={t(f.label)}
+                                            label={undefined}
+                                            placeholder={t(f.label)}
                                             itemTitle={f.itemTitle}
                                             itemValue={f.itemValue}
                                             modelValue={props.filters[f.key]}
@@ -282,7 +262,8 @@ const FilterContainer = dc(
                                         <DateInput
                                             name={f.key?.toString()}
                                             rules={f.rules}
-                                            label={t(f.label)}
+                                            label={undefined}
+                                            placeholder={t(f.label)}
                                             modelValue={props.filters[f.key]}
                                             onUpdate:modelValue={(v) => {
                                                 props.setFilter(f.key, isEmpty(v) ? undefined : v);
@@ -296,30 +277,35 @@ const FilterContainer = dc(
                                 }
 
                                 return (
-                                    <ThemedView
-                                        key={f.key}
-                                        style={{
-                                            flex: "1",
-                                            minWidth: "200px",
-                                        }}
-                                    >
+                                    <div class="pg-field-wrapper" key={f.key}>
+                                        <label
+                                            style={{
+                                                fontSize: "12.5px",
+                                                fontWeight: 500,
+                                                color: "var(--pg-ink-primary)",
+                                            }}
+                                        >
+                                            {t(f.label)}
+                                        </label>
                                         {filterField}
-                                    </ThemedView>
+                                    </div>
                                 );
                             })}
-                        </ThemedView>
+                        </div>
                     </VForm>
 
-                    <Button
-                        variant="text"
-                        label="Apply Filters"
-                        disabled={!valid.value || props.loading}
-                        loading={props.loading}
-                        onClick={() => {
-                            props.onApply();
-                        }}
-                    ></Button>
-                </ThemedView>
+                    <div class="pg-filters-container__actions">
+                        <Button
+                            variant="text"
+                            label="Apply Filters"
+                            disabled={!valid.value || props.loading}
+                            loading={props.loading}
+                            onClick={() => {
+                                props.onApply();
+                            }}
+                        ></Button>
+                    </div>
+                </div>
             );
         };
     },

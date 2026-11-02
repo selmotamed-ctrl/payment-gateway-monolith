@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { ApiTable } from "@/components/Table/ApiTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
 import { tableRegistry } from "@/components/Table/tableRegistry";
@@ -301,29 +302,46 @@ const MerchantsPage = dc(() => {
             sortable: false,
             headerTooltip: COLUMN_HELP.actions,
             Value: ({ row }: { row: MerchantSummary }) => (
-                <ThemedView style={{ flexDirection: "row", gap: "4px", flexWrap: "wrap" }}>
-                    <VBtn size="x-small" variant="text" prependIcon="mdi-eye-outline" onClick={() => openInspection(row)}>
-                        {t("Inspect")}
-                    </VBtn>
-                    <VBtn size="x-small" variant="text" prependIcon="mdi-open-in-new" onClick={() => openDetail(row)}>
-                        {t("Open")}
-                    </VBtn>
-                    {canWrite.value && row.status === "ACTIVE" && (
-                        <VBtn size="x-small" variant="text" color="error" onClick={() => openAction(row, "SUSPEND")}>
-                            {t("Suspend")}
-                        </VBtn>
-                    )}
-                    {canWrite.value && row.status === "SUSPENDED" && (
-                        <VBtn size="x-small" variant="text" color="success" onClick={() => openAction(row, "REINSTATE")}>
-                            {t("Reinstate")}
-                        </VBtn>
-                    )}
-                    {canWrite.value && ["ACTIVE", "SUSPENDED"].includes(row.status) && (
-                        <VBtn size="x-small" variant="text" color="error" onClick={() => openAction(row, "CLOSE")}>
-                            {t("Close")}
-                        </VBtn>
-                    )}
-                </ThemedView>
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Inspect"),
+                        icon: "mdi-eye-outline",
+                        onClick: () => openInspection(row),
+                    }}
+                    items={[
+                        {
+                            key: "open",
+                            label: t("Open"),
+                            icon: "mdi-open-in-new",
+                            onClick: () => openDetail(row),
+                        },
+                        {
+                            key: "suspend",
+                            label: t("Suspend"),
+                            icon: "mdi-pause-circle-outline",
+                            danger: true,
+                            dividerBefore: true,
+                            hidden: !(canWrite.value && row.status === "ACTIVE"),
+                            onClick: () => openAction(row, "SUSPEND"),
+                        },
+                        {
+                            key: "reinstate",
+                            label: t("Reinstate"),
+                            icon: "mdi-play-circle-outline",
+                            dividerBefore: true,
+                            hidden: !(canWrite.value && row.status === "SUSPENDED"),
+                            onClick: () => openAction(row, "REINSTATE"),
+                        },
+                        {
+                            key: "close",
+                            label: t("Close"),
+                            icon: "mdi-close-circle-outline",
+                            danger: true,
+                            hidden: !(canWrite.value && ["ACTIVE", "SUSPENDED"].includes(row.status)),
+                            onClick: () => openAction(row, "CLOSE"),
+                        },
+                    ]}
+                />
             ),
         },
     ];

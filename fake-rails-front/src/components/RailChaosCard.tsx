@@ -1,8 +1,9 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
-import {
-  VBtn, VCard, VCardText, VChip, VSlider, VSwitch, VSelect, VTextField, VDivider,
-} from "vuetify/components";
+import { VSelect, VSlider, VSwitch, VTextField } from "vuetify/components";
+import { SectionFields } from "@/components/SectionFields";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import { api } from "@/utils/api";
 
 interface Scenario {
@@ -42,7 +43,7 @@ const FAILURE_MODES = [
 ];
 
 export const RailChaosCard = dc(
-  (props: { descriptor: Descriptor; scenario: Scenario; onChanged?: (scenario: Scenario) => void }, expose, ctx) => {
+  (props: { descriptor: Descriptor; scenario: Scenario; onChanged?: (scenario: Scenario) => void }, expose, _ctx) => {
     const draft = ref<Scenario>(JSON.parse(JSON.stringify(props.scenario)));
     const saving = ref(false);
     const saved = ref("");
@@ -90,43 +91,85 @@ export const RailChaosCard = dc(
     expose({ sync });
 
     return () => (
-      <VCard color="surface" class="pa-1">
-        <VCardText>
-          <div class="d-flex align-center mb-2">
-            <strong>{props.descriptor.name}</strong>
-            <VChip size="x-small" class="ml-2" variant="tonal">{props.descriptor.railCode}</VChip>
-            <div style={{ flex: 1 }} />
-            <VChip size="x-small" color={draft.value.enabled ? "success" : "error"} variant="tonal">
-              {draft.value.enabled ? "enabled" : "outage 503"}
-            </VChip>
+      <SectionFields
+        title={props.descriptor.name}
+        subtitle={`${props.descriptor.railCode} · ${props.descriptor.collectionModes.join(" · ")}`}
+        columns={1}
+        v-slots={{
+          headerActions: () => (
+            <div class="d-flex align-center ga-2">
+              {saved.value ? <StatusBadge status="SAVED" label="Saved" toneOverride="success" showDot={false} /> : null}
+              <StatusBadge
+                status={draft.value.enabled ? "ENABLED" : "OUTAGE"}
+                label={draft.value.enabled ? "enabled" : "outage 503"}
+                toneOverride={draft.value.enabled ? "success" : "danger"}
+                showDot={false}
+              />
+            </div>
+          ),
+          footer: () => (
+            <TableRowActions
+              primaryAction={{
+                label: "Save",
+                icon: "mdi-content-save-outline",
+                loading: saving.value,
+                onClick: save,
+              }}
+              items={[
+                { key: "healthy", label: "Healthy preset", icon: "mdi-heart-pulse", onClick: () => preset("healthy") },
+                { key: "flaky", label: "25% flaky", icon: "mdi-pulse", onClick: () => preset("flaky") },
+                { key: "timeout", label: "Timeout confirm", icon: "mdi-timer-sand", onClick: () => preset("timeout_on_confirm") },
+                { key: "outage", label: "Outage", icon: "mdi-power-plug-off", danger: true, dividerBefore: true, onClick: () => preset("outage") },
+              ]}
+            />
+          ),
+        }}
+      >
+        <div class="pg-field-wrapper">
+          <label>Failure chance</label>
+          <div class="d-flex align-center ga-3">
+            <VSlider
+              class="flex-grow-1"
+              modelValue={draft.value.overallFailureChancePercent}
+              onUpdate:modelValue={(value: number) => { draft.value.overallFailureChancePercent = value; }}
+              min={0}
+              max={100}
+              step={1}
+              hideDetails
+            />
+            <strong class="pg-tabular">{draft.value.overallFailureChancePercent}%</strong>
           </div>
-          <div class="text-caption text-medium-emphasis mb-2">{props.descriptor.collectionModes.join(" · ")}</div>
+        </div>
 
-          <div class="d-flex justify-space-between">
-            <span>Failure chance</span><strong>{draft.value.overallFailureChancePercent}%</strong>
-          </div>
-          <VSlider
-            modelValue={draft.value.overallFailureChancePercent}
-            onUpdate:modelValue={(value: number) => { draft.value.overallFailureChancePercent = value; }}
-            min={0} max={100} step={1} hideDetails
-          />
-
-          <div class="d-flex ga-2 mb-2">
+        <div class="pg-field-wrapper">
+          <label>Latency range (ms)</label>
+          <div class="d-flex ga-2">
             <VTextField
-              label="Latency min ms" type="number" density="compact" hideDetails
+              density="compact"
+              variant="outlined"
+              hideDetails
+              type="number"
+              placeholder="Min"
               modelValue={draft.value.latencyMs.min}
               onUpdate:modelValue={(value: string) => { draft.value.latencyMs.min = Number(value); }}
             />
             <VTextField
-              label="Latency max ms" type="number" density="compact" hideDetails
+              density="compact"
+              variant="outlined"
+              hideDetails
+              type="number"
+              placeholder="Max"
               modelValue={draft.value.latencyMs.max}
               onUpdate:modelValue={(value: string) => { draft.value.latencyMs.max = Number(value); }}
             />
           </div>
+        </div>
 
+        <div class="pg-field-wrapper">
+          <label>Primary failure mode</label>
           <VSelect
-            label="Primary failure mode"
             density="compact"
+            variant="outlined"
             hideDetails
             items={FAILURE_MODES}
             modelValue={Object.entries(draft.value.failureModeWeights).sort((a, b) => b[1] - a[1])[0]?.[0]}
@@ -136,40 +179,42 @@ export const RailChaosCard = dc(
               );
             }}
           />
+        </div>
 
-          <div class="d-flex ga-2 my-2">
-            <VSwitch
-              label="Duplicates" density="compact" hideDetails
-              modelValue={draft.value.webhookBehavior.duplicateCount > 1}
-              onUpdate:modelValue={(value: boolean | null) => { draft.value.webhookBehavior.duplicateCount = value === true ? 3 : 1; }}
-            />
-            <VSwitch
-              label="Out of order" density="compact" hideDetails
-              modelValue={draft.value.webhookBehavior.outOfOrderPendingAfterPaid}
-              onUpdate:modelValue={(value: boolean | null) => { draft.value.webhookBehavior.outOfOrderPendingAfterPaid = value === true; }}
-            />
-          </div>
-
-          <div class="d-flex justify-space-between">
-            <span>Corrupt signature</span><strong>{draft.value.webhookBehavior.corruptSignatureChancePercent}%</strong>
-          </div>
-          <VSlider
-            modelValue={draft.value.webhookBehavior.corruptSignatureChancePercent}
-            onUpdate:modelValue={(value: number) => { draft.value.webhookBehavior.corruptSignatureChancePercent = value; }}
-            min={0} max={100} step={5} hideDetails
+        <div class="pg-field-wrapper">
+          <label>Webhook behavior</label>
+          <VSwitch
+            label="Duplicates"
+            density="compact"
+            hideDetails
+            modelValue={draft.value.webhookBehavior.duplicateCount > 1}
+            onUpdate:modelValue={(value: boolean | null) => { draft.value.webhookBehavior.duplicateCount = value === true ? 3 : 1; }}
           />
+          <VSwitch
+            label="Out of order"
+            density="compact"
+            hideDetails
+            modelValue={draft.value.webhookBehavior.outOfOrderPendingAfterPaid}
+            onUpdate:modelValue={(value: boolean | null) => { draft.value.webhookBehavior.outOfOrderPendingAfterPaid = value === true; }}
+          />
+        </div>
 
-          <VDivider class="my-3" />
-          <div class="d-flex ga-1 flex-wrap">
-            <VBtn size="small" variant="tonal" onClick={() => preset("healthy")}>Healthy</VBtn>
-            <VBtn size="small" variant="tonal" onClick={() => preset("flaky")}>25% flaky</VBtn>
-            <VBtn size="small" variant="tonal" onClick={() => preset("timeout_on_confirm")}>Timeout confirm</VBtn>
-            <VBtn size="small" variant="tonal" color="error" onClick={() => preset("outage")}>Outage</VBtn>
-            <VBtn size="small" loading={saving.value} onClick={save}>Save</VBtn>
-            {saved.value ? <VChip size="small" color="success" variant="tonal">{saved.value}</VChip> : null}
+        <div class="pg-field-wrapper">
+          <label>Corrupt signature</label>
+          <div class="d-flex align-center ga-3">
+            <VSlider
+              class="flex-grow-1"
+              modelValue={draft.value.webhookBehavior.corruptSignatureChancePercent}
+              onUpdate:modelValue={(value: number) => { draft.value.webhookBehavior.corruptSignatureChancePercent = value; }}
+              min={0}
+              max={100}
+              step={5}
+              hideDetails
+            />
+            <strong class="pg-tabular">{draft.value.webhookBehavior.corruptSignatureChancePercent}%</strong>
           </div>
-        </VCardText>
-      </VCard>
+        </div>
+      </SectionFields>
     );
   },
   { props: ["descriptor", "scenario", "onChanged"] },

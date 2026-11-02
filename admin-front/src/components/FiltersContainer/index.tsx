@@ -1,6 +1,6 @@
 import { isEmpty, type RulesList } from "@/utils/clientValidationRules";
 import { dc } from "kt-dc";
-import { useLocale, useTheme } from "vuetify";
+import { useLocale } from "vuetify";
 import { VChip, VForm } from "vuetify/components";
 
 export type FilterField<T, Key = string> =
@@ -52,7 +52,6 @@ const ActiveFilters = dc(
         setFilters: (key: string, value: any) => void;
     }) => {
         const { t } = useLocale();
-        const theme = useTheme();
         const fieldMap = computed(() => {
             return props.filtersDescriptions.reduce(
                 (map, field) => {
@@ -66,88 +65,68 @@ const ActiveFilters = dc(
         });
 
         return () => {
-            const isDark = theme.current.value.dark;
-            const colors = theme.current.value.colors;
             return (
-                <>
-                    <ThemedView
+                <div class="pg-filters-container__active">
+                    <ThemedText
                         style={{
-                            flexDirection: "row",
-                            flexWrap: "wrap",
-                            gap: "8px",
-                            alignItems: "center",
-                            padding: "12px 16px",
-                            backgroundColor: isDark ? colors["surface-variant"] : "#f8fafc",
-                            borderRadius: "8px",
-                            border: isDark ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid #e2e8f0",
+                            fontSize: "13px",
+                            fontWeight: 500,
+                            color: "var(--pg-ink-muted)",
+                            marginInlineEnd: "4px",
                         }}
                     >
-                        <ThemedText
-                            style={{
-                                fontSize: "14px",
-                                fontWeight: "500",
-                                color: colors["on-surface-variant"],
-                                marginRight: "4px",
-                            }}
-                        >
-                            {t("Active filters")}:
-                        </ThemedText>
-                        {props.showActiveFilters &&
-                            Object.entries(props.filters).map(([key, value], index) => {
-                                let uniqueKey = key;
-                                if (typeof value == "string") {
+                        {t("Active filters")}:
+                    </ThemedText>
+                    {props.showActiveFilters &&
+                        Object.entries(props.filters).map(([key, value]) => {
+                            if (typeof value == "string") {
+                                return (
+                                    <VChip
+                                        key={key}
+                                        closable
+                                        onClick:close={() => {
+                                            props.setFilters(key, null);
+                                        }}
+                                        density="compact"
+                                        variant="tonal"
+                                    >
+                                        {t(fieldMap.value[key]?.label || "")} {t(value)}
+                                    </VChip>
+                                );
+                            } else if (Array.isArray(value) && value.length > 0 && typeof value[0] == "string") {
+                                return value.map((v) => {
                                     return (
                                         <VChip
-                                            key={uniqueKey}
+                                            key={`${key}${v}`}
                                             closable
                                             onClick:close={() => {
-                                                props.setFilters(key, null);
+                                                const filtered = value.filter((entry) => entry !== v);
+                                                props.setFilters(key, filtered);
                                             }}
                                             density="compact"
                                             variant="tonal"
                                         >
-                                            {t(fieldMap.value[key]?.label || "")} {t(value)}
+                                            {t(fieldMap.value[key]?.label || "")} {t(v)}
                                         </VChip>
                                     );
-                                } else if (Array.isArray(value) && value.length > 0 && typeof value[0] == "string") {
-                                    return value.map((v) => {
-                                        let uniqueKey = `${key}${v}`;
+                                });
+                            }
+                            return null;
+                        })}
 
-                                        return (
-                                            <VChip
-                                                key={uniqueKey}
-                                                closable
-                                                onClick:close={() => {
-                                                    const filtered = value.filter((_v) => {
-                                                        return v !== _v;
-                                                    });
-                                                    props.setFilters(key, filtered);
-                                                }}
-                                                density="compact"
-                                                variant="tonal"
-                                            >
-                                                {t(fieldMap.value[key]?.label || "")} {t(v)}
-                                            </VChip>
-                                        );
-                                    });
-                                }
-                            })}
-
-                        {/* Clear All Button */}
-                        <Button
-                            variant="text"
-                            label="Clear All"
-                            onClick={props.clear}
-                            style={{
-                                marginLeft: "auto",
-                                color: colors["on-surface-variant"],
-                                fontSize: "14px",
-                                fontWeight: "500",
-                                textTransform: "none",
-                            }}
-                        />
-                    </ThemedView>
-                </>
+                    <Button
+                        variant="text"
+                        label="Clear All"
+                        onClick={props.clear}
+                        style={{
+                            marginInlineStart: "auto",
+                            color: "var(--pg-ink-secondary)",
+                            fontSize: "13px",
+                            fontWeight: 500,
+                            textTransform: "none",
+                        }}
+                    />
+                </div>
             );
         };
     },
@@ -178,12 +157,7 @@ const FilterContainer = dc(
                 return <></>;
             }
             return (
-                <ThemedView
-                    style={{
-                        gap: "16px",
-                        padding: "16px 0px",
-                    }}
-                >
+                <div class="pg-filters-container">
                     <ActiveFilters<any>
                         clear={props.onClear}
                         filters={props.filters}
@@ -202,14 +176,7 @@ const FilterContainer = dc(
                             valid.value = !!v;
                         }}
                     >
-                        <ThemedView
-                            style={{
-                                flexDirection: "row",
-                                gap: "16px",
-                                alignItems: "flex-start",
-                                flexWrap: "wrap",
-                            }}
-                        >
+                        <div class="pg-filters-container__grid">
                             {props.filtersDescription.map((f) => {
                                 let filterField: JSX.Element = <></>;
 
@@ -226,7 +193,8 @@ const FilterContainer = dc(
                                             }}
                                             type={f.fieldType}
                                             rules={f.rules}
-                                            label={t(f.label)}
+                                            label={undefined}
+                                            placeholder={t(f.label)}
                                             name={f.key?.toString()}
                                         ></TextField>
                                     );
@@ -234,7 +202,8 @@ const FilterContainer = dc(
                                     filterField = (
                                         <Autocomplete
                                             name={f.key?.toString()}
-                                            label={t(f.label)}
+                                            label={undefined}
+                                            placeholder={t(f.label)}
                                             items={f.items}
                                             itemTitle={f.itemTitle}
                                             itemValue={f.itemValue}
@@ -258,7 +227,8 @@ const FilterContainer = dc(
                                             apiDataExtractor={f.apiDataExtractor}
                                             url={f.url}
                                             name={f.key?.toString()}
-                                            label={t(f.label)}
+                                            label={undefined}
+                                            placeholder={t(f.label)}
                                             itemTitle={f.itemTitle}
                                             itemValue={f.itemValue}
                                             modelValue={props.filters[f.key]}
@@ -280,7 +250,8 @@ const FilterContainer = dc(
                                         <DateInput
                                             name={f.key?.toString()}
                                             rules={f.rules}
-                                            label={t(f.label)}
+                                            label={undefined}
+                                            placeholder={t(f.label)}
                                             modelValue={props.filters[f.key]}
                                             onUpdate:modelValue={(v) => {
                                                 props.setFilter(f.key, isEmpty(v) ? undefined : v);
@@ -294,30 +265,35 @@ const FilterContainer = dc(
                                 }
 
                                 return (
-                                    <ThemedView
-                                        key={f.key}
-                                        style={{
-                                            flex: "1",
-                                            minWidth: "200px",
-                                        }}
-                                    >
+                                    <div class="pg-field-wrapper" key={f.key}>
+                                        <label
+                                            style={{
+                                                fontSize: "12.5px",
+                                                fontWeight: 500,
+                                                color: "var(--pg-ink-primary)",
+                                            }}
+                                        >
+                                            {t(f.label)}
+                                        </label>
                                         {filterField}
-                                    </ThemedView>
+                                    </div>
                                 );
                             })}
-                        </ThemedView>
+                        </div>
                     </VForm>
 
-                    <Button
-                        variant="text"
-                        label="Apply Filters"
-                        disabled={!valid.value || props.loading}
-                        loading={props.loading}
-                        onClick={() => {
-                            props.onApply();
-                        }}
-                    ></Button>
-                </ThemedView>
+                    <div class="pg-filters-container__actions">
+                        <Button
+                            variant="text"
+                            label="Apply Filters"
+                            disabled={!valid.value || props.loading}
+                            loading={props.loading}
+                            onClick={() => {
+                                props.onApply();
+                            }}
+                        ></Button>
+                    </div>
+                </div>
             );
         };
     },

@@ -1,13 +1,15 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VTextField, VTextarea } from "vuetify/components";
+import { VTextField, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
 import { DataTable } from "@/components/Table/DataTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import type { TableHeader } from "@/components/Table/types";
+import { SectionFields } from "@/components/SectionFields";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -165,14 +167,21 @@ const ApplicationsPage = dc(() => {
             key: "actions",
             label: "Actions Column",
             Value: ({ row }: { row: Application }) => (
-                <ThemedView style={{ flexDirection: "row", gap: "6px" }}>
-                    <VBtn size="small" variant="tonal" onClick={() => openDialog(row, "DESCRIPTIVE")}>
-                        {t("Edit")}
-                    </VBtn>
-                    <VBtn size="small" variant="tonal" color="warning" onClick={() => openDialog(row, "SENSITIVE")}>
-                        {t("Propose")}
-                    </VBtn>
-                </ThemedView>
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Edit"),
+                        icon: "mdi-pencil-outline",
+                        onClick: () => openDialog(row, "DESCRIPTIVE"),
+                    }}
+                    items={[
+                        {
+                            key: "propose",
+                            label: t("Propose"),
+                            icon: "mdi-file-edit-outline",
+                            onClick: () => openDialog(row, "SENSITIVE"),
+                        },
+                    ]}
+                />
             ),
         },
     ];
@@ -213,7 +222,7 @@ const ApplicationsPage = dc(() => {
                 onSubmit={() => void submit()}
             >
                 {mode.value === "DESCRIPTIVE" ? (
-                    <>
+                    <SectionFields title={t("Profile")}>
                         <FormField label={t("Application Name")} required>
                             <VTextField
                                 modelValue={descriptive.value.name}
@@ -236,9 +245,9 @@ const ApplicationsPage = dc(() => {
                                 hideDetails
                             />
                         </FormField>
-                    </>
+                    </SectionFields>
                 ) : (
-                    <>
+                    <SectionFields title={t("Details")}>
                         <FormField label={t("Assigned Wallet ID")} hint={t("Wallet that receives settlements for this application.")}>
                             <VTextField
                                 modelValue={sensitive.value.assignedWalletId}
@@ -268,7 +277,7 @@ const ApplicationsPage = dc(() => {
                                 hideDetails
                             />
                         </FormField>
-                    </>
+                    </SectionFields>
                 )}
             </FormModal>
         </ScreenContainer>

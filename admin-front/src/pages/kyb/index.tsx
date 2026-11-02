@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { ApiTable } from "@/components/Table/ApiTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
 import { tableRegistry } from "@/components/Table/tableRegistry";
@@ -489,35 +490,35 @@ const KybReviewPage = dc(() => {
             sortable: false,
             headerTooltip: COLUMN_HELP.actions,
             Value: ({ row }: { row: KybDocumentSummary }) => (
-                <ThemedView style={{ flexDirection: "row", gap: "4px", flexWrap: "wrap" }}>
-                    <VBtn size="x-small" variant="text" prependIcon="mdi-open-in-new" onClick={() => openDetail(row)}>
-                        {t("Open")}
-                    </VBtn>
-                    <VBtn
-                        size="x-small"
-                        variant="text"
-                        prependIcon="mdi-eye-outline"
-                        disabled={row.avStatus !== "CLEAN" || !row.contentAvailable}
-                        onClick={() => openPreview(row)}
-                    >
-                        {t("Preview")}
-                    </VBtn>
-                    {row.canReview && (
-                        <>
-                            <VBtn size="x-small" variant="text" color="success" onClick={() => openReview(row, "ACCEPTED")}>
-                                {t("Accept")}
-                            </VBtn>
-                            <VBtn size="x-small" variant="text" color="error" onClick={() => openReview(row, "REJECTED")}>
-                                {t("Reject")}
-                            </VBtn>
-                        </>
-                    )}
-                    {(row.canRequestReplacement || row.canRequestRevalidation) && (
-                        <VBtn size="x-small" variant="text" color="warning" onClick={() => openAction(row)}>
-                            {t(row.canRequestReplacement ? "Replace" : "Re-verify")}
-                        </VBtn>
-                    )}
-                </ThemedView>
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Preview"),
+                        icon: "mdi-eye-outline",
+                        disabled: row.avStatus !== "CLEAN" || !row.contentAvailable,
+                        onClick: () => openPreview(row),
+                    }}
+                    items={[
+                        { key: "open", label: t("Open"), icon: "mdi-open-in-new", onClick: () => openDetail(row) },
+                        ...(row.canReview
+                            ? [
+                                  { key: "accept", label: t("Accept"), icon: "mdi-check", onClick: () => openReview(row, "ACCEPTED") },
+                                  { key: "reject", label: t("Reject"), icon: "mdi-close", danger: true, onClick: () => openReview(row, "REJECTED") },
+                              ]
+                            : []),
+                        ...(row.canRequestReplacement || row.canRequestRevalidation
+                            ? [
+                                  {
+                                      key: "replace",
+                                      label: t(row.canRequestReplacement ? "Replace" : "Re-verify"),
+                                      icon: "mdi-file-refresh-outline",
+                                      danger: true,
+                                      dividerBefore: true,
+                                      onClick: () => openAction(row),
+                                  },
+                              ]
+                            : []),
+                    ]}
+                />
             ),
         },
     ];

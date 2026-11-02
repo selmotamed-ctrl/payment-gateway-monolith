@@ -7,7 +7,9 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
 import { DataTable } from "@/components/Table/DataTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import type { TableHeader } from "@/components/Table/types";
+import { SectionFields } from "@/components/SectionFields";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -152,9 +154,14 @@ const CredentialsPage = dc(() => {
             key: "actions",
             label: "Actions Column",
             Value: ({ row }: { row: CredentialSet }) => (
-                <VBtn size="small" variant="tonal" onClick={() => openDialog(row)}>
-                    {t("Edit")}
-                </VBtn>
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Edit"),
+                        icon: "mdi-pencil-outline",
+                        onClick: () => openDialog(row),
+                    }}
+                    items={[]}
+                />
             ),
         },
     ];
@@ -199,61 +206,65 @@ const CredentialsPage = dc(() => {
                 submitLabel={t("Save")}
                 onSubmit={() => void save()}
             >
-                <FormField label={t("Credential Name")} required>
-                    <VTextField
-                        modelValue={form.value.label}
-                        onUpdate:modelValue={(v: string) => (form.value.label = v)}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Gateway Code")} required>
-                    <VTextField
-                        modelValue={form.value.gatewayCode}
-                        onUpdate:modelValue={(v: string) => (form.value.gatewayCode = v)}
-                        disabled={!!editing.value}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Environment")} required>
-                    <VSelect
-                        items={["SANDBOX", "LIVE"]}
-                        modelValue={form.value.env}
-                        onUpdate:modelValue={(v: any) => (form.value.env = v)}
-                        disabled={!!editing.value}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Settlement Target")} required>
-                    <VSelect
-                        items={["PLATFORM_CLEARING", "MERCHANT_DIRECT", "PROVIDER_HELD"]}
-                        modelValue={form.value.settlementTarget}
-                        onUpdate:modelValue={(v: any) => (form.value.settlementTarget = v)}
-                        disabled={!!editing.value}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Username")}>
-                    <VTextField
-                        modelValue={form.value.username}
-                        onUpdate:modelValue={(v: string) => (form.value.username = v)}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Secret")} hint={t("Write Only")}>
-                    <VTextField
-                        type="password"
-                        modelValue={form.value.secret}
-                        onUpdate:modelValue={(v: string) => (form.value.secret = v)}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Secret Reference")}>
-                    <VTextField
-                        modelValue={form.value.secretRef}
-                        onUpdate:modelValue={(v: string) => (form.value.secretRef = v)}
-                        hideDetails
-                    />
-                </FormField>
+                <SectionFields title={t("Details")}>
+                    <FormField label={t("Credential Name")} required>
+                        <VTextField
+                            modelValue={form.value.label}
+                            onUpdate:modelValue={(v: string) => (form.value.label = v)}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Gateway Code")} required>
+                        <VTextField
+                            modelValue={form.value.gatewayCode}
+                            onUpdate:modelValue={(v: string) => (form.value.gatewayCode = v)}
+                            disabled={!!editing.value}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Environment")} required>
+                        <VSelect
+                            items={["SANDBOX", "LIVE"]}
+                            modelValue={form.value.env}
+                            onUpdate:modelValue={(v: any) => (form.value.env = v)}
+                            disabled={!!editing.value}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Settlement Target")} required>
+                        <VSelect
+                            items={["PLATFORM_CLEARING", "MERCHANT_DIRECT", "PROVIDER_HELD"]}
+                            modelValue={form.value.settlementTarget}
+                            onUpdate:modelValue={(v: any) => (form.value.settlementTarget = v)}
+                            disabled={!!editing.value}
+                            hideDetails
+                        />
+                    </FormField>
+                </SectionFields>
+                <SectionFields title={t("Secret")}>
+                    <FormField label={t("Username")}>
+                        <VTextField
+                            modelValue={form.value.username}
+                            onUpdate:modelValue={(v: string) => (form.value.username = v)}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Secret")} hint={t("Write Only")}>
+                        <VTextField
+                            type="password"
+                            modelValue={form.value.secret}
+                            onUpdate:modelValue={(v: string) => (form.value.secret = v)}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Secret Reference")}>
+                        <VTextField
+                            modelValue={form.value.secretRef}
+                            onUpdate:modelValue={(v: string) => (form.value.secretRef = v)}
+                            hideDetails
+                        />
+                    </FormField>
+                </SectionFields>
             </FormModal>
         </ScreenContainer>
     );

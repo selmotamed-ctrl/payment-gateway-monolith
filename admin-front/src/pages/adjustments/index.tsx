@@ -10,6 +10,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { statusTone } from "@/components/Table/statusTone";
 import { ApiTable } from "@/components/Table/ApiTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
 import { tableRegistry } from "@/components/Table/tableRegistry";
@@ -31,6 +32,7 @@ import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import { SectionFields } from "@/components/SectionFields";
 type Adjustment = {
     id: string;
     type: string;
@@ -507,7 +509,15 @@ const AdjustmentsPage = dc(() => {
             key: "actions",
             label: "Review",
             sortable: false,
-            Value: ({ row }: { row: Adjustment }) => <VBtn size="small" variant="tonal" onClick={() => void openDetails(row)}>{t("Review")}</VBtn>,
+            Value: ({ row }: { row: Adjustment }) => (
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Review"),
+                        icon: "mdi-cash-check",
+                        onClick: () => void openDetails(row),
+                    }}
+                />
+            ),
         },
     ]);
 
@@ -705,56 +715,58 @@ const AdjustmentsPage = dc(() => {
                 <VAlert type="info" variant="tonal">
                     {t("The draft creates an approval request. The adjustment does not execute until a different finance checker approves it.")}
                 </VAlert>
-                <FormField label={t("Adjustment type")} required sensitiveMakerChecker>
-                    <VSelect
-                        items={ADJUSTMENT_TYPES.map((value) => ({ title: value, value }))}
-                        modelValue={form.value.type}
-                        onUpdate:modelValue={(value: string) => (form.value.type = value)}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Amount")} required sensitiveMakerChecker>
-                    <VTextField
-                        modelValue={form.value.amount}
-                        onUpdate:modelValue={(value: string) => (form.value.amount = value)}
-                        placeholder="0.0000"
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Merchant")} required sensitiveMakerChecker>
-                    <VAutocomplete
-                        items={merchantOptions.value}
-                        itemTitle="title"
-                        itemValue="value"
-                        modelValue={form.value.merchantId}
-                        onUpdate:modelValue={(value: string | null) => onMerchantChanged(value ?? "")}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField
-                    label={t("Target merchant wallet account")}
-                    hint={form.value.merchantId ? t("Select the merchant wallet GL account") : t("Choose a merchant first")}
-                    required
-                    sensitiveMakerChecker
-                >
-                    <VAutocomplete
-                        items={glAccountOptions.value}
-                        itemTitle="title"
-                        itemValue="value"
-                        modelValue={form.value.targetGlAccountId}
-                        onUpdate:modelValue={(value: string | null) => (form.value.targetGlAccountId = value ?? "")}
-                        disabled={!form.value.merchantId}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Reason")} required sensitiveMakerChecker>
-                    <VTextField
-                        modelValue={form.value.reason}
-                        onUpdate:modelValue={(value: string) => (form.value.reason = value)}
-                        hideDetails
-                    />
-                </FormField>
-                <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px" }}>
+                <SectionFields title={t("Adjustment details")}>
+                    <FormField label={t("Adjustment type")} required sensitiveMakerChecker>
+                        <VSelect
+                            items={ADJUSTMENT_TYPES.map((value) => ({ title: value, value }))}
+                            modelValue={form.value.type}
+                            onUpdate:modelValue={(value: string) => (form.value.type = value)}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Amount")} required sensitiveMakerChecker>
+                        <VTextField
+                            modelValue={form.value.amount}
+                            onUpdate:modelValue={(value: string) => (form.value.amount = value)}
+                            placeholder="0.0000"
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Merchant")} required sensitiveMakerChecker>
+                        <VAutocomplete
+                            items={merchantOptions.value}
+                            itemTitle="title"
+                            itemValue="value"
+                            modelValue={form.value.merchantId}
+                            onUpdate:modelValue={(value: string | null) => onMerchantChanged(value ?? "")}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField
+                        label={t("Target merchant wallet account")}
+                        hint={form.value.merchantId ? t("Select the merchant wallet GL account") : t("Choose a merchant first")}
+                        required
+                        sensitiveMakerChecker
+                    >
+                        <VAutocomplete
+                            items={glAccountOptions.value}
+                            itemTitle="title"
+                            itemValue="value"
+                            modelValue={form.value.targetGlAccountId}
+                            onUpdate:modelValue={(value: string | null) => (form.value.targetGlAccountId = value ?? "")}
+                            disabled={!form.value.merchantId}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Reason")} required sensitiveMakerChecker>
+                        <VTextField
+                            modelValue={form.value.reason}
+                            onUpdate:modelValue={(value: string) => (form.value.reason = value)}
+                            hideDetails
+                        />
+                    </FormField>
+                </SectionFields>
+                <SectionFields title={t("Source references")}>
                     <FormField label={t("Source attempt ID (optional)")} sensitiveMakerChecker>
                         <VTextField
                             modelValue={form.value.sourceAttemptId}
@@ -769,14 +781,14 @@ const AdjustmentsPage = dc(() => {
                             hideDetails
                         />
                     </FormField>
-                </ThemedView>
-                <FormField label={t("External dispute reference (optional)")} sensitiveMakerChecker>
-                    <VTextField
-                        modelValue={form.value.externalDisputeRef}
-                        onUpdate:modelValue={(value: string) => (form.value.externalDisputeRef = value)}
-                        hideDetails
-                    />
-                </FormField>
+                    <FormField label={t("External dispute reference (optional)")} sensitiveMakerChecker>
+                        <VTextField
+                            modelValue={form.value.externalDisputeRef}
+                            onUpdate:modelValue={(value: string) => (form.value.externalDisputeRef = value)}
+                            hideDetails
+                        />
+                    </FormField>
+                </SectionFields>
                 <FormChecklist
                     checks={[...ADJUSTMENT_CHECKS]}
                     modelValue={proposalChecklist.value}

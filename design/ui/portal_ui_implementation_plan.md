@@ -468,3 +468,76 @@ Test harness corrections:
 ### 9.8 Remaining operational step
 
 - Deploy the three frontends and verify the live runtime configuration, CSP/font loading, checklists/help flags and XLSX exports.
+
+---
+
+## 10. v2.0 implementation plan — padding, compact tables, row actions, SectionFields
+
+Source: `design/ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md`
+
+### 10.1 Non-negotiable v2 outcomes
+
+1. Remove any unlayered universal padding/margin reset that can override Vuetify cascade layers. Keep only safe box-sizing.
+2. Add the v2 padding tokens and guaranteed container classes:
+   - `.pg-screen-container`
+   - `.pg-table-card`
+   - `.pg-table-toolbar`
+   - `.pg-table-filters`
+   - `.pg-table-active-chips`
+   - `.pg-table-footer`
+   - `.pg-section-fields`, `.pg-section-fields__header`, `.pg-section-fields__body`, `.pg-section-fields__footer`
+   - `.pg-field-wrapper`
+   - `.pg-col-actions`
+   - `.pg-cell-truncate`
+3. Tables are compact single-line 40px rows with 36px headers, hairline dividers, 16/20px edge padding, no full-row rainbow tints, and no wrapping.
+4. Every table action cell uses the new `<TableRowActions />`:
+   - at most one 26px primary quick action,
+   - one 26px `⋯` overflow menu,
+   - 32px menu rows, 184px min-width, tokenized 1px border/shadow,
+   - destructive actions use danger text.
+5. All 22+ admin pages and merchant table pages migrate action cells to `<TableRowActions />` per Part V.
+6. `SectionFields` is added as the exact padded architectural section card and used for grouped form sections. `InputFields`, `FiltersContainer`, `DetailsFieldsDialog`, `AwaitedConfirmationDialog`, and `ScreenContainer` are rebuilt with guaranteed padding/static labels.
+7. `ScreenContainer` gets `.pg-screen-container` padding while preserving `.pg-page` for test compatibility.
+8. Shared v2 changes are mirrored to admin, merchant, checkout, and fake-rails where the components exist.
+9. The compliance gate is extended for the no-reset/no-row-tint/TableRowActions rules, and a Playwright geometry spec is added for container padding, 40px rows, row action density, and filter alignment.
+
+### 10.2 Execution batches
+
+- v2-1: CSS tokens/padding/table-card rules + ScreenContainer/SectionFields/InputFields/FiltersContainer.
+- v2-2: TableRowActions action-column migration for gateways, rails, routes, join requests, merchants, approvals.
+- v2-3: TableRowActions action-column migration for AML, operator cases, disputes, adjustments, cashouts, reconciliation, users, AML rules/reports.
+- v2-4: merchant table action-column migration.
+- v2-5: DetailsFieldsDialog/AwaitedConfirmationDialog + fake-rails/checkout shared component rollout.
+- v2-6: compliance/geometry gates and final integration.
+
+### 10.3 Definition of done
+
+- No unlayered `* { padding: 0; margin: 0 }` reset.
+- `.pg-screen-container`, `.pg-table-card`, `.pg-section-fields` and related classes exist and are used.
+- Table rows measure <= 44px and action cells contain at most one primary + one overflow button.
+- No page action column contains a multi-VBtn stack.
+- All existing behavior, exports, authorities, checklist/help flags and API calls are preserved.
+- Final typecheck/build/unit/Playwright/exhaustive/live checks pass, then branch `ui-enhancements` is committed and pushed.
+
+---
+
+## 11. v2.0 completion log
+
+Completed:
+- Added v2 padding tokens and guaranteed container classes: `.pg-screen-container`, `.pg-table-card`, `.pg-table-toolbar`, `.pg-table-filters`, `.pg-table-active-chips`, `.pg-table-footer`, `.pg-section-fields*`, `.pg-field-wrapper`, `.pg-col-actions`, `.pg-cell-truncate`.
+- Rebuilt `ScreenContainer` on `.pg-page .pg-screen-container` with explicit desktop/mobile padding.
+- Added `SectionFields`; rebuilt `InputFields` with static labels/36px controls and `FiltersContainer` with padded token surfaces.
+- Replaced `TableRowActions` with the compact v2 API (one 26px primary action + one 26px overflow menu) and migrated admin/merchant/fake-rails action columns.
+- Enforced 40px single-line table rows, 36px headers, 20px edge padding, token hover, no row tints, and `.pg-col-actions` alignment.
+- Rebuilt `DetailsFieldsDialog` and `AwaitedConfirmationDialog` on `FormModal`/`DescriptionList` with automatic MonoRef/MoneyDisplay/StatusBadge formatting.
+- Rolled the shared system into fake-rails-front, including fonts, tokens, UI primitives, tables, row actions, SectionFields, and fake-rails pages.
+- Added v2 static compliance checks and `tests/e2e/admin/table-and-padding-geometry.spec.ts`.
+
+Verification:
+- Admin/merchant/checkout/fake-rails typechecks pass.
+- Admin/merchant unit tests and root Vitest pass.
+- All four frontends build.
+- Standard Playwright: 49/49 passed.
+- Exhaustive Playwright: 474 passed, 4 live-only skipped.
+- v2 geometry spec: 3/3 passed.
+- Deployment health verification passed for all tiers.

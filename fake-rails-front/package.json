@@ -10,8 +10,8 @@
     "type-check": "vue-tsc --build"
   },
   "dependencies": {
-    "@fontsource/roboto": "^5.2.8",
     "@mdi/font": "^7.4.47",
+    "decimal.js": "^10.6.0",
     "kt-dc": "^1.0.1",
     "vue": "^3.5.22",
     "vue-router": "^4.6.3",

@@ -246,7 +246,7 @@ export const ApiTable = defineComponent(
                 : undefined;
 
             return (
-                <SurfaceCard noPadding class="pg-unified-table">
+                <SurfaceCard noPadding class="pg-table-card pg-unified-table">
                     <TableHeader
                         loading={loading.value}
                         onSearch={onSearch}

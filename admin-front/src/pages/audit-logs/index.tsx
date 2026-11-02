@@ -9,6 +9,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { ApiTable } from "@/components/Table/ApiTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
 import { tableRegistry } from "@/components/Table/tableRegistry";
@@ -305,7 +306,9 @@ const AuditLogsPage = dc(() => {
             label: "Inspect",
             sortable: false,
             Value: ({ row }: { row: AuditLog }) => (
-                <VBtn size="small" variant="tonal" onClick={() => openDetails(row)}>{t("Inspect")}</VBtn>
+                <TableRowActions
+                    primaryAction={{ label: t("Inspect"), icon: "mdi-text-search", onClick: () => openDetails(row) }}
+                />
             ),
         },
     ]);

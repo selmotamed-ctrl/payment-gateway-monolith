@@ -10,6 +10,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import { ApiTable } from "@/components/Table/ApiTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
 import { createOptionsLoader } from "@/components/Table/referenceOptions";
@@ -41,6 +42,7 @@ import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
 import { FormChecklist } from "@/components/ui/FormChecklist";
 import { FormField } from "@/components/ui/FormField";
+import { SectionFields } from "@/components/SectionFields";
 type AssigneeOption = { title: string; value: string };
 
 type OperatorCasesSummary = {
@@ -868,32 +870,38 @@ const OperatorCasesPage = dc(() => {
             Value: ({ row }: { row: OperatorCaseSummary }) => {
                 const eligibility = row.inquiryEligibility;
                 return (
-                    <ThemedView style={{ flexDirection: "row", gap: "6px", alignItems: "center" }}>
-                        <VBtn size="small" variant="text" prependIcon="mdi-eye-outline" onClick={() => openInspection(row)}>
-                            {t("Inspect")}
-                        </VBtn>
-                        <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => openCase(row)}>
-                            {t("Open")}
-                        </VBtn>
-                        <span
-                            title={
-                                eligibility?.eligible
-                                    ? t("Schedule a gateway status inquiry")
-                                    : reasonText(eligibility?.reason) || t("Inquiry is not available")
-                            }
-                        >
-                            <VBtn
-                                size="small"
-                                variant="tonal"
-                                color="primary"
-                                loading={inquiringId.value === row.id}
-                                disabled={!eligibility?.eligible || bulkLoading.value || !canInquire.value}
-                                onClick={() => void inquireOne(row)}
-                            >
-                                {t("Inquire")}
-                            </VBtn>
-                        </span>
-                    </ThemedView>
+                    <div
+                        title={
+                            eligibility?.eligible
+                                ? t("Schedule a gateway status inquiry")
+                                : reasonText(eligibility?.reason) || t("Inquiry is not available")
+                        }
+                        style={{ display: "inline-flex" }}
+                    >
+                        <TableRowActions
+                            primaryAction={{
+                                label: t("Inquire"),
+                                icon: "mdi-refresh",
+                                loading: inquiringId.value === row.id,
+                                disabled: !eligibility?.eligible || bulkLoading.value || !canInquire.value,
+                                onClick: () => void inquireOne(row),
+                            }}
+                            items={[
+                                {
+                                    key: "inspect",
+                                    label: t("Inspect"),
+                                    icon: "mdi-eye-outline",
+                                    onClick: () => openInspection(row),
+                                },
+                                {
+                                    key: "open",
+                                    label: t("Open"),
+                                    icon: "mdi-open-in-new",
+                                    onClick: () => openCase(row),
+                                },
+                            ]}
+                        />
+                    </div>
                 );
             },
         },
@@ -1180,27 +1188,29 @@ const OperatorCasesPage = dc(() => {
                 <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
                     {t("Resolved and pending-checker cases are skipped automatically.")}
                 </ThemedText>
-                <FormField
-                    label={t("Assignee")}
-                    hint={t("Leave empty to unassign the selected cases.")}
-                >
-                    <VAutocomplete
-                        items={assignOptions.value}
-                        itemTitle="title"
-                        itemValue="value"
-                        modelValue={assignUserId.value}
-                        loading={assignOptionsLoading.value}
-                        clearable
-                        onUpdate:modelValue={(value: unknown) => (assignUserId.value = value ? String(value) : null)}
-                        onUpdate:search={(value: string) => void searchAssignees(value)}
-                    />
-                </FormField>
-                <FormField label={t("Reason (optional)")}>
-                    <VTextField
-                        modelValue={assignReason.value}
-                        onUpdate:modelValue={(value: string) => (assignReason.value = value)}
-                    />
-                </FormField>
+                <SectionFields title={t("Assignment details")}>
+                    <FormField
+                        label={t("Assignee")}
+                        hint={t("Leave empty to unassign the selected cases.")}
+                    >
+                        <VAutocomplete
+                            items={assignOptions.value}
+                            itemTitle="title"
+                            itemValue="value"
+                            modelValue={assignUserId.value}
+                            loading={assignOptionsLoading.value}
+                            clearable
+                            onUpdate:modelValue={(value: unknown) => (assignUserId.value = value ? String(value) : null)}
+                            onUpdate:search={(value: string) => void searchAssignees(value)}
+                        />
+                    </FormField>
+                    <FormField label={t("Reason (optional)")}>
+                        <VTextField
+                            modelValue={assignReason.value}
+                            onUpdate:modelValue={(value: string) => (assignReason.value = value)}
+                        />
+                    </FormField>
+                </SectionFields>
                 {showChecklists && (
                     <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                         <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Assignment checklist")}</ThemedText>
@@ -1234,19 +1244,21 @@ const OperatorCasesPage = dc(() => {
                 <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
                     {t("Resolved, pending-checker and unchanged cases are skipped automatically.")}
                 </ThemedText>
-                <FormField label={t("State")} required>
-                    <VSelect
-                        items={["OPEN", "IN_PROGRESS"]}
-                        modelValue={bulkState.value}
-                        onUpdate:modelValue={(value: string | null) => (bulkState.value = value === "OPEN" ? "OPEN" : "IN_PROGRESS")}
-                    />
-                </FormField>
-                <FormField label={t("Reason (optional)")}>
-                    <VTextField
-                        modelValue={stateReason.value}
-                        onUpdate:modelValue={(value: string) => (stateReason.value = value)}
-                    />
-                </FormField>
+                <SectionFields title={t("State change")}>
+                    <FormField label={t("State")} required>
+                        <VSelect
+                            items={["OPEN", "IN_PROGRESS"]}
+                            modelValue={bulkState.value}
+                            onUpdate:modelValue={(value: string | null) => (bulkState.value = value === "OPEN" ? "OPEN" : "IN_PROGRESS")}
+                        />
+                    </FormField>
+                    <FormField label={t("Reason (optional)")}>
+                        <VTextField
+                            modelValue={stateReason.value}
+                            onUpdate:modelValue={(value: string) => (stateReason.value = value)}
+                        />
+                    </FormField>
+                </SectionFields>
                 {showChecklists && (
                     <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                         <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("State change checklist")}</ThemedText>

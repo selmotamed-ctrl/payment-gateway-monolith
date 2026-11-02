@@ -1,10 +1,12 @@
 import { dc } from "kt-dc";
 import { onMounted, ref } from "vue";
-import {
-  VBtn, VCard, VCardText, VCardTitle, VChip, VRow, VCol, VAlert, VDivider,
-} from "vuetify/components";
+import { VAlert, VCol, VDivider, VRow } from "vuetify/components";
 import PortalLayout from "@/layouts/portal";
 import LiveTransactionFeed from "@/components/LiveTransactionFeed";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { MonoRef } from "@/components/ui/MonoRef";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import { api } from "@/utils/api";
 
 interface PendingAction {
@@ -49,34 +51,28 @@ const DashboardPage = dc(() => {
       .filter((row) => statuses.includes(row.status))
       .reduce((sum, row) => sum + Number(row.count), 0);
 
+  const metrics = () => [
+    { label: "Total transactions", value: (summary.value?.totals ?? []).reduce((sum, row) => sum + Number(row.count), 0), tone: "neutral" as const },
+    { label: "Paid", value: totalFor(["PAID", "SUCCEEDED"]), tone: "success" as const },
+    { label: "Awaiting customer", value: totalFor(["AWAITING_ACTION", "INITIATED"]), tone: "warning" as const },
+    { label: "Failed", value: totalFor(["FAILED", "CANCELLED"]), tone: "danger" as const },
+  ];
+
   return () => (
     <PortalLayout>
       {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
       <VRow>
-        <VCol cols={12} md={3}>
-          <VCard color="surface"><VCardText>
-            <div class="text-caption text-medium-emphasis">Total transactions</div>
-            <div class="text-h4 font-weight-bold">{(summary.value?.totals ?? []).reduce((sum, row) => sum + Number(row.count), 0)}</div>
-          </VCardText></VCard>
-        </VCol>
-        <VCol cols={12} md={3}>
-          <VCard color="surface"><VCardText>
-            <div class="text-caption text-medium-emphasis">Paid</div>
-            <div class="text-h4 font-weight-bold text-success">{totalFor(["PAID", "SUCCEEDED"])}</div>
-          </VCardText></VCard>
-        </VCol>
-        <VCol cols={12} md={3}>
-          <VCard color="surface"><VCardText>
-            <div class="text-caption text-medium-emphasis">Awaiting customer</div>
-            <div class="text-h4 font-weight-bold text-warning">{totalFor(["AWAITING_ACTION", "INITIATED"])}</div>
-          </VCardText></VCard>
-        </VCol>
-        <VCol cols={12} md={3}>
-          <VCard color="surface"><VCardText>
-            <div class="text-caption text-medium-emphasis">Failed</div>
-            <div class="text-h4 font-weight-bold text-error">{totalFor(["FAILED", "CANCELLED"])}</div>
-          </VCardText></VCard>
-        </VCol>
+        {metrics().map((metric) => (
+          <VCol key={metric.label} cols={12} md={3}>
+            <SurfaceCard>
+              <div class="text-caption text-medium-emphasis">{metric.label}</div>
+              <div class="d-flex align-center justify-space-between mt-2">
+                <span class="text-h4 font-weight-bold pg-tabular">{metric.value}</span>
+                <StatusBadge status={metric.tone.toUpperCase()} label={metric.tone} toneOverride={metric.tone} showDot={false} />
+              </div>
+            </SurfaceCard>
+          </VCol>
+        ))}
       </VRow>
 
       <VRow class="mt-2">
@@ -84,40 +80,72 @@ const DashboardPage = dc(() => {
           <LiveTransactionFeed max={60} />
         </VCol>
         <VCol cols={12} lg={5}>
-          <VCard color="surface">
-            <VCardTitle class="d-flex align-center">
-              Pending customer actions
-              <VChip size="small" class="ml-3" variant="tonal">{summary.value?.pendingActions.length ?? 0}</VChip>
-            </VCardTitle>
-            <VCardText style={{ maxHeight: "520px", overflowY: "auto" }}>
-              {(summary.value?.pendingActions ?? []).length === 0
-                ? <div class="text-medium-emphasis">No pending OTP, QR or push requests.</div>
-                : null}
+          <SurfaceCard
+            title="Pending customer actions"
+            v-slots={{
+              headerActions: () => (
+                <StatusBadge
+                  status="PENDING"
+                  label={String(summary.value?.pendingActions.length ?? 0)}
+                  toneOverride="warning"
+                  showDot={false}
+                />
+              ),
+            }}
+          >
+            <div style={{ maxHeight: "520px", overflowY: "auto" }}>
+              {(summary.value?.pendingActions ?? []).length === 0 ? (
+                <div class="text-medium-emphasis">No pending OTP, QR or push requests.</div>
+              ) : null}
               {(summary.value?.pendingActions ?? []).map((action) => (
                 <div key={action.id} class="mb-4">
-                  <div class="d-flex align-center">
-                    <VChip size="small" color="warning" variant="tonal">{action.rail_code}</VChip>
-                    <span class="ml-2 pg-mono">{action.our_reference}</span>
+                  <div class="d-flex align-center flex-wrap ga-2">
+                    <StatusBadge status={action.rail_code} label={action.rail_code} toneOverride="neutral" showDot={false} />
+                    <MonoRef value={action.our_reference} />
                     <div style={{ flex: 1 }} />
-                    <strong>{action.normalized_amount_lyd} LYD</strong>
+                    <strong class="pg-money pg-tabular">{action.normalized_amount_lyd} LYD</strong>
                   </div>
                   {action.expected_otp ? (
                     <VAlert type="info" variant="tonal" density="compact" class="my-2">
-                      OTP: <strong class="pg-mono">{action.expected_otp}</strong>
-                      <VBtn size="x-small" variant="text" onClick={() => navigator.clipboard?.writeText(action.expected_otp ?? "")}>Copy</VBtn>
+                      OTP: <MonoRef value={action.expected_otp} />
                     </VAlert>
                   ) : null}
-                  <div class="d-flex ga-1 mt-2">
-                    <VBtn size="small" color="success" onClick={() => act(action.id, "APPROVE")}>Approve</VBtn>
-                    <VBtn size="small" variant="tonal" onClick={() => act(action.id, "APPROVE_MISMATCH")}>Amount mismatch</VBtn>
-                    <VBtn size="small" variant="tonal" onClick={() => act(action.id, "APPROVE_LATE")}>Approve late</VBtn>
-                    <VBtn size="small" color="error" variant="tonal" onClick={() => act(action.id, "REJECT")}>Reject</VBtn>
+                  <div class="d-flex justify-end mt-2">
+                    <TableRowActions
+                      primaryAction={{
+                        label: "Approve",
+                        icon: "mdi-check",
+                        onClick: () => act(action.id, "APPROVE"),
+                      }}
+                      items={[
+                        {
+                          key: "mismatch",
+                          label: "Approve amount mismatch",
+                          icon: "mdi-scale-balance",
+                          onClick: () => act(action.id, "APPROVE_MISMATCH"),
+                        },
+                        {
+                          key: "late",
+                          label: "Approve late",
+                          icon: "mdi-clock-check-outline",
+                          onClick: () => act(action.id, "APPROVE_LATE"),
+                        },
+                        {
+                          key: "reject",
+                          label: "Reject",
+                          icon: "mdi-close-circle-outline",
+                          danger: true,
+                          dividerBefore: true,
+                          onClick: () => act(action.id, "REJECT"),
+                        },
+                      ]}
+                    />
                   </div>
                   <VDivider class="mt-3" />
                 </div>
               ))}
-            </VCardText>
-          </VCard>
+            </div>
+          </SurfaceCard>
         </VCol>
       </VRow>
     </PortalLayout>

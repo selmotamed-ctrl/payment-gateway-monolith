@@ -12,6 +12,7 @@ import { MonoRef } from "@/components/ui/MonoRef";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import type { MetricItem } from "@/components/ui/MetricStrip";
 import { ApiTable } from "@/components/Table/ApiTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
 import { tableRegistry } from "@/components/Table/tableRegistry";
@@ -27,6 +28,7 @@ import { FormField } from "@/components/ui/FormField";
 import { FormChecklist } from "@/components/ui/FormChecklist";
 import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
 import { MetaPill } from "@/components/ui/MetaPill";
+import { SectionFields } from "@/components/SectionFields";
 const SUMMARY_EXPORT_CHECKS = [
     { key: "ROUTE_SCOPE_VERIFIED", label: "Route portfolio scope verified" },
     { key: "STATUS_HEALTH_REVIEWED", label: "Status and health reviewed" },
@@ -424,13 +426,13 @@ const RoutesPage = dc(() => {
             key: "actions",
             label: "Actions Column",
             Value: ({ row }: { row: GatewayRoute }) => (
-                <VBtn
-                    size="small"
-                    variant="tonal"
-                    onClick={() => openEditRoute(row)}
-                >
-                    {t("Update")}
-                </VBtn>
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Edit"),
+                        icon: "mdi-pencil-outline",
+                        onClick: () => openEditRoute(row),
+                    }}
+                />
             ),
         },
     ];
@@ -556,7 +558,7 @@ const RoutesPage = dc(() => {
                     <MetaPill size="small" variant="tonal" color="primary">{editingRoute.value?.credentialPolicy ?? "-"}</MetaPill>
                     <StatusBadge status={editingRoute.value?.healthState ?? "-"} toneOverride={healthTone(editingRoute.value?.healthState ?? "") === "error" ? "danger" : (healthTone(editingRoute.value?.healthState ?? "") as any)} />
                 </ThemedView>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 14px" }}>
+                <SectionFields title={t("Routing controls")}>
                     <FormField label={t("Priority")} sensitiveMakerChecker>
                         <VTextField
                             type="number"
@@ -610,7 +612,7 @@ const RoutesPage = dc(() => {
                             onUpdate:modelValue={(v: string) => (routeEditForm.value.scope = v)}
                         />
                     </FormField>
-                </div>
+                </SectionFields>
                 <FormChecklist
                     checks={[...ROUTE_EDIT_CHECKS]}
                     modelValue={routeEditChecklist.value}
@@ -649,33 +651,35 @@ const RoutesPage = dc(() => {
                     ),
                 }}
             >
-                <FormField label={t("Rails")} required>
-                    <VSelect
-                        items={railOptions.value}
-                        modelValue={routeForm.value.railId}
-                        onUpdate:modelValue={(v: string) => (routeForm.value.railId = v)}
-                    />
-                </FormField>
-                <FormField label={t("Gateways")} required>
-                    <VSelect
-                        items={gatewayOptions.value}
-                        modelValue={routeForm.value.gatewayId}
-                        onUpdate:modelValue={(v: string) => (routeForm.value.gatewayId = v)}
-                    />
-                </FormField>
-                <FormField label={t("Priority")} sensitiveMakerChecker>
-                    <VTextField
-                        type="number"
-                        modelValue={String(routeForm.value.priority)}
-                        onUpdate:modelValue={(v: string) => (routeForm.value.priority = Number(v) || 0)}
-                    />
-                </FormField>
-                <FormField label={t("Max Amount")} hint="optional, e.g. 5000.0000" sensitiveMakerChecker>
-                    <VTextField
-                        modelValue={routeForm.value.limitAmount}
-                        onUpdate:modelValue={(v: string) => (routeForm.value.limitAmount = v)}
-                    />
-                </FormField>
+                <SectionFields title={t("Route pairing")}>
+                    <FormField label={t("Rails")} required>
+                        <VSelect
+                            items={railOptions.value}
+                            modelValue={routeForm.value.railId}
+                            onUpdate:modelValue={(v: string) => (routeForm.value.railId = v)}
+                        />
+                    </FormField>
+                    <FormField label={t("Gateways")} required>
+                        <VSelect
+                            items={gatewayOptions.value}
+                            modelValue={routeForm.value.gatewayId}
+                            onUpdate:modelValue={(v: string) => (routeForm.value.gatewayId = v)}
+                        />
+                    </FormField>
+                    <FormField label={t("Priority")} sensitiveMakerChecker>
+                        <VTextField
+                            type="number"
+                            modelValue={String(routeForm.value.priority)}
+                            onUpdate:modelValue={(v: string) => (routeForm.value.priority = Number(v) || 0)}
+                        />
+                    </FormField>
+                    <FormField label={t("Max Amount")} hint="optional, e.g. 5000.0000" sensitiveMakerChecker>
+                        <VTextField
+                            modelValue={routeForm.value.limitAmount}
+                            onUpdate:modelValue={(v: string) => (routeForm.value.limitAmount = v)}
+                        />
+                    </FormField>
+                </SectionFields>
             </FormModal>
         </ScreenContainer>
     );

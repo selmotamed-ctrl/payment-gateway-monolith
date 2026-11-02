@@ -10,6 +10,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { statusTone } from "@/components/Table/statusTone";
 import { ApiTable } from "@/components/Table/ApiTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
 import { tableRegistry } from "@/components/Table/tableRegistry";
@@ -29,6 +30,7 @@ import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import { SectionFields } from "@/components/SectionFields";
 type RegulatoryReport = {
     id: string;
     reportRef: string;
@@ -525,7 +527,15 @@ const AmlReportsPage = dc(() => {
             key: "actions",
             label: "Review",
             sortable: false,
-            Value: ({ row }: { row: RegulatoryReport }) => <VBtn size="small" variant="tonal" onClick={() => void openDetails(row)}>{t("Review")}</VBtn>,
+            Value: ({ row }: { row: RegulatoryReport }) => (
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Review"),
+                        icon: "mdi-shield-search",
+                        onClick: () => void openDetails(row),
+                    }}
+                />
+            ),
         },
     ]);
     return () => (
@@ -705,39 +715,41 @@ const AmlReportsPage = dc(() => {
                 onSubmit={() => void submit()}
             >
                 <VAlert type="info" variant="tonal">{t("The report is drafted as PENDING_CHECKER. A different MLRO must approve it before it is frozen and submitted.")}</VAlert>
-                <FormField label={t("Reporting rule")} required sensitiveMakerChecker>
-                    <VSelect
-                        items={rules.value.map((rule) => ({ title: `${rule.reportType} · ${rule.status} · ${rule.sourceReference ?? rule.id}`, value: rule.id }))}
-                        modelValue={form.value.reportingRuleId}
-                        onUpdate:modelValue={(value: string) => onRuleChanged(value)}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Report type")} required sensitiveMakerChecker>
-                    <VSelect
-                        items={REPORT_TYPES.map((value) => ({ title: value, value }))}
-                        modelValue={form.value.reportType}
-                        onUpdate:modelValue={(value: string) => (form.value.reportType = value)}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Authority")} required sensitiveMakerChecker>
-                    <VTextField modelValue={form.value.authority} onUpdate:modelValue={(value: string) => (form.value.authority = value)} hideDetails />
-                </FormField>
-                <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px" }}>
+                <SectionFields title={t("Report definition")}>
+                    <FormField label={t("Reporting rule")} required sensitiveMakerChecker>
+                        <VSelect
+                            items={rules.value.map((rule) => ({ title: `${rule.reportType} · ${rule.status} · ${rule.sourceReference ?? rule.id}`, value: rule.id }))}
+                            modelValue={form.value.reportingRuleId}
+                            onUpdate:modelValue={(value: string) => onRuleChanged(value)}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Report type")} required sensitiveMakerChecker>
+                        <VSelect
+                            items={REPORT_TYPES.map((value) => ({ title: value, value }))}
+                            modelValue={form.value.reportType}
+                            onUpdate:modelValue={(value: string) => (form.value.reportType = value)}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Authority")} required sensitiveMakerChecker>
+                        <VTextField modelValue={form.value.authority} onUpdate:modelValue={(value: string) => (form.value.authority = value)} hideDetails />
+                    </FormField>
                     <FormField label={t("Period start")} required sensitiveMakerChecker>
                         <VTextField type="date" modelValue={form.value.periodStart} onUpdate:modelValue={(value: string) => (form.value.periodStart = value)} hideDetails />
                     </FormField>
                     <FormField label={t("Period end")} required sensitiveMakerChecker>
                         <VTextField type="date" modelValue={form.value.periodEnd} onUpdate:modelValue={(value: string) => (form.value.periodEnd = value)} hideDetails />
                     </FormField>
-                </ThemedView>
-                <FormField label={t("AML case ID (optional)")} sensitiveMakerChecker>
-                    <VTextField modelValue={form.value.caseId} onUpdate:modelValue={(value: string) => (form.value.caseId = value)} hideDetails />
-                </FormField>
-                <FormField label={t("Notes")} sensitiveMakerChecker>
-                    <VTextarea modelValue={form.value.notes} onUpdate:modelValue={(value: string) => (form.value.notes = value)} rows={3} hideDetails />
-                </FormField>
+                </SectionFields>
+                <SectionFields title={t("Case linkage and notes")}>
+                    <FormField label={t("AML case ID (optional)")} sensitiveMakerChecker>
+                        <VTextField modelValue={form.value.caseId} onUpdate:modelValue={(value: string) => (form.value.caseId = value)} hideDetails />
+                    </FormField>
+                    <FormField label={t("Notes")} sensitiveMakerChecker>
+                        <VTextarea modelValue={form.value.notes} onUpdate:modelValue={(value: string) => (form.value.notes = value)} rows={3} hideDetails />
+                    </FormField>
+                </SectionFields>
                 <FormChecklist
                     checks={[...REPORT_CHECKS]}
                     modelValue={reportChecklist.value}
@@ -795,25 +807,27 @@ const AmlReportsPage = dc(() => {
                 <VAlert type="info" variant="tonal">
                     {t("Record the authority response exactly. A rejection requires a documented reason.")}
                 </VAlert>
-                <FormField label={t("Authority decision")} required sensitiveMakerChecker>
-                    <VSelect
-                        items={[
-                            { title: t("Acknowledged"), value: "ACKNOWLEDGED" },
-                            { title: t("Rejected by authority"), value: "REJECTED_BY_AUTHORITY" },
-                        ]}
-                        modelValue={ackStatus.value}
-                        onUpdate:modelValue={(value: string) => (ackStatus.value = value as "ACKNOWLEDGED" | "REJECTED_BY_AUTHORITY")}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Rejection reason")} sensitiveMakerChecker>
-                    <VTextarea
-                        rows={2}
-                        modelValue={ackReason.value}
-                        onUpdate:modelValue={(value: string) => (ackReason.value = value)}
-                        hideDetails
-                    />
-                </FormField>
+                <SectionFields title={t("Authority decision")}>
+                    <FormField label={t("Authority decision")} required sensitiveMakerChecker>
+                        <VSelect
+                            items={[
+                                { title: t("Acknowledged"), value: "ACKNOWLEDGED" },
+                                { title: t("Rejected by authority"), value: "REJECTED_BY_AUTHORITY" },
+                            ]}
+                            modelValue={ackStatus.value}
+                            onUpdate:modelValue={(value: string) => (ackStatus.value = value as "ACKNOWLEDGED" | "REJECTED_BY_AUTHORITY")}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Rejection reason")} sensitiveMakerChecker>
+                        <VTextarea
+                            rows={2}
+                            modelValue={ackReason.value}
+                            onUpdate:modelValue={(value: string) => (ackReason.value = value)}
+                            hideDetails
+                        />
+                    </FormField>
+                </SectionFields>
                 <FormChecklist
                     checks={[...ACK_CHECKS]}
                     modelValue={ackChecklist.value}

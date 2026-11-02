@@ -297,7 +297,7 @@ export const DataTable = defineComponent(
                 : undefined;
 
             return (
-                <SurfaceCard noPadding class="pg-unified-table">
+                <SurfaceCard noPadding class="pg-table-card pg-unified-table">
                     <TableHeader
                         loading={!!effectiveLoading.value}
                         onSearch={onSearch}

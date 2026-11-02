@@ -3,13 +3,12 @@ import { dc } from "kt-dc";
 /**
  * The page content surface.
  *
- * It is a plain block container (no `flex: 1` on a non-flex parent) with the
- * shared max width and responsive padding. The shell owns the layout; pages
- * only supply their content.
+ * `.pg-page` stays on the root for existing page-level selectors while
+ * `.pg-screen-container` guarantees the v2 desktop/mobile padding.
  */
 const ScreenContainer = dc(
     (_, __, { slots }) => {
-        return () => <div class="pg-page">{slots.default?.()}</div>;
+        return () => <div class="pg-page pg-screen-container">{slots.default?.()}</div>;
     },
     { slots: ["default"] },
 );

@@ -384,7 +384,7 @@ const TableFilters = dc(
                     )}
 
                     {active.value.length > 0 && (
-                        <div class="pg-table-filters__active">
+                        <div class="pg-table-active-chips pg-table-filters__active">
                             <div class="pg-table-filters__chips">
                                 {active.value.map((filter) => (
                                     <span key={filter.key} class="pg-filter-chip">

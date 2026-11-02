@@ -10,6 +10,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { statusTone } from "@/components/Table/statusTone";
 import { ApiTable } from "@/components/Table/ApiTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
 import { tableRegistry } from "@/components/Table/tableRegistry";
@@ -31,6 +32,7 @@ import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import { SectionFields } from "@/components/SectionFields";
 type Cashout = {
     id: string;
     merchantId: string;
@@ -431,9 +433,13 @@ const CashoutsPage = dc(() => {
             label: "Action",
             sortable: false,
             Value: ({ row }: { row: Cashout }) => (
-                <VBtn size="small" variant={row.state === "PENDING" ? "tonal" : "text"} onClick={() => void openDetails(row)}>
-                    {row.state === "PENDING" ? t("Process") : t("Review")}
-                </VBtn>
+                <TableRowActions
+                    primaryAction={{
+                        label: row.state === "PENDING" ? t("Process") : t("Review"),
+                        icon: row.state === "PENDING" ? "mdi-cash-fast" : "mdi-file-document-search-outline",
+                        onClick: () => void openDetails(row),
+                    }}
+                />
             ),
         },
     ]);
@@ -634,29 +640,31 @@ const CashoutsPage = dc(() => {
                     complete={checklistComplete.value}
                     incompleteMessage={t("Complete all checklist items before processing")}
                 />
-                <FormField label={t("Decision")} required sensitiveMakerChecker>
-                    <VSelect
-                        items={[
-                            { title: t("Approve and execute"), value: "APPROVE" },
-                            { title: t("Reject and release"), value: "REJECT" },
-                        ]}
-                        modelValue={decision.value}
-                        onUpdate:modelValue={(value: string) => (decision.value = value as "APPROVE" | "REJECT")}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField
-                    label={t("Decision reason")}
-                    hint={t("Required for rejection.")}
-                    sensitiveMakerChecker
-                >
-                    <VTextarea
-                        rows={3}
-                        modelValue={reason.value}
-                        onUpdate:modelValue={(value: string) => (reason.value = value)}
-                        hideDetails
-                    />
-                </FormField>
+                <SectionFields title={t("Finance decision")}>
+                    <FormField label={t("Decision")} required sensitiveMakerChecker>
+                        <VSelect
+                            items={[
+                                { title: t("Approve and execute"), value: "APPROVE" },
+                                { title: t("Reject and release"), value: "REJECT" },
+                            ]}
+                            modelValue={decision.value}
+                            onUpdate:modelValue={(value: string) => (decision.value = value as "APPROVE" | "REJECT")}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField
+                        label={t("Decision reason")}
+                        hint={t("Required for rejection.")}
+                        sensitiveMakerChecker
+                    >
+                        <VTextarea
+                            rows={3}
+                            modelValue={reason.value}
+                            onUpdate:modelValue={(value: string) => (reason.value = value)}
+                            hideDetails
+                        />
+                    </FormField>
+                </SectionFields>
             </FormModal>
         </ScreenContainer>
     );

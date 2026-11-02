@@ -9,6 +9,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { statusTone } from "@/components/Table/statusTone";
 import { ApiTable } from "@/components/Table/ApiTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
 import { tableRegistry } from "@/components/Table/tableRegistry";
@@ -28,6 +29,7 @@ import { MonoRef } from "@/components/ui/MonoRef";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import { SectionFields } from "@/components/SectionFields";
 type Screening = {
     id: string;
     subjectType: string;
@@ -376,7 +378,15 @@ const AmlScreeningsPage = dc(() => {
             key: "actions",
             label: "Review",
             sortable: false,
-            Value: ({ row }: { row: Screening }) => <VBtn size="small" variant="tonal" onClick={() => void openDetails(row)}>{t("Review")}</VBtn>,
+            Value: ({ row }: { row: Screening }) => (
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Review"),
+                        icon: "mdi-shield-search",
+                        onClick: () => void openDetails(row),
+                    }}
+                />
+            ),
         },
     ]);
     return () => (
@@ -555,22 +565,37 @@ const AmlScreeningsPage = dc(() => {
                 cancelLabel={t("Close")}
                 onSubmit={() => void submitDisposition()}
             >
-                <FormField label={t("Unresolved match")} required sensitiveMakerChecker>
-                    <VSelect
-                        items={unresolvedMatches.value.map((match) => ({ title: `${match.matchedName} · ${match.listType} · ${match.score}`, value: match.id }))}
-                        modelValue={selectedMatchId.value}
-                        onUpdate:modelValue={(value: string) => (selectedMatchId.value = value)}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Disposition")} required sensitiveMakerChecker>
-                    <VSelect
-                        items={DISPOSITIONS}
-                        modelValue={disposition.value}
-                        onUpdate:modelValue={(value: string) => (disposition.value = value)}
-                        hideDetails
-                    />
-                </FormField>
+                <SectionFields title={t("Disposition details")}>
+                    <FormField label={t("Unresolved match")} required sensitiveMakerChecker>
+                        <VSelect
+                            items={unresolvedMatches.value.map((match) => ({ title: `${match.matchedName} · ${match.listType} · ${match.score}`, value: match.id }))}
+                            modelValue={selectedMatchId.value}
+                            onUpdate:modelValue={(value: string) => (selectedMatchId.value = value)}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Disposition")} required sensitiveMakerChecker>
+                        <VSelect
+                            items={DISPOSITIONS}
+                            modelValue={disposition.value}
+                            onUpdate:modelValue={(value: string) => (disposition.value = value)}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField
+                        label={t("Disposition notes")}
+                        hint={t("Required. Explain why the match is false, true or escalated.")}
+                        required
+                        sensitiveMakerChecker
+                    >
+                        <VTextarea
+                            modelValue={note.value}
+                            onUpdate:modelValue={(value: string) => (note.value = value)}
+                            rows={3}
+                            hideDetails
+                        />
+                    </FormField>
+                </SectionFields>
                 <FormChecklist
                     checks={[...DISPOSITION_CHECKS]}
                     modelValue={dispositionChecklist.value}
@@ -580,19 +605,6 @@ const AmlScreeningsPage = dc(() => {
                     complete={dispositionChecklistComplete.value}
                     incompleteMessage={t("Complete all disposition checklist items before saving")}
                 />
-                <FormField
-                    label={t("Disposition notes")}
-                    hint={t("Required. Explain why the match is false, true or escalated.")}
-                    required
-                    sensitiveMakerChecker
-                >
-                    <VTextarea
-                        modelValue={note.value}
-                        onUpdate:modelValue={(value: string) => (note.value = value)}
-                        rows={3}
-                        hideDetails
-                    />
-                </FormField>
             </FormModal>
         </ScreenContainer>
     );

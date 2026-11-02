@@ -1,6 +1,8 @@
 import { dc } from "kt-dc";
-import { RouterLink, useRoute, useRouter } from "vue-router";
-import { VAppBar, VAppBarTitle, VBtn, VChip, VMain, VSpacer, VContainer } from "vuetify/components";
+import { useRoute, useRouter } from "vue-router";
+import { VAppBar, VAppBarTitle, VBtn, VMain, VSpacer } from "vuetify/components";
+import { ScreenContainer } from "@/components/ScreenContainer";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { clearSession, getUser } from "@/utils/api";
 
 export const PortalLayout = dc(
@@ -35,13 +37,16 @@ export const PortalLayout = dc(
             ))}
           </div>
           <VSpacer />
-          <VChip color="success" variant="tonal" class="mr-3">
-            {user?.environment ?? "SANDBOX"}
-          </VChip>
+          <StatusBadge
+            status={user?.environment ?? "SANDBOX"}
+            label={user?.environment ?? "SANDBOX"}
+            toneOverride="info"
+            showDot={false}
+          />
           <VBtn variant="text" onClick={logout}>Logout</VBtn>
         </VAppBar>
         <VMain>
-          <VContainer fluid class="pa-6">{slots.default?.()}</VContainer>
+          <ScreenContainer>{slots.default?.()}</ScreenContainer>
         </VMain>
       </div>
     );

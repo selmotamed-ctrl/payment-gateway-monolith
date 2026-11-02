@@ -107,8 +107,7 @@ test.describe("merchant shell", () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/portal/dashboard");
     await expect(page.locator(".pg-drawer").getByText("Dashboard", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Language" }).click();
-    await page.getByText("العربية", { exact: true }).click();
+    await page.getByRole("button", { name: "العربية" }).click();
     await page.waitForTimeout(500);
     await expect(page.locator(".pg-drawer").getByText("لوحة التحكم", { exact: true })).toBeVisible();
   });

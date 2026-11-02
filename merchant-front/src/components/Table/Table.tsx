@@ -1,10 +1,8 @@
 import "./styling.css";
 import { readCell, type BaseTableProps, type IconProps, type RefreshMethodData, type RefreshMethodWithNextSkip, type TableHeader } from "./types";
-import { criticalRowTone } from "./statusTone";
 import { ThemedView } from "../ThemedView";
 import { useLocale } from "vuetify";
 import Icon from "@/components/Icon/index.vue";
-import { TableRowActions } from "./TableRowActions";
 import { defineComponent } from "vue";
 import { VForm, VIcon, VTooltip } from "vuetify/components";
 import { extractApiError } from "@/utils/errors/extractor";
@@ -240,6 +238,7 @@ export const Table = defineComponent(
                                             <th
                                                 key={header.key}
                                                 scope="col"
+                                                class={header.key === "actions" ? "pg-col-actions" : undefined}
                                                 aria-sort={
                                                     header.sortable !== false && !header.Header && header.key !== "actions" && header.label
                                                         ? props.sortBy === (header.sortKey ?? header.key)
@@ -272,23 +271,11 @@ export const Table = defineComponent(
                                         return <props.Row key={`${index}`} items={row}></props.Row>;
                                     }
 
-                                    let rowColor: string | undefined;
-                                    try {
-                                        rowColor = props.rowColor?.(row);
-                                    } catch {
-                                        rowColor = undefined;
-                                    }
-                                    const criticalTone = criticalRowTone(row as Record<string, unknown>, rowColor);
-
                                     return (
                                         <>
                                             <tr
                                                 key={`${index + props.skip}`}
-                                                class={[
-                                                    "table-data-row",
-                                                    criticalTone === "danger" ? "pg-critical-row" : "",
-                                                    criticalTone === "warning" ? "pg-critical-row pg-critical-row--warning" : "",
-                                                ]}
+                                                class="table-data-row"
                                             >
                                                 {props.headers.map((header, headerIndex) => {
                                                     const cellKey = `${index}${headerIndex}`;
@@ -297,6 +284,7 @@ export const Table = defineComponent(
                                                         return (
                                                             <td
                                                                 key={String(headerIndex)}
+                                                                class={header.key === "actions" ? "pg-col-actions" : undefined}
                                                                 style={{
                                                                     borderInlineEnd: header.endSeparator ? separatorStyle : undefined,
                                                                     borderInlineStart: header.startSeparator ? separatorStyle : undefined,
@@ -304,26 +292,6 @@ export const Table = defineComponent(
                                                                 }}
                                                             >
                                                                 <header.Value key={header.key} row={row}></header.Value>
-                                                            </td>
-                                                        );
-                                                    }
-
-                                                    if (header.actions) {
-                                                        return (
-                                                            <td
-                                                                key={header.key}
-                                                                style={{
-                                                                    borderInlineEnd: header.endSeparator ? separatorStyle : undefined,
-                                                                    borderInlineStart: header.startSeparator ? separatorStyle : undefined,
-                                                                }}
-                                                            >
-                                                                <TableRowActions
-                                                                    refreshAsIs={props.refreshAsIs}
-                                                                    header={header}
-                                                                    refresh={props.refresh}
-                                                                    reset={props.reset}
-                                                                    row={row}
-                                                                ></TableRowActions>
                                                             </td>
                                                         );
                                                     }

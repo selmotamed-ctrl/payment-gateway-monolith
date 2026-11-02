@@ -10,6 +10,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { statusTone } from "@/components/Table/statusTone";
 import { ApiTable } from "@/components/Table/ApiTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
 import { tableRegistry } from "@/components/Table/tableRegistry";
@@ -31,6 +32,7 @@ import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import { SectionFields } from "@/components/SectionFields";
 type AmlCase = {
     id: string;
     caseRef: string;
@@ -483,7 +485,15 @@ const AmlCasesPage = dc(() => {
             key: "actions",
             label: "Review",
             sortable: false,
-            Value: ({ row }: { row: AmlCase }) => <VBtn size="small" variant="tonal" onClick={() => void openDetails(row)}>{t("Review")}</VBtn>,
+            Value: ({ row }: { row: AmlCase }) => (
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Review"),
+                        icon: "mdi-shield-search",
+                        onClick: () => void openDetails(row),
+                    }}
+                />
+            ),
         },
     ]);
 
@@ -707,14 +717,29 @@ const AmlCasesPage = dc(() => {
                 onSubmit={() => void propose()}
             >
                 <VAlert type="info" variant="tonal">{t("The resolution is proposed to a different MLRO checker. No ledger posting occurs until approval.")}</VAlert>
-                <FormField label={t("Resolution")} required sensitiveMakerChecker>
-                    <VSelect
-                        items={RESOLUTIONS}
-                        modelValue={resolution.value}
-                        onUpdate:modelValue={(value: string) => (resolution.value = value)}
-                        hideDetails
-                    />
-                </FormField>
+                <SectionFields title={t("Resolution proposal")}>
+                    <FormField label={t("Resolution")} required sensitiveMakerChecker>
+                        <VSelect
+                            items={RESOLUTIONS}
+                            modelValue={resolution.value}
+                            onUpdate:modelValue={(value: string) => (resolution.value = value)}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField
+                        label={t("Rationale")}
+                        hint={t("Required. Record the evidence and reasoning for the checker.")}
+                        required
+                        sensitiveMakerChecker
+                    >
+                        <VTextarea
+                            modelValue={rationale.value}
+                            onUpdate:modelValue={(value: string) => (rationale.value = value)}
+                            rows={3}
+                            hideDetails
+                        />
+                    </FormField>
+                </SectionFields>
                 <FormChecklist
                     checks={[...AML_CASE_CHECKS]}
                     modelValue={caseChecklist.value}
@@ -724,19 +749,6 @@ const AmlCasesPage = dc(() => {
                     complete={caseChecklistComplete.value}
                     incompleteMessage={t("Complete all case checklist items before proposing")}
                 />
-                <FormField
-                    label={t("Rationale")}
-                    hint={t("Required. Record the evidence and reasoning for the checker.")}
-                    required
-                    sensitiveMakerChecker
-                >
-                    <VTextarea
-                        modelValue={rationale.value}
-                        onUpdate:modelValue={(value: string) => (rationale.value = value)}
-                        rows={3}
-                        hideDetails
-                    />
-                </FormField>
             </FormModal>
         </ScreenContainer>
     );

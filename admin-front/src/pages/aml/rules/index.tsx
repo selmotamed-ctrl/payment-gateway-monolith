@@ -10,6 +10,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { statusTone } from "@/components/Table/statusTone";
 import { ApiTable } from "@/components/Table/ApiTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
 import { tableRegistry } from "@/components/Table/tableRegistry";
@@ -28,6 +29,7 @@ import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import { SectionFields } from "@/components/SectionFields";
 type AmlRule = {
     id: string;
     code: string;
@@ -404,7 +406,15 @@ const AmlRulesPage = dc(() => {
             key: "actions",
             label: "Review",
             sortable: false,
-            Value: ({ row }: { row: AmlRule }) => <VBtn size="small" variant="tonal" onClick={() => void openDetails(row)}>{t("Review")}</VBtn>,
+            Value: ({ row }: { row: AmlRule }) => (
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Review"),
+                        icon: "mdi-shield-search",
+                        onClick: () => void openDetails(row),
+                    }}
+                />
+            ),
         },
     ]);
     return () => (
@@ -566,34 +576,34 @@ const AmlRulesPage = dc(() => {
                 onSubmit={() => void submit()}
             >
                 <VAlert type="info" variant="tonal">{t("The rule is created inactive and an approval request is issued. A different authorised checker must approve it.")}</VAlert>
-                <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px" }}>
+                <SectionFields title={t("Rule definition")}>
                     <FormField label={t("Code")} required sensitiveMakerChecker>
                         <VTextField modelValue={form.value.code} onUpdate:modelValue={(value: string) => (form.value.code = value)} hideDetails />
                     </FormField>
                     <FormField label={t("Name")} required sensitiveMakerChecker>
                         <VTextField modelValue={form.value.name} onUpdate:modelValue={(value: string) => (form.value.name = value)} hideDetails />
                     </FormField>
-                </ThemedView>
-                <FormField label={t("Rule type")} required sensitiveMakerChecker>
-                    <VSelect items={RULE_TYPES.map((value) => ({ title: value, value }))} modelValue={form.value.ruleType} onUpdate:modelValue={(value: string) => onRuleTypeChanged(value)} hideDetails />
-                </FormField>
-                <ThemedView style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "10px" }}>
+                    <FormField label={t("Rule type")} required sensitiveMakerChecker>
+                        <VSelect items={RULE_TYPES.map((value) => ({ title: value, value }))} modelValue={form.value.ruleType} onUpdate:modelValue={(value: string) => onRuleTypeChanged(value)} hideDetails />
+                    </FormField>
                     <FormField label={t("Action")} required sensitiveMakerChecker>
                         <VSelect items={RULE_ACTIONS.map((value) => ({ title: value, value }))} modelValue={form.value.action} onUpdate:modelValue={(value: string) => (form.value.action = value)} hideDetails />
                     </FormField>
                     <FormField label={t("Severity")} required sensitiveMakerChecker>
                         <VSelect items={SEVERITIES.map((value) => ({ title: value, value }))} modelValue={form.value.baseSeverity} onUpdate:modelValue={(value: string) => (form.value.baseSeverity = value)} hideDetails />
                     </FormField>
-                </ThemedView>
-                <FormField label={t("Effective from (optional)")} sensitiveMakerChecker>
-                    <VTextField type="date" modelValue={form.value.effectiveFrom} onUpdate:modelValue={(value: string) => (form.value.effectiveFrom = value)} hideDetails />
-                </FormField>
-                <FormField label={t("Scope JSON")} hint={t("Use {} for all merchants and rails.")} sensitiveMakerChecker>
-                    <VTextarea modelValue={form.value.scopeText} onUpdate:modelValue={(value: string) => (form.value.scopeText = value)} rows={3} hideDetails />
-                </FormField>
-                <FormField label={t("Params JSON")} hint={PARAM_HELP[form.value.ruleType] ?? ""} sensitiveMakerChecker>
-                    <VTextarea modelValue={form.value.paramsText} onUpdate:modelValue={(value: string) => (form.value.paramsText = value)} rows={4} hideDetails />
-                </FormField>
+                </SectionFields>
+                <SectionFields title={t("Scope and parameters")}>
+                    <FormField label={t("Effective from (optional)")} sensitiveMakerChecker>
+                        <VTextField type="date" modelValue={form.value.effectiveFrom} onUpdate:modelValue={(value: string) => (form.value.effectiveFrom = value)} hideDetails />
+                    </FormField>
+                    <FormField label={t("Scope JSON")} hint={t("Use {} for all merchants and rails.")} sensitiveMakerChecker>
+                        <VTextarea modelValue={form.value.scopeText} onUpdate:modelValue={(value: string) => (form.value.scopeText = value)} rows={3} hideDetails />
+                    </FormField>
+                    <FormField label={t("Params JSON")} hint={PARAM_HELP[form.value.ruleType] ?? ""} sensitiveMakerChecker>
+                        <VTextarea modelValue={form.value.paramsText} onUpdate:modelValue={(value: string) => (form.value.paramsText = value)} rows={4} hideDetails />
+                    </FormField>
+                </SectionFields>
                 <FormChecklist
                     checks={[...RULE_CHECKS]}
                     modelValue={ruleChecklist.value}

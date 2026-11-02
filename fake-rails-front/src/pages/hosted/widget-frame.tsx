@@ -1,6 +1,8 @@
 import { dc } from "kt-dc";
 import { computed } from "vue";
-import { VBtn, VChip, VAlert } from "vuetify/components";
+import { VAlert } from "vuetify/components";
+import { TableRowActions } from "@/components/Table/TableRowActions";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { api } from "@/utils/api";
 
 const WidgetFramePage = dc(() => {
@@ -52,25 +54,33 @@ const WidgetFramePage = dc(() => {
   const badge = computed(() => (rail === "mpgs" ? "MPGS 3-D Secure" : "Moamalat Lightbox"));
 
   return () => (
-    <div style={{ padding: "18px", fontFamily: "system-ui, sans-serif", color: "#111827" }}>
-      <div class="d-flex align-center mb-3">
+    <div style={{ padding: "18px", fontFamily: "system-ui, sans-serif", color: "var(--pg-ink-primary)" }}>
+      <div class="d-flex align-center mb-3 ga-2">
         <strong>{badge.value}</strong>
-        <VChip size="small" class="ml-2" variant="tonal">{rail}</VChip>
+        <StatusBadge status={rail} label={rail} toneOverride="neutral" showDot={false} />
       </div>
       <div class="d-flex justify-space-between mb-1">
         <span>Reference</span><span class="pg-mono">{reference || "-"}</span>
       </div>
       <div class="d-flex justify-space-between mb-4">
-        <span>Amount</span><strong>{amount}</strong>
+        <span>Amount</span><strong class="pg-money pg-tabular">{amount}</strong>
       </div>
       <VAlert type="info" variant="tonal" density="compact" class="mb-3">
         Sandbox card: 4111 1111 1111 1111 · any future expiry · CVV 123
       </VAlert>
-      <div class="d-flex flex-column ga-2">
-        <VBtn color="success" onClick={() => complete(true)}>Complete card payment</VBtn>
-        <VBtn variant="tonal" onClick={() => complete(false)}>Spoof browser callback without server payment</VBtn>
-        <VBtn color="error" variant="tonal" onClick={decline}>Trigger card decline</VBtn>
-        <VBtn variant="text" onClick={cancel}>Cancel</VBtn>
+      <div class="d-flex justify-end">
+        <TableRowActions
+          primaryAction={{
+            label: "Complete card payment",
+            icon: "mdi-credit-card-check-outline",
+            onClick: () => complete(true),
+          }}
+          items={[
+            { key: "spoof", label: "Spoof browser callback without server payment", icon: "mdi-call-split", onClick: () => complete(false) },
+            { key: "decline", label: "Trigger card decline", icon: "mdi-credit-card-off-outline", danger: true, dividerBefore: true, onClick: decline },
+            { key: "cancel", label: "Cancel", icon: "mdi-close", onClick: cancel },
+          ]}
+        />
       </div>
     </div>
   );

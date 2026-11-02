@@ -1,9 +1,9 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useRouter } from "vue-router";
-import {
-  VBtn, VCard, VCardText, VCardTitle, VTextField, VAlert, VChip,
-} from "vuetify/components";
+import { VAlert, VBtn, VTextField } from "vuetify/components";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { api, setToken, setUser, type TesterUser } from "@/utils/api";
 
 const LoginPage = dc(() => {
@@ -36,26 +36,40 @@ const LoginPage = dc(() => {
 
   return () => (
     <div class="pg-hosted">
-      <VCard color="surface" width={420} class="pa-2">
-        <VCardTitle class="text-h5 font-weight-bold">Fake Payment Rails</VCardTitle>
-        <VCardText>
-          <div class="d-flex align-center mb-4">
-            <VChip size="small" variant="tonal" color="info">Single tester portal</VChip>
-          </div>
-          {error.value ? <VAlert type="error" variant="tonal" class="mb-3">{error.value}</VAlert> : null}
+      <SurfaceCard
+        title="Fake Payment Rails"
+        style={{ width: "420px", maxWidth: "96vw" }}
+        v-slots={{
+          headerActions: () => (
+            <StatusBadge status="SANDBOX" label="Single tester portal" toneOverride="info" showDot={false} />
+          ),
+        }}
+      >
+        {error.value ? <VAlert type="error" variant="tonal" class="mb-3">{error.value}</VAlert> : null}
+        <div class="pg-field-wrapper mb-3">
+          <label>Username</label>
           <VTextField
-            label="Username" modelValue={username.value}
+            density="compact"
+            variant="outlined"
+            hideDetails
+            modelValue={username.value}
             onUpdate:modelValue={(value: string) => { username.value = value; }}
-            class="mb-2"
           />
+        </div>
+        <div class="pg-field-wrapper mb-3">
+          <label>Password</label>
           <VTextField
-            label="Password" type="password" modelValue={password.value}
+            type="password"
+            density="compact"
+            variant="outlined"
+            hideDetails
+            modelValue={password.value}
             onUpdate:modelValue={(value: string) => { password.value = value; }}
             onKeydown={(event: KeyboardEvent) => { if (event.key === "Enter") void submit(); }}
           />
-          <VBtn block class="mt-4" loading={loading.value} onClick={submit}>Sign in</VBtn>
-        </VCardText>
-      </VCard>
+        </div>
+        <VBtn block loading={loading.value} onClick={submit}>Sign in</VBtn>
+      </SurfaceCard>
     </div>
   );
 });

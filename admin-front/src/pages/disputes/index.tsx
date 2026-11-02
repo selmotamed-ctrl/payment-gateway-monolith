@@ -10,6 +10,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { statusTone } from "@/components/Table/statusTone";
 import { ApiTable } from "@/components/Table/ApiTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
 import { tableRegistry } from "@/components/Table/tableRegistry";
@@ -31,6 +32,7 @@ import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import { SectionFields } from "@/components/SectionFields";
 type Dispute = {
     id: string;
     externalDisputeRef: string;
@@ -457,7 +459,15 @@ const DisputesPage = dc(() => {
             key: "actions",
             label: "Review",
             sortable: false,
-            Value: ({ row }: { row: Dispute }) => <VBtn size="small" variant="tonal" onClick={() => void openDetails(row)}>{t("Review")}</VBtn>,
+            Value: ({ row }: { row: Dispute }) => (
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Review"),
+                        icon: "mdi-file-document-search-outline",
+                        onClick: () => void openDetails(row),
+                    }}
+                />
+            ),
         },
     ]);
 
@@ -666,21 +676,31 @@ const DisputesPage = dc(() => {
                 cancelLabel={t("Close")}
                 onSubmit={() => void submitEvidence()}
             >
-                <FormField label={t("Evidence reference")} hint={t("Gateway portal reference or case number")} sensitiveMakerChecker>
-                    <VTextField
-                        modelValue={evidenceReference.value}
-                        onUpdate:modelValue={(value: string) => (evidenceReference.value = value)}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Document URL")} sensitiveMakerChecker>
-                    <VTextField
-                        modelValue={evidenceDocumentUrl.value}
-                        onUpdate:modelValue={(value: string) => (evidenceDocumentUrl.value = value)}
-                        placeholder="https://"
-                        hideDetails
-                    />
-                </FormField>
+                <SectionFields title={t("Evidence details")}>
+                    <FormField label={t("Evidence reference")} hint={t("Gateway portal reference or case number")} sensitiveMakerChecker>
+                        <VTextField
+                            modelValue={evidenceReference.value}
+                            onUpdate:modelValue={(value: string) => (evidenceReference.value = value)}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Document URL")} sensitiveMakerChecker>
+                        <VTextField
+                            modelValue={evidenceDocumentUrl.value}
+                            onUpdate:modelValue={(value: string) => (evidenceDocumentUrl.value = value)}
+                            placeholder="https://"
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Evidence notes")} sensitiveMakerChecker>
+                        <VTextarea
+                            modelValue={evidenceNotes.value}
+                            onUpdate:modelValue={(value: string) => (evidenceNotes.value = value)}
+                            rows={3}
+                            hideDetails
+                        />
+                    </FormField>
+                </SectionFields>
                 <FormChecklist
                     checks={[...EVIDENCE_CHECKS]}
                     modelValue={evidenceChecklist.value}
@@ -690,14 +710,6 @@ const DisputesPage = dc(() => {
                     complete={evidenceChecklistComplete.value}
                     incompleteMessage={t("Complete all evidence checklist items before submitting")}
                 />
-                <FormField label={t("Evidence notes")} sensitiveMakerChecker>
-                    <VTextarea
-                        modelValue={evidenceNotes.value}
-                        onUpdate:modelValue={(value: string) => (evidenceNotes.value = value)}
-                        rows={3}
-                        hideDetails
-                    />
-                </FormField>
             </FormModal>
         </ScreenContainer>
     );

@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { ApiTable } from "@/components/Table/ApiTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
 import { tableRegistry } from "@/components/Table/tableRegistry";
@@ -387,37 +388,32 @@ const GatewayInquirySchedulesPage = dc(() => {
             label: "Actions",
             sortable: false,
             Value: ({ row }) => (
-                <ThemedView style={{ flexDirection: "row", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
-                    <VBtn size="small" variant="text" prependIcon="mdi-eye-outline" onClick={() => void openDetail(row)}>
-                        {t("View")}
-                    </VBtn>
-                    <VBtn
-                        size="small"
-                        variant="tonal"
-                        disabled={!canAct.value || !row.canRunNow || actionLoading.value}
-                        onClick={() => openAction("run-now", row)}
-                    >
-                        {t("Run now")}
-                    </VBtn>
-                    <VBtn
-                        size="small"
-                        variant="tonal"
-                        color="warning"
-                        disabled={!canAct.value || !row.canCancel || actionLoading.value}
-                        onClick={() => openAction("cancel", row)}
-                    >
-                        {t("Cancel")}
-                    </VBtn>
-                    <VBtn
-                        size="small"
-                        variant="tonal"
-                        color="primary"
-                        disabled={!canAct.value || !row.canRetry || actionLoading.value}
-                        onClick={() => openAction("retry", row)}
-                    >
-                        {t("Retry")}
-                    </VBtn>
-                </ThemedView>
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Run now"),
+                        icon: "mdi-radar",
+                        disabled: !canAct.value || !row.canRunNow || actionLoading.value,
+                        onClick: () => openAction("run-now", row),
+                    }}
+                    items={[
+                        { key: "view", label: t("View"), icon: "mdi-eye-outline", onClick: () => void openDetail(row) },
+                        {
+                            key: "cancel",
+                            label: t("Cancel"),
+                            icon: "mdi-cancel",
+                            danger: true,
+                            disabled: !canAct.value || !row.canCancel || actionLoading.value,
+                            onClick: () => openAction("cancel", row),
+                        },
+                        {
+                            key: "retry",
+                            label: t("Retry"),
+                            icon: "mdi-refresh",
+                            disabled: !canAct.value || !row.canRetry || actionLoading.value,
+                            onClick: () => openAction("retry", row),
+                        },
+                    ]}
+                />
             ),
         },
     ];

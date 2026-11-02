@@ -2,7 +2,6 @@
     font-feature-settings:
         "kern" 1,
         "tnum" 1;
-    letter-spacing: 0;
 }
 
 body {
@@ -28,33 +27,6 @@ body {
     --fintech-soft: 0 8px 24px rgba(0, 0, 0, 0.24);
 }
 
-
-.v-btn {
-    min-height: 38px;
-}
-
-.v-table,
-.v-data-table {
-    border: 1px solid var(--fintech-border);
-    border-radius: var(--pg-radius-md);
-    overflow: hidden;
-    background: var(--pg-bg-surface) !important;
-    box-shadow: none;
-}
-
-.v-table th,
-.v-data-table th {
-    background: rgb(var(--v-theme-surface-variant));
-    color: rgb(var(--v-theme-on-surface-variant)) !important;
-    font-size: 12px;
-    font-weight: 800 !important;
-    letter-spacing: 0;
-}
-
-.v-table td,
-.v-data-table td {
-    border-bottom-color: var(--fintech-border) !important;
-}
 
 .hoverable:hover {
     background-color: rgba(15, 107, 255, 0.06);
@@ -293,8 +265,6 @@ td .v-messages__message,
 html,
 body,
 #app {
-    padding: 0px;
-    margin: 0px;
     height: 100%;
 }
 
@@ -348,17 +318,7 @@ body,
 
 * {
     scrollbar-width: thin !important;
-    font-family: "Plus Jakarta Sans", "Cairo", system-ui, sans-serif;
-    font-optical-sizing: auto;
-    letter-spacing: 0;
     scrollbar-color: rgba(100, 100, 100, 0.4) transparent;
-}
-
-/* Arabic uses Cairo; Latin uses Plus Jakarta Sans. */
-[dir="rtl"] *,
-[dir="rtl"] {
-    font-family: "Cairo", "Plus Jakarta Sans", system-ui, sans-serif;
-    letter-spacing: 0;
 }
 
 .v-theme--dark * {

@@ -1,11 +1,15 @@
 import { dc } from "kt-dc";
 import { onMounted, ref } from "vue";
-import {
-  VBtn, VCard, VCardText, VChip, VRow, VCol, VTextField, VSelect,
-} from "vuetify/components";
+import { VBtn, VSelect, VTextField } from "vuetify/components";
 import PortalLayout from "@/layouts/portal";
 import WireInspectorDrawer from "@/components/WireInspectorDrawer";
 import WebhookComposerModal from "@/components/WebhookComposerModal";
+import { DataTable } from "@/components/Table/DataTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
+import type { TableHeader } from "@/components/Table/types";
+import { SectionFields } from "@/components/SectionFields";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { MonoRef } from "@/components/ui/MonoRef";
 import { api } from "@/utils/api";
 
 interface TransactionRow {
@@ -46,57 +50,114 @@ const TransactionsPage = dc(() => {
     drawer.value = true;
   };
 
+  const openWebhook = (id: string) => {
+    selected.value = id;
+    webhookOpen.value = true;
+  };
+
   onMounted(load);
+
+  const headers: TableHeader<TransactionRow>[] = [
+    {
+      key: "rail_code",
+      label: "Rail",
+      Value: ({ row }) => <StatusBadge status={row.rail_code} label={row.rail_code} toneOverride="neutral" showDot={false} />,
+    },
+    {
+      key: "our_reference",
+      label: "Our reference",
+      Value: ({ row }) => <MonoRef value={row.our_reference} />,
+    },
+    {
+      key: "provider_reference",
+      label: "Provider",
+      Value: ({ row }) => <MonoRef value={row.provider_reference} />,
+    },
+    {
+      key: "normalized_amount_lyd",
+      label: "Amount",
+      Value: ({ row }) => <span class="pg-money pg-tabular">{row.normalized_amount_lyd}</span>,
+    },
+    {
+      key: "collection_mode",
+      label: "Mode",
+    },
+    {
+      key: "status",
+      label: "Status",
+      Value: ({ row }) => <StatusBadge status={row.status} />,
+    },
+    {
+      key: "created_at",
+      label: "Created",
+      Value: ({ row }) => <span class="pg-mono">{new Date(row.created_at).toLocaleString()}</span>,
+    },
+    {
+      key: "actions",
+      label: "Actions",
+      sortable: false,
+      Value: ({ row }) => (
+        <TableRowActions
+          primaryAction={{
+            label: "Inspect",
+            icon: "mdi-eye-outline",
+            onClick: () => inspect(row.id),
+          }}
+          items={[
+            {
+              key: "webhook",
+              label: "Compose webhook",
+              icon: "mdi-webhook",
+              onClick: () => openWebhook(row.id),
+            },
+          ]}
+        />
+      ),
+    },
+  ];
 
   return () => (
     <PortalLayout>
-      <VCard color="surface" class="mb-4">
-        <VCardText class="d-flex ga-3 align-center flex-wrap">
+      <SectionFields
+        title="Filter transactions"
+        subtitle={`${total.value} matching records`}
+        v-slots={{
+          footer: () => <VBtn size="small" onClick={load}>Search</VBtn>,
+        }}
+      >
+        <div class="pg-field-wrapper">
+          <label>Reference</label>
           <VTextField
-            label="Reference" density="compact" hideDetails style={{ maxWidth: "280px" }}
-            modelValue={reference.value} onUpdate:modelValue={(value: string) => { reference.value = value; }}
+            density="compact"
+            variant="outlined"
+            hideDetails
+            clearable
+            placeholder="Search by reference"
+            modelValue={reference.value}
+            onUpdate:modelValue={(value: string) => { reference.value = value; }}
           />
+        </div>
+        <div class="pg-field-wrapper">
+          <label>Status</label>
           <VSelect
-            label="Status" density="compact" hideDetails clearable style={{ maxWidth: "220px" }}
+            density="compact"
+            variant="outlined"
+            hideDetails
+            clearable
+            placeholder="Any status"
             items={["INITIATED", "AWAITING_ACTION", "PAID", "FAILED", "CANCELLED", "REFUNDED", "UNKNOWN_SIMULATED"]}
-            modelValue={status.value} onUpdate:modelValue={(value: string) => { status.value = value; }}
+            modelValue={status.value}
+            onUpdate:modelValue={(value: string) => { status.value = value; }}
           />
-          <VBtn onClick={load}>Search</VBtn>
-          <VChip variant="tonal">{total.value} rows</VChip>
-        </VCardText>
-      </VCard>
+        </div>
+      </SectionFields>
 
-      <VCard color="surface">
-        <table class="w-100">
-          <thead>
-            <tr>
-              <th>Rail</th><th>Our reference</th><th>Provider</th>
-              <th>Amount</th><th>Mode</th><th>Status</th><th>Created</th><th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.value.map((row) => (
-              <tr key={row.id}>
-                <td><VChip size="x-small" variant="tonal">{row.rail_code}</VChip></td>
-                <td class="pg-mono">{row.our_reference}</td>
-                <td class="pg-mono">{row.provider_reference}</td>
-                <td>{row.normalized_amount_lyd}</td>
-                <td>{row.collection_mode}</td>
-                <td>
-                  <VChip size="x-small" color={row.status === "PAID" ? "success" : row.status === "FAILED" ? "error" : "warning"} variant="tonal">
-                    {row.status}
-                  </VChip>
-                </td>
-                <td class="pg-mono">{new Date(row.created_at).toLocaleString()}</td>
-                <td>
-                  <VBtn size="x-small" variant="text" onClick={() => inspect(row.id)}>Inspect</VBtn>
-                  <VBtn size="x-small" variant="text" onClick={() => { selected.value = row.id; webhookOpen.value = true; }}>Webhook</VBtn>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </VCard>
+      <DataTable
+        data={rows.value}
+        headers={headers}
+        title="Transactions"
+        numberOfItemsPerPage={20}
+      />
 
       <WireInspectorDrawer
         transactionId={selected.value}

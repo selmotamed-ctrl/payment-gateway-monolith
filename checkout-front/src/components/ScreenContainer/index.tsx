@@ -1,28 +1,14 @@
 import { dc } from "kt-dc";
-import { useDisplay } from "vuetify";
 
+/**
+ * The page content surface.
+ *
+ * `.pg-page` stays on the root for existing page-level selectors while
+ * `.pg-screen-container` guarantees the v2 desktop/mobile padding.
+ */
 const ScreenContainer = dc(
     (_, __, { slots }) => {
-        const display = useDisplay();
-        return () => {
-            const mobile = display.mobile.value;
-            return (
-                <>
-                    <ThemedView
-                        style={{
-                            flex: 1,
-                            gap: mobile ? "14px" : "20px",
-                            padding: !mobile ? "24px 28px 32px" : "12px",
-                            width: "100%",
-                            maxWidth: "1680px",
-                            margin: "0 auto",
-                        }}
-                    >
-                        {slots.default?.()}
-                    </ThemedView>
-                </>
-            );
-        };
+        return () => <div class="pg-page pg-screen-container">{slots.default?.()}</div>;
     },
     { slots: ["default"] },
 );

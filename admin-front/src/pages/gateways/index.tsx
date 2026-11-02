@@ -13,6 +13,7 @@ import { MonoRef } from "@/components/ui/MonoRef";
 import type { MetricItem } from "@/components/ui/MetricStrip";
 import { statusTone } from "@/components/Table/statusTone";
 import { ApiTable } from "@/components/Table/ApiTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
 import { tableRegistry } from "@/components/Table/tableRegistry";
@@ -28,6 +29,7 @@ import { FormField } from "@/components/ui/FormField";
 import { FormChecklist } from "@/components/ui/FormChecklist";
 import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
 import { MetaPill } from "@/components/ui/MetaPill";
+import { SectionFields } from "@/components/SectionFields";
 const ROLLBACK_CHECKS = [
     { key: "TARGET_VERSION_VERIFIED", label: "Target version verified" },
     { key: "GATES_VERIFIED", label: "Rollback target gates verified" },
@@ -427,16 +429,24 @@ const GatewaysPage = dc(() => {
             label: "Actions",
             sortable: false,
             Value: ({ row }: { row: Gateway }) => (
-                <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                    <VBtn size="small" variant="tonal" color="primary" onClick={() => void router.push({ name: "GatewayWizard", params: { id: row.id } })}>
-                        {t("Open wizard")}
-                    </VBtn>
-                    {row.activeVersion && rollbackTargets(row).length > 0 && (
-                        <VBtn size="small" variant="text" color="warning" onClick={() => openRollback(row)}>
-                            {t("Rollback")}
-                        </VBtn>
-                    )}
-                </ThemedView>
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Wizard"),
+                        icon: "mdi-tune-variant",
+                        onClick: () => void router.push({ name: "GatewayWizard", params: { id: row.id } }),
+                    }}
+                    items={[
+                        {
+                            key: "rollback",
+                            label: t("Rollback"),
+                            icon: "mdi-history",
+                            danger: true,
+                            dividerBefore: true,
+                            hidden: !(row.activeVersion && rollbackTargets(row).length > 0),
+                            onClick: () => openRollback(row),
+                        },
+                    ]}
+                />
             ),
         },
     ]);
@@ -572,22 +582,24 @@ const GatewaysPage = dc(() => {
                 <VAlert type="warning" variant="tonal">
                     {t("Rollback changes the live version immediately. Verify the target version and operational impact first.")}
                 </VAlert>
-                <FormField label={t("Target version")} required sensitiveMakerChecker>
-                    <VSelect
-                        items={(rollbackGateway.value ? rollbackTargets(rollbackGateway.value) : []).map((version) => ({
-                            title: `v${version.versionNumber} · ${version.state}`,
-                            value: version.id,
-                        }))}
-                        modelValue={rollbackTarget.value}
-                        onUpdate:modelValue={(value: string) => (rollbackTarget.value = value)}
-                    />
-                </FormField>
-                <FormField label={t("Rollback reason")} required sensitiveMakerChecker>
-                    <VTextField
-                        modelValue={rollbackReason.value}
-                        onUpdate:modelValue={(value: string) => (rollbackReason.value = value)}
-                    />
-                </FormField>
+                <SectionFields title={t("Rollback details")}>
+                    <FormField label={t("Target version")} required sensitiveMakerChecker>
+                        <VSelect
+                            items={(rollbackGateway.value ? rollbackTargets(rollbackGateway.value) : []).map((version) => ({
+                                title: `v${version.versionNumber} · ${version.state}`,
+                                value: version.id,
+                            }))}
+                            modelValue={rollbackTarget.value}
+                            onUpdate:modelValue={(value: string) => (rollbackTarget.value = value)}
+                        />
+                    </FormField>
+                    <FormField label={t("Rollback reason")} required sensitiveMakerChecker>
+                        <VTextField
+                            modelValue={rollbackReason.value}
+                            onUpdate:modelValue={(value: string) => (rollbackReason.value = value)}
+                        />
+                    </FormField>
+                </SectionFields>
                 <FormChecklist
                     checks={[...ROLLBACK_CHECKS]}
                     modelValue={rollbackChecklist.value}
@@ -626,24 +638,26 @@ const GatewaysPage = dc(() => {
                     ),
                 }}
             >
-                <FormField label={t("Gateway code")} hint="lowercase letters, digits, - and _" required sensitiveMakerChecker>
-                    <VTextField modelValue={form.value.code} onUpdate:modelValue={(value: string) => (form.value.code = value)} />
-                </FormField>
-                <FormField label={t("Gateway name")} required>
-                    <VTextField modelValue={form.value.name} onUpdate:modelValue={(value: string) => (form.value.name = value)} />
-                </FormField>
-                <FormField label={t("Operator")}>
-                    <VTextField modelValue={form.value.operator} onUpdate:modelValue={(value: string) => (form.value.operator = value)} />
-                </FormField>
-                <FormField label={t("Kind")}>
-                    <VSelect items={["DIRECT", "AGGREGATOR", "NATIVE_ADAPTER", "INTERNAL"]} modelValue={form.value.kind} onUpdate:modelValue={(value: string) => (form.value.kind = value)} />
-                </FormField>
-                <FormField label={t("Country")}>
-                    <VTextField modelValue={form.value.country} onUpdate:modelValue={(value: string) => (form.value.country = value)} />
-                </FormField>
-                <FormField label={t("Risk class")} sensitiveMakerChecker>
-                    <VSelect items={["NORMAL", "HIGH_RISK"]} modelValue={form.value.riskClass} onUpdate:modelValue={(value: string) => (form.value.riskClass = value)} />
-                </FormField>
+                <SectionFields title={t("Gateway profile")}>
+                    <FormField label={t("Gateway code")} hint="lowercase letters, digits, - and _" required sensitiveMakerChecker>
+                        <VTextField modelValue={form.value.code} onUpdate:modelValue={(value: string) => (form.value.code = value)} />
+                    </FormField>
+                    <FormField label={t("Gateway name")} required>
+                        <VTextField modelValue={form.value.name} onUpdate:modelValue={(value: string) => (form.value.name = value)} />
+                    </FormField>
+                    <FormField label={t("Operator")}>
+                        <VTextField modelValue={form.value.operator} onUpdate:modelValue={(value: string) => (form.value.operator = value)} />
+                    </FormField>
+                    <FormField label={t("Kind")}>
+                        <VSelect items={["DIRECT", "AGGREGATOR", "NATIVE_ADAPTER", "INTERNAL"]} modelValue={form.value.kind} onUpdate:modelValue={(value: string) => (form.value.kind = value)} />
+                    </FormField>
+                    <FormField label={t("Country")}>
+                        <VTextField modelValue={form.value.country} onUpdate:modelValue={(value: string) => (form.value.country = value)} />
+                    </FormField>
+                    <FormField label={t("Risk class")} sensitiveMakerChecker>
+                        <VSelect items={["NORMAL", "HIGH_RISK"]} modelValue={form.value.riskClass} onUpdate:modelValue={(value: string) => (form.value.riskClass = value)} />
+                    </FormField>
+                </SectionFields>
             </FormModal>
         </ScreenContainer>
     );

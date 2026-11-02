@@ -8,7 +8,9 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
 import { DataTable } from "@/components/Table/DataTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import type { TableHeader } from "@/components/Table/types";
+import { SectionFields } from "@/components/SectionFields";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -199,33 +201,39 @@ const LinksPage = dc(() => {
             key: "actions",
             label: "Actions Column",
             Value: ({ row }: { row: PaymentLink }) => (
-                <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                    <VBtn
-                        size="small"
-                        variant="tonal"
-                        onClick={() => {
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Copy"),
+                        icon: "mdi-content-copy",
+                        onClick: () => {
                             copyToClipboard(checkoutUrl(row));
                             showSnackBar({ type: "success", message: t("Copied") });
-                        }}
-                    >
-                        {t("Copy")}
-                    </VBtn>
-                    <VBtn size="small" variant="tonal" onClick={() => void showQr(row)}>
-                        {t("Generate QR")}
-                    </VBtn>
-                    <VBtn size="small" variant="tonal" onClick={() => void openAttempts(row)}>
-                        {t("Attempts Inspector")}
-                    </VBtn>
-                    <VBtn
-                        size="small"
-                        variant="tonal"
-                        color="error"
-                        disabled={row.status !== "ACTIVE"}
-                        onClick={() => void cancelLink(row)}
-                    >
-                        {t("Cancel")}
-                    </VBtn>
-                </ThemedView>
+                        },
+                    }}
+                    items={[
+                        {
+                            key: "qr",
+                            label: t("Generate QR"),
+                            icon: "mdi-qrcode",
+                            onClick: () => void showQr(row),
+                        },
+                        {
+                            key: "attempts",
+                            label: t("Attempts Inspector"),
+                            icon: "mdi-history",
+                            onClick: () => void openAttempts(row),
+                        },
+                        {
+                            key: "cancel",
+                            label: t("Cancel"),
+                            icon: "mdi-cancel",
+                            danger: true,
+                            disabled: row.status !== "ACTIVE",
+                            dividerBefore: true,
+                            onClick: () => void cancelLink(row),
+                        },
+                    ]}
+                />
             ),
         },
     ];
@@ -309,14 +317,14 @@ const LinksPage = dc(() => {
                 submitLabel={t("Create")}
                 onSubmit={() => void createLink()}
             >
-                <FormField label={t("Description")} required>
-                    <VTextField
-                        modelValue={form.value.description}
-                        onUpdate:modelValue={(v: string) => (form.value.description = v)}
-                        hideDetails
-                    />
-                </FormField>
-                <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
+                <SectionFields title={t("Payment Link")}>
+                    <FormField label={t("Description")} required>
+                        <VTextField
+                            modelValue={form.value.description}
+                            onUpdate:modelValue={(v: string) => (form.value.description = v)}
+                            hideDetails
+                        />
+                    </FormField>
                     <FormField label={t("Amount")} required style={{ minWidth: "170px" }}>
                         <VTextField
                             modelValue={form.value.amount}
@@ -346,21 +354,23 @@ const LinksPage = dc(() => {
                             hideDetails
                         />
                     </FormField>
-                </ThemedView>
-                <FormField label={t("Redirect URL")}>
-                    <VTextField
-                        modelValue={form.value.redirectUrl}
-                        onUpdate:modelValue={(v: string) => (form.value.redirectUrl = v)}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Rail Whitelist")} hint={t("Comma separated, empty means all rails.")}>
-                    <VTextField
-                        modelValue={form.value.railWhitelist}
-                        onUpdate:modelValue={(v: string) => (form.value.railWhitelist = v)}
-                        hideDetails
-                    />
-                </FormField>
+                </SectionFields>
+                <SectionFields title={t("Settings")}>
+                    <FormField label={t("Redirect URL")}>
+                        <VTextField
+                            modelValue={form.value.redirectUrl}
+                            onUpdate:modelValue={(v: string) => (form.value.redirectUrl = v)}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Rail Whitelist")} hint={t("Comma separated, empty means all rails.")}>
+                        <VTextField
+                            modelValue={form.value.railWhitelist}
+                            onUpdate:modelValue={(v: string) => (form.value.railWhitelist = v)}
+                            hideDetails
+                        />
+                    </FormField>
+                </SectionFields>
             </FormModal>
 
             <FormModal

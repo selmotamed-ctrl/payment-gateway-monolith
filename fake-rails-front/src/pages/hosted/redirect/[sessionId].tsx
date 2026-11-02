@@ -1,8 +1,11 @@
 import { dc } from "kt-dc";
 import { onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
-import { VBtn, VChip, VAlert, VDivider } from "vuetify/components";
+import { VAlert, VDivider } from "vuetify/components";
 import HostedLayout from "@/layouts/hosted";
+import { TableRowActions } from "@/components/Table/TableRowActions";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { MonoRef } from "@/components/ui/MonoRef";
 import { api } from "@/utils/api";
 
 interface HostedSession {
@@ -59,29 +62,38 @@ const HostedRedirectPage = dc(() => {
       {error.value ? <VAlert type="error" variant="tonal">{error.value}</VAlert> : null}
       {session.value ? (
         <div>
-          <div class="d-flex justify-space-between mb-1">
+          <div class="d-flex justify-space-between align-center mb-1">
             <span>Merchant reference</span>
-            <strong class="pg-mono">{session.value.transaction.our_reference}</strong>
+            <MonoRef value={session.value.transaction.our_reference} />
           </div>
           <div class="d-flex justify-space-between mb-1">
             <span>Amount</span>
-            <strong>{session.value.transaction.normalized_amount_lyd} {session.value.transaction.currency}</strong>
+            <strong class="pg-money pg-tabular">{session.value.transaction.normalized_amount_lyd} {session.value.transaction.currency}</strong>
           </div>
-          <div class="d-flex justify-space-between mb-3">
+          <div class="d-flex justify-space-between align-center mb-3">
             <span>Status</span>
-            <VChip size="small" variant="tonal">{session.value.transaction.status}</VChip>
+            <StatusBadge status={session.value.transaction.status} />
           </div>
           <VDivider class="mb-3" />
           <div class="text-caption text-medium-emphasis mb-2">
             Tester controls (this page emulates the upstream gateway checkout)
           </div>
-          <div class="d-flex flex-column ga-2">
-            <VBtn color="success" disabled={busy.value} onClick={() => act("APPROVE")}>1. Approve &amp; redirect normally</VBtn>
-            <VBtn color="warning" variant="tonal" disabled={busy.value} onClick={() => act("APPROVE_TAMPERED")}>2. Approve with tampered return URL</VBtn>
-            <VBtn variant="tonal" disabled={busy.value} onClick={() => act("DROP_WEBHOOK")}>3. Send browser return only — drop webhook</VBtn>
-            <VBtn variant="tonal" disabled={busy.value} onClick={() => act("ABANDON")}>4. Close tab / abandon — webhook in 30s</VBtn>
-            <VBtn color="error" variant="tonal" disabled={busy.value} onClick={() => act("DECLINE")}>5. Decline (insufficient funds)</VBtn>
-            <VBtn variant="text" disabled={busy.value} onClick={() => act("CANCEL")}>6. Customer cancel</VBtn>
+          <div class="d-flex justify-end">
+            <TableRowActions
+              primaryAction={{
+                label: "Approve & redirect",
+                icon: "mdi-check",
+                loading: busy.value,
+                onClick: () => act("APPROVE"),
+              }}
+              items={[
+                { key: "tampered", label: "Approve with tampered return URL", icon: "mdi-link-variant", disabled: busy.value, onClick: () => act("APPROVE_TAMPERED") },
+                { key: "drop", label: "Browser return only — drop webhook", icon: "mdi-web-off", disabled: busy.value, onClick: () => act("DROP_WEBHOOK") },
+                { key: "abandon", label: "Close tab / abandon — webhook in 30s", icon: "mdi-timer-sand", disabled: busy.value, onClick: () => act("ABANDON") },
+                { key: "decline", label: "Decline (insufficient funds)", icon: "mdi-credit-card-off-outline", danger: true, disabled: busy.value, dividerBefore: true, onClick: () => act("DECLINE") },
+                { key: "cancel", label: "Customer cancel", icon: "mdi-close", disabled: busy.value, onClick: () => act("CANCEL") },
+              ]}
+            />
           </div>
         </div>
       ) : null}

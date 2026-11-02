@@ -12,6 +12,7 @@ import { MonoRef } from "@/components/ui/MonoRef";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import type { MetricItem } from "@/components/ui/MetricStrip";
 import { ApiTable } from "@/components/Table/ApiTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
 import { tableRegistry } from "@/components/Table/tableRegistry";
@@ -27,6 +28,7 @@ import { FormField } from "@/components/ui/FormField";
 import { FormChecklist } from "@/components/ui/FormChecklist";
 import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
 import { MetaPill } from "@/components/ui/MetaPill";
+import { SectionFields } from "@/components/SectionFields";
 type RailField = {
     id?: string;
     key?: string;
@@ -568,14 +570,21 @@ const RailsPage = dc(() => {
             key: "actions",
             label: "Actions Column",
             Value: ({ row }: { row: Rail }) => (
-                <ThemedView style={{ flexDirection: "row", gap: "8px" }}>
-                    <VBtn size="small" variant="text" prependIcon="mdi-pencil" onClick={() => openEditRail(row)}>
-                        {t("Edit")}
-                    </VBtn>
-                    <VBtn size="small" variant="tonal" onClick={() => void openRail(row)}>
-                        {t("Customer Catalog")}
-                    </VBtn>
-                </ThemedView>
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Customer Catalog"),
+                        icon: "mdi-form-select",
+                        onClick: () => void openRail(row),
+                    }}
+                    items={[
+                        {
+                            key: "edit",
+                            label: t("Edit"),
+                            icon: "mdi-pencil-outline",
+                            onClick: () => openEditRail(row),
+                        },
+                    ]}
+                />
             ),
         },
     ];
@@ -746,42 +755,42 @@ const RailsPage = dc(() => {
                 <ThemedText type="defaultSemiBold">
                     {editingFieldIndex.value === null ? t("Add") : t("Edit")}
                 </ThemedText>
-                <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
-                    <FormField label={t("Field Key")} required sensitiveMakerChecker style={{ flex: "1 1 180px" }}>
+                <SectionFields title={t("Field details")}>
+                    <FormField label={t("Field Key")} required sensitiveMakerChecker>
                         <VTextField
                             modelValue={fieldForm.value.code}
                             onUpdate:modelValue={(v: string) => (fieldForm.value.code = v)}
                         />
                     </FormField>
-                    <FormField label={t("Label (English)")} required style={{ flex: "1 1 200px" }}>
+                    <FormField label={t("Label (English)")} required>
                         <VTextField
                             modelValue={fieldForm.value.label}
                             onUpdate:modelValue={(v: string) => (fieldForm.value.label = v)}
                         />
                     </FormField>
-                    <FormField label={t("Input Type")} style={{ flex: "1 1 160px" }}>
+                    <FormField label={t("Input Type")}>
                         <VSelect
                             items={PUBLIC_TYPES}
                             modelValue={fieldForm.value.type}
                             onUpdate:modelValue={(v: string) => (fieldForm.value.type = v)}
                         />
                     </FormField>
-                </ThemedView>
-                <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
-                    <FormField label={t("Regex")} style={{ flex: "1 1 200px" }}>
+                </SectionFields>
+                <SectionFields title={t("Validation and requirements")}>
+                    <FormField label={t("Regex")}>
                         <VTextField
                             modelValue={fieldForm.value.pattern}
                             onUpdate:modelValue={(v: string) => (fieldForm.value.pattern = v)}
                         />
                     </FormField>
-                    <FormField label={t("Min")} style={{ flex: "0 1 120px" }}>
+                    <FormField label={t("Min")}>
                         <VTextField
                             type="number"
                             modelValue={fieldForm.value.minLength}
                             onUpdate:modelValue={(v: string) => (fieldForm.value.minLength = v)}
                         />
                     </FormField>
-                    <FormField label={t("Max")} style={{ flex: "0 1 120px" }}>
+                    <FormField label={t("Max")}>
                         <VTextField
                             type="number"
                             modelValue={fieldForm.value.maxLength}
@@ -798,7 +807,7 @@ const RailsPage = dc(() => {
                         modelValue={fieldForm.value.sensitive}
                         onUpdate:modelValue={(v: any) => (fieldForm.value.sensitive = !!v)}
                     />
-                </ThemedView>
+                </SectionFields>
                 <FormChecklist
                     checks={[...RAIL_FIELD_CHECKS]}
                     modelValue={railFieldChecklist.value}
@@ -838,7 +847,7 @@ const RailsPage = dc(() => {
                     ),
                 }}
             >
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 14px" }}>
+                <SectionFields title={t("Rail settings")}>
                     <FormField label={t("Label (English)")}>
                         <VTextField
                             modelValue={railEditForm.value.nameEn}
@@ -891,7 +900,7 @@ const RailsPage = dc(() => {
                             onUpdate:modelValue={(v: string) => (railEditForm.value.instructionsAr = v)}
                         />
                     </FormField>
-                </div>
+                </SectionFields>
                 <FormChecklist
                     checks={[...RAIL_EDIT_CHECKS]}
                     modelValue={railEditChecklist.value}
@@ -931,25 +940,27 @@ const RailsPage = dc(() => {
                     ),
                 }}
             >
-                <FormField label={t("Rail Code")} hint="lowercase letters, digits, - and _" required sensitiveMakerChecker>
-                    <VTextField
-                        modelValue={railForm.value.code}
-                        onUpdate:modelValue={(v: string) => (railForm.value.code = v)}
-                    />
-                </FormField>
-                <FormField label={t("Label (English)")} required>
-                    <VTextField
-                        modelValue={railForm.value.name}
-                        onUpdate:modelValue={(v: string) => (railForm.value.name = v)}
-                    />
-                </FormField>
-                <FormField label={t("Type")}>
-                    <VSelect
-                        items={["REDIRECT", "EMBEDDED", "QR", "PUSH", "TRANSFER", "CASH"]}
-                        modelValue={railForm.value.collectionMode}
-                        onUpdate:modelValue={(v: string) => (railForm.value.collectionMode = v)}
-                    />
-                </FormField>
+                <SectionFields title={t("Rail profile")}>
+                    <FormField label={t("Rail Code")} hint="lowercase letters, digits, - and _" required sensitiveMakerChecker>
+                        <VTextField
+                            modelValue={railForm.value.code}
+                            onUpdate:modelValue={(v: string) => (railForm.value.code = v)}
+                        />
+                    </FormField>
+                    <FormField label={t("Label (English)")} required>
+                        <VTextField
+                            modelValue={railForm.value.name}
+                            onUpdate:modelValue={(v: string) => (railForm.value.name = v)}
+                        />
+                    </FormField>
+                    <FormField label={t("Type")}>
+                        <VSelect
+                            items={["REDIRECT", "EMBEDDED", "QR", "PUSH", "TRANSFER", "CASH"]}
+                            modelValue={railForm.value.collectionMode}
+                            onUpdate:modelValue={(v: string) => (railForm.value.collectionMode = v)}
+                        />
+                    </FormField>
+                </SectionFields>
             </FormModal>
         </ScreenContainer>
     );

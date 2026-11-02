@@ -10,6 +10,7 @@ import { ThemedText } from "@/components/ThemedText";
 import { statusTone } from "@/components/Table/statusTone";
 import { JsonDiffViewer, type JsonPatchOperation } from "@/components/ui/JsonDiffViewer";
 import { ApiTable } from "@/components/Table/ApiTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues } from "@/components/Table/filters";
 import { tableRegistry } from "@/components/Table/tableRegistry";
@@ -39,6 +40,7 @@ import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
 import { FormChecklist } from "@/components/ui/FormChecklist";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { SectionFields } from "@/components/SectionFields";
 type ApprovalView = "pending" | "history" | "all";
 
 const SUMMARY_EXPORT_CHECKS = [
@@ -689,7 +691,22 @@ const ApprovalsPage = dc(() => {
             label: "Review",
             sortable: false,
             Value: ({ row }: { row: ApprovalRow }) => (
-                <VBtn size="small" variant="tonal" onClick={() => void openDetails(row)}>{t("Review")}</VBtn>
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Review"),
+                        icon: "mdi-file-compare",
+                        onClick: () => void openDetails(row),
+                    }}
+                    items={[
+                        {
+                            key: "subject",
+                            label: t("Open subject"),
+                            icon: "mdi-open-in-new",
+                            hidden: !subjectRoute(row),
+                            onClick: () => openSubject(row),
+                        },
+                    ]}
+                />
             ),
         },
     ]);
@@ -851,35 +868,37 @@ const ApprovalsPage = dc(() => {
                 <VAlert type="warning" variant="tonal">
                     {t("Each request is validated independently. Requests you made yourself or cannot check will fail and remain selected.")}
                 </VAlert>
-                <FormField
-                    label={t("Rejection reason")}
-                    hint={t("At least 2 characters. Applied to every selected request.")}
-                    required
-                >
-                    <VTextarea
-                        modelValue={bulkRejectReason.value}
-                        onUpdate:modelValue={(value: string) => (bulkRejectReason.value = value)}
-                        rows={3}
-                    />
-                </FormField>
-                {showChecklists && (
-                    <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                        <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Bulk rejection checklist")}</ThemedText>
-                        {BULK_REJECT_CHECKS.map((check) => (
-                            <VCheckbox
-                                key={check.key}
-                                modelValue={bulkRejectChecklist.value[check.key] === true}
-                                onUpdate:modelValue={(value: unknown) => (bulkRejectChecklist.value = { ...bulkRejectChecklist.value, [check.key]: Boolean(value) })}
-                                label={t(check.label)}
-                                density="compact"
-                                hideDetails
-                            />
-                        ))}
-                        {!bulkRejectChecklistComplete.value && (
-                            <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all bulk rejection checklist items before continuing.")}</ThemedText>
-                        )}
-                    </ThemedView>
-                )}
+                <SectionFields title={t("Bulk rejection details")}>
+                    <FormField
+                        label={t("Rejection reason")}
+                        hint={t("At least 2 characters. Applied to every selected request.")}
+                        required
+                    >
+                        <VTextarea
+                            modelValue={bulkRejectReason.value}
+                            onUpdate:modelValue={(value: string) => (bulkRejectReason.value = value)}
+                            rows={3}
+                        />
+                    </FormField>
+                    {showChecklists && (
+                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Bulk rejection checklist")}</ThemedText>
+                            {BULK_REJECT_CHECKS.map((check) => (
+                                <VCheckbox
+                                    key={check.key}
+                                    modelValue={bulkRejectChecklist.value[check.key] === true}
+                                    onUpdate:modelValue={(value: unknown) => (bulkRejectChecklist.value = { ...bulkRejectChecklist.value, [check.key]: Boolean(value) })}
+                                    label={t(check.label)}
+                                    density="compact"
+                                    hideDetails
+                                />
+                            ))}
+                            {!bulkRejectChecklistComplete.value && (
+                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{t("Complete all bulk rejection checklist items before continuing.")}</ThemedText>
+                            )}
+                        </ThemedView>
+                    )}
+                </SectionFields>
             </FormModal>
 
             <SlideOverDrawer

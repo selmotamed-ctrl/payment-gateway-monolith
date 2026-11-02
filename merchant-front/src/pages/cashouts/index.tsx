@@ -8,6 +8,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
 import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
+import { SectionFields } from "@/components/SectionFields";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -212,51 +213,55 @@ const CashoutsPage = dc(() => {
                     ),
                 }}
             >
-                <FormField label={t("Wallet")} required>
-                    <VAutocomplete
-                        items={walletOptions.value}
-                        itemTitle="title"
-                        itemValue="value"
-                        modelValue={walletId.value}
-                        onUpdate:modelValue={(v: string) => (walletId.value = v ?? "")}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Amount")} required>
-                    <VTextField
-                        modelValue={amount.value}
-                        onUpdate:modelValue={(v: string) => (amount.value = v)}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Currency")} required>
-                    <VTextField
-                        modelValue={currency.value}
-                        onUpdate:modelValue={(v: string) => (currency.value = v.toUpperCase())}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Bank name")} required>
-                    <VTextField
-                        modelValue={bankName.value}
-                        onUpdate:modelValue={(v: string) => (bankName.value = v)}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Account number")} required>
-                    <VTextField
-                        modelValue={accountNumber.value}
-                        onUpdate:modelValue={(v: string) => (accountNumber.value = v)}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("IBAN (optional)")}>
-                    <VTextField
-                        modelValue={iban.value}
-                        onUpdate:modelValue={(v: string) => (iban.value = v)}
-                        hideDetails
-                    />
-                </FormField>
+                <SectionFields title={t("Cash-Outs")}>
+                    <FormField label={t("Wallet")} required>
+                        <VAutocomplete
+                            items={walletOptions.value}
+                            itemTitle="title"
+                            itemValue="value"
+                            modelValue={walletId.value}
+                            onUpdate:modelValue={(v: string) => (walletId.value = v ?? "")}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Amount")} required>
+                        <VTextField
+                            modelValue={amount.value}
+                            onUpdate:modelValue={(v: string) => (amount.value = v)}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Currency")} required>
+                        <VTextField
+                            modelValue={currency.value}
+                            onUpdate:modelValue={(v: string) => (currency.value = v.toUpperCase())}
+                            hideDetails
+                        />
+                    </FormField>
+                </SectionFields>
+                <SectionFields title={t("Bank Details")}>
+                    <FormField label={t("Bank name")} required>
+                        <VTextField
+                            modelValue={bankName.value}
+                            onUpdate:modelValue={(v: string) => (bankName.value = v)}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Account number")} required>
+                        <VTextField
+                            modelValue={accountNumber.value}
+                            onUpdate:modelValue={(v: string) => (accountNumber.value = v)}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("IBAN (optional)")}>
+                        <VTextField
+                            modelValue={iban.value}
+                            onUpdate:modelValue={(v: string) => (iban.value = v)}
+                            hideDetails
+                        />
+                    </FormField>
+                </SectionFields>
             </FormModal>
         </ScreenContainer>
     );

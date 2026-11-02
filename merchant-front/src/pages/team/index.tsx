@@ -7,7 +7,9 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
 import { DataTable } from "@/components/Table/DataTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import type { TableHeader } from "@/components/Table/types";
+import { SectionFields } from "@/components/SectionFields";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -156,9 +158,14 @@ const TeamPage = dc(() => {
             key: "actions",
             label: "Actions Column",
             Value: ({ row }: { row: TeamMember }) => (
-                <VBtn size="small" variant="tonal" onClick={() => openDialog(row)}>
-                    {t("Edit")}
-                </VBtn>
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Edit"),
+                        icon: "mdi-pencil-outline",
+                        onClick: () => openDialog(row),
+                    }}
+                    items={[]}
+                />
             ),
         },
     ];
@@ -223,7 +230,7 @@ const TeamPage = dc(() => {
                     ),
                 }}
             >
-                <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
+                <SectionFields title={t("Profile")}>
                     <FormField label={t("Full Name")} required style={{ minWidth: "200px" }}>
                         <VTextField
                             modelValue={form.value.name}
@@ -277,29 +284,31 @@ const TeamPage = dc(() => {
                             hideDetails
                         />
                     </FormField>
-                </ThemedView>
-                <FormField label={t("Scopes")}>
-                    <VSelect
-                        items={SCOPES.map((scope) => ({ title: scope, value: scope }))}
-                        modelValue={form.value.appScopeIds}
-                        onUpdate:modelValue={(v: string[]) => (form.value.appScopeIds = v)}
-                        multiple
-                        chips
-                        closable-chips
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Authorities")}>
-                    <VSelect
-                        items={SCOPES.map((scope) => ({ title: `${scope}.*`, value: scope }))}
-                        modelValue={form.value.authorities}
-                        onUpdate:modelValue={(v: string[]) => (form.value.authorities = v)}
-                        multiple
-                        chips
-                        closable-chips
-                        hideDetails
-                    />
-                </FormField>
+                </SectionFields>
+                <SectionFields title={t("Authorities")}>
+                    <FormField label={t("Scopes")}>
+                        <VSelect
+                            items={SCOPES.map((scope) => ({ title: scope, value: scope }))}
+                            modelValue={form.value.appScopeIds}
+                            onUpdate:modelValue={(v: string[]) => (form.value.appScopeIds = v)}
+                            multiple
+                            chips
+                            closable-chips
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Authorities")}>
+                        <VSelect
+                            items={SCOPES.map((scope) => ({ title: `${scope}.*`, value: scope }))}
+                            modelValue={form.value.authorities}
+                            onUpdate:modelValue={(v: string[]) => (form.value.authorities = v)}
+                            multiple
+                            chips
+                            closable-chips
+                            hideDetails
+                        />
+                    </FormField>
+                </SectionFields>
             </FormModal>
         </ScreenContainer>
     );

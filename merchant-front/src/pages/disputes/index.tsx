@@ -1,13 +1,15 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VFileInput, VTextarea } from "vuetify/components";
+import { VFileInput, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
 import { DataTable } from "@/components/Table/DataTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import type { TableHeader } from "@/components/Table/types";
+import { SectionFields } from "@/components/SectionFields";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -141,19 +143,20 @@ const DisputesPage = dc(() => {
             key: "actions",
             label: "Actions Column",
             Value: ({ row }: { row: Dispute }) => (
-                <VBtn
-                    size="small"
-                    variant="tonal"
-                    onClick={() => {
-                        selected.value = row;
-                        note.value = "";
-                        file.value = null;
-                        formError.value = "";
-                        dialogOpen.value = true;
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Respond"),
+                        icon: "mdi-file-document-edit-outline",
+                        onClick: () => {
+                            selected.value = row;
+                            note.value = "";
+                            file.value = null;
+                            formError.value = "";
+                            dialogOpen.value = true;
+                        },
                     }}
-                >
-                    {t("Respond")}
-                </VBtn>
+                    items={[]}
+                />
             ),
         },
     ];
@@ -193,23 +196,25 @@ const DisputesPage = dc(() => {
                 submitLabel={t("Submit")}
                 onSubmit={() => void submitEvidence()}
             >
-                <FormField label={t("Notes")}>
-                    <VTextarea
-                        modelValue={note.value}
-                        onUpdate:modelValue={(v: string) => (note.value = v)}
-                        rows={3}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Evidence")}>
-                    <VFileInput
-                        modelValue={file.value}
-                        onUpdate:modelValue={(v: File | File[] | null) => {
-                            file.value = Array.isArray(v) ? (v[0] ?? null) : v;
-                        }}
-                        hideDetails
-                    />
-                </FormField>
+                <SectionFields title={t("Evidence")}>
+                    <FormField label={t("Notes")}>
+                        <VTextarea
+                            modelValue={note.value}
+                            onUpdate:modelValue={(v: string) => (note.value = v)}
+                            rows={3}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Evidence")}>
+                        <VFileInput
+                            modelValue={file.value}
+                            onUpdate:modelValue={(v: File | File[] | null) => {
+                                file.value = Array.isArray(v) ? (v[0] ?? null) : v;
+                            }}
+                            hideDetails
+                        />
+                    </FormField>
+                </SectionFields>
             </FormModal>
         </ScreenContainer>
     );

@@ -1,11 +1,12 @@
-import { defineComponent, ref, type VNode } from "vue";
-import { VDialog, VForm } from "vuetify/components";
+import { ref, type VNode } from "vue";
+import { VBtn, VForm } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { dc } from "kt-dc";
 import { extractApiError, UnknownError, type ApiError } from "@/utils/errors/extractor";
 import { AlertView } from "./AlertView";
-import { SurfaceCard } from "@/components/ui";
+import { FormModal } from "@/components/ui/FormModal";
 import type { JSONObject } from "kt-common";
+
 export interface ConfirmOptions {
     title: string;
     message: string;
@@ -19,8 +20,8 @@ export const AwaitedConfirmationDialog = dc<{}, { show(opts: ConfirmOptions): Pr
     const visible = ref(false);
     const title = ref<string>("");
     const message = ref<string>("");
-    let resolver: (value: boolean) => void;
-    const type = ref("primary" as string);
+    let resolver: (value: boolean) => void = () => {};
+    const type = ref<ConfirmOptions["type"]>("primary");
     const valid = ref(true);
     const slot = ref(null as null | ((props: { form: globalThis.Ref<JSONObject, JSONObject> }) => JSX.Element));
     const submitButtonLabel = ref(null as null | string);
@@ -77,46 +78,64 @@ export const AwaitedConfirmationDialog = dc<{}, { show(opts: ConfirmOptions): Pr
 
     expose({ show });
 
+    const submitLabel = () => t(submitButtonLabel.value || "Confirm");
+
     return (): VNode => (
-        <VDialog
-            style={{
-                zIndex: 100,
-            }}
+        <FormModal
             modelValue={visible.value}
-            onUpdate:modelValue={(v: boolean | null) => (visible.value = !!v)}
-            persistent
-            max-width="650"
-        >
-            {{
-                default: () => (
-                    <SurfaceCard title={t(title.value)} style={{ width: "100%" }}>
-                        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <div style={{ fontSize: "13.5px", color: "var(--pg-ink-secondary)" }}>
-                                {t(message.value)}
-                            </div>
-                            {slot.value && (
-                                <VForm
-                                    modelValue={valid.value}
-                                    onUpdate:modelValue={(v) => {
-                                        valid.value = !!v;
-                                    }}
-                                >
-                                    {slot.value?.({ form })}
-                                </VForm>
-                            )}
-                            <AlertView type="error" message={apiError.value?.error} messages={apiError.value?.errors}></AlertView>
-                            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-                                <Button disabled={loading.value} variant="text" onClick={onCancel}>
-                                    {t("Cancel")}
-                                </Button>
-                                <Button variant="text" loading={loading.value} disabled={!valid.value || loading.value} color={type.value} onClick={onConfirm}>
-                                    {t("Confirm")}
-                                </Button>
-                            </div>
-                        </div>
-                    </SurfaceCard>
+            onUpdate:modelValue={(value: boolean) => {
+                if (value) {
+                    visible.value = true;
+                    return;
+                }
+                if (loading.value) {
+                    visible.value = true;
+                    return;
+                }
+                if (visible.value) onCancel();
+            }}
+            title={t(title.value)}
+            loading={loading.value}
+            danger={type.value === "error"}
+            onSubmit={() => {
+                if (valid.value && !loading.value) void onConfirm();
+            }}
+            v-slots={{
+                footer: () => (
+                    <>
+                        <VBtn variant="outlined" disabled={loading.value} onClick={onCancel}>
+                            {t("Cancel")}
+                        </VBtn>
+                        <VBtn
+                            variant="flat"
+                            color={type.value}
+                            loading={loading.value}
+                            disabled={!valid.value || loading.value}
+                            aria-label={submitLabel()}
+                            onClick={() => void onConfirm()}
+                        >
+                            {submitLabel()}
+                        </VBtn>
+                    </>
                 ),
             }}
-        </VDialog>
+        >
+            <p style={{ margin: 0, fontSize: "13.5px", lineHeight: 1.6, color: "var(--pg-ink-secondary)", whiteSpace: "pre-wrap" }}>
+                {t(message.value)}
+            </p>
+            {slot.value && (
+                <VForm
+                    modelValue={valid.value}
+                    onUpdate:modelValue={(value: boolean | null) => {
+                        valid.value = !!value;
+                    }}
+                >
+                    {slot.value?.({ form })}
+                </VForm>
+            )}
+            <AlertView type="error" message={apiError.value?.error} messages={apiError.value?.errors}></AlertView>
+        </FormModal>
     );
 });
+
+export default AwaitedConfirmationDialog;

@@ -8,7 +8,9 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { StateView } from "@/components/StateView";
 import { DataTable } from "@/components/Table/DataTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import type { TableHeader } from "@/components/Table/types";
+import { SectionFields } from "@/components/SectionFields";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -129,33 +131,32 @@ const WalletsPage = dc(() => {
             key: "actions",
             label: "Actions Column",
             Value: ({ row }: { row: Wallet }) => (
-                <ThemedView style={{ flexDirection: "row", gap: "6px" }}>
-                    <VBtn
-                        size="small"
-                        variant="tonal"
-                        onClick={() => void router.push({ name: "Statements", query: { walletId: row.id } })}
-                    >
-                        {t("Statements")}
-                    </VBtn>
-                    <VBtn
-                        size="small"
-                        variant="tonal"
-                        onClick={async () => {
-                            try {
-                                const response = await api.get(urlsMap.walletBalance(row.id));
-                                const payload = response.data?.data ?? response.data ?? {};
-                                showSnackBar({
-                                    type: "primary",
-                                    message: `${payload.balance ?? row.balance} ${payload.currency ?? row.currency}`,
-                                });
-                            } catch (e) {
-                                showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
-                            }
-                        }}
-                    >
-                        {t("Refresh")}
-                    </VBtn>
-                </ThemedView>
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Statements"),
+                        icon: "mdi-file-document-outline",
+                        onClick: () => void router.push({ name: "Statements", query: { walletId: row.id } }),
+                    }}
+                    items={[
+                        {
+                            key: "refresh",
+                            label: t("Refresh"),
+                            icon: "mdi-refresh",
+                            onClick: async () => {
+                                try {
+                                    const response = await api.get(urlsMap.walletBalance(row.id));
+                                    const payload = response.data?.data ?? response.data ?? {};
+                                    showSnackBar({
+                                        type: "primary",
+                                        message: `${payload.balance ?? row.balance} ${payload.currency ?? row.currency}`,
+                                    });
+                                } catch (e) {
+                                    showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+                                }
+                            },
+                        },
+                    ]}
+                />
             ),
         },
     ];
@@ -208,30 +209,32 @@ const WalletsPage = dc(() => {
                 submitLabel={t("Create")}
                 onSubmit={() => void createWallet()}
             >
-                <FormField label={t("Application")} required>
-                    <VAutocomplete
-                        items={applicationOptions.value}
-                        itemTitle="title"
-                        itemValue="value"
-                        modelValue={form.value.applicationId}
-                        onUpdate:modelValue={(v: string) => (form.value.applicationId = v ?? "")}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Wallet Name")} required>
-                    <VTextField
-                        modelValue={form.value.name}
-                        onUpdate:modelValue={(v: string) => (form.value.name = v)}
-                        hideDetails
-                    />
-                </FormField>
-                <FormField label={t("Currency")} required>
-                    <VTextField
-                        modelValue={form.value.currency}
-                        onUpdate:modelValue={(v: string) => (form.value.currency = v.toUpperCase())}
-                        hideDetails
-                    />
-                </FormField>
+                <SectionFields title={t("Details")}>
+                    <FormField label={t("Application")} required>
+                        <VAutocomplete
+                            items={applicationOptions.value}
+                            itemTitle="title"
+                            itemValue="value"
+                            modelValue={form.value.applicationId}
+                            onUpdate:modelValue={(v: string) => (form.value.applicationId = v ?? "")}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Wallet Name")} required>
+                        <VTextField
+                            modelValue={form.value.name}
+                            onUpdate:modelValue={(v: string) => (form.value.name = v)}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Currency")} required>
+                        <VTextField
+                            modelValue={form.value.currency}
+                            onUpdate:modelValue={(v: string) => (form.value.currency = v.toUpperCase())}
+                            hideDetails
+                        />
+                    </FormField>
+                </SectionFields>
             </FormModal>
         </ScreenContainer>
     );

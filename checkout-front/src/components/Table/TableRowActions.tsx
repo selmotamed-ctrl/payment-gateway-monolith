@@ -1,401 +1,185 @@
-import { type RefreshMethodWithNextSkip, type TableHeader, type TableHeaderAction } from "./types";
-import { ThemedText } from "../ThemedText";
-import { useLocale, useTheme } from "vuetify";
-import Icon from "@/components/Icon/index.vue";
-import { VDivider, VMenu, VProgressCircular, VTooltip } from "vuetify/components";
-import { defineComponent, ref } from "vue";
+import { defineComponent, ref, type PropType, type VNodeChild } from "vue";
+import { VIcon, VMenu } from "vuetify/components";
+import { useLocale } from "vuetify";
 
-export const TableRowActions = defineComponent<{
-    header: TableHeader<any>;
-    row: any;
-    refresh: RefreshMethodWithNextSkip;
-    reset: () => void | Promise<void>;
-    refreshAsIs: () => void | Promise<void>;
-}>(
-    (props) => {
+export interface RowActionItem {
+    key: string;
+    label: string;
+    icon?: string;
+    danger?: boolean;
+    disabled?: boolean;
+    hidden?: boolean;
+    dividerBefore?: boolean;
+    onClick: () => void | Promise<void>;
+}
+
+export interface RowPrimaryAction {
+    label: string;
+    icon?: string;
+    disabled?: boolean;
+    loading?: boolean;
+    onClick: () => void | Promise<void>;
+}
+
+export const TableRowActions = defineComponent({
+    name: "TableRowActions",
+    props: {
+        primaryAction: { type: Object as PropType<RowPrimaryAction | null>, default: null },
+        items: { type: Array as PropType<RowActionItem[]>, default: () => [] },
+    },
+    setup(props) {
         const { t } = useLocale();
-        const loading = ref(false);
-        const open = ref(false);
-        const theme = useTheme();
-        const onClick = async (action: TableHeaderAction<any>) => {
-            if (loading.value) {
-                return;
-            }
-            loading.value = true;
-            try {
-                await action.action(props.row, {
-                    refresh: props.refresh,
-                    reset: props.reset,
-                    refreshAsIs: props.refreshAsIs,
-                });
-            } catch (error) {
-                console.error(error);
-            } finally {
-                loading.value = false;
-            }
-        };
-        return () => {
-            const currentColors = theme.current.value.colors;
-            const header = props.header;
-            const row = props.row;
-
-            const actionsList = header.actions?.filter((action) => {
-                if (typeof action.if === "function") {
-                    return action.if(row);
-                }
-                return true;
-            });
-
-            if (header?.menu) {
-                return (
-                    <>
-                        <VMenu
-                            modelValue={open.value}
-                            onUpdate:modelValue={(v) => {
-                                open.value = v;
-                            }}
-                        >
-                            {{
-                                default: () => {
-                                    return (
-                                        <ThemedView
-                                            style={{
-                                                minWidth: "300px",
-                                                gap: "12px",
-                                                padding: "12px",
-                                                borderRadius: "12px",
-                                                border: "1px solid var(--pg-border-subtle)",
-                                                backgroundColor: "var(--pg-bg-surface)",
-                                            }}
-                                        >
-                                            {actionsList
-                                                ?.map((action, index) => {
-                                                    let backgroundColor = !action.backgroundColor
-                                                        ? currentColors.primary
-                                                        : typeof action.backgroundColor == "function"
-                                                          ? action.backgroundColor(row)
-                                                          : action.backgroundColor;
-
-                                                    const disabled = loading.value || (typeof action.disabled == "function" ? action.disabled(row) : undefined);
-
-                                                    if (disabled || loading.value) {
-                                                        backgroundColor = currentColors["secondary"];
-                                                    }
-
-                                                    let content = (
-                                                        <ThemedView
-                                                            key={`${index}`}
-                                                            noHoverable
-                                                            role="button"
-                                                            tabindex={disabled ? -1 : 0}
-                                                            aria-disabled={disabled ? "true" : "false"}
-                                                            aria-label={t(typeof action.label == "function" ? action.label(row) : action.label ?? "")}
-                                                            onKeydown={(event: KeyboardEvent) => {
-                                                                if (event.key === "Enter" || event.key === " ") {
-                                                                    event.preventDefault();
-                                                                    (event.currentTarget as HTMLElement).click();
-                                                                }
-                                                            }}
-                                                            style={{
-                                                                width: "100%",
-                                                                borderRadius: "8px",
-                                                                padding: "8px",
-                                                                color: backgroundColor,
-                                                                flexDirection: "row",
-                                                                alignItems: "center",
-                                                                gap: "12px",
-                                                                justifyContent: "space-between",
-                                                                cursor: disabled ? "not-allowed" : "pointer",
-                                                                transition: "all 0.2s ease",
-                                                                opacity: loading.value ? 0.6 : 1,
-                                                            }}
-                                                            disabled={disabled}
-                                                            onClick={() => {
-                                                                if (!disabled) {
-                                                                    onClick(action);
-                                                                    open.value = false;
-                                                                }
-                                                            }}
-                                                        >
-                                                            {action.label && (
-                                                                <>
-                                                                    <ThemedText
-                                                                        style={{
-                                                                            fontWeight: "600",
-                                                                            fontSize: "12px",
-                                                                            lineHeight: "12px",
-                                                                        }}
-                                                                    >
-                                                                        {t(typeof action.label == "function" ? action.label(row) : action.label)}
-                                                                    </ThemedText>
-                                                                </>
-                                                            )}
-
-                                                            {action.iconName && (
-                                                                <>
-                                                                    <Icon
-                                                                        icon={typeof action.iconName == "function" ? action.iconName(row) : action.iconName}
-                                                                        color={backgroundColor}
-                                                                        size={12}
-                                                                    />
-                                                                </>
-                                                            )}
-                                                        </ThemedView>
-                                                    );
-
-                                                    let toolTipWrappedContent: JSX.Element;
-                                                    const ToolTipContent = action.Tooltip?.({ row });
-                                                    const toolTipContent = action.tooltip?.({ row });
-                                                    if (ToolTipContent) {
-                                                        toolTipWrappedContent = (
-                                                            <VTooltip>
-                                                                {{
-                                                                    activator: ({ props }: any) => {
-                                                                        return <ThemedView {...props}>{content}</ThemedView>;
-                                                                    },
-                                                                    default: () => {
-                                                                        return <>{ToolTipContent}</>;
-                                                                    },
-                                                                }}
-                                                            </VTooltip>
-                                                        );
-                                                    } else if (toolTipContent) {
-                                                        toolTipWrappedContent = (
-                                                            <VTooltip>
-                                                                {{
-                                                                    activator: ({ props }: any) => {
-                                                                        return <ThemedView {...props}>{content}</ThemedView>;
-                                                                    },
-                                                                    default: () => {
-                                                                        return <>{t(toolTipContent)}</>;
-                                                                    },
-                                                                }}
-                                                            </VTooltip>
-                                                        );
-                                                    } else {
-                                                        toolTipWrappedContent = <>{content}</>;
-                                                    }
-
-                                                    let hrefWrappedContent: JSX.Element;
-                                                    const href = action.href;
-                                                    if (href) {
-                                                        hrefWrappedContent = (
-                                                            <a
-                                                                style={{
-                                                                    textDecoration: "none",
-                                                                    width: "100%",
-                                                                }}
-                                                                onClick={(e) => {
-                                                                    e.preventDefault();
-                                                                }}
-                                                                href={href(row)}
-                                                            >
-                                                                {toolTipWrappedContent}
-                                                            </a>
-                                                        );
-                                                    } else {
-                                                        hrefWrappedContent = <>{toolTipWrappedContent}</>;
-                                                    }
-
-                                                    return (
-                                                        <>
-                                                            {hrefWrappedContent}
-                                                            {index < actionsList.length - 1 ? <VDivider /> : <></>}
-                                                        </>
-                                                    );
-                                                })
-                                                .filter((e) => !!e)}
-                                        </ThemedView>
-                                    );
-                                },
-
-                                activator: (slotProps: any) => {
-                                    return (
-                                        <ThemedView
-                                            style={{
-                                                paddingBottom: "1px",
-                                            }}
-                                            {...slotProps?.props}
-                                            role="button"
-                                            tabindex={loading.value ? -1 : 0}
-                                            aria-haspopup="menu"
-                                            aria-expanded={open.value ? "true" : "false"}
-                                            aria-label={t("Row actions")}
-                                            onKeydown={(event: KeyboardEvent) => {
-                                                if (event.key === "Enter" || event.key === " ") {
-                                                    event.preventDefault();
-                                                    (event.currentTarget as HTMLElement).click();
-                                                }
-                                            }}
-                                            noHoverable
-                                            disabled={loading.value}
-                                        >
-                                            {!loading.value ? (
-                                                <Icon icon="mdi-dots-vertical" size={32}></Icon>
-                                            ) : (
-                                                <VProgressCircular indeterminate></VProgressCircular>
-                                            )}
-                                        </ThemedView>
-                                    );
-                                },
-                            }}
-                        </VMenu>
-                    </>
-                );
-            }
-
+        const menuOpen = ref(false);
+        return (): VNodeChild => {
+            const visibleItems = (props.items ?? []).filter((item) => !item.hidden);
             return (
-                <ThemedView
+                <div
+                    onClick={(event: MouseEvent) => event.stopPropagation()}
                     style={{
+                        display: "inline-flex",
                         alignItems: "center",
-                        flexDirection: "row",
-                        gap: "8px",
-                        padding: "8px",
+                        justifyContent: "flex-end",
+                        gap: "6px",
+                        height: "28px",
+                        whiteSpace: "nowrap",
                     }}
                 >
-                    {actionsList?.map((action, index) => {
-                        let backgroundColor = !action.backgroundColor
-                            ? currentColors.primary
-                            : typeof action.backgroundColor == "function"
-                              ? action.backgroundColor(row)
-                              : action.backgroundColor;
-
-                        const disabled = loading.value || (typeof action.disabled == "function" ? action.disabled(row) : undefined);
-
-                        if (disabled || loading.value) {
-                            backgroundColor = currentColors["secondary"];
-                        }
-                        let content = (
-                            <>
-                                <ThemedView
-                                    class={disabled ? "" : "table-row-action-button"}
-                                    key={`${index}`}
-                                    noHoverable
-                                    role="button"
-                                    tabindex={disabled ? -1 : 0}
-                                    aria-disabled={disabled ? "true" : "false"}
-                                    aria-label={t(typeof action.label == "function" ? action.label(row) : action.label ?? "")}
-                                    onKeydown={(event: KeyboardEvent) => {
-                                        if (event.key === "Enter" || event.key === " ") {
-                                            event.preventDefault();
-                                            (event.currentTarget as HTMLElement).click();
-                                        }
-                                    }}
-                                    style={{
-                                        borderRadius: "8px",
-                                        padding: "8px 12px",
-                                        backgroundColor: "transparent",
-                                        border: `1px solid ${backgroundColor}33`,
-                                        flexDirection: "row",
-                                        color: backgroundColor,
-                                        alignItems: "center",
-                                        gap: "8px",
-                                        justifyContent: "center",
-                                        cursor: disabled ? "not-allowed" : "pointer",
-                                        transition: "all 0.2s ease",
-                                        opacity: loading.value ? 0.6 : 1,
-                                    }}
-                                    disabled={disabled}
-                                    onClick={() => {
-                                        const disabled = loading.value || (typeof action.disabled == "function" ? action.disabled(row) : undefined);
-                                        if (!disabled) {
-                                            onClick(action);
-                                        }
-                                    }}
-                                >
-                                    {loading.value ? (
-                                        <>
-                                            <VProgressCircular size={14} indeterminate></VProgressCircular>
-                                        </>
-                                    ) : (
-                                        action.iconName && (
-                                            <>
-                                                <Icon
-                                                    icon={typeof action.iconName == "function" ? action.iconName(row) : action.iconName}
-                                                    color={backgroundColor}
-                                                    size={14}
-                                                ></Icon>
-                                            </>
-                                        )
-                                    )}
-
-                                    {action.label && (
-                                        <>
-                                            <ThemedText
-                                                style={{
-                                                    fontWeight: "600",
-                                                    fontSize: "12px",
-                                                    lineHeight: "12px",
-                                                    color: backgroundColor,
-                                                }}
-                                            >
-                                                {t(typeof action.label == "function" ? action.label(row) : action.label)}
-                                            </ThemedText>
-                                        </>
-                                    )}
-                                </ThemedView>
-                            </>
-                        );
-                        let toolTipWrappedContent: JSX.Element;
-                        const ToolTipContent = action.Tooltip?.({ row });
-                        const toolTipContent = action.tooltip?.({ row });
-                        if (ToolTipContent) {
-                            toolTipWrappedContent = (
-                                <VTooltip>
-                                    {{
-                                        activator: ({ props }: any) => {
-                                            return <ThemedView {...props}>{content}</ThemedView>;
-                                        },
-                                        default: () => {
-                                            return <>{ToolTipContent}</>;
-                                        },
-                                    }}
-                                </VTooltip>
-                            );
-                        } else if (toolTipContent) {
-                            toolTipWrappedContent = (
-                                <VTooltip>
-                                    {{
-                                        activator: ({ props }: any) => {
-                                            return <ThemedView {...props}>{content}</ThemedView>;
-                                        },
-                                        default: () => {
-                                            return <>{t(toolTipContent)}</>;
-                                        },
-                                    }}
-                                </VTooltip>
-                            );
-                        } else {
-                            toolTipWrappedContent = <>{content}</>;
-                        }
-
-                        let hrefWrappedContent: JSX.Element;
-                        const href = action.href;
-                        if (href) {
-                            hrefWrappedContent = (
-                                <a
-                                    style={{
-                                        textDecoration: "none",
-                                    }}
-                                    onClick={(e) => {
-                                        e.preventDefault();
-                                    }}
-                                    href={href(row)}
-                                >
-                                    {toolTipWrappedContent}
-                                </a>
-                            );
-                        } else {
-                            hrefWrappedContent = <>{toolTipWrappedContent}</>;
-                        }
-
-                        return hrefWrappedContent;
-                    })}
-                </ThemedView>
+                    {props.primaryAction && (
+                        <button
+                            type="button"
+                            disabled={props.primaryAction.disabled || props.primaryAction.loading}
+                            onClick={() => void props.primaryAction?.onClick()}
+                            style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "5px",
+                                height: "26px",
+                                padding: "0 10px",
+                                borderRadius: "var(--pg-radius-sm)",
+                                backgroundColor: "var(--pg-bg-surface)",
+                                color: "var(--pg-ink-primary)",
+                                border: "1px solid var(--pg-border-strong)",
+                                fontSize: "12px",
+                                fontWeight: 500,
+                                lineHeight: 1,
+                                cursor: props.primaryAction.disabled ? "not-allowed" : "pointer",
+                                opacity: props.primaryAction.disabled ? 0.5 : 1,
+                                boxShadow: "var(--pg-shadow-xs)",
+                                fontFamily: "inherit",
+                            }}
+                        >
+                            {props.primaryAction.icon && <VIcon icon={props.primaryAction.icon} size={13} />}
+                            <span>{props.primaryAction.label}</span>
+                        </button>
+                    )}
+                    {visibleItems.length > 0 && (
+                        <VMenu
+                            modelValue={menuOpen.value}
+                            onUpdate:modelValue={(value: boolean) => (menuOpen.value = value)}
+                            location="bottom end"
+                            offset={4}
+                        >
+                            {{
+                                activator: ({ props: activatorProps }: { props: Record<string, unknown> }) => (
+                                    <button
+                                        type="button"
+                                        {...activatorProps}
+                                        aria-label={t("Row actions")}
+                                        style={{
+                                            display: "inline-flex",
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                            width: "26px",
+                                            height: "26px",
+                                            borderRadius: "var(--pg-radius-sm)",
+                                            backgroundColor: menuOpen.value ? "var(--pg-bg-surface-subtle)" : "transparent",
+                                            color: "var(--pg-ink-secondary)",
+                                            border: menuOpen.value
+                                                ? "1px solid var(--pg-border-subtle)"
+                                                : "1px solid transparent",
+                                            cursor: "pointer",
+                                        }}
+                                    >
+                                        <VIcon icon="mdi-dots-horizontal" size={16} />
+                                    </button>
+                                ),
+                                default: () => (
+                                    <div
+                                        style={{
+                                            minWidth: "184px",
+                                            padding: "4px",
+                                            backgroundColor: "var(--pg-bg-surface)",
+                                            border: "1px solid var(--pg-border-subtle)",
+                                            borderRadius: "var(--pg-radius-md)",
+                                            boxShadow: "var(--pg-shadow-menu)",
+                                            display: "flex",
+                                            flexDirection: "column",
+                                            gap: "1px",
+                                        }}
+                                    >
+                                        {visibleItems.map((item) => (
+                                            <div key={item.key}>
+                                                {item.dividerBefore && (
+                                                    <div
+                                                        style={{
+                                                            height: "1px",
+                                                            backgroundColor: "var(--pg-border-subtle)",
+                                                            margin: "4px 2px",
+                                                        }}
+                                                    />
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    disabled={item.disabled}
+                                                    onClick={() => {
+                                                        menuOpen.value = false;
+                                                        void item.onClick();
+                                                    }}
+                                                    style={{
+                                                        width: "100%",
+                                                        display: "flex",
+                                                        alignItems: "center",
+                                                        gap: "8px",
+                                                        height: "32px",
+                                                        padding: "0 10px",
+                                                        borderRadius: "var(--pg-radius-xs)",
+                                                        backgroundColor: "transparent",
+                                                        border: "none",
+                                                        fontSize: "12.5px",
+                                                        fontWeight: 500,
+                                                        color: item.danger
+                                                            ? "var(--pg-status-danger-text)"
+                                                            : "var(--pg-ink-primary)",
+                                                        cursor: item.disabled ? "not-allowed" : "pointer",
+                                                        opacity: item.disabled ? 0.45 : 1,
+                                                        textAlign: "start",
+                                                        fontFamily: "inherit",
+                                                    }}
+                                                >
+                                                    {item.icon && (
+                                                        <VIcon
+                                                            icon={item.icon}
+                                                            size={15}
+                                                            style={{
+                                                                color: item.danger
+                                                                    ? "var(--pg-status-danger-text)"
+                                                                    : "var(--pg-ink-muted)",
+                                                            }}
+                                                        />
+                                                    )}
+                                                    <span>{item.label}</span>
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ),
+                            }}
+                        </VMenu>
+                    )}
+                </div>
             );
         };
     },
-    {
-        props: ["refreshAsIs", "header", "row", "reset", "refresh"],
-    },
-);
+});
+
+export default TableRowActions;

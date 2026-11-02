@@ -59,6 +59,17 @@
   --pg-shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.05), 0 1px 2px -1px rgba(15, 23, 42, 0.03);
   --pg-shadow-modal: 0 20px 25px -5px rgba(15, 23, 42, 0.12), 0 8px 10px -6px rgba(15, 23, 42, 0.06);
 
+  /* Guaranteed Spacing & Padding Tokens */
+  --pg-pad-screen-desktop: 24px 28px 48px 28px;
+  --pg-pad-screen-mobile: 16px 16px 36px 16px;
+  --pg-pad-card-header: 14px 20px;
+  --pg-pad-card-body: 20px 24px;
+  --pg-pad-card-footer: 12px 20px;
+  --pg-pad-table-toolbar: 12px 20px;
+  --pg-pad-table-filters: 16px 20px;
+  --pg-pad-table-chips: 8px 20px;
+  --pg-pad-table-footer: 10px 20px;
+
   --pg-font-sans-ltr: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --pg-font-sans-rtl: "Cairo", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --pg-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -110,6 +121,27 @@
   --pg-status-neutral-text: #a1a1aa;
   --pg-status-neutral-border: #27272a;
   --pg-status-neutral-dot: #71717a;
+}
+
+/* Safe reset: never reset padding/margin on * outside a cascade layer. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Guaranteed page breathing room, independent of the app shell. */
+.pg-screen-container {
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: var(--pg-pad-screen-desktop) !important;
+}
+
+@media (max-width: 600px) {
+  .pg-screen-container {
+    padding: var(--pg-pad-screen-mobile) !important;
+  }
 }
 
 html,
@@ -211,6 +243,29 @@ html[dir="rtl"] .pg-heading {
   background-color: var(--pg-bg-surface-subtle) !important;
 }
 
+.v-card-title {
+  padding: var(--pg-pad-card-header) !important;
+  font-size: 16px !important;
+  font-weight: 600 !important;
+}
+
+.v-card-subtitle {
+  padding: 0 20px 8px 20px !important;
+  font-size: 13px !important;
+  color: var(--pg-ink-muted) !important;
+}
+
+.v-card-text {
+  padding: var(--pg-pad-card-body) !important;
+}
+
+.v-card-actions {
+  padding: var(--pg-pad-card-footer) !important;
+  border-top: 1px solid var(--pg-border-subtle);
+  background-color: var(--pg-bg-surface-subtle);
+  gap: 8px;
+}
+
 .v-btn {
   text-transform: none !important;
   letter-spacing: -0.005em !important;
@@ -256,18 +311,146 @@ html[dir="rtl"] .pg-heading {
   border-radius: var(--pg-radius-lg) !important;
 }
 
-.pg-unified-table .v-table__wrapper {
+/* Unified architectural table card */
+.pg-table-card {
+  background-color: var(--pg-bg-surface) !important;
+  border: 1px solid var(--pg-border-subtle) !important;
+  border-radius: var(--pg-radius-md) !important;
+  box-shadow: var(--pg-shadow-xs) !important;
+  overflow: hidden;
+}
+
+/* Long cell values never wrap to a second line */
+.pg-cell-truncate {
+  display: inline-block;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+/* Row action cell stays pinned to the inline end. */
+.pg-col-actions {
+  width: 1% !important;
+  white-space: nowrap !important;
+  text-align: end !important;
+}
+
+/* Section card with guaranteed internal padding */
+.pg-section-fields {
+  background-color: var(--pg-bg-surface);
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-md);
+  box-shadow: var(--pg-shadow-xs);
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+
+.pg-section-fields__header {
+  padding: 14px 24px !important;
+  border-bottom: 1px solid var(--pg-border-subtle);
+  background-color: var(--pg-bg-surface);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pg-section-fields__body {
+  padding: 20px 24px !important;
+}
+
+.pg-section-fields__footer {
+  padding: 12px 24px !important;
+  border-top: 1px solid var(--pg-border-subtle);
+  background-color: var(--pg-bg-surface-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Static top labels and compact 36px controls */
+.pg-field-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pg-field-wrapper > label {
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--pg-ink-primary);
+}
+
+.pg-field-wrapper .v-field {
+  min-height: 36px !important;
+  border-radius: var(--pg-radius-sm) !important;
+  background-color: var(--pg-bg-surface) !important;
+}
+
+.pg-field-wrapper .v-field__input {
+  min-height: 36px !important;
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+  padding-inline: 12px !important;
+  font-size: 13px !important;
+}
+
+/* Standalone filter surface */
+.pg-filters-container {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: var(--pg-pad-table-filters) !important;
+  background-color: var(--pg-bg-surface-subtle);
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-md);
+}
+
+.pg-filters-container__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px 16px;
+  align-items: start;
+}
+
+.pg-filters-container__active {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.pg-filters-container__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.pg-unified-table .v-table__wrapper,
+.pg-table-card .v-table__wrapper {
   overflow-x: auto;
 }
 
+.pg-table-card .v-table__wrapper > table,
+.pg-table-card > .table-wrapper > table,
+.pg-table-card table,
 .pg-unified-table .v-table__wrapper > table,
 .pg-unified-table > .table-wrapper > table,
 .pg-unified-table table {
+  width: 100%;
   border-collapse: separate;
   border-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
 
+.pg-table-card .v-table__wrapper > table > thead > tr > th,
+.pg-table-card > .table-wrapper > table > thead > tr > th,
+.pg-table-card table > thead > tr > th,
 .pg-unified-table .v-table__wrapper > table > thead > tr > th,
 .pg-unified-table > .table-wrapper > table > thead > tr > th,
 .pg-unified-table table > thead > tr > th {
@@ -277,40 +460,105 @@ html[dir="rtl"] .pg-heading {
   font-weight: 600 !important;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  height: 38px !important;
-  padding: 0 12px !important;
+  height: 36px !important;
+  padding: 0 14px !important;
   border-bottom: 1px solid var(--pg-border-subtle) !important;
-  white-space: nowrap;
+  white-space: nowrap !important;
+  user-select: none;
   position: sticky;
   top: 0;
   z-index: 10;
 }
 
+html[dir="rtl"] .pg-table-card .v-table__wrapper > table > thead > tr > th,
+html[dir="rtl"] .pg-table-card > .table-wrapper > table > thead > tr > th,
+html[dir="rtl"] .pg-table-card table > thead > tr > th,
 html[dir="rtl"] .pg-unified-table .v-table__wrapper > table > thead > tr > th,
 html[dir="rtl"] .pg-unified-table > .table-wrapper > table > thead > tr > th,
 html[dir="rtl"] .pg-unified-table table > thead > tr > th {
   text-transform: none;
   letter-spacing: 0;
-  font-size: 12.5px !important;
+  font-size: 12px !important;
 }
 
+.pg-table-card .v-table__wrapper > table > thead > tr > th:first-child,
+.pg-table-card .v-table__wrapper > table > tbody > tr > td:first-child,
+.pg-table-card > .table-wrapper > table > thead > tr > th:first-child,
+.pg-table-card > .table-wrapper > table > tbody > tr > td:first-child,
+.pg-table-card table > thead > tr > th:first-child,
+.pg-table-card table > tbody > tr > td:first-child,
+.pg-unified-table .v-table__wrapper > table > thead > tr > th:first-child,
+.pg-unified-table .v-table__wrapper > table > tbody > tr > td:first-child,
+.pg-unified-table > .table-wrapper > table > thead > tr > th:first-child,
+.pg-unified-table > .table-wrapper > table > tbody > tr > td:first-child,
+.pg-unified-table table > thead > tr > th:first-child,
+.pg-unified-table table > tbody > tr > td:first-child {
+  padding-inline-start: 20px !important;
+}
+
+.pg-table-card .v-table__wrapper > table > thead > tr > th:last-child,
+.pg-table-card .v-table__wrapper > table > tbody > tr > td:last-child,
+.pg-table-card > .table-wrapper > table > thead > tr > th:last-child,
+.pg-table-card > .table-wrapper > table > tbody > tr > td:last-child,
+.pg-table-card table > thead > tr > th:last-child,
+.pg-table-card table > tbody > tr > td:last-child,
+.pg-unified-table .v-table__wrapper > table > thead > tr > th:last-child,
+.pg-unified-table .v-table__wrapper > table > tbody > tr > td:last-child,
+.pg-unified-table > .table-wrapper > table > thead > tr > th:last-child,
+.pg-unified-table > .table-wrapper > table > tbody > tr > td:last-child,
+.pg-unified-table table > thead > tr > th:last-child,
+.pg-unified-table table > tbody > tr > td:last-child {
+  padding-inline-end: 20px !important;
+}
+
+.pg-table-card .v-table__wrapper > table > tbody > tr,
+.pg-table-card > .table-wrapper > table > tbody > tr,
+.pg-table-card table > tbody > tr,
+.pg-unified-table .v-table__wrapper > table > tbody > tr,
+.pg-unified-table > .table-wrapper > table > tbody > tr,
+.pg-unified-table table > tbody > tr {
+  height: 40px !important;
+  transition: background-color 0.1s ease;
+}
+
+.pg-table-card .v-table__wrapper > table > tbody > tr > td,
+.pg-table-card > .table-wrapper > table > tbody > tr > td,
+.pg-table-card table > tbody > tr > td,
 .pg-unified-table .v-table__wrapper > table > tbody > tr > td,
 .pg-unified-table > .table-wrapper > table > tbody > tr > td,
 .pg-unified-table table > tbody > tr > td {
-  height: 46px !important;
-  font-size: 13.5px !important;
-  padding: 0 12px !important;
+  height: 40px !important;
+  max-height: 40px !important;
+  padding: 0 14px !important;
+  font-size: 13px !important;
+  line-height: 1.35 !important;
   color: var(--pg-ink-primary);
   border-bottom: 1px solid var(--pg-border-subtle) !important;
-  transition: background-color 0.12s ease;
+  white-space: nowrap !important;
+  vertical-align: middle !important;
 }
 
+.pg-table-card .v-table__wrapper > table > tbody > tr:hover > td,
+.pg-table-card > .table-wrapper > table > tbody > tr:hover > td,
+.pg-table-card table > tbody > tr:hover > td,
 .pg-unified-table .v-table__wrapper > table > tbody > tr:hover > td,
 .pg-unified-table > .table-wrapper > table > tbody > tr:hover > td,
 .pg-unified-table table > tbody > tr:hover > td {
   background-color: var(--pg-bg-surface-hover) !important;
 }
 
+.pg-table-card .v-table__wrapper > table > tbody > tr:last-child > td,
+.pg-table-card > .table-wrapper > table > tbody > tr:last-child > td,
+.pg-table-card table > tbody > tr:last-child > td,
+.pg-unified-table .v-table__wrapper > table > tbody > tr:last-child > td,
+.pg-unified-table > .table-wrapper > table > tbody > tr:last-child > td,
+.pg-unified-table table > tbody > tr:last-child > td {
+  border-bottom: none !important;
+}
+
+.pg-table-card table,
+.pg-table-card .pg-tabular,
+.pg-table-card .pg-money,
 .pg-unified-table table,
 .pg-unified-table .pg-tabular,
 .pg-unified-table .pg-money {
@@ -336,10 +584,11 @@ html[dir="rtl"] .pg-critical-row.pg-critical-row--warning > td:first-child {
 /* Unified table toolbar, filters, banners and pagination */
 .pg-table-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 10px 16px;
+  gap: 12px;
+  padding: var(--pg-pad-table-toolbar) !important;
   border-bottom: 1px solid var(--pg-border-subtle);
   background: var(--pg-bg-surface);
 }
@@ -433,9 +682,20 @@ html[dir="rtl"] .pg-critical-row.pg-critical-row--warning > td:first-child {
 }
 
 .pg-table-filters {
-  padding: 14px 16px;
+  padding: var(--pg-pad-table-filters) !important;
   border-bottom: 1px solid var(--pg-border-subtle);
   background: var(--pg-bg-surface-subtle);
+}
+
+.pg-table-active-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: var(--pg-pad-table-chips) !important;
+  background-color: var(--pg-bg-surface);
+  border-bottom: 1px solid var(--pg-border-subtle);
 }
 
 .pg-table-filters__toolbar {
@@ -600,12 +860,15 @@ html[dir="rtl"] .pg-filter-label {
 
 .pg-table-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 12px 16px;
+  gap: 12px;
+  padding: var(--pg-pad-table-footer) !important;
   border-top: 1px solid var(--pg-border-subtle);
   background: var(--pg-bg-surface);
+  font-size: 12.5px;
+  color: var(--pg-ink-muted);
 }
 
 .pg-table-footer--mobile {

@@ -27,6 +27,7 @@ export const FormField = defineComponent({
                 ? [
                       cloneVNode(first, {
                           id: fieldId,
+                          "aria-label": props.label,
                           "aria-describedby": describedBy,
                           "aria-required": props.required ? "true" : undefined,
                           "aria-invalid": props.error ? "true" : undefined,

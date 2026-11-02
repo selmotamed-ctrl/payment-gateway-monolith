@@ -22,10 +22,6 @@ body {
 }
 
 
-.v-btn {
-    min-height: 36px;
-}
-
 .hoverable:hover {
     background-color: rgba(15, 107, 255, 0.06);
     transform: translateY(-1px);
@@ -274,8 +270,6 @@ td .v-messages__message,
 html,
 body,
 #app {
-    padding: 0px;
-    margin: 0px;
     height: 100%;
 }
 
@@ -771,14 +765,9 @@ html[dir="rtl"] .pg-nav__section {
     width: 100%;
     max-width: 1600px;
     margin-inline: auto;
-    padding: 24px 28px 40px;
 }
 
 @media (max-width: 960px) {
-    .pg-page {
-        padding: 16px 14px 32px;
-    }
-
     .pg-user-btn__name {
         display: none;
     }
@@ -859,7 +848,7 @@ html[dir="rtl"] .pg-nav__section {
 
 .pg-route-progress {
     position: fixed;
-    top: 56px;
+    top: var(--v-layout-top, 56px);
     inset-inline: 0;
     z-index: 1000;
     pointer-events: none;

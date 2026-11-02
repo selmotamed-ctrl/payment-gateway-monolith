@@ -11,6 +11,7 @@ import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
 import { statusTone } from "@/components/Table/statusTone";
 import { ApiTable } from "@/components/Table/ApiTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import { DataTable } from "@/components/Table/DataTable";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues, type TableFilter } from "@/components/Table/filters";
@@ -34,6 +35,7 @@ import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import { SectionFields } from "@/components/SectionFields";
 const UPLOAD_CHECKS = [
     { key: "SOURCE_VERIFIED", label: "Statement source verified" },
     { key: "FILE_REVIEWED", label: "Statement file reviewed" },
@@ -574,7 +576,13 @@ const ReconciliationPage = dc(() => {
             label: "Actions",
             sortable: false,
             Value: ({ row }: { row: StatementSource }) => (
-                <VBtn size="small" variant="text" onClick={() => openSourceEdit(row)}>{t("Edit")}</VBtn>
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Edit"),
+                        icon: "mdi-pencil-outline",
+                        onClick: () => openSourceEdit(row),
+                    }}
+                />
             ),
         },
     ]);
@@ -621,7 +629,15 @@ const ReconciliationPage = dc(() => {
             key: "actions",
             label: "Review",
             sortable: false,
-            Value: ({ row }: { row: ReconciliationRun }) => <VBtn size="small" variant="tonal" onClick={() => void openRun(row)}>{t("Review")}</VBtn>,
+            Value: ({ row }: { row: ReconciliationRun }) => (
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Review"),
+                        icon: "mdi-clipboard-search-outline",
+                        onClick: () => void openRun(row),
+                    }}
+                />
+            ),
         },
     ]);
 
@@ -720,7 +736,7 @@ const ReconciliationPage = dc(() => {
                             <SurfaceCard>
                                 <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                                     <ThemedText type="defaultSemiBold">{t("Upload a statement")}</ThemedText>
-                                    <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap", alignItems: "flex-start" }}>
+                                    <SectionFields title={t("Statement upload")}>
                                         <FormField label={t("Statement source")} required>
                                             <VSelect
                                                 items={sources.value.map((source) => ({ title: source.name, value: source.id }))}
@@ -730,29 +746,28 @@ const ReconciliationPage = dc(() => {
                                                     preview.value = null;
                                                 }}
                                                 hideDetails
-                                                style={{ minWidth: "220px" }}
                                             />
                                         </FormField>
                                         <FormField label={t("Period start")} required>
-                                            <VTextField type="date" modelValue={periodStart.value} onUpdate:modelValue={(value: string) => (periodStart.value = value)} hideDetails style={{ minWidth: "170px" }} />
+                                            <VTextField type="date" modelValue={periodStart.value} onUpdate:modelValue={(value: string) => (periodStart.value = value)} hideDetails />
                                         </FormField>
                                         <FormField label={t("Period end")} required>
-                                            <VTextField type="date" modelValue={periodEnd.value} onUpdate:modelValue={(value: string) => (periodEnd.value = value)} hideDetails style={{ minWidth: "170px" }} />
+                                            <VTextField type="date" modelValue={periodEnd.value} onUpdate:modelValue={(value: string) => (periodEnd.value = value)} hideDetails />
                                         </FormField>
                                         <FormField label={t("Statement file")} required>
-                                            <VFileInput modelValue={file.value} onUpdate:modelValue={(value: File | File[] | null) => void onFileChanged(value)} hideDetails style={{ minWidth: "260px" }} />
+                                            <VFileInput modelValue={file.value} onUpdate:modelValue={(value: File | File[] | null) => void onFileChanged(value)} hideDetails />
                                         </FormField>
-                                        <FormChecklist
-                                            checks={[...UPLOAD_CHECKS]}
-                                            modelValue={uploadChecklist.value}
-                                            onUpdate:modelValue={(value: Record<string, boolean>) => (uploadChecklist.value = value)}
-                                            show={showChecklists}
-                                            title={t("Upload checklist")}
-                                            complete={uploadChecklistComplete.value}
-                                            incompleteMessage={t("Complete all upload checklist items before uploading")}
-                                        />
-                                        <VBtn color="primary" loading={uploadLoading.value} disabled={!selectedSourceId.value || !file.value || !uploadChecklistComplete.value} onClick={() => void upload()}>{t("Upload")}</VBtn>
-                                    </ThemedView>
+                                    </SectionFields>
+                                    <FormChecklist
+                                        checks={[...UPLOAD_CHECKS]}
+                                        modelValue={uploadChecklist.value}
+                                        onUpdate:modelValue={(value: Record<string, boolean>) => (uploadChecklist.value = value)}
+                                        show={showChecklists}
+                                        title={t("Upload checklist")}
+                                        complete={uploadChecklistComplete.value}
+                                        incompleteMessage={t("Complete all upload checklist items before uploading")}
+                                    />
+                                    <VBtn color="primary" loading={uploadLoading.value} disabled={!selectedSourceId.value || !file.value || !uploadChecklistComplete.value} onClick={() => void upload()}>{t("Upload")}</VBtn>
                                 </SurfaceCardText>
                             </SurfaceCard>
 
@@ -867,8 +882,8 @@ const ReconciliationPage = dc(() => {
                 cancelLabel={t("Cancel")}
                 onSubmit={() => void saveSourceEdit()}
             >
-                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-                    <ThemedText style={{ fontSize: "13px", flex: 1 }}>{editingSource.value?.name}</ThemedText>
+                <ThemedText style={{ fontSize: "13px" }}>{editingSource.value?.name}</ThemedText>
+                <SectionFields title={t("Source configuration")}>
                     <FormField label={t("Active")}>
                         <VSwitch
                             modelValue={sourceForm.value.active}
@@ -877,27 +892,25 @@ const ReconciliationPage = dc(() => {
                             hideDetails
                         />
                     </FormField>
-                </ThemedView>
-                <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
                     <FormField label={t("Schedule cron")}>
-                        <VTextField modelValue={sourceForm.value.scheduleCron} onUpdate:modelValue={(value: string) => (sourceForm.value.scheduleCron = value)} hideDetails style={{ flex: "1 1 240px" }} />
+                        <VTextField modelValue={sourceForm.value.scheduleCron} onUpdate:modelValue={(value: string) => (sourceForm.value.scheduleCron = value)} hideDetails />
                     </FormField>
                     <FormField label={t("Settlement lag days")}>
-                        <VTextField type="number" modelValue={sourceForm.value.settlementLagDays} onUpdate:modelValue={(value: string) => (sourceForm.value.settlementLagDays = value)} hideDetails style={{ flex: "1 1 180px" }} />
+                        <VTextField type="number" modelValue={sourceForm.value.settlementLagDays} onUpdate:modelValue={(value: string) => (sourceForm.value.settlementLagDays = value)} hideDetails />
                     </FormField>
-                </ThemedView>
-                <FormField label={t("Dedupe key template")}>
-                    <VTextField modelValue={sourceForm.value.dedupeKeyTemplate} onUpdate:modelValue={(value: string) => (sourceForm.value.dedupeKeyTemplate = value)} hideDetails />
-                </FormField>
-                <FormField label={t("Parser config JSON")}>
-                    <VTextarea
-                        modelValue={sourceForm.value.parserConfig}
-                        onUpdate:modelValue={(value: string) => (sourceForm.value.parserConfig = value)}
-                        rows={8}
-                        hideDetails
-                        style={{ fontFamily: "ui-monospace, monospace", direction: "ltr" }}
-                    />
-                </FormField>
+                    <FormField label={t("Dedupe key template")}>
+                        <VTextField modelValue={sourceForm.value.dedupeKeyTemplate} onUpdate:modelValue={(value: string) => (sourceForm.value.dedupeKeyTemplate = value)} hideDetails />
+                    </FormField>
+                    <FormField label={t("Parser config JSON")}>
+                        <VTextarea
+                            modelValue={sourceForm.value.parserConfig}
+                            onUpdate:modelValue={(value: string) => (sourceForm.value.parserConfig = value)}
+                            rows={8}
+                            hideDetails
+                            style={{ fontFamily: "ui-monospace, monospace", direction: "ltr" }}
+                        />
+                    </FormField>
+                </SectionFields>
                 <FormChecklist
                     checks={[...SOURCE_EDIT_CHECKS]}
                     modelValue={sourceEditChecklist.value}
