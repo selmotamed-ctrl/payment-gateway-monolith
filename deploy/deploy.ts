@@ -2,7 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { loadDeployConfig, pgStorageConfigured, type DeployConfig, type DeployRole } from "./lib/configSchema";
+import { effectiveDatabase, loadDeployConfig, parseNodeList, pgStorageConfigured, type DeployConfig, type DeployRole } from "./lib/configSchema";
 import { findSshConflicts, planHosts, renderTopology, type DeployPlan, type HostPlan, type ServicePlan } from "./lib/hostPlanner";
 import { buildPki, certFilesForHost, readMaterial, verifyPki } from "./lib/pkiManager";
 import { SshRunner } from "./lib/sshRunner";
@@ -112,7 +112,6 @@ const warn = (message: string): void => console.warn(`  ! ${message}`);
 const timestamp = (): string => new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
 
 const STORAGE_CERT_DIR = "/etc/pg-deploy/certs";
-const BACKUP_CERT_DIR = "/var/lib/pg-backup/shared/certs";
 
 const isStorageRole = (role: string): boolean =>
   ["pg-primary", "pg-replica", "pgbouncer", "redis", "audit-db", "log-db", "backup"].includes(role);
@@ -121,10 +120,13 @@ const uploadStorageCertificates = (
   runner: SshRunner,
   plan: DeployPlan,
   pki: ReturnType<typeof buildPki>,
+  config: DeployConfig,
   dryRun: boolean,
 ): void => {
   for (const host of plan.hosts.filter((candidate) => candidate.roles.some(isStorageRole))) {
-    const directory = host.roles.includes("backup") ? BACKUP_CERT_DIR : STORAGE_CERT_DIR;
+    const directory = host.roles.includes("backup")
+      ? config.BACKUP_DAEMON_CERT_DIR
+      : STORAGE_CERT_DIR;
     for (const material of certFilesForHost(pki, host.roles)) {
       if (dryRun) {
         runner.writeRemoteFile({ target: host.ssh, path: `${directory}/${material.name}.crt`, content: "", mode: 0o644, sudo: true });
@@ -423,6 +425,39 @@ const deployService = (input: {
   return releaseDir;
 };
 
+/** Copies the daemon source to BACKUP_NODE and (re)starts its systemd unit. */
+const deployBackupDaemon = (input: {
+  runner: SshRunner;
+  config: DeployConfig;
+  host: HostPlan;
+}): void => {
+  const { runner, config, host } = input;
+  const installDir = "/opt/pg-backup-daemon";
+  const sourceDir = join(REPO_ROOT, "deploy", "backup-daemon");
+  runner.run(
+    host.ssh,
+    `install -d -m 0755 -o ${host.ssh.user} -g ${host.ssh.user} ${installDir}`,
+    { sudo: true },
+  );
+  runner.sync({
+    target: host.ssh,
+    local: sourceDir,
+    remote: installDir,
+    delete: true,
+    excludes: ["node_modules", ".git", "dist", "test", "*.log", ".env"],
+  });
+  runner.run(host.ssh, `chown -R pgbackup:pgbackup ${installDir}`, { sudo: true });
+  runner.run(host.ssh, 'command -v /usr/local/bin/bun >/dev/null 2>&1 || (command -v bun >/dev/null 2>&1 || curl -fsSL https://bun.sh/install | bash)', { sudo: false });
+  runner.run(host.ssh, `test -x /usr/local/bin/bun || ln -sfn /home/${host.ssh.user}/.bun/bin/bun /usr/local/bin/bun`, { sudo: true });
+  runner.run(host.ssh, "/usr/local/bin/bun install --frozen-lockfile", { cwd: installDir, sudo: true, sudoUser: "pgbackup" });
+  runner.run(
+    host.ssh,
+    "systemctl daemon-reload && systemctl enable pg-backup-daemon && systemctl restart pg-backup-daemon",
+    { sudo: true },
+  );
+  log(`  backup daemon source -> ${host.ssh.host}:${installDir} (BACKUP_DAEMON_PORT=${config.BACKUP_DAEMON_PORT})`);
+};
+
 const provisionDatabase = (input: {
   runner: SshRunner;
   config: DeployConfig;
@@ -436,61 +471,49 @@ const provisionDatabase = (input: {
   // The DDL runs ON the database host through its own sudo access. The
   // application credential is never used to create the database, and it never
   // leaves the core host. The SQL is streamed to a temporary file instead of
-  // quoted on the command line: it contains backticks and quotes.
-  const createSql = config.DB_ENGINE === "mysql"
-    ? [
-        `CREATE DATABASE IF NOT EXISTS \`${config.DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`,
-        `CREATE USER IF NOT EXISTS '${config.DB_USER}'@'${config.CORE_PRIVATE_IP}' IDENTIFIED BY '${config.DB_PASSWORD}';`,
-        `CREATE USER IF NOT EXISTS '${config.DB_USER}'@'127.0.0.1' IDENTIFIED BY '${config.DB_PASSWORD}';`,
-        `CREATE USER IF NOT EXISTS '${config.DB_USER}'@'%' IDENTIFIED BY '${config.DB_PASSWORD}';`,
-        `GRANT ALL PRIVILEGES ON \`${config.DB_NAME}\`.* TO '${config.DB_USER}'@'${config.CORE_PRIVATE_IP}';`,
-        `GRANT ALL PRIVILEGES ON \`${config.DB_NAME}\`.* TO '${config.DB_USER}'@'127.0.0.1';`,
-        `GRANT ALL PRIVILEGES ON \`${config.DB_NAME}\`.* TO '${config.DB_USER}'@'%';`,
-        "FLUSH PRIVILEGES;",
-      ].join("\n")
-    : [
-        `DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${config.DB_USER}') THEN CREATE ROLE "${config.DB_USER}" LOGIN PASSWORD '${config.DB_PASSWORD}'; END IF; END $$;`,
-        `SELECT 'CREATE DATABASE "${config.DB_NAME}" OWNER "${config.DB_USER}"' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${config.DB_NAME}')\\gexec`,
-      ].join("\n");
+  // quoted on the command line.
+  const createSql = [
+    `DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${config.DB_USER}') THEN CREATE ROLE "${config.DB_USER}" LOGIN PASSWORD '${config.DB_PASSWORD}'; END IF; END $$;`,
+    `SELECT 'CREATE DATABASE "${config.DB_NAME}" OWNER "${config.DB_USER}"' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${config.DB_NAME}')\\gexec`,
+  ].join("\n");
 
   const sqlPath = `/tmp/pg-db-init-${timestamp()}.sql`;
   runner.writeRemoteFile({ target: host.ssh, path: sqlPath, content: `${createSql}\n`, mode: 0o600 });
   try {
-    if (config.DB_ENGINE === "mysql") {
-      runner.run(host.ssh, `mysql --protocol=socket < ${sqlPath}`, { sudo: true });
-    } else {
-      runner.run(host.ssh, `psql -f ${sqlPath}`, { sudo: true, sudoUser: "postgres" });
-    }
+    runner.run(host.ssh, `psql -f ${sqlPath}`, { sudo: true, sudoUser: "postgres" });
   } finally {
     runner.run(host.ssh, `rm -f ${sqlPath}`);
-  }
-
-  // The schema enforces maker≠checker with a BEFORE INSERT trigger. MySQL
-  // requires SUPER to create a trigger while the binary log is on unless
-  // log_bin_trust_function_creators is set; the application user must not have
-  // SUPER, so raise the flag here (and persist it for the next restart).
-  if (config.DB_ENGINE === "mysql") {
-    runner.run(host.ssh, `mysql --protocol=socket -e "SET GLOBAL log_bin_trust_function_creators = 1"`, { sudo: true });
-    runner.writeRemoteFile({
-      target: host.ssh,
-      path: "/etc/mysql/conf.d/zz-payment-gateway.cnf",
-      content: "[mysqld]\nlog_bin_trust_function_creators = 1\n",
-      mode: 0o644,
-      sudo: true,
-    });
-    log("  log_bin_trust_function_creators=1 (required for the maker≠checker trigger)");
   }
   log(`  database ${config.DB_NAME} and user ${config.DB_USER} ready on ${config.DB_PRIVATE_IP ?? host.ssh.host}`);
 };
 
+/** The exact pre-migration backup command, against the primary direct port. */
+export const preMigrationBackup = (
+  config: DeployConfig,
+  target: string,
+): { command: string; host: string; port: number; database: string; user: string } => {
+  const database = effectiveDatabase(config);
+  const primary = parseNodeList(config.PG_PRIMARY_NODE)[0];
+  const pgStorage = pgStorageConfigured(config);
+  const host = pgStorage && primary ? primary.privateIp : (config.DB_PRIVATE_IP ?? config.DB_SSH_HOST ?? "");
+  const port = pgStorage && primary ? primary.servicePort : config.DB_PORT;
+  const name = pgStorage ? config.PG_DB_NAME : database.name;
+  const user = pgStorage ? config.PG_DB_USER : database.user;
+  const password = pgStorage ? config.PG_DB_PASSWORD : database.password;
+  return {
+    host,
+    port,
+    database: name,
+    user,
+    command: `PGPASSWORD=${JSON.stringify(password)} pg_dump -h ${host} -p ${port} -U ${user} -Fc ${name} > ${target}.dump`,
+  };
+};
+
 const backupDatabase = (input: { runner: SshRunner; config: DeployConfig; host: HostPlan; releaseTimestamp: string }): void => {
   const { runner, config, host, releaseTimestamp } = input;
-  const databaseHost = config.DB_PRIVATE_IP ?? config.DB_SSH_HOST ?? "";
   const backupDir = `${config.CORE_REMOTE_DIR}/shared/backups`;
   const target = `${backupDir}/pre-migrate-${releaseTimestamp}`;
-  const command = config.DB_ENGINE === "mysql"
-    ? `MYSQL_PWD=${JSON.stringify(config.DB_PASSWORD)} mysqldump -h ${databaseHost} -P ${config.DB_PORT} -u ${config.DB_USER} --single-transaction --routines --events ${config.DB_NAME} | gzip > ${target}.sql.gz`
-    : `PGPASSWORD=${JSON.stringify(config.DB_PASSWORD)} pg_dump -h ${databaseHost} -p ${config.DB_PORT} -U ${config.DB_USER} -Fc ${config.DB_NAME} > ${target}.dump`;
+  const { command } = preMigrationBackup(config, target);
   // The tree lives under /var/www and may not exist yet on an update deploy, so
   // the directory is created as root and handed to the SSH user before the
   // dump writes into it.
@@ -609,7 +632,7 @@ const main = async (): Promise<void> => {
       log(`  ${certificate.name}: valid ${certificate.expiresInDays} day(s)${certificate.sans.length > 0 ? ` SAN=${certificate.sans.join(",")}` : ""}`);
     }
   }
-  uploadStorageCertificates(runner, plan, pki, options.dryRun);
+  uploadStorageCertificates(runner, plan, pki, config, options.dryRun);
 
   // ---- Step 4: bootstrap the unique hosts -------------------------------
   step(4, "Bootstrap the target hosts and apply the firewall");
@@ -679,6 +702,12 @@ const main = async (): Promise<void> => {
   if (config.BACKUP_ENABLED && shouldRunStorage(options, ["backup"])) {
     const report = provisionBackupEngine({ runner, config, dryRun: options.dryRun });
     log(`  Backup engine (${config.BACKUP_ENGINE_MODE}) on: ${report.nodes.join(", ") || "none"}`);
+    const backupHost = plan.hosts.find((host) => host.roles.includes("backup"));
+    if (backupHost) {
+      deployBackupDaemon({ runner, config, host: backupHost });
+    } else {
+      warn("BACKUP_ENABLED but the plan has no backup host; the daemon was not deployed");
+    }
   }
 
   if (!pgStorageConfigured(config) && (shouldRun(options, "db") || shouldRun(options, "core"))) {
@@ -689,6 +718,10 @@ const main = async (): Promise<void> => {
     }
   } else if (!pgStorageConfigured(config)) {
     log("  skipped (--only excludes db/core)");
+  } else if (!fresh && shouldRun(options, "core")) {
+    // PostgreSQL storage: dump the primary directly (never through PgBouncer)
+    // before the core release runs migrate-deploy.
+    backupDatabase({ runner, config, host: coreHost, releaseTimestamp });
   }
 
   // ---- Steps 6-9: deploy the services in dependency order ---------------

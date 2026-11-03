@@ -10,7 +10,7 @@ DB_PRIVATE_IP="10.10.0.10"
 DB_NAME="gateway"
 DB_USER="gw"
 DB_PASSWORD="ultra-strong-db-password"
-DATABASE_URL="mysql://gw:ultra-strong-db-password@10.10.0.10:3306/gateway"
+DATABASE_URL="postgresql://gw:ultra-strong-db-password@10.10.0.10:5432/gateway"
 CORE_SSH_HOST="10.10.0.20"
 CORE_SSH_KEY_PATH="~/.ssh/core"
 CORE_PRIVATE_IP="10.10.0.20"
@@ -54,7 +54,7 @@ D="value with # hash"
 describe("deploy config validation", () => {
   test("accepts a complete five-host configuration", () => {
     const config = requireConfig(base);
-    expect(config.DB_ENGINE).toBe("mysql");
+    expect(config.DB_ENGINE).toBe("postgresql");
     expect(config.CORE_PORT).toBe(4000);
     expect(config.ADMIN_NGINX_LAN_PORT).toBe(8443);
     expect(config.KEEP_RELEASES).toBe(5);
@@ -84,8 +84,8 @@ describe("deploy config validation", () => {
     expect(config.ADMIN_SHOW_HELP_PANELS).toBe(false);
   });
 
-  test("rejects a DATABASE_URL that disagrees with DB_ENGINE", () => {
-    const result = loadDeployConfig(withOverrides(`DB_ENGINE="postgresql"`));
+  test("rejects a non-PostgreSQL DATABASE_URL", () => {
+    const result = loadDeployConfig(withOverrides(`DATABASE_URL="http://gw:ultra-strong-db-password@10.10.0.10:5432/gateway"`));
     expect(result.ok).toBe(false);
     expect(result.problems.join(" ")).toContain("DATABASE_URL must start with postgresql://");
   });
@@ -195,7 +195,7 @@ CHECKOUT_PRIVATE_IP="127.0.0.1"
   test("the firewall restricts the database and the core to the right peers", () => {
     const plan = planHosts(requireConfig(base));
     const db = plan.hosts.find((host) => host.roles.includes("db"));
-    const dbRule = db?.firewall.find((rule) => rule.port === 3306);
+    const dbRule = db?.firewall.find((rule) => rule.port === 5432);
     expect(dbRule?.fromCidrs).toEqual(["10.10.0.20"]);
 
     const core = plan.hosts.find((host) => host.roles.includes("core"));
@@ -220,7 +220,7 @@ CHECKOUT_PRIVATE_IP="127.0.0.1"
       }
     }
     const core = plan.hosts.find((host) => host.roles.includes("core"));
-    expect(core?.services[0]?.env.DATABASE_URL).toContain("mysql://");
+    expect(core?.services[0]?.env.DATABASE_URL).toContain("postgresql://");
     expect(core?.services[0]?.env.KMS_MASTER_KEY).toBeDefined();
     expect(core?.services[0]?.env.MTLS_SERVER_CERT_PATH).toBe("shared/certs/core-back.crt");
   });

@@ -80,6 +80,8 @@ const slotName = (node: PgNodeRef | string, index = 0): string => {
   return raw.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^([^a-z])/, "r_$1").slice(0, 63);
 };
 
+const shellQuote = (value: string): string => `'${value.replace(/'/g, `'\''`)}'`;
+
 /** The exact PostgreSQL 18 tuning block from the storage architecture. */
 export const postgresConfigSnippet = (_config?: Pick<DeployConfig, "PG_VERSION">): string => `listen_addresses = '*'
 max_connections = 300
@@ -152,17 +154,25 @@ export const replicaCommands = (
   const primaryPort = nodePort(primary);
   const dataDir = postgresDataDir(config);
   const user = config?.PG_REPLICATION_USER ?? "pg_replicator";
+  const password = config?.PG_REPLICATION_PASSWORD ?? "";
+  const slot = slotName(replica);
+  const pgpassEntry = `${primaryIp}:${primaryPort}:*:${user}:${password}`;
+  const autoConf = `${dataDir}/postgresql.auto.conf`;
   return [
-    `test -s ${dataDir}/PG_VERSION || pg_basebackup -h ${primaryIp} -p ${primaryPort} -U ${user} -D ${dataDir} -Fp -Xs -P -R`,
+    `install -d -m 0700 /var/lib/postgresql && (umask 077 && printf '%s\n' ${shellQuote(pgpassEntry)} > /var/lib/postgresql/.pgpass)`,
+    `test -s ${dataDir}/PG_VERSION || PGPASSWORD=${shellQuote(password)} pg_basebackup -h ${primaryIp} -p ${primaryPort} -U ${user} -D ${dataDir} -Fp -Xs -P -R -S ${shellQuote(slot)}`,
     `test -s ${dataDir}/PG_VERSION && echo 'replica already initialized'`,
+    `touch ${autoConf} && if grep -q '^primary_slot_name' ${autoConf}; then sed -i "s|^primary_slot_name = .*|primary_slot_name = '${slot}'|" ${autoConf}; else printf "primary_slot_name = '%s'\n" ${shellQuote(slot)} >> ${autoConf}; fi`,
     "systemctl enable --now postgresql",
   ];
 };
 
 /** The exact PgBouncer transaction-pooling configuration. */
 export const pgbouncerIni = (config: DeployConfig): string => `[pgbouncer]
+listen_addr = 0.0.0.0
 listen_port = ${config.PGBOUNCER_PORT}
 pool_mode = transaction
+server_tls_sslmode = require
 max_client_conn = ${config.PGBOUNCER_MAX_CLIENT_CONN}
 default_pool_size = ${config.PGBOUNCER_DEFAULT_POOL_SIZE}
 reserve_pool_size = 10
@@ -209,6 +219,9 @@ export const provisionPostgres18 = (input: PostgresProvisionInput): ProvisionRep
     ...replicaRefs.map((node) => nodeEndpoint(node)),
     ...parseNodeList(config.CORE_NODES).map((node) => node.privateIp),
     ...(config.CORE_PRIVATE_IP ? [config.CORE_PRIVATE_IP] : []),
+    ...parseNodeList(config.BACKUP_NODE).map((node) => node.privateIp),
+    ...parseNodeList(config.AUDIT_DB_NODE).map((node) => node.privateIp),
+    ...parseNodeList(config.LOG_DB_NODE).map((node) => node.privateIp),
   ];
   write(runner, primarySsh, `/etc/postgresql/${version(config)}/main/pg_hba.conf`, pgHbaSnippet(config, primaryAllowed), 0o600);
   const bootstrapSqlPath = `/tmp/pg18-bootstrap-${process.pid}.sql`;
@@ -217,6 +230,15 @@ export const provisionPostgres18 = (input: PostgresProvisionInput): ProvisionRep
   commands.push(bootstrap);
   runner.run(primarySsh, bootstrap, { sudo: true });
   runner.run(primarySsh, "systemctl restart postgresql", { sudo: true });
+  const journalPartitionCron = `30 1 * * * root su - postgres -c "psql -d ${config.PG_DB_NAME} -c 'SELECT ensure_journal_line_partitions(18)'" >/var/log/pg-journal-partitions.log 2>&1`;
+  runner.writeRemoteFile({
+    target: primarySsh,
+    path: "/etc/cron.d/pg-journal-partitions",
+    content: `${journalPartitionCron}\n`,
+    mode: 0o644,
+    sudo: true,
+  });
+  commands.push("install /etc/cron.d/pg-journal-partitions");
 
   if (config.PGBOUNCER_ENABLED) {
     write(runner, primarySsh, "/etc/pgbouncer/pgbouncer.ini", pgbouncerIni(config), 0o640);
@@ -235,7 +257,16 @@ export const provisionPostgres18 = (input: PostgresProvisionInput): ProvisionRep
       runner.run(replicaSsh, command, { sudo: true });
     }
     write(runner, replicaSsh, postgresConfigPath(config), snippet, 0o644);
-    write(runner, replicaSsh, `/etc/postgresql/${version(config)}/main/pg_hba.conf`, pgHbaSnippet(config, [primaryIp]), 0o600);
+    write(
+      runner,
+      replicaSsh,
+      `/etc/postgresql/${version(config)}/main/pg_hba.conf`,
+      pgHbaSnippet(config, [
+        primaryIp,
+        ...parseNodeList(config.BACKUP_NODE).map((node) => node.privateIp),
+      ]),
+      0o600,
+    );
     for (const command of replicaCommands(primary, replica, config)) {
       commands.push(command);
       runner.run(replicaSsh, command, { sudo: true, sudoUser: "postgres" });

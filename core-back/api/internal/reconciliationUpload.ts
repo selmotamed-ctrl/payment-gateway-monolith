@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Request, Response } from "express";
 import { ApiError } from "../../lib/error";
 import type { PrismaLike, Repositories, Tx } from "../../engine/db/ports";
+import { writeAudit } from "../../lib/audit/writeAudit";
 
 /**
  * The upload of a statement file.
@@ -121,7 +122,7 @@ export const createReconciliationUploadHandler = (
   const checklist = Array.isArray(metadata.checklist)
     ? metadata.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10)
     : [];
-  await deps.db.auditLog.create({
+  await writeAudit(deps.db, {
     data: {
       actorId: typeof metadata.actorId === "string" ? metadata.actorId : "system",
       role: typeof metadata.actorRole === "string" ? metadata.actorRole : "OPERATOR",

@@ -16,7 +16,7 @@ Coverage: Moamalat (NPG) · LYPay (CBL Instant Payment) · Numo Pay · Sadad (Al
     - 3. Research Foundation: The Libyan & International Gateway Landscape
 - **PART II: PLATFORM CORE & DATA MODEL**
     - 4. Core Domain Concepts: The Four-Layer Catalog & Visible Rails Formula
-    - 5. Complete MySQL / MariaDB Database Schema (51 Core Tables Across 5 Groups, plus 13 v4.1 Tables in Group F)
+    - 5. Complete Database Schema (51 Core Tables Across 5 Groups, plus 13 v4.1 Tables in Group F)
 - **PART III: THE UNIVERSAL RAIL ENGINE**
     - 6. Engine Contract, Client Actions, Auth Registry, Transforms & Crypto Engine
 - **PART IV: COLLECTION MODES, STATE MACHINE & BLUEPRINTS**
@@ -103,7 +103,7 @@ Where declarative configuration genuinely cannot express a gateway (proprietary 
 | **Security Governance** | Strict Maker-Checker (Four-Eyes) on all sensitive mutations; AES-256-GCM at rest (`keyId:iv:authTag:ciphertext`) |
 | **Covered Gateways (20)** | Moamalat NPG, LYPay, Numo Pay, Sadad, Libyana, Edfali/Edfaa Li, MobiCash, Tadawul/T-LYNC, OnePay, Yussor Pay, Sahara Pay, Masrefy Pay, Hawelli, GPay Libya, Google Pay, Visa/MC (MPGS/3DS2), Evo Pay, NeomPay (first-party), plus Aggregators (DPay, Plutu, MyPay) |
 | **Channels** | Single/Multi-Use Payment Links, Hosted Checkout UI, POS Terminals & Realtime WebSocket/SSE Cashier Screens, Merchant API |
-| **Scale of Specification** | 64 MySQL / MariaDB Tables (51 core + 13 identity / compliance / dispute / configuration), 10 Engine Phases, 6-Method Engine Contract, Closed Transform Library, 14 Safeguards, 24 STRIDE Threats, 140 Edge Cases, 7 Blueprints, 12 Go-Live Gates |
+| **Scale of Specification** | 64 PostgreSQL 18 Tables (51 core + 13 identity / compliance / dispute / configuration), 10 Engine Phases, 6-Method Engine Contract, Closed Transform Library, 14 Safeguards, 24 STRIDE Threats, 140 Edge Cases, 7 Blueprints, 12 Go-Live Gates |
 
 ## **2\. Source Design Comparison and Consolidation Register**
 
@@ -240,11 +240,11 @@ Evaluated dynamically on every `GET /v1/pay/{linkKey}` request:visible\_rails \=
 
   )
 
-## **5\. Complete MySQL / MariaDB Database Schema (51 Core Tables Across 5 Groups, plus 13 v4.1 Tables in Group F)**
+## **5\. Complete Database Schema (51 Core Tables Across 5 Groups, plus 13 v4.1 Tables in Group F)**
 
-All tables include id VARCHAR(191) PRIMARY KEY holding a UUIDv7 string (uuid(7)), created\_at DATETIME(3) NOT NULL DEFAULT CURRENT\_TIMESTAMP(3), and updated\_at DATETIME(3) NOT NULL DEFAULT CURRENT\_TIMESTAMP(3). All monetary columns use DECIMAL(18,4) — floating-point types (FLOAT, DOUBLE) are strictly banned. All ciphertexts use AES-256-GCM formatted as `keyId:iv:authTag:ciphertext`.
+All tables include a native `UUID` primary key (`@db.Uuid`, UUIDv7 application default), `created_at` / `updated_at` timestamp columns (`TIMESTAMP(3)` or `TIMESTAMPTZ(3)`), native `JSONB` for structured values and `BYTEA` for binary payloads. All monetary columns use `NUMERIC(18,4)` — floating-point types (`FLOAT`, `DOUBLE`) are strictly banned. All ciphertexts use AES-256-GCM formatted as `keyId:iv:authTag:ciphertext`.
 
-> **Database engine note.** This design was originally written against PostgreSQL and the platform has since been migrated to **MySQL 8.0+ / MariaDB 10.6+**. The implementation is already converted: `core-back/prisma/schema.prisma` declares `provider = "mysql"`, the connection is made through `@prisma/adapter-mariadb` on top of the `mariadb` driver package, and the initial migration `core-back/prisma/migrations/20261027000000_init/migration.sql` is plain MySQL / MariaDB DDL. The type mapping below therefore follows the MySQL / MariaDB rules: `String` → `VARCHAR(191)` (free-form content declared `@db.Text`), `Bytes` → `BLOB` (the inbound webhook body is `@db.LongBlob`), `Json` → `JSON` (`LONGTEXT` + a JSON validity check), money → `DECIMAL(18,4)`, Prisma enums → native `ENUM` columns, and there are no native array columns (`TEXT[]` / `UUID[]` are stored as `JSON` arrays). The remaining PostgreSQL references in this document are deliberate historical notes about the pre-migration state.
+> **Database engine status (current).** PostgreSQL 18 is the only current engine: `core-back/prisma/schema.prisma` declares `provider = "postgresql"`, the runtime uses `@prisma/adapter-pg` + `pg`, and `DATABASE_URL` must be a `postgresql://` URL. This §5 is historical where it conflicts with the current design: it was originally written during an earlier MySQL/MariaDB delivery period and its table notes retain some MySQL-era type spellings as historical context. The authoritative current storage rules — native `UUID`, `JSONB`, `BYTEA`, `NUMERIC(18,4)`, native PostgreSQL enum types, replicas, audit/log databases and the backup control plane — are in `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md`, which supersedes this section wherever the two conflict.
 
 ### **5.1 Group A: Platform, Commercial, Risk, Governance & Double-Entry Ledger Entities (18 Tables)**
 
@@ -268,7 +268,7 @@ All tables include id VARCHAR(191) PRIMARY KEY holding a UUIDv7 string (uuid(7))
 | **`velocity_rules`** | `scope_type` (`END_CLIENT_IP\|END_CLIENT_PHONE\|END_CLIENT_CARD\|MERCHANT\|APPLICATION\|RAIL\|LINK`), `scope_value TEXT NULL`, `window_seconds INT`, `max_count INT`, `max_amount DECIMAL(18,4)`, `action` (`REJECT\|FLAG`), `active BOOL` | Evaluated atomically inside the attempt-creation guard transaction. `REJECT` creates a terminal `BLOCKED` attempt for audit. |
 | **`aml_cases`** | `subject_type` (`MERCHANT\|END_CLIENT\|PAYMENT_ATTEMPT`), `subject_id UUID`, `trigger_reason TEXT`, `severity` (`LOW\|MEDIUM\|HIGH\|CRITICAL`), `hold_journal_entry_id UUID NULL`, `status` (`OPEN\|PENDING_CHECKER\|RELEASED\|REJECTED_VOID`), `reviewer_notes TEXT` | Correlated escalation: if a payment hits both a `FLAG` velocity rule and an AML threshold, `severity` escalates to `CRITICAL` automatically. |
 | **`adjustments`** | `type` (`CHARGEBACK\|REFUND\|MANUAL_CREDIT\|MANUAL_DEBIT\|CORRECTION\|CASHOUT_SUBTRACTION`), `target_gl_account_id UUID FK`, `source_attempt_id UUID NULL FK`, `amount DECIMAL(18,4)`, `reverse_commission BOOL`, `reason TEXT`, `external_dispute_ref TEXT NULL`, `provider_refund_ref TEXT NULL`, `state` (`DRAFT\|PENDING_REVIEW\|APPROVED\|EXECUTING\|EXECUTED\|REJECTED`), `journal_entry_id UUID NULL FK` | Generalizes all non-standard money movements. `EXECUTING` holds automated API refunds while the gateway `REFUND` flow is in flight or `UNKNOWN`. |
-| **`cashout_requests` & `approval_requests`** | `cashout_requests`: `merchant_id`, `wallet_id`, `amount`, `destination_bank_json`, `state` (`PENDING\|REJECTED\|PROCESSING\|COMPLETE\|SUBTRACTED`), `adjustment_id`.  `approval_requests`: `subject_type`, `subject_id`, `payload_diff_json`, `maker_user_id`, `checker_user_id`, `state`, `rejection_reason`, `risk_acceptance_note` | Maker ≠ Checker (`checker_user_id <> maker_user_id`) is enforced by the `approval_requests_checker_not_maker` `BEFORE INSERT` trigger — MariaDB forbids a `CHECK` constraint on a column that participates in a foreign key — **and** by the application-level check in `ApprovalService` and the `makerCheckerGuard` middleware. |
+| **`cashout_requests` & `approval_requests`** | `cashout_requests`: `merchant_id`, `wallet_id`, `amount`, `destination_bank_json`, `state` (`PENDING\|REJECTED\|PROCESSING\|COMPLETE\|SUBTRACTED`), `adjustment_id`.  `approval_requests`: `subject_type`, `subject_id`, `payload_diff_json`, `maker_user_id`, `checker_user_id`, `state`, `rejection_reason`, `risk_acceptance_note` | Maker ≠ Checker (`checker_user_id <> maker_user_id`) is enforced by the `approval_requests_checker_not_maker_insert` `CHECK` constraint and the `approval_requests_checker_not_maker_update` `BEFORE UPDATE` trigger, **and** by the application-level check in `ApprovalService` and the `makerCheckerGuard` middleware. |
 
 ### **5.2 Group B: Gateway Catalog, Environments, Auth & Credentials (6 Tables)**
 
@@ -477,7 +477,7 @@ excluded\_fields: \['hashed'\]
 5. **Forward-Only Motion:** `SUCCEEDED` is never downgraded by a later failure or expiry event. Conflicting trusted signals (e.g., verified webhook says `PAID`, inquiry says `FAILED`) freeze the attempt in `UNKNOWN` and open a `P1` `CONFLICT` operator case.  
 6. **Late Success Recovery:** A verified confirmation arriving after `EXPIRED` or `FAILED` transitions the attempt to `SUCCEEDED`, posts the ledger entry (if the link slot is still available), and raises a `P2` alert. If the single-use link was already paid by another attempt in the meantime, funds route to `SUSPENSE` and auto-draft a refund `Adjustment`.  
 7. **Atomic Ledger Posting:** Transitioning to `SUCCEEDED` and inserting `journal_entries` \+ `journal_lines` occur in the **exact same database transaction**, guarded by `UNIQUE(ref_type, ref_id)` on `journal_entries` and `UNIQUE(ledger_entry_id)` on `payment_attempts`.  
-8. **Durable Database Timers:** `expires_at` and `next_check_at` are indexed `DATETIME(3)` columns polled by stateless multi-instance workers using `SELECT ... FOR UPDATE SKIP LOCKED`. `SKIP LOCKED` requires **MySQL 8.0+ / MariaDB 10.6+**; the terminal transitions are additionally guarded by a conditional `UPDATE ... WHERE terminal_at IS NULL`, so a terminal state is applied **at most once** even when two cluster nodes claim the same row.  
+8. **Durable Database Timers:** `expires_at` and `next_check_at` are indexed timestamp columns polled by stateless multi-instance workers using PostgreSQL `SELECT ... FOR UPDATE SKIP LOCKED`; the terminal transitions are additionally guarded by a conditional `UPDATE ... WHERE terminal_at IS NULL`, so a terminal state is applied **at most once** even when two cluster nodes claim the same row.
 9. **Realtime Streaming:** Every state transition broadcasts to the checkout SSE stream (`GET /v1/pay/{linkKey}/logs/{logId}/status`) and the paired POS WebSocket room.
 
 ## **8\. Seven Production Configuration Blueprints**
@@ -584,7 +584,7 @@ Checked continuously by database triggers and a scheduled verification job:  TRE
 
 \+ SUSPENSE Balance
 
-#### **9.2.1 Database-Level Enforcement of the Domain Invariants (MySQL / MariaDB)**
+#### **9.2.1 Database-Level Enforcement of the Domain Invariants (PostgreSQL 18)**
 
 Four domain invariants are enforced at the database layer, but not in the same way:
 
@@ -593,9 +593,9 @@ Four domain invariants are enforced at the database layer, but not in the same w
 | `journal_lines.amount > 0` | `CHECK` constraint `journal_lines_amount_positive` |
 | `attempt_groups.success_count <= 1` | `CHECK` constraint `attempt_groups_single_success` |
 | `payment_links` slot reservation (`infinite_use = true OR confirmed_count + active_locked_count <= use_count`) | `CHECK` constraint `payment_links_slot_reservation_invariant` |
-| `approval_requests.checker_user_id <> maker_user_id` | `BEFORE INSERT` trigger `approval_requests_checker_not_maker` |
+| `approval_requests.checker_user_id <> maker_user_id` | `CHECK` constraint `approval_requests_checker_not_maker_insert` plus `BEFORE UPDATE` trigger `approval_requests_checker_not_maker_update` |
 
-MariaDB **forbids a `CHECK` constraint on a column that participates in a foreign key**, and `approval_requests.checker_user_id` / `maker_user_id` are both foreign keys into `users`. The Maker ≠ Checker invariant is therefore enforced by a `BEFORE INSERT` trigger on `approval_requests` that raises `SIGNAL SQLSTATE '45000'` (`checker_user_id must differ from maker_user_id`), **in addition to** the application-level check in `ApprovalService` and the `makerCheckerGuard` middleware. The other three domain checks remain plain `CHECK` constraints.
+PostgreSQL allows a `CHECK` constraint on the foreign-key columns, so the Maker ≠ Checker invariant is enforced by both the insert constraint and the `BEFORE UPDATE` trigger on `approval_requests`, **in addition to** the application-level check in `ApprovalService` and the `makerCheckerGuard` middleware. The other three domain checks also remain plain `CHECK` constraints.
 
 ### **9.3 Ten Worked Double-Entry Journal Entries**
 
@@ -637,7 +637,7 @@ These five entries complete the scenarios introduced by the AML program (§18), 
 2. **Synchronous Promise-Cached Consumer Registry:** Stores initialization Promise in memory before awaiting DB to prevent duplicate consumer construction or timer leaks under concurrent bursts.  
 3. **Single-Flight Auth Token Refresh:** Concurrent 401/403 responses share one in-flight `refreshToken()` Promise so parallel payments never stampede a gateway's token endpoint.  
 4. **Chained `setTimeout` with \+/-10% Jitter:** Replaces `setInterval` to avoid cluster-wide refresh storms; retains last valid token on refresh error and schedules accelerated retry.  
-5. **Atomic Rotating Refresh-Token Persistence:** Encrypts and persists `new_refresh_token_selector` to the MySQL / MariaDB database **before** resolving the refresh Promise so server restarts never lose OAuth2 sessions.  
+5. **Atomic Rotating Refresh-Token Persistence:** Encrypts and persists `new_refresh_token_selector` to the PostgreSQL 18 database **before** resolving the refresh Promise so server restarts never lose OAuth2 sessions.
 6. **Per-Step `AbortController` Timeouts:** Enforces `step.timeout_ms` (10s auth/inquire, 15s initiate/confirm/refund) on every outbound socket.  
 7. **Strict Retry Boundary on Money Steps:** `MOVES_MONEY` steps never auto-retry on timeout, socket reset, or 5xx; they transition immediately to `UNKNOWN`.  
 8. **Raw-Text-First Response Reader:** Reads `response.text()` before attempting JSON/XML parsing; caps responses at `max_response_bytes` (2 MB) and JSON depth at 64; disables XML DTD/external entities (XXE-safe).  
@@ -666,7 +666,7 @@ These five entries complete the scenarios introduced by the AML program (§18), 
 | **T-12** | Denial of Service | SMS OTP pumping drains merchant/gateway SMS budget | Sliding-window velocity limits per phone, IP, link, rail, carrier prefix \+ resend cooldowns |
 | **T-13** | Denial of Service | Hostile/oversized gateway response exhausts memory | 2 MB response cap, 64 JSON depth cap, `AbortController` timeouts, raw-text-first reader |
 | **T-14** | Denial of Service | Webhook retry storm during gateway incident | Sub-10ms synchronous inbox insert \+ immediate HTTP ack; asynchronous worker processing |
-| **T-15** | Elevation of Priv | Insider approves their own config or adjustment | `approval_requests_checker_not_maker` `BEFORE INSERT` trigger (MariaDB forbids a `CHECK` constraint on a column that participates in a foreign key) \+ `ApprovalService` \+ API middleware enforcement |
+| **T-15** | Elevation of Priv | Insider approves their own config or adjustment | `approval_requests_checker_not_maker_insert` `CHECK` constraint and `approval_requests_checker_not_maker_update` `BEFORE UPDATE` trigger \+ `ApprovalService` \+ API middleware enforcement |
 | **T-16** | Elevation of Priv | Admin points flow URL to requestbin to steal secrets | Host-pinned credentials (Safeguard 11\) \+ Maker-Checker on `gateway_versions` |
 | **T-17** | Spoofing (SSRF) | Admin/merchant URL targets internal metadata/VPC | HTTPS-only \+ custom DNS hook blocking private IPv4/IPv6 ranges (Safeguard 10\) |
 | **T-18** | Tampering | Customer input breaks out of JSON/XML/Header template | Destination-aware encoding (Safeguard 13\) \+ `CR`/`LF` rejection \+ RE2 non-backtracking regexes |
@@ -728,7 +728,7 @@ No `gateway_versions` row can transition to `LIVE` without passing all 12 gates:
 | **3** | Gateway session expires before platform TTL (10m/15m) | `expires_at = min(gateway_session_ttl, platform_ttl)`; countdown shown; late submit rejected locally. | Med |
 | **4** | Repeated wrong OTP vs. brute-force attack | `RETRYABLE_OTP` increments `otp_attempts` up to `max_otp_attempts` (3) in `AWAITING_CUSTOMER`, then transitions to `FAILED`. | Med |
 | **5** | Correct OTP entered, but `SUBMIT` (`CONFIRM`) call times out | Transitions to `UNKNOWN` (never `FAILED`); same OTP is never resubmitted; slot reservation held; background reconciler polls `VERIFY` or statement. | High |
-| **6** | Server restart or pod crash during active attempt | Durable `expires_at` and `next_check_at` in the MySQL / MariaDB database; stateless workers resume with `FOR UPDATE SKIP LOCKED` (requires MySQL 8.0+ / MariaDB 10.6+). | High |
+| **6** | Server restart or pod crash during active attempt | Durable `expires_at` and `next_check_at` in the PostgreSQL 18 database; stateless workers resume with native `FOR UPDATE SKIP LOCKED`. | High |
 | **7** | Two browser tabs or devices open the same single-use link | Atomic `active_locked_count` reservation inside guard transaction; second tab sees *"Payment in progress"*. | Med |
 | **8** | Customer clicks retry while previous attempt is `UNKNOWN` | Slot reservation remains held through `UNKNOWN`; retry blocked server-side until `UNKNOWN` resolves. | High |
 | **9** | Customer switches rail mid-flow (e.g., Edfali to Moamalat Card) | Old attempt cancelled via `CANCEL` flow (or watched until expiry); new attempt joins same `attempt_group_id` (`success_count <= 1`). | Med |
@@ -854,7 +854,7 @@ No `gateway_versions` row can transition to `LIVE` without passing all 12 gates:
 | **94** | Customer clicks `DEEP_LINK` button on desktop or without wallet app installed | Checkout UI renders QR code / Pay Code alongside the deep link and falls back gracefully if app launch fails. | Low |
 | **95** | Cashier cancels a pending QR payment on POS terminal | Triggers `CANCEL` flow at gateway (if `supports_cancel = true`), marks attempt `CANCELLED`, releases link reservation, and keeps inbox open for late settlement races. | Low |
 | **96** | Slow upstream SMS delivery causes customer to click submit/resend repeatedly | UI disables button with live countdown; backend enforces idempotency key and `otp_resend_cooldown_seconds`. | Med |
-| **97** | Gateway confirms success, but MySQL / MariaDB ledger insert encounters a transient lock/error | Because status transition to `SUCCEEDED` and `LedgerPoster` share one DB transaction, attempt remains in `VERIFYING` and worker retries posting idempotently. | High |
+| **97** | Gateway confirms success, but the PostgreSQL 18 ledger insert encounters a transient lock/error | Because status transition to `SUCCEEDED` and `LedgerPoster` share one DB transaction, attempt remains in `VERIFYING` and worker retries posting idempotently. | High |
 | **98** | Merchant webhook/notification emitted twice on retry | Outbound merchant notifications are triggered strictly from the committed `journal_entries` outbox with a unique `event_id`. | Low |
 
 ### **Group I: Multi-Instance Cluster, Time, Concurrency & Drift (Cases 99–115)**
@@ -865,7 +865,7 @@ No `gateway_versions` row can transition to `LIVE` without passing all 12 gates:
 | **100** | Duplicate webhook redelivered across a worker pod restart (after DB commit, before HTTP ack) | `inbound_events` dedupe key and `UNIQUE(ref_type, ref_id)` on `journal_entries` guarantee zero double-posting across restarts. | High |
 | **101** | Finance approves a `REFUND` adjustment while customer starts a new attempt on a multi-use link | Refund `Adjustment` locks and references the specific `source_attempt_id`, operating independently of new attempts on the link. | Med |
 | **102** | Gateway silently reorders or renames columns in daily CSV/XLSX settlement statement | `statement_sources` parser validates header row against required column map; halts ingest and fires `P2` alert on schema drift. | Med |
-| **103** | Route paused or credential rotated on Node A while Node B serves checkout traffic | `InvalidationBus` (Redis Pub/Sub) evicts Node B caches in \< 1s; attempt initiation always verifies route/version state against the MySQL / MariaDB database. | Med |
+| **103** | Route paused or credential rotated on Node A while Node B serves checkout traffic | `InvalidationBus` (Redis Pub/Sub) evicts Node B caches in \< 1s; attempt initiation always verifies route/version state against the PostgreSQL 18 database. | Med |
 | **104** | Gateway incident unleashes 10,000 webhook retries in 60 seconds | Inbox receiver performs lightweight insert \+ ack; bounded worker queue drains `inbound_events` with per-route concurrency caps. | Med |
 | **105** | POS tablet loses Wi-Fi/cellular connectivity mid-payment | Attempt completes server-side; on reconnect, POS screen replays missed state from `/v1/pay/{linkKey}/logs/{logId}/status`. | Low |
 | **106** | Clock drift between platform cluster and gateway exceeds tolerance | NTP sync monitored via alert; inbound timestamp rejection triggers `RB-02` while preserving raw event in `inbound_events` for replay. | Med |
@@ -934,7 +934,7 @@ No `gateway_versions` row can transition to `LIVE` without passing all 12 gates:
 
 | Stage | Scope & Deliverables | Exit Criteria (Go-Live Gate Verification) |
 | :---- | :---- | :---- |
-| **Stage 1: Core Foundations & Ledger** | MySQL / MariaDB schema (64 tables, §5), `DynamicRailEngine` core, 14 safeguards, `ApiConsumer` registry, `TransformPipe[]`, `CryptoProfile` engine, 13-state machine with `active_locked_count`, `inbound_events` inbox, `LedgerPoster` with `GATEWAY_CLEARING`, Maker-Checker engine, and Mock Gateway. | Mock Gateway end-to-end payment posts balanced journal entry; continuous ledger invariant check green; 14 safeguards unit-tested. |
+| **Stage 1: Core Foundations & Ledger** | PostgreSQL 18 schema (64 tables, §5), `DynamicRailEngine` core, 14 safeguards, `ApiConsumer` registry, `TransformPipe[]`, `CryptoProfile` engine, 13-state machine with `active_locked_count`, `inbound_events` inbox, `LedgerPoster` with `GATEWAY_CLEARING`, Maker-Checker engine, and Mock Gateway. | Mock Gateway end-to-end payment posts balanced journal entry; continuous ledger invariant check green; 14 safeguards unit-tested. |
 | **Stage 2: OTP & Redirect Rails** | `OTP_PULL` and `REDIRECT` playbooks, pre-flight guard pipeline (Velocity \+ AML), Test Console, and 15-scenario test runner. Onboard **DPay**, **Plutu**, **MyPay**, **T-LYNC**, **Sadad**, and **Edfali**. | First aggregator route and first direct OTP rail pass all 12 Go-Live Gates and process canary live traffic. |
 | **Stage 3: Embedded, Push, QR & POS Realtime** | `EMBEDDED` (`WidgetDefinition`), `QR_DISPLAY`, `PUSH_APPROVAL`, `PAY_CODE`, `DEEP_LINK`, `HYBRID`, and WebSocket/SSE POS Screen rooms. Onboard **Moamalat Lightbox**, **LYPay**, **OnePay**, **MobiCash**, **Yussor Pay**, **Sahara Pay**, and **Visa/MC (MPGS 3DS2)**. | Moamalat Lightbox card rail and LYPay/OnePay POS QR rails live with mandatory server inquiry verification. |
 | **Stage 4: Reconciliation, Fee Accrual & Refunds** | `StatementSource` CSV/XLSX/JSON ingestion, `GATEWAY_FEE_ACCRUAL` true-ups, automated `REFUND`/`VOID` flows via Maker-Checker `Adjustments`, per-route circuit breakers, and SLO/Alert dashboards (`RB-01` to `RB-05`). | Two full T+N bank/gateway statement reconciliation cycles close with `0.0000 LYD` unexplained drift. |
@@ -1005,7 +1005,7 @@ The platform presents three human-facing interfaces and three machine-facing sur
 
 ### **15.4 The Four-Eyes Action Matrix**
 
-The single `approval_requests` wrapper (state machine: `DRAFT → PENDING_REVIEW → APPROVED → EXECUTED`, or `REJECTED` back to `DRAFT`) governs every action below. The **Maker ≠ Checker** rule is enforced by the `approval_requests_checker_not_maker` `BEFORE INSERT` trigger (MariaDB forbids a `CHECK` constraint on a column that participates in a foreign key, so the database-level guarantee is a trigger raising `SIGNAL SQLSTATE '45000'`), by the application-level check in `ApprovalService`, and again in the `makerCheckerGuard` middleware, regardless of what the client sends.
+The single `approval_requests` wrapper (state machine: `DRAFT → PENDING_REVIEW → APPROVED → EXECUTED`, or `REJECTED` back to `DRAFT`) governs every action below. The **Maker ≠ Checker** rule is enforced by the `approval_requests_checker_not_maker_insert` `CHECK` constraint and the `approval_requests_checker_not_maker_update` `BEFORE UPDATE` trigger, by the application-level check in `ApprovalService`, and again in the `makerCheckerGuard` middleware, regardless of what the client sends.
 
 | Action | Typical Maker | Required Checker | Execution Effect (atomic with approval) |
 | :---- | :---- | :---- | :---- |

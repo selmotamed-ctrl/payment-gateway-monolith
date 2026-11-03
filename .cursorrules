@@ -1,0 +1,1 @@
+Read and follow AGENTS.md and project-design/INDEX.md. design/** is historical; project-design/** is canonical. Update the affected part and project-design/TRACKER.md with every behavior/contract/schema/env/deploy/UI/test change. Never hand-edit generated design files.

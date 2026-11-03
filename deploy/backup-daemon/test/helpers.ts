@@ -56,6 +56,7 @@ export class FakeEngine implements BackupEngine {
   };
 
   public triggerCalls: Array<{ target: BackupTarget; kind: BackupKind }> = [];
+  public pruneCalls: Array<{ target: BackupTarget; kind?: BackupKind }> = [];
 
   constructor(
     private readonly triggerImpl: (
@@ -83,6 +84,10 @@ export class FakeEngine implements BackupEngine {
   public async recover(request: RecoverRequest): Promise<RecoverResult> {
     this.recovered.push(request);
     return this.recoverImpl(request);
+  }
+
+  public async prune(target: BackupTarget, kind?: BackupKind): Promise<void> {
+    this.pruneCalls.push({ target, kind });
   }
 }
 

@@ -31,5 +31,3 @@ export const postgresPlaceholders = (count: number, startIndex = 1, cast?: strin
  * Kept so that the callers of the old name keep working; the produced
  * placeholders are the PostgreSQL ones.
  */
-export const mysqlPlaceholders = (count: number): string =>
-  postgresPlaceholders(count);

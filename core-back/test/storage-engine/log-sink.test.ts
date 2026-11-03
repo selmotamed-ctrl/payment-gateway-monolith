@@ -14,9 +14,7 @@ import {
   uniqueUuid,
 } from "./helpers/db";
 
-if (!databaseIsReachable) {
-  test.skip("log sink suite requires the live database", () => undefined);
-}
+const describeDatabase = databaseIsReachable ? describe : describe.skip;
 
 class CapturePool {
   public readonly calls: Array<{ sql: string; values: unknown[] }> = [];
@@ -174,7 +172,7 @@ describe("DedicatedPostgresLogSink buffering", () => {
   });
 });
 
-describe("DedicatedPostgresLogSink against the sandbox log database", () => {
+describeDatabase("DedicatedPostgresLogSink against the sandbox log database", () => {
   test("queryStepLogsForAttempt returns step-order ordering after a real flush", async () => {
     const sandbox = await createLogSandbox("logs-order");
     const sink = new DedicatedPostgresLogSink(sandbox.pool, 5_000, 60_000);

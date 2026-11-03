@@ -128,7 +128,7 @@ const buildAgent = (baseUrl: string): http.Agent => {
   return new https.Agent({
     keepAlive: true,
     maxSockets: 8,
-    minVersion: "TLSv1.2",
+    minVersion: "TLSv1.3",
     ca: readFileIfPresent(env.BACKUP_DAEMON_CA_CERT_PATH),
     cert: readFileIfPresent(env.BACKUP_DAEMON_CLIENT_CERT_PATH),
     key: readFileIfPresent(env.BACKUP_DAEMON_CLIENT_KEY_PATH),

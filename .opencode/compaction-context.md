@@ -5,16 +5,16 @@ This context is part of the session compaction prompt. Preserve it in the contin
 ### 1. Product and repository architecture
 
 - **Monorepo**:
-  - `core-back/` — Bun + Express 5 + Prisma/MySQL core. It is the only service with database credentials and `KMS_MASTER_KEY`; it owns payments, ledger, governance, reconciliation, AML, operator cases, gateway inquiry schedules and background workers.
-  - `admin-back/`, `merchant-back/`, `checkout-back/` — edge BFF services. They connect to core only through mTLS using their own client certificate. They must never receive `DATABASE_URL` or the master key.
+  - `core-back/` — Bun + Express 5 + Prisma/PostgreSQL 18 core (`@prisma/adapter-pg` + `pg`). It is the only service with relational database credentials and `KMS_MASTER_KEY`; it owns payments, ledger, governance, reconciliation, AML, operator cases, gateway inquiry schedules and background workers. Persistence goes through `lib/storageEngine/` (UnitOfWork, ReadStore, Redis cache/velocity, audit DB, log DB, backup control).
+  - `admin-back/`, `merchant-back/`, `checkout-back/` — edge BFF services. They connect to core only through mTLS using their own client certificate and a least-in-flight/round-robin `CORE_BACK_URLS` pool with `x-pg-min-lsn` propagation. They must never receive `DATABASE_URL` or the master key.
   - `admin-front/`, `merchant-front/`, `checkout-front/` — Vue 3 + Vuetify 3 + TSX SPAs. Admin is LAN-only; merchant and checkout are public behind Nginx. `fake-rails-back/` and `fake-rails-front/` are an optional sandbox/test harness.
-  - `deploy/` — multi-host deployment engine.
+  - `deploy/` — multi-host deployment engine with compute node arrays and storage provisioners (PostgreSQL 18 primary/replicas, PgBouncer, Redis, audit/log DBs, backup daemon). `deploy/backup-daemon/` is the WAL-G/Barman + restore/invariant-drill control plane.
   - `tests/` — Playwright/Vitest suites.
-  - `design/` — authoritative architecture, product and delivery designs.
+  - `project-design/` — canonical architecture, product, implementation state and tracker. `design/` is historical/reference only.
 
-- **Network topology**: DB only accepts core; core mTLS only accepts the three edge certificates; admin Nginx is LAN-restricted; merchant/checkout are public TLS vhosts. mTLS certificate CN is verified again in core middleware.
+- **Network topology**: PostgreSQL 18 primary accepts replicas (and core when PgBouncer is off); PgBouncer, Redis, audit/log DBs and the backup daemon accept only the allowed core/backup private IPs; core mTLS only accepts the three edge certificates; admin Nginx is LAN-restricted; merchant/checkout are public TLS vhosts. mTLS certificate CN is verified again in core middleware.
 
-- **Deployment architecture**: `deploy/deploy.sh` invokes `deploy/deploy.ts`. It validates `deploy/deploy.env` with `deploy/lib/configSchema.ts`, plans hosts with `hostPlanner.ts`, builds SPAs locally, ensures PKI, bootstraps hosts/UFW, provisions/backs up the DB, deploys core then admin/merchant/checkout, verifies health, prunes releases and prints an audit summary. Nginx/PM2 templates live in `deploy/templates/`. The deploy engine injects per-release frontend runtime values into `runtime-config.js`.
+- **Deployment architecture**: `deploy/deploy.sh` invokes `deploy/deploy.ts`. The current **14-step** pipeline validates `deploy/deploy.env` with `deploy/lib/configSchema.ts`, plans compute and storage hosts with `hostPlanner.ts`, builds SPAs locally, ensures multi-node PKI, bootstraps hosts/UFW, runs the storage provisioners (PostgreSQL 18 primary/replicas + PgBouncer, Redis, audit/log DBs, backup engine) or the legacy single-host DB backup, deploys core, optional Fake Rails, admin/merchant/checkout (rolling batches with `--rolling-batch` / `--nodes`), seeds optional data, verifies health, prunes releases and prints an audit summary. Nginx/PM2 templates live in `deploy/templates/`. The deploy engine injects per-release frontend runtime values into `runtime-config.js`.
 
 - **Frontend conventions**: manual router (`admin-front/src/router/index.ts`), file-based page folders, `urlsMap` for API paths, `ApiTable`/`DataTable` for lists and XLSX export, `tableRegistry` for filters, `constants/env` for runtime/build flags, `i18nCatalogue` for English/Arabic strings, and `layouts/sections.tsx` for navigation/authorities.
 
@@ -22,17 +22,20 @@ This context is part of the session compaction prompt. Preserve it in the contin
 
 Never rely only on this summary for implementation details. Re-read the relevant files:
 
-- Design:
-  - `design/payment_gateway_final_design-v5.md`
-  - `design/payment-gateway-refined-design-v4.1.md`
-  - `design/payment_gateway_deployment_and_guides_architecture.md`
-  - `design/opencode_technical_delivery_design.md`
-  - `design/fixes/_0001_operator_cases.md`
-  - Relevant feature designs under `design/` (`synthetic_operational_data_seeder_architecture.md`, `fake_payment_rails_service_architecture.md`, guide/academy docs).
+- Canonical design:
+  - `project-design/INDEX.md` (entrypoint)
+  - `project-design/STATUS.md` (generated status)
+  - `project-design/TRACKER.md` (change/gap/decision log)
+  - the relevant `project-design/parts/**` file for the area being changed
+  - `design/**` only as historical/reference material (never current authority)
 - Schema/data:
   - `core-back/prisma/schema.prisma`
-  - `core-back/prisma/migrations/**`
+  - `core-back/prisma/migrations/**` (PostgreSQL 18 baseline, storage engine and CQRS read models)
   - `core-back/prisma/schemaVersion.ts`
+- Storage/backup:
+  - `core-back/lib/storageEngine/**`
+  - `deploy/backup-daemon/src/**`
+  - `deploy/provisioners/**`
 - Core:
   - `core-back/api/internal/admin.ts` (admin internal contract)
   - `core-back/api/internal/merchant.ts`, `core-back/api/internal/checkout.ts`
@@ -54,6 +57,10 @@ Never rely only on this summary for implementation details. Re-read the relevant
 - Tests:
   - `core-back/test/**`, `admin-back/test/**`, `tests/e2e/**`, `tests/unit/**`
 
+## 4. Documentation update rule
+
+Any behavior, API, schema/migration, env/config, deploy, UI-route, test or invariant change must update the affected `project-design/parts/**` file and `project-design/TRACKER.md` in the same change. Run `bun scripts/project-design/build.ts --check` before finishing. Never hand-edit generated design files (`PROJECT_DESIGN.md`, `STATUS.md`, appendices, `*/blueprint.md`).
+
 If the compaction cannot fit a required detail, explicitly instruct the resumed agent: **“Before acting, read the relevant design, Prisma schema/migration, and code files listed above.”**
 
 ### 3. Non-negotiable invariants
@@ -63,6 +70,7 @@ If the compaction cannot fit a required detail, explicitly instruct the resumed 
 - Authorities are checked on the server. UI checks are UX only.
 - Never expose or log secrets, ciphertext, AML-confidential data or master keys. Edge hosts must not receive DB/KMS secrets.
 - Every material state change writes an audit record where the design requires it.
+- PostgreSQL 18 is the only supported runtime database (`postgresql://` URLs, `@prisma/adapter-pg` + `pg`); MySQL/MariaDB are historical. `DATABASE_URL`, `DATABASE_REPLICA_URLS`, `AUDIT_DATABASE_URL` and `LOG_DATABASE_URL` must all be PostgreSQL URLs.
 - New Prisma models require a committed migration and `prisma generate`; deploy applies `migrate-deploy` before restarting core.
 - Do not bypass `core-back` from an edge service.
 - Keep English/Arabic catalogue entries in sync when adding user-facing text.

@@ -42,6 +42,8 @@ import type {
   UserRow,
   VelocityRuleRow,
 } from "./ports";
+import { enqueueOutboxEvent } from "../../lib/storageEngine/outbox";
+import { writeAudit } from "../../lib/audit/writeAudit";
 
 type Any = Record<string, any>;
 
@@ -159,9 +161,9 @@ export class PrismaRepositories implements Repositories {
     },
     getWalletBalance: async (tx, merchantId) => {
       const result = await tx.$queryRaw`
-        SELECT COALESCE(SUM(CASE WHEN jl.direction = 'CREDIT' THEN jl.amount ELSE -jl.amount END), 0) AS balance
-        FROM journal_lines jl
-        INNER JOIN gl_accounts a ON a.id = jl.gl_account_id
+        SELECT COALESCE(SUM(-s.current_balance), 0) AS balance
+        FROM gl_account_shards s
+        INNER JOIN gl_accounts a ON a.id = s.gl_account_id
         WHERE a.account_type = 'MERCHANT_WALLET' AND a.owner_id = ${merchantId}
       `;
       const first = rows<Any>(result)[0];
@@ -443,7 +445,26 @@ export class PrismaRepositories implements Repositories {
       return "PLATFORM_CLEARING";
     },
     createAttempt: async (tx, data) => {
-      return model(tx, "paymentAttempt").create({ data }) as Promise<PaymentAttemptRow>;
+      const row = await model(tx, "paymentAttempt").create({ data }) as PaymentAttemptRow;
+      await enqueueOutboxEvent(tx as never, {
+        topic: "attempt.transitioned",
+        aggregateType: "PAYMENT_ATTEMPT",
+        aggregateId: String(row.id),
+        merchantId: String(row.merchantId),
+        payload: {
+          event: "created",
+          attemptId: String(row.id),
+          merchantId: String(row.merchantId),
+          routeId: row.routeId ? String(row.routeId) : null,
+          currency: String(row.currency),
+          status: String(row.status),
+          substatus: row.substatus ?? null,
+          totalChargedAmount: row.totalChargedAmount,
+          netMerchantAmount: row.netMerchantAmount,
+          occurredAt: (row.createdAt ?? new Date()).toISOString(),
+        },
+      });
+      return row;
     },
     findAttemptById: async (tx, id) => {
       return (await model(tx, "paymentAttempt").findUnique({ where: { id } })) as PaymentAttemptRow | null;
@@ -474,7 +495,29 @@ export class PrismaRepositories implements Repositories {
       })) as PaymentAttemptRow | null;
     },
     updateAttempt: async (tx, id, patch) => {
-      return model(tx, "paymentAttempt").update({ where: { id }, data: patch }) as Promise<PaymentAttemptRow>;
+      const row = await model(tx, "paymentAttempt").update({ where: { id }, data: patch }) as PaymentAttemptRow;
+      const terminal = ["SUCCEEDED", "FAILED", "EXPIRED", "CANCELLED", "BLOCKED", "REFUNDED"];
+      if (patch.status !== undefined && terminal.includes(String(patch.status))) {
+        await enqueueOutboxEvent(tx as never, {
+          topic: "attempt.transitioned",
+          aggregateType: "PAYMENT_ATTEMPT",
+          aggregateId: String(row.id),
+          merchantId: String(row.merchantId),
+          payload: {
+            event: "terminal",
+            attemptId: String(row.id),
+            merchantId: String(row.merchantId),
+            routeId: row.routeId ? String(row.routeId) : null,
+            currency: String(row.currency),
+            status: String(row.status),
+            substatus: row.substatus ?? null,
+            totalChargedAmount: row.totalChargedAmount,
+            netMerchantAmount: row.netMerchantAmount,
+            occurredAt: (row.terminalAt ?? new Date()).toISOString(),
+          },
+        });
+      }
+      return row;
     },
     collectWindowStats: async (tx, filter) => {
       const or: Any[] = [{ merchantId: filter.merchantId }];
@@ -653,7 +696,7 @@ export class PrismaRepositories implements Repositories {
       if (!actorId) {
         return;
       }
-      await model(tx, "auditLog").create({
+      await writeAudit(tx as never, {
         data: {
           actorId,
           role: data.role ?? "SYSTEM",

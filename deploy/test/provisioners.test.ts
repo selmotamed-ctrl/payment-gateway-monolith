@@ -14,14 +14,21 @@ import { provisionRedis, redisConfigSnippet, redisFirewallCommands } from "../pr
 import {
   AUDIT_DB_DDL,
   LOG_DB_DDL,
+  auditDatabaseDdl,
   ensureLogPartitions,
+  logDatabaseDdl,
+  logPartitionCronLine,
   provisionAuditAndLogDb,
 } from "../provisioners/auditAndLogDbProvisioner";
 import {
   archiveCommand,
+  archiveCommandSql,
   backupCronEntries,
+  backupCronFile,
   backupDaemonSystemdUnit,
   backupDaemonEnv,
+  backupDaemonTriggerScript,
+  journalLinePartitionCronLine,
   provisionBackupEngine,
   verifyBackupTargetCommands,
   walGEnvironment,
@@ -51,6 +58,7 @@ PG_REPLICA_NODES="pg-rep-1@10.10.10.11:22:10.10.10.11:5432"
 PG_SSH_KEY_PATH="~/.ssh/pg"
 PG_DB_PASSWORD="ultra-strong-pg-password"
 PG_REPLICATION_PASSWORD="ultra-strong-repl-password"
+PG_AUDIT_DATA_DIR="/var/lib/postgresql/18/audit"
 PGBOUNCER_ENABLED="true"
 REDIS_MANAGE_VIA_SSH="true"
 REDIS_NODES="redis-1@10.10.11.10:22:10.10.11.10:6379"
@@ -130,20 +138,25 @@ describe("PostgreSQL 18 provisioner", () => {
     expect(commands.join("\n")).toContain("pgbouncer");
   });
 
-  test("replica commands use streaming basebackup with -R", () => {
+  test("replica commands use streaming basebackup with -R, a password and the created slot", () => {
     const commands = replicaCommands(
       { nodeId: "pg-pri", privateIp: "10.10.10.10", servicePort: 5432 },
       { nodeId: "pg-rep-1", privateIp: "10.10.10.11", servicePort: 5432 },
       config(),
     ).join("\n");
+    expect(commands).toContain("PGPASSWORD=");
+    expect(commands).toContain("/var/lib/postgresql/.pgpass");
     expect(commands).toContain("pg_basebackup -h 10.10.10.10 -p 5432 -U pg_replicator");
-    expect(commands).toContain("-Fp -Xs -P -R");
+    expect(commands).toContain("-Fp -Xs -P -R -S");
+    expect(commands).toContain("primary_slot_name");
   });
 
-  test("PgBouncer uses transaction mode and prepared statements", () => {
+  test("PgBouncer listens for remote cores, uses server TLS, transaction mode and prepared statements", () => {
     const ini = pgbouncerIni(config());
+    expect(ini).toContain("listen_addr = 0.0.0.0");
     expect(ini).toContain("listen_port = 6432");
     expect(ini).toContain("pool_mode = transaction");
+    expect(ini).toContain("server_tls_sslmode = require");
     expect(ini).toContain("max_client_conn = 2000");
     expect(ini).toContain("default_pool_size = 50");
     expect(ini).toContain("reserve_pool_size = 10");
@@ -158,6 +171,7 @@ describe("PostgreSQL 18 provisioner", () => {
     expect(report.nodes).toEqual(["10.10.10.10", "10.10.10.11"]);
     expect(runner.writes.some((write) => write.path === postgresConfigPath(config()))).toBe(true);
     expect(runner.writes.some((write) => write.path.endsWith("pg_hba.conf") && write.content.includes("hostssl"))).toBe(true);
+    expect(runner.writes.some((write) => write.path.endsWith("pg_hba.conf") && write.content.includes("10.10.13.10"))).toBe(true);
     const sql = runner.writes.find((write) => write.content.includes("CREATE DATABASE"));
     expect(sql?.content).toContain('CREATE DATABASE "payment_gateway_prod"');
     expect(sql?.content).toContain("pg_create_physical_replication_slot");
@@ -197,18 +211,27 @@ describe("Redis provisioner", () => {
 });
 
 describe("Audit and log database provisioner", () => {
-  test("the audit DDL contains the hash chain, immutable trigger and least-privilege revokes", () => {
+  test("the audit DDL contains the hash chain, immutable trigger and least-privilege grants", () => {
     expect(AUDIT_DB_DDL).toContain("prev_hash           CHAR(64)");
     expect(AUDIT_DB_DDL).toContain("row_hash            CHAR(64)");
     expect(AUDIT_DB_DDL).toContain("forbid_audit_mutation");
     expect(AUDIT_DB_DDL).toContain("BEFORE UPDATE OR DELETE OR TRUNCATE");
     expect(AUDIT_DB_DDL).toContain("REVOKE UPDATE, DELETE, TRUNCATE ON audit_records FROM PUBLIC");
+    const ddl = auditDatabaseDdl(config());
+    expect(ddl).toContain('GRANT SELECT, INSERT ON audit_records TO "pg_audit_writer"');
+    expect(ddl).toContain("GRANT USAGE, SELECT ON ALL SEQUENCES");
+    expect(ddl).toContain("ALTER DEFAULT PRIVILEGES");
+    expect(ddl).not.toContain("GRANT UPDATE");
   });
 
-  test("the log DDL is monthly partitioned", () => {
+  test("the log DDL is monthly partitioned and grants only SELECT/INSERT to the writer", () => {
     expect(LOG_DB_DDL).toContain("PARTITION BY RANGE (created_at)");
     expect(LOG_DB_DDL).toContain("attempt_step_logs");
     expect(LOG_DB_DDL).toContain("http_access_logs");
+    const ddl = logDatabaseDdl(config());
+    expect(ddl).toContain('GRANT SELECT, INSERT ON attempt_step_logs, http_access_logs TO "pg_log_writer"');
+    expect(ddl).toContain("GRANT USAGE, SELECT ON ALL SEQUENCES");
+    expect(ddl).not.toContain("GRANT UPDATE");
   });
 
   test("ensureLogPartitions creates six months for both tables plus the maintenance function", () => {
@@ -220,6 +243,13 @@ describe("Audit and log database provisioner", () => {
     expect((sql.match(/CREATE TABLE IF NOT EXISTS attempt_step_logs_\d{4}_\d{2}/g) ?? []).length).toBe(6);
     expect((sql.match(/CREATE TABLE IF NOT EXISTS http_access_logs_\d{4}_\d{2}/g) ?? []).length).toBe(6);
     expect(sql).toContain("CREATE OR REPLACE FUNCTION ensure_log_partitions");
+    expect(sql).toContain("retention_months");
+    expect(sql).toContain("DROP TABLE IF EXISTS");
+    expect(sql).toContain("make_interval(months => retention_months)");
+  });
+
+  test("the log retention cron passes LOG_RETENTION_MONTHS to the maintenance function", () => {
+    expect(logPartitionCronLine(config())).toContain("ensure_log_partitions(6, 12)");
   });
 
   test("provisions both databases and installs the partition cron", () => {
@@ -233,35 +263,129 @@ describe("Audit and log database provisioner", () => {
 });
 
 describe("Backup engine provisioner", () => {
-  test("builds WAL-G/Barman commands, daemon unit, cron and target verification", () => {
+  test("emits the daemon env contract, unit, cron and target verification", () => {
     const cfg = config();
+    const env = backupDaemonEnv(cfg);
     expect(archiveCommand(cfg)).toContain("barman-wal-archive");
+    expect(archiveCommand(cfg, "audit_db")).toContain("pg_audit_db");
     expect(walGEnvironment(cfg).WALG_COMPRESSION_METHOD).toBe("zstd");
     expect(walGEnvironment(cfg).WALG_LIBSODIUM_KEY).toBe(cfg.BACKUP_ENCRYPTION_KEY_HEX);
-    expect(backupDaemonEnv(cfg).MTLS_SERVER_CERT_PATH).toContain("backup-daemon.crt");
+    expect(walGEnvironment(cfg).WALG_S3_PREFIX).toBe("s3://payment-gateway-backups/prod/postgres_core");
+    expect(walGEnvironment(cfg, "audit_db").WALG_S3_PREFIX).toBe("s3://payment-gateway-backups/prod/audit_db");
+    expect(env.BACKUP_DAEMON_CERT_PATH).toBe("/var/lib/pg-backup/shared/certs/backup-daemon.crt");
+    expect(env.BACKUP_DAEMON_KEY_PATH).toContain("backup-daemon.key");
+    expect(env.BACKUP_DAEMON_CA_CERT_PATH).toContain("internal-ca.crt");
+    expect(env.BACKUP_DAEMON_BIND_HOST).toBe("10.10.13.10");
+    expect(env.BACKUP_CORE_S3_PREFIX).toContain("/postgres_core");
+    expect(env.BACKUP_AUDIT_S3_PREFIX).toContain("/audit_db");
+    expect(env.PG_PRIMARY_HOST).toBe("10.10.10.10");
+    expect(env.PG_PRIMARY_PORT).toBe("5432");
+    expect(env.PG_PRIMARY_DB_NAME).toBe("payment_gateway_prod");
+    expect(env.PG_REPLICA_NODES).toContain("pg-rep-1@");
+    expect(env.PG_DATA_DIR).toContain("/var/lib/postgresql/18/main");
+    expect(env.BARMAN_SERVER).toBe("payment_gateway_prod");
+    expect(env.BARMAN_AUDIT_SERVER).toBe("pg_audit_db");
+    expect(env.BACKUP_CATALOG_PATH).toBe("/var/lib/pg-backup/catalog.json");
+    expect(env.SCHEDULER_ENABLED).toBe("true");
+    expect(env.BACKUP_ALERT_LAG_SECONDS).toBe("300");
     const unit = backupDaemonSystemdUnit(cfg);
-    expect(unit).toContain("pg-backup-daemon");
-    expect(unit).toContain("BACKUP_DAEMON_PORT");
-    expect(backupCronEntries(cfg).join("\n")).toContain("0 2 * * 0");
+    expect(unit).toContain("WorkingDirectory=/opt/pg-backup-daemon");
+    expect(unit).toContain("ExecStart=/usr/local/bin/bun run src/index.ts");
+    expect(unit).toContain("EnvironmentFile=/etc/pg-backup/backup.env");
+    expect(unit).toContain("User=pgbackup");
+    expect(unit).toContain("ReadWritePaths=/var/lib/pg-backup /var/log/pg-backup");
+    expect(backupCronEntries(cfg)).toEqual([]);
+    expect(backupCronFile(cfg)).toContain("scheduler");
     expect(verifyBackupTargetCommands(cfg).join("\n")).toContain("rclone lsd");
     expect(verifyBackupTargetCommands(cfg).join("\n")).toContain("ssh ");
   });
 
-  test("uses wal-g wal-push when the engine mode is wal-g", () => {
-    const cfg = loadDeployConfig(SOURCE.replace('BACKUP_ENGINE_MODE="barman"', 'BACKUP_ENGINE_MODE="wal-g"'));
-    expect(cfg.ok).toBe(true);
-    expect(archiveCommand(cfg.config!)).toBe("wal-g wal-push %p");
+  test("generates every daemon path, port, timeout and scheduler setting from deploy.env", () => {
+    const source = `${SOURCE}
+BACKUP_DAEMON_CERT_DIR="/srv/pg-backup/certs"
+BACKUP_CATALOG_PATH="/srv/pg-backup/catalog.json"
+BACKUP_PGPASSFILE="/srv/pg-backup/.pgpass"
+BACKUP_SCRATCH_DIR="/srv/pg-backup/scratch"
+BACKUP_SCRATCH_AUDIT_DIR="/srv/pg-backup/audit-scratch"
+BACKUP_SCRATCH_PORT="55442"
+BACKUP_SCRATCH_AUDIT_PORT="55443"
+BACKUP_COMMAND_TIMEOUT_MS="900000"
+BACKUP_ALLOW_INSECURE_HTTP="true"
+BACKUP_SCHEDULER_TICK_MS="15000"
+BACKUP_WALG_BIN="/opt/bin/wal-g"
+BACKUP_BARMAN_BIN="/opt/bin/barman"
+BACKUP_BARMAN_CLOUD_BIN="/opt/bin/barman-cloud-backup"
+BACKUP_REDIS_CLI_BIN="/opt/bin/redis-cli"
+`;
+    const parsed = loadDeployConfig(source);
+    expect(parsed.ok).toBe(true);
+    const cfg = parsed.config!;
+    const env = backupDaemonEnv(cfg);
+    expect(env.BACKUP_DAEMON_CERT_PATH).toBe("/srv/pg-backup/certs/backup-daemon.crt");
+    expect(env.BACKUP_CATALOG_PATH).toBe("/srv/pg-backup/catalog.json");
+    expect(env.PGPASSFILE).toBe("/srv/pg-backup/.pgpass");
+    expect(env.BACKUP_SCRATCH_DIR).toBe("/srv/pg-backup/scratch");
+    expect(env.BACKUP_SCRATCH_AUDIT_DIR).toBe("/srv/pg-backup/audit-scratch");
+    expect(env.BACKUP_SCRATCH_PORT).toBe("55442");
+    expect(env.BACKUP_SCRATCH_AUDIT_PORT).toBe("55443");
+    expect(env.BACKUP_COMMAND_TIMEOUT_MS).toBe("900000");
+    expect(env.BACKUP_ALLOW_INSECURE_HTTP).toBe("true");
+    expect(env.SCHEDULER_TICK_MS).toBe("15000");
+    expect(env.WALG_BIN).toBe("/opt/bin/wal-g");
+    expect(env.BARMAN_BIN).toBe("/opt/bin/barman");
+    expect(env.BARMAN_CLOUD_BIN).toBe("/opt/bin/barman-cloud-backup");
+    expect(env.REDIS_CLI_BIN).toBe("/opt/bin/redis-cli");
+    const unit = backupDaemonSystemdUnit(cfg);
+    for (const path of [
+      "/srv/pg-backup",
+      "/srv/pg-backup/scratch",
+      "/srv/pg-backup/audit-scratch",
+    ]) {
+      expect(unit).toContain(path);
+    }
   });
 
-  test("writes daemon env, unit, cron, restore verifier and archive command", () => {
+  test("uses per-target WAL-G prefixes when the engine mode is wal-g", () => {
+    const source = SOURCE
+      .replace('BACKUP_ENGINE_MODE="barman"', 'BACKUP_ENGINE_MODE="wal-g"')
+      .replace('BACKUP_NODE="backup-1@10.10.13.10:22:10.10.13.10:4090"', 'BACKUP_NODE="backup-1@10.10.10.10:22:10.10.10.10:4090"');
+    const cfg = loadDeployConfig(source);
+    expect(cfg.ok).toBe(true);
+    expect(archiveCommand(cfg.config!)).toContain("wal-g wal-push %p");
+    expect(archiveCommand(cfg.config!)).toContain("postgres_core");
+    expect(archiveCommand(cfg.config!, "audit_db")).toContain("audit_db");
+    expect(archiveCommandSql(cfg.config!, "audit_db")).toContain("audit_db");
+  });
+
+  test("rejects WAL-G when the backup node does not share the primary data directories", () => {
+    const cfg = loadDeployConfig(SOURCE.replace('BACKUP_ENGINE_MODE="barman"', 'BACKUP_ENGINE_MODE="wal-g"'));
+    expect(cfg.ok).toBe(false);
+    expect(cfg.problems.join(" ")).toContain("BACKUP_NODE private IP must equal PG_PRIMARY_NODE private IP");
+  });
+
+  test("writes daemon env, unit, trigger, cron, restore verifier and archive command", () => {
     const runner = new FakeRunner();
     const report = provisionBackupEngine({ runner, config: config(), dryRun: true });
     expect(report.nodes).toEqual(["10.10.13.10"]);
+    expect(report.daemon?.installDir).toBe("/opt/pg-backup-daemon");
     expect(runner.writes.some((write) => write.path === "/etc/pg-backup/backup.env")).toBe(true);
     expect(runner.writes.some((write) => write.path === "/etc/systemd/system/pg-backup-daemon.service")).toBe(true);
     expect(runner.writes.some((write) => write.path === "/etc/cron.d/pg-backup")).toBe(true);
+    expect(runner.writes.some((write) => write.path === "/usr/local/bin/pg-backup-daemon-trigger")).toBe(true);
     expect(runner.writes.some((write) => write.path === "/usr/local/bin/pg-backup-restore-drill")).toBe(true);
-    expect(runner.writes.some((write) => write.content.includes("archive_command"))).toBe(true);
+    expect(runner.writes.some((write) => write.path === "/etc/cron.d/pg-journal-partitions")).toBe(true);
+    expect(runner.writes.some((write) => write.content.includes("ensure_journal_line_partitions(18)"))).toBe(true);
+    expect(
+      runner.writes.some(
+        (write) =>
+          write.content.includes("archive_mode = 'off'") &&
+          write.content.includes("pg_create_physical_replication_slot('barman')"),
+      ),
+    ).toBe(true);
+    expect(runner.writes.some((write) => write.content.includes("wal-g-audit.env") || write.content.includes("pg_audit_db"))).toBe(true);
     expect(runner.runs.some((run) => run.command.includes("rclone lsd"))).toBe(true);
+    expect(backupDaemonTriggerScript(config())).toContain("/v1/backups/trigger");
+    expect(backupDaemonTriggerScript(config())).toContain("--cert");
+    expect(journalLinePartitionCronLine(config())).toContain("ensure_journal_line_partitions(18)");
   });
 });

@@ -53,6 +53,8 @@ LOG_DB_PASSWORD="ultra-strong-log-password"
 BACKUP_ENABLED="true"
 BACKUP_NODE="backup-1@10.10.13.10:22:10.10.13.10:4090"
 BACKUP_SSH_KEY_PATH="~/.ssh/backup"
+BACKUP_ENGINE_MODE="barman"
+BACKUP_PRIMARY_S3_ENDPOINT="https://s3.example.invalid"
 BACKUP_PRIMARY_S3_BUCKET="s3://payment-gateway-backups/prod"
 BACKUP_ENCRYPTION_KEY_HEX="abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
 `;

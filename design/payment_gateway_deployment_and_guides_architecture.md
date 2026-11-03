@@ -1,18 +1,18 @@
 # MULTI-RAIL PAYMENT GATEWAY PLATFORM — MULTI-HOST AUTOMATED DEPLOYMENT ENGINE & 4-PORTAL INTERACTIVE GUIDES ARCHITECTURE
 
-**Subtitle:** Topology-Aware Multi-Server Deployment Orchestrator (`1-to-5 Host Matrix`, Automated mTLS 1.3 PKI Generation & Distribution, Per-Host UFW Zero-Trust Firewalling, Atomic Symlink Releases, PM2 + Bun, Multi-Vhost Nginx Generator) and Built-In Interactive User Guides, Employee Academy & Dynamic Checkout Help Center across `admin-front`, `merchant-front`, and `checkout-front`.
+**Subtitle:** Topology-Aware Multi-Server Deployment Orchestrator (`1..N Compute Nodes + Dedicated PostgreSQL 18/Redis/Audit/Log/Backup Storage Tiers`, Automated Multi-Node mTLS 1.3 PKI Generation & Distribution, Per-Host UFW Zero-Trust Firewalling, Atomic Symlink Releases, PM2 + Bun, Multi-Vhost Nginx Generator, Rolling Batches and Storage Provisioners) and Built-In Interactive User Guides, Employee Academy & Dynamic Checkout Help Center across `admin-front`, `merchant-front`, and `checkout-front`.
 
 **Target Repository:** [`selmotamed-ctrl/payment-gateway-monolith`](https://github.com/selmotamed-ctrl/payment-gateway-monolith) (`core-back`, `admin-back`, `admin-front`, `merchant-back`, `merchant-front`, `checkout-back`, `checkout-front`, `design`)
 
 ## Contents
 
 - **PART I: MULTI-SERVER ZERO-TRUST DEPLOYMENT ENGINE ARCHITECTURE**
-  - 1. Flexible 1-to-5 Host Topology Model (Same-Server vs. Fully Distributed)
+  - 1. Flexible 1..N Compute + Storage Topology Model (Same-Server vs. Fully Distributed)
   - 2. Complete `deploy/` Directory Structure
   - 3. Multi-Host Configuration Architecture: `deploy.env` & Zod 4 Validator
   - 4. Automated mTLS 1.3 PKI Generation, SAN Binding & Least-Privilege Distribution
   - 5. Host-Aware UFW Firewall & Network Isolation Provisioning
-  - 6. Ordered 12-Step Multi-Host Deployment Pipeline (Database -> Core -> Edge Nodes)
+  - 6. Ordered 14-Step Multi-Host Deployment Pipeline (Storage -> Core -> Edge Nodes)
   - 7. Reference Templates (Multi-App PM2, Public SSL Nginx, LAN-Only Admin Nginx)
   - 8. Complete Operator Manual & Environment Variable Reference (`deploy/DEPLOYMENT_GUIDE.md`)
 - **PART II: THE FOUR BUILT-IN INTERACTIVE PORTAL GUIDES & EMPLOYEE ACADEMY**
@@ -28,21 +28,24 @@
 
 # PART I: MULTI-SERVER ZERO-TRUST DEPLOYMENT ENGINE ARCHITECTURE
 
-## 1. Flexible 1-to-5 Host Topology Model (Same-Server vs. Fully Distributed)
+## 1. Flexible 1..N Compute + Storage Topology Model (Same-Server vs. Fully Distributed)
 
-Unlike a single-server app, the Payment Gateway Platform consists of **4 backend services**, **3 frontend SPAs**, and **1 database server**, where any service may live on its own dedicated physical/virtual server or share a host with others:
+Unlike a single-server app, the Payment Gateway Platform consists of **4 backend services**, **3 frontend SPAs**, and a **PostgreSQL 18 storage plane**, where any service may live on its own dedicated physical/virtual server or share a host with others:
 
-- **Node Role 1 (`DB_HOST`):** Runs PostgreSQL / MariaDB. Accepts connections **strictly** from `CORE_HOST_PRIVATE_IP` (never from `admin-back`, `merchant-back`, `checkout-back`, or the public internet).
-- **Node Role 2 (`CORE_HOST`):** Runs `core-back` on port `4000` (mTLS 1.3 Server). Has the **only** Prisma client, database credentials, and `KMS_MASTER_KEY`. Accepts connections **strictly** from the private LAN IPs of `ADMIN_HOST`, `MERCHANT_HOST`, and `CHECKOUT_HOST`.
-- **Node Role 3 (`ADMIN_HOST`):** Runs `admin-back` (`:4101`) + serves `admin-front` static build via LAN-only Nginx (`:8443` SSL on private LAN interface, never router-forwarded). Connects to `CORE_HOST:4000` using `admin-back-client.crt` (`CN=admin-back`).
-- **Node Role 4 (`MERCHANT_HOST`):** Runs `merchant-back` (`:4102`) + serves `merchant-front` static build via Public SSL Nginx (`80 -> 443`). Connects to `CORE_HOST:4000` using `merchant-back-client.crt` (`CN=merchant-back`).
-- **Node Role 5 (`CHECKOUT_HOST`):** Runs `checkout-back` (`:4103`) + serves `checkout-front` static build via Public SSL Nginx (`80 -> 443`). Connects to `CORE_HOST:4000` using `checkout-back-client.crt` (`CN=checkout-back`).
+- **Compute tiers (`1..N` nodes):** `CORE_NODES` runs `core-back` on port `4000` (mTLS 1.3 server, the only Prisma client, database credentials and `KMS_MASTER_KEY`), and `ADMIN_NODES` / `MERCHANT_NODES` / `CHECKOUT_NODES` run the three edge backends plus their SPAs. Each tier is declared as a comma-separated array of `nodeId@sshHost:sshPort:privateIp:servicePort` entries.
+- **PostgreSQL 18 primary:** `PG_PRIMARY_NODE` runs the relational core. It accepts `5432` from replicas and, when PgBouncer is disabled, from core nodes.
+- **Streaming replicas (`1..M`):** `PG_REPLICA_NODES` receive physical replication via `pg_basebackup -R` and serve dashboards, lists, exports and deep search with LSN-aware read-your-own-writes routing.
+- **PgBouncer:** when `PGBOUNCER_ENABLED=true`, transaction-mode pooling runs on the primary and every replica on `6432`, and core nodes connect through it.
+- **Redis:** `REDIS_NODES` provides the L1/L2 cache and atomic velocity counters; it is never authoritative for money.
+- **Dedicated audit and log databases:** `AUDIT_DB_NODE` (`pg_audit_db`, append-only SHA-256 hash chain) and `LOG_DB_NODE` (`pg_logs_db`, monthly-partitioned step/access logs).
+- **Backup daemon:** `BACKUP_NODE` runs `pg-backup-daemon` on an mTLS control plane (`:4090`) over WAL-G or Barman, with S3 primary storage and an optional secondary SSH/S3 target.
 
 ### Smart Host Deduplication in `deploy/deploy.ts`
-The deployment orchestrator groups the 5 logical roles by `(SSH_HOST, SSH_PORT)`:
-- **Scenario A (5 Separate Servers):** Every role has a distinct IP in `deploy.env`. The script bootstraps each server with **only** the packages, certificates, PM2 apps, and Nginx vhosts required for its specific role.
-- **Scenario B (2 Servers — e.g., Internal Core/Admin/DB Server + Public Edge Server for Merchant/Checkout):** The script detects that `MERCHANT_HOST` and `CHECKOUT_HOST` share an IP, runs OS bootstrap once on that host, deploys both `merchant-back` and `checkout-back` into PM2, and configures both Nginx public virtual hosts (`merchant.<domain>` and `pay.<domain>`).
-- **Scenario C (Single All-in-One Staging/Compact Server):** All 5 roles point to the same IP (`127.0.0.1` private communication), while still enforcing mTLS client certificates and separate ports (`4000`, `4101`, `4102`, `4103`, `8443`, `443`).
+The deployment orchestrator groups every compute and storage role by `(sshHost, sshPort)`:
+- **Scenario A (fully distributed):** every compute tier and storage role has its own host.
+- **Scenario B (combined compute hosts — e.g., Internal Core/Admin + Public Edge):** the script detects shared SSH endpoints, bootstraps each host once, and merges PM2 services, Nginx vhosts and UFW rules.
+- **Scenario C (single all-in-one staging server):** all roles share one host (`127.0.0.1` private communication), while still enforcing mTLS client certificates and distinct compute listeners (`4000`, `4101`, `4102`, `4103`, `8443`, `443`). PostgreSQL-family storage roles may co-locate on `5432`.
+- **Scenario D (horizontal compute):** add `core-2`, `merch-2`, `chk-2`, etc. to the node arrays. Edge nodes receive `CORE_BACK_URLS=https://<core-private-ip>:<port>,...` and `CORE_BACK_URL` (first node for compatibility); the core server certificate SAN contains every core private IP. Deploys use rolling batches (`--rolling-batch`) and can be limited with `--nodes`.
 
 ---
 
@@ -65,18 +68,25 @@ payment-gateway-monolith/
     ├── deploy.env                      # Operator's secret config (gitignored, chmod 600)
     ├── DEPLOYMENT_GUIDE.md             # Complete operator manual & variable dictionary
     ├── lib/
-    │   ├── configSchema.ts             # Zod 4 validator for all 5 host roles & app vars
-    │   ├── hostPlanner.ts              # Deduplicates hosts by IP & plans per-host actions
-    │   ├── pkiManager.ts               # Generates/rotates Internal CA + SAN-bound mTLS certs
+    │   ├── configSchema.ts             # Zod 4 validator for compute tiers, PG/storage nodes & app vars
+    │   ├── hostPlanner.ts              # Deduplicates hosts by SSH endpoint, plans compute + storage nodes
+    │   ├── pkiManager.ts               # Generates/rotates Internal CA + multi-node SAN mTLS certs
     │   ├── sshRunner.ts                # Multi-host SSH, stdin-sudo (`sudo -S`), and rsync engine
-    │   ├── firewallConfigurator.ts     # Configures strict UFW rules per host role
-    │   └── healthVerifier.ts           # End-to-end mTLS + HTTP health probes & auto-rollback
-    └── templates/
-        ├── pm2.core.config.cjs.tpl
-        ├── pm2.edge.config.cjs.tpl
-        ├── nginx.admin.lan.conf.tpl    # LAN-only port 8443 SSL config (`allow <LAN_CIDR>; deny all;`)
-        ├── nginx.merchant.ssl.conf.tpl # Public 80->443 SSL config for merchant portal & POS stream
-        └── nginx.checkout.ssl.conf.tpl # Public 80->443 SSL config for checkout & SSE stream
+    │   ├── firewallConfigurator.ts     # Configures strict UFW rules per compute/storage role
+    │   └── healthVerifier.ts           # End-to-end mTLS + storage + HTTP health probes
+    ├── provisioners/
+    │   ├── postgres18Provisioner.ts    # PostgreSQL 18 primary/replicas + PgBouncer
+    │   ├── redisProvisioner.ts         # Redis cache/velocity tier
+    │   ├── auditAndLogDbProvisioner.ts # pg_audit_db + partitioned pg_logs_db
+    │   └── backupEngineProvisioner.ts  # WAL-G/Barman + pg-backup-daemon + cron drills
+    ├── backup-daemon/                  # mTLS backup control plane + restore/invariant drills
+    ├── templates/
+    │   ├── pm2.core.config.cjs.tpl
+    │   ├── pm2.edge.config.cjs.tpl
+    │   ├── nginx.admin.lan.conf.tpl    # LAN-only port 8443 SSL config (`allow <LAN_CIDR>; deny all;`)
+    │   ├── nginx.merchant.ssl.conf.tpl # Public 80->443 SSL config for merchant portal & POS stream
+    │   └── nginx.checkout.ssl.conf.tpl # Public 80->443 SSL config for checkout & SSE stream
+    └── test/                           # config, planner, PKI, provisioner and rolling-deploy suites
 ```
 
 ---
@@ -85,24 +95,25 @@ payment-gateway-monolith/
 
 ### 3.1 Complete `deploy/deploy.env.example`
 
+PostgreSQL 18 is the default and the only supported runtime engine. The `DB_*`
+block is a legacy single-host compatibility path; the `PG_*` block is the
+current primary/replica/PgBouncer storage tier.
+
 ```ini
-# ==============================================================================
-# MULTI-RAIL PAYMENT GATEWAY — MULTI-HOST DEPLOYMENT CONFIGURATION (deploy.env)
-# ==============================================================================
-# Supports 1 to 5 servers. If two roles share the same server, give them the same
-# SSH_HOST, SSH_USER, SSH_KEY_PATH, and SUDO_PASSWORD; the orchestrator will
-# automatically deduplicate OS provisioning and merge PM2/Nginx configurations.
-
 # --- 0. GLOBAL DEPLOYMENT OPTIONS ---------------------------------------------
-DEPLOY_MODE="auto"                  # "auto" | "fresh" | "update"
-KEEP_RELEASES="5"                   # Number of atomic releases kept per host for rollback
-ROTATE_MTLS_CERTS="false"           # Set "true" to force regeneration of mTLS client/server certs
-MTLS_VALIDITY_DAYS="825"            # Validity period for generated internal mTLS certificates
-LAN_ALLOWED_CIDRS="10.0.0.0/8,192.168.0.0/16" # Allowed LAN subnets for admin-front/admin-back
+DEPLOY_MODE="auto"                  # "auto" | "fresh" | "update" (rolling_update is accepted)
+DEPLOY_ENV="production"
+ROLLING_BATCH_SIZE="1"              # nodes per rolling batch
+KEEP_RELEASES="5"
+ROTATE_MTLS_CERTS="false"
+MTLS_VALIDITY_DAYS="825"
+LAN_ALLOWED_CIDRS="127.0.0.1/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
 
-# --- 1. DATABASE SERVER (DB_HOST) ---------------------------------------------
-# Set DB_MANAGE_VIA_SSH="true" if the script should SSH into DB_HOST to create
-# the DB/user and lock firewall rules to CORE_PRIVATE_IP only.
+# Multi-node format (all *_NODES arrays, PG_PRIMARY_NODE, PG_REPLICA_NODES,
+# REDIS_NODES, AUDIT_DB_NODE, LOG_DB_NODE, BACKUP_NODE):
+#   nodeId@sshHost:sshPort:privateIp:servicePort
+
+# --- 1. LEGACY SINGLE-HOST DATABASE COMPATIBILITY (OPTIONAL) ------------------
 DB_MANAGE_VIA_SSH="true"
 DB_SSH_HOST="10.10.0.10"
 DB_SSH_PORT="22"
@@ -110,72 +121,138 @@ DB_SSH_USER="ubuntu"
 DB_SSH_KEY_PATH="~/.ssh/id_ed25519_pg_db"
 DB_SUDO_PASSWORD="db-sudo-password"
 DB_PRIVATE_IP="10.10.0.10"
-DB_ENGINE="postgresql"              # "postgresql" | "mysql"
+DB_ENGINE="postgresql"              # PostgreSQL 18 only
 DB_PORT="5432"
 DB_NAME="payment_gateway_prod"
 DB_USER="pg_core_user"
 DB_PASSWORD="ultra-strong-db-password"
-DATABASE_URL="postgresql://pg_core_user:ultra-strong-db-password@10.10.0.10:5432/payment_gateway_prod?schema=public"
+DATABASE_URL="postgresql://pg_core_user:ultra-strong-db-password@10.10.0.10:5432/payment_gateway_prod"
 
-# --- 2. CORE-BACK SERVER (CORE_HOST — Private LAN Only, Sole DB Owner) --------
+# --- 1b. HORIZONTAL COMPUTE NODE ARRAYS --------------------------------------
+CORE_NODES="core-1@10.10.1.11:22:10.10.1.11:4000,core-2@10.10.1.12:22:10.10.1.12:4000"
+ADMIN_NODES="admin-1@10.10.2.11:22:10.10.2.11:4101"
+MERCHANT_NODES="merch-1@203.0.113.11:22:10.10.3.11:4102,merch-2@203.0.113.12:22:10.10.3.12:4102"
+CHECKOUT_NODES="chk-1@203.0.113.21:22:10.10.4.11:4103,chk-2@203.0.113.22:22:10.10.4.12:4103"
+# CORE_BACK_URLS="https://10.10.1.11:4000,https://10.10.1.12:4000"
+
+# --- 2. CORE-BACK SERVER (PRIVATE LAN ONLY, SOLE DB OWNER) -------------------
 CORE_SSH_HOST="10.10.0.20"
 CORE_SSH_PORT="22"
 CORE_SSH_USER="ubuntu"
 CORE_SSH_KEY_PATH="~/.ssh/id_ed25519_pg_core"
 CORE_SUDO_PASSWORD="core-sudo-password"
-CORE_PRIVATE_IP="10.10.0.20"        # IP bound by core-back mTLS server & included in core-back.crt SAN
+CORE_PRIVATE_IP="10.10.0.20"
 CORE_PORT="4000"
 CORE_REMOTE_DIR="/var/www/pg-core"
-RUN_PRISMA_SEED="false"             # Set "true" on initial deploy to seed GL accounts, roles & 7 blueprints
+RUN_PRISMA_SEED="false"
 
-# --- 3. ADMIN SERVER (ADMIN_HOST — Private LAN Only, Non-Forwarded Port) ------
+# --- 3. ADMIN SERVER (PRIVATE LAN ONLY, NON-FORWARDED PORT) ------------------
 ADMIN_SSH_HOST="10.10.0.30"
 ADMIN_SSH_PORT="22"
 ADMIN_SSH_USER="ubuntu"
 ADMIN_SSH_KEY_PATH="~/.ssh/id_ed25519_pg_admin"
 ADMIN_SUDO_PASSWORD="admin-sudo-password"
-ADMIN_PRIVATE_IP="10.10.0.30"       # Allowed by UFW on CORE_HOST:4000
+ADMIN_PRIVATE_IP="10.10.0.30"
 ADMIN_BACK_PORT="4101"
-ADMIN_NGINX_LAN_PORT="8443"         # Served over HTTPS on LAN only (not router-forwarded)
+ADMIN_NGINX_LAN_PORT="8443"
 ADMIN_DOMAIN="admin.internal"
 ADMIN_REMOTE_DIR="/var/www/pg-admin"
 
-# --- 4. MERCHANT SERVER (MERCHANT_HOST — Public SSL 80/443) -------------------
+# --- 4. MERCHANT SERVER (PUBLIC SSL 80/443) ----------------------------------
 MERCHANT_SSH_HOST="203.0.113.10"
 MERCHANT_SSH_PORT="22"
 MERCHANT_SSH_USER="ubuntu"
 MERCHANT_SSH_KEY_PATH="~/.ssh/id_ed25519_pg_merchant"
 MERCHANT_SUDO_PASSWORD="merchant-sudo-password"
-MERCHANT_PRIVATE_IP="10.10.0.40"    # Private LAN IP used to reach CORE_PRIVATE_IP:4000 over mTLS
+MERCHANT_PRIVATE_IP="10.10.0.40"
 MERCHANT_BACK_PORT="4102"
 MERCHANT_DOMAIN="merchant.yourdomain.ly"
-MERCHANT_SSL_MODE="certbot"         # "certbot" | "custom" | "self_signed"
+MERCHANT_SSL_MODE="certbot"
 MERCHANT_SSL_CERT_PATH="/etc/letsencrypt/live/merchant.yourdomain.ly/fullchain.pem"
 MERCHANT_SSL_KEY_PATH="/etc/letsencrypt/live/merchant.yourdomain.ly/privkey.pem"
 MERCHANT_REMOTE_DIR="/var/www/pg-merchant"
 
-# --- 5. CHECKOUT SERVER (CHECKOUT_HOST — Public SSL 80/443) -------------------
+# --- 5. CHECKOUT SERVER (PUBLIC SSL 80/443) ----------------------------------
 CHECKOUT_SSH_HOST="203.0.113.20"
 CHECKOUT_SSH_PORT="22"
 CHECKOUT_SSH_USER="ubuntu"
 CHECKOUT_SSH_KEY_PATH="~/.ssh/id_ed25519_pg_checkout"
 CHECKOUT_SUDO_PASSWORD="checkout-sudo-password"
-CHECKOUT_PRIVATE_IP="10.10.0.50"    # Private LAN IP used to reach CORE_PRIVATE_IP:4000 over mTLS
+CHECKOUT_PRIVATE_IP="10.10.0.50"
 CHECKOUT_BACK_PORT="4103"
 CHECKOUT_DOMAIN="pay.yourdomain.ly"
-CHECKOUT_SSL_MODE="certbot"         # "certbot" | "custom" | "self_signed"
+CHECKOUT_SSL_MODE="certbot"
 CHECKOUT_SSL_CERT_PATH="/etc/letsencrypt/live/pay.yourdomain.ly/fullchain.pem"
 CHECKOUT_SSL_KEY_PATH="/etc/letsencrypt/live/pay.yourdomain.ly/privkey.pem"
 CHECKOUT_REMOTE_DIR="/var/www/pg-checkout"
 
-# --- 6. CORE-BACK MASTER SECRETS (Delivered ONLY to CORE_HOST, NEVER to Edge) -
-KMS_MASTER_KEY_ID="v1"
-KMS_MASTER_KEY_HEX="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-JWT_ADMIN_SECRET="64-byte-random-secret-for-admin-jwt"
-JWT_MERCHANT_SECRET="64-byte-random-secret-for-merchant-jwt"
+# --- 6. POSTGRESQL 18 PRIMARY + STREAMING REPLICAS + PGBOUNCER ---------------
+PG_MANAGE_VIA_SSH="true"
+PG_VERSION="18"
+PG_PRIMARY_NODE="pg-pri@10.10.10.10:22:10.10.10.10:5432"
+PG_REPLICA_NODES="pg-rep-1@10.10.10.11:22:10.10.10.11:5432,pg-rep-2@10.10.10.12:22:10.10.10.12:5432"
+PG_SSH_USER="ubuntu"
+PG_SSH_PORT="22"
+PG_SSH_KEY_PATH="~/.ssh/id_ed25519_pg_db"
+PG_SUDO_PASSWORD="pg-sudo-password"
+PG_DB_NAME="payment_gateway_prod"
+PG_DB_USER="pg_core_user"
+PG_DB_PASSWORD="ultra-strong-pg-password"
+PG_REPLICATION_USER="pg_replicator"
+PG_REPLICATION_PASSWORD="ultra-strong-repl-password"
+PGBOUNCER_ENABLED="true"
+PGBOUNCER_PORT="6432"
+PGBOUNCER_DEFAULT_POOL_SIZE="50"
+PGBOUNCER_MAX_CLIENT_CONN="2000"
+PGBOUNCER_MAX_PREPARED_STATEMENTS="256"
+
+# --- 7. REDIS 7.4+ CACHE / VELOCITY ENGINE -----------------------------------
+REDIS_MANAGE_VIA_SSH="true"
+REDIS_NODES="redis-1@10.10.11.10:22:10.10.11.10:6379"
+REDIS_SSH_USER="ubuntu"
+REDIS_SSH_PORT="22"
+REDIS_SSH_KEY_PATH="~/.ssh/id_ed25519_pg_redis"
+REDIS_SUDO_PASSWORD="redis-sudo-password"
+REDIS_PASSWORD="ultra-strong-redis-password"
+REDIS_MAXMEMORY="4gb"
+
+# --- 8. DEDICATED AUDIT + LOG DATABASES --------------------------------------
+AUDIT_DB_MANAGE_VIA_SSH="true"
+AUDIT_DB_NODE="audit-db@10.10.12.10:22:10.10.12.10:5432"
+AUDIT_DB_NAME="pg_audit_db"
+AUDIT_DB_USER="pg_audit_writer"
+AUDIT_DB_PASSWORD="ultra-strong-audit-password"
+
+LOG_DB_MANAGE_VIA_SSH="true"
+LOG_DB_NODE="log-db@10.10.12.20:22:10.10.12.20:5432"
+LOG_DB_NAME="pg_logs_db"
+LOG_DB_USER="pg_log_writer"
+LOG_DB_PASSWORD="ultra-strong-log-password"
+LOG_RETENTION_MONTHS="12"
+
+# --- 9. BACKUP ORCHESTRATOR & PITR DRILL ENGINE -------------------------------
+BACKUP_ENABLED="true"
+BACKUP_NODE="backup-1@10.10.13.10:22:10.10.13.10:4090"
+BACKUP_ENGINE_MODE="barman"          # "wal-g" | "barman"
+BACKUP_COMPRESSION="zstd"            # "zstd" | "lz4" | "gzip"
+BACKUP_ENCRYPTION_KEY_HEX="<64 hex chars; openssl rand -hex 32>"
+BACKUP_PRIMARY_S3_ENDPOINT="https://s3.eu-central-1.amazonaws.com"
+BACKUP_PRIMARY_S3_BUCKET="s3://libya-pg-backups-primary/prod"
+BACKUP_PRIMARY_S3_ACCESS_KEY="AKIA..."
+BACKUP_PRIMARY_S3_SECRET_KEY="secret..."
+BACKUP_SECONDARY_SSH_TARGET="backup-vault@198.51.100.99:/mnt/offsite-vault/pg"
+BACKUP_FULL_CRON="0 2 * * 0"
+BACKUP_DELTA_CRON="0 2 * * 1-6"
+BACKUP_DRILL_CRON="0 4 * * 0"
+BACKUP_RETENTION_FULL_COUNT="8"
+BACKUP_RETENTION_WAL_DAYS="14"
+BACKUP_DAEMON_PORT="4090"
+
+# --- 10. CORE-ONLY MASTER SECRETS (NEVER DELIVERED TO EDGE) -------------------
+KMS_MASTER_KEY="change-me-at-least-32-characters-long-secret"
 BASE_CURRENCY="LYD"
 GATEWAY_TIMEZONE="Africa/Tripoli"
-REDIS_URL=""                        # Optional Redis URL for multi-node InvalidationBus
+REDIS_URL=""                        # optional external Redis URL
 ```
 
 ---
@@ -185,18 +262,19 @@ REDIS_URL=""                        # Optional Redis URL for multi-node Invalida
 One of the hardest parts of deploying a multi-server mTLS architecture is making sure certificates match the exact private IP addresses of the servers and that private keys never end up on the wrong machine. `deploy/lib/pkiManager.ts` automates this completely:
 
 1. **Local Vault Generation (`deploy/.certs/` — gitignored, `chmod 600`):**
-   - On first run (or when `ROTATE_MTLS_CERTS="true"`), `pkiManager.ts` generates an offline **Internal Root CA** (`internal-ca.key` + `internal-ca.crt`) and signs 4 leaf certificates:
-     - **`core-back.crt` / `core-back.key`:** Includes Subject Alternative Names (`subjectAltName = IP:${CORE_PRIVATE_IP}, IP:127.0.0.1, DNS:core-back.internal`). Without the dynamic `IP:${CORE_PRIVATE_IP}` SAN, TLS 1.3 hostname verification would fail when edge servers sit on separate machines!
-     - **`admin-back-client.crt` / `.key`:** Signed with `CN=admin-back, OU=edge-admin`.
-     - **`merchant-back-client.crt` / `.key`:** Signed with `CN=merchant-back, OU=edge-merchant`.
-     - **`checkout-back-client.crt` / `.key`:** Signed with `CN=checkout-back, OU=edge-checkout`.
+   - On first run (or when `ROTATE_MTLS_CERTS="true"`), `pkiManager.ts` generates an offline **Internal Root CA** (`internal-ca.key` + `internal-ca.crt`) and signs the leaf certificates:
+     - **`core-back.crt` / `core-back.key`:** server certificate whose SAN contains `IP:<every CORE_NODES private IP>`, `IP:127.0.0.1` and `DNS:core-back.internal`. The multi-IP SAN is what lets a rolling deploy of one core node keep mTLS alive on the others.
+     - **`admin-back-client.crt` / `.key`:** `CN=admin-back`, `OU=edge-admin`.
+     - **`merchant-back-client.crt` / `.key`:** `CN=merchant-back`, `OU=edge-merchant`.
+     - **`checkout-back-client.crt` / `.key`:** `CN=checkout-back`, `OU=edge-checkout`.
+     - **`backup-daemon.crt` / `.key`:** backup control-plane server certificate, SAN-bound to `BACKUP_NODE` and `127.0.0.1`.
+     - **`pg-client`, `redis-client`, `audit-db-client`, `log-db-client`, `backup-client`:** optional storage/backup client certificates generated only when the matching storage tier is enabled.
 2. **Strict Least-Privilege Key Distribution:**
    - `internal-ca.key` **never leaves your deployment workstation**.
-   - `CORE_HOST` receives **only** `internal-ca.crt`, `core-back.crt`, and `core-back.key`.
-   - `ADMIN_HOST` receives **only** `internal-ca.crt`, `admin-back-client.crt`, and `admin-back-client.key`.
-   - `MERCHANT_HOST` receives **only** `internal-ca.crt`, `merchant-back-client.crt`, and `merchant-back-client.key`.
-   - `CHECKOUT_HOST` receives **only** `internal-ca.crt`, `checkout-back-client.crt`, and `checkout-back-client.key`.
-   - Even if `CHECKOUT_HOST` were compromised by an attacker on the public internet, it does **not** possess `merchant-back-client.key` or `admin-back-client.key`, nor does it possess `DATABASE_URL` or `KMS_MASTER_KEY`.
+   - Each core node receives `internal-ca.crt`, `core-back.crt/.key`, and the enabled storage client certificates.
+   - Each edge host receives **only** `internal-ca.crt` and its own `<edge>-back-client.crt/.key`.
+   - The backup host receives `internal-ca.crt`, `backup-daemon.crt/.key`, `backup-client.crt/.key` and `pg-client.crt/.key`; PostgreSQL/Redis/audit/log storage hosts receive only their own client certificate and the CA.
+   - Even if a public edge host is compromised, it does **not** possess another edge's client key, `DATABASE_URL` or `KMS_MASTER_KEY`.
 
 ---
 
@@ -206,49 +284,41 @@ During Fresh Bootstrap (or `--enforce-firewall`), `deploy/lib/firewallConfigurat
 
 | Host Role | Inbound Ports Opened by `firewallConfigurator.ts` | Explicitly Blocked |
 | :--- | :--- | :--- |
-| **`DB_HOST`** | `SSH_PORT`, plus `DB_PORT` (`5432`/`3306`) **ONLY from `CORE_PRIVATE_IP`** (`ufw allow from <CORE_PRIVATE_IP> to any port <DB_PORT> proto tcp`). | All public & edge traffic to DB. |
-| **`CORE_HOST`** | `SSH_PORT`, plus `CORE_PORT` (`4000`) **ONLY from `ADMIN_PRIVATE_IP`, `MERCHANT_PRIVATE_IP`, and `CHECKOUT_PRIVATE_IP`**. | All public internet traffic to `:4000`. |
-| **`ADMIN_HOST`** | `SSH_PORT`, plus `ADMIN_NGINX_LAN_PORT` (`8443`) **ONLY from `LAN_ALLOWED_CIDRS`** (`10.0.0.0/8`, `192.168.0.0/16`). `ADMIN_BACK_PORT` (`4101`) bound to `127.0.0.1` only. | All non-LAN traffic. |
-| **`MERCHANT_HOST`** | `SSH_PORT`, `80/tcp`, `443/tcp`. `MERCHANT_BACK_PORT` (`4102`) bound to `127.0.0.1` only. | Direct external access to `:4102`. |
-| **`CHECKOUT_HOST`** | `SSH_PORT`, `80/tcp`, `443/tcp`. `CHECKOUT_BACK_PORT` (`4103`) bound to `127.0.0.1` only. | Direct external access to `:4103`. |
+| **Legacy `DB_HOST`** | `SSH_PORT`, plus `DB_PORT` (`5432`) **ONLY from `CORE_PRIVATE_IP`**. | All public & edge traffic to DB. |
+| **`CORE_NODES`** | `SSH_PORT`, plus `CORE_PORT` (`4000`) **ONLY from the admin/merchant/checkout private IPs**. | All public internet traffic to `:4000`. |
+| **`ADMIN_NODES`** | `SSH_PORT`, plus `ADMIN_NGINX_LAN_PORT` (`8443`) **ONLY from `LAN_ALLOWED_CIDRS`**. `ADMIN_BACK_PORT` (`4101`) bound to `127.0.0.1` only. | All non-LAN traffic. |
+| **`MERCHANT_NODES`** | `SSH_PORT`, `80/tcp`, `443/tcp`. `MERCHANT_BACK_PORT` (`4102`) bound to `127.0.0.1` only. | Direct external access to `:4102`. |
+| **`CHECKOUT_NODES`** | `SSH_PORT`, `80/tcp`, `443/tcp`. `CHECKOUT_BACK_PORT` (`4103`) bound to `127.0.0.1` only. | Direct external access to `:4103`. |
+| **PostgreSQL primary** | `SSH_PORT`, `5432` from replicas (and core when PgBouncer is off), `6432` from core nodes when PgBouncer is on. | Public and edge traffic. |
+| **PostgreSQL replica** | `SSH_PORT`, `5432` from primary/other replicas (and core when PgBouncer is off), `6432` from core nodes when PgBouncer is on. | Public and edge traffic. |
+| **Redis** | `SSH_PORT`, `6379` from core and backup nodes. | Public and edge traffic. |
+| **Audit DB / log DB** | `SSH_PORT`, the PostgreSQL port from core and backup nodes. | Public and edge traffic. |
+| **`BACKUP_NODE`** | `SSH_PORT`, `BACKUP_DAEMON_PORT` (`4090`) from core nodes. | Public and edge traffic. |
 
 *(If multiple roles share the same physical server, `hostPlanner.ts` unions their UFW rules on that host.)*
 
 ---
 
-## 6. Ordered 12-Step Multi-Host Deployment Pipeline
+## 6. Ordered 14-Step Multi-Host Deployment Pipeline
 
-When you run `./deploy/deploy.sh` (or target a single tier via `./deploy/deploy.sh --only=checkout`), the orchestrator executes in strict dependency order so `core-back` and database migrations are always live *before* edge servers switch over:
+When you run `./deploy/deploy.sh` (or target a single tier via `./deploy/deploy.sh --only=checkout`), the orchestrator executes in strict dependency order so the storage plane and database migrations are always live *before* edge servers switch over:
 
-1. **Step 1 — Validate `deploy.env` & Build Execution Plan:** Validates all variables with Zod 4 and prints the **Host Topology Map** (showing which services map to which physical IPs).
-2. **Step 2 — Build All 3 Frontend SPAs Locally (`admin-front`, `merchant-front`, `checkout-front`):** Injects the respective build-time constants and compiles all 3 Vite TSX bundles in parallel on the deployment machine.
-3. **Step 3 — Ensure mTLS PKI Certificates:** Generates or verifies `internal-ca.crt` and the 4 leaf certificates in `deploy/.certs/` bound to `CORE_PRIVATE_IP`.
+1. **Step 1 — Validate `deploy.env` & Build Execution Plan:** Validates all variables with Zod 4 and prints the **Host Topology Map** (compute nodes and storage roles).
+2. **Step 2 — Build the SPAs Locally:** Compiles `admin-front`, `merchant-front`, `checkout-front` and, when enabled, `fake-rails-front`.
+3. **Step 3 — Ensure Multi-Node mTLS PKI:** Generates or verifies the internal CA, the multi-SAN core certificate, edge client certificates, the backup-daemon certificate and the storage client certificates.
 4. **Step 4 — Bootstrap Unique Target Hosts (Fresh Mode):** Connects to every unique host via SSH, pipes `SUDO_PASSWORD` to `sudo -S`, installs `nginx`, `rsync`, `ufw`, `bun`, `pm2`, and applies role-specific UFW rules.
-5. **Step 5 — Database Pre-Migration Backup & Provisioning (`DB_HOST` / `CORE_HOST`):** Verifies database connectivity from `CORE_HOST`; if migrations are pending, dumps a compressed pre-migration backup into `CORE_REMOTE_DIR/shared/backups/`.
-6. **Step 6 — Deploy `core-back` to `CORE_HOST`:**
-   - Rsyncs `core-back/` into `/var/www/pg-core/releases/<TS>/core-back`.
-   - Uploads `internal-ca.crt`, `core-back.crt`, and `core-back.key` to `/var/www/pg-core/shared/certs/` (`chmod 600`).
-   - Writes `/var/www/pg-core/shared/.env` (containing `DATABASE_URL` and `KMS_MASTER_KEY_HEX`).
-   - Runs `bun install --frozen-lockfile`, `bunx prisma generate`, `bun run migrate-deploy`, and optional `seed.ts`.
-   - Atomically switches `/var/www/pg-core/current`, reloads PM2 (`pg-core-back`), and verifies the mTLS `/health` probe on `https://${CORE_PRIVATE_IP}:${CORE_PORT}/health`.
-7. **Step 7 — Deploy `admin-back` & `admin-front` to `ADMIN_HOST`:**
-   - Rsyncs `admin-back/` and `admin-front/dist/` to `/var/www/pg-admin/releases/<TS>/`.
-   - Uploads **only** `internal-ca.crt` and `admin-back-client.{crt,key}`.
-   - Writes `shared/.env` (`CORE_BACK_URL=https://${CORE_PRIVATE_IP}:${CORE_PORT}`, zero DB vars), installs dependencies, switches `current` symlink, and reloads PM2 (`pg-admin-back`).
-   - Renders LAN-only Nginx config (`:8443`), verifies `sudo nginx -t`, and reloads Nginx.
-8. **Step 8 — Deploy `merchant-back` & `merchant-front` to `MERCHANT_HOST`:**
-   - Rsyncs `merchant-back/` and `merchant-front/dist/` to `/var/www/pg-merchant/releases/<TS>/`.
-   - Uploads **only** `internal-ca.crt` and `merchant-back-client.{crt,key}`.
-   - Writes `shared/.env`, installs dependencies, switches `current` symlink, reloads PM2 (`pg-merchant-back`), and updates/reloads Nginx (`merchant.<domain>` on `80/443` with SSE/WebSocket unbuffered proxy for POS rooms).
-9. **Step 9 — Deploy `checkout-back` & `checkout-front` to `CHECKOUT_HOST`:**
-   - Rsyncs `checkout-back/` and `checkout-front/dist/` to `/var/www/pg-checkout/releases/<TS>/`.
-   - Uploads **only** `internal-ca.crt` and `checkout-back-client.{crt,key}`.
-   - Writes `shared/.env`, installs dependencies, switches `current` symlink, reloads PM2 (`pg-checkout-back`), and updates/reloads Nginx (`pay.<domain>` on `80/443` with strict CSP headers and unbuffered SSE proxy).
-10. **Step 10 — End-to-End Cross-Host mTLS & Health Verification:**
-    - Verifies that `ADMIN_HOST`, `MERCHANT_HOST`, and `CHECKOUT_HOST` can each complete a mutually authenticated TLS 1.3 handshake to `CORE_HOST:4000` on their permitted channel and receive `{ "msg": "OK" }`.
-    - If any tier fails health verification, automatically triggers **Multi-Host Rollback** to the previous release timestamp across all affected hosts.
-11. **Step 11 — Prune Old Releases:** Keeps the most recent `KEEP_RELEASES` (default 5) on each server.
-12. **Step 12 — Emit Deployment Audit Summary:** Prints deployed commit SHA, release timestamp, host statuses, and active certificate expiry dates.
+5. **Step 5 — Provision Storage Engines or the Legacy Database:** Runs the PostgreSQL 18 primary/replica + PgBouncer, Redis, audit/log DB and backup provisioners. On the legacy single-host path, creates the database/role and takes a compressed pre-migration backup into `CORE_REMOTE_DIR/shared/backups/`.
+6. **Step 6 — Deploy `core-back`:** Rsyncs the release, uploads the least-privilege certificates, writes `shared/.env` (`DATABASE_URL`, replica URLs, audit/log URLs, Redis, backup control plane, `KMS_MASTER_KEY`), runs `bun install --frozen-lockfile`, `prisma generate`, `migrate-deploy`, optional seed, switches `current`, reloads PM2 and probes `/health` over mTLS.
+7. **Step 7 (optional) — Deploy `fake-rails-back` + `fake-rails-front`.**
+8. **Step 8 — Deploy `admin-back` + `admin-front`:** Writes `CORE_BACK_URLS=https://<core-ip>:<port>,...` plus `CORE_BACK_URL` (first node), renders the LAN-only Nginx vhost (`:8443`), reloads PM2 and Nginx.
+9. **Step 9 — Deploy `merchant-back` + `merchant-front`:** Same mTLS client pool, public `merchant.<domain>` vhost on `80/443` with unbuffered POS SSE.
+10. **Step 10 — Deploy `checkout-back` + `checkout-front`:** Same mTLS client pool, public `pay.<domain>` vhost on `80/443` with strict CSP and unbuffered payer SSE.
+11. **Step 11 — Seed Fake Rails Blueprints and Synthetic History:** Optional, test-server only.
+12. **Step 12 — End-to-End Verification:** Probes every core node, every edge node against a healthy core URL, the public vhosts, PostgreSQL primary/replicas (`pg_isready` + `SELECT 1`), PgBouncer, Redis `PING`, audit/log `SELECT 1`, and the backup-daemon `/health` over mTLS when configured. A failed rolling batch stops the deploy with the previous release still on disk.
+13. **Step 13 — Prune Old Releases:** Keeps the most recent `KEEP_RELEASES` (default 5) on each server.
+14. **Step 14 — Emit Deployment Audit Summary:** Prints deployed commit SHA, release timestamp, host statuses and active certificate expiry dates.
+
+Rolling updates use `--rolling-batch=<n>` (default `ROLLING_BATCH_SIZE`, or `1`); each batch is health-checked before the next starts. `--nodes=<id,...>` limits a run to named compute nodes. `--only` accepts the compute roles plus `pg`, `pg-primary`, `pg-replica`, `pgbouncer`, `redis`, `audit-db`, `log-db`, `backup` and `storage`.
 
 ---
 
@@ -401,7 +471,7 @@ When an end-customer opens a payment link (`https://pay.<domain>/pay/:linkKey`),
 You can hand this file directly to **OpenCode** to implement both the Multi-Host Deployment Orchestrator and the 4 Portal Guide Systems in [`payment-gateway-monolith`](https://github.com/selmotamed-ctrl/payment-gateway-monolith):
 
 ### Phase A: Multi-Host Deployment Engine (`deploy/`)
-- [x] **`PG-D1` Build Multi-Host Zod Config & Host Planner:** Implement `deploy/lib/configSchema.ts` and `deploy/lib/hostPlanner.ts` supporting 1-to-5 servers (`DB_HOST`, `CORE_HOST`, `ADMIN_HOST`, `MERCHANT_HOST`, `CHECKOUT_HOST`) and `deploy/deploy.env.example`.
+- [x] **`PG-D1` Build Multi-Host Zod Config & Host Planner:** Implement `deploy/lib/configSchema.ts` and `deploy/lib/hostPlanner.ts` supporting `1..N` compute tiers (`CORE_NODES`, `ADMIN_NODES`, `MERCHANT_NODES`, `CHECKOUT_NODES`) plus storage nodes (`PG_PRIMARY_NODE`, `PG_REPLICA_NODES`, PgBouncer, `REDIS_NODES`, `AUDIT_DB_NODE`, `LOG_DB_NODE`, `BACKUP_NODE`) and `deploy/deploy.env.example`.
 - [x] **`PG-D2` Build Automated mTLS PKI Generator & Distributor:** Implement `deploy/lib/pkiManager.ts` generating `internal-ca.crt` and SAN-bound `core-back.crt` (`IP:${CORE_PRIVATE_IP}`) + `admin-back`, `merchant-back`, and `checkout-back` client certs, distributing only the required keys to each host.
 - [x] **`PG-D3` Build SSH/`stdin`-Sudo Runner, UFW Configurator & Atomic Deployer:** Implement `deploy/lib/sshRunner.ts`, `deploy/lib/firewallConfigurator.ts`, `deploy/lib/healthVerifier.ts`, `deploy/deploy.ts`, and `deploy/deploy.sh`.
 - [x] **`PG-D4` Create PM2 & Nginx Templates + `DEPLOYMENT_GUIDE.md`:** Implement `pm2.core.config.cjs.tpl`, `pm2.edge.config.cjs.tpl`, `nginx.admin.lan.conf.tpl`, `nginx.merchant.ssl.conf.tpl`, `nginx.checkout.ssl.conf.tpl`, and `deploy/DEPLOYMENT_GUIDE.md`.

@@ -26,9 +26,20 @@ import { invalidationBus } from "../../lib/invalidationBus";
 import { ApiError } from "../../lib/error";
 import { ApiConsumerError } from "../apiConsumer/ApiConsumer";
 import type { DynamicAttempt } from "../flow/DynamicRailEngine";
-import { createLedgerShardWriter } from "../../lib/storageEngine/ledgerShardWriter";
+import { createLedgerPoster } from "../../lib/storageEngine/ledgerPosterFactory";
+import type { StorageEngine } from "../../lib/storageEngine/ports";
+import { env } from "../../lib/env";
 
 export interface PlatformRuntime {
+  storage?: StorageEngine;
+  transactionRunner: <R>(
+    callback: (transaction: unknown) => Promise<R>,
+    options?: { attemptId?: string },
+  ) => Promise<R>;
+  consumeCommitLsn(attemptId: string): string | undefined;
+  runTransactionWithLsn<R>(
+    callback: (transaction: unknown) => Promise<R>,
+  ): Promise<{ data: R; commitLsn: string }>;
   engine: DynamicRailEngine;
   ledgerPoster: LedgerPoster;
   guardPipeline: AttemptGuardPipeline;
@@ -68,7 +79,16 @@ export interface ConsumerConfigKey {
  * that the HTTP routes, the durable workers and the outbound gateway calls
  * all share the same ledger poster, the same registry and the same cache.
  */
-export const createPlatformRuntime = (db: PrismaLike): PlatformRuntime => {
+export interface PlatformRuntimeOptions {
+  storage?: StorageEngine;
+}
+
+export const createPlatformRuntime = (
+  db: PrismaLike,
+  options: PlatformRuntimeOptions = {},
+): PlatformRuntime => {
+  const storage = options.storage;
+  const commitLsnByAttempt = new Map<string, string>();
   const vault = new Vault();
   const crypto = new CryptoEngine();
   const repositories = new PrismaRepositories(db);
@@ -109,7 +129,7 @@ export const createPlatformRuntime = (db: PrismaLike): PlatformRuntime => {
     },
   });
 
-  const ledgerPoster = new LedgerPoster(db as never, undefined, createLedgerShardWriter());
+  const ledgerPoster = createLedgerPoster(db as never);
   const attempts = new PrismaAttemptRepository(db);
   const slots = new PrismaSlotReservationStore(db);
   const flowProvider = new PrismaFlowProvider(db);
@@ -156,13 +176,75 @@ export const createPlatformRuntime = (db: PrismaLike): PlatformRuntime => {
       }
       return resolveCredentialValues(db, vault, attempt.credentialSetId);
     },
-    transactionRunner: async (callback) => db.$transaction(async (tx: PrismaLike) => callback(tx)),
+    ...(storage
+      ? { logSink: storage.logSink }
+      : {}),
+    transactionRunner: storage
+      ? async (callback, runnerOptions) => {
+          const result = await storage.uow.run(
+            async (tx) => callback(tx.db as unknown),
+            {
+              timeoutMs: env.STORAGE_QUERY_TIMEOUT_MS,
+              operationName: "dynamic-rail-transaction",
+            },
+          );
+          if (runnerOptions?.attemptId) {
+            commitLsnByAttempt.set(runnerOptions.attemptId, result.commitLsn);
+            if (commitLsnByAttempt.size > 10_000) {
+              const oldest = commitLsnByAttempt.keys().next();
+              if (!oldest.done) commitLsnByAttempt.delete(oldest.value);
+            }
+          }
+          return result.data;
+        }
+      : async (callback) => db.$transaction(async (tx: PrismaLike) => callback(tx)),
   });
 
   const screening = new CachedScreeningProvider(new InternalWatchlistProvider());
-  const guardPipeline = new AttemptGuardPipeline({ db, repositories, screening });
+  const guardPipeline = new AttemptGuardPipeline({
+    db,
+    repositories,
+    screening,
+    ...(storage ? { velocityStore: storage.cache } : {}),
+  });
 
   return {
+    storage,
+    transactionRunner: storage
+      ? async (callback, runnerOptions) => {
+          const result = await storage.uow.run(
+            async (tx) => callback(tx.db as unknown),
+            {
+              timeoutMs: env.STORAGE_QUERY_TIMEOUT_MS,
+              operationName: "platform-transaction",
+            },
+          );
+          if (runnerOptions?.attemptId) {
+            commitLsnByAttempt.set(runnerOptions.attemptId, result.commitLsn);
+          }
+          return result.data;
+        }
+      : async (callback) => db.$transaction(async (tx: PrismaLike) => callback(tx)),
+    consumeCommitLsn: (attemptId: string) => {
+      const lsn = commitLsnByAttempt.get(attemptId);
+      commitLsnByAttempt.delete(attemptId);
+      return lsn;
+    },
+    runTransactionWithLsn: async (callback) => {
+      if (storage) {
+        return storage.uow.run(
+          async (tx) => callback(tx.db as unknown),
+          {
+            timeoutMs: env.STORAGE_QUERY_TIMEOUT_MS,
+            operationName: "platform-transaction-with-lsn",
+          },
+        );
+      }
+      return {
+        data: await db.$transaction(async (tx: PrismaLike) => callback(tx)),
+        commitLsn: "0/0",
+      };
+    },
     engine,
     ledgerPoster,
     guardPipeline,

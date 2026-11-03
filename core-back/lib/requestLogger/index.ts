@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
+import type { HttpAccessLogRecord, LogSinkPort } from "../storageEngine/ports";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -162,9 +163,46 @@ declare global {
     }
 }
 
+let accessLogSink: LogSinkPort | undefined;
+
+/** Installs the dedicated operational log sink used by the request logger. */
+export const setAccessLogSink = (sink: LogSinkPort | undefined): void => {
+    accessLogSink = sink;
+};
+
+const accessLogChannel = (path: string): HttpAccessLogRecord["channel"] => {
+    if (path.startsWith("/internal/admin")) return "admin";
+    if (path.startsWith("/internal/merchant")) return "merchant";
+    if (path.startsWith("/internal/checkout")) return "checkout";
+    return "webhook";
+};
+
 export const requestLoggerMiddleware = (req: Request, res: Response, next: NextFunction) => {
     req.logger = createRequestLogger(req, res);
-    res.on("finish", () => req.logger.end());
+    const startedAt = process.hrtime.bigint();
+    res.on("finish", () => {
+        req.logger.end();
+        if (!accessLogSink) return;
+        const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+        const forwardedIp = req.header("x-real-client-ip");
+        try {
+            accessLogSink.writeAccessLog({
+                requestId: req.requestId ?? shortId(),
+                channel: accessLogChannel(req.path ?? req.url ?? "/"),
+                method: req.method,
+                routePattern: req.route?.path ?? req.path ?? req.url ?? "/",
+                statusCode: res.statusCode,
+                durationMs: Math.max(0, Math.round(durationMs * 1000) / 1000),
+                dbQueries: 0,
+                dbDurationMs: 0,
+                actorId: null,
+                clientIp: forwardedIp ?? req.ip ?? null,
+                createdAt: new Date(),
+            });
+        } catch {
+            // Operational logging must never fail a request.
+        }
+    });
     next();
 };
 

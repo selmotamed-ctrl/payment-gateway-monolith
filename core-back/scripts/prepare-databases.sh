@@ -24,10 +24,8 @@
 # The two databases are separate on purpose: the integration suite rewrites its
 # own data and must never touch the application database.
 #
-# Legacy note: the previous MySQL / MariaDB workflow (and its environment
-# variables) is kept in `prisma/migrations-mysql-legacy/` and the git history.
-# The runtime still recognises `mysql://` and `mariadb://` URLs for the legacy
-# adapter, but PostgreSQL is the supported production engine.
+# PostgreSQL 18 is the only supported engine. The former MySQL/MariaDB
+# migration history and runtime adapter have been removed.
 #
 set -euo pipefail
 

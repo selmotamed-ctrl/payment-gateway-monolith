@@ -12,9 +12,15 @@ import {
   type BackupDaemonConfig,
 } from "./config";
 import { signDrillReport, type DrillReport, type DrillRunOptions } from "./restoreDrillRunner";
+import type { SchedulerState } from "./scheduler";
 
 export interface DrillRunnerLike {
   run(options?: DrillRunOptions): Promise<DrillReport>;
+}
+
+export interface SchedulerStateProvider {
+  getState?: () => SchedulerState;
+  state?: SchedulerState;
 }
 
 export interface BackupDaemonServerOptions {
@@ -22,6 +28,7 @@ export interface BackupDaemonServerOptions {
   engine: BackupEngine;
   drillRunner: DrillRunnerLike;
   catalog: CatalogStore;
+  scheduler?: SchedulerStateProvider;
   version?: string;
   clock?: () => Date;
   idFactory?: () => string;
@@ -227,6 +234,14 @@ export const createBackupDaemonHandler = (options: BackupDaemonServerOptions): H
               alertLagSeconds: policy.alertLagSeconds,
             },
             policy,
+            scheduler:
+              options.scheduler?.getState?.() ??
+              options.scheduler?.state ?? {
+                enabled: false,
+                nextFullAt: null,
+                nextDeltaAt: null,
+                nextDrillAt: null,
+              },
             backups,
             latestDrill: catalog.latestDrill(),
             drills,
@@ -380,15 +395,19 @@ export const loadTlsOptions = async (
         "set BACKUP_ALLOW_INSECURE_HTTP=true only for local tests/development",
     );
   }
+  if (!config.BACKUP_DAEMON_CA_CERT_PATH) {
+    throw new Error(
+      "mTLS requires BACKUP_DAEMON_CA_CERT_PATH; " +
+        "set BACKUP_ALLOW_INSECURE_HTTP=true only for local tests/development",
+    );
+  }
   const tls: Bun.TLSOptions = {
     cert: await readFile(config.BACKUP_DAEMON_CERT_PATH),
     key: await readFile(config.BACKUP_DAEMON_KEY_PATH),
+    ca: await readFile(config.BACKUP_DAEMON_CA_CERT_PATH),
+    requestCert: true,
+    rejectUnauthorized: true,
   };
-  if (config.BACKUP_DAEMON_CA_CERT_PATH) {
-    tls.ca = await readFile(config.BACKUP_DAEMON_CA_CERT_PATH);
-    tls.requestCert = true;
-    tls.rejectUnauthorized = true;
-  }
   return tls;
 };
 

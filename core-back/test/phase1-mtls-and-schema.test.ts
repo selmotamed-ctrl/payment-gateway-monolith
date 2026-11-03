@@ -142,27 +142,22 @@ describe("prisma schema", () => {
     }
   });
 
-  test("keeps the PostgreSQL migrations and the legacy MySQL history separate", () => {
+  test("uses only the PostgreSQL migration history", () => {
     const migrationsDirectory = path.join(repositoryRoot, "prisma", "migrations");
-    const legacyDirectory = path.join(repositoryRoot, "prisma", "migrations-mysql-legacy");
     expect(fs.existsSync(migrationsDirectory)).toBe(true);
-    expect(fs.existsSync(legacyDirectory)).toBe(true);
+    expect(fs.existsSync(path.join(repositoryRoot, "prisma", "migrations-mysql-legacy"))).toBe(false);
     const postgresMigrations = fs.readdirSync(migrationsDirectory, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name);
-    const legacyMigrations = fs.readdirSync(legacyDirectory, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name);
     expect(postgresMigrations).toContain("20261103000000_postgres18_init");
-    expect(legacyMigrations).toContain("20261029203000_init");
-    expect(postgresMigrations).not.toContain("20261029203000_init");
     for (const migration of postgresMigrations) {
       const sql = fs.readFileSync(
         path.join(migrationsDirectory, migration, "migration.sql"),
         "utf8",
       );
-      expect(sql).not.toMatch(/\bENGINE\s*=/);
-      expect(sql).not.toMatch(/`[^`]+`/);
+      expect(sql).toContain("CREATE");
+      expect(sql.toLowerCase()).not.toContain("engine=innodb");
+      expect(sql).not.toContain("`");
     }
   });
 

@@ -2,6 +2,7 @@ import { Decimal } from "decimal.js";
 import { invalidationBus, type InvalidationBus } from "../../lib/invalidationBus";
 import { decimal, type DecimalInput, type LedgerPostContext, type LedgerScenario, type LedgerScenarioInput, type PaymentConfirmationInput } from "../ledger/LedgerPoster";
 import { StepExecutor, type FlowStep, type StepExecutionContext, type StepExecutionResult } from "./StepExecutor";
+import type { LogSinkPort } from "../../lib/storageEngine/ports";
 import type {
   AdapterAttempt,
   AdapterAttemptStatus,
@@ -138,7 +139,10 @@ export interface PaymentLedgerPoster {
 }
 
 export interface DynamicRailTransactionRunner {
-  <R>(callback: (transaction: unknown) => Promise<R>): Promise<R>;
+  <R>(
+    callback: (transaction: unknown) => Promise<R>,
+    options?: { attemptId?: string },
+  ): Promise<R>;
 }
 
 export interface OperatorCaseOpenInput {
@@ -189,6 +193,8 @@ export interface DynamicRailEngineOptions {
   operatorCaseSink?: OperatorCaseSink;
   reportingEvaluator?: ReportingEvaluator;
   invalidationBus?: Pick<InvalidationBus, "publish">;
+  /** Dedicated pg_logs_db sink; when absent the engine keeps its existing behaviour. */
+  logSink?: LogSinkPort;
   now?: () => Date;
   panFieldNames?: readonly string[];
 }
@@ -313,11 +319,13 @@ export class DynamicRailEngine {
   private readonly options: DynamicRailEngineOptions;
   private readonly now: () => Date;
   private readonly transitionBus: Pick<InvalidationBus, "publish">;
+  private readonly logSink?: LogSinkPort;
 
   constructor(options: DynamicRailEngineOptions) {
     this.options = options;
     this.now = options.now ?? (() => new Date());
     this.transitionBus = options.invalidationBus ?? invalidationBus;
+    this.logSink = options.logSink;
   }
 
   async preInitiate(attempt: DynamicAttempt, formData: AdapterFormData): Promise<DynamicRailResult> {
@@ -757,6 +765,7 @@ export class DynamicRailEngine {
         panFieldNames: this.options.panFieldNames,
       };
       const result = await this.options.stepExecutor.execute(step, context);
+      this.recordStepLogs(phase, attempt, steps, index, step, result);
       Object.assign(state, result.output.state);
       Object.assign(publicOutputs, result.output.public);
       if (result.output.settledAmount !== undefined) {
@@ -885,6 +894,51 @@ export class DynamicRailEngine {
       return phase === "SUBMIT" ? "SUCCEEDED" : "AWAITING_CUSTOMER";
     }
     return "SUCCEEDED";
+  }
+
+  private recordStepLogs(
+    phase: FlowPhase,
+    attempt: DynamicAttempt,
+    steps: readonly FlowStep[],
+    index: number,
+    step: FlowStep,
+    result: StepExecutionResult,
+  ): void {
+    if (!this.logSink || result.logs.length === 0) {
+      return;
+    }
+    const gatewayVersionId = attempt.gatewayVersionId ?? "";
+    for (const [logIndex, log] of result.logs.entries()) {
+      const request = log.request;
+      const redactedRequestJson =
+        request !== null && typeof request === "object" && !Array.isArray(request)
+          ? (request as Record<string, unknown>)
+          : { value: request ?? null };
+      const response = log.response;
+      const redactedResponseText =
+        typeof response === "string"
+          ? response
+          : response === undefined || response === null
+            ? ""
+            : JSON.stringify(response);
+      try {
+        this.logSink.writeStepLog({
+          attemptId: attempt.id,
+          gatewayVersionId,
+          phase,
+          stepId: log.stepId ?? step.id ?? null,
+          stepOrder: index * 100 + logIndex,
+          redactedRequestJson,
+          redactedResponseText,
+          httpStatus: log.httpStatus ?? null,
+          durationMs: log.durationMs ?? null,
+          outcome: log.outcome,
+          createdAt: this.options.now?.() ?? new Date(),
+        });
+      } catch {
+        // Step logging is non-blocking and must never fail a payment.
+      }
+    }
   }
 
   private clientActionFrom(result: StepExecutionResult): AdapterClientAction | undefined {
@@ -1029,7 +1083,9 @@ export class DynamicRailEngine {
     };
 
     const runner = this.options.transactionRunner;
-    const result = runner ? await runner(finalize) : await finalize();
+    const result = runner
+      ? await runner(finalize, { attemptId: attempt.id })
+      : await finalize();
     attempt.status = "SUCCEEDED";
     if (result.outcome === "SUSPENSE") {
       attempt.substatus = "SUSPENSE_SETTLEMENT";

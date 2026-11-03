@@ -4,6 +4,7 @@ import { CatalogStore, createDefaultPolicy } from "./catalogStore";
 import { SpawnCommandRunner } from "./commandRunner";
 import { loadBackupDaemonConfig } from "./config";
 import { RestoreDrillRunner } from "./restoreDrillRunner";
+import { BackupScheduler } from "./scheduler";
 import { startBackupDaemonServer } from "./server";
 
 const main = async (): Promise<void> => {
@@ -30,11 +31,17 @@ const main = async (): Promise<void> => {
   }
 
   const drillRunner = new RestoreDrillRunner({ config, engine, runner });
-  const server = await startBackupDaemonServer({ config, engine, drillRunner, catalog });
+  const scheduler = new BackupScheduler({ config, engine, drillRunner, catalog });
+  const server = await startBackupDaemonServer({ config, engine, drillRunner, catalog, scheduler });
+  if (config.SCHEDULER_ENABLED) scheduler.start();
 
   console.log(
     `[pg-backup-daemon] listening on ${config.BACKUP_ALLOW_INSECURE_HTTP ? "http" : "https"}://` +
       `${config.BACKUP_DAEMON_BIND_HOST}:${config.BACKUP_DAEMON_PORT} (engine=${config.BACKUP_ENGINE_MODE})`,
+  );
+  console.log(
+    `[pg-backup-daemon] scheduler ${config.SCHEDULER_ENABLED ? "enabled" : "disabled"} ` +
+      `(tick=${config.SCHEDULER_TICK_MS}ms)`,
   );
 
   let shuttingDown = false;
@@ -42,9 +49,9 @@ const main = async (): Promise<void> => {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`[pg-backup-daemon] received ${signal}, shutting down`);
+    scheduler.stop();
     server.stop(true);
-    const timeout = new Promise<void>((resolve) => setTimeout(resolve, 15_000));
-    await Promise.race([server.whenIdle(), timeout]);
+    await Promise.race([Promise.all([scheduler.whenIdle(), server.whenIdle()]), new Promise<void>((resolve) => setTimeout(resolve, 15_000))]);
     process.exit(0);
   };
 

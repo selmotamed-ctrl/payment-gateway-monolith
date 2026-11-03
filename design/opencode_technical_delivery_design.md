@@ -17,7 +17,7 @@ When executing this delivery plan, the **OpenCode AI Agent** must follow these s
 2. **Strict Database & Secret Isolation (`core-back` Exclusivity):**
    - **ONLY `core-back`** may contain `prisma/`, `@prisma/client`, database connection strings (`DATABASE_URL`), `KMS_MASTER_KEY`, or outbound payment gateway execution code.
    - `admin-back`, `merchant-back`, and `checkout-back` MUST have **zero database packages** in `package.json`. They communicate with `core-back` exclusively via the mTLS client (`lib/mtlsClient/index.ts`).
-   - **Database engine:** MySQL 8.0+ / MariaDB 10.6+ only. The Prisma datasource is `provider = "mysql"`, the connection is made through `@prisma/adapter-mariadb` on top of the `mariadb` driver package, and `DATABASE_URL` is a `mysql://user:password@host:3306/payment_gateway` string. No Postgres adapter, no `pg` package and no Postgres-only SQL dialect may be introduced anywhere in the platform.
+   - **Database engine:** PostgreSQL 18 only. The Prisma datasource is `provider = "postgresql"`, the connection is made through `@prisma/adapter-pg` (`PrismaPg`) on top of the `pg` driver package, and `DATABASE_URL` is a `postgresql://user:password@host:5432/payment_gateway` string. Native UUID, JSONB, `NUMERIC(18,4)`, partial/covering/BRIN indexes and `pg_trgm` GIN indexes are the supported dialect. MySQL/MariaDB are historical and must not be reintroduced.
 3. **Strict Checkout Zero-Trust Rule (`checkout-back` & `checkout-front`):**
    - Never add endpoints or fields in `checkout-back` or `checkout-front` that create links, modify link details, or accept `amount` or `currency` from the client. `core-back` always resolves `amount` and `currency` from `payment_links` by `linkKey`.
 4. **Template Code Conventions (`selmotamed-ctrl/template-back-front`):**
@@ -29,13 +29,13 @@ When executing this delivery plan, the **OpenCode AI Agent** must follow these s
 
 ### 1.1 Database Engine
 
-The platform was originally designed for PostgreSQL and has since been migrated to **MySQL / MariaDB** (MySQL 8.0+ / MariaDB 10.6+). The implementation is already converted: `core-back/prisma/schema.prisma` declares `provider = "mysql"`, the connection is made through `@prisma/adapter-mariadb` on top of the `mariadb` driver package, and the initial migration `core-back/prisma/migrations/20261027000000_init/migration.sql` is plain MySQL / MariaDB DDL. The PostgreSQL references that remain in this document are deliberate historical notes about the pre-migration state; the authoritative rules are the MySQL / MariaDB rules of §7 of `design/payment_gateway_final_design-v5.md`.
+The platform is standardized on **PostgreSQL 18**: `core-back/prisma/schema.prisma` declares `provider = "postgresql"`, the connection is made through `@prisma/adapter-pg` on top of the `pg` driver package, and the baseline migration `core-back/prisma/migrations/20261103000000_postgres18_init/migration.sql` is PostgreSQL 18 DDL. The storage-engine and CQRS migrations add partial/covering/BRIN/trigram indexes, `gl_account_shards`, `outbox_events`, `audit_outbox` and the `rm_*` read models. MySQL/MariaDB appear in this tracker only as historical delivery-run notes. The authoritative storage rules are `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md`; the database section of `design/payment_gateway_final_design-v5.md` carries a status note pointing there.
 
 ## 2. Workspace Directory Architecture & Port Allocation
 
 | Project Directory | Role | Local Port | Reverse Proxy / Network Binding | Upstream Target |
 | :--- | :--- | :--- | :--- | :--- |
-| **`core-back`** | Core Engine, Prisma DB, Ledger, Outbound Gateway Executor, Workers | `4000` (mTLS 1.3 HTTPS) | Bound to private LAN IP / `127.0.0.1:4000` (**No public proxy, no port forward**) | MySQL / MariaDB DB + External Gateways |
+| **`core-back`** | Core Engine, Prisma/PostgreSQL 18 storage engine, Ledger, Outbound Gateway Executor, Workers | `4000` (mTLS 1.3 HTTPS) | Bound to private LAN IP / `127.0.0.1:4000` (**No public proxy, no port forward**) | PostgreSQL 18 primary/replicas + Redis + audit/log DBs + External Gateways |
 | **`admin-back`** | Admin Edge API Server | `4101` (HTTP local) | LAN Reverse Proxy `https://admin.internal:8443/api` (LAN-only, non-forwarded port) | `https://core-back:4000/internal/admin/*` (mTLS `CN=admin-back`) |
 | **`admin-front`** | Admin Back Office SPA | `5101` (Dev) / Static `dist/` | LAN Reverse Proxy `https://admin.internal:8443/` | `/api` -> `admin-back:4101` |
 | **`merchant-back`** | Merchant Edge API Server | `4102` (HTTP local) | Public SSL Reverse Proxy `https://merchant.<domain>/api` (80->443) | `https://core-back:4000/internal/merchant/*` (mTLS `CN=merchant-back`) |
@@ -86,7 +86,7 @@ core-back/
 │   ├── mockGateway/
 │   │   └── MockGatewayServer.ts        # Built-in simulator for the 15-scenario sandbox suite & chaos tests
 │   └── workers/
-│       ├── ExpirySweeperWorker.ts      # Polls expires_at with FOR UPDATE SKIP LOCKED (MySQL 8.0+ / MariaDB 10.6+) -> inquire() -> EXPIRED
+│       ├── ExpirySweeperWorker.ts      # Polls expires_at with PostgreSQL FOR UPDATE SKIP LOCKED -> inquire() -> EXPIRED
 │       ├── PollWorker.ts               # Polls next_check_at with backoff schedule
 │       ├── InboundInboxWorker.ts       # Drains inbound_events asynchronously
 │       └── OutboxNotificationWorker.ts # Sends SMS/Email/In-App notifications from notifications table
@@ -296,7 +296,7 @@ export function recursiveSet(
   - **Action:** Define strict Zod 4 environment schemas. Ensure `admin-back`, `merchant-back`, and `checkout-back` remove all `DATABASE_*` variables and require `CORE_BACK_URL`, `MTLS_CLIENT_CERT_PATH`, `MTLS_CLIENT_KEY_PATH`, and `MTLS_CA_CERT_PATH`. Verify `package.json` in all 3 edge backends has **no** `prisma` or `@prisma/*` packages.
 - [x] **`T-1.3` Implement Complete 64-Table Prisma Schema in `core-back`**
   - **Target:** `core-back/prisma/schema.prisma`
-  - **Action:** Author all 64 models across Groups A–F exactly as specified in `design/payment-gateway-final-design.md` §7.1–§7.6, against the MySQL / MariaDB Prisma rules of §7 (`provider = "mysql"`, `@prisma/adapter-mariadb` + `mariadb` driver, `String` → `VARCHAR(191)` with free-form content declared `@db.Text`, `Bytes` → `@db.LongBlob`, `Json` → `JSON`, money → `@db.Decimal(18, 4)`, enums → native `ENUM`):
+  - **Action:** Author all 64 models across Groups A–F exactly as specified in `design/payment-gateway-final-design.md` §7.1–§7.6, against the PostgreSQL 18 Prisma rules (`provider = "postgresql"`, `@prisma/adapter-pg` + `pg` driver, native `UUID`, `String` → `TEXT`, `Bytes` → `BYTEA`, `Json` → `JSONB`, money → `@db.Decimal(18, 4)`, enums → native PostgreSQL enum types):
     - Group A (18): `Merchant`, `User`, `Application`, `Wallet`, `AccessToken`, `AccessTokenIp`, `PaymentLink`, `PosTerminal`, `PosScreen`, `GlAccount`, `JournalEntry`, `JournalLine`, `CommissionProfile`, `VelocityRule`, `AmlCase`, `Adjustment`, `CashoutRequest`, `ApprovalRequest`.
     - Group B (6): `Gateway`, `GatewayVersion`, `GatewayEnvironment`, `GatewayAuth`, `GatewaySetting`, `CredentialSet`.
     - Group C (4): `Asset`, `Rail`, `RailField`, `RailRoute`.
@@ -305,7 +305,7 @@ export function recursiveSet(
     - Group F (13): `UserIdentity`, `JoinRequest`, `KybDocument`, `BeneficialOwner`, `AmlScreening`, `AmlScreeningMatch`, `AmlRule`, `ReportingRule`, `RegulatoryReport`, `Dispute`, `NotificationTemplate`, `Notification`, `PlatformSetting`.
 - [/] **`T-1.4` Run Prisma Migrations & Build Seed Script**
   - **Target:** `core-back/prisma/migrations/`, `core-back/prisma/seed.ts`
-  - **Action:** Run `bun run migrate-dev` against MySQL 8.0+ / MariaDB 10.6+; the initial migration `core-back/prisma/migrations/20261027000000_init/migration.sql` is plain MySQL / MariaDB DDL. Seed system GL Accounts (`TREASURY`, `PLATFORM_INCOME`, `PROVIDER_FEE_EXPENSE`, `GATEWAY_FEE_EXPENSE`, `GATEWAY_FEE_ACCRUAL`, `AML_HOLD`, `CHARGEBACK_RESERVE`, `SUSPENSE`), default `platform_settings` (`OD-1` to `OD-11`), bilingual `notification_templates`, initial admin users (`GATEWAY_ADMIN`, `SECURITY_ADMIN`, `FINANCE`, `COMPLIANCE`, `MLRO`, `OPERATOR`, `SUPPORT`), and default `CommissionProfile`.
+  - **Action:** Run `bun run migrate-dev` against PostgreSQL 18; the baseline migration `core-back/prisma/migrations/20261103000000_postgres18_init/migration.sql` is PostgreSQL 18 DDL, followed by the storage-engine and CQRS read-model migrations. Seed system GL Accounts (`TREASURY`, `PLATFORM_INCOME`, `PROVIDER_FEE_EXPENSE`, `GATEWAY_FEE_EXPENSE`, `GATEWAY_FEE_ACCRUAL`, `AML_HOLD`, `CHARGEBACK_RESERVE`, `SUSPENSE`), default `platform_settings` (`OD-1` to `OD-11`), bilingual `notification_templates`, initial admin users (`GATEWAY_ADMIN`, `SECURITY_ADMIN`, `FINANCE`, `COMPLIANCE`, `MLRO`, `OPERATOR`, `SUPPORT`), and default `CommissionProfile`.
 - [x] **`T-1.5` Implement mTLS Server in `core-back` & `mtlsClient` in All 3 Edge Backends**
   - **Target:** `core-back/index.ts`, `core-back/api/middleware/mtlsGuard.ts`, `{admin,merchant,checkout}-back/lib/mtlsClient/index.ts`
   - **Action:** Wire TLS 1.3 mutual authentication, CN-to-route enforcement (`/internal/admin`, `/internal/merchant`, `/internal/checkout`), and write an integration test verifying that `checkout-back` client cert gets `403 FORBIDDEN_SERVICE_IDENTITY` if it attempts to call `/internal/admin/health`.
@@ -322,7 +322,7 @@ export function recursiveSet(
   - **Action:** Implement all 15 journal entry templates (§11.3 of Final Design), enforcing `SUM(DEBIT) == SUM(CREDIT) > 0` with `Prisma.Decimal`, `UNIQUE(ref_type, ref_id)` idempotency, Ledger Rule INTERNAL-1 for `INTERNAL` gateways (NeomPay), `GATEWAY_CLEARING` + `GATEWAY_FEE_ACCRUAL` for external gateways, and `COMMISSION_RECEIVABLE` for `MERCHANT_DIRECT`.
 - [x] **`T-2.3` Implement Universal Maker-Checker Engine (`approval_requests`) & Detail Change Logger**
   - **Target:** `core-back/engine/governance/ApprovalService.ts`, `DetailChangeService.ts`
-  - **Action:** Implement `proposeApproval`, `approveRequest`, `rejectRequest`, and `emergencyExecuteWithRatification`. Enforce `checker_user_id != maker_user_id` in the application layer (`ApprovalService`) and in the `makerCheckerGuard` middleware, and rely on the `approval_requests_checker_not_maker` `BEFORE INSERT` trigger (`SIGNAL SQLSTATE '45000'`) at the database layer, because MariaDB forbids a `CHECK` constraint on a column that participates in a foreign key. Prevent `SYSTEM_AUTOMATION` from ever acting as a checker, validate `base_version` for JSON-Patch entity edits, and execute the underlying state change or ledger posting atomically inside the approval transaction.
+  - **Action:** Implement `proposeApproval`, `approveRequest`, `rejectRequest`, and `emergencyExecuteWithRatification`. Enforce `checker_user_id != maker_user_id` in the application layer (`ApprovalService`) and in the `makerCheckerGuard` middleware, and rely on the `approval_requests_checker_not_maker_insert` `CHECK` constraint and the `approval_requests_checker_not_maker_update` `BEFORE UPDATE` trigger at the database layer. Prevent `SYSTEM_AUTOMATION` from ever acting as a checker, validate `base_version` for JSON-Patch entity edits, and execute the underlying state change or ledger posting atomically inside the approval transaction.
 - **Phase 2 Verification Gate:**
   - `cd core-back && bun test test/phase2-ledger-and-governance.test.ts` (Verifies all 15 journal entry scenarios, `0.0000` invariant drift, Maker != Checker enforcement, and secret redaction).
 
@@ -359,7 +359,7 @@ export function recursiveSet(
   - **Action:** Implement webhook/statement/manual dispute intake (`UNIQUE(gateway_id, external_dispute_ref)`), `SYSTEM_AUTOMATION` drafting of `CHARGEBACK` Adjustments into `PENDING_REVIEW`, human `FINANCE` checker execution, `negative_balance_ceiling` netting, and configurable CSV/XLSX/JSON `StatementSource` ingestion with fee variance true-ups.
 - [x] **`T-4.4` Implement Background Workers (`ExpirySweeper`, `PollWorker`, `InboundInbox`, `OutboxNotification`)**
   - **Target:** `core-back/engine/workers/*.ts`
-  - **Action:** Implement stateless `FOR UPDATE SKIP LOCKED` polling workers (requires MySQL 8.0+ / MariaDB 10.6+) and realtime event fan-out to `checkout-back` and `merchant-back`. The terminal transitions are guarded by a conditional `UPDATE ... WHERE terminal_at IS NULL`, so a terminal state is applied at most once.
+  - **Action:** Implement stateless PostgreSQL `FOR UPDATE SKIP LOCKED` polling workers and realtime event fan-out to `checkout-back` and `merchant-back`. The terminal transitions are guarded by a conditional `UPDATE ... WHERE terminal_at IS NULL`, so a terminal state is applied at most once.
 - **Phase 4 Verification Gate:**
   - `cd core-back && bun test test/phase4-onboarding-aml-disputes-recon.test.ts`
 
@@ -444,22 +444,24 @@ export function recursiveSet(
 - **Phase 8 Final Verification Gate:**
   - All 4 backend test suites pass (`core-back`, `admin-back`, `merchant-back`, `checkout-back`), all 3 frontend production builds succeed (`admin-front`, `merchant-front`, `checkout-front`), and the continuous ledger invariant check reports `0.0000 LYD` drift.
 
-## 9. Execution Verification Record (Delivery Run)
+## 9. Execution Verification Record (historical delivery runs)
 
-All phase verification gates were executed in this workspace with the following results:
+These gates were executed during the earlier delivery runs (pre-PostgreSQL 18 unless stated). They
+are retained as history; Delivery Run 4 in §28 records the current PostgreSQL 18/storage state and
+explicitly does not claim a fresh test run.
 
 | Verification Gate | Command | Result |
 | :--- | :--- | :--- |
-| Phase 1 | `cd core-back && bunx prisma validate && bun test test/phase1-mtls-and-schema.test.ts` | Schema valid (64 models, MySQL / MariaDB, `Decimal(18,4)`), 11 tests pass, mTLS channel binding enforced (`checkout-back` cert rejected on `/internal/admin` with `403 FORBIDDEN_SERVICE_IDENTITY`) |
+| Phase 1 (historical MySQL/MariaDB era) | `cd core-back && bunx prisma validate && bun test test/phase1-mtls-and-schema.test.ts` | Schema valid at the time (64 models, MySQL/MariaDB, `Decimal(18,4)`), 11 tests pass, mTLS channel binding enforced (`checkout-back` cert rejected on `/internal/admin` with `403 FORBIDDEN_SERVICE_IDENTITY`) |
 | Phase 2 | `cd core-back && bun test test/phase2-ledger-and-governance.test.ts` | 11 tests pass (Vault round trip, 15 balanced journal templates, idempotent posting, checkpoint balance, `0.0000` invariant drift, maker/checker separation, detail change log) |
 | Phase 3 | `cd core-back && bun test test/phase3-dynamic-engine-and-blueprints.test.ts` | 12 tests pass (7 production blueprints, 15 deterministic mock scenarios, initiate/confirm/ledger flow, 12 go-live gates, closed transform library) |
 | Phase 4 | `cd core-back && bun test test/phase4-onboarding-aml-disputes-recon.test.ts` | 16 tests pass (duplicate detection, AML hold/case-only/critical escalation, Arabic normalisation, no tipping-off, dispute dedupe, statement parsing) |
 | Phase 8 | `cd core-back && bun test test/edge-cases/catalog-140.test.ts` | 140 catalogued edge cases with 140 executable regression checks, all pass |
 | All backends | `cd <service> && bun run typecheck && bun test` | `core-back` 796 tests, `admin-back` 416 tests, `merchant-back` 67 tests, `checkout-back` 45 tests — all pass with clean TypeScript |
 | All frontends | `cd <spa> && bun run build` | `admin-front`, `merchant-front`, `checkout-front` all build (type-check + Vite) |
-| Schema parity | `cd core-back && bunx prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script` | 64 model tables and 100 enum types, identical to the committed migration (plus the hand written `schema_versions` table, the three domain `CHECK` constraints and the `approval_requests_checker_not_maker` `BEFORE INSERT` trigger) |
+| Schema parity (historical MySQL/MariaDB era) | `cd core-back && bunx prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script` | 64 model tables and 100 enum types, identical to the migration of that era (plus the handwritten `schema_versions` table, the three domain `CHECK` constraints and the historical `approval_requests_checker_not_maker` trigger). The current PostgreSQL 18 schema uses the baseline/storage/CQRS migrations instead. |
 
-**Live database verification (Delivery Run 3):** a **MariaDB 13.0.2** instance is running locally and the platform has been migrated to it. `prisma migrate deploy` applies the 64-table migration cleanly and `bun run db-seed` seeds 15 gateways, 13 gateway versions, 43 flows, 63 flow steps, 107 step parameters, 147 step outputs, 12 crypto profiles, 28 confirmation channels, 23 rail fields, 13 routes, 33 GL accounts, 7 admin users, 18 notification templates and 11 platform settings. The ledger invariant reports `0.0000` drift after a live payment, and `test/e2e/mariadb-payment.test.ts` drives a complete payment (initiate → confirm → journal entry → slot commit) against the live database.
+**Historical live database verification (Delivery Run 3, MariaDB era — superseded by Delivery Run 4):** a **MariaDB 13.0.2** instance was used at the time. This is retained as history only; PostgreSQL 18 is the current engine. `prisma migrate deploy` applied the 64-table migration cleanly and `bun run db-seed` seeded 15 gateways, 13 gateway versions, 43 flows, 63 flow steps, 107 step parameters, 147 step outputs, 12 crypto profiles, 28 confirmation channels, 23 rail fields, 13 routes, 33 GL accounts, 7 admin users, 18 notification templates and 11 platform settings. The ledger invariant reported `0.0000` drift after a live payment, and `test/e2e/mariadb-payment.test.ts` drove a complete payment (initiate → confirm → journal entry → slot commit) against the live database.
 
 ## 10. Hardening Pass · Audit Findings Closed (Delivery Run 2)
 
@@ -547,30 +549,36 @@ defect list. The following are the defects that were **closed** in this pass, gr
 | :--- | :--- |
 | The edge environment was cached on first read, and Bun executes the test files of a directory in an arbitrary order. A configuration written by one test file was therefore served to the next one, and the whole edge suite failed with `500 MTLS_MATERIAL_UNAVAILABLE` | The edge environment is no longer cached in the test environment (the same rule `core-back` already used), each test file now configures its environment in `beforeAll`, and `test/env-isolation.test.ts` in every edge service guards the behaviour |
 
-## 10.7 Database engine migration · PostgreSQL → MySQL / MariaDB
+## 10.7 Database engine history · PostgreSQL → MySQL/MariaDB → PostgreSQL 18
 
-The platform was designed against PostgreSQL and has been migrated to **MySQL 8.0+ / MariaDB 10.6+**.
+The platform has changed engines twice. This section records the history so an agent does not
+mistake an old instruction for current guidance.
 
-| Change | Detail |
+| Era | Delivery runs | State |
+| :--- | :--- | :--- |
+| Original design | Pre-run 2 | PostgreSQL design references in the v5 master document. |
+| MySQL / MariaDB migration | Delivery Runs 2-3 | `provider = "mysql"`, the MariaDB adapter/driver, MySQL/MariaDB DDL, `VARCHAR(191)`/`LongBlob`/`JSON` types and a trigger-based maker/checker invariant. This era is **historical and unsupported at runtime**; the adapter/driver dependencies and the legacy migration history were removed during development. |
+| PostgreSQL 18 storage engine | Delivery Run 4 (current) | `provider = "postgresql"`, `@prisma/adapter-pg` + `pg`, native UUID/JSONB/`NUMERIC(18,4)`, PostgreSQL 18 baseline `20261103000000_postgres18_init`, plus the storage-engine, CQRS and storage-hardening (`20261103180000_storage_hardening`) migrations. |
+
+What changed in the current return to PostgreSQL 18:
+
+| Area | Current detail |
 | :--- | :--- |
-| Datasource | `provider = "mysql"`; the database name comes from the connection string (`mysql://user:password@host:3306/payment_gateway`) |
-| Driver | `@prisma/adapter-mariadb` + the `mariadb` driver replace `@prisma/adapter-pg` |
-| Bounded strings | MySQL maps an unbounded `String` to `VARCHAR(191)`, not to `TEXT`. Every field that carries free-form or serialized content is now declared explicitly as `@db.Text`; every column that participates in an index or a foreign key stays a bounded `VARCHAR` |
-| Binary payloads | `Bytes` maps to `BLOB` (64 KB), so the inbound webhook body is `@db.LongBlob` |
-| JSON | `Json` maps to `JSON` (LONGTEXT plus a validity check in MariaDB) |
-| Money | `DECIMAL(18,4)`, never `FLOAT`/`DOUBLE` |
-| Enums | The Prisma enums are generated as native `ENUM` columns |
-| Maker ≠ Checker | MariaDB forbids a `CHECK` constraint on a column that participates in a foreign key, so the invariant is enforced by a `BEFORE INSERT` trigger on `approval_requests` that raises `SIGNAL SQLSTATE '45000'`, in addition to `ApprovalService` and `makerCheckerGuard`. The other three domain invariants remain `CHECK` constraints |
-| Raw SQL | Every statement was converted: `$1` → `?`, `"identifier"` → `` `identifier` ``, `UPDATE … RETURNING` → a `SELECT … FOR UPDATE` plus a conditional `UPDATE` inside one transaction |
-| Row locking | `FOR UPDATE SKIP LOCKED` requires MySQL 8.0+ / MariaDB 10.6+; the terminal transitions are additionally guarded by a conditional `UPDATE … WHERE terminal_at IS NULL` so a terminal state is applied at most once |
-| Migration | `prisma/migrations/20261027000000_init/migration.sql` is plain MySQL/MariaDB DDL and applies cleanly to a live instance |
+| Datasource | `provider = "postgresql"`; `DATABASE_URL` must be `postgresql://...` and the env validator rejects non-PostgreSQL URLs. |
+| Driver | `@prisma/adapter-pg` (`PrismaPg`) + `pg` are the only runtime adapter/driver; the legacy non-PostgreSQL adapter/driver were removed from `package.json`. |
+| Identifiers | Native `UUID` columns (`@db.Uuid`) with UUIDv7 defaults; no `VARCHAR(191)` UUID emulation. |
+| Structured data | `JSONB` for `Json` columns; `BYTEA` for binary payloads; native `TEXT`/`VARCHAR` for strings. |
+| Money | `NUMERIC(18,4)`, never `FLOAT`/`DOUBLE`. |
+| Enums | Native PostgreSQL enum types generated from the Prisma enums. |
+| Maker ≠ Checker | `CHECK` constraint `approval_requests_checker_not_maker_insert` plus the `approval_requests_checker_not_maker_update` `BEFORE UPDATE` trigger, in addition to `ApprovalService` and `makerCheckerGuard`. |
+| Row locking | Native `SELECT ... FOR UPDATE SKIP LOCKED`; terminal transitions still use a conditional `UPDATE ... WHERE terminal_at IS NULL`. |
+| Performance | Partial indexes, covering `INCLUDE` indexes, BRIN time-series indexes and `pg_trgm` GIN search indexes in `20261103120000_postgres18_storage_engine`; `20261103180000_storage_hardening` adds monthly `journal_lines` partitions, the shard-range constraint, `pg_stat_statements`, audit/log grants and the remaining search indexes. |
+| Storage engine | `UnitOfWork`, `ReadStore`, Redis cache/velocity, `pg_audit_db`, `pg_logs_db`, `gl_account_shards`, `outbox_events`, `audit_outbox` and the `rm_*` read models. |
+| Migration | PostgreSQL 18 baseline + storage-engine + CQRS read-model migrations apply to a fresh database with `bun run migrate-deploy`. |
 
-Two defects were found by the new end-to-end suite and fixed:
-
-| Defect | Fix |
-| :--- | :--- |
-| The engine never supplied the provider fee, so a platform-held confirmation could not be posted at all | The route fee is one economic amount; it is now supplied under both names and the ledger template decides whether it is booked as `PROVIDER_FEE_EXPENSE` (deducted at source) or as `GATEWAY_FEE_EXPENSE` + `GATEWAY_FEE_ACCRUAL` (accrued at T+N) |
-| The declarative step outputs (`SETTLED_AMOUNT`, `PROVIDER_FEE`, `PROVIDER_REF`, `NETWORK_REF`) were resolved by the step executor but never left the phase, so the attempt was never enriched with the gateway's facts | The engine now carries them out of the phase and persists them on the attempt |
+The former MySQL-only constraints (binary-log trigger permission, `VARCHAR(191)` defaults, `SIGNAL
+SQLSTATE`, `LONGBLOB`) do not apply to PostgreSQL 18 and are kept only in the historical migration
+archive.
 
 ## 11. Continuation Plan · Open Items
 
@@ -578,8 +586,8 @@ These items are **not** closed by this pass. They are ordered by operational ris
 
 | # | Item | Severity | Notes |
 | :--- | :--- | :--- | :--- |
-| 1 | ~~Apply the migration and the seed to a live database~~ | — | **CLOSED**: the migration and the seed were applied to a live MySQL 8.4 instance (and earlier to MariaDB 13.0.2) and the phase gates were re-run against it |
-| 2 | ~~Run an end-to-end payment through the engine~~ | — | **CLOSED**: `test/e2e/mariadb-payment.test.ts` drives a complete payment against the live database (initiate → confirm → balanced journal entry → slot commit → `0.0000` invariant). What is still missing is a **real** partner gateway: the suite uses a local HTTP stand-in |
+| 1 | ~~Apply the migration and the seed to a live database~~ | — | **CLOSED (historical, MySQL/MariaDB era)**: the migration and the seed were applied to a live MySQL 8.4 instance (and earlier to MariaDB 13.0.2) and the phase gates were re-run against it. Superseded by the PostgreSQL 18 baseline and Delivery Run 4 verification. |
+| 2 | ~~Run an end-to-end payment through the engine~~ | — | **CLOSED (historical, MySQL/MariaDB era)**: `test/e2e/mariadb-payment.test.ts` drove a complete payment. The current PostgreSQL 18 path is `test/e2e/postgres-payment.test.ts` (Delivery Run 4). What is still missing is a **real** partner gateway: the suite uses a local HTTP stand-in |
 | 2b | Run the same end-to-end path against a real sandbox gateway of one of the seven blueprints (Edfali/Sadad OTP, Moamalat, CBL LYPay, MyPay, MPGS, NeomPay) | HIGH | The declarative flows, the crypto profiles and the confirmation channels are seeded; only the partner credentials and a reachable sandbox endpoint are missing |
 | 3 | Bind the real SMS/email aggregator credentials to the notification webhook transport | MEDIUM | The transport is implemented and signed; it only needs the provider endpoint and its secret |
 | 4 | ~~Execute the regulatory report submission~~ | — | **CLOSED** (delivery run 6): the report is created through an approval, and `POST /aml/reports/:id/submit` → `/acknowledge` moves `APPROVED → SUBMITTED → ACKNOWLEDGED` (or `REJECTED_BY_AUTHORITY`) with a submission reference; a `PROVISIONAL` rule is refused (OD-1), and `POST /aml/reporting-rules/:id/promote` promotes a rule `PROVISIONAL → CONFIRMED` through maker/checker. What remains is only the real authority endpoint/credentials |
@@ -636,7 +644,7 @@ A final conformance audit turned every requirement-bearing design section into a
 | Six edge routes answered `200` where core answers `202` | All of them relay the core status; the admin edge also forwards the dispute `outcome` so a chargeback can be decided |
 | Abandoned join-request drafts never expired | New `JoinRequestExpiryWorker` expires the abandoned drafts and the overdue reviews |
 | The 140-case catalogue was 102/140 tautological | All 140 checks now drive the real production unit; a regression in the behaviour fails the check. Zero `todo` remain |
-| The design documents still described PostgreSQL | All five documents now describe MySQL 8.0+ / MariaDB 10.6+, including the `VARCHAR(191)` string rule, the `LongBlob` webhook body, the trigger-based maker/checker invariant (MariaDB forbids a CHECK on a foreign-key column) and the raw-SQL dialect |
+| The design documents still described the earlier engine mandate (historical) | The current documents now point to PostgreSQL 18, the storage-engine blueprint and the `@prisma/adapter-pg` runtime; the MySQL/MariaDB wording is retained only in historical delivery-run notes |
 
 ### 12.5 Verification
 
@@ -646,8 +654,8 @@ A final conformance audit turned every requirement-bearing design section into a
 | `admin-back` | 408 pass, 0 fail |
 | `merchant-back` | 67 pass, 0 fail |
 | `checkout-back` | 45 pass, 0 fail |
-| Live MySQL 8.4 end-to-end payment | 8 pass: initiate → confirm → balanced journal entry → slot commit → `0.0000` invariant, plus the duplicate-settlement, self-approval and slot-exhaustion refusals |
-| Schema | 68 tables (66 models + `schema_versions` + `_prisma_migrations`), `schema_versions = 5`, migration applies cleanly to a fresh MySQL 8.4 database |
+| Historical (MySQL 8.4 era): end-to-end payment | 8 pass: initiate → confirm → balanced journal entry → slot commit → `0.0000` invariant, plus the duplicate-settlement, self-approval and slot-exhaustion refusals |
+| Historical (MySQL 8.4 era): schema | 68 tables (66 models + `schema_versions` + `_prisma_migrations`), `schema_versions = 5`; superseded by the PostgreSQL 18 baseline |
 | Frontends | `admin-front`, `merchant-front`, `checkout-front` all build |
 
 ## 13. Fifth Hardening Pass · Independent Re-Audit Findings Closed
@@ -670,7 +678,7 @@ A fresh independent conformance audit re-verified the F1–F18 fixes against the
 | :--- | :--- |
 | `core-back`: typecheck + test | **759 pass, 0 fail** (was 712) |
 | `admin-back` / `merchant-back` / `checkout-back` | 408 / 67 / 45 pass, 0 fail |
-| Live MySQL 8.4 end-to-end payment | 8 pass |
+| Historical (MySQL 8.4 era): end-to-end payment | 8 pass |
 | Composed checkout slot reservation | 3 new tests (single-use reserved once, engine self-reserves when not pre-reserved, infinite-use link stays usable) |
 | AML release/void finalization | 4 new tests |
 | Rollback gate enforcement | 4 new tests |
@@ -695,7 +703,7 @@ A final audit of the **composed** production paths (rather than the units) found
 | :--- | :--- |
 | `core-back`: typecheck + test | **759 pass, 0 fail** |
 | `admin-back` / `merchant-back` / `checkout-back` | 408 / 67 / 45 pass, 0 fail |
-| Live MySQL 8.4 end-to-end payment | 8 pass |
+| Historical (MySQL 8.4 era): end-to-end payment | 8 pass |
 | Concurrent confirm | 4 new tests (one submit, one journal, one slot) |
 | Refund three-phase | 1 new test with separate transaction/base connections (no deadlock, one posting) |
 | AML hold protection | 4 new tests (cancel and expiry both refuse a held attempt) |
@@ -748,7 +756,7 @@ The offline simulator found a real engine bug: a `required` step output stored a
 | `core-back` typecheck + test | **788 pass, 0 fail** (+25 spec importer, +4 live materializer, and the engine fix) |
 | `admin-back` | 412 pass (4 new route tests: transcript query forwarding, verify forwarding, import 201, unknown rail kind rejected before core) |
 | `admin-front` build | passes (new `pages/gateways/ai-import` wizard + router entry) |
-| Live MariaDB import | a verified spec materializes 2 environments, 2 auth, 1 crypto profile, 2 flows / 2 steps, 1 channel, 1 error map, 2 rail fields, a `DRAFT` version and a `PAUSED` route; `NEW_VERSION` adds a second draft; a `CREATE_NEW` on an existing code is refused; an invalid spec writes nothing |
+| Historical (MariaDB era): live import | a verified spec materializes 2 environments, 2 auth, 1 crypto profile, 2 flows / 2 steps, 1 channel, 1 error map, 2 rail fields, a `DRAFT` version and a `PAUSED` route; `NEW_VERSION` adds a second draft; a `CREATE_NEW` on an existing code is refused; an invalid spec writes nothing |
 
 ## 16. Multi-Host Deployment Engine (`deploy/`)
 
@@ -758,20 +766,21 @@ Implemented from `design/payment_gateway_deployment_and_guides_architecture.md` 
 
 | Piece | File | Behaviour |
 | :--- | :--- | :--- |
-| Config + validation | `deploy/lib/configSchema.ts` | Parses `deploy.env` and validates every value with Zod 4 **before the first SSH connection**: IPs, CIDRs, FQDN domains, ports, identifier-safe DB names, `DATABASE_URL` ⟷ `DB_ENGINE` agreement, custom-SSL certificate paths, distinct merchant/checkout domains, distinct ports, and the database host never sharing an IP with the core. |
-| Host planner | `deploy/lib/hostPlanner.ts` | Deduplicates the 5 logical roles by `SSH_HOST:SSH_PORT` into 1…5 concrete hosts. Merges PM2 services, Nginx vhosts, certificate bundles and **unions the UFW rules**; rejects two roles on one host that use different SSH keys/users. Classifies the topology (`single-host` / `split` / `distributed`) and renders the Host Topology Map. |
-| PKI | `deploy/lib/pkiManager.ts` | Generates an offline internal CA (10y) and four leaf certificates: the core **server** certificate with `IP:<CORE_PRIVATE_IP>, IP:127.0.0.1, DNS:core-back.internal` in its SAN, and `CN=admin-back` / `CN=merchant-back` / `CN=checkout-back` client certificates. Idempotent, rotates on `--rotate-certs`, and inspects validity + SANs for the audit summary. `certFilesForHost` implements the least-privilege distribution (the CA **key** never leaves the workstation; an edge host only receives its own client certificate). |
+| Config + validation | `deploy/lib/configSchema.ts` | Parses `deploy.env` and validates every value with Zod 4 **before the first SSH connection**: IPv4 nodes, CIDRs, FQDN domains, ports, identifier-safe database names, `DATABASE_URL` ⟷ `DB_ENGINE` agreement (PostgreSQL only when `PG_*` is configured), the `PG_PRIMARY_NODE`/replica relationship, PgBouncer requirements, custom-SSL certificate paths, distinct merchant/checkout domains, distinct ports, and compute/storage listener/port collisions. |
+| Host planner | `deploy/lib/hostPlanner.ts` | Deduplicates compute tiers (`CORE_NODES`, `ADMIN_NODES`, `MERCHANT_NODES`, `CHECKOUT_NODES`) and storage roles (`PG_PRIMARY_NODE`, `PG_REPLICA_NODES`, PgBouncer, `REDIS_NODES`, audit/log DBs, `BACKUP_NODE`) by SSH endpoint. Merges PM2 services, Nginx vhosts, certificate bundles and **unions the UFW rules**; rejects two roles on one host that use different SSH keys/users or collide on a port. Classifies the topology (`single-host` / `split` / `distributed`), derives `CORE_BACK_URLS`, and renders the Host Topology Map. |
+| PKI | `deploy/lib/pkiManager.ts` | Generates an offline internal CA (10y), the core **server** certificate with every `CORE_NODES` private IP plus `IP:127.0.0.1, DNS:core-back.internal` in its SAN, `CN=admin-back` / `CN=merchant-back` / `CN=checkout-back` client certificates, the backup-daemon server certificate, and optional storage client certificates (`pg-client`, `redis-client`, `audit-db-client`, `log-db-client`, `backup-client`). Idempotent, rotates on `--rotate-certs`, and inspects validity + SANs for the audit summary. `certFilesForHost` implements the least-privilege distribution (the CA **key** never leaves the workstation; an edge host only receives its own client certificate). |
 | SSH runner | `deploy/lib/sshRunner.ts` | `ssh` with `BatchMode`/`StrictHostKeyChecking=accept-new`, privileged commands through `sudo -S` with the password on **stdin**, `rsync` for the release trees, and `writeRemoteFile` that streams a secret over ssh stdin so it never touches the local disk. |
-| Firewall | `deploy/lib/firewallConfigurator.ts` | Base deny + role rules derived from the plan: the database only from the core IP, the core only from the three edge IPs, the admin portal only from `LAN_ALLOWED_CIDRS`, the public edge only SSH/80/443. The SSH rule is always present and `ufw --force enable` runs last, so a deploy can never lock itself out. |
-| Verification | `deploy/lib/healthVerifier.ts` | Runs ON each host with that host's own certificate: the core `/health` over mTLS, each edge backend `/health`, each edge completing a mutual TLS handshake to **its own** core channel, and the public vhosts. |
-| Orchestrator | `deploy/deploy.ts` + `deploy/deploy.sh` | The ordered 12 steps (validate → build SPAs → PKI → bootstrap+UFW → DB provisioning + pre-migration backup → core → admin → merchant → checkout → verify → prune → audit). Atomic `releases/<ts>/` + `current` symlink, `shared/.env` (0600, symlinked into each release), PM2 ecosystem per service, Nginx render + `nginx -t` + reload. Flags: `--env`, `--only`, `--fresh`, `--update`, `--enforce-firewall`, `--skip-build`, `--skip-verify`, `--rotate-certs`, `--keep`, `--dry-run`. |
+| Firewall | `deploy/lib/firewallConfigurator.ts` | Base deny + role rules derived from the plan: the database only from core/replica peers, PgBouncer `6432` only from core nodes, Redis/audit/log DBs only from core + backup, the backup daemon `4090` only from core, core `4000` only from the edge private IPs, the admin portal only from `LAN_ALLOWED_CIDRS`, and the public edge only SSH/80/443. The SSH rule is always present and `ufw --force enable` runs last, so a deploy can never lock itself out. |
+| Verification | `deploy/lib/healthVerifier.ts` | Runs ON each host with that host's own certificate: every core node `/health` over mTLS, each edge backend `/health`, each edge completing a mutual TLS handshake to a healthy core URL, the public vhosts, PostgreSQL primary/replicas (`pg_isready` + `SELECT 1`), PgBouncer, Redis `PING`, audit/log `SELECT 1`, and the backup-daemon `/health` over mTLS when configured. |
+| Orchestrator | `deploy/deploy.ts` + `deploy/deploy.sh` | The ordered 14 steps (validate → build SPAs → PKI → bootstrap+UFW → storage provisioners/legacy DB backup → core → optional Fake Rails → admin → merchant → checkout → seed → verify → prune → audit). Atomic `releases/<ts>/` + `current` symlink, `shared/.env` (0600, symlinked into each release), PM2 ecosystem per service, Nginx render + `nginx -t` + reload. Flags: `--env`, `--only`, `--nodes`, `--rolling-batch`, `--fresh`, `--update`, `--enforce-firewall`, `--skip-build`, `--skip-verify`, `--rotate-certs`, `--keep`, `--dry-run`. |
+| Storage provisioners | `deploy/provisioners/*.ts` | PostgreSQL 18 primary/replicas + PgBouncer, Redis, `pg_audit_db`/`pg_logs_db`, and WAL-G/Barman backup daemon provisioning. |
 | Templates | `deploy/templates/*.tpl` | Multi-app PM2 (`core`/`edge`), LAN-only admin vhost (`allow <LAN_CIDR>; deny all;`, TLS 1.3, HSTS/CSP), public merchant vhost (80→443 + unbuffered POS SSE) and public checkout vhost (80→443 + unbuffered payer SSE + strict CSP). |
-| Operator manual | `deploy/DEPLOYMENT_GUIDE.md` | Quick start, the 1-to-5 host topology, the full environment dictionary, the certificate model, the firewall matrix, the 12 steps, the release layout, rollback and a troubleshooting table. |
+| Operator manual | `deploy/DEPLOYMENT_GUIDE.md` | Quick start, multi-node compute + storage topology, the full environment dictionary, the certificate model, the firewall matrix, the 14 steps, rolling batches, storage provisioners, backups/drills, the release layout, rollback and a troubleshooting table. |
 
 ### 16.2 Verification
 
-- `deploy`: typecheck clean, **25 tests** (config validation incl. every rejection case, the 5/2/1-host scenarios, firewall union + restriction, the edge `.env` never containing `DATABASE_URL`/`KMS_MASTER_KEY`, the topology map, CLI parsing, env quoting and absolute cert paths, the PM2 ecosystem, and all three Nginx templates rendering with **no placeholder left**).
-- `./deploy/deploy.sh --dry-run` walks the full 12-step pipeline against a sample `deploy.env` and prints every ssh/rsync/file action without executing anything.
+- `deploy`: typecheck clean; the test suite covers config validation (including every rejection case), 1/2/5/N-host and storage-node scenarios, firewall union + restriction, the edge `.env` never containing `DATABASE_URL`/`KMS_MASTER_KEY`, the topology map, CLI parsing, rolling batches, env quoting and absolute cert paths, the PM2 ecosystem, provisioners, and Nginx template rendering with **no placeholder left**.
+- `./deploy/deploy.sh --dry-run` walks the full 14-step pipeline against a sample `deploy.env` and prints every ssh/rsync/file action without executing anything.
 
 ## 17. The Four Built-In Portal Guides & Employee Academy
 
@@ -807,13 +816,14 @@ Implemented from the same design's Part II (PG-G1…PG-G5).
 
 ## 18. Live Single-Node Deployment Validation
 
-The deploy engine was executed against a real Ubuntu 26.04 host (MySQL 8.4,
-one box carrying all five roles) rather than only dry-run. The run surfaced
+The deploy engine was executed against a real Ubuntu 26.04 host (historical MySQL 8.4
+era, one box carrying all five roles) rather than only dry-run. The current pipeline is the
+PostgreSQL 18 / storage-tier 14-step flow. The run surfaced
 seven defects that the dry-run could not, all now fixed:
 
 | # | Defect found by the live run | Fix |
 | :--- | :--- | :--- |
-| 1 | MySQL refused to create the maker≠checker trigger (`ERROR 1419`) because the binary log is on and the app user has no `SUPER`. | Provisioning now sets `log_bin_trust_function_creators = 1` and persists it in `/etc/mysql/conf.d/zz-payment-gateway.cnf`. |
+| 1 | Historical (MySQL era): MySQL refused to create the maker≠checker trigger (`ERROR 1419`) because the binary log is on and the app user has no `SUPER`. | The historical fix set `log_bin_trust_function_creators = 1`. PostgreSQL 18 now uses a `CHECK` constraint plus a `BEFORE UPDATE` trigger, so this flag is obsolete. |
 | 2 | A single-box install was rejected because `DB_PRIVATE_IP` equalled `CORE_PRIVATE_IP`. | The validator now accepts the co-located database (it binds to `127.0.0.1`). |
 | 3 | The LAN-only admin vhost rendered without a certificate, so `nginx -t` failed. | A self-signed certificate is minted for the admin server name when none is configured. |
 | 4 | App files under `/var/www` were root-owned, so PM2 (the SSH user) could not read `shared/.env` or the keys. | The deploy chowns the tree to the SSH user and writes certificate/env/PM2 files as that user, using sudo only for `/var/www` creation and Nginx. |
@@ -834,14 +844,14 @@ Validation performed on the live host:
 
 | Case | Result |
 | :--- | :--- |
-| Clean `--fresh` from a wiped box | **pass**, 12/12 steps, 9/9 verification probes, ~150 s |
-| `--update` (twice) | **pass**, pre-migration `mysqldump` created, 4 services redeployed, 9/9 probes |
+| Clean `--fresh` from a wiped box (historical 12-step era) | **pass**, 12/12 steps, 9/9 verification probes, ~150 s; current pipeline is 14 steps |
+| `--update` (twice, historical MySQL era) | **pass**, pre-migration `mysqldump` created, 4 services redeployed, 9/9 probes; PostgreSQL uses `pg_dump -Fc` |
 | `--only=admin` | **pass**, only the admin release advanced; core/merchant/checkout untouched |
 | `--keep=1` | **pass**, pruned to one release per host, PM2 pointed at it |
 | `--rotate-certs` | **pass**, new CA + 4 leaves uploaded to every host |
-| `--dry-run` | **pass**, 12-step plan with a single-host topology |
+| `--dry-run` (historical 12-step era) | **pass**, 12-step plan with a single-host topology; current plan is 14 steps |
 | Invalid config (bad CIDR, mixed keys on a shared host, custom SSL without paths) | **fail fast**, exit 1 before any SSH |
-| Firewall from another LAN host | 22/80/443 open; 3306/4000/4101/4102/4103 **blocked**; 8443 open to the LAN only |
+| Firewall from another LAN host (historical MySQL era) | 22/80/443 open; 3306/4000/4101/4102/4103 **blocked**; 8443 open to the LAN only. PostgreSQL 18 deployments open `5432`/`6432` only to the allowed storage/core peers |
 | Edge `.env` isolation | no `DATABASE_URL`, `KMS_MASTER_KEY` or DB password on any edge host |
 | Authenticated flow through Nginx → admin-back → core (mTLS) → DB | login (bcrypt), MFA gate, academy progress, checkout-support read **and** versioned write |
 | Seed + schema | `schema_versions = 6`, 13/13 rails carry a help guide, support config enabled |
@@ -884,7 +894,7 @@ checkout apps still carried the global scaling transform. Root causes and fixes:
 | 6 | Empty navigation sections rendered headers with no items. | `useSections()` drops sections whose routes are all hidden (asserted in e2e). |
 | 7 | Merchant login posted `{identity, password, mfaCode}` against a strict `{identifier, password}` schema → 400; the merchant session had no `authoritiesMap`. | Payload fixed, MFA is a proper two-step flow, and the core returns `userInfo` with the merchant projection (28 UI authorities). |
 | 8 | The admin dashboard called a non-existent `v1/admin/stats/overview`; the merchant overview returned a different shape than the page consumed. | Added the admin overview endpoint (core + edge) and extended the merchant overview (period-aware: stats, charts, recent payments, wallet balance). |
-| 9 | New MySQL connections failed on `caching_sha2_password` (`allowPublicKeyRetrieval`), so any fresh core pool would break. | The DB adapter now builds a pool config with `allowPublicKeyRetrieval: true` (tested). |
+| 9 | Historical (MySQL era): new connections failed on `caching_sha2_password` (`allowPublicKeyRetrieval`). | The historical MariaDB adapter used `allowPublicKeyRetrieval: true`. The current PostgreSQL 18 path uses `@prisma/adapter-pg` + `pg` and is not affected. |
 | 10 | No frontend tests existed. | Added Playwright e2e (geometry/a11y/auth/navigation) + a live suite against the deployed box + a Vitest unit suite. |
 
 The shell is now shared in shape between admin and merchant (branding/sections
@@ -1111,8 +1121,48 @@ documents the one manual step (update `deploy.env`) and
 `--update --enforce-firewall`.
 
 **Live verification.** Deployed to `10.84.183.205` (release `20261029224709`):
-all 12 deployment checks green; live Playwright **6/6**; API smoke created a
+all 12 deployment checks at the time (the current pipeline has 14 steps); live Playwright **6/6**; API smoke created a
 rail, patched it with the extended fields, created a route with a gateway,
 patched it, paused it, and created/suspended a merchant team member. Compliance
 AML rule creation is covered by the admin-back contract tests (the live account
 hit the login rate limiter).
+
+## 28. Delivery Run 4 — PostgreSQL 18 storage engine, backups and horizontal scaling
+
+This delivery run completed the PostgreSQL 18 migration and added the distributed storage plane,
+backup control plane and horizontal deployment topology. The documentation set was
+updated in the same pass; no application code was changed by the documentation run itself and no
+build/test was executed for it.
+
+### 28.1 What exists now
+
+| Area | Implemented state |
+| :--- | :--- |
+| PostgreSQL 18 baseline | `core-back/prisma/schema.prisma` is `provider = "postgresql"`; `20261103000000_postgres18_init` is the baseline, followed by `20261103120000_postgres18_storage_engine`, `20261103130000_cqrs_read_models` and `20261103180000_storage_hardening`. The legacy MySQL/MariaDB migration history was removed during development; `prisma/migrations/` is the complete current history. |
+| Runtime adapter | `@prisma/adapter-pg` (`PrismaPg`) + `pg`. `core-back/lib/env/index.ts` accepts only `postgresql://`/`postgres://` URLs for `DATABASE_URL`, `DATABASE_REPLICA_URLS`, `AUDIT_DATABASE_URL` and `LOG_DATABASE_URL`. |
+| Storage engine | `core-back/lib/storageEngine/`: `UnitOfWork` (atomic ledger + outbox + audit outbox + commit LSN + sorted shard locks), `ReadStore` (primary/replica/`atLeastLsn` + lag monitor + fallback), Redis cache/velocity adapters, dedicated audit store (SHA-256 chain) and buffered log sink. |
+| Sharded ledger | `gl_account_shards` with 16 shards for system GL accounts and one shard for merchant wallets; `ledgerShardWriter.ts` and `shardBalances.ts` implement the posting/read paths. |
+| Outbox and read models | `outbox_events`, `audit_outbox`, `OutboxRelayWorker` / `AuditShipperWorker`, `rm_merchant_daily_stats`, `rm_route_daily_volumes`. |
+| Audit/log databases | `pg_audit_db` append-only hash chain with immutability trigger; `pg_logs_db` monthly-partitioned `attempt_step_logs` / `http_access_logs` with `ensure_log_partitions`. |
+| Backups | `deploy/backup-daemon/` wraps WAL-G or Barman, S3 primary + optional secondary SSH/S3, mTLS control plane on `:4090`, catalog, restore/invariant drill runner and `/health`, `/v1/overview`, `/v1/backups/trigger`, `/v1/drills/run`, `/v1/policy`, `/v1/runs`, `/v1/drills`. |
+| Admin backup API | Core: `/internal/admin/system/backups/overview`, `/trigger`, `/drill`, `/policy`, `/catalog`. Admin edge: `/api/v1/admin/system/backups/overview` (`security:read`/`gateway:read`), `/trigger`, `/drill`, `/policy` (`security:write`; policy uses maker-checker). |
+| Horizontal compute | `CORE_NODES`, `ADMIN_NODES`, `MERCHANT_NODES`, `CHECKOUT_NODES`; rolling batches (`--rolling-batch`), node targeting (`--nodes`), per-node PM2 services and multi-IP core certificate SAN. |
+| Storage deploy | `PG_PRIMARY_NODE`, `PG_REPLICA_NODES`, `PGBOUNCER_*`, `REDIS_NODES`, `AUDIT_DB_NODE`, `LOG_DB_NODE`, `BACKUP_NODE`; provisioners for PostgreSQL 18/replicas/PgBouncer, Redis, audit/log DBs and the backup engine. |
+| Edge failover | All three edge BFFs use `CORE_BACK_URLS` with least-in-flight + round-robin selection, passive failure cooldown, retries and `x-pg-min-lsn` propagation; `CORE_BACK_URL` remains the first-node compatibility value. |
+| Deployment pipeline | 14 steps with the optional Fake Rails step at 7 and the storage provisioning at 5. |
+| Docs | `deploy/deploy.env.example`, `deploy/DEPLOYMENT_GUIDE.md`, service READMEs/blueprints, storage/backup design docs, the test plan and this tracker now describe PostgreSQL 18, not the historical engine. |
+
+### 28.2 Remaining work
+
+| # | Item | Severity | Notes |
+| :--- | :--- | :--- | :--- |
+| 1 | Validate the complete 14-step pipeline and storage provisioners against real PostgreSQL 18 primary/replica/audit/log/backup hosts | HIGH | The code paths and tests exist; a production-shaped multi-host run is still required before go-live. |
+| 2 | Exercise WAL-G and Barman against the real S3/MinIO/R2 bucket and the secondary SSH/S3 vault, including a full restore + ledger invariant drill | HIGH | The daemon, catalog and drill runner exist; operator credentials and network access are deployment-specific. |
+| 3 | Wire the backup daemon mTLS material consistently | HIGH | `backupEngineProvisioner.ts` writes `MTLS_SERVER_CERT_PATH`/`MTLS_SERVER_KEY_PATH`/`MTLS_CA_CERT_PATH`, while `backup-daemon/src/config.ts` reads `BACKUP_DAEMON_CERT_PATH`/`BACKUP_DAEMON_KEY_PATH`/`BACKUP_DAEMON_CA_CERT_PATH`; until aligned the daemon falls back to `127.0.0.1` without mTLS. |
+| 4 | Align `BACKUP_COMPRESSION` vocabulary | MEDIUM | The daemon accepts `zstd`, `lz4`, `lzma`, `brotli`, `none`; `deploy/lib/configSchema.ts` accepts only `zstd`, `lz4`, `gzip`. |
+| 5 | Validate the PostgreSQL-only deploy config on the next run | MEDIUM | `deploy/lib/configSchema.ts` now exposes only `postgresql`, defaults `DB_ENGINE="postgresql"`/`DB_PORT=5432` and requires `postgresql://` URLs; re-run config validation against the operator `deploy.env`. |
+| 6 | Run replica lag/failover and read-your-own-writes tests under sustained load | HIGH | The routing and LSN monitor are implemented; a long-running 1,000+ TPS benchmark is still needed. |
+| 7 | Validate audit hash-chain verification and log backpressure on the dedicated databases | MEDIUM | The adapters and provisioner DDL exist; production retention/partition maintenance should be observed for one full month. |
+| 8 | Bind the real SMS/email aggregator and real partner sandbox credentials | MEDIUM | Unchanged from the earlier continuation plan. |
+| 9 | Complete the operator runbooks for storage-node failure, PgBouncer loss, replica promotion and backup restore | HIGH | The deployment guide documents the topology and drills; step-by-step incident runbooks remain. |
+| 10 | Re-run the exhaustive suite against PostgreSQL 18 and record the results here | HIGH | This delivery run is documentation-only; it does not claim a fresh test run. |

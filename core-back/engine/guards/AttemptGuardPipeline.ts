@@ -19,7 +19,8 @@ import type {
 import { evaluateCommissionReceivableCeiling } from "../governance/GovernanceExecution";
 import { buildLedgerTemplate, LedgerPoster } from "../ledger/LedgerPoster";
 import { AmlRuleEngine, slaHoursForSeverity, type AmlRuleHit } from "./AmlRuleEngine";
-import { createLedgerShardWriter } from "../../lib/storageEngine/ledgerShardWriter";
+import { createLedgerPoster } from "../../lib/storageEngine/ledgerPosterFactory";
+import type { CachePort } from "../../lib/storageEngine/ports";
 import {
   buildScreeningSubject,
   normalizeIdentifier,
@@ -120,6 +121,7 @@ export interface AttemptGuardPipelineDeps {
   db: PrismaLike;
   repositories: Repositories;
   screening: ScreeningProvider;
+  velocityStore?: CachePort;
   clock?: () => Date;
 }
 
@@ -275,6 +277,38 @@ const matchesScope = (
   }
 };
 
+const velocityScopeKey = (
+  scopeType: VelocityRuleRow["scopeType"],
+  scope: {
+    merchantId: string;
+    applicationId: string;
+    linkId: string;
+    railCode: string;
+    clientIp: string | null;
+    clientPhone: string | null;
+    cardAlias: string | null;
+  },
+): string | null => {
+  switch (scopeType) {
+    case "MERCHANT":
+      return scope.merchantId;
+    case "APPLICATION":
+      return scope.applicationId;
+    case "LINK":
+      return scope.linkId;
+    case "RAIL":
+      return scope.railCode;
+    case "END_CLIENT_IP":
+      return scope.clientIp;
+    case "END_CLIENT_PHONE":
+      return scope.clientPhone;
+    case "END_CLIENT_CARD":
+      return scope.cardAlias;
+    default:
+      return null;
+  }
+};
+
 const blockDecision = (
   reason: string,
   customerMessageCode = "PAYMENT_CANNOT_BE_PROCESSED",
@@ -308,12 +342,14 @@ export class AttemptGuardPipeline {
   private readonly db: PrismaLike;
   private readonly repositories: Repositories;
   private readonly screening: ScreeningProvider;
+  private readonly velocityStore?: CachePort;
   private readonly clock: () => Date;
 
   constructor(deps: AttemptGuardPipelineDeps) {
     this.db = deps.db;
     this.repositories = deps.repositories;
     this.screening = deps.screening;
+    this.velocityStore = deps.velocityStore;
     this.clock = deps.clock ?? (() => new Date());
   }
 
@@ -1164,6 +1200,42 @@ export class AttemptGuardPipeline {
       if (!matched) {
         continue;
       }
+      const maxCount = rule.maxCount === null || rule.maxCount === undefined ? null : Number(rule.maxCount);
+      const maxAmount = rule.maxAmount === null || rule.maxAmount === undefined ? null : moneyFromDecimal(rule.maxAmount);
+      if (this.velocityStore) {
+        const scopeKey = velocityScopeKey(rule.scopeType, {
+          merchantId: input.merchant.id,
+          applicationId: input.link.applicationId,
+          linkId: input.link.id,
+          railCode: input.request.railCode,
+          clientIp: input.clientIp,
+          clientPhone: input.clientPhone,
+          cardAlias: input.cardAlias,
+        });
+        if (scopeKey) {
+          const evaluation = await this.velocityStore.incrWindowCounter(
+            [{
+              ruleId: String(rule.id),
+              scopeKey,
+              windowSeconds: Math.max(1, rule.windowSeconds),
+              maxCount: maxCount ?? Number.MAX_SAFE_INTEGER,
+              maxAmountMinor: maxAmount,
+            }],
+            input.amounts.totalCharged,
+            input.now.getTime(),
+          );
+          const stat = evaluation.windowStats[String(rule.id)] ?? { count: 0, amountMinor: 0n };
+          results.push({
+            rule,
+            count: stat.count,
+            totalAmount: stat.amountMinor,
+            exceeded:
+              evaluation.violatedRuleIds.includes(String(rule.id)) ||
+              evaluation.flaggedRuleIds.includes(String(rule.id)),
+          });
+          continue;
+        }
+      }
       const since = new Date(input.now.getTime() - Math.max(1, rule.windowSeconds) * 1000);
       const stats = await this.collectScopedWindowStats(tx, {
         scopeType: rule.scopeType,
@@ -1176,8 +1248,6 @@ export class AttemptGuardPipeline {
         cardAlias: input.cardAlias,
         since,
       });
-      const maxCount = rule.maxCount === null || rule.maxCount === undefined ? null : Number(rule.maxCount);
-      const maxAmount = rule.maxAmount === null || rule.maxAmount === undefined ? null : moneyFromDecimal(rule.maxAmount);
       const countExceeded = maxCount !== null && stats.count >= maxCount;
       const amountExceeded = maxAmount !== null && stats.totalAmount + input.amounts.totalCharged > maxAmount;
       results.push({
@@ -1403,7 +1473,7 @@ export class AttemptGuardPipeline {
       merchantAmount: 0,
     });
     journal.refId = input.attemptId;
-    const poster = new LedgerPoster(this.db as never, undefined, createLedgerShardWriter());
+    const poster = createLedgerPoster(this.db as never);
     const posted = await poster.post(
       journal,
       { accounts, currency: input.currency },

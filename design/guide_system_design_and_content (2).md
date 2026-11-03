@@ -3275,7 +3275,7 @@ Breaking these rules can lead to disciplinary action, and for some acts (tipping
 ### Five logical roles
 | Role | What runs there | Who may connect to it |
 | :--- | :--- | :--- |
-| Database host | The MySQL or MariaDB database | **Only** the core host |
+| Database host | The PostgreSQL 18 database | **Only** the core host |
 | Core host | `core-back` (port 4000, mutual-TLS) | **Only** the three edge hosts |
 | Admin host | `admin-back` (4101, local only) and the Back Office pages through a LAN-only web server | Office network only |
 | Merchant host | `merchant-back` (4102, local only) and the merchant portal through a public web server | The public internet, encrypted |
@@ -3412,7 +3412,7 @@ The tool checks: the core over mutual TLS, each edge service's health address, e
 @@end
 
 @@article id=b12-08 book=12 order=8 title="The database, timers and workers in plain words" roles=SECURITY_ADMIN,GATEWAY_ADMIN minutes=1 ui=AVAILABLE related=b02-07,b12-01,b07-06
-* The database is **MySQL 8.0+ or MariaDB 10.6+**. Only the core connects to it.
+* The database is **PostgreSQL 18**. Only the core connects to it.
 * Money is stored as exact decimals with four places, never as approximate numbers.
 * **Timers live in the database**: when a payment expires, when to ask again. Background workers on any server pick up due items, and a database feature lets two workers avoid taking the same item. This means a restart or a crash does not lose a payment's timers.
 * A terminal change is applied **at most once**, even if two servers pick the same item.

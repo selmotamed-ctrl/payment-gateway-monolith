@@ -321,6 +321,14 @@ describe("transport security", () => {
     expect(await loadTlsOptions(insecure)).toBeUndefined();
   });
 
+  test("TLS requires the CA as well as the server certificate pair", async () => {
+    const missingCa = makeConfig({
+      BACKUP_DAEMON_CERT_PATH: "/certs/server.crt",
+      BACKUP_DAEMON_KEY_PATH: "/certs/server.key",
+    });
+    await expect(loadTlsOptions(missingCa, async () => "PEM")).rejects.toThrow("CA_CERT_PATH");
+  });
+
   test("mTLS requires client certificates when a CA is configured", async () => {
     const config = makeConfig({
       BACKUP_DAEMON_CERT_PATH: "/certs/server.crt",

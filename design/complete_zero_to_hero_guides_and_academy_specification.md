@@ -103,7 +103,7 @@ If you hear engineers mention `core-back`, `admin-back`, `merchant-back`, or `ch
 ```text
 [ PUBLIC INTERNET ] ──▶ Checkout Website (checkout-front / checkout-back)   ─┐
 [ PUBLIC INTERNET ] ──▶ Merchant Portal  (merchant-front / merchant-back)   ─┼──▶ (mTLS 1.3 Certificate Lock) ──▶ [ CORE ENGINE & DATABASE (core-back) ]
-[ OFFICE LAN ONLY ] ──▶ Admin Back Office (admin-front / admin-back :8443)  ─┘                                     (Holds All Money, Keys & MySQL DB)
+[ OFFICE LAN ONLY ] ──▶ Admin Back Office (admin-front / admin-back :8443)  ─┘                                     (Holds All Money, Keys & PostgreSQL 18 database)
 ```
 
 1. **The Public Edge Servers Hold Zero Secrets and Zero Database Access:**
@@ -111,7 +111,7 @@ If you hear engineers mention `core-back`, `admin-back`, `merchant-back`, or `ch
 2. **The Admin Portal (`admin-front` / `admin-back`) Is Local-Network (LAN) Only:**
    - The Admin Back Office you are using right now runs on a private office network port (`:8443`) that is blocked from the public internet at the firewall level.
 3. **The Vault (`core-back`) Trusts Nobody Blindly ("The Double-Check Rule"):**
-   - Only `core-back` can talk to the MySQL/MariaDB database, decrypt bank credentials (`Vault`), talk to external banks, or write to the financial ledger (`LedgerPoster`).
+   - Only `core-back` can talk to the PostgreSQL 18 database, decrypt bank credentials (`Vault`), talk to external banks, or write to the financial ledger (`LedgerPoster`).
    - Even when `admin-back` or `checkout-back` sends a message to `core-back` using a cryptographic certificate (**mTLS 1.3**), `core-back` **re-checks everything from scratch**: it verifies your login token, your Multi-Factor Authentication (MFA), your exact permission flags (`authorities_map`), and ensures that the Maker and Checker on an approval are two different human beings.
 
 > **CRITICAL HUMAN ERROR WARNING — NEVER BYPASS NETWORK OR ACCOUNT BOUNDARIES:**
@@ -138,7 +138,7 @@ In our platform, **every sensitive action is governed by the Four-Eyes (Maker-Ch
    - Instead of changing the live database immediately, the system saves an **Approval Request (`approval_requests`)** containing a **JSON-Patch Diff** (a side-by-side comparison of the Old Value vs. the Proposed New Value) and records the entity's current `base_version`.
 2. **Step 2 — The Checker Inspects & Decides (`PENDING_REVIEW -> APPROVED -> EXECUTED` or `REJECTED`):**
    - User B (a **different** person with `is_checker = true` in that domain) opens the **Approvals Queue (`/approvals`)**.
-   - The system enforces **`checker_user_id != maker_user_id`** at three separate levels: in the UI, in the backend middleware, and in a hard MySQL database trigger (`approval_requests_checker_not_maker`). You **cannot** approve your own request.
+   - The system enforces **`checker_user_id != maker_user_id`** at three separate levels: in the UI, in the backend middleware, and in a hard PostgreSQL database trigger (`approval_requests_checker_not_maker`). You **cannot** approve your own request.
    - When the Checker clicks **Approve**, the system verifies that the record hasn't been modified by someone else in the meantime (`base_version` check) and **atomically executes** the change and writes the ledger/audit record in the exact same database transaction.
 
 #### Chapter 2.3: The Asymmetry Rule — Emergency Actions (`EMERGENCY_RATIFICATION`)
@@ -563,7 +563,7 @@ In web browsers, customers (or attackers) can change anything on their screen:
    - *B)* **Correct:** Treats the browser event as an untrusted hint (`must_inquire = true`), transitions to `VERIFYING`, and calls Moamalat's server-to-server `FilterTransactions` inquiry API.
    - *C)* Ignores the event completely and waits for tomorrow's CSV file.
    - *Explanation:* Browser callbacks can be spoofed via browser developer tools (`T-06`), so they only trigger a server inquiry.
-6. **Q6:** Which service in our 7-project architecture is the **only** service that holds the MySQL database connection and `KMS_MASTER_KEY`?
+6. **Q6:** Which service in our 7-project architecture is the **only** service that holds the PostgreSQL 18 database connection and `KMS_MASTER_KEY`?
    - *A)* `admin-back`
    - *B)* `checkout-back`
    - *C)* **Correct:** `core-back`
@@ -608,7 +608,7 @@ What happens if Maker 1 proposes changing a Merchant's `risk_tier` when the Merc
 #### Module 2 Verification Quiz (`QUIZ-M2` — 8 Questions, 100% Required)
 1. **Q1:** Where is the `checker_user_id != maker_user_id` (Maker cannot be Checker) rule enforced in our platform?
    - *A)* Only by hiding the Approve button in the frontend UI.
-   - *B)* **Correct:** In three layers: the frontend UI, the `makerCheckerGuard` / `ApprovalService` in `core-back`, and the `approval_requests_checker_not_maker` `BEFORE INSERT` trigger inside MySQL/MariaDB.
+   - *B)* **Correct:** In three layers: the frontend UI, the `makerCheckerGuard` / `ApprovalService` in `core-back`, and the `approval_requests_checker_not_maker` trigger inside PostgreSQL 18.
    - *C)* Only in `admin-back`.
 2. **Q2:** While a sensitive edit to `applications.assigned_wallet_id` is in `PENDING_REVIEW` waiting for a Checker, which wallet receives money from payments on that application?
    - *A)* Payments are blocked until the Checker decides.
@@ -907,7 +907,7 @@ Neither `activateGatewayVersion` (promoting a draft to `LIVE`) nor `rollbackGate
    - *C)* `0.0000 LYD`
 2. **Q2:** Why does our Refund execution use **Three Separate Short Phases** (Phase 1: Claim & set `EXECUTING` -> Phase 2: Call gateway over network with NO DB transaction open -> Phase 3: Finalize journal entry & set `EXECUTED`)?
    - *A)* To make the UI spinner last longer.
-   - *B)* **Correct:** To prevent holding a MySQL row lock open during a slow external network call (which would deadlock the database) and to ensure that if the gateway times out, the adjustment stays safely in `EXECUTING` without ever double-refunding.
+   - *B)* **Correct:** To prevent holding a PostgreSQL row lock open during a slow external network call (which would deadlock the database) and to ensure that if the gateway times out, the adjustment stays safely in `EXECUTING` without ever double-refunding.
 3. **Q3:** A merchant's wallet balance is `20.0000 LYD` and their `negative_balance_ceiling` is `0.0000 LYD`. What happens when a `100.0000 LYD` chargeback adjustment is reviewed?
    - *A)* The wallet goes to `-77.0000 LYD` anyway.
    - *B)* **Correct:** Because `-77.0000 LYD` would breach their `0.0000 LYD` ceiling, the adjustment is held in `PENDING_REVIEW` and opens a `P1` `OperatorCase` for Finance collection/netting.

@@ -1,24 +1,18 @@
-import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../../generated/prisma/client";
 import { env } from "../../lib/env";
 import {
-  buildMariaDbPoolConfig,
   buildPostgresPoolConfig,
-  isMysqlUrl,
   isPostgresUrl,
 } from "../../lib/db/connectionConfig";
 
 let baseClientInstance: PrismaClient | undefined;
 
 const adapterFor = (databaseUrl: string) => {
-  if (isPostgresUrl(databaseUrl)) {
-    return new PrismaPg(buildPostgresPoolConfig(databaseUrl));
+  if (!isPostgresUrl(databaseUrl)) {
+    throw new Error("DATABASE_URL must be a PostgreSQL URL");
   }
-  if (isMysqlUrl(databaseUrl)) {
-    return new PrismaMariaDb(buildMariaDbPoolConfig(databaseUrl) as never);
-  }
-  return new PrismaMariaDb(databaseUrl);
+  return new PrismaPg(buildPostgresPoolConfig(databaseUrl));
 };
 
 export const createClientForUrl = (databaseUrl: string): PrismaClient =>

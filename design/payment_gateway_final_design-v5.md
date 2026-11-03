@@ -8,6 +8,12 @@
 **Date:** October 2026 · Libya (Central Bank of Libya Compliant) & International Switches  
 **Coverage (20 Gateways):** Moamalat (NPG) · LYPay (CBL Instant Payment) · Numo Pay · Sadad (Almadar) · Libyana · Edfali / Edfaa Li (BCD) · MobiCash (Masarat) · Tadawul / T-LYNC · OnePay · Yussor Pay (NCB) · Sahara Pay · Masrefy Pay (Jumhouria Bank) · Hawelli (Zaho) · GPay Libya & Google Pay · Visa / Mastercard (MPGS / 3DS2) · Evo Pay · NeomPay (First-Party Wallet) · Aggregators (DPay, Plutu, MyPay)
 
+> **Document status (November 2026):** the database rules in §7 are **superseded** by
+> `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md`.
+> PostgreSQL 18 is the only supported runtime engine (`provider = "postgresql"`,
+> `@prisma/adapter-pg` + `pg`). The MySQL/MariaDB text in the history below is retained only as a
+> historical record of an earlier delivery run and must not be used to configure the platform.
+
 ## Contents
 
 - **PART I: FOUNDATIONS & MULTI-SERVICE TOPOLOGY**
@@ -180,7 +186,7 @@ Every connection from `admin-back`, `merchant-back`, or `checkout-back` to `core
                                    │               │
                                    ▼               ▼
                         ┌─────────────────┐ ┌──────────────────────┐
-│ MySQL / MariaDB │ │ External Gateways    │
+│ PostgreSQL 18   │ │ External Gateways    │
                          │ (Local Only)    │ │ (Fixed Egress HTTPS) │
                         └─────────────────┘ └──────────────────────┘
 ```
@@ -341,26 +347,27 @@ visible_rails =
 
 ## 7. Complete Database Schema in `core-back` (64 Tables Across 6 Groups + Prisma 7 Rules)
 
-All 64 tables reside exclusively in `core-back/prisma/schema.prisma`.
+All 64 tables reside exclusively in `core-back/prisma/schema.prisma`. The historical MySQL-era type spellings in the table notes below (`DATETIME`, `JSON`, `LONGBLOB`, `VARCHAR(191)`) are superseded by the live PostgreSQL 18 schema (`TIMESTAMP`/`TIMESTAMPTZ`, `JSONB`, `BYTEA`, native text); they are retained only as a migration record.
 - **Primary Keys & Timestamps:** Every table includes `id String @id @default(uuid(7))`, `createdAt DateTime @default(now())`, and `updatedAt DateTime @updatedAt`.
 - **Monetary Precision:** All monetary columns use `@db.Decimal(18, 4)` (`Prisma.Decimal` / `decimal.js`) — floating-point types (`Float`, `Double`) are strictly banned.
 - **Encryption at Rest:** All ciphertexts use AES-256-GCM formatted as `keyId:iv:authTag:ciphertext`.
-- **Database Engine:** **MySQL 8.0+ / MariaDB 10.6+**, reached through the `@prisma/adapter-mariadb` adapter on top of the `mariadb` driver package. The datasource is `provider = "mysql"`; the database name, host, port and credentials come from the connection string (`mysql://user:password@host:3306/payment_gateway`).
+- **Database Engine:** **PostgreSQL 18** only, reached through `@prisma/adapter-pg` (`PrismaPg`) on top of the `pg` driver package. The datasource is `provider = "postgresql"`; the database name, host, port and credentials come from the connection string (`postgresql://user:password@host:5432/payment_gateway`). The current storage blueprint is `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md`.
 
-### Prisma 7 Rules (MySQL / MariaDB)
+### Prisma 7 Rules (PostgreSQL 18)
 
-The Prisma datamodel is a **MySQL / MariaDB** datamodel. These rules are not negotiable and are enforced by the migration `core-back/prisma/migrations/20261027000000_init/migration.sql`.
+The Prisma datamodel is a **PostgreSQL 18** datamodel. These rules are not negotiable and are enforced by `core-back/prisma/migrations/20261103000000_postgres18_init/migration.sql` plus the storage-engine and CQRS migrations.
 
-1. **Datasource:** `datasource db { provider = "mysql" }`. The database name is never hard-coded in the schema — it is taken from the connection string (`mysql://user:password@host:3306/payment_gateway`), which `prisma7.config.ts` reads from `DATABASE_URL`.
-2. **Adapter & Driver:** `core-back` connects with `@prisma/adapter-mariadb` on top of the `mariadb` driver package. No Postgres adapter or `pg` package exists anywhere in the platform.
-3. **`String` is `VARCHAR(191)`, never an unbounded `TEXT`:** in MySQL / MariaDB a Prisma `String` maps to `VARCHAR(191)`. Every field that carries free-form or serialized content is therefore declared **explicitly** as `@db.Text` (e.g. `legalName String @db.Text`, `redirectUrl String? @db.Text`, `contextCiphertext String @db.Text`), while every column that participates in an index or a foreign key stays a bounded `VARCHAR`. No string column is left to the implicit default.
-4. **`Bytes` is `BLOB` (64 KB):** the inbound webhook body is larger than that, so `inbound_events.raw_body_bytes` is declared `@db.LongBlob`.
-5. **`Json` is `JSON`:** stored as `LONGTEXT` with a JSON validity check in MariaDB. Every structured-but-schema-free value (`scopes`, `rail_whitelist`, `aliases`, `base_urls`, `allowed_hosts`, `cost_model`, `success_check`, `payload_json`, …) is a `Json` column; there are no native array columns.
-6. **Money is `DECIMAL(18,4)`:** every monetary column is `@db.Decimal(18, 4)` (rate columns use `@db.Decimal(8, 6)`). `FLOAT` and `DOUBLE` are banned.
-7. **`ENUM` columns are generated from the Prisma enums:** each Prisma `enum` becomes a native MySQL `ENUM(...)` column whose values are the enum members — the Prisma enum stays the single source of truth.
-8. **Identifiers:** primary and foreign keys are `VARCHAR(191)` holding a UUIDv7 string (`uuid(7)`) — there is no native `UUID` column type and no auto-increment `SERIAL`.
-9. **Timestamps:** `DateTime` maps to `DATETIME(3)` (millisecond precision, UTC). There is no `TIMESTAMPTZ` type.
-10. **Row locks:** `SELECT ... FOR UPDATE SKIP LOCKED` requires **MySQL 8.0+ / MariaDB 10.6+** (see §9.1 rule 8).
+1. **Datasource:** `datasource db { provider = "postgresql" }`. The database name is never hard-coded in the schema — it is taken from the connection string (`postgresql://user:password@host:5432/payment_gateway`), which reads `DATABASE_URL`. non-PostgreSQL URLs are rejected at runtime.
+2. **Adapter & Driver:** `core-back` connects with `@prisma/adapter-pg` (`PrismaPg`) on top of the `pg` driver package.
+3. **Strings are native `TEXT`/`VARCHAR`:** Prisma `String` maps to `TEXT`; fixed-size identifiers use `@db.Char(n)` or `@db.VarChar(n)`.
+4. **`Bytes` is `BYTEA`:** the inbound webhook body is stored as native binary.
+5. **`Json` is `JSONB`:** every structured-but-schema-free value (`scopes`, `rail_whitelist`, `aliases`, `base_urls`, `allowed_hosts`, `cost_model`, `success_check`, `payload_json`, …) is a native `JSONB` column.
+6. **Money is `NUMERIC(18,4)`:** every monetary column is `@db.Decimal(18, 4)` (rate columns use `@db.Decimal(8, 6)`). `FLOAT` and `DOUBLE` are banned.
+7. **Enums are native PostgreSQL enum types:** each Prisma `enum` becomes a native enum whose values are the enum members — the Prisma enum stays the single source of truth.
+8. **Identifiers are native `UUID`:** primary and foreign keys use PostgreSQL `UUID` (`@db.Uuid`) with UUIDv7 application defaults; there is no `VARCHAR` UUID emulation.
+9. **Timestamps are `TIMESTAMP(3)` / `TIMESTAMPTZ(3)`:** `DateTime` uses millisecond precision; time-zone-aware fields use `@db.Timestamptz(3)`.
+10. **Row locks and indexes:** `SELECT ... FOR UPDATE SKIP LOCKED` is native PostgreSQL. Worker claim loops use partial indexes, append-only time-series tables use BRIN and covering `INCLUDE` indexes, and global search uses `pg_trgm` GIN indexes.
+11. **Transactional storage engine:** `UnitOfWork` writes the ledger, `outbox_events` and `audit_outbox` atomically; `gl_account_shards` provides 16-way locking for system accounts; the dedicated `pg_audit_db` and `pg_logs_db` are reached through their own ports.
 
 ### 7.1 Group A: Platform, Commercial, Risk, Governance & Double-Entry Ledger Entities (18 Tables)
 
@@ -383,7 +390,7 @@ The Prisma datamodel is a **MySQL / MariaDB** datamodel. These rules are not neg
 | **`aml_cases`** | `subject_type` (`MERCHANT\|END_CLIENT\|PAYMENT_ATTEMPT`), `subject_id UUID`, `trigger_reason TEXT`, `severity` (`LOW\|MEDIUM\|HIGH\|CRITICAL`), `severity_inputs_json JSON`, `screening_id UUID NULL`, `rule_id UUID NULL`, `rule_version INT NULL`, `hold_journal_entry_id UUID NULL`, `status` (`OPEN\|IN_REVIEW\|PENDING_CHECKER\|RELEASED\|REJECTED_VOID\|FROZEN\|ESCALATED_STR`), `sla_due_at`, `assigned_reviewer_id`, `regulatory_report_id`, `confidential BOOL DEFAULT true`, `reviewer_notes TEXT` | Correlated escalation: if a payment hits both a `FLAG` velocity rule and an AML threshold, `severity` escalates to `CRITICAL` automatically. |
 | **`adjustments`** | `type` (`CHARGEBACK\|REFUND\|MANUAL_CREDIT\|MANUAL_DEBIT\|CORRECTION\|CASHOUT_SUBTRACTION`), `target_gl_account_id UUID FK`, `source_attempt_id UUID NULL FK`, `dispute_id UUID NULL FK`, `drafted_by_system BOOL DEFAULT false`, `amount DECIMAL(18,4)`, `reverse_commission BOOL`, `reason TEXT`, `external_dispute_ref TEXT NULL`, `provider_refund_ref TEXT NULL`, `state` (`DRAFT\|PENDING_REVIEW\|APPROVED\|EXECUTING\|EXECUTED\|REJECTED`), `journal_entry_id UUID NULL FK` | Generalizes all non-standard money movements. `EXECUTING` holds automated API refunds while the gateway `REFUND` flow is in flight or `UNKNOWN`. |
 | **`cashout_requests`** | `merchant_id UUID FK`, `wallet_id UUID FK`, `amount DECIMAL(18,4)`, `destination_bank_json JSON`, `state` (`PENDING\|REJECTED\|PROCESSING\|COMPLETE\|SUBTRACTED`), `adjustment_id UUID NULL FK` | Snapshots `destination_bank_json` at creation. `COMPLETE -> SUBTRACTED` executes as a Maker-Checker Adjustment. |
-| **`approval_requests`** | `subject_type`, `subject_id`, `payload_diff_json JSON`, `mode` (`STANDARD\|EMERGENCY_RATIFICATION`), `base_version INT NULL`, `expires_at DATETIME(3)`, `ratify_due_at DATETIME(3) NULL`, `maker_user_id UUID`, `checker_user_id UUID NULL`, `state` (`DRAFT\|PENDING_REVIEW\|APPROVED\|EXECUTED\|REJECTED`), `rejection_reason`, `risk_acceptance_note` | Maker ≠ Checker (`checker_user_id <> maker_user_id`) is enforced by the `approval_requests_checker_not_maker` `BEFORE INSERT` trigger (MariaDB forbids a `CHECK` constraint on a column that participates in a foreign key), **and** by the application-level check in `ApprovalService` and the `makerCheckerGuard` middleware. |
+| **`approval_requests`** | `subject_type`, `subject_id`, `payload_diff_json JSON`, `mode` (`STANDARD\|EMERGENCY_RATIFICATION`), `base_version INT NULL`, `expires_at DATETIME(3)`, `ratify_due_at DATETIME(3) NULL`, `maker_user_id UUID`, `checker_user_id UUID NULL`, `state` (`DRAFT\|PENDING_REVIEW\|APPROVED\|EXECUTED\|REJECTED`), `rejection_reason`, `risk_acceptance_note` | Maker ≠ Checker (`checker_user_id <> maker_user_id`) is enforced by the `approval_requests_checker_not_maker_insert` `CHECK` constraint, the `approval_requests_checker_not_maker_update` `BEFORE UPDATE` trigger, **and** the application-level check in `ApprovalService` and the `makerCheckerGuard` middleware. |
 
 ### 7.2 Group B: Gateway Catalog, Environments, Auth & Credentials (6 Tables)
 
@@ -430,7 +437,7 @@ The Prisma datamodel is a **MySQL / MariaDB** datamodel. These rules are not neg
 | **`attempt_groups`** | `link_id UUID FK`, `customer_fingerprint CHAR(64)`, `success_count INT DEFAULT 0 CHECK (success_count <= 1)` | Groups all retries and rail switches by one customer on one link. Enforces at most one `SUCCEEDED` attempt per group. |
 | **`payment_attempts`** | `reference VARCHAR(191) UNIQUE`, `idempotency_key TEXT`, `link_id UUID FK`, `attempt_group_id UUID FK`, `application_id UUID FK`, `merchant_id UUID FK`, `rail_id UUID FK`, `route_id UUID FK`, `credential_set_id UUID FK`, `gateway_version_id UUID FK`, `commission_profile_id UUID FK`, `env` (`SANDBOX\|LIVE`), `mode TEXT`, `sub_mode TEXT NULL`, `status` (`CREATED\|INITIATING\|AWAITING_CUSTOMER\|AUTHORIZING\|VERIFYING\|UNKNOWN\|SUCCEEDED\|FAILED\|EXPIRED\|CANCELLED\|BLOCKED\|PARTIALLY_REFUNDED\|REFUNDED\|DISPUTED`), `substatus TEXT NULL`, `gateway_reference TEXT`, `provider_reference TEXT NULL`, `network_reference TEXT NULL`, `requested_amount DECIMAL(18,4)`, `surcharge_amount DECIMAL(18,4) DEFAULT 0`, `total_charged_amount DECIMAL(18,4)`, `gateway_amount_wire TEXT`, `settled_amount DECIMAL(18,4) NULL`, `gateway_fee_amount DECIMAL(18,4) NULL`, `platform_commission_amount DECIMAL(18,4)`, `net_merchant_amount DECIMAL(18,4)`, `fee_bearer TEXT`, `currency CHAR(3)`, `customer_fields_masked JSON`, `context_ciphertext TEXT`, `otp_attempts INT DEFAULT 0`, `last_otp_sent_at DATETIME(3) NULL`, `client_ip TEXT`, `user_agent TEXT`, `expires_at DATETIME(3)`, `grace_expires_at DATETIME(3)`, `next_check_at DATETIME(3) NULL`, `ledger_entry_id UUID NULL FK UNIQUE`, `terminal_at DATETIME(3) NULL` | The unified runtime payment record. Pins `gateway_version_id`, `route_id`, `credential_set_id`, and `commission_profile_id`. `UNIQUE(ledger_entry_id)` prevents double ledger posting. |
 | **`attempt_step_logs`** | `attempt_id UUID FK`, `gateway_version_id UUID FK`, `phase TEXT`, `step_id UUID FK`, `step_order INT`, `redacted_request_json JSON`, `redacted_response_text TEXT`, `http_status INT`, `duration_ms INT`, `outcome TEXT`, `created_at DATETIME(3)` | Immutable forensic log of every outbound HTTP call. Preserves raw text for `UNKNOWN` debugging; scrubbed by multi-layer secret redactor prior to insert. |
-| **`inbound_events`** | `channel_id UUID FK`, `gateway_id UUID FK`, `env TEXT`, `raw_body_bytes LONGBLOB`, `redacted_headers_json JSON`, `source_ip TEXT`, `verified BOOL`, `verification_error TEXT NULL`, `dedupe_key CHAR(64)`, `attempt_id UUID NULL FK`, `received_at DATETIME(3)`, `processed_at DATETIME(3) NULL`, `processing_result TEXT` | Durable webhook inbox stored **before** any processing and never deleted. `UNIQUE(channel_id, dedupe_key)` absorbs replays and retries. |
+| **`inbound_events`** | `channel_id UUID FK`, `gateway_id UUID FK`, `env TEXT`, `raw_body_bytes BYTEA`, `redacted_headers_json JSON`, `source_ip TEXT`, `verified BOOL`, `verification_error TEXT NULL`, `dedupe_key CHAR(64)`, `attempt_id UUID NULL FK`, `received_at DATETIME(3)`, `processed_at DATETIME(3) NULL`, `processing_result TEXT` | Durable webhook inbox stored **before** any processing and never deleted. `UNIQUE(channel_id, dedupe_key)` absorbs replays and retries. |
 | **`operator_cases`** | `attempt_id UUID NULL FK`, `reconciliation_item_id UUID NULL FK`, `kind` (`UNKNOWN\|HELD\|CONFLICT\|MISMATCH\|LATE_SUCCESS\|MANUAL_REVIEW\|UNMATCHED_STATEMENT`), `priority` (`P1\|P2\|P3`), `sla_due_at DATETIME(3)`, `state` (`OPEN\|IN_PROGRESS\|PENDING_CHECKER\|RESOLVED`), `assignee_user_id UUID NULL FK`, `resolution_notes TEXT`, `approval_request_id UUID NULL FK` | Operational queue with SLA timers for human-in-the-loop exception handling under Maker-Checker. |
 | **`reconciliation_runs`** | `statement_source_id UUID FK`, `window_start DATETIME(3)`, `window_end DATETIME(3)`, `file_hash CHAR(64) UNIQUE`, `stats_json JSON` | `file_hash UNIQUE` makes manual or SFTP statement uploads idempotent. |
 | **`reconciliation_items`** | `run_id UUID FK`, `attempt_id UUID NULL FK`, `our_reference TEXT`, `provider_reference TEXT`, `batch_reference TEXT NULL`, `statement_amount DECIMAL(18,4)`, `statement_fee DECIMAL(18,4)`, `result` (`MATCHED\|AMOUNT_MISMATCH\|MISSING_AT_GATEWAY\|MISSING_LOCALLY\|DUPLICATE`), `operator_case_id UUID NULL FK` | Per-line reconciliation outcome. |
@@ -475,7 +482,7 @@ Directly inherited from the Voucher Provider Management System and hardened with
    - Stores the initialization `Promise<ApiConsumer>` in `consumersMap` **synchronously before awaiting DB loads** to eliminate race conditions and duplicate timer leaks under concurrent bursts.
    - Replaces `setInterval` with a **chained `setTimeout`** (`period * (0.9 + Math.random() * 0.2)` for +/-10% jitter) so refreshes never overlap or stampede across cluster instances.
    - Uses a `singleFlightRefreshPromise` when concurrent requests encounter `401`/`403` so only one token refresh HTTP call is executed.
-   - If the refresh response includes a rotated refresh token (`new_refresh_token_selector`), encrypts and persists it to `credential_sets` in the MySQL / MariaDB database **before** resolving the refresh Promise.
+   - If the refresh response includes a rotated refresh token (`new_refresh_token_selector`), encrypts and persists it to `credential_sets` in the PostgreSQL 18 database **before** resolving the refresh Promise.
    - Retries a `401`/`403` request **only if the HTTP failure occurred before the gateway could have processed a money movement**; timeouts and 5xx on `MOVES_MONEY` steps are **never retried**.
 
 ### 8.2 The Six-Method Universal Engine Contract (`DynamicRailEngine`)
@@ -521,7 +528,7 @@ Directly inherited from the Voucher Provider Management System and hardened with
 5. **Forward-Only Motion:** `SUCCEEDED` is never downgraded by a later failure or expiry event. Conflicting trusted signals freeze the attempt in `UNKNOWN` and open a `P1` `CONFLICT` operator case.
 6. **Late Success Recovery:** A verified confirmation arriving after `EXPIRED` or `FAILED` transitions the attempt to `SUCCEEDED`, posts the ledger entry (if the link slot is still available), and raises a `P2` alert. If the single-use link was already paid by another attempt in the meantime, funds route to `SUSPENSE` and auto-draft a refund `Adjustment`.
 7. **Atomic Ledger Posting:** Transitioning to `SUCCEEDED` and inserting `journal_entries` + `journal_lines` occur in the **exact same database transaction**, guarded by `UNIQUE(ref_type, ref_id)` on `journal_entries` and `UNIQUE(ledger_entry_id)` on `payment_attempts`.
-8. **Durable Database Timers:** `expires_at` and `next_check_at` are indexed `DATETIME(3)` columns polled by stateless workers in `core-back` using `SELECT ... FOR UPDATE SKIP LOCKED`. `SKIP LOCKED` requires **MySQL 8.0+ / MariaDB 10.6+** — below that floor the sweepers must run single-node, because the lock-skipping semantics do not exist. The terminal transitions are additionally guarded by a conditional `UPDATE ... WHERE terminal_at IS NULL`, so a terminal state is applied **at most once** even when two cluster nodes claim the same row.
+8. **Durable Database Timers:** `expires_at` and `next_check_at` are indexed timestamp columns polled by stateless workers in `core-back` using `SELECT ... FOR UPDATE SKIP LOCKED`, which is native PostgreSQL 18. The terminal transitions are additionally guarded by a conditional `UPDATE ... WHERE terminal_at IS NULL`, so a terminal state is applied **at most once** even when two cluster nodes claim the same row.
 9. **Realtime Streaming:** Every state transition broadcasts from `core-back` to `checkout-back` (for the payer's SSE stream) and `merchant-back` (for the paired POS WebSocket/SSE cashier room).
 
 ## 10. Seven Production Configuration Blueprints (Including NeomPay First-Party Rail)
@@ -567,18 +574,18 @@ Checked continuously by `core-back` triggers and a scheduled verification job:
 + SUSPENSE Balance
 ```
 
-#### 11.2.1 Database-Level Enforcement of the Domain Invariants (MySQL / MariaDB)
+#### 11.2.1 Database-Level Enforcement of the Domain Invariants (PostgreSQL 18)
 
-The four domain invariants are enforced in the database by the initial migration, but **not** in the same way:
+The four domain invariants are enforced in the database by the PostgreSQL 18 migrations:
 
 | Invariant | Enforcement |
 | :--- | :--- |
 | `journal_lines.amount > 0` | `CHECK` constraint `journal_lines_amount_positive` |
 | `attempt_groups.success_count <= 1` | `CHECK` constraint `attempt_groups_single_success` |
 | `payment_links` slot reservation (`infinite_use = true OR confirmed_count + active_locked_count <= use_count`) | `CHECK` constraint `payment_links_slot_reservation_invariant` |
-| `approval_requests.checker_user_id <> maker_user_id` | `BEFORE INSERT` trigger `approval_requests_checker_not_maker` |
+| `approval_requests.checker_user_id <> maker_user_id` | `CHECK` constraint `approval_requests_checker_not_maker_insert` plus the `approval_requests_checker_not_maker_update` `BEFORE UPDATE` trigger |
 
-MariaDB **forbids a `CHECK` constraint on a column that participates in a foreign key**, and `approval_requests.checker_user_id` / `maker_user_id` are both foreign keys into `users`. The Maker ≠ Checker invariant is therefore enforced by a `BEFORE INSERT` trigger on `approval_requests` that raises `SIGNAL SQLSTATE '45000'` (`checker_user_id must differ from maker_user_id`), **in addition to** the application-level check in `ApprovalService` and the `makerCheckerGuard` middleware. The other three domain checks remain plain `CHECK` constraints.
+PostgreSQL allows a `CHECK` constraint on the foreign-key columns, so the insert path is protected by both the constraint and the trigger. The application-level checks in `ApprovalService` and the `makerCheckerGuard` middleware remain the first line of defence.
 
 ### 11.3 All 15 Worked Double-Entry Journal Entries
 
@@ -609,7 +616,7 @@ MariaDB **forbids a `CHECK` constraint on a column that participates in a foreig
 2. **Synchronous Promise-Cached Consumer Registry** (prevents duplicate consumer timers under concurrency).
 3. **Single-Flight Auth Token Refresh** (one shared refresh Promise across concurrent 401/403 calls).
 4. **Chained `setTimeout` with +/-10% Jitter** (replaces `setInterval`).
-5. **Atomic Rotating Refresh-Token Persistence** (written to the MySQL / MariaDB database before resolving refresh Promise).
+5. **Atomic Rotating Refresh-Token Persistence** (written to the PostgreSQL 18 database before resolving refresh Promise).
 6. **Per-Step `AbortController` Timeouts** (10s auth/inquire, 15s initiate/confirm/refund).
 7. **Strict Retry Boundary on Money Steps** (`MOVES_MONEY` steps never auto-retry on timeout/5xx -> `UNKNOWN`).
 8. **Raw-Text-First Response Reader** (2 MB cap, 64 JSON depth cap, XML DTD/external entities disabled).

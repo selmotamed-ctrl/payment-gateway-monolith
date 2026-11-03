@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { edgeCoreUrls, loadDeployConfig, parseNodeList } from "../lib/configSchema";
+import { edgeCoreUrls, effectiveDatabase, loadDeployConfig, parseNodeList } from "../lib/configSchema";
 
 const BASE = `
 DB_MANAGE_VIA_SSH="true"
@@ -9,7 +9,7 @@ DB_PRIVATE_IP="10.10.0.10"
 DB_NAME="gateway"
 DB_USER="gw"
 DB_PASSWORD="ultra-strong-db-password"
-DATABASE_URL="mysql://gw:ultra-strong-db-password@10.10.0.10:3306/gateway"
+DATABASE_URL="postgresql://gw:ultra-strong-db-password@10.10.0.10:5432/gateway"
 CORE_SSH_HOST="10.10.0.20"
 CORE_SSH_KEY_PATH="~/.ssh/core"
 CORE_PRIVATE_IP="10.10.0.20"
@@ -110,15 +110,49 @@ PG_REPLICA_NODES="pg-rep-1@10.0.1.11:22:10.1.1.11:5432"
     expect(result.problems.join(" ")).toContain("PG_REPLICA_NODES requires PG_PRIMARY_NODE");
   });
 
-  test("PG storage forces DB_ENGINE=postgresql", () => {
-    const result = loadDeployConfig(withOverrides(`
+  test("DB_ENGINE defaults to PostgreSQL 18 on port 5432", () => {
+    const config = requireConfig(BASE);
+    expect(config.DB_ENGINE).toBe("postgresql");
+    expect(config.DB_PORT).toBe(5432);
+  });
+
+  test("legacy DB_* remains the compatibility path when no PG storage is configured", () => {
+    const database = effectiveDatabase(requireConfig(BASE));
+    expect(database.name).toBe("gateway");
+    expect(database.user).toBe("gw");
+    expect(database.password).toBe("ultra-strong-db-password");
+    expect(database.host).toBe("10.10.0.10");
+  });
+
+  test("PG storage credentials override the legacy DB_* compatibility block", () => {
+    const config = requireConfig(withOverrides(`
 PG_MANAGE_VIA_SSH="true"
 PG_PRIMARY_NODE="pg-pri@10.0.1.10:22:10.1.1.10:5432"
+PG_DB_NAME="pg_authoritative"
+PG_DB_USER="pg_authoritative_user"
 PG_DB_PASSWORD="strong-pg-password"
 PG_SSH_KEY_PATH="~/.ssh/pg"
 `));
+    const database = effectiveDatabase(config);
+    expect(database.engine).toBe("postgresql");
+    expect(database.name).toBe("pg_authoritative");
+    expect(database.user).toBe("pg_authoritative_user");
+    expect(database.password).toBe("strong-pg-password");
+    expect(database.host).toBe("10.1.1.10");
+    expect(database.port).toBe(5432);
+  });
+
+  test("an invalid backup endpoint is rejected", () => {
+    const result = loadDeployConfig(withOverrides(`
+BACKUP_ENABLED="true"
+BACKUP_NODE="backup-1@10.0.3.10:22:10.1.3.10:4090"
+BACKUP_SSH_KEY_PATH="~/.ssh/backup"
+BACKUP_PRIMARY_S3_ENDPOINT="s3.example.invalid"
+BACKUP_PRIMARY_S3_BUCKET="s3://payment-gateway-backups/prod"
+BACKUP_ENCRYPTION_KEY_HEX="abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+`));
     expect(result.ok).toBe(false);
-    expect(result.problems.join(" ")).toContain("DB_ENGINE must be 'postgresql'");
+    expect(result.problems.join(" ")).toContain("BACKUP_PRIMARY_S3_ENDPOINT must be an absolute http(s) URL");
   });
 
   test("backup without S3 bucket or encryption key is rejected", () => {
@@ -131,6 +165,7 @@ BACKUP_SSH_KEY_PATH="~/.ssh/backup"
     const problems = result.problems.join(" ");
     expect(problems).toContain("BACKUP_PRIMARY_S3_BUCKET");
     expect(problems).toContain("BACKUP_ENCRYPTION_KEY_HEX");
+    expect(problems).toContain("BACKUP_PRIMARY_S3_ENDPOINT");
   });
 
   test("the shipped example env remains a valid legacy single-host configuration", () => {

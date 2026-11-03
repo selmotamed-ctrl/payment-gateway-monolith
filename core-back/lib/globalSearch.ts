@@ -40,6 +40,7 @@ import type {
   SearchResultGroup,
   SearchType,
 } from "./search/types";
+import type { AuditStorePort } from "./storageEngine/ports";
 
 const compact = (values: Array<string | null | undefined>): string =>
   values.filter((value): value is string => Boolean(value)).join(" · ");
@@ -1539,8 +1540,22 @@ export const auditLogProvider = defineSearchProvider({
   aliases: ["audit", "logs"],
   order: 200,
   canAccess: (actor) => hasAuthority(actor, "security:read"),
-  fetchCandidates: async ({ prisma, parsed, take }) => {
+  fetchCandidates: async ({ prisma, parsed, take, auditStore }) => {
     const query = parsed.term;
+    if (auditStore) {
+      const page = await auditStore.queryAuditLogs({
+        searchContains: query,
+        limit: take,
+      });
+      return page.items.map((row) => ({
+        id: row.id,
+        action: row.action,
+        entityType: row.entityType,
+        entityId: row.entityId,
+        createdAt: row.createdAt,
+        actor: { email: row.actorEmail ?? "", role: row.role },
+      }));
+    }
     return prisma.auditLog.findMany({
       where: {
         OR: [
@@ -1658,6 +1673,7 @@ export interface ExecuteGlobalSearchDeps {
   requestId?: string;
   logger?: GlobalSearchLogger;
   registry?: SearchProviderRegistry;
+  auditStore?: AuditStorePort | null;
 }
 
 export async function executeGlobalSearch(
@@ -1731,6 +1747,7 @@ export async function executeGlobalSearch(
         parsed,
         actor: deps.actor,
         take,
+        auditStore: deps.auditStore,
       });
       const ranked = rankAndSliceCandidates(
         rows,

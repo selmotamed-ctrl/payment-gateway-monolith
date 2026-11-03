@@ -11,7 +11,7 @@ Testing a zero-code, multi-rail payment gateway platform across 20 heterogeneous
 This specification designs a **Standalone Fake Payment Rails Emulator & Chaos Testing Service** (`fake-rails-back` + `fake-rails-front`) that acts as a complete, self-contained external payment ecosystem:
 
 1. **Zero Shared Database with the Payment Gateway (`100% Out-of-Process Isolation`):**
-   - `fake-rails-back` has zero access to `core-back`'s MySQL/MariaDB database and shares no memory with `core-back`. It persists its own transactions, webhook delivery queues, and chaos rules in an isolated embedded SQLite WAL database (`bun:sqlite` at `shared/data/fake-rails.sqlite`).
+   - `fake-rails-back` has zero access to `core-back`'s PostgreSQL 18 database and shares no memory with `core-back`. It persists its own transactions, webhook delivery queues, and chaos rules in an isolated embedded SQLite WAL database (`bun:sqlite` at `shared/data/fake-rails.sqlite`).
    - To `core-back`, the Fake Rails Service is indistinguishable from 20 real external bank switches and aggregators over HTTPS.
 2. **All 9 Collection Modes, All 10 Flow Phases, and All 20 Gateway Profiles:**
    - Emulates every collection mode (`OTP_PULL`, `REDIRECT`, `EMBEDDED`, `PUSH_APPROVAL`, `QR_DISPLAY`, `PAY_CODE`, `DEEP_LINK`, `MANUAL`, `HYBRID`) and every lifecycle phase (`CREDENTIAL_CHECK`, `PRE_INITIATE`, `INITIATE`, `SUBMIT`, `VERIFY`, `CANCEL`, `REFUND`, `VOID`, `CAPTURE`, `SETTLEMENT_FETCH`), plus interactive Hosted Checkout pages (`REDIRECT`) and drop-in JavaScript widget scripts (`EMBEDDED` Moamalat Lightbox & MPGS Hosted Session).
@@ -61,7 +61,7 @@ This specification designs a **Standalone Fake Payment Rails Emulator & Chaos Te
 │  │  • Chaos & Probabilistic Failure Engine (0% - 100% per Rail & Phase)             │  │
 │  │  • Outbound Webhook Dispatcher (HMAC, Sorted-Values, Timestamp.Body, RSA)        │  │
 │  │  • Statement Generator (CSV / XLSX / JSON with configurable fee variance)        │  │
-│  │  • Embedded SQLite WAL Store (shared/data/fake-rails.sqlite — Zero MySQL access) │  │
+│  │  • Embedded SQLite WAL Store (shared/data/fake-rails.sqlite — Zero PostgreSQL access) │  │
 │  └──────────────────────────────────────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```

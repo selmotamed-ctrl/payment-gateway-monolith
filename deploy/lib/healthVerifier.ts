@@ -316,11 +316,13 @@ export const probeLogDb = (runner: SshRunner, plan: DeployPlan, config: DeployCo
 export const probeBackupDaemon = (runner: SshRunner, plan: DeployPlan, config: DeployConfig): ProbeResult[] => {
   const node = plan.storage.backup;
   if (!node || !config.BACKUP_ENABLED) return [];
-  const certs = "/var/lib/pg-backup/shared/certs";
+  const certs = config.BACKUP_DAEMON_CERT_DIR;
+  const configuredBind = config.BACKUP_DAEMON_BIND_HOST.trim();
+  const healthHost = !configuredBind || configuredBind === "0.0.0.0" ? node.privateIp : configuredBind;
   const command = mtlsCurl({
     certs,
     certName: "backup-daemon",
-    url: `https://127.0.0.1:${config.BACKUP_DAEMON_PORT}/health`,
+    url: `https://${healthHost}:${config.BACKUP_DAEMON_PORT}/health`,
     expect: "OK",
   });
   try {

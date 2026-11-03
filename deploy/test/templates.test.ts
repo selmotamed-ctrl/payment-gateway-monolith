@@ -44,13 +44,13 @@ describe("environment rendering", () => {
       {
         MTLS_CA_CERT_PATH: "shared/certs/internal-ca.crt",
         MTLS_SERVER_CERT_PATH: "shared/certs/core-back.crt",
-        DATABASE_URL: "mysql://user:pass@host/db",
+        DATABASE_URL: "postgresql://user:pass@host/db",
       },
       "/var/www/pg-core",
     );
     expect(env.MTLS_CA_CERT_PATH).toBe("/var/www/pg-core/shared/certs/internal-ca.crt");
     expect(env.MTLS_SERVER_CERT_PATH).toBe("/var/www/pg-core/shared/certs/core-back.crt");
-    expect(env.DATABASE_URL).toBe("mysql://user:pass@host/db");
+    expect(env.DATABASE_URL).toBe("postgresql://user:pass@host/db");
   });
 });
 

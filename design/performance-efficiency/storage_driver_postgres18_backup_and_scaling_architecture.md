@@ -855,7 +855,7 @@ Because read models and search indexes are maintained **asynchronously by `Outbo
 
 ### 4.1 Primary Relational Core DDL (`payment_gateway_prod` on PostgreSQL 18)
 
-Below is the exact PostgreSQL 18 migration (`core-back/prisma/migrations/20261103120000_postgres18_storage_engine/migration.sql`) leveraging Postgres-native features that MySQL lacks:
+Below is the exact PostgreSQL 18 migration (`core-back/prisma/migrations/20261103120000_postgres18_storage_engine/migration.sql`) leveraging the PostgreSQL-native features used throughout this design:
 
 ```
 -- ============================================================================

@@ -158,9 +158,22 @@ export class PostgresUnitOfWorkAdapter implements UnitOfWorkPort {
       // turn a successful payment into an error.
     }
 
+    // pg_current_wal_lsn() inside the transaction is the insert position
+    // before the commit record. Read the flush LSN after commit so a replica
+    // that reached this watermark has definitely replayed our commit.
+    let commitLsn = result.commitLsn;
+    try {
+      const flushed = await this.primaryDb.$queryRaw<Array<{ lsn: string }>>(
+        Prisma.sql`SELECT pg_current_wal_flush_lsn()::text AS lsn`,
+      );
+      commitLsn = flushed[0]?.lsn ?? commitLsn;
+    } catch {
+      // The write already committed; keep the in-transaction watermark.
+    }
+
     return {
       data: result.data,
-      commitLsn: result.commitLsn,
+      commitLsn,
       durationMs: Math.round(performance.now() - startMs),
     };
   }

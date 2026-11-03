@@ -41,3 +41,57 @@ export const signedShardDelta = (
   const value = amount.toString();
   return direction === "DEBIT" ? value : `-${value}`;
 };
+
+export interface ShardBalanceRow {
+  id: string;
+  accountType: string;
+  total: string;
+}
+
+export const loadShardBalanceRows = async (
+  db: { $queryRawUnsafe?: (query: string, ...values: unknown[]) => Promise<unknown> },
+  accountIds?: readonly string[],
+): Promise<ShardBalanceRow[]> => {
+  if (typeof db.$queryRawUnsafe !== "function") {
+    return [];
+  }
+  const rows = accountIds && accountIds.length > 0
+    ? await db.$queryRawUnsafe(
+        `SELECT s.gl_account_id::text AS id, g.account_type::text AS "accountType",
+                SUM(s.current_balance)::text AS total
+         FROM gl_account_shards s
+         INNER JOIN gl_accounts g ON g.id = s.gl_account_id
+         WHERE s.gl_account_id = ANY($1::uuid[])
+         GROUP BY s.gl_account_id, g.account_type`,
+        accountIds,
+      )
+    : await db.$queryRawUnsafe(
+        `SELECT s.gl_account_id::text AS id, g.account_type::text AS "accountType",
+                SUM(s.current_balance)::text AS total
+         FROM gl_account_shards s
+         INNER JOIN gl_accounts g ON g.id = s.gl_account_id
+         GROUP BY s.gl_account_id, g.account_type`,
+      );
+  return Array.isArray(rows) ? rows as ShardBalanceRow[] : [];
+};
+
+const DEBIT_POSITIVE_ACCOUNT_TYPES = new Set([
+  "TREASURY",
+  "GATEWAY_CLEARING",
+  "COMMISSION_RECEIVABLE",
+  "PROVIDER_FEE_EXPENSE",
+  "GATEWAY_FEE_EXPENSE",
+]);
+
+export const naturalShardBalance = (
+  accountType: string,
+  shardTotal: string | number | { toString(): string },
+): string => {
+  const value = shardTotal.toString();
+  if (Number(value) === 0) return "0";
+  return DEBIT_POSITIVE_ACCOUNT_TYPES.has(accountType)
+    ? value
+    : value.startsWith("-")
+      ? value.slice(1)
+      : `-${value}`;
+};

@@ -1,13 +1,13 @@
 import { parseNodeList, type DeployConfig } from "../lib/configSchema";
 import type { SshTarget } from "../lib/hostPlanner";
-import type { ProvisionReport, ProvisionRunner } from "./postgres18Provisioner";
+import { pgHbaSnippet, postgresConfigPath, type ProvisionReport, type ProvisionRunner } from "./postgres18Provisioner";
 
 /**
  * Dedicated append-only audit database and monthly-partitioned operational log
  * database. The DDL is copied verbatim from the storage architecture.
  */
 
-export const AUDIT_DB_DDL = `CREATE EXTENSION IF NOT EXISTS pg_trgm;
+const AUDIT_DB_BASE = `CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE TABLE IF NOT EXISTS audit_records (
   seq_no              BIGINT GENERATED ALWAYS AS IDENTITY UNIQUE,
@@ -64,7 +64,7 @@ CREATE TRIGGER trg_audit_immutable
 REVOKE UPDATE, DELETE, TRUNCATE ON audit_records FROM PUBLIC;
 `;
 
-export const LOG_DB_DDL = `CREATE TABLE IF NOT EXISTS attempt_step_logs (
+const LOG_DB_BASE = `CREATE TABLE IF NOT EXISTS attempt_step_logs (
   id                     UUID         NOT NULL,
   attempt_id             UUID         NOT NULL,
   gateway_version_id     UUID         NOT NULL,
@@ -106,8 +106,40 @@ CREATE INDEX IF NOT EXISTS http_access_logs_created_brin_idx
   ON http_access_logs USING brin (created_at);
 `;
 
-export const auditDatabaseDdl = (): string => AUDIT_DB_DDL;
-export const logDatabaseDdl = (): string => LOG_DB_DDL;
+const sqlIdentifier = (value: string): string => `"${value.replace(/"/g, '""')}"`;
+
+/** Least-privilege runtime grants for the audit writer (append-only). */
+export const auditRuntimeGrants = (role: string): string => {
+  const writer = sqlIdentifier(role);
+  return `-- Least-privilege runtime privileges for the audit writer
+GRANT USAGE ON SCHEMA public TO ${writer};
+GRANT SELECT, INSERT ON audit_records TO ${writer};
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${writer};
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT ON TABLES TO ${writer};
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO ${writer};
+`;
+};
+
+/** Least-privilege runtime grants for the log writer (no UPDATE/DELETE/TRUNCATE). */
+export const logRuntimeGrants = (role: string): string => {
+  const writer = sqlIdentifier(role);
+  return `-- Least-privilege runtime privileges for the log writer
+GRANT USAGE ON SCHEMA public TO ${writer};
+GRANT SELECT, INSERT ON attempt_step_logs, http_access_logs TO ${writer};
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${writer};
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT ON TABLES TO ${writer};
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO ${writer};
+`;
+};
+
+/** The default-role DDL, kept as a stable export for operators and tests. */
+export const AUDIT_DB_DDL = `${AUDIT_DB_BASE}\n${auditRuntimeGrants("pg_audit_writer")}`;
+export const LOG_DB_DDL = `${LOG_DB_BASE}\n${logRuntimeGrants("pg_log_writer")}`;
+
+export const auditDatabaseDdl = (config?: Pick<DeployConfig, "AUDIT_DB_USER">): string =>
+  config ? `${AUDIT_DB_BASE}\n${auditRuntimeGrants(config.AUDIT_DB_USER)}` : AUDIT_DB_DDL;
+export const logDatabaseDdl = (config?: Pick<DeployConfig, "LOG_DB_USER">): string =>
+  config ? `${LOG_DB_BASE}\n${logRuntimeGrants(config.LOG_DB_USER)}` : LOG_DB_DDL;
 export const auditDbDdl = auditDatabaseDdl;
 export const logDbDdl = logDatabaseDdl;
 
@@ -120,13 +152,15 @@ const nextMonth = (date: Date): Date => new Date(Date.UTC(date.getUTCFullYear(),
 
 /**
  * Creates the next N monthly partitions for both log tables plus the
- * maintenance function/cron SQL. Accepts (monthsAhead, now) or (now, months).
+ * maintenance function/cron SQL. Accepts (monthsAhead, now, retentionMonths)
+ * or (now, monthsAhead, retentionMonths).
  */
-export function ensureLogPartitions(monthsAhead?: number, now?: Date): string;
-export function ensureLogPartitions(now?: Date, monthsAhead?: number): string;
-export function ensureLogPartitions(first?: number | Date, second?: number | Date): string {
+export function ensureLogPartitions(monthsAhead?: number, now?: Date, retentionMonths?: number): string;
+export function ensureLogPartitions(now?: Date, monthsAhead?: number, retentionMonths?: number): string;
+export function ensureLogPartitions(first?: number | Date, second?: number | Date, third?: number): string {
   const monthsAhead = typeof first === "number" ? first : typeof second === "number" ? second : 6;
   const now = first instanceof Date ? first : second instanceof Date ? second : new Date();
+  const retention = typeof third === "number" ? third : 12;
   const statements: string[] = [];
   for (let offset = 0; offset < monthsAhead; offset += 1) {
     const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + offset, 1));
@@ -138,13 +172,16 @@ export function ensureLogPartitions(first?: number | Date, second?: number | Dat
       );
     }
   }
-  statements.push(`CREATE OR REPLACE FUNCTION ensure_log_partitions(months_ahead INT DEFAULT 6)
+  statements.push(`CREATE OR REPLACE FUNCTION ensure_log_partitions(months_ahead INT DEFAULT 6, retention_months INT DEFAULT 12)
 RETURNS void AS $$
 DECLARE
   offset INT;
   start_date DATE;
   end_date DATE;
   suffix TEXT;
+  cutoff_date DATE;
+  partition_name TEXT;
+  partition_start DATE;
 BEGIN
   FOR offset IN 0..months_ahead - 1 LOOP
     start_date := (date_trunc('month', now())::date + (offset || ' months')::interval)::date;
@@ -153,17 +190,47 @@ BEGIN
     EXECUTE format('CREATE TABLE IF NOT EXISTS attempt_step_logs_%s PARTITION OF attempt_step_logs FOR VALUES FROM (%L) TO (%L)', suffix, start_date, end_date);
     EXECUTE format('CREATE TABLE IF NOT EXISTS http_access_logs_%s PARTITION OF http_access_logs FOR VALUES FROM (%L) TO (%L)', suffix, start_date, end_date);
   END LOOP;
+
+  -- Retention is applied only to monthly partitions older than the configured
+  -- window; the default partition and any non-monthly table are never touched.
+  cutoff_date := (date_trunc('month', now()) - make_interval(months => retention_months))::date;
+  FOR partition_name IN
+    SELECT child.relname
+    FROM pg_inherits
+    JOIN pg_class parent ON parent.oid = pg_inherits.inhparent
+    JOIN pg_class child ON child.oid = pg_inherits.inhrelid
+    WHERE parent.relname = 'attempt_step_logs'
+      AND child.relname ~ '^attempt_step_logs_[0-9]{4}_[0-9]{2}$'
+  LOOP
+    partition_start := to_date(right(partition_name, 7), 'YYYY_MM');
+    IF partition_start < cutoff_date THEN
+      EXECUTE format('DROP TABLE IF EXISTS %I', partition_name);
+    END IF;
+  END LOOP;
+  FOR partition_name IN
+    SELECT child.relname
+    FROM pg_inherits
+    JOIN pg_class parent ON parent.oid = pg_inherits.inhparent
+    JOIN pg_class child ON child.oid = pg_inherits.inhrelid
+    WHERE parent.relname = 'http_access_logs'
+      AND child.relname ~ '^http_access_logs_[0-9]{4}_[0-9]{2}$'
+  LOOP
+    partition_start := to_date(right(partition_name, 7), 'YYYY_MM');
+    IF partition_start < cutoff_date THEN
+      EXECUTE format('DROP TABLE IF EXISTS %I', partition_name);
+    END IF;
+  END LOOP;
 END;
 $$ LANGUAGE plpgsql;
 
-SELECT ensure_log_partitions(${monthsAhead});
+SELECT ensure_log_partitions(${monthsAhead}, ${retention});
 `);
   return statements.join("\n");
 }
 
 export const LOG_PARTITION_MAINTENANCE_CRON = "15 1 * * *";
 export const logPartitionCronLine = (config: DeployConfig): string =>
-  `${LOG_PARTITION_MAINTENANCE_CRON} root su - postgres -c "psql -d ${config.LOG_DB_NAME} -c 'SELECT ensure_log_partitions(6)'" >/var/log/pg-log-partitions.log 2>&1`;
+  `${LOG_PARTITION_MAINTENANCE_CRON} root su - postgres -c "psql -d ${config.LOG_DB_NAME} -c 'SELECT ensure_log_partitions(6, ${config.LOG_RETENTION_MONTHS})'" >/var/log/pg-log-partitions.log 2>&1`;
 
 const nodeSsh = (config: DeployConfig, spec: { sshHost: string; sshPort: number }, kind: "audit" | "log"): SshTarget => ({
   host: spec.sshHost,
@@ -202,6 +269,40 @@ export interface AuditLogProvisionInput {
   now?: Date;
 }
 
+const auditLogConfigSnippet = (): string => `listen_addresses = '*'
+wal_level = replica
+max_wal_senders = 16
+max_replication_slots = 16
+`;
+
+const allowedAuditLogSources = (config: DeployConfig): string[] => [
+  ...parseNodeList(config.CORE_NODES).map((node) => node.privateIp),
+  ...(config.CORE_PRIVATE_IP ? [config.CORE_PRIVATE_IP] : []),
+  ...parseNodeList(config.BACKUP_NODE).map((node) => node.privateIp),
+];
+
+const configureAuditLogHost = (
+  runner: ProvisionRunner,
+  ssh: SshTarget,
+  config: DeployConfig,
+): void => {
+  runner.writeRemoteFile({
+    target: ssh,
+    path: postgresConfigPath(config),
+    content: auditLogConfigSnippet(),
+    mode: 0o644,
+    sudo: true,
+  });
+  runner.writeRemoteFile({
+    target: ssh,
+    path: `/etc/postgresql/${config.PG_VERSION}/main/pg_hba.conf`,
+    content: pgHbaSnippet(config, allowedAuditLogSources(config)),
+    mode: 0o600,
+    sudo: true,
+  });
+  runner.run(ssh, "systemctl restart postgresql", { sudo: true });
+};
+
 export const provisionAuditAndLogDb = (input: AuditLogProvisionInput): ProvisionReport => {
   const { runner, config } = input;
   const commands: string[] = [];
@@ -219,10 +320,11 @@ export const provisionAuditAndLogDb = (input: AuditLogProvisionInput): Provision
       commands.push(command);
       runner.run(ssh, command, { sudo: true });
     }
+    configureAuditLogHost(runner, ssh, config);
     const repoPath = `/tmp/pg-audit-bootstrap-${process.pid}.sql`;
     applySql(runner, ssh, repoPath, repositorySql(config, "audit"), config, "postgres");
     const ddlPath = `/tmp/pg-audit-ddl-${process.pid}.sql`;
-    applySql(runner, ssh, ddlPath, AUDIT_DB_DDL, config, config.AUDIT_DB_NAME);
+    applySql(runner, ssh, ddlPath, auditDatabaseDdl(config), config, config.AUDIT_DB_NAME);
     commands.push("apply audit_records DDL + immutability trigger");
   }
   const logSpec = parseNodeList(config.LOG_DB_NODE)[0];
@@ -233,10 +335,11 @@ export const provisionAuditAndLogDb = (input: AuditLogProvisionInput): Provision
       commands.push(command);
       runner.run(ssh, command, { sudo: true });
     }
+    configureAuditLogHost(runner, ssh, config);
     const repoPath = `/tmp/pg-log-bootstrap-${process.pid}.sql`;
     applySql(runner, ssh, repoPath, repositorySql(config, "log"), config, "postgres");
     const ddlPath = `/tmp/pg-log-ddl-${process.pid}.sql`;
-    applySql(runner, ssh, ddlPath, `${LOG_DB_DDL}\n${ensureLogPartitions(input.now ?? new Date(), 6)}`, config, config.LOG_DB_NAME);
+    applySql(runner, ssh, ddlPath, `${logDatabaseDdl(config)}\n${ensureLogPartitions(input.now ?? new Date(), 6, config.LOG_RETENTION_MONTHS)}`, config, config.LOG_DB_NAME);
     const cronPath = "/etc/cron.d/pg-log-partitions";
     runner.writeRemoteFile({ target: ssh, path: cronPath, content: `${logPartitionCronLine(config)}\n`, mode: 0o644, sudo: true });
     commands.push(`install ${cronPath}`);

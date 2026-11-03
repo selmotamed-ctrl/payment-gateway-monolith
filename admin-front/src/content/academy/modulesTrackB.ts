@@ -821,15 +821,15 @@ export const ACADEMY_MODULES_TRACK_B: AcademyModule[] = [
                     {
                         "text": "To make the UI spinner last longer.",
                         "correct": false,
-                        "explanation": "Incorrect. The correct answer is: To prevent holding a MySQL row lock open during a slow external network call (which would deadlock the database) and to ensure that if the gateway times out, the adjustment stays safely in `EXECUTING` without ever double-refunding."
+                        "explanation": "Incorrect. The correct answer is: To prevent holding a PostgreSQL row lock open during a slow external network call (which would deadlock the database) and to ensure that if the gateway times out, the adjustment stays safely in `EXECUTING` without ever double-refunding."
                     },
                     {
-                        "text": "To prevent holding a MySQL row lock open during a slow external network call (which would deadlock the database) and to ensure that if the gateway times out, the adjustment stays safely in `EXECUTING` without ever double-refunding.",
+                        "text": "To prevent holding a PostgreSQL row lock open during a slow external network call (which would deadlock the database) and to ensure that if the gateway times out, the adjustment stays safely in `EXECUTING` without ever double-refunding.",
                         "correct": true,
-                        "explanation": "The correct answer is: To prevent holding a MySQL row lock open during a slow external network call (which would deadlock the database) and to ensure that if the gateway times out, the adjustment stays safely in `EXECUTING` without ever double-refunding."
+                        "explanation": "The correct answer is: To prevent holding a PostgreSQL row lock open during a slow external network call (which would deadlock the database) and to ensure that if the gateway times out, the adjustment stays safely in `EXECUTING` without ever double-refunding."
                     }
                 ],
-                "explanation": "The correct answer is: To prevent holding a MySQL row lock open during a slow external network call (which would deadlock the database) and to ensure that if the gateway times out, the adjustment stays safely in `EXECUTING` without ever double-refunding.",
+                "explanation": "The correct answer is: To prevent holding a PostgreSQL row lock open during a slow external network call (which would deadlock the database) and to ensure that if the gateway times out, the adjustment stays safely in `EXECUTING` without ever double-refunding.",
                 "critical": true
             },
             {

@@ -1,6 +1,6 @@
 import express, { type Request, type Response } from "express";
 import { z } from "zod";
-import type { Prisma } from "../../generated/prisma/client";
+import { Prisma } from "../../generated/prisma/client";
 import { client } from "../../prisma/client";
 import { ApiError, parseOrThrow } from "../../lib/error";
 import { requireAuthorities } from "../middleware/authDoubleCheck";
@@ -17,6 +17,7 @@ import {
   isBackupDaemonConfigured,
 } from "../../lib/storageEngine/backupControlClient";
 import { stableJson } from "../../lib/storageEngine/auditAndLogAdapters";
+import { writeAudit } from "../../lib/audit/writeAudit";
 
 const router = express.Router();
 
@@ -117,6 +118,87 @@ const localDrills = async (): Promise<DrillReport[]> => {
   });
 };
 
+const syncDaemonCatalog = async (overview: BackupOverview): Promise<void> => {
+  const runWrites = overview.backups.map((run) => {
+    const startedAt = new Date(run.startedAt);
+    const completedAt = run.completedAt ? new Date(run.completedAt) : null;
+    return client.backupCatalogRun.upsert({
+      where: { id: run.id },
+      update: {
+        target: run.target,
+        kind: run.kind,
+        engine: run.engine,
+        status: run.status,
+        startedAt,
+        completedAt,
+        durationMs: run.durationMs ?? null,
+        sizeBytes: run.sizeBytes === undefined ? null : BigInt(Math.max(0, Math.trunc(run.sizeBytes))),
+        startLsn: run.startLsn ?? null,
+        endLsn: run.endLsn ?? null,
+        storageTargets: (run.storageTargets ?? []) as Prisma.InputJsonValue,
+        errorMessage: run.errorMessage ?? null,
+      },
+      create: {
+        id: run.id,
+        target: run.target,
+        kind: run.kind,
+        engine: run.engine,
+        status: run.status,
+        startedAt,
+        completedAt,
+        durationMs: run.durationMs ?? null,
+        sizeBytes: run.sizeBytes === undefined ? null : BigInt(Math.max(0, Math.trunc(run.sizeBytes))),
+        startLsn: run.startLsn ?? null,
+        endLsn: run.endLsn ?? null,
+        storageTargets: (run.storageTargets ?? []) as Prisma.InputJsonValue,
+        errorMessage: run.errorMessage ?? null,
+      },
+    });
+  });
+
+  const drillWrites = overview.drills.map((drill) => {
+    const startedAt = new Date(drill.startedAt);
+    const completedAt = new Date(drill.completedAt);
+    const targetTime = new Date(drill.targetTime);
+    return client.backupRestoreDrill.upsert({
+      where: { id: drill.id },
+      update: {
+        status: drill.status,
+        startedAt,
+        completedAt,
+        durationMs: drill.durationMs,
+        targetTime,
+        replayedLsn: drill.replayedLsn || null,
+        doubleEntryDrift: new Prisma.Decimal(drill.doubleEntryDrift || "0"),
+        balanceMismatches: drill.balanceMismatches,
+        auditBrokenLinks: drill.auditBrokenLinks,
+        journalLineCount: BigInt(Math.max(0, Math.trunc(drill.journalLineCount))),
+        checkpointsJson: { checks: drill.checks } as unknown as Prisma.InputJsonValue,
+        errorMessage: drill.errorMessage ?? null,
+        reportSignature: drill.reportSignature ?? null,
+      },
+      create: {
+        id: drill.id,
+        status: drill.status,
+        startedAt,
+        completedAt,
+        durationMs: drill.durationMs,
+        targetTime,
+        replayedLsn: drill.replayedLsn || null,
+        doubleEntryDrift: new Prisma.Decimal(drill.doubleEntryDrift || "0"),
+        balanceMismatches: drill.balanceMismatches,
+        auditBrokenLinks: drill.auditBrokenLinks,
+        journalLineCount: BigInt(Math.max(0, Math.trunc(drill.journalLineCount))),
+        checkpointsJson: { checks: drill.checks } as unknown as Prisma.InputJsonValue,
+        errorMessage: drill.errorMessage ?? null,
+        reportSignature: drill.reportSignature ?? null,
+      },
+    });
+  });
+
+  await Promise.allSettled([...runWrites, ...drillWrites]);
+};
+
 const daemonOverview = async (): Promise<{
   overview: BackupOverview | null;
   reachable: boolean;
@@ -144,6 +226,9 @@ router.get("/overview", async (request: Request, response: Response) => {
     localDrills(),
   ]);
   const overview = daemon.overview;
+  if (overview) {
+    await syncDaemonCatalog(overview);
+  }
   response.setHeader("Cache-Control", "no-store");
   response.json({
     configured: isBackupDaemonConfigured(),
@@ -300,19 +385,20 @@ router.put("/policy", async (request: Request, response: Response) => {
       baseVersion: (approval.baseVersion ?? 0) + 1,
     },
   });
-  await client.auditOutbox.create({
+  await writeAudit(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
       action: "BACKUP_POLICY_UPDATED",
       entityType: "BACKUP_POLICY",
       entityId: "backup-policy",
-      beforeJson: (approval.payloadDiffJson ?? {}) as Prisma.InputJsonValue,
+      approvalRequestId: approval.id,
+      beforeJson: (approval.payloadDiffJson ?? {}) as Record<string, unknown>,
       afterJson: {
         policy: updated.policy,
         approvalRequestId: approval.id,
         checksum: stableJson(updated.policy).slice(0, 64),
-      } as unknown as Prisma.InputJsonValue,
+      },
     },
   });
   response.json({

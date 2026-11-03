@@ -8,24 +8,24 @@
 
 For a mission-critical financial switch and multi-rail payment gateway, a small set of happy-path unit tests is insufficient. Subtle defects hide in the intersections: a 3-decimal LYD split-fee rounding remainder on a 2-decimal aggregator route, a concurrent duplicate `confirm` racing an early webhook, an IPv4-mapped IPv6 SSRF address (`::ffff:127.0.0.1`), a `v-model` JSX binding that silently fails to open a dialog, or a seeded historical transaction that fails when an operator clicks **Inquire** or **Refund**.
 
-This blueprint gives the **OpenCode AI Agent** a complete, file-by-file, matrix-by-matrix implementation plan to build and execute an exhaustive verification suite totaling **37,600+ automated test cases and assertions** across 10 specialized test suites.
+This blueprint gives the **OpenCode AI Agent** a complete, file-by-file, matrix-by-matrix implementation plan to build and execute an exhaustive verification suite totaling **38,500+ automated test cases and assertions** across 11 specialized test suites.
 
 ### Non-Negotiable Rules for OpenCode When Implementing This Plan
 
 1. **Zero-Tautology Rule (No Testing Mocks Against Mocks):**
-   - Every test must invoke the **real production module, Express router, Prisma/MySQL database constraint, or rendered Vue 3 TSX DOM**. Tests that assert `expect(true).toBe(true)` or assert only on local test stubs are strictly forbidden.
+   - Every test must invoke the **real production module, Express router, Prisma/PostgreSQL 18 database constraint, or rendered Vue 3 TSX DOM**. Tests that assert `expect(true).toBe(true)` or assert only on local test stubs are strictly forbidden.
 2. **Combinatorial & Property-Based Matrix Generation (`describe.each` + Seeded PRNG Fuzzers):**
    - To achieve 37,000+ meaningful test cases without 500,000 lines of copy-pasted boilerplate, use data-driven Cartesian product generators (`for (const gateway of ALL_20_GATEWAYS) for (const scenario of ALL_20_SCENARIOS) ...`) and deterministic seeded property-based fuzzers (`xoshiro128**` with fixed seed `"pg-exhaustive-2026"`) so every single permutation is named, reproducible, and individually reported on failure.
 3. **Continuous Double-Entry Invariant Assertion Hook:**
-   - Every test suite that touches the database (`Suites 1, 2, 4, 6, 7, 8, 10`) must run `await invariantVerifier.verifySystemInvariant()` in its `afterEach` / `afterAll` hook, asserting `drift === "0.0000"`. If any test leaves even `0.0001 LYD` of ledger imbalance, the suite must fail immediately.
+   - Every test suite that touches the database (`Suites 1, 2, 4, 6, 7, 8, 9, 11`) must run `await invariantVerifier.verifySystemInvariant()` in its `afterEach` / `afterAll` hook, asserting `drift === "0.0000"`. If any test leaves even `0.0001 LYD` of ledger imbalance, the suite must fail immediately.
 4. **Fail-Fast Gate Progression:**
-   - OpenCode must implement and pass each suite in order (`T-EX-01` through `T-EX-10`), fixing any production code defect uncovered by a suite before advancing to the next.
+   - OpenCode must implement and pass each suite in order (`T-EX-01` through `T-EX-11`), fixing any production code defect uncovered by a suite before advancing to the next.
 
-## 1. Master Test Volume & Coverage Matrix (37,600+ Assertions)
+## 1. Master Test Volume & Coverage Matrix (38,500+ Assertions)
 
 | Suite ID | Suite Name & Target Directory | Primary Runner | Target Scope | Automated Test / Assertion Count |
 | :--- | :--- | :--- | :--- | :--- |
-| **Suite 01** | **Database Schema, 66 Models, 100 Enums, FKs, Triggers & Indexes** (`core-back/test/exhaustive/01-schema/`) | `bun test` + Live MySQL 8.4 / MariaDB | Every column type, `@db.Decimal(18,4)`, `@db.LongBlob`, `@@unique`, FK `Restrict`/`Cascade`/`SetNull`, 3 `CHECK` constraints, and Maker!=Checker `BEFORE INSERT/UPDATE` trigger | **~2,200 tests** |
+| **Suite 01** | **Database Schema, 66 Models, 100 Enums, FKs, Triggers & Indexes** (`core-back/test/exhaustive/01-schema/`) | `bun test` + Live PostgreSQL 18 | Every column type, `NUMERIC(18,4)`, `BYTEA`, native `UUID`/`JSONB`, `@@unique`, FK `Restrict`/`Cascade`/`SetNull`, `CHECK` constraints, and the Maker!=Checker `CHECK` + `BEFORE UPDATE` trigger | **~2,200 tests** |
 | **Suite 02** | **Double-Entry Ledger, 15 Templates, Fee Bearers & 10k Monetary Fuzzer** (`core-back/test/exhaustive/02-ledger/`) | `bun test` + Property Fuzzer | 15 templates × 3 currencies × 3 fee bearers × 4 commission calc types × 4 rounding modes + 10,000 random decimal permutations + monthly checkpoints | **~11,200 tests** |
 | **Suite 03** | **Transform Pipeline (`TransformPipe[]`), `recursiveSet` & `CryptoProfile` Lab** (`core-back/test/exhaustive/03-transforms-crypto/`) | `bun test` | All 36 pure transforms, type-safety validator, 500 dot-path/array selectors, prototype-pollution guards, 6 canonicalizers × 4 algorithms × 3 key encodings | **~3,600 tests** |
 | **Suite 04** | **Dynamic Rail Engine: 20 Gateways × 10 Phases × 24 Chaos Scenarios** (`core-back/test/exhaustive/04-rail-engine/`) | `bun test` + `fake-rails-back` | All 20 gateways × 9 modes × 10 phases × 24 deterministic & probabilistic chaos faults against live `fake-rails-back` | **~4,800 tests** |
@@ -33,13 +33,16 @@ This blueprint gives the **OpenCode AI Agent** a complete, file-by-file, matrix-
 | **Suite 06** | **High-Concurrency Race Conditions, Slot Locks & Multi-Worker `SKIP LOCKED`** (`core-back/test/exhaustive/06-concurrency/`) | `bun test` (Parallel Workers) | 50-way single-use link races, concurrent duplicate `confirm` + webhook races, parallel partial refunds, single-flight token refresh, multi-node workers | **~1,200 tests** |
 | **Suite 07** | **Onboarding, KYB, 7-Layer AML, Disputes, Recon, Smart AI Importer & 12 Gates** (`core-back/test/exhaustive/07-workflows/`) | `bun test` | Full state machines for `JoinRequest`, KYB SHA-256 dupes & magic bytes, AML rules & Arabic matching, disputes, CSV/XLSX/JSON recon, AI Spec Importer | **~2,500 tests** |
 | **Suite 08** | **140 Edge Cases + 24 STRIDE Threats + 15 Engineering Safeguards** (`core-back/test/exhaustive/08-security-edge/`) | `bun test` | All 140 edge cases (Groups A–K), 24 STRIDE vectors (IPv6 SSRF, XXE, CRLF, Luhn PAN redaction, host-pinned secrets, replay/tamper) | **~1,800 tests** |
-| **Suite 09** | **Full-Surface Playwright UI, Filter, Dialog, RTL/LTR & Geometry Matrix** (`e2e/exhaustive/09-ui-surface/`) | `@playwright/test` + `vitest` | Every page, dialog, stepper, `VDateInput` filter, chart, simulator & guide across `admin-front`, `merchant-front`, `checkout-front`, `fake-rails-front` (3 viewports × 2 locales × 2 themes) | **~2,300 tests** |
-| **Suite 10** | **Cross-Service E2E Lifecycles, Synthetic Seeder & Multi-Host Deploy Engine** (`e2e/exhaustive/10-e2e-seeder-deploy/`) | `@playwright/test` + `bun test` | Complete merchant-to-checkout-to-fake-rails-to-ledger-to-cashout E2E journeys, 5-gate `SeederSafetyGate` + 3.5-year seeder verification, and `deploy/` matrix | **~1,200 tests** |
-| **TOTAL** | **All 10 Workspaces Verified End-to-End** | **Unified CI Runner** | **100% Schema, API, Engine, Ledger, Security, Seeder, Deploy & UI Coverage** | **~37,600+ tests** |
+| **Suite 09** | **PostgreSQL 18 Storage Engine, Replicas, Audit/Log DBs, Backup & Restore Drills** (`core-back/test/exhaustive/09-storage-backup/`) | `bun test` + Live PostgreSQL 18 + `pg-backup-daemon` tests | `UnitOfWork` atomicity, `gl_account_shards` 16-way locking, outbox/audit shippers, LSN-aware replica reads, Redis velocity, `pg_audit_db` hash chain/immutability, `pg_logs_db` partition/backpressure, backup overview/trigger/policy and restore/invariant drills | **~900 tests** |
+| **Suite 10** | **Full-Surface Playwright UI, Filter, Dialog, RTL/LTR & Geometry Matrix** (`e2e/exhaustive/10-ui-surface/`) | `@playwright/test` + `vitest` | Every page, dialog, stepper, `VDateInput` filter, chart, simulator & guide across `admin-front`, `merchant-front`, `checkout-front`, `fake-rails-front` (3 viewports × 2 locales × 2 themes) | **~2,300 tests** |
+| **Suite 11** | **Cross-Service E2E Lifecycles, Synthetic Seeder & Multi-Host Deploy Engine** (`e2e/exhaustive/11-e2e-seeder-deploy/`) | `@playwright/test` + `bun test` | Complete merchant-to-checkout-to-fake-rails-to-ledger-to-cashout E2E journeys, 5-gate `SeederSafetyGate` + 3.5-year seeder verification, and `deploy/` matrix | **~1,200 tests** |
+| **TOTAL** | **All 10 Workspaces Verified End-to-End** | **Unified CI Runner** | **100% Schema, API, Engine, Ledger, Storage/Backup, Security, Seeder, Deploy & UI Coverage** | **~38,500+ tests** |
 
 ---
 
 ## 2. Suite 01: Database Schema, 66 Models, 100 Enums, FKs, Triggers & Indexes (`~2,200 Tests`)
+
+The suite runs against the live **PostgreSQL 18** database. MySQL/MariaDB introspection and type assertions are historical and must not be reintroduced.
 
 **Target Files to Create:**
 - `core-back/test/exhaustive/01-schema/models-and-columns.test.ts`
@@ -50,12 +53,12 @@ This blueprint gives the **OpenCode AI Agent** a complete, file-by-file, matrix-
 ### 2.1 Exhaustive Test Cases in Suite 01
 
 1. **66-Model Structural & Type Fidelity Matrix (`66 models × 15 checks = 990 tests`):**
-   - Dynamically introspects `INFORMATION_SCHEMA.COLUMNS`, `INFORMATION_SCHEMA.STATISTICS`, and `INFORMATION_SCHEMA.TABLE_CONSTRAINTS` on the live MySQL/MariaDB database and compares them 1-to-1 against `prisma/schema.prisma`:
+   - Dynamically introspects `information_schema.columns`, `pg_indexes`/`pg_index`, and the PostgreSQL constraint catalog on the live PostgreSQL 18 database and compares them 1-to-1 against `prisma/schema.prisma`:
      - Asserts every monetary column across all tables (`amount`, `requested_amount`, `surcharge_amount`, `total_charged_amount`, `settled_amount`, `gateway_fee_amount`, `platform_commission_amount`, `net_merchant_amount`, `checkpoint_balance`, `flat_fee`, `min_fee`, `max_fee`, `min_amount`, `max_amount`, `daily_cap_amount`, `commission_receivable_ceiling`, `negative_balance_ceiling`, `threshold_amount`, `statement_amount`, `statement_fee`) is `decimal(18,4)` and **never** `float` or `double`.
      - Inserts boundary values (`0.0001`, `99999999999999.9999`, `-99999999999999.9999`) and verifies exact string round-trip via `Prisma.Decimal` with zero precision loss.
-     - Asserts `inbound_events.raw_body_bytes` and `reconciliation_runs.file_content` are `longblob` and successfully store and retrieve a `1.5 MB` binary buffer byte-for-byte.
-     - Asserts all free-form text columns (`@db.Text`) store `10,000`-character Arabic and English payloads without `VARCHAR(191)` truncation errors.
-     - Asserts all 100 native MySQL `ENUM` definitions reject invalid enum strings at the database layer.
+     - Asserts `inbound_events.raw_body_bytes` and `reconciliation_runs.file_content` are `bytea` and successfully store and retrieve a `1.5 MB` binary buffer byte-for-byte.
+     - Asserts free-form text columns store `10,000`-character Arabic and English payloads without truncation.
+     - Asserts all native PostgreSQL enum types reject invalid enum labels at the database layer.
 2. **Unique Constraint Enforcement Matrix (`42 unique constraints × 5 cases = 210 tests`):**
    - Tests every `@unique` and `@@unique` constraint across the schema by inserting two colliding rows and asserting deterministic rejection (`P2002`):
      - `users.email`, `payment_links.key`, `pos_screens.screen_code`, `gl_accounts(gatewayId, env, credentialSetId)`, `journal_entries(refType, refId)`, `gateways.code`, `gateway_versions(gatewayId, versionNumber)`, `gateway_versions.contentHash`, `gateway_environments(gatewayVersionId, env)`, `gateway_auth(gatewayVersionId, env)`, `credential_sets(gatewayId, env, externalMerchantId)`, `rails.code`, `rail_fields(railId, key)`, `rail_routes(railId, gatewayId, credentialPolicy)`, `crypto_profiles(gatewayVersionId, name)`, `flow_steps(flowId, orderIndex)`, `step_parameters(stepId, place, key)`, `step_outputs(stepId, name)`, `status_rules(gatewayVersionId, phase, orderIndex)`, `error_maps(gatewayVersionId, gatewayCode, canonicalError)`, `confirmation_channels.pathToken`, `attempt_groups(linkId, customerFingerprint)`, `payment_attempts.reference`, `payment_attempts.ledgerEntryId`, `payment_attempts(linkId, idempotencyKey)`, `inbound_events(channelId, dedupeKey)`, `reconciliation_runs.fileHash`, `user_identities(kind, identifierNormalized)`, `user_identities.providerSubject`, `aml_rules.code`, `disputes(gatewayId, externalDisputeRef)`, `notification_templates(code, channel, lang, version)`, `notifications.eventId`, `platform_settings(key, scope, version)`.
@@ -70,8 +73,8 @@ This blueprint gives the **OpenCode AI Agent** a complete, file-by-file, matrix-
      - `infinite_use = false, use_count = 5`: all valid pairs where `confirmed + locked <= 5` pass; all pairs where `confirmed + locked > 5` **rejected**.
      - `infinite_use = true, use_count = 1`: `(500, 25)` pass.
    - **`approval_requests_checker_not_maker` Trigger:**
-     - `INSERT` with `checker_user_id = maker_user_id` -> rejected with `SQLSTATE '45000'`.
-     - `UPDATE` setting `checker_user_id = maker_user_id` -> rejected with `SQLSTATE '45000'`.
+     - `INSERT` with `checker_user_id = maker_user_id` -> rejected with the PostgreSQL trigger exception.
+     - `UPDATE` setting `checker_user_id = maker_user_id` -> rejected with the PostgreSQL trigger exception.
      - `INSERT` with `checker_user_id = NULL` -> pass; `UPDATE` with distinct `checker_user_id != maker_user_id` -> pass.
 
 ---
@@ -271,7 +274,7 @@ For **every one of the 20 seeded gateways** (`moamalat`, `lypay`, `numo_pay`, `s
    - Asserts: `SUBMIT` flow step is called at most once, `JournalEntry` is created **exactly once**, `payment_links.confirmed_count` increments by **exactly `1`**, `active_locked_count` decrements by **exactly `1`**, and `InvariantVerifier` reports `0.0000` drift.
 4. **Concurrent Partial Refunds Race:**
    - On a `100.0000 LYD` `SUCCEEDED` attempt, approves 5 concurrent partial refund `Adjustments` of `30.0000 LYD` each (`total = 150.0000 LYD > 100.0000 LYD`).
-   - Asserts: **at most 3** (`90.0000 LYD`) execute; the 4th and 5th are deterministically rejected with `REFUND_EXCEEDS_SETTLED_AMOUNT`, and the three-phase refund lock never deadlocks MySQL.
+   - Asserts: **at most 3** (`90.0000 LYD`) execute; the 4th and 5th are deterministically rejected with `REFUND_EXCEEDS_SETTLED_AMOUNT`, and the three-phase refund lock never deadlocks PostgreSQL.
 5. **Multi-Instance Worker Cluster Simulation (`4 worker nodes × 200 due items`):**
    - Spawns 4 concurrent instances of `ExpirySweeperWorker`, `PollWorker`, `InboundInboxWorker`, and `BackgroundJobWorker` against 200 due database rows.
    - Asserts that `SELECT ... FOR UPDATE SKIP LOCKED` and conditional `WHERE terminal_at IS NULL` ensure every row is processed **exactly once** with zero duplicate inquiries or state transitions.
@@ -329,7 +332,57 @@ Expands each of the **140 catalogued edge cases** into 10+ boundary variations (
 
 ---
 
-## 10. Suite 09: Full-Surface Playwright UI, Filter, Dialog, RTL/LTR & Geometry Matrix Across All 4 Portals (`~2,300 Tests`)
+## 10. Suite 09: PostgreSQL 18 Storage Engine, Replicas, Audit/Log Databases, Backups & Restore Drills (`~900 Tests`)
+
+**Target Files to Create:**
+- `core-back/test/exhaustive/09-storage-backup/uow-outbox-audit-atomicity.test.ts`
+- `core-back/test/exhaustive/09-storage-backup/gl-shards-and-lsn-routing.test.ts`
+- `core-back/test/exhaustive/09-storage-backup/audit-chain-and-log-backpressure.test.ts`
+- `core-back/test/exhaustive/09-storage-backup/backup-control-and-drills.test.ts`
+- `deploy/backup-daemon/test/exhaustive/backup-restore-matrix.test.ts`
+
+### 10.1 Storage Engine & Replica Matrix
+
+1. **`UnitOfWork` atomicity (`200 tests`):**
+   - Proves the ledger posting, `outbox_events`, `audit_outbox` and commit-LSN capture commit in one PostgreSQL transaction.
+   - Forces a failure after the ledger write but before the outbox/audit flush and asserts **zero** rows from any of the three tables.
+   - Asserts `statement_timeout`/transaction timeout is applied inside the transaction and a hung lock fails fast.
+   - Verifies the returned `commitLsn` is a valid `pg_current_wal_lsn()` value.
+2. **`gl_account_shards` concurrency (`150 tests`):**
+   - Seeds 16 shards for every system GL account and exactly one shard for merchant wallets.
+   - Runs 50-way concurrent postings against the same system account and asserts the 16 shard rows absorb the writes without a single hot-row deadlock.
+   - Verifies deterministic `(gl_account_id, shard_id)` lock ordering prevents AB-BA deadlocks across multi-account postings.
+   - Verifies `getGlAccountBalance` sums the 1 or 16 rows to the exact `NUMERIC(18,4)` balance.
+3. **LSN-aware `ReadStore` routing (`150 tests`):**
+   - Routes `'primary'` reads to the primary, `'replica'` reads to a healthy replica within `READ_REPLICA_MAX_LAG_MS`, and `{ atLeastLsn }` reads only to a replica whose `pg_last_wal_replay_lsn()` is >= the requested LSN.
+   - Simulates replica lag, replica death mid-query and an empty replica pool; asserts the primary fallback and the reported `servedBy`.
+   - Verifies the LSN comparator over `0/0`, multi-segment and malformed LSNs.
+4. **Redis cache/velocity (`100 tests`):**
+   - Verifies single-flight `getOrLoad`, TTL expiry, prefix invalidation and cross-node pub/sub invalidation.
+   - Runs the atomic Lua sliding-window velocity counters for count and amount limits; asserts a Redis outage degrades to the memory adapter without authorizing money.
+5. **Audit and log databases (`200 tests`):**
+   - `pg_audit_db`: appends the SHA-256 chain, rejects `UPDATE`/`DELETE`/`TRUNCATE` through the immutability trigger, detects a deliberately broken link and verifies `verifyHashChainIntegrity`.
+   - `pg_logs_db`: flushes buffered step/access logs into the correct monthly partition, drops access logs first under backpressure, re-queues step logs on a failed flush and never throws into the request path.
+   - Asserts a missing `AUDIT_DATABASE_URL`/`LOG_DATABASE_URL` leaves the optional port disabled rather than crashing the core.
+6. **Backup control plane and drills (`100 tests`):**
+   - Drives `pg-backup-daemon` `/health`, `/v1/overview`, `/v1/backups/trigger`, `/v1/policy`, `/v1/runs` and `/v1/drills` over the mTLS test harness.
+   - Verifies `target` (`all`, `postgres_core`, `audit_db`, `redis`) and `kind` (`full`, `delta`) validation, the queued → running → passed/failed catalog transitions and policy persistence.
+   - Runs the restore drill against a scratch PostgreSQL 18 instance and asserts the three checks (double-entry zero drift, sharded balance parity, audit hash chain) produce a signed `PASSED`/`FAILED` report.
+   - Verifies a tampered/restored ledger or broken audit link fails the drill rather than reporting success.
+7. **Core/admin route contract (`100 tests`):**
+   - Asserts `security:read`/`gateway:read` can read the overview and `security:write` is required for trigger/drill/policy.
+   - Asserts a policy update creates a maker-checker approval and cannot execute without the checker.
+   - Asserts an unconfigured daemon returns `503 BACKUP_DAEMON_NOT_CONFIGURED` for writes while the local catalog stays readable.
+
+### 10.2 Environment
+
+Run this suite against PostgreSQL 18 with at least one streaming replica when available. Tests that
+need a replica or the backup daemon skip explicitly (with a named reason) when the environment is
+not provisioned; they must not pass by silently asserting a stub.
+
+---
+
+## 11. Suite 10: Full-Surface Playwright UI, Filter, Dialog, RTL/LTR & Geometry Matrix Across All 4 Portals (`~2,300 Tests`)
 
 **Target Files to Create:**
 - `admin-front/e2e/exhaustive-admin-surface.spec.ts`
@@ -359,14 +412,14 @@ For **every route** across all 4 frontend SPAs (`admin-front` 22 routes, `mercha
 
 ---
 
-## 11. Suite 10: Full Cross-Service End-to-End Journeys, Synthetic Seeder & Deploy Engine Verification (`~1,200 Tests`)
+## 12. Suite 11: Full Cross-Service End-to-End Journeys, Synthetic Seeder & Deploy Engine Verification (`~1,200 Tests`)
 
 **Target Files to Create:**
 - `e2e/exhaustive/10-e2e-seeder-deploy/full-platform-lifecycle-journeys.spec.ts`
 - `core-back/test/exhaustive/10-seeder-and-deploy/synthetic-seeder-safety-and-audit.test.ts`
 - `deploy/test/exhaustive-deploy-matrix.test.ts`
 
-### 11.1 Complete Multi-Portal End-to-End Journeys (Browser + All Backends + Fake Rails + MySQL + SQLite)
+### 12.1 Complete Multi-Portal End-to-End Journeys (Browser + All Backends + Fake Rails + PostgreSQL 18)
 
 1. **Journey 1 — Self-Service Merchant Onboarding to First Settled Payment & Cash-Out:**
    - Applicant registers in `merchant-front` -> verifies OTP -> fills business profile -> uploads PNG/PDF KYB documents -> adds Beneficial Owners -> submits Join Request.
@@ -389,7 +442,7 @@ For **every route** across all 4 frontend SPAs (`admin-front` 22 routes, `mercha
 
 ---
 
-## 12. OpenCode Phased Execution Tracker & Master Runner Script
+## 13. OpenCode Phased Execution Tracker & Master Runner Script
 
 Add a root runner script `scripts/run-exhaustive-suite.sh` and execute the following checklist in sequence:
 
@@ -401,5 +454,6 @@ Add a root runner script `scripts/run-exhaustive-suite.sh` and execute the follo
 - [ ] **`T-EX-06` Implement & Pass Suite 06 (`core-back/test/exhaustive/06-concurrency/` — ~1,200 tests):** `cd core-back && bun test test/exhaustive/06-concurrency`
 - [ ] **`T-EX-07` Implement & Pass Suite 07 (`core-back/test/exhaustive/07-workflows/` — ~2,500 tests):** `cd core-back && bun test test/exhaustive/07-workflows`
 - [ ] **`T-EX-08` Implement & Pass Suite 08 (`core-back/test/exhaustive/08-security-edge/` — ~1,800 tests):** `cd core-back && bun test test/exhaustive/08-security-edge`
-- [ ] **`T-EX-09` Implement & Pass Suite 09 (`*/e2e/exhaustive-*.spec.ts` — ~2,300 tests):** Run Playwright + Vitest across `admin-front`, `merchant-front`, `checkout-front`, and `fake-rails-front`.
-- [ ] **`T-EX-10` Implement & Pass Suite 10 (`e2e/exhaustive/10-e2e-seeder-deploy/` — ~1,200 tests):** Run cross-service E2E journeys, Synthetic Seeder verification, and `deploy` matrix tests.
+- [ ] **`T-EX-09` Implement & Pass Suite 09 (`core-back/test/exhaustive/09-storage-backup/` — ~900 tests):** Run the storage engine, replica/LSN, audit/log DB, backup daemon and restore/invariant drill matrix.
+- [ ] **`T-EX-10` Implement & Pass Suite 10 (`*/e2e/exhaustive-*.spec.ts` — ~2,300 tests):** Run Playwright + Vitest across `admin-front`, `merchant-front`, `checkout-front`, and `fake-rails-front`.
+- [ ] **`T-EX-11` Implement & Pass Suite 11 (`e2e/exhaustive/11-e2e-seeder-deploy/` — ~1,200 tests):** Run cross-service E2E journeys, Synthetic Seeder verification, and `deploy` matrix tests.

@@ -12,10 +12,12 @@ import {
 } from "./engine/workers/productionRuntime";
 import { env } from "./lib/env";
 import { isApiError, toErrorEnvelope } from "./lib/error";
-import { requestLoggerMiddleware } from "./lib/requestLogger";
+import { requestLoggerMiddleware, setAccessLogSink } from "./lib/requestLogger";
 import { rawBodyMiddleware } from "./lib/rawBody";
 import { client } from "./prisma/client";
 import { getStorageEngine, shutdownStorageEngine } from "./lib/storageEngine";
+import { setPlatformStorage } from "./engine/runtime";
+import { invalidationBus } from "./lib/invalidationBus";
 
 declare global {
   namespace Express {
@@ -196,6 +198,52 @@ export const createHttpsServer = (): CoreHttpsServer => {
   return server;
 };
 
+const configureRedisInvalidation = async (): Promise<(() => Promise<void>)> => {
+  const firstRedisNode = env.REDIS_NODES.split(",").map((node) => node.trim()).filter(Boolean)[0];
+  const redisUrl = env.REDIS_URL ?? (firstRedisNode ? `redis://${firstRedisNode}` : undefined);
+  if (!redisUrl) {
+    return async () => undefined;
+  }
+  try {
+    const redisModule = await import("redis");
+    const publisher = redisModule.createClient({ url: redisUrl });
+    const subscriber = publisher.duplicate();
+    await publisher.connect();
+    await subscriber.connect();
+    invalidationBus.configureTransport(
+    {
+      publish: async (channel, message) => {
+        await publisher.publish(channel, message);
+      },
+    },
+    {
+      subscribe: async (channel, listener) => {
+        await subscriber.subscribe(channel, (message) => listener(message));
+      },
+      unsubscribe: async (channel) => {
+        await subscriber.unsubscribe(channel);
+      },
+      psubscribe: async (pattern, listener) => {
+        await subscriber.pSubscribe(pattern, (message) => listener(message));
+      },
+        punsubscribe: async (pattern) => {
+          await subscriber.pUnsubscribe(pattern);
+        },
+      },
+    );
+    return async () => {
+      invalidationBus.configureTransport(undefined, undefined);
+      await Promise.allSettled([publisher.quit(), subscriber.quit()]);
+    };
+  } catch (error) {
+    console.warn(
+      `Redis invalidation bus disabled: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    invalidationBus.configureTransport(undefined, undefined);
+    return async () => undefined;
+  }
+};
+
 export const start = async () => {
   // The statement upload and the dispute intake are queue-only routes: the
   // service refuses to boot if nothing can drain the durable jobs.
@@ -203,8 +251,11 @@ export const start = async () => {
     workerEnabled: env.WORKER_ENABLED,
     backgroundJobsEnabled: env.WORKER_BACKGROUND_JOBS_ENABLED,
   });
+  const closeInvalidationTransport = await configureRedisInvalidation();
   const server = createHttpsServer();
-  const storage = env.WORKER_ENABLED ? getStorageEngine() : undefined;
+  const storage = getStorageEngine();
+  setPlatformStorage(storage);
+  setAccessLogSink(storage.logSink);
   const workers = env.WORKER_ENABLED
     ? createProductionWorkerRuntime({
         db: client as never,
@@ -237,6 +288,9 @@ export const start = async () => {
 
   const stop = async (): Promise<void> => {
     workers?.stop();
+    setAccessLogSink(undefined);
+    setPlatformStorage(undefined);
+    await closeInvalidationTransport();
     await shutdownStorageEngine();
     await new Promise<void>((resolve) => {
       server.close(() => resolve());

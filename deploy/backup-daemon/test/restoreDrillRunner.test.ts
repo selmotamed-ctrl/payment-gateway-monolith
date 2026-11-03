@@ -26,7 +26,8 @@ import {
 } from "./helpers";
 
 const NOW = new Date("2026-11-03T12:00:00.000Z");
-const SCRATCH = "/var/lib/pg-backup-scratch";
+const SCRATCH = "/var/lib/pg-backup/scratch";
+const AUDIT_SCRATCH = "/var/lib/pg-backup/scratch/audit";
 
 const auditRows = (): AuditChainRow[] => {
   const first: AuditChainRow = {
@@ -105,20 +106,27 @@ const makeHarness = (
   outputs: DrillOutputs = defaultOutputs(),
   options: {
     startFails?: boolean;
-    recovered?: { replayedLsn?: string; recoveryConf?: string };
+    recovered?: { replayedLsn?: string; recoveryConf?: string; initializedEmptyDir?: boolean };
     initialFiles?: Record<string, string>;
+    producesDataDir?: boolean;
     engineThrows?: boolean;
   } = {},
 ) => {
   const config = makeConfig();
   const runner = drillRunnerFor(outputs, options.startFails);
   const fileSystem = new MemoryDrillFileSystem(
-    options.initialFiles ?? { [join(SCRATCH, "PG_VERSION")]: "18" },
+    options.initialFiles ?? {
+      [join(SCRATCH, "PG_VERSION")]: "18",
+      [join(AUDIT_SCRATCH, "PG_VERSION")]: "18",
+    },
   );
   const engine = new FakeEngine(
     async () => ({ storageTargets: ["primary-s3"] }),
     async (recoverRequest) => {
       if (options.engineThrows) throw new Error("restore failed: bucket unavailable");
+      if (options.producesDataDir !== false) {
+        await fileSystem.writeFile(join(recoverRequest.targetDir, "PG_VERSION"), "18");
+      }
       return options.recovered ?? {
         replayedLsn: "0/16B6C50",
         recoveryConf:
@@ -202,27 +210,69 @@ describe("restore drill runner", () => {
     expect(report.errorMessage).toBeUndefined();
     expect(verifyDrillReportSignature(report, ENCRYPTION_KEY_HEX)).toBe(true);
 
-    expect(engine.recovered).toHaveLength(1);
-    expect(engine.recovered[0]).toMatchObject({ targetDir: SCRATCH, port: config.BACKUP_SCRATCH_PORT });
+    expect(engine.recovered).toHaveLength(2);
+    expect(engine.recovered[0]).toMatchObject({
+      target: "postgres_core",
+      targetDir: SCRATCH,
+      port: config.BACKUP_SCRATCH_PORT,
+    });
+    expect(engine.recovered[1]).toMatchObject({
+      target: "audit_db",
+      targetDir: AUDIT_SCRATCH,
+      port: config.BACKUP_SCRATCH_AUDIT_PORT,
+    });
     expect(engine.recovered[0]?.targetTime.toISOString()).toBe("2026-11-03T11:55:00.000Z");
+    expect(engine.recovered[1]?.targetTime.toISOString()).toBe("2026-11-03T11:55:00.000Z");
     expect(
       fileSystem.writeHistory.find((entry) => entry.path === join(SCRATCH, "postgresql.auto.conf"))?.data,
     ).toContain("recovery_target_time = '2026-11-03T11:55:00.000Z'");
+    expect(
+      fileSystem.writeHistory.find((entry) => entry.path === join(AUDIT_SCRATCH, "postgresql.auto.conf"))?.data,
+    ).toContain("recovery_target_time = '2026-11-03T11:55:00.000Z'");
     expect(fileSystem.writeHistory.some((entry) => entry.path === join(SCRATCH, "recovery.signal"))).toBe(true);
+    expect(fileSystem.writeHistory.some((entry) => entry.path === join(AUDIT_SCRATCH, "recovery.signal"))).toBe(true);
     expect(fileSystem.removed).toContain(SCRATCH);
+    expect(fileSystem.removed).toContain(AUDIT_SCRATCH);
     expect(await fileSystem.exists(SCRATCH)).toBe(false);
-    expect(runner.calls.filter((call) => basename(call.command) === "psql")).toHaveLength(4);
+    expect(await fileSystem.exists(AUDIT_SCRATCH)).toBe(false);
+    const psqlCalls = runner.calls.filter((call) => basename(call.command) === "psql");
+    expect(psqlCalls).toHaveLength(4);
+    const auditCall = psqlCalls.find((call) => call.args.at(-1) === AUDIT_CHAIN_QUERY);
+    expect(auditCall?.args).toContain(config.PG_AUDIT_DB_NAME);
+    expect(auditCall?.args).toContain(String(config.BACKUP_SCRATCH_AUDIT_PORT));
+    const coreCall = psqlCalls.find((call) => call.args.at(-1) === DOUBLE_ENTRY_QUERY);
+    expect(coreCall?.args).toContain(config.PG_PRIMARY_DB_NAME);
+    expect(coreCall?.args).toContain(String(config.BACKUP_SCRATCH_PORT));
 
     const tampered = { ...report, journalLineCount: report.journalLineCount + 1 };
     expect(verifyDrillReportSignature(tampered, ENCRYPTION_KEY_HEX)).toBe(false);
   });
 
-  test("runs initdb when the recovered directory has no PG_VERSION", async () => {
-    const { runner, fileSystem, drill } = makeHarness(defaultOutputs(), { initialFiles: {} });
+  test("refuses to initdb over a restore that produced no PostgreSQL data directory", async () => {
+    const { runner, fileSystem, drill } = makeHarness(defaultOutputs(), {
+      initialFiles: {},
+      producesDataDir: false,
+    });
+    const report = await drill.run();
+    expect(report.status).toBe("FAILED");
+    expect(report.errorMessage).toContain("refusing to initdb");
+    expect(runner.calls.some((call) => basename(call.command) === "initdb")).toBe(false);
+    expect(runner.calls.some((call) => basename(call.command) === "psql")).toBe(false);
+    expect(await fileSystem.exists(SCRATCH)).toBe(false);
+    expect(await fileSystem.exists(AUDIT_SCRATCH)).toBe(false);
+  });
+
+  test("runs initdb only when the engine explicitly reports an initialized empty dir", async () => {
+    const { runner, fileSystem, drill } = makeHarness(defaultOutputs(), {
+      initialFiles: {},
+      producesDataDir: false,
+      recovered: { initializedEmptyDir: true, replayedLsn: "0/16B6C50" },
+    });
     const report = await drill.run();
     expect(report.status).toBe("PASSED");
-    expect(runner.calls.some((call) => basename(call.command) === "initdb")).toBe(true);
+    expect(runner.calls.filter((call) => basename(call.command) === "initdb")).toHaveLength(2);
     expect(await fileSystem.exists(SCRATCH)).toBe(false);
+    expect(await fileSystem.exists(AUDIT_SCRATCH)).toBe(false);
   });
 
   const failingCases: Array<{
@@ -271,6 +321,7 @@ describe("restore drill runner", () => {
       if (failingCase.check === "balanceParity") expect(report.balanceMismatches).toBe(2);
       if (failingCase.check === "auditChain") expect(report.auditBrokenLinks).toBe(1);
       expect(await fileSystem.exists(SCRATCH)).toBe(false);
+      expect(await fileSystem.exists(AUDIT_SCRATCH)).toBe(false);
     });
   }
 
@@ -282,6 +333,7 @@ describe("restore drill runner", () => {
     expect(report.checks.doubleEntry).toEqual({ ok: false, detail: "not executed" });
     expect(runner.calls.some((call) => basename(call.command) === "psql")).toBe(false);
     expect(await fileSystem.exists(SCRATCH)).toBe(false);
+    expect(await fileSystem.exists(AUDIT_SCRATCH)).toBe(false);
   });
 
   test("reports a failed pg_ctl start and still destroys the scratch directory", async () => {
@@ -291,11 +343,13 @@ describe("restore drill runner", () => {
     expect(report.errorMessage).toContain("pg_ctl start failed");
     expect(report.checks.auditChain).toEqual({ ok: false, detail: "not executed" });
     expect(await fileSystem.exists(SCRATCH)).toBe(false);
+    expect(await fileSystem.exists(AUDIT_SCRATCH)).toBe(false);
   });
 
   test("surfaces audit query failures without aborting the other checks", async () => {
     const outputs = defaultOutputs();
     const { runner, drill } = makeHarness(outputs);
+    const drillFileSystem = new MemoryDrillFileSystem();
     const failingRunner = new RecordingRunner((command, args, options) => {
       const query = args.at(-1);
       if (basename(command) === "psql" && query === AUDIT_CHAIN_QUERY) {
@@ -305,9 +359,15 @@ describe("restore drill runner", () => {
     });
     const harness = new RestoreDrillRunner({
       config: makeConfig(),
-      engine: new FakeEngine(),
+      engine: new FakeEngine(
+        async () => ({ storageTargets: ["primary-s3"] }),
+        async (recoverRequest) => {
+          await drillFileSystem.writeFile(join(recoverRequest.targetDir, "PG_VERSION"), "18");
+          return { replayedLsn: "0/16B6C50" };
+        },
+      ),
       runner: failingRunner,
-      fileSystem: new MemoryDrillFileSystem({ [join(SCRATCH, "PG_VERSION")]: "18" }),
+      fileSystem: drillFileSystem,
       clock: () => NOW,
     });
     const report = await harness.run();

@@ -1137,7 +1137,7 @@ model JournalEntry {
 }
 
 model JournalLine {
-  id          String           @id @default(uuid(7)) @db.Uuid
+  id          String           @default(uuid(7)) @db.Uuid
   createdAt   DateTime         @default(now()) @map("created_at")
   updatedAt   DateTime         @updatedAt @map("updated_at")
   entryId     String           @map("entry_id") @db.Uuid
@@ -1148,8 +1148,11 @@ model JournalLine {
   entry     JournalEntry @relation(fields: [entryId], references: [id], onDelete: Restrict)
   glAccount GlAccount    @relation(fields: [glAccountId], references: [id], onDelete: Restrict)
 
-  @@index([entryId])
-  @@index([glAccountId])
+  // journal_lines is monthly range-partitioned by created_at in PostgreSQL 18.
+  // The partition key must participate in the primary key.
+  @@id([id, createdAt])
+  @@index([entryId, createdAt])
+  @@index([glAccountId, createdAt])
   @@map("journal_lines")
 }
 

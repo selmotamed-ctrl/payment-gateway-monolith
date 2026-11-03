@@ -1,13 +1,21 @@
 # Payment Gateway — Multi-Host Deployment Guide
 
-This guide is the operator manual for `deploy/deploy.ts`. It covers the 1-to-5
-host topology, the environment reference, the certificate model, the firewall
-policy and the recovery procedures.
+This guide is the operator manual for `deploy/deploy.ts`. It covers the
+horizontally scalable compute tiers, the PostgreSQL 18 storage tiers, the
+environment reference, the certificate model, the firewall policy, the 14-step
+pipeline, backups/restore drills and the recovery procedures.
 
-> The platform is a 7-service monolith: `core-back` (the only service with a
-> database credential and the `KMS_MASTER_KEY`), the three edge APIs
-> (`admin-back`, `merchant-back`, `checkout-back`) and the three SPAs
-> (`admin-front`, `merchant-front`, `checkout-front`).
+> The platform is a 7-service monolith plus its storage and backup tiers:
+> `core-back` (the only service with a database credential and the
+> `KMS_MASTER_KEY`), the three edge APIs (`admin-back`, `merchant-back`,
+> `checkout-back`), the three SPAs (`admin-front`, `merchant-front`,
+> `checkout-front`), and the optional PostgreSQL 18 / PgBouncer / Redis /
+> audit-DB / log-DB / backup-daemon storage nodes.
+>
+> PostgreSQL 18 is the only supported runtime database. The legacy single-host
+> `DB_*` block is a compatibility path; new deployments use the `PG_*` storage
+> tier. MySQL/MariaDB are historical and are not supported by `core-back` at
+> runtime.
 
 ## 1. Quick start
 
@@ -34,6 +42,8 @@ Flags:
 | `--skip-verify` | Skip the end-to-end mTLS health verification. |
 | `--rotate-certs` | Regenerate the internal CA **and** every leaf certificate. |
 | `--keep=<n>` | Releases kept per host (default `KEEP_RELEASES`). |
+| `--rolling-batch=<n>` | Deploy and health-check `n` compute nodes per batch (default `ROLLING_BATCH_SIZE`, or `1`). |
+| `--nodes=<id,...>` | Limit the run to the named compute nodes (for example `--nodes=core-1,chk-2`). |
 | `--dry-run` | Print every local and remote command, execute nothing. |
 
 The script refuses to start if `deploy.env` is missing or invalid: every value
@@ -45,13 +55,16 @@ A `--fresh` run installs `nginx rsync ufw curl ca-certificates` and `nodejs`
 (PM2 runs on Node; the applications run on Bun), installs Bun, installs PM2 and
 symlinks Bun to `/usr/local/bin/bun` so the PM2 interpreter always resolves.
 
-Two host settings are applied automatically because the schema depends on them:
+Database and TLS settings applied automatically because the schema depends on
+them:
 
-* **`log_bin_trust_function_creators = 1`** on MySQL. The maker≠checker guard is
-  a `BEFORE INSERT` trigger, and MySQL forbids creating a trigger while the
-  binary log is on unless this flag is set or the user has `SUPER` (the
-  application user never does). The deploy sets the global value and persists it
-  in `/etc/mysql/conf.d/zz-payment-gateway.cnf`.
+* **PostgreSQL 18 storage provisioning.** When the `PG_*` fields are enabled,
+  the orchestrator installs PostgreSQL 18, writes the tuned
+  `zz-pg-switch.conf` (`io_method = 'io_uring'`, `synchronous_commit = on`,
+  `wal_level = replica`, replication slots and `pg_stat_statements`), creates
+  the application and replication roles, applies the SCRAM `pg_hba` rules,
+  initializes every replica with `pg_basebackup -R`, and optionally installs
+  PgBouncer in transaction mode on `6432`.
 * **TLS for every vhost**, including the LAN-only admin. When a public vhost is
   in `self_signed` mode, or the admin vhost has no certificate, the deploy mints
   a certificate bound to the server name so `nginx -t` always passes.
@@ -63,17 +76,24 @@ restart is sub-second on a single-instance fork app.
 
 ### A single staging box
 
-Every role may share one host. Because MySQL binds to `127.0.0.1`, point the
-application connection at the loopback and keep `DB_SSH_HOST` at the box:
+Every role may share one host. For the legacy single-host path, point the
+application connection at the PostgreSQL 18 listener and keep `DB_SSH_HOST` at
+the box:
 
 ```dotenv
 DB_SSH_HOST="203.0.113.10"
 DB_PRIVATE_IP="127.0.0.1"
-DATABASE_URL="mysql://pg_core_user:...@127.0.0.1:3306/payment_gateway_prod"
+DB_ENGINE="postgresql"
+DB_PORT="5432"
+DATABASE_URL="postgresql://pg_core_user:...@127.0.0.1:5432/payment_gateway_prod"
 CORE_PRIVATE_IP="203.0.113.10"     # edge -> core mTLS target
 MERCHANT_SSL_MODE="self_signed"    # no public DNS on a test box
 CHECKOUT_SSL_MODE="self_signed"
 ```
+
+For a multi-node storage tier, set `PG_MANAGE_VIA_SSH="true"`,
+`PG_PRIMARY_NODE="pg-pri@127.0.0.1:22:127.0.0.1:5432"` and leave the legacy
+`DB_*` block disabled.
 
 The planner then reports `topology: single-host (1 host(s))` and applies the
 union of every role's firewall rules once.
@@ -215,30 +235,49 @@ public vhosts stay domain-based and are unaffected.
 IP, or `_` (the Nginx catch-all). Set `ADMIN_DOMAIN="_"` when the admin portal
 is only reached by IP.
 
-## 2. The 1-to-5 host topology
+## 2. Compute tiers and storage tiers
 
-The orchestrator groups the five logical roles by their SSH endpoint
-(`SSH_HOST:SSH_PORT`). Roles that share an endpoint are one machine.
+The orchestrator groups every compute and storage role by its SSH endpoint
+(`sshHost:sshPort`). Roles that share an endpoint are one machine; every entry
+in a node array still receives its own service plan and PM2/Nginx identity.
 
-| Role | Runs | Public exposure |
+### Compute tiers (`1..N` nodes each)
+
+| Tier | Runs | Public exposure |
 | :--- | :--- | :--- |
-| `DB_HOST` | MySQL 8 / MariaDB 10.6+ (or PostgreSQL) | **Never** public. Accepts the DB port only from `CORE_PRIVATE_IP`. |
-| `CORE_HOST` | `core-back` `:4000` (mTLS 1.3) | **Never** public. Accepts `:4000` only from the three edge private IPs. |
-| `ADMIN_HOST` | `admin-back` `:4101` + `admin-front` via Nginx `:8443` | LAN only (`LAN_ALLOWED_CIDRS`). |
-| `MERCHANT_HOST` | `merchant-back` `:4102` + `merchant-front` via Nginx `80/443` | Public HTTPS. |
-| `CHECKOUT_HOST` | `checkout-back` `:4103` + `checkout-front` via Nginx `80/443` | Public HTTPS. |
+| `CORE_NODES` | `core-back` `:4000` (mTLS 1.3) | **Never** public. Accepts `:4000` only from the edge private IPs. |
+| `ADMIN_NODES` | `admin-back` `:4101` + `admin-front` via Nginx `:8443` | LAN only (`LAN_ALLOWED_CIDRS`). |
+| `MERCHANT_NODES` | `merchant-back` `:4102` + `merchant-front` via Nginx `80/443` | Public HTTPS. |
+| `CHECKOUT_NODES` | `checkout-back` `:4103` + `checkout-front` via Nginx `80/443` | Public HTTPS. |
 
-Three supported shapes:
+### Storage tiers (optional, independently scalable)
 
-- **A — five servers:** every `*_SSH_HOST` is a distinct IP.
-- **B — two servers:** e.g. `ADMIN_SSH_HOST = CORE_SSH_HOST` (internal) and
-  `CHECKOUT_SSH_HOST = MERCHANT_SSH_HOST` (public edge). The script
-  bootstraps each host once and merges both PM2 apps and both Nginx vhosts.
-- **C — one staging box:** every `*_SSH_HOST` is the same IP. Ports stay
-  distinct and mTLS is still enforced.
+| Tier | Runs | Exposure |
+| :--- | :--- | :--- |
+| `PG_PRIMARY_NODE` | PostgreSQL 18 primary | Accepts `5432` from replicas and, when PgBouncer is disabled, core nodes. |
+| `PG_REPLICA_NODES` | Streaming read replicas (`1..M`) | Replication from primary/replicas; reads from core nodes or PgBouncer. |
+| `PGBOUNCER_ENABLED` | PgBouncer on the primary and each replica, port `6432` | Accepts `6432` from core nodes only. |
+| `REDIS_NODES` | Redis 7.4+ cache and velocity engine | Accepts `6379` from core and backup nodes. |
+| `AUDIT_DB_NODE` | Dedicated tamper-evident `pg_audit_db` | Accepts PostgreSQL from core and backup nodes. |
+| `LOG_DB_NODE` | Dedicated partitioned `pg_logs_db` | Accepts PostgreSQL from core and backup nodes. |
+| `BACKUP_NODE` | `pg-backup-daemon` (`:4090` mTLS) + WAL-G/Barman | Accepts `4090` from core nodes only. |
+
+Supported shapes:
+
+- **A — fully distributed:** every compute array and storage node has its own
+  host.
+- **B — combined compute hosts:** for example admin and core share an internal
+  box, merchant and checkout share a public edge box. The script bootstraps
+  each host once and merges PM2 apps, Nginx vhosts and firewall rules.
+- **C — one staging box:** every role shares one IP; ports stay distinct, mTLS
+  is still enforced, and storage roles may co-locate on `5432`.
+- **D — horizontal compute:** add `core-2`, `merch-2`, `chk-2`, etc. to the
+  node arrays. Edge nodes receive the derived `CORE_BACK_URLS` list and each
+  core server certificate SAN contains every core private IP.
 
 `./deploy/deploy.sh --dry-run` prints the resulting **Host Topology Map**,
-which is the fastest way to confirm that your deduplication is what you meant.
+which is the fastest way to confirm that your deduplication and node arrays are
+what you meant.
 
 ## 3. Environment reference
 
@@ -252,18 +291,49 @@ which is the fastest way to confirm that your deduplication is what you meant.
 | `MTLS_VALIDITY_DAYS` | `825` | Leaf certificate validity. |
 | `LAN_ALLOWED_CIDRS` | `127.0.0.1/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` | Nginx allowlist and `ADMIN_LAN_CIDRS` for the admin host. |
 
-### Database (`DB_*`)
+### Database (`DB_*`, legacy single-host compatibility path)
 
 | Variable | Notes |
 | :--- | :--- |
-| `DB_MANAGE_VIA_SSH` | When `true`, the script creates the database and the application user on the DB host through its own sudo access. |
+| `DB_MANAGE_VIA_SSH` | When `true`, the script creates the PostgreSQL 18 database and application role on the DB host through its own sudo access. |
 | `DB_SSH_HOST` / `_PORT` / `_USER` / `_KEY_PATH` / `_SUDO_PASSWORD` | SSH target of the database host. |
-| `DB_PRIVATE_IP` | The address the core connects to. Must differ from `CORE_PRIVATE_IP`. |
-| `DB_ENGINE` | `mysql` or `postgresql`. Must agree with `DATABASE_URL`. |
-| `DB_PORT` | `3306` (MySQL/MariaDB) or `5432` (PostgreSQL). |
+| `DB_PRIVATE_IP` | The address the core connects to. |
+| `DB_ENGINE` | Keep `postgresql`. PostgreSQL 18 is the only supported runtime engine. |
+| `DB_PORT` | `5432`. |
 | `DB_NAME` / `DB_USER` | Identifier-safe database and role names. |
 | `DB_PASSWORD` | The application role password (≥ 8 chars). |
-| `DATABASE_URL` | The connection string the core uses. |
+| `DATABASE_URL` | The `postgresql://` connection string the core uses. |
+
+### PostgreSQL 18 storage tier (`PG_*`, `PGBOUNCER_*`, `REDIS_*`, audit/log/backup)
+
+| Variable | Notes |
+| :--- | :--- |
+| `PG_MANAGE_VIA_SSH` | Install/manage PostgreSQL 18 on the storage nodes. Requires `PG_PRIMARY_NODE`, `PG_SSH_KEY_PATH` and `PG_DB_PASSWORD`. |
+| `PG_VERSION` | PostgreSQL major version, default `18`. |
+| `PG_PRIMARY_NODE` | One node in `nodeId@sshHost:sshPort:privateIp:servicePort` format. |
+| `PG_REPLICA_NODES` | Zero or more streaming replicas in the same format; requires a primary. |
+| `PG_DB_NAME` / `PG_DB_USER` / `PG_DB_PASSWORD` | Application database and role. |
+| `PG_REPLICATION_USER` / `PG_REPLICATION_PASSWORD` | Physical replication role. Required when replicas are configured. |
+| `PGBOUNCER_ENABLED` | Install PgBouncer in transaction mode on the primary and every replica. Requires the `PG_*` storage fields. |
+| `PGBOUNCER_PORT` / `PGBOUNCER_DEFAULT_POOL_SIZE` / `PGBOUNCER_MAX_CLIENT_CONN` / `PGBOUNCER_MAX_PREPARED_STATEMENTS` | Pooler listener and limits, defaults `6432` / `50` / `2000` / `256`. |
+| `REDIS_MANAGE_VIA_SSH` / `REDIS_NODES` / `REDIS_PASSWORD` / `REDIS_MAXMEMORY` | Dedicated Redis cache/velocity tier; nodes use the same format. `REDIS_URL` remains available for an external Redis. |
+| `AUDIT_DB_MANAGE_VIA_SSH` / `AUDIT_DB_NODE` / `AUDIT_DB_NAME` / `AUDIT_DB_USER` / `AUDIT_DB_PASSWORD` | Tamper-evident audit database. |
+| `LOG_DB_MANAGE_VIA_SSH` / `LOG_DB_NODE` / `LOG_DB_NAME` / `LOG_DB_USER` / `LOG_DB_PASSWORD` / `LOG_RETENTION_MONTHS` | Partitioned operational/step-log database. |
+| `BACKUP_ENABLED` / `BACKUP_NODE` | Enable the backup daemon and its mTLS control plane. Requires an SSH key, S3 bucket and encryption key. |
+| `BACKUP_ENGINE_MODE` / `BACKUP_COMPRESSION` / `BACKUP_ENCRYPTION_KEY_HEX` | `wal-g` or `barman`; `zstd`, `lz4`, `lzma`, `brotli` or `none`; exactly 64 hex characters. |
+| `BACKUP_PRIMARY_S3_*` / `BACKUP_SECONDARY_SSH_TARGET` | Primary S3/MinIO/R2 target and optional secondary remote vault. |
+| `BACKUP_FULL_CRON` / `BACKUP_DELTA_CRON` / `BACKUP_DRILL_CRON` | Full, delta and restore/invariant drill schedules. |
+| `BACKUP_RETENTION_FULL_COUNT` / `BACKUP_RETENTION_WAL_DAYS` / `BACKUP_ALERT_LAG_SECONDS` / `BACKUP_DAEMON_PORT` | Retention, lag alert and daemon port, defaults `8` / `14` / `300` / `4090`. |
+| `BACKUP_SCHEDULER_ENABLED` / `BACKUP_SCHEDULER_TICK_MS` | Daemon-owned schedule; `false` uses `/etc/cron.d/pg-backup`. |
+| `BACKUP_DAEMON_CERT_DIR` / `BACKUP_CATALOG_PATH` / `BACKUP_PGPASSFILE` | Generated daemon mTLS material, catalog and libpq password-file paths. |
+| `BACKUP_SCRATCH_DIR` / `BACKUP_SCRATCH_AUDIT_DIR` / `BACKUP_SCRATCH_PORT` / `BACKUP_SCRATCH_AUDIT_PORT` | Core and audit restore-drill scratch paths/ports. |
+| `BACKUP_COMMAND_TIMEOUT_MS` / `BACKUP_ALLOW_INSECURE_HTTP` | WAL-G/Barman command timeout and the explicit development-only plain-HTTP switch. |
+| `BACKUP_WALG_BIN` / `BACKUP_BARMAN_BIN` / `BACKUP_BARMAN_CLOUD_BIN` / `BACKUP_REDIS_CLI_BIN` | Daemon command binaries. |
+
+Every storage node uses the same `nodeId@sshHost:sshPort:privateIp:servicePort`
+format. A PostgreSQL-family role (primary, replica, audit DB, log DB) may
+co-locate on `5432`; a storage listener may never collide with a compute
+listener on the same SSH endpoint.
 
 ### Core (`CORE_*`)
 
@@ -297,7 +367,7 @@ takes effect on the next deploy without rebuilding the SPA.
 | :--- | :--- |
 | `KMS_MASTER_KEY` | Root key for the AES-256-GCM vault and the session signing. **Never** delivered to an edge host. |
 | `BASE_CURRENCY` / `GATEWAY_TIMEZONE` | Defaults `LYD` / `Africa/Tripoli`. |
-| `REDIS_URL` | Optional; enables cross-node `InvalidationBus`. |
+| `REDIS_URL` | Optional external Redis URL; enables the L2 cache, velocity counters and cross-node `InvalidationBus`. When empty, `REDIS_NODES` is used. |
 
 ## 4. Certificates (mTLS 1.3)
 
@@ -305,21 +375,29 @@ takes effect on the next deploy without rebuilding the SPA.
 (`chmod 600`, gitignored):
 
 - `internal-ca.crt` / `internal-ca.key` — the offline root CA.
-- `core-back.crt` / `.key` — the **server** certificate, SAN
-  `IP:<CORE_PRIVATE_IP>, IP:127.0.0.1, DNS:core-back.internal`. The SAN is
-  mandatory: the edge hosts reach the core by private IP and TLS 1.3 verifies
-  the hostname.
+- `core-back.crt` / `.key` — the **server** certificate. Its SAN contains
+  `IP:<every CORE_NODES private IP>`, `IP:127.0.0.1` and
+  `DNS:core-back.internal`. The multi-IP SAN is mandatory: edge hosts reach the
+  core nodes by private IP and TLS 1.3 verifies the hostname, so a rolling core
+  deploy never breaks mTLS on the remaining nodes.
 - `admin-back-client`, `merchant-back-client`, `checkout-back-client` — the
   **client** certificates, `CN=admin-back|merchant-back|checkout-back`.
+- `backup-daemon.crt` / `.key` — the backup daemon mTLS **server**
+  certificate, SAN-bound to `BACKUP_NODE` and `127.0.0.1`.
+- `pg-client`, `redis-client`, `audit-db-client`, `log-db-client` and
+  `backup-client` — optional **client** certificates for the storage/backup
+  mTLS links, generated only when the corresponding storage tier is enabled.
 
 Least-privilege distribution:
 
 | Host | Receives |
 | :--- | :--- |
-| `CORE_HOST` | `internal-ca.crt`, `core-back.crt`, `core-back.key` |
-| `ADMIN_HOST` | `internal-ca.crt`, `admin-back-client.crt/.key` |
-| `MERCHANT_HOST` | `internal-ca.crt`, `merchant-back-client.crt/.key` |
-| `CHECKOUT_HOST` | `internal-ca.crt`, `checkout-back-client.crt/.key` |
+| `CORE_NODES` | `internal-ca.crt`, `core-back.crt/.key`, and the enabled storage client certificates |
+| `ADMIN_NODES` | `internal-ca.crt`, `admin-back-client.crt/.key` |
+| `MERCHANT_NODES` | `internal-ca.crt`, `merchant-back-client.crt/.key` |
+| `CHECKOUT_NODES` | `internal-ca.crt`, `checkout-back-client.crt/.key` |
+| `BACKUP_NODE` | `internal-ca.crt`, `backup-daemon.crt/.key`, `backup-client.crt/.key`, `pg-client.crt/.key` |
+| PostgreSQL / Redis / audit / log storage nodes | Only their own storage client certificate and the internal CA |
 
 `internal-ca.key` **never leaves the deployment workstation**. An edge host has
 no database credential, no `KMS_MASTER_KEY` and no other host's client key, so
@@ -334,8 +412,8 @@ the remaining validity in days.
 The private IP is part of the core certificate SAN, the nginx vhosts, the DB
 grants and the UFW rules, so a new LAN address needs one coordinated run:
 
-1. Update every `*_PRIVATE_IP` and `*_SSH_HOST` in `deploy/deploy.env` to the
-   new address (all roles on one box share it).
+1. Update every `*_PRIVATE_IP` / `*_SSH_HOST` and every node-array `privateIp`
+   in `deploy/deploy.env` to the new address (all roles on one box share it).
 2. Run `./deploy/deploy.sh --update --enforce-firewall`. The `--update` flag
    skips OS bootstrap; `--enforce-firewall` re-emits UFW for the new sources.
 3. The deploy detects the SAN drift automatically: if `core-back.crt` does not
@@ -353,36 +431,53 @@ Playwright specs accept overrides: `PG_ADMIN_URL`, `PG_MERCHANT_URL`,
 
 | Host | Opened | Bound to |
 | :--- | :--- | :--- |
-| `DB_HOST` | SSH, `DB_PORT` from `CORE_PRIVATE_IP` | — |
-| `CORE_HOST` | SSH, `CORE_PORT` from the admin/merchant/checkout private IPs | — |
-| `ADMIN_HOST` | SSH, `ADMIN_NGINX_LAN_PORT` from `LAN_ALLOWED_CIDRS` | `admin-back` on `127.0.0.1` |
-| `MERCHANT_HOST` | SSH, 80, 443 | `merchant-back` on `127.0.0.1` |
-| `CHECKOUT_HOST` | SSH, 80, 443 | `checkout-back` on `127.0.0.1` |
+| Legacy `DB_HOST` | SSH, `DB_PORT` from `CORE_PRIVATE_IP` | — |
+| `CORE_NODES` | SSH, `CORE_PORT` from the admin/merchant/checkout private IPs | — |
+| `ADMIN_NODES` | SSH, `ADMIN_NGINX_LAN_PORT` from `LAN_ALLOWED_CIDRS` | `admin-back` on `127.0.0.1` |
+| `MERCHANT_NODES` | SSH, 80, 443 | `merchant-back` on `127.0.0.1` |
+| `CHECKOUT_NODES` | SSH, 80, 443 | `checkout-back` on `127.0.0.1` |
+| PostgreSQL primary | SSH, `5432` from replicas (and from core nodes when PgBouncer is off), `6432` from core nodes when PgBouncer is on | — |
+| PostgreSQL replica | SSH, `5432` from primary/other replicas (and core when PgBouncer is off), `6432` from core nodes when PgBouncer is on | — |
+| Redis | SSH, `6379` from core and backup nodes | — |
+| Audit DB / log DB | SSH, PostgreSQL port from core and backup nodes | — |
+| `BACKUP_NODE` | SSH, `BACKUP_DAEMON_PORT` (`4090`) from core nodes | — |
 
 A host that runs several roles gets the union of its rules. The SSH rule is
 always emitted, and `ufw --force enable` is the **last** command, so the deploy
 can never lock itself out.
 
-## 6. The 12-step pipeline
+## 6. The 14-step pipeline
 
 1. Validate `deploy.env` and print the topology map.
-2. Build the three SPAs locally (`bun run build`).
-3. Generate or verify the PKI.
+2. Build the SPAs locally (`bun run build`).
+3. Generate or verify the multi-node PKI.
 4. Bootstrap each unique host (`--fresh`) and apply UFW.
-5. Create the database and the application role; take a pre-migration backup
-   (compressed) into `CORE_REMOTE_DIR/shared/backups/`.
+5. Provision the storage engines (PostgreSQL 18 primary/replicas + PgBouncer,
+   Redis, audit/log databases, backup engine). On the legacy single-host path,
+   create the database/role and take a compressed pre-migration backup into
+   `CORE_REMOTE_DIR/shared/backups/`.
 6. Deploy `core-back`: rsync, certs, `.env`, `bun install --frozen-lockfile`,
    `prisma generate`, `migrate-deploy`, optional seed, atomic `current`
    symlink, PM2 reload.
-7. Deploy `admin-back` + `admin-front` on the LAN vhost.
-8. Deploy `merchant-back` + `merchant-front` (unbuffered POS SSE).
-9. Deploy `checkout-back` + `checkout-front` (unbuffered payer SSE, strict CSP).
-10. Verify: the core `/health` over mTLS, each edge backend `/health`, each edge
-    host completing an mTLS handshake to **its own** core channel, and the
-    public vhosts.
-11. Prune old releases.
-12. Print the audit summary (commit, release timestamp, hosts, certificate
+7. Optional: deploy `fake-rails-back` + `fake-rails-front`.
+8. Deploy `admin-back` + `admin-front` on the LAN vhost.
+9. Deploy `merchant-back` + `merchant-front` (unbuffered POS SSE).
+10. Deploy `checkout-back` + `checkout-front` (unbuffered payer SSE, strict CSP).
+11. Seed Fake Rails blueprints and optional synthetic operational history.
+12. Verify: every core node `/health` over mTLS, each edge backend `/health`,
+    each edge host completing an mTLS handshake to a healthy core node, the
+    public vhosts, PostgreSQL primary/replicas with `pg_isready` + `SELECT 1`,
+    PgBouncer, Redis `PING`, audit/log `SELECT 1`, and the backup-daemon
+    `/health` over mTLS when configured.
+13. Prune old releases.
+14. Print the audit summary (commit, release timestamp, hosts, certificate
     expiry).
+
+Steps 6-10 support rolling batches (`--rolling-batch=<n>`), and each batch is
+health-checked before the next one starts. `--nodes=<id,...>` limits a run to
+named compute nodes. `--only` accepts `core`, `admin`, `merchant`, `checkout`,
+`fake-rails`, and the storage targets `pg`, `pg-primary`, `pg-replica`,
+`pgbouncer`, `redis`, `audit-db`, `log-db`, `backup` and `storage`.
 
 Release layout on every host:
 
@@ -419,12 +514,15 @@ Common failures:
 | Symptom | Cause / fix |
 | :--- | :--- |
 | `SSH key '…' does not exist` | Fix `*_SSH_KEY_PATH`; the key must exist on the workstation. |
-| `Invalid deploy.env: DATABASE_URL must start with mysql://` | `DATABASE_URL` and `DB_ENGINE` disagree. |
-| `DB_PRIVATE_IP and CORE_PRIVATE_IP cannot be the same host` | The design keeps the database on its own node; use a separate IP or set `DB_MANAGE_VIA_SSH=false` and point `DATABASE_URL` at an external database. |
+| `Invalid deploy.env: DATABASE_URL must start with postgresql://` | `DATABASE_URL` must be a PostgreSQL URL. Set `DB_ENGINE="postgresql"` and `DB_PORT="5432"`. |
+| `DB_ENGINE must be 'postgresql' when PostgreSQL 18 storage fields are configured` | A `PG_*` field is set while `DB_ENGINE` still says something else. |
+| `PG_REPLICA_NODES requires PG_PRIMARY_NODE` | Add exactly one `PG_PRIMARY_NODE` before configuring replicas. |
+| `PGBOUNCER_ENABLED requires the PostgreSQL 18 storage fields` | PgBouncer is part of the `PG_*` storage tier; fill `PG_PRIMARY_NODE`/`PG_DB_PASSWORD` or disable the pooler. |
 | `missing certificate /etc/letsencrypt/…` | Issue it: `certbot --nginx -d <domain> --agree-tos -m ops@<domain>`. |
-| `core /health (mTLS) FAIL` | The core did not start: `pm2 logs pg-core-back`, then check `shared/.env`. |
+| `core /health (mTLS) FAIL` | The core did not start: `pm2 logs pg-core-back`, then check `shared/.env` and the PostgreSQL connectivity. |
 | `mTLS -> core /internal/admin/health FAIL` | The client certificate does not match the channel (`CN=admin-back` is required on `/internal/admin`). |
-| The whole deploy aborts after step 10 | No host was left broken; the previous release is still on disk. |
+| `backup-daemon /health FAIL` | Check `systemctl status pg-backup-daemon`, `/etc/pg-backup/backup.env`, the S3 bucket credentials and the daemon certificate paths. |
+| The whole deploy aborts after step 12 | No host was left broken; the previous release is still on disk. |
 
 ## 8. Security notes
 
@@ -490,13 +588,17 @@ LOG_DB_MANAGE_VIA_SSH="true"
 LOG_DB_NODE="log-db@10.10.12.20:22:10.10.12.20:5432"
 ```
 
+When both the legacy `DB_*` block and the `PG_*` block are present, the planner
+derives the connection URL from `DB_NAME` / `DB_USER` / `DB_PASSWORD` (they win
+over `PG_DB_*`), so keep the two blocks aligned or use only one path.
+
 After the OS bootstrap the orchestrator runs the modular provisioners:
 
 | Provisioner | What it applies |
 | :--- | :--- |
 | `postgres18Provisioner` | PostgreSQL 18 install, the exact `zz-pg-switch.conf` tuning (`io_method='io_uring'`, `synchronous_commit=on`, `wal_level=replica`, ...), application/replication roles, SCRAM `pg_hba`, physical replication slots, `pg_basebackup -R` on every replica and PgBouncer transaction pooling (`6432`, `max_prepared_statements=256`). |
 | `redisProvisioner` | Redis bound to the node's private IP, `requirepass`, `save 3600 1`, `maxmemory`, and UFW `6379` only from the core + backup nodes. |
-| `auditAndLogDbProvisioner` | `pg_audit_db` with the hash-chain table, immutable trigger and `REVOKE UPDATE, DELETE, TRUNCATE`; `pg_logs_db` with monthly `attempt_step_logs` / `http_access_logs` partitions, six months ahead, the `ensure_log_partitions` function and its cron. |
+| `auditAndLogDbProvisioner` | `pg_audit_db` with the hash-chain table, immutable trigger, least-privilege `SELECT, INSERT` grants and `REVOKE UPDATE, DELETE, TRUNCATE`; `pg_logs_db` with monthly `attempt_step_logs` / `http_access_logs` partitions, six months ahead, the `ensure_log_partitions` retention function and its cron. |
 | `backupEngineProvisioner` | WAL-G/Barman, `zstd`, `rclone`, backup-daemon environment + systemd unit (`:4090` mTLS), `archive_command` on the primary and audit DB, S3/secondary-SSH verification, full/delta/drill cron and the scratch-restore invariant verifier. |
 
 The firewall matrix is generated from the same plan: `5432` primary↔replicas,
@@ -508,18 +610,37 @@ core + backup, and backup-daemon `4090` from core nodes.
 ```dotenv
 BACKUP_ENABLED="true"
 BACKUP_NODE="backup-1@10.10.13.10:22:10.10.13.10:4090"
-BACKUP_ENGINE_MODE="barman"          # or "wal-g"
+BACKUP_ENGINE_MODE="barman"          # or "wal-g" (co-located with the PG primary)
 BACKUP_COMPRESSION="zstd"
 BACKUP_ENCRYPTION_KEY_HEX="<64 hex chars; openssl rand -hex 32>"
+BACKUP_PRIMARY_S3_ENDPOINT="https://s3.example.invalid"
 BACKUP_PRIMARY_S3_BUCKET="s3://payment-gateway-backups/prod"
+BACKUP_CORE_S3_PREFIX=""             # default <bucket>/postgres_core
+BACKUP_AUDIT_S3_PREFIX=""            # default <bucket>/audit_db
 BACKUP_SECONDARY_SSH_TARGET="backup-vault@198.51.100.99:/mnt/offsite-vault/pg"
+BACKUP_ALERT_LAG_SECONDS="300"
+BACKUP_DAEMON_BIND_HOST=""           # default BACKUP_NODE private IP
 BACKUP_FULL_CRON="0 2 * * 0"
 BACKUP_DELTA_CRON="0 2 * * 1-6"
 BACKUP_DRILL_CRON="0 4 * * 0"
+BACKUP_SCHEDULER_ENABLED="true"      # daemon owns the schedule; false uses /etc/cron.d/pg-backup
 ```
 
-`BACKUP_ENABLED=true` requires `BACKUP_NODE`, an S3 bucket and a 64-hex
-encryption key. The health verifier additionally probes every core node, every
+`BACKUP_ENGINE_MODE="wal-g"` requires `BACKUP_NODE` to be co-located with the
+PostgreSQL primary because WAL-G reads the local data directory. `barman` is the
+supported dedicated-backup-host mode: the provisioner configures Barman
+streaming archiving for both the core and audit databases. Restore drills restore
+both databases into separate scratch clusters before checking the ledger and
+audit-chain invariants.
+
+`BACKUP_ENABLED=true` requires `BACKUP_NODE`, an absolute http(s) S3 endpoint,
+an S3 bucket and a 64-hex encryption key. The deploy engine is the single source
+of truth: `backupEngineProvisioner` writes `/etc/pg-backup/backup.env` from
+`deploy.env`, `deploy.ts` syncs the daemon to `/opt/pg-backup-daemon`, and the
+systemd unit is enabled automatically. `deploy/backup-daemon/backup.env.example`
+is only a local/troubleshooting reference and must not be copied manually in
+production.
+The health verifier additionally probes every core node, every
 edge node against every core URL, `pg_isready` + `SELECT 1` on the primary and
 replicas, PgBouncer on `6432`, Redis `PING`, audit/log `SELECT 1`, and the
 backup-daemon `/health` over mTLS. When no storage fields are configured the

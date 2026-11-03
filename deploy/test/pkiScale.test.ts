@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { loadDeployConfig } from "../lib/configSchema";
-import { buildPki, certFilesForHost } from "../lib/pkiManager";
+import { buildPki, certFilesForHost, inspectCertificate } from "../lib/pkiManager";
 
 const SOURCE = `
 DB_MANAGE_VIA_SSH="false"
@@ -34,15 +37,19 @@ REDIS_PASSWORD="ultra-strong-redis-password"
 BACKUP_ENABLED="true"
 BACKUP_NODE="backup-1@10.10.13.10:22:10.10.13.10:4090"
 BACKUP_SSH_KEY_PATH="~/.ssh/backup"
+BACKUP_ENGINE_MODE="barman"
+BACKUP_PRIMARY_S3_ENDPOINT="https://s3.example.invalid"
 BACKUP_PRIMARY_S3_BUCKET="s3://payment-gateway-backups/prod"
 BACKUP_ENCRYPTION_KEY_HEX="abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
 `;
 
-const config = () => {
-  const result = loadDeployConfig(SOURCE);
+const requireConfig = (source: string) => {
+  const result = loadDeployConfig(source);
   if (!result.ok || !result.config) throw new Error(result.problems.join("; "));
   return result.config;
 };
+
+const config = () => requireConfig(SOURCE);
 
 describe("multi-node PKI", () => {
   test("the core certificate SAN carries every core private IP, loopback and the internal DNS name", () => {
@@ -81,5 +88,24 @@ describe("multi-node PKI", () => {
     expect(backup.map((file) => file.name)).toEqual(expect.arrayContaining(["internal-ca", "backup-daemon", "backup-client"]));
     const edge = certFilesForHost(bundle, ["admin"]);
     expect(edge.map((file) => file.name)).toEqual(["internal-ca", "admin-back-client"]);
+  });
+
+  test("re-signs the backup and Fake Rails leaves when their SANs drift, keeping the CA stable", () => {
+    const directory = mkdtempSync(join(tmpdir(), "pg-pki-drift-"));
+    try {
+      buildPki({ config: config(), directory });
+      const caBefore = readFileSync(join(directory, "internal-ca.crt"), "utf8");
+      const changed = requireConfig(`${SOURCE}
+BACKUP_NODE="backup-1@10.10.13.99:22:10.10.13.99:4090"
+FAKE_RAILS_PRIVATE_IP="10.10.14.10"
+FAKE_RAILS_DOMAIN="fakerails.internal"
+`);
+      buildPki({ config: changed, directory });
+      expect(inspectCertificate(join(directory, "backup-daemon.crt"), "backup-daemon").sans).toContain("10.10.13.99");
+      expect(inspectCertificate(join(directory, "fake-rails.crt"), "fake-rails").sans).toContain("10.10.14.10");
+      expect(readFileSync(join(directory, "internal-ca.crt"), "utf8")).toBe(caBefore);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

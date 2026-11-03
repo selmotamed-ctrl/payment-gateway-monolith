@@ -6,9 +6,9 @@ import type {
   SlotReservation,
   SlotReservationStore,
 } from "../flow/DynamicRailEngine";
-import { buildLedgerTemplate, decimal, LedgerPoster, type LedgerPostContext } from "../ledger/LedgerPoster";
+import { buildLedgerTemplate, decimal, type LedgerPostContext } from "../ledger/LedgerPoster";
 import { ApiError } from "../../lib/error";
-import { createLedgerShardWriter } from "../../lib/storageEngine/ledgerShardWriter";
+import { createLedgerPoster } from "../../lib/storageEngine/ledgerPosterFactory";
 
 /**
  * Prisma-backed slot reservation store.
@@ -176,7 +176,7 @@ export class PrismaSlotReservationStore implements SlotReservationStore {
       ownershipMode: attempt.ownershipMode,
     });
     template.refId = attempt.id;
-    const poster = new LedgerPoster(target as never, undefined, createLedgerShardWriter());
+    const poster = createLedgerPoster(target as never);
     const posted = await poster.post(template, this.ledgerContext(attempt), target as never);
 
     const suspenseAccountId = await this.suspenseAccountId(target, attempt.currency);

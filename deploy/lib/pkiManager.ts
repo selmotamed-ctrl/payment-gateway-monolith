@@ -201,12 +201,16 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
 
   if (everythingExists && !rotate) {
     // The private IP is part of the server certificate SAN. A staging box that
-    // moves to a different LAN must get a new server certificate, otherwise the
-    // edges reject the core's TLS handshake. Re-sign the leaves (the CA stays).
-    const current = inspectCertificate(server.certPath, server.name);
-    const hasAllIps = coreIps.every((ip) => current.sans.includes(ip));
-    const hasLoopback = current.sans.includes("127.0.0.1");
-    if (hasAllIps && hasLoopback) {
+    // moves to a different LAN must get new server certificates for the core,
+    // the backup daemon and Fake Rails, otherwise TLS clients reject them.
+    // Re-sign the leaves (the CA stays stable) only when a SAN actually drifts.
+    const certificateCoversSans = (material: CertMaterial): boolean => {
+      const current = inspectCertificate(material.certPath, material.name);
+      return (material.sans ?? [])
+        .map((san) => san.replace(/^(IP|DNS|URI):/i, ""))
+        .every((san) => current.sans.includes(san));
+    };
+    if ([server, backup, fakeRails].every(certificateCoversSans)) {
       verifyPki(bundle);
       return bundle;
     }

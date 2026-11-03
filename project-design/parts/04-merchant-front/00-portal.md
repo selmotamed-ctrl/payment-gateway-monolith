@@ -1,0 +1,365 @@
+---
+id: merchant-ui.portal
+title: Merchant Portal
+status: partial
+confidence: high
+last_verified: 2026-11-03
+verified_against: 5a24f6f+working-tree
+code:
+  - merchant-front/src/router/index.ts
+  - merchant-front/src/layouts/**
+  - merchant-front/src/pages/**
+  - merchant-front/src/components/**
+  - merchant-front/src/constants/urlsMap/index.ts
+  - merchant-front/src/state/**
+design_sources:
+  - design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md
+  - design/ui/portal_ui_implementation_plan.md
+  - design/complete_zero_to_hero_guides_and_academy_specification.md
+  - design/payment_gateway_deployment_and_guides_architecture.md
+tests:
+  - tests/e2e/merchant/shell.spec.ts
+  - tests/e2e/merchant/auth.spec.ts
+  - tests/e2e/merchant/a11y.spec.ts
+  - tests/e2e/exhaustive/exhaustive-merchant-surface.spec.ts
+  - merchant-front/src/content/__tests__/content-completeness.test.ts
+gaps:
+  - The Statements route has no router-level authority entry, so direct navigation is allowed even when the navigation item is hidden.
+  - Merchant guide and developer-guide routes are intentionally open to any authenticated merchant; this is a learning surface, not a data boundary.
+  - Google OIDC login is represented in the API map but the backend returns 501; the portal does not support a working Google sign-in flow.
+  - Merchant onboarding progress and guide checklist state are client-assisted; completion is not a server-issued activation authority.
+  - The portal has no route-level maker-checker visualization for pending application changes beyond status badges and pending states.
+---
+
+# Merchant Portal
+
+## 1. Purpose and scope
+
+This part owns the merchant-facing portal in `merchant-front`: its routes, authentication entry points, 248/56 shell, onboarding flow, wallet/application/link/POS/payment/dispute/cash-out/token/credential/team pages, and the guide surfaces that are implemented in this workspace.
+
+It does not own the merchant edge API (`merchant-back`), the merchant external API (`/api/v1/external/*`), or the merchant guide content in detail. The guide and developer API are covered in `01-guide-and-developer-api.md`. Checkout is covered in `05-checkout-front/**`.
+
+## 2. Design intent (extracted and synthesized from ./design)
+
+The merchant portal is the self-service business workspace:
+
+1. **One merchant identity, many applications.** A merchant owns wallets and applications; each application maps to a wallet and controls the rails/redirect domains used by its links.
+2. **KYB before live money.** A merchant can prepare onboarding and use sandbox behavior while pending, but live activation follows KYB approval.
+3. **Wallet balances are ledger-derived.** The portal shows available, pending and negative amounts; it never edits a balance column.
+4. **Sensitive changes are governed.** Descriptive application/merchant fields can change directly; wallet assignment, rail whitelist and redirect allowlist are sensitive and require review.
+5. **Links are server-priced.** The checkout cannot change the amount; the merchant link record is the price authority.
+6. **POS is a real-time surface.** A paired screen reflects the current payment state and must not be treated as a payment authority.
+7. **Disputes are evidence workflows.** The merchant uploads evidence before the deadline; money movement remains an admin finance action.
+8. **API tokens are scoped secrets.** Tokens are shown once, can be revoked, and can be constrained by IP CIDR allowlists.
+9. **Help is merchant-specific.** The shell exposes merchant guild search/help, not the admin 12-book guide.
+10. **All money and spreadsheet output uses decimal.js and the shared XLSX pipeline.**
+
+## 3. As-built architecture
+
+### 3.1 Public and protected routes
+
+`merchant-front/src/router/index.ts` defines:
+
+- Public `/` (`Landing`), `/login` (`Login`), `/register` (`Register`), and a catch-all `NotFound`.
+- A protected `/portal` parent using `layouts/default`, with 16 children.
+- A visitor guard for login/register and a landing-to-dashboard redirect for authenticated users.
+- A `routesAuthorities` check after authentication; missing/empty authority arrays mean no UI gate.
+- A dynamic-import retry path using `localStorage`.
+
+### 3.2 The 16 portal routes
+
+| # | Path | Name | UI authority | Purpose |
+| :--- | :--- | :--- | :--- | :--- |
+| 1 | `/portal/dashboard` | `Dashboard` | `stats.read` | Wallet balance, period volume, success rate, pending cash-outs, charts and recent payments. |
+| 2 | `/portal/onboarding` | `Onboarding` | `[]` (authenticated only) | Five-step KYB/onboarding: profile, owners, documents, payout, submit; revalidation requests. |
+| 3 | `/portal/guide` | `MerchantGuide` | none | Merchant operations guide, role-filtered chapters, first-5 checklist, fee calculator, code generator, webhook checks. |
+| 4 | `/portal/guide/developers` | `MerchantDeveloperGuide` | none | Developer API chapters D-01..D-05 with code templates. |
+| 5 | `/portal/wallets` | `Wallets` | `wallets.read` | Wallet balances, pending/negative amounts, last use, create wallet, statements shortcut. |
+| 6 | `/portal/statements` | `Statements` | **none (gap)** | Monthly statement by wallet/month, line items, snapshot hash and XLSX export. |
+| 7 | `/portal/applications` | `Applications` | `applications.read` | Application list, profile edits, wallet assignment, rail whitelist and redirect allowlist proposals. |
+| 8 | `/portal/links` | `Links` | `links.read` | Create/cancel links, QR, attempts inspector, redirect URL and rail whitelist. |
+| 9 | `/portal/pos` | `PosTerminals` | `pos.manage` or `pos.operate` | Terminals, screens and pairing. |
+| 10 | `/portal/pos/screen/:code` | `PosScreen` | `pos.manage` or `pos.operate` | Realtime customer-facing screen for a paired terminal. |
+| 11 | `/portal/payments` | `Payments` | `payments.read` | Payment attempts, status, amount, commission, net and application. |
+| 12 | `/portal/disputes` | `Disputes` | `payments.read` | Chargeback list, evidence deadline/status and evidence upload. |
+| 13 | `/portal/cashouts` | `Cashouts` | `cashout.read` or `cashout.request` | Cash-out requests, wallet, amount and bank destination. |
+| 14 | `/portal/developers/tokens` | `DeveloperTokens` | `tokens.read` | API token creation, one-time secret, scopes, IP allowlist and revocation. |
+| 15 | `/portal/credentials` | `Credentials` | `credentials.manage` | Merchant-owned gateway credential sets and environments. |
+| 16 | `/portal/team` | `Team` | `users.manage` | Team members, roles, scopes and authority editing. |
+
+### 3.3 Shell and layout
+
+`merchant-front/src/layouts/default.tsx` mirrors the admin 248/56 shell:
+
+- 56 px app bar with menu toggle, brand, breadcrumbs, guide search, help, theme, AR/EN language controls and account menu.
+- 248 px drawer permanent on desktop and temporary on compact screens.
+- Drawer sections: Overview, Money, Commerce, Developer.
+- Active navigation uses `meta.parentName` or the longest matching path.
+- Guide search pill and `Ctrl+K` open the merchant guide search modal.
+- `?` opens the merchant contextual-help drawer.
+- Operator card shows merchant role and maker/checker dots.
+- Route loading bar and focused main content.
+- Skip link and RTL-aware layout.
+
+Public auth pages use `layouts/auth.tsx`. The POS screen page is still under the `/portal` layout but renders a focused full-height status surface.
+
+### 3.4 Onboarding
+
+`merchant-front/src/pages/onboarding/index.tsx` implements five steps:
+
+1. **Business Profile** — legal/trade name, registration number, tax id, business category, address, contact phone/email, expected monthly volume, currency, website, sales-channel description.
+2. **Beneficial Owners** — full name, ownership percent, national id, date of birth, nationality, PEP/controller flags; total ownership is displayed with decimal.js.
+3. **Documents** — document type, file, expiry; uploads use multipart `POST v1/merchant/onboarding/kyb-documents`. Open revalidation requests get a replacement file and expiry.
+4. **Bank Details** — bank name, account holder, IBAN, account number, SWIFT; payout account must match the approved corporate account policy.
+5. **Review and Submit** — submit with acknowledgement through `POST v1/merchant/onboarding/submit`.
+
+The page loads the current join request and open revalidations, supports profile save, owner creation, document upload and submit, and shows the join status and requested-info state. It is available to every authenticated merchant because `routesAuthorities.Onboarding = []`.
+
+Onboarding completion is not an activation authority: the admin KYB/join-request process and `core-back` decide when a merchant is live.
+
+### 3.5 Wallets and statements
+
+`Wallets` (`/portal/wallets`):
+
+- Lists wallet name, currency, balance, pending, amount due/negative balance, status and last use.
+- Can create a wallet with application, label and currency.
+- Links to the statements route for a wallet.
+- Shows values through `MoneyDisplay`; calculations use decimal utilities.
+
+`Statements` (`/portal/statements`):
+
+- Loads wallets, selects a wallet and one of the last 12 months.
+- Shows opening/closing balance, gross credits, commission, net credits, adjustments, cash-outs, snapshot hash and line items.
+- Exports the statement through `GET v1/merchant/wallets/:id/statements/:month/export`.
+- Uses the shared XLSX pipeline; export is unavailable until a wallet is selected.
+
+The `Statements` route is hidden from navigation without `statements.read`/`statements.export` but has no `routesAuthorities` entry, so a direct URL is not redirected by the merchant router.
+
+### 3.6 Applications
+
+`Applications` (`/portal/applications`):
+
+- Lists applications with status.
+- Edits descriptive fields (display/name, sales-channel description, expected volume).
+- Proposes sensitive changes: assigned wallet, rail whitelist and redirect-domain allowlist.
+- Displays pending/approved status for sensitive proposals.
+- Requires `applications.read`; mutation authority is enforced by the merchant API.
+
+The UI reflects the maker-checker model but does not itself approve changes.
+
+### 3.7 Payment links
+
+`Links` (`/portal/links`):
+
+- Lists links with amount, currency, use count, expiry, state and attempts.
+- Creates a link with description, amount, currency, use count, expiry, redirect URL and rail whitelist.
+- Shows a QR code for the link.
+- Opens an attempts inspector for the link.
+- Cancels a link through `POST v1/merchant/links/:id/cancel`.
+
+The link amount is stored server-side; the checkout page never accepts a client amount or currency. A single-use link can lock its slot while an attempt is in progress.
+
+### 3.8 POS terminals and screens
+
+`PosTerminals` (`/portal/pos`):
+
+- Lists terminals and paired screens.
+- Creates a terminal with name and location.
+- Creates/pairs a screen with a screen name and type.
+- Shows screen role/status and actions.
+
+`PosScreen` (`/portal/pos/screen/:code`):
+
+- Loads the screen state from `GET v1/merchant/pos/screens/:code/stream` and then opens an `EventSource` on the same path.
+- Shows amount, status, rail code, screen code, reference and last update.
+- Shows a live/pending badge and a manual refresh.
+- Is a real-time display surface; it does not initiate or confirm a payment from the screen page.
+
+### 3.9 Payments and disputes
+
+`Payments` (`/portal/payments`):
+
+- Searchable list of payment attempts.
+- Shows reference, rail, status, amount, commission, net, application, creation and confirmation times.
+- Uses `StatusBadge` with success/warning/danger mapping.
+
+`Disputes` (`/portal/disputes`):
+
+- Lists dispute reference, source, state, amount, reason code, evidence deadline and whether evidence was submitted.
+- Opens an evidence dialog with a note and optional file.
+- Submits multipart evidence to `POST v1/merchant/disputes/:id/evidence`.
+- Does not move money; admin finance handles adjustments.
+
+### 3.10 Cash-outs
+
+`Cashouts` (`/portal/cashouts`):
+
+- Lists cash-out state, wallet, amount, currency and request time.
+- Requests a cash-out with wallet, amount, currency and bank details (bank name, account number, optional IBAN).
+- Shows processing states and supports the maker/checker or finance processing status returned by the API.
+- Requires `cashout.read` or `cashout.request` in the UI; the merchant API re-checks.
+
+### 3.11 Developer tokens
+
+`DeveloperTokens` (`/portal/developers/tokens`):
+
+- Lists token name, status, IP-whitelist state and revocation state.
+- Creates a token with name, scopes and optional IP CIDR allowlist.
+- Shows the one-time secret in a dedicated card after creation.
+- Revokes tokens through `DELETE v1/merchant/tokens/:id`.
+- Updates IP allowlists through `PUT v1/merchant/tokens/:id/ips`.
+
+Tokens authenticate the external API (`pg_live_...`); the portal session is separate.
+
+### 3.12 Merchant credentials
+
+`Credentials` (`/portal/credentials`):
+
+- Lists merchant-owned gateway credential sets.
+- Creates/edits credential name, gateway code, environment, settlement target, username, write-only secret, secret reference.
+- Shows whether a secret exists (write-only) and environment/settlement posture.
+- Requires `credentials.manage`.
+
+This supports `MERCHANT_DIRECT` mode, where the merchant's own gateway credentials are used and the platform records commission receivable rather than holding principal cash.
+
+### 3.13 Team and roles
+
+`Team` (`/portal/team`):
+
+- Lists merchant users, roles, status and authority posture.
+- Invites a member with full name, email, phone, role and temporary password.
+- Edits profile/status and scopes/authorities.
+- Sends changes through `PATCH v1/merchant/users/:id` or `POST v1/merchant/users`.
+- Requires `users.manage`.
+
+### 3.14 Guide surfaces
+
+The portal exposes two guide routes plus shell help/search:
+
+- `/portal/guide` (`MerchantGuide`) — operations guide with first-5 checklist, role search/filter, chapter modal, fee calculator, code generator and webhook checks.
+- `/portal/guide/developers` (`MerchantDeveloperGuide`) — D-01..D-05 chapter reader with code templates.
+- Shell guide search (`Ctrl+K`) opens the merchant guide search modal and routes to the relevant chapter.
+- Shell help (`?`) opens the merchant contextual-help drawer with the M/D mapping.
+- The guide is a learning surface and has no route authority entry.
+
+The content and tooling are documented in `01-guide-and-developer-api.md`.
+
+## 4. Contracts and invariants
+
+1. **The merchant SPA talks only to `merchant-back` under `/api`.** It holds no database or core credential.
+2. **The external API uses `pg_live_` bearer tokens, not the portal session.**
+3. **Sensitive application changes are maker-checker proposals.** The current configuration remains active until approved.
+4. **Wallet balances are derived from the ledger.** The portal does not write balances.
+5. **Payment-link amounts are server-authoritative.** The portal sends the intended amount at creation; checkout never supplies it.
+6. **POS screens are display surfaces.** They reflect attempts; they do not create money movement.
+7. **Evidence uploads are multipart and deadline-bound.**
+8. **Credential secrets are write-only after save.**
+9. **Money and exports use decimal.js and the shared XLSX pipeline.**
+10. **The UI authority check is advisory.** `core-back` remains authoritative.
+11. **English and Arabic catalogues remain in sync.**
+
+## 5. Data / API / config / deployment surface
+
+| Surface | Location |
+| :--- | :--- |
+| Merchant router | `merchant-front/src/router/index.ts` |
+| Merchant navigation/gates | `merchant-front/src/layouts/sections.tsx` |
+| Merchant shell | `merchant-front/src/layouts/default.tsx` |
+| Auth layout | `merchant-front/src/layouts/auth.tsx` |
+| Pages | `merchant-front/src/pages/**` |
+| API map | `merchant-front/src/constants/urlsMap/index.ts` |
+| Guide content | `merchant-front/src/content/guide/**` |
+| Guide/help components | `merchant-front/src/components/guide/**` |
+| Environment | `VITE_API_URL`, `VITE_SEND_NOT_FOUND_TRANSLATIONS`, `VITE_MY_TAILSCALE` |
+
+The portal uses no admin checklist/help-panel flags. Its shell always exposes guide search and help.
+
+## 6. Operational usage
+
+- Start a merchant: register/login, complete onboarding, wait for KYB approval, then create a wallet/application/link or POS screen.
+- Debug a missing page: check `routesAuthorities` for that route name, then confirm the backend authority. A hidden nav item does not prove the route is gated.
+- Debug a link: use the attempts inspector; confirm the link state and slot behavior before creating a replacement link.
+- Debug a POS screen: check the screen code, the live `EventSource` connection, and the terminal/screen pairing.
+- Debug a dispute: confirm the evidence deadline and that the file is attached; an evidence note without a file may still be accepted but is weaker.
+- Debug API integration: use the developer guide generator, then verify the token, IP allowlist and webhook signature checks.
+
+## 7. Status and deviations
+
+### Implemented
+
+- 16 protected portal routes and four public routes.
+- 248/56 merchant shell with RTL, theme, search, help and operator card.
+- Onboarding, wallets, statements, applications, links, POS, payments, disputes, cash-outs, tokens, credentials and team pages.
+- Merchant guide and developer guide surfaces.
+- Sensitive application proposal UI and credential/token write-only handling.
+- Shared XLSX export for statements.
+
+### Partial
+
+- `Statements` lacks a router-level authority gate.
+- The guide/developer routes are open learning surfaces, which is intentional but means any authenticated merchant can read them.
+- The portal shows maker/checker posture but does not provide a full pending-change diff workflow for every sensitive object.
+- Google OIDC is listed in the API map but the actual merchant `/auth/google` endpoint returns 501, so no working Google flow ships.
+- Merchant help and guide content are the 10+5 chapter baseline, not guide v2.
+
+### Missing / deferred
+
+- No self-service activation override; KYB approval remains admin-controlled.
+- No merchant-side certification/training gate for production authorities.
+- No guide v2 context map/playbook/read tracking.
+- No working Google sign-in.
+
+### Known bugs / risks
+
+- **Authorization gap:** direct navigation to `/portal/statements` is not blocked by the router even when the UI would hide it.
+- **Onboarding risk:** client-side progress and completion are convenience signals, not activation authority.
+- **POS risk:** a displayed `SUCCEEDED` screen is a reflection; the merchant must still follow the server-confirmed payment status and settlement rules.
+- **Documentation risk:** do not describe the portal as having a working Google login or a fully server-enforced route gate.
+- **Guide risk:** merchant chapter content must not be conflated with the admin 12-book guide or guide v2.
+
+## 8. Verification and tests
+
+- `tests/e2e/merchant/shell.spec.ts` checks the merchant shell, drawer, navigation rendering, locale re-translation, overflow, mobile behavior and removed scaling.
+- `tests/e2e/merchant/auth.spec.ts` covers authentication entry behavior.
+- `tests/e2e/merchant/a11y.spec.ts` covers accessibility basics.
+- `tests/e2e/exhaustive/exhaustive-merchant-surface.spec.ts` enumerates the portal routes and viewport/locale/theme matrix.
+- `merchant-front/src/content/__tests__/content-completeness.test.ts` checks the merchant guide chapter content and tools.
+
+The shell/auth/a11y suites require the live stack. The content test is a Bun test.
+
+## 9. Source references
+
+### Old design sections
+
+- `design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — shared portal tokens/primitives/shell intent.
+- `design/ui/portal_ui_implementation_plan.md` — merchant rollout and shared table/primitives.
+- `design/complete_zero_to_hero_guides_and_academy_specification.md` — merchant guide chapter baseline.
+- `design/payment_gateway_deployment_and_guides_architecture.md` — merchant portal/guide architecture.
+
+### Code paths
+
+- `merchant-front/src/router/index.ts`
+- `merchant-front/src/layouts/default.tsx`
+- `merchant-front/src/layouts/sections.tsx`
+- `merchant-front/src/pages/onboarding/index.tsx`
+- `merchant-front/src/pages/wallets/index.tsx`
+- `merchant-front/src/pages/statements/index.tsx`
+- `merchant-front/src/pages/applications/index.tsx`
+- `merchant-front/src/pages/links/index.tsx`
+- `merchant-front/src/pages/pos/index.tsx`
+- `merchant-front/src/pages/pos/screen/[code].tsx`
+- `merchant-front/src/pages/payments/index.tsx`
+- `merchant-front/src/pages/disputes/index.tsx`
+- `merchant-front/src/pages/cashouts/index.tsx`
+- `merchant-front/src/pages/developers/tokens/index.tsx`
+- `merchant-front/src/pages/credentials/index.tsx`
+- `merchant-front/src/pages/team/index.tsx`
+
+### Generated appendices
+
+- `project-design/appendices/api-route-matrix.md`
+- `project-design/appendices/test-inventory.md`
+
+## 10. Change history
+
+- 2026-11-03 — Initial canonical merchant portal part. Confirms 16 portal routes, the 248/56 shell, onboarding and money/commerce/developer pages, guide surfaces, and the Statements/route authority and Google OIDC gaps.

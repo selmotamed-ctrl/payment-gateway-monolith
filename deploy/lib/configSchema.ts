@@ -53,7 +53,7 @@ const booleanish = z
   .transform((value) => value === "true" || value === "1" || value === "yes");
 
 export const DEPLOY_MODES = ["auto", "fresh", "update", "rolling_update"] as const;
-export const DB_ENGINES = ["mysql", "postgresql"] as const;
+export const DB_ENGINES = ["postgresql"] as const;
 export const SSL_MODES = ["certbot", "custom", "self_signed"] as const;
 export const ROLE_NAMES = ["db", "core", "admin", "merchant", "checkout", "fake-rails"] as const;
 export type DeployRole = (typeof ROLE_NAMES)[number];
@@ -154,8 +154,8 @@ const base = z.strictObject({
   DB_SSH_KEY_PATH: sshPath.optional(),
   DB_SUDO_PASSWORD: z.string().max(256).default(""),
   DB_PRIVATE_IP: ipv4.optional(),
-  DB_ENGINE: z.enum(DB_ENGINES).default("mysql"),
-  DB_PORT: port.default(3306),
+  DB_ENGINE: z.enum(DB_ENGINES).default("postgresql"),
+  DB_PORT: port.default(5432),
   DB_NAME: z
     .string()
     .trim()
@@ -313,6 +313,8 @@ const base = z.strictObject({
   PGBOUNCER_DEFAULT_POOL_SIZE: z.coerce.number().int().min(1).max(10_000).default(50),
   PGBOUNCER_MAX_CLIENT_CONN: z.coerce.number().int().min(1).max(100_000).default(2000),
   PGBOUNCER_MAX_PREPARED_STATEMENTS: z.coerce.number().int().min(0).max(10_000).default(256),
+  PG_DATA_DIR: z.string().trim().max(300).default(""),
+  PG_AUDIT_DATA_DIR: z.string().trim().max(300).default(""),
 
   // 10. Redis cache / velocity engine
   REDIS_MANAGE_VIA_SSH: booleanish.default(false),
@@ -379,7 +381,7 @@ const base = z.strictObject({
   BACKUP_SSH_KEY_PATH: sshPath.optional(),
   BACKUP_SUDO_PASSWORD: z.string().max(256).default(""),
   BACKUP_ENGINE_MODE: z.enum(["wal-g", "barman"]).default("wal-g"),
-  BACKUP_COMPRESSION: z.enum(["zstd", "lz4", "gzip"]).default("zstd"),
+  BACKUP_COMPRESSION: z.enum(["zstd", "lz4", "lzma", "brotli", "none"]).default("zstd"),
   BACKUP_ENCRYPTION_KEY_HEX: z
     .string()
     .trim()
@@ -390,13 +392,33 @@ const base = z.strictObject({
   BACKUP_PRIMARY_S3_BUCKET: z.string().trim().max(500).default(""),
   BACKUP_PRIMARY_S3_ACCESS_KEY: z.string().max(500).default(""),
   BACKUP_PRIMARY_S3_SECRET_KEY: z.string().max(500).default(""),
+  BACKUP_CORE_S3_PREFIX: z.string().trim().max(1000).default(""),
+  BACKUP_AUDIT_S3_PREFIX: z.string().trim().max(1000).default(""),
   BACKUP_SECONDARY_SSH_TARGET: z.string().trim().max(500).default(""),
   BACKUP_FULL_CRON: z.string().trim().min(1).max(120).default("0 2 * * 0"),
   BACKUP_DELTA_CRON: z.string().trim().min(1).max(120).default("0 2 * * 1-6"),
   BACKUP_DRILL_CRON: z.string().trim().min(1).max(120).default("0 4 * * 0"),
   BACKUP_RETENTION_FULL_COUNT: z.coerce.number().int().min(1).max(365).default(8),
   BACKUP_RETENTION_WAL_DAYS: z.coerce.number().int().min(1).max(3650).default(14),
+  BACKUP_ALERT_LAG_SECONDS: z.coerce.number().int().min(1).max(86_400).default(300),
   BACKUP_DAEMON_PORT: port.default(4090),
+  BACKUP_SCHEDULER_ENABLED: booleanish.default(true),
+  BACKUP_SCHEDULER_TICK_MS: z.coerce.number().int().positive().max(3_600_000).default(30_000),
+  BACKUP_DAEMON_BIND_HOST: z.string().trim().max(64).default(""),
+  BACKUP_DAEMON_CERT_DIR: z.string().trim().max(300).default("/var/lib/pg-backup/shared/certs"),
+  BACKUP_CATALOG_PATH: z.string().trim().max(300).default("/var/lib/pg-backup/catalog.json"),
+  BACKUP_PGPASSFILE: z.string().trim().max(300).default("/var/lib/pg-backup/.pgpass"),
+  BACKUP_SCRATCH_DIR: z.string().trim().max(300).default("/var/lib/pg-backup/scratch"),
+  BACKUP_SCRATCH_AUDIT_DIR: z.string().trim().max(300).default(""),
+  BACKUP_SCRATCH_PORT: port.default(55432),
+  BACKUP_SCRATCH_AUDIT_PORT: port.default(55433),
+  BACKUP_COMMAND_TIMEOUT_MS: z.coerce.number().int().positive().max(86_400_000).default(1_800_000),
+  BACKUP_ALLOW_INSECURE_HTTP: booleanish.default(false),
+  BACKUP_WALG_BIN: z.string().trim().min(1).max(300).default("wal-g"),
+  BACKUP_BARMAN_BIN: z.string().trim().min(1).max(300).default("barman"),
+  BACKUP_BARMAN_CLOUD_BIN: z.string().trim().min(1).max(300).default("barman-cloud-backup"),
+  BACKUP_REDIS_CLI_BIN: z.string().trim().min(1).max(300).default("redis-cli"),
+  BARMAN_AUDIT_SERVER: z.string().trim().max(200).default(""),
 
   // 8. Synthetic operational data seeder (test servers with Fake Rails only)
   RUN_SYNTHETIC_HISTORY_SEED: booleanish.default(false),
@@ -459,14 +481,18 @@ export const effectiveDatabase = (config: DeployConfig): {
 } => {
   const primary = parseNodeList(config.PG_PRIMARY_NODE)[0] ?? null;
   const pg = pgStorageConfigured(config);
-  const name = config.DB_NAME ?? config.PG_DB_NAME;
-  const user = config.DB_USER ?? config.PG_DB_USER;
-  const password = config.DB_PASSWORD ?? config.PG_DB_PASSWORD;
+  // When the PostgreSQL 18 storage tier is configured its credentials are
+  // authoritative; the legacy DB_* block is only a compatibility path for an
+  // externally managed database.
+  const name = pg ? config.PG_DB_NAME : (config.DB_NAME ?? config.PG_DB_NAME);
+  const user = pg ? config.PG_DB_USER : (config.DB_USER ?? config.PG_DB_USER);
+  const password = pg ? config.PG_DB_PASSWORD : (config.DB_PASSWORD ?? config.PG_DB_PASSWORD);
   const host = primary?.privateIp ?? config.DB_PRIVATE_IP ?? null;
   const port = primary?.servicePort ?? config.DB_PORT;
   const derivedPort = config.PGBOUNCER_ENABLED ? config.PGBOUNCER_PORT : port;
-  const url = config.DATABASE_URL
-    ?? (pg && host ? `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${derivedPort}/${name}` : null);
+  const url = pg && host
+    ? `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${derivedPort}/${name}`
+    : (config.DATABASE_URL ?? null);
   return {
     engine: config.DB_ENGINE,
     host,
@@ -475,7 +501,7 @@ export const effectiveDatabase = (config: DeployConfig): {
     user,
     password,
     url,
-    privateIp: config.DB_PRIVATE_IP ?? primary?.privateIp ?? null,
+    privateIp: pg ? (primary?.privateIp ?? config.DB_PRIVATE_IP ?? null) : (config.DB_PRIVATE_IP ?? primary?.privateIp ?? null),
     managedViaSsh: config.DB_MANAGE_VIA_SSH || config.PG_MANAGE_VIA_SSH,
   };
 };
@@ -537,7 +563,7 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
     if (!config.DATABASE_URL) problems.push("DATABASE_URL is required");
   }
   if (config.DATABASE_URL) {
-    const enginePrefix = config.DB_ENGINE === "mysql" ? "mysql://" : "postgresql://";
+    const enginePrefix = "postgresql://";
     if (!config.DATABASE_URL.startsWith(enginePrefix)) {
       problems.push(`DATABASE_URL must start with ${enginePrefix} (DB_ENGINE=${config.DB_ENGINE})`);
     }
@@ -623,6 +649,42 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
     if (!config.BACKUP_SSH_KEY_PATH) problems.push("BACKUP_SSH_KEY_PATH is required when BACKUP_ENABLED=true");
     if (!config.BACKUP_PRIMARY_S3_BUCKET) problems.push("BACKUP_PRIMARY_S3_BUCKET is required when BACKUP_ENABLED=true");
     if (!config.BACKUP_ENCRYPTION_KEY_HEX) problems.push("BACKUP_ENCRYPTION_KEY_HEX is required when BACKUP_ENABLED=true");
+    const endpointIsHttpUrl = (() => {
+      try {
+        const endpoint = new URL(config.BACKUP_PRIMARY_S3_ENDPOINT);
+        return (endpoint.protocol === "http:" || endpoint.protocol === "https:") && endpoint.hostname.length > 0;
+      } catch {
+        return false;
+      }
+    })();
+    if (!endpointIsHttpUrl) {
+      problems.push("BACKUP_PRIMARY_S3_ENDPOINT must be an absolute http(s) URL when BACKUP_ENABLED=true");
+    }
+    const backupNodes = (() => {
+      try {
+        return parseNodeList(config.BACKUP_NODE);
+      } catch {
+        return [];
+      }
+    })();
+    const auditNodes = (() => {
+      try {
+        return parseNodeList(config.AUDIT_DB_NODE);
+      } catch {
+        return [];
+      }
+    })();
+    const backupIp = backupNodes[0]?.privateIp;
+    const primaryIp = primaryNodes[0]?.privateIp;
+    if (config.BACKUP_ENGINE_MODE === "wal-g") {
+      if (backupIp && primaryIp && backupIp !== primaryIp) {
+        problems.push("BACKUP_NODE private IP must equal PG_PRIMARY_NODE private IP when BACKUP_ENGINE_MODE=wal-g (WAL-G reads the local data directory)");
+      }
+      const auditIp = auditNodes[0]?.privateIp;
+      if (backupIp && auditIp && auditIp !== backupIp && config.PG_AUDIT_DATA_DIR.trim().length === 0) {
+        problems.push("PG_AUDIT_DATA_DIR is required when the audit database is on a different host from the WAL-G backup node");
+      }
+    }
   }
   // Node ids are unique across the whole plan; private IPs are unique within a
   // tier (co-locating different tiers on one box remains supported).

@@ -1,6 +1,7 @@
 import type { PrismaClient } from "../../generated/prisma/client";
 import type { AuthenticatedAdminActor } from "../auth/confidentialAccess";
 import type { SearchResultItem, SearchType } from "./types";
+import type { AuditStorePort } from "../storageEngine/ports";
 
 export type QueryTokenKind =
   | "SHA256_HEX"
@@ -303,6 +304,7 @@ export interface SearchProviderContext {
   parsed: ParsedSearchQuery;
   actor: AuthenticatedAdminActor;
   take: number;
+  auditStore?: AuditStorePort | null;
 }
 
 export interface SearchProviderPlugin<TRow = unknown> {

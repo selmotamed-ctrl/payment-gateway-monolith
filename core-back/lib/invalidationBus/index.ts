@@ -49,8 +49,8 @@ export const topicMatchesPattern = (topic: string, pattern: string): boolean => 
 export class InvalidationBus {
   private readonly emitter = new EventEmitter();
   private readonly namespace: string;
-  private readonly publisher?: RedisCompatiblePublisher;
-  private readonly subscriber?: RedisCompatibleSubscriber;
+  private publisher?: RedisCompatiblePublisher;
+  private subscriber?: RedisCompatibleSubscriber;
   private readonly seenLimit: number;
   private readonly seen = new Set<string>();
   private readonly subscriptions = new Map<string, Set<InvalidationListener<never>>>();
@@ -61,6 +61,18 @@ export class InvalidationBus {
     this.subscriber = options.subscriber;
     this.seenLimit = options.seenLimit ?? 2048;
     this.emitter.setMaxListeners(0);
+  }
+
+  /**
+   * Attaches the cross-node Redis transport. It must be installed before the
+   * first subscription is created.
+   */
+  configureTransport(
+    publisher?: RedisCompatiblePublisher,
+    subscriber?: RedisCompatibleSubscriber,
+  ): void {
+    this.publisher = publisher;
+    this.subscriber = subscriber;
   }
 
   channel(topic: string): string {

@@ -1,8 +1,20 @@
+
+
+
+
+
+import { randomUUID } from "node:crypto";
+import { promises as nodeFs } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { BackupDaemonConfig } from "./config";
 import type { CommandResult, CommandRunner } from "./commandRunner";
 
 export const BACKUP_TARGETS = ["all", "postgres_core", "audit_db", "redis"] as const;
 export type BackupTarget = (typeof BACKUP_TARGETS)[number];
+
+export const RECOVERY_TARGETS = ["postgres_core", "audit_db"] as const;
+export type RecoveryTarget = (typeof RECOVERY_TARGETS)[number];
 
 export const BACKUP_KINDS = ["full", "delta"] as const;
 export type BackupKind = (typeof BACKUP_KINDS)[number];
@@ -45,6 +57,7 @@ export interface BackupSummary {
 }
 
 export interface RecoverRequest {
+  target: RecoveryTarget;
   targetTime: Date;
   targetDir: string;
   port: number;
@@ -53,14 +66,19 @@ export interface RecoverRequest {
 export interface RecoverResult {
   replayedLsn?: string;
   recoveryConf?: string;
+  /** Set only when the engine deliberately prepared an empty, initialized data dir. */
+  initializedEmptyDir?: boolean;
+  emptyDirInitialized?: boolean;
+  initializedEmptyDataDir?: boolean;
 }
 
 export interface BackupEngine {
   overviewHealth(): Promise<EngineHealth>;
   triggerBackup(target: BackupTarget, kind: BackupKind): Promise<BackupExecutionResult>;
-  listBackups(limit: number): Promise<BackupSummary[]>;
+  listBackups(limit: number, target?: BackupTarget): Promise<BackupSummary[]>;
   latestDrill?(): Promise<unknown | null>;
   recover?(request: RecoverRequest): Promise<RecoverResult>;
+  prune?(target: BackupTarget, kind?: BackupKind): Promise<void>;
 }
 
 export interface BuiltCommand {
@@ -83,14 +101,32 @@ export class BackupEngineError extends Error {
 
 const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, "");
 
+const shellQuote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`;
+
 export const backupDataDir = (config: BackupDaemonConfig, target: BackupTarget): string => {
-  if (target === "audit_db") return config.PG_AUDIT_DATA_DIR ?? config.PG_DATA_DIR;
+  if (target === "audit_db") {
+    if (!config.PG_AUDIT_DATA_DIR) {
+      throw new Error(
+        "PG_AUDIT_DATA_DIR is required for the audit_db WAL-G target; refusing to back up the core data directory",
+      );
+    }
+    return config.PG_AUDIT_DATA_DIR;
+  }
   return config.PG_DATA_DIR;
 };
 
-export const walGEnvironment = (config: BackupDaemonConfig): Record<string, string> => {
+export const walGS3Prefix = (
+  config: BackupDaemonConfig,
+  target: BackupTarget = "postgres_core",
+): string =>
+  trimTrailingSlash(target === "audit_db" ? config.BACKUP_AUDIT_S3_PREFIX : config.BACKUP_CORE_S3_PREFIX);
+
+export const walGEnvironment = (
+  config: BackupDaemonConfig,
+  target: BackupTarget = "postgres_core",
+): Record<string, string> => {
   const env: Record<string, string> = {
-    WALG_S3_PREFIX: config.BACKUP_PRIMARY_S3_BUCKET,
+    WALG_S3_PREFIX: walGS3Prefix(config, target),
     AWS_ENDPOINT_URL: config.BACKUP_PRIMARY_S3_ENDPOINT,
     AWS_ENDPOINT_URL_S3: config.BACKUP_PRIMARY_S3_ENDPOINT,
     WALG_COMPRESSION_METHOD: config.BACKUP_COMPRESSION,
@@ -111,13 +147,16 @@ export const walGEnvironment = (config: BackupDaemonConfig): Record<string, stri
 const psqlEnvironment = (config: BackupDaemonConfig): Record<string, string> =>
   config.PG_PRIMARY_PASSWORD ? { PGPASSWORD: config.PG_PRIMARY_PASSWORD } : {};
 
+/** Barman connects with the replication role and PGPASSFILE, not the app password. */
+const barmanEnvironment = (): Record<string, string> => ({});
+
 export const buildWalGBaseBackupCommand = (
   config: BackupDaemonConfig,
   target: BackupTarget = "postgres_core",
 ): BuiltCommand => ({
   command: config.WALG_BIN,
   args: ["backup-push", backupDataDir(config, target)],
-  env: walGEnvironment(config),
+  env: walGEnvironment(config, target),
   timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
 });
 
@@ -127,7 +166,7 @@ export const buildWalGDeltaBackupCommand = (
 ): BuiltCommand => ({
   command: config.WALG_BIN,
   args: ["backup-push", "--delta", backupDataDir(config, target)],
-  env: walGEnvironment(config),
+  env: walGEnvironment(config, target),
   timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
 });
 
@@ -138,24 +177,28 @@ export const buildWalGBackupCommand = (
 ): BuiltCommand =>
   kind === "delta" ? buildWalGDeltaBackupCommand(config, target) : buildWalGBaseBackupCommand(config, target);
 
-export const buildWalGListBackupsCommand = (config: BackupDaemonConfig): BuiltCommand => ({
+export const buildWalGListBackupsCommand = (
+  config: BackupDaemonConfig,
+  target: BackupTarget = "postgres_core",
+): BuiltCommand => ({
   command: config.WALG_BIN,
   args: ["backup-list", "--json"],
-  env: walGEnvironment(config),
+  env: walGEnvironment(config, target),
   timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
 });
 
 export const buildWalGMirrorCommand = (
   config: BackupDaemonConfig,
-  source: string = config.BACKUP_PRIMARY_S3_BUCKET,
+  target: BackupTarget = "postgres_core",
 ): BuiltCommand | null => {
   if (!config.BACKUP_SECONDARY_SSH_TARGET) return null;
+  const source = walGS3Prefix(config, target);
   const destination = config.BACKUP_SECONDARY_SSH_TARGET;
   if (source.startsWith("s3://") || destination.startsWith("s3://") || destination.startsWith("rclone:")) {
     return {
       command: "rclone",
       args: ["sync", source, destination],
-      env: walGEnvironment(config),
+      env: walGEnvironment(config, target),
       timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
     };
   }
@@ -166,10 +209,23 @@ export const buildWalGMirrorCommand = (
   };
 };
 
-export const buildWalGVerifyBucketCommand = (config: BackupDaemonConfig): BuiltCommand => ({
+export const buildWalGVerifyBucketCommand = (
+  config: BackupDaemonConfig,
+  target: BackupTarget = "postgres_core",
+): BuiltCommand => ({
   command: config.WALG_BIN,
-  args: ["st", "ls", config.BACKUP_PRIMARY_S3_BUCKET],
-  env: walGEnvironment(config),
+  args: ["st", "ls", walGS3Prefix(config, target)],
+  env: walGEnvironment(config, target),
+  timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
+});
+
+export const buildWalGPruneCommand = (
+  config: BackupDaemonConfig,
+  target: BackupTarget = "postgres_core",
+): BuiltCommand => ({
+  command: config.WALG_BIN,
+  args: ["delete", "retain", "FULL", String(config.BACKUP_RETENTION_FULL_COUNT), "--confirm"],
+  env: walGEnvironment(config, target),
   timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
 });
 
@@ -260,30 +316,45 @@ export const buildWalGArchiveStatusCommand = (config: BackupDaemonConfig): Built
     port: config.PG_PRIMARY_PORT,
   });
 
-export const barmanServerName = (config: BackupDaemonConfig): string =>
-  config.BARMAN_SERVER ?? config.PG_PRIMARY_HOST;
+export const barmanServerName = (
+  config: BackupDaemonConfig,
+  target: BackupTarget = "postgres_core",
+): string =>
+  target === "audit_db"
+    ? (config.BARMAN_AUDIT_SERVER ?? config.PG_AUDIT_DB_NAME)
+    : (config.BARMAN_SERVER ?? config.PG_PRIMARY_HOST);
 
-export const buildBarmanCheckCommand = (config: BackupDaemonConfig): BuiltCommand => ({
+export const buildBarmanCheckCommand = (
+  config: BackupDaemonConfig,
+  target: BackupTarget = "postgres_core",
+): BuiltCommand => ({
   command: config.BARMAN_BIN,
-  args: ["check", barmanServerName(config)],
-  env: psqlEnvironment(config),
+  args: ["check", barmanServerName(config, target)],
+  env: barmanEnvironment(),
   timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
 });
 
 export const buildBarmanBackupCommand = (
   config: BackupDaemonConfig,
   kind: BackupKind,
+  target: BackupTarget = "postgres_core",
 ): BuiltCommand => ({
   command: config.BARMAN_BIN,
-  args: kind === "delta" ? ["backup", "--incremental", barmanServerName(config)] : ["backup", barmanServerName(config)],
-  env: psqlEnvironment(config),
+  args:
+    kind === "delta"
+      ? ["backup", "--incremental", barmanServerName(config, target)]
+      : ["backup", barmanServerName(config, target)],
+  env: barmanEnvironment(),
   timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
 });
 
-export const buildBarmanListBackupsCommand = (config: BackupDaemonConfig): BuiltCommand => ({
+export const buildBarmanListBackupsCommand = (
+  config: BackupDaemonConfig,
+  target: BackupTarget = "postgres_core",
+): BuiltCommand => ({
   command: config.BARMAN_BIN,
-  args: ["list-backup", barmanServerName(config)],
-  env: psqlEnvironment(config),
+  args: ["list-backup", barmanServerName(config, target)],
+  env: barmanEnvironment(),
   timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
 });
 
@@ -292,21 +363,25 @@ export const buildBarmanRecoverCommand = (
   backupId: string,
   targetDir: string,
   targetTime: Date,
+  target: BackupTarget = "postgres_core",
 ): BuiltCommand => ({
   command: config.BARMAN_BIN,
   args: [
     "recover",
-    barmanServerName(config),
+    barmanServerName(config, target),
     backupId,
     targetDir,
     "--target-time",
     targetTime.toISOString(),
   ],
-  env: psqlEnvironment(config),
+  env: barmanEnvironment(),
   timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
 });
 
-export const buildBarmanCloudBackupCommand = (config: BackupDaemonConfig): BuiltCommand => ({
+export const buildBarmanCloudBackupCommand = (
+  config: BackupDaemonConfig,
+  target: BackupTarget = "postgres_core",
+): BuiltCommand => ({
   command: config.BARMAN_CLOUD_BIN,
   args: [
     "--cloud-provider",
@@ -314,9 +389,9 @@ export const buildBarmanCloudBackupCommand = (config: BackupDaemonConfig): Built
     "--endpoint-url",
     config.BACKUP_PRIMARY_S3_ENDPOINT,
     config.BACKUP_PRIMARY_S3_BUCKET,
-    barmanServerName(config),
+    barmanServerName(config, target),
   ],
-  env: walGEnvironment(config),
+  env: walGEnvironment(config, target),
   timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
 });
 
@@ -328,6 +403,28 @@ export const buildRedisSnapshotCommand = (config: BackupDaemonConfig): BuiltComm
     timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
   };
 };
+
+export const buildRedisRdbCommand = (
+  config: BackupDaemonConfig,
+  path: string,
+): BuiltCommand | null => {
+  if (!config.REDIS_URL) return null;
+  return {
+    command: config.REDIS_CLI_BIN,
+    args: ["-u", config.REDIS_URL, "--rdb", path],
+    timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
+  };
+};
+
+export const buildRedisUploadCommand = (
+  config: BackupDaemonConfig,
+  sourcePath: string,
+): BuiltCommand => ({
+  command: "rclone",
+  args: ["copyto", sourcePath, `${walGS3Prefix(config, "postgres_core")}/redis/dump.rdb`],
+  env: walGEnvironment(config, "postgres_core"),
+  timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
+});
 
 export const buildRedisPingCommand = (config: BackupDaemonConfig): BuiltCommand | null => {
   if (!config.REDIS_URL) return null;
@@ -536,6 +633,40 @@ const optionalTargetChecks = (config: BackupDaemonConfig, runner: CommandRunner)
   return checks;
 };
 
+const triggerRedisSnapshot = async (
+  config: BackupDaemonConfig,
+  runner: CommandRunner,
+  target: BackupTarget,
+  kind: BackupKind,
+): Promise<string[]> => {
+  const snapshot = buildRedisSnapshotCommand(config);
+  if (!snapshot) throw new BackupEngineError("REDIS_URL is not configured", target, kind);
+  await runChecked(runner, snapshot, target, kind);
+
+  const dumpPath = join(tmpdir(), `pg-backup-redis-${randomUUID()}.rdb`);
+  const rdb = buildRedisRdbCommand(config, dumpPath);
+  if (!rdb) throw new BackupEngineError("REDIS_URL is not configured", target, kind);
+
+  try {
+    await runChecked(runner, rdb, target, kind);
+    const upload = buildRedisUploadCommand(config, dumpPath);
+    try {
+      await runChecked(runner, upload, target, kind);
+    } catch (error) {
+      throw new BackupEngineError(
+        `Redis snapshot upload requires rclone and a reachable core S3 prefix: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        target,
+        kind,
+      );
+    }
+    return ["redis", "primary-s3"];
+  } finally {
+    await nodeFs.rm(dumpPath, { force: true }).catch(() => undefined);
+  }
+};
+
 const triggerWalGTarget = async (
   config: BackupDaemonConfig,
   runner: CommandRunner,
@@ -543,10 +674,7 @@ const triggerWalGTarget = async (
   kind: BackupKind,
 ): Promise<string[]> => {
   if (target === "redis") {
-    const redis = buildRedisSnapshotCommand(config);
-    if (!redis) throw new BackupEngineError("REDIS_URL is not configured", target, kind);
-    await runChecked(runner, redis, target, kind);
-    return ["redis"];
+    return triggerRedisSnapshot(config, runner, target, kind);
   }
 
   const backup = buildWalGBackupCommand(config, target, kind);
@@ -562,9 +690,9 @@ const triggerWalGTarget = async (
     throw error;
   }
 
-  await runChecked(runner, buildWalGVerifyBucketCommand(config), target, kind);
+  await runChecked(runner, buildWalGVerifyBucketCommand(config, target), target, kind);
   const storageTargets = ["primary-s3"];
-  const mirror = buildWalGMirrorCommand(config);
+  const mirror = buildWalGMirrorCommand(config, target);
   if (mirror) {
     await runChecked(runner, mirror, target, kind);
     storageTargets.push("secondary-ssh");
@@ -609,14 +737,18 @@ export class WalGEngine implements BackupEngine {
     const requested: BackupTarget[] =
       target === "all" ? (this.config.REDIS_URL ? ["postgres_core", "audit_db", "redis"] : ["postgres_core", "audit_db"]) : [target];
     const storageTargets = new Set<string>();
-    const seenDataDirs = new Set<string>();
 
     for (const requestedTarget of requested) {
-      if (requestedTarget !== "redis") {
-        const dataDir = backupDataDir(this.config, requestedTarget);
-        if (seenDataDirs.has(dataDir)) continue;
-        seenDataDirs.add(dataDir);
+      if (requestedTarget === "audit_db" && !this.config.PG_AUDIT_DATA_DIR) {
+        throw new BackupEngineError(
+          "PG_AUDIT_DATA_DIR is required for the audit_db WAL-G target; refusing to back up the core data directory",
+          requestedTarget,
+          kind,
+        );
       }
+    }
+
+    for (const requestedTarget of requested) {
       for (const storageTarget of await triggerWalGTarget(this.config, this.runner, requestedTarget, kind)) {
         if (!storageTarget.startsWith("start-lsn:")) storageTargets.add(storageTarget);
       }
@@ -625,32 +757,49 @@ export class WalGEngine implements BackupEngine {
     return { storageTargets: [...storageTargets] };
   }
 
-  public async listBackups(limit: number): Promise<BackupSummary[]> {
-    const command = buildWalGListBackupsCommand(this.config);
+  public async listBackups(
+    limit: number,
+    target: BackupTarget = "postgres_core",
+  ): Promise<BackupSummary[]> {
+    const command = buildWalGListBackupsCommand(this.config, target);
     const result = await this.runner.run(command.command, command.args, {
       env: command.env,
       timeoutMs: command.timeoutMs,
     });
-    if (result.code !== 0) throw new BackupEngineError(`backup-list failed: ${errorText(result)}`, "all", "full");
+    if (result.code !== 0) throw new BackupEngineError(`backup-list failed: ${errorText(result)}`, target, "full");
     return parseWalGBackupList(result.stdout).slice(0, Math.max(0, limit));
   }
 
   public async recover(request: RecoverRequest): Promise<RecoverResult> {
-    const env = walGEnvironment(this.config);
+    const env = walGEnvironment(this.config, request.target);
     const fetch = await this.runner.run(this.config.WALG_BIN, ["backup-fetch", request.targetDir, "LATEST"], {
       env,
       timeoutMs: this.config.BACKUP_COMMAND_TIMEOUT_MS,
     });
     if (fetch.code !== 0) {
-      throw new BackupEngineError(`backup-fetch failed: ${errorText(fetch)}`, "postgres_core", "full");
+      throw new BackupEngineError(`backup-fetch failed: ${errorText(fetch)}`, request.target, "full");
     }
     const escapedTargetTime = request.targetTime.toISOString().replace(/'/g, "''");
+    const restoreEnv = Object.entries(env)
+      .filter(([key]) => key.startsWith("WALG_") || key.startsWith("AWS_"))
+      .map(([key, value]) => `${key}=${shellQuote(value)}`)
+      .join(" ");
     return {
       recoveryConf:
-        `restore_command = '${this.config.WALG_BIN} wal-fetch %f %p'\n` +
+        `restore_command = '${restoreEnv} ${this.config.WALG_BIN} wal-fetch %f %p'\n` +
         `recovery_target_time = '${escapedTargetTime}'\n` +
         "recovery_target_action = 'promote'\n",
     };
+  }
+
+  public async prune(target: BackupTarget, kind: BackupKind = "full"): Promise<void> {
+    if (kind !== "full") return;
+    const targets: BackupTarget[] =
+      target === "all" ? ["postgres_core", "audit_db"] : target === "redis" ? [] : [target];
+    for (const pruneTarget of targets) {
+      const command = buildWalGPruneCommand(this.config, pruneTarget);
+      await runChecked(this.runner, command, pruneTarget, kind);
+    }
   }
 }
 
@@ -661,14 +810,11 @@ const triggerBarmanTarget = async (
   kind: BackupKind,
 ): Promise<string[]> => {
   if (target === "redis") {
-    const redis = buildRedisSnapshotCommand(config);
-    if (!redis) throw new BackupEngineError("REDIS_URL is not configured", target, kind);
-    await runChecked(runner, redis, target, kind);
-    return ["redis"];
+    return triggerRedisSnapshot(config, runner, target, kind);
   }
-  await runChecked(runner, buildBarmanCheckCommand(config), target, kind);
-  await runChecked(runner, buildBarmanBackupCommand(config, kind), target, kind);
-  await runChecked(runner, buildBarmanCloudBackupCommand(config), target, kind);
+  await runChecked(runner, buildBarmanCheckCommand(config, target), target, kind);
+  await runChecked(runner, buildBarmanBackupCommand(config, kind, target), target, kind);
+  await runChecked(runner, buildBarmanCloudBackupCommand(config, target), target, kind);
   return ["primary-s3"];
 };
 
@@ -680,8 +826,10 @@ export class BarmanEngine implements BackupEngine {
 
   public async overviewHealth(): Promise<EngineHealth> {
     const check = buildBarmanCheckCommand(this.config);
+    const auditCheck = buildBarmanCheckCommand(this.config, "audit_db");
     const targets = await Promise.all([
       checkTarget(this.runner, "barman", "Barman Backup Server", "ssh", check),
+      checkTarget(this.runner, "barman-audit", "Barman Audit Server", "ssh", auditCheck),
       checkTarget(
         this.runner,
         "primary-s3",
@@ -709,13 +857,7 @@ export class BarmanEngine implements BackupEngine {
     const requested: BackupTarget[] =
       target === "all" ? (this.config.REDIS_URL ? ["postgres_core", "audit_db", "redis"] : ["postgres_core", "audit_db"]) : [target];
     const storageTargets = new Set<string>();
-    const seenDataDirs = new Set<string>();
     for (const requestedTarget of requested) {
-      if (requestedTarget !== "redis") {
-        const dataDir = backupDataDir(this.config, requestedTarget);
-        if (seenDataDirs.has(dataDir)) continue;
-        seenDataDirs.add(dataDir);
-      }
       for (const storageTarget of await triggerBarmanTarget(this.config, this.runner, requestedTarget, kind)) {
         storageTargets.add(storageTarget);
       }
@@ -723,28 +865,42 @@ export class BarmanEngine implements BackupEngine {
     return { storageTargets: [...storageTargets] };
   }
 
-  public async listBackups(limit: number): Promise<BackupSummary[]> {
-    const command = buildBarmanListBackupsCommand(this.config);
+  public async listBackups(
+    limit: number,
+    target: BackupTarget = "postgres_core",
+  ): Promise<BackupSummary[]> {
+    const command = buildBarmanListBackupsCommand(this.config, target);
     const result = await this.runner.run(command.command, command.args, {
       env: command.env,
       timeoutMs: command.timeoutMs,
     });
-    if (result.code !== 0) throw new BackupEngineError(`list-backup failed: ${errorText(result)}`, "all", "full");
+    if (result.code !== 0) throw new BackupEngineError(`list-backup failed: ${errorText(result)}`, target, "full");
     return parseBarmanBackupList(result.stdout).slice(0, Math.max(0, limit));
   }
 
   public async recover(request: RecoverRequest): Promise<RecoverResult> {
-    const backups = await this.listBackups(1);
+    const backups = await this.listBackups(1, request.target);
     const backupId = backups[0]?.backupId ?? "latest";
-    const command = buildBarmanRecoverCommand(this.config, backupId, request.targetDir, request.targetTime);
+    const command = buildBarmanRecoverCommand(
+      this.config,
+      backupId,
+      request.targetDir,
+      request.targetTime,
+      request.target,
+    );
     const result = await this.runner.run(command.command, command.args, {
       env: command.env,
       timeoutMs: command.timeoutMs,
     });
     if (result.code !== 0) {
-      throw new BackupEngineError(`barman recover failed: ${errorText(result)}`, "postgres_core", "full");
+      throw new BackupEngineError(`barman recover failed: ${errorText(result)}`, request.target, "full");
     }
     return {};
+  }
+
+  public async prune(_target: BackupTarget, _kind: BackupKind = "full"): Promise<void> {
+    // Barman applies its own retention_policy on the server; no destructive
+    // commands are issued by the daemon.
   }
 }
 

@@ -1,6 +1,7 @@
 import { decimal } from "../ledger/LedgerPoster";
 import type { AttemptRepository, DynamicAttempt, DynamicAttemptPatch } from "../flow/DynamicRailEngine";
 import type { PrismaLike } from "../db/ports";
+import { enqueueOutboxEvent } from "../../lib/storageEngine/outbox";
 
 export interface AttemptRow {
   id: string;
@@ -209,6 +210,27 @@ export class PrismaAttemptRepository implements AttemptRepository {
         route: { select: { mismatchPolicy: true, costModel: true } },
       },
     }) as AttemptRow;
+    const terminal = ["SUCCEEDED", "FAILED", "EXPIRED", "CANCELLED", "BLOCKED", "REFUNDED"];
+    if (data.status !== undefined && terminal.includes(String(data.status))) {
+      await enqueueOutboxEvent(target, {
+        topic: "attempt.transitioned",
+        aggregateType: "PAYMENT_ATTEMPT",
+        aggregateId: String(row.id),
+        merchantId: row.merchantId ? String(row.merchantId) : null,
+        payload: {
+          event: "terminal",
+          attemptId: String(row.id),
+          merchantId: row.merchantId ? String(row.merchantId) : null,
+          routeId: row.routeId ? String(row.routeId) : null,
+          currency: String(row.currency),
+          status: String(row.status),
+          substatus: row.substatus ?? null,
+          totalChargedAmount: row.totalChargedAmount,
+          netMerchantAmount: row.netMerchantAmount,
+          occurredAt: (row.status === "SUCCEEDED" || row.status === "FAILED" ? new Date() : new Date()).toISOString(),
+        },
+      });
+    }
     return toAttempt(row);
   }
 }

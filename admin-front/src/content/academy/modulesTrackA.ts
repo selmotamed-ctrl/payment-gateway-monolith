@@ -207,7 +207,7 @@ export const ACADEMY_MODULES_TRACK_A: AcademyModule[] = [
             },
             {
                 "id": "QUIZ-M1-Q6",
-                "questionEn": "Which service in our 7-project architecture is the only service that holds the MySQL database connection and `KMS_MASTER_KEY`?",
+                "questionEn": "Which service in our 7-project architecture is the only service that holds the PostgreSQL 18 database connection and `KMS_MASTER_KEY`?",
                 "options": [
                     {
                         "text": "`admin-back`",
@@ -410,20 +410,20 @@ export const ACADEMY_MODULES_TRACK_A: AcademyModule[] = [
                     {
                         "text": "Only by hiding the Approve button in the frontend UI.",
                         "correct": false,
-                        "explanation": "Incorrect. The correct answer is: In three layers: the frontend UI, the `makerCheckerGuard` / `ApprovalService` in `core-back`, and the `approval_requests_checker_not_maker` `BEFORE INSERT` trigger inside MySQL/MariaDB."
+                        "explanation": "Incorrect. The correct answer is: In three layers: the frontend UI, the `makerCheckerGuard` / `ApprovalService` in `core-back`, and the `approval_requests_checker_not_maker` database trigger inside PostgreSQL 18."
                     },
                     {
-                        "text": "In three layers: the frontend UI, the `makerCheckerGuard` / `ApprovalService` in `core-back`, and the `approval_requests_checker_not_maker` `BEFORE INSERT` trigger inside MySQL/MariaDB.",
+                        "text": "In three layers: the frontend UI, the `makerCheckerGuard` / `ApprovalService` in `core-back`, and the `approval_requests_checker_not_maker` database trigger inside PostgreSQL 18.",
                         "correct": true,
-                        "explanation": "The correct answer is: In three layers: the frontend UI, the `makerCheckerGuard` / `ApprovalService` in `core-back`, and the `approval_requests_checker_not_maker` `BEFORE INSERT` trigger inside MySQL/MariaDB."
+                        "explanation": "The correct answer is: In three layers: the frontend UI, the `makerCheckerGuard` / `ApprovalService` in `core-back`, and the `approval_requests_checker_not_maker` database trigger inside PostgreSQL 18."
                     },
                     {
                         "text": "Only in `admin-back`.",
                         "correct": false,
-                        "explanation": "Incorrect. The correct answer is: In three layers: the frontend UI, the `makerCheckerGuard` / `ApprovalService` in `core-back`, and the `approval_requests_checker_not_maker` `BEFORE INSERT` trigger inside MySQL/MariaDB."
+                        "explanation": "Incorrect. The correct answer is: In three layers: the frontend UI, the `makerCheckerGuard` / `ApprovalService` in `core-back`, and the `approval_requests_checker_not_maker` database trigger inside PostgreSQL 18."
                     }
                 ],
-                "explanation": "The correct answer is: In three layers: the frontend UI, the `makerCheckerGuard` / `ApprovalService` in `core-back`, and the `approval_requests_checker_not_maker` `BEFORE INSERT` trigger inside MySQL/MariaDB.",
+                "explanation": "The correct answer is: In three layers: the frontend UI, the `makerCheckerGuard` / `ApprovalService` in `core-back`, and the `approval_requests_checker_not_maker` database trigger inside PostgreSQL 18.",
                 "critical": true
             },
             {

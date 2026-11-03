@@ -252,6 +252,7 @@ const storageEnv = (config: DeployConfig): Record<string, string> => {
       PG_REPLICATION_PASSWORD: config.PG_REPLICATION_PASSWORD,
     } : {}),
     PG_REPLICA_HOSTS: replicas.map((node) => `${node.privateIp}:${config.PGBOUNCER_ENABLED ? config.PGBOUNCER_PORT : node.servicePort}`).join(","),
+    PG_REPLICA_NODES: config.PG_REPLICA_NODES,
     PGBOUNCER_ENABLED: config.PGBOUNCER_ENABLED ? "true" : "false",
     PGBOUNCER_PORT: String(config.PGBOUNCER_PORT),
     PGBOUNCER_DEFAULT_POOL_SIZE: String(config.PGBOUNCER_DEFAULT_POOL_SIZE),
@@ -735,13 +736,13 @@ const buildStorageFirewall = (config: DeployConfig, node: StorageNodePlan, allSt
     case "pg-primary":
       return [
         sshRule,
-        { port: pgPort, proto: "tcp", fromCidrs: [...new Set([...replicaIps, ...(config.PGBOUNCER_ENABLED ? [] : coreIps)])], comment: "PostgreSQL 18 primary <- replicas" },
+        { port: pgPort, proto: "tcp", fromCidrs: [...new Set([...replicaIps, ...(backupIp ? [backupIp] : []), ...(config.PGBOUNCER_ENABLED ? [] : coreIps)])], comment: "PostgreSQL 18 primary <- replicas + backup/Barman/WAL streaming" },
         ...(config.PGBOUNCER_ENABLED ? [{ port: config.PGBOUNCER_PORT, proto: "tcp" as const, fromCidrs: coreIps, comment: "PgBouncer from core nodes" }] : []),
       ];
     case "pg-replica":
       return [
         sshRule,
-        { port: pgPort, proto: "tcp", fromCidrs: [...new Set([...pgIps.filter((ip) => ip !== node.privateIp), ...(config.PGBOUNCER_ENABLED ? [] : coreIps)])], comment: "PostgreSQL 18 replica <- primary/replicas" },
+        { port: pgPort, proto: "tcp", fromCidrs: [...new Set([...pgIps.filter((ip) => ip !== node.privateIp), ...(backupIp ? [backupIp] : []), ...(config.PGBOUNCER_ENABLED ? [] : coreIps)])], comment: "PostgreSQL 18 replica <- primary/replicas + backup/Barman/WAL streaming" },
         ...(config.PGBOUNCER_ENABLED ? [{ port: config.PGBOUNCER_PORT, proto: "tcp" as const, fromCidrs: coreIps, comment: "PgBouncer from core nodes" }] : []),
       ];
     case "pgbouncer":

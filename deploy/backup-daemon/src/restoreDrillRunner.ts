@@ -288,12 +288,16 @@ export class RestoreDrillRunner {
     let journalLineCount = 0;
     let errorMessage: string | undefined;
 
-    const scratch = config.BACKUP_SCRATCH_DIR;
-    const autoConfPath = join(scratch, "postgresql.auto.conf");
+    const coreScratch = config.BACKUP_SCRATCH_DIR;
+    const auditScratch = config.BACKUP_SCRATCH_AUDIT_DIR;
+    const corePort = config.BACKUP_SCRATCH_PORT;
+    const auditPort = config.BACKUP_SCRATCH_AUDIT_PORT;
+    const scratchDirectories = [coreScratch, auditScratch];
+    const pgCtl = join(config.PG_BIN_DIR, "pg_ctl");
 
-    const stopScratch = async (): Promise<void> => {
+    const stopScratch = async (scratch: string): Promise<void> => {
       try {
-        await this.deps.runner.run(join(config.PG_BIN_DIR, "pg_ctl"), ["-D", scratch, "-m", "fast", "-w", "stop"], {
+        await this.deps.runner.run(pgCtl, ["-D", scratch, "-m", "fast", "-w", "stop"], {
           timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
         });
       } catch {
@@ -301,12 +305,20 @@ export class RestoreDrillRunner {
       }
     };
 
-    const psql = async (query: string, database: string): Promise<CommandResult> => {
+    const psql = async (
+      query: string,
+      database: string,
+      target: "postgres_core" | "audit_db",
+    ): Promise<CommandResult> => {
       const command = buildPsqlCommand(
         config,
         query,
         database,
-        { id: "scratch", host: "127.0.0.1", port: config.BACKUP_SCRATCH_PORT },
+        {
+          id: "scratch",
+          host: "127.0.0.1",
+          port: target === "audit_db" ? auditPort : corePort,
+        },
       );
       try {
         return await this.deps.runner.run(command.command, command.args, {
@@ -318,52 +330,57 @@ export class RestoreDrillRunner {
       }
     };
 
-    try {
-      await stopScratch();
-      await this.fileSystem.rm(scratch, { recursive: true, force: true });
-      await this.fileSystem.mkdir(scratch, { recursive: true });
-
-      if (!this.deps.engine.recover) {
-        throw new Error("backup engine does not implement recover()");
-      }
-      const recovered: RecoverResult = await this.deps.engine.recover({
-        targetTime,
-        targetDir: scratch,
-        port: config.BACKUP_SCRATCH_PORT,
-      });
-      replayedLsn = recovered.replayedLsn ?? "";
-
-      if (!(await this.fileSystem.exists(join(scratch, "PG_VERSION")))) {
-        const initdb = await this.deps.runner.run(
-          join(config.PG_BIN_DIR, "initdb"),
-          [
-            "-D",
-            scratch,
-            "-U",
-            config.PG_PRIMARY_USER,
-            "--auth=trust",
-            "--no-locale",
-            "-E",
-            "UTF8",
-          ],
-          { timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS },
+    const ensureCluster = async (
+      scratch: string,
+      recovered: RecoverResult,
+      label: string,
+    ): Promise<void> => {
+      if (await this.fileSystem.exists(join(scratch, "PG_VERSION"))) return;
+      const initializedEmptyDir =
+        recovered.initializedEmptyDir === true ||
+        recovered.emptyDirInitialized === true ||
+        recovered.initializedEmptyDataDir === true;
+      if (!initializedEmptyDir) {
+        throw new Error(
+          `${label} restore did not produce a PostgreSQL data directory (PG_VERSION missing); ` +
+            "refusing to initdb over a failed restore",
         );
-        if (initdb.code !== 0) {
-          throw new Error(`initdb failed: ${(initdb.stderr || initdb.stdout).trim().slice(0, 500)}`);
-        }
       }
-
-      if (recovered.recoveryConf) {
-        const existing = await this.fileSystem.readFile(autoConfPath).catch(() => "");
-        const separator = existing.trim().length > 0 ? "\n" : "";
-        await this.fileSystem.writeFile(autoConfPath, `${existing}${separator}${recovered.recoveryConf}`);
-        const recoverySignal = join(scratch, "recovery.signal");
-        if (!(await this.fileSystem.exists(recoverySignal))) {
-          await this.fileSystem.writeFile(recoverySignal, "");
-        }
+      const initdb = await this.deps.runner.run(
+        join(config.PG_BIN_DIR, "initdb"),
+        [
+          "-D",
+          scratch,
+          "-U",
+          config.PG_PRIMARY_USER,
+          "--auth=trust",
+          "--no-locale",
+          "-E",
+          "UTF8",
+        ],
+        { timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS },
+      );
+      if (initdb.code !== 0) {
+        throw new Error(`${label} initdb failed: ${(initdb.stderr || initdb.stdout).trim().slice(0, 500)}`);
       }
+    };
 
-      const pgCtl = join(config.PG_BIN_DIR, "pg_ctl");
+    const writeRecoveryFiles = async (
+      scratch: string,
+      recovered: RecoverResult,
+    ): Promise<void> => {
+      if (!recovered.recoveryConf) return;
+      const autoConfPath = join(scratch, "postgresql.auto.conf");
+      const existing = await this.fileSystem.readFile(autoConfPath).catch(() => "");
+      const separator = existing.trim().length > 0 ? "\n" : "";
+      await this.fileSystem.writeFile(autoConfPath, `${existing}${separator}${recovered.recoveryConf}`);
+      const recoverySignal = join(scratch, "recovery.signal");
+      if (!(await this.fileSystem.exists(recoverySignal))) {
+        await this.fileSystem.writeFile(recoverySignal, "");
+      }
+    };
+
+    const startCluster = async (scratch: string, port: number, label: string): Promise<void> => {
       const start = await this.deps.runner.run(
         pgCtl,
         [
@@ -372,17 +389,52 @@ export class RestoreDrillRunner {
           "-l",
           join(scratch, "postgresql.log"),
           "-o",
-          `-p ${config.BACKUP_SCRATCH_PORT} -c listen_addresses=127.0.0.1 -c unix_socket_directories=${scratch}`,
+          `-p ${port} -c listen_addresses=127.0.0.1 -c unix_socket_directories=${scratch}`,
           "-w",
           "start",
         ],
         { timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS },
       );
       if (start.code !== 0) {
-        throw new Error(`pg_ctl start failed: ${(start.stderr || start.stdout).trim().slice(0, 500)}`);
+        throw new Error(
+          `${label} pg_ctl start failed: ${(start.stderr || start.stdout).trim().slice(0, 500)}`,
+        );
+      }
+    };
+
+    try {
+      await Promise.all(scratchDirectories.map((scratch) => stopScratch(scratch)));
+      for (const scratch of scratchDirectories) {
+        await this.fileSystem.rm(scratch, { recursive: true, force: true });
+        await this.fileSystem.mkdir(scratch, { recursive: true });
       }
 
-      const doubleEntry = await psql(DOUBLE_ENTRY_QUERY, config.PG_PRIMARY_DB_NAME);
+      if (!this.deps.engine.recover) {
+        throw new Error("backup engine does not implement recover()");
+      }
+      const coreRecovered = await this.deps.engine.recover({
+        target: "postgres_core",
+        targetTime,
+        targetDir: coreScratch,
+        port: corePort,
+      });
+      const auditRecovered = await this.deps.engine.recover({
+        target: "audit_db",
+        targetTime,
+        targetDir: auditScratch,
+        port: auditPort,
+      });
+      replayedLsn = coreRecovered.replayedLsn ?? "";
+
+      await ensureCluster(coreScratch, coreRecovered, "core");
+      await ensureCluster(auditScratch, auditRecovered, "audit");
+      await writeRecoveryFiles(coreScratch, coreRecovered);
+      await writeRecoveryFiles(auditScratch, auditRecovered);
+
+      await startCluster(coreScratch, corePort, "core");
+      await startCluster(auditScratch, auditPort, "audit");
+
+      const doubleEntry = await psql(DOUBLE_ENTRY_QUERY, config.PG_PRIMARY_DB_NAME, "postgres_core");
       doubleEntryDrift = doubleEntry.code === 0 ? doubleEntry.stdout.trim() : "";
       checks.doubleEntry = {
         ok: doubleEntry.code === 0 && numericZero(doubleEntry.stdout),
@@ -392,13 +444,13 @@ export class RestoreDrillRunner {
             : `double-entry query failed: ${(doubleEntry.stderr || doubleEntry.stdout).trim().slice(0, 300)}`,
       };
 
-      const countResult = await psql(JOURNAL_LINE_COUNT_QUERY, config.PG_PRIMARY_DB_NAME);
+      const countResult = await psql(JOURNAL_LINE_COUNT_QUERY, config.PG_PRIMARY_DB_NAME, "postgres_core");
       if (countResult.code === 0) {
         const parsedCount = numericInteger(countResult.stdout);
         journalLineCount = Number.isNaN(parsedCount) ? 0 : parsedCount;
       }
 
-      const parity = await psql(BALANCE_PARITY_QUERY, config.PG_PRIMARY_DB_NAME);
+      const parity = await psql(BALANCE_PARITY_QUERY, config.PG_PRIMARY_DB_NAME, "postgres_core");
       const mismatchCount = parity.code === 0 ? numericInteger(parity.stdout) : Number.NaN;
       balanceMismatches = Number.isNaN(mismatchCount) ? 0 : mismatchCount;
       checks.balanceParity = {
@@ -409,7 +461,7 @@ export class RestoreDrillRunner {
             : `balance parity query failed: ${(parity.stderr || parity.stdout).trim().slice(0, 300)}`,
       };
 
-      const auditResult = await psql(AUDIT_CHAIN_QUERY, config.PG_AUDIT_DB_NAME);
+      const auditResult = await psql(AUDIT_CHAIN_QUERY, config.PG_AUDIT_DB_NAME, "audit_db");
       if (auditResult.code !== 0) {
         checks.auditChain = {
           ok: false,
@@ -426,17 +478,21 @@ export class RestoreDrillRunner {
       }
 
       if (!replayedLsn) {
-        const lsnResult = await psql(REPLAYED_LSN_QUERY, config.PG_PRIMARY_DB_NAME);
+        const lsnResult = await psql(REPLAYED_LSN_QUERY, config.PG_PRIMARY_DB_NAME, "postgres_core");
         if (lsnResult.code === 0) replayedLsn = lsnResult.stdout.trim();
       }
     } catch (error) {
       errorMessage = safeError(error, config);
     } finally {
-      await stopScratch();
-      try {
-        await this.fileSystem.rm(scratch, { recursive: true, force: true });
-      } catch (error) {
-        errorMessage ??= `scratch cleanup failed: ${safeError(error, config)}`;
+      for (const scratch of scratchDirectories) {
+        await stopScratch(scratch);
+      }
+      for (const scratch of scratchDirectories) {
+        try {
+          await this.fileSystem.rm(scratch, { recursive: true, force: true });
+        } catch (error) {
+          errorMessage ??= `scratch cleanup failed: ${safeError(error, config)}`;
+        }
       }
     }
 

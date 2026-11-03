@@ -16,7 +16,7 @@ import {
   type FeeVariancePoster,
 } from "../reconciliation/StatementIngestor";
 import type { BackgroundJobHandler } from "./BackgroundJobWorker";
-import { createLedgerShardWriter } from "../../lib/storageEngine/ledgerShardWriter";
+import { createLedgerPoster } from "../../lib/storageEngine/ledgerPosterFactory";
 
 /**
  * The payload of a dispute intake job.
@@ -129,7 +129,7 @@ const postSettlementSweeps = async (
   if (candidates.length === 0) {
     return 0;
   }
-  const poster = deps.ledgerPoster ?? new LedgerPoster(deps.db as never, undefined, createLedgerShardWriter());
+  const poster = deps.ledgerPoster ?? createLedgerPoster(deps.db as never);
   const seen = new Set<string>();
   let posted = 0;
   for (const item of candidates) {

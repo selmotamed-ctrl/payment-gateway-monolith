@@ -241,6 +241,32 @@ export const readThroughReplica = async <T>(
   }
 };
 
+/**
+ * Replica read with a safe primary fallback. When the storage engine has not
+ * been initialised (unit tests, tools), the supplied primary client is used
+ * directly instead of opening a new connection.
+ */
+export const readThroughReplicaOrPrimary = async <T>(
+  primary: PrismaClient,
+  minLsnHeader: string | undefined,
+  fn: (reader: PrismaClient) => Promise<T>,
+  timeoutMs = 3_000,
+): Promise<T> => {
+  const engine = engineSingleton;
+  if (!engine) {
+    return fn(primary);
+  }
+  const consistency = minLsnHeader
+    ? { atLeastLsn: minLsnHeader, maxWaitMs: 250 }
+    : ("replica" as const);
+  try {
+    const result = await engine.readStore.execute(consistency, fn, { timeoutMs });
+    return result.data;
+  } catch {
+    return fn(primary);
+  }
+};
+
 export const getConfiguredAuditStore = (): AuditStorePort | null =>
   env.AUDIT_DATABASE_URL ? getStorageEngine().auditStore : null;
 

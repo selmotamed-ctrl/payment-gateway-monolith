@@ -22,6 +22,10 @@ export interface OutboxEnvelope {
 }
 
 export interface AuditEnvelope {
+  /** Source audit_outbox id, preserved for idempotent shipping. */
+  id?: string;
+  /** Time the audited action occurred, not the ingestion time. */
+  createdAt?: Date;
   actorId: string;
   actorEmail?: string | null;
   role: string;
@@ -170,6 +174,7 @@ export interface AuditQueryParams {
   role?: string;
   action?: string;
   searchPrefix?: string;
+  searchContains?: string;
   createdFrom?: Date;
   createdTo?: Date;
   cursorCreatedAt?: Date;

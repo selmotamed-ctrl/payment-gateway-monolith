@@ -4,7 +4,7 @@ import { expect, test } from "@playwright/test";
  * Suite 10.1 — cross-service lifecycle journeys.
  *
  * These journeys need the whole stack running on localhost (core-back over
- * mTLS, the three edge backends, both portals, Fake Rails and MySQL). They are
+ * mTLS, the three edge backends, both portals, Fake Rails and PostgreSQL 18). They are
  * enabled with `E2E_LIVE=1` after `scripts/run-exhaustive-suite.sh --deploy`.
  */
 const LIVE = process.env.E2E_LIVE === "1";

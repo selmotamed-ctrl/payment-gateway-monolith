@@ -31,6 +31,9 @@ run_core_suite() {
   (cd core-back && bun test --parallel=1 "test/exhaustive/${directory}")
 }
 
+step "Project design consistency"
+bun scripts/project-design/build.ts --check
+
 step "T-EX-01  Schema, models, constraints & triggers"
 (cd core-back && bun test --parallel=1 test/exhaustive/01-schema)
 

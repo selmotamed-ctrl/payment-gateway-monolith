@@ -5,23 +5,18 @@ export default async ({ directory }: { directory?: string }) => {
   const root = directory ?? process.cwd();
   const fallback = `
 ## PROJECT CONTINUATION CONTEXT
-This is the multi-rail payment gateway monorepo: core-back owns the database, KMS and domain logic; admin-back, merchant-back and checkout-back are mTLS-only edge BFFs; admin/merchant/checkout-front are Vue 3 + Vuetify SPAs; deploy/ is the multi-host deployment engine.
+This is the multi-rail payment gateway monorepo. The canonical design is in project-design/: read project-design/INDEX.md, project-design/STATUS.md and the relevant project-design/parts/** file before changing behavior. design/** is historical/reference only.
 
 Before changing behavior, re-read:
-- design/payment_gateway_final_design-v5.md
-- design/payment-gateway-refined-design-v4.1.md
-- design/payment_gateway_deployment_and_guides_architecture.md
-- design/opencode_technical_delivery_design.md
-- design/fixes/_0001_operator_cases.md
+- AGENTS.md
+- project-design/INDEX.md and the relevant part
 - core-back/prisma/schema.prisma and core-back/prisma/migrations/**
-- core-back/api/internal/admin.ts and core-back/engine/**
-- admin-back/api/protected/operations.ts
-- admin-front/src/router/index.ts, constants/urlsMap, constants/env, components/Table, layouts/sections.tsx
-- deploy/deploy.ts, deploy/lib/configSchema.ts, deploy/lib/hostPlanner.ts, deploy/templates/**
+- core-back/lib/storageEngine/** and core-back/engine/**
+- deploy/deploy.ts, deploy/lib/configSchema.ts, deploy/lib/hostPlanner.ts, deploy/provisioners/**
+- the relevant service README and tests
 
-Never guess contracts. Money uses Decimal, sensitive actions use maker-checker, secrets stay in core, and every state change is audited. Preserve the current task, decisions, changed files, migrations, verification results and remaining steps. If a detail is missing, tell the resumed agent to re-read the relevant design/schema/code files before acting.
+Never guess contracts. Money uses Decimal, sensitive actions use maker-checker, secrets stay in core, and every state change is audited. Any behavior/API/schema/env/deploy/UI/test change must update the affected project-design part and project-design/TRACKER.md in the same change. Never hand-edit generated design files. Preserve the current task, decisions, changed files, migrations, verification results and remaining steps.
 `;
-
   return {
     "experimental.session.compacting": async (
       _input: unknown,

@@ -139,6 +139,17 @@ export interface LedgerPostResult {
   idempotent: boolean;
 }
 
+/**
+ * Emits the transactional ledger outbox event inside the same transaction as
+ * the journal entry. The callback is optional so focused unit tests keep
+ * using the in-memory ledger without a database.
+ */
+export type LedgerPostedOutboxWriter = (
+  transaction: LedgerPrismaClient,
+  entry: JournalEntryRecord,
+  lines: readonly JournalLineRecord[],
+) => Promise<void>;
+
 export type LedgerScenario =
   | "PLATFORM_HELD_CONFIRMATION"
   | "PLATFORM_HELD_FEE_ACCRUAL"
@@ -622,6 +633,7 @@ export class LedgerPoster {
     client: LedgerPrismaClient,
     transactionRunner?: LedgerTransactionRunner,
     private readonly shardWriter?: LedgerShardWriter,
+    private readonly postedOutboxWriter?: LedgerPostedOutboxWriter,
   ) {
     this.client = client;
     this.transactionRunner = transactionRunner
@@ -693,6 +705,9 @@ export class LedgerPoster {
             amount: line.amount,
           });
         }
+      }
+      if (this.postedOutboxWriter) {
+        await this.postedOutboxWriter(runner, entry, lines);
       }
       return { entry, lines, created: true, idempotent: false };
     };

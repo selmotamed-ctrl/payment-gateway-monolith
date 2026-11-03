@@ -25,7 +25,7 @@ DB_PRIVATE_IP="10.10.0.10"
 DB_NAME="gateway"
 DB_USER="gw"
 DB_PASSWORD="ultra-strong-db-password"
-DATABASE_URL="mysql://gw:ultra-strong-db-password@10.10.0.10:3306/gateway"
+DATABASE_URL="postgresql://gw:ultra-strong-db-password@10.10.0.10:5432/gateway"
 CORE_SSH_HOST="10.10.0.20"
 CORE_SSH_KEY_PATH="~/.ssh/core"
 CORE_PRIVATE_IP="10.10.0.20"
@@ -194,7 +194,7 @@ describe("Suite 10 · firewall unions", () => {
   test("the database port is restricted to the core host", () => {
     const plan = planHosts(config(BASE));
     const db = plan.hosts.find((host) => host.roles.includes("db"))!;
-    const rule = db.firewall.find((entry) => entry.port === 3306);
+    const rule = db.firewall.find((entry) => entry.port === 5432);
     expect(rule?.fromCidrs).toEqual(["10.10.0.20"]);
   });
 
@@ -211,7 +211,7 @@ describe("Suite 10 · firewall unions", () => {
     const ports = fakeRails.firewall.map((rule) => rule.port);
     expect(ports).toContain(8444);
     expect(ports).not.toContain(4000);
-    expect(ports).not.toContain(3306);
+    expect(ports).not.toContain(5432);
   });
 });
 

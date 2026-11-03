@@ -79,16 +79,22 @@ export const projectAttemptTransition = async (
   const day = dayOf(payload.occurredAt, occurredAt);
   const amount = asMoney(payload.totalChargedAmount);
   const net = asMoney(payload.netMerchantAmount);
+  // Older outbox rows do not carry the lifecycle marker; treat them as the
+  // creation event so the historical read-model semantics (attempt_count and
+  // gross volume for every attempt) are preserved.
+  const eventKind = asString(payload.event) ?? "created";
+  const created = eventKind === "created" ? 1 : 0;
   const success = kind === "success" ? 1 : 0;
   const failure = kind === "failure" ? 1 : 0;
+  const moneyPositive = eventKind === "created";
 
   if (merchantId) {
     await db.$executeRawUnsafe(
       `INSERT INTO rm_merchant_daily_stats
          (merchant_id, day, currency, attempt_count, success_count, failure_count, gross_amount, net_amount, updated_at)
-       VALUES ($1::uuid, $2::date, $3, 1, $4, $5, $6::numeric, $7::numeric, now())
+       VALUES ($1::uuid, $2::date, $3, $4, $5, $6, $7::numeric, $8::numeric, now())
        ON CONFLICT (merchant_id, day, currency) DO UPDATE SET
-         attempt_count = rm_merchant_daily_stats.attempt_count + 1,
+         attempt_count = rm_merchant_daily_stats.attempt_count + EXCLUDED.attempt_count,
          success_count = rm_merchant_daily_stats.success_count + EXCLUDED.success_count,
          failure_count = rm_merchant_daily_stats.failure_count + EXCLUDED.failure_count,
          gross_amount = rm_merchant_daily_stats.gross_amount + EXCLUDED.gross_amount,
@@ -97,10 +103,11 @@ export const projectAttemptTransition = async (
       merchantId,
       day,
       currency,
+      created,
       success,
       failure,
-      amount,
-      net,
+      moneyPositive ? amount : "0.0000",
+      moneyPositive ? net : "0.0000",
     );
   }
 
@@ -108,17 +115,18 @@ export const projectAttemptTransition = async (
     await db.$executeRawUnsafe(
       `INSERT INTO rm_route_daily_volumes
          (route_id, day, currency, attempt_count, success_count, volume_amount, updated_at)
-       VALUES ($1::uuid, $2::date, $3, 1, $4, $5::numeric, now())
+       VALUES ($1::uuid, $2::date, $3, $4, $5, $6::numeric, now())
        ON CONFLICT (route_id, day, currency) DO UPDATE SET
-         attempt_count = rm_route_daily_volumes.attempt_count + 1,
+         attempt_count = rm_route_daily_volumes.attempt_count + EXCLUDED.attempt_count,
          success_count = rm_route_daily_volumes.success_count + EXCLUDED.success_count,
          volume_amount = rm_route_daily_volumes.volume_amount + EXCLUDED.volume_amount,
          updated_at = now()`,
       routeId,
       day,
       currency,
+      created,
       success,
-      success ? amount : "0.0000",
+      moneyPositive ? amount : "0.0000",
     );
   }
 };
@@ -325,8 +333,12 @@ export class AuditShipperWorker {
 
   public async drain(): Promise<number> {
     const batchSize = this.options.batchSize ?? 100;
-    return this.db.$transaction(async (tx) => {
-      const rows = await tx.$queryRawUnsafe<AuditOutboxRow[]>(
+    // Claim a batch in a short transaction. The audit insert is idempotent on
+    // the source id, so if this process dies after the audit database append
+    // but before the shipped_at update, the next pass re-appends the same ids
+    // and the audit database ignores them instead of duplicating the chain.
+    const rows = await this.db.$transaction(async (tx) =>
+      tx.$queryRawUnsafe<AuditOutboxRow[]>(
         `SELECT id, actor_id, actor_email, role, action, entity_type, entity_id,
                 merchant_id, approval_request_id, request_id, client_ip,
                 user_agent, before_json, after_json, created_at
@@ -336,37 +348,39 @@ export class AuditShipperWorker {
          LIMIT $1
          FOR UPDATE SKIP LOCKED`,
         batchSize,
-      );
+      ),
+    );
 
-      if (rows.length === 0) {
-        return 0;
-      }
+    if (rows.length === 0) {
+      return 0;
+    }
 
-      await this.auditStore.appendBatch(
-        rows.map((row) => ({
-          actorId: row.actor_id,
-          actorEmail: row.actor_email,
-          role: row.role,
-          action: row.action,
-          entityType: row.entity_type,
-          entityId: row.entity_id,
-          merchantId: row.merchant_id,
-          approvalRequestId: row.approval_request_id,
-          requestId: row.request_id,
-          clientIp: row.client_ip,
-          userAgent: row.user_agent,
-          beforeJson: asRecord(row.before_json),
-          afterJson: asRecord(row.after_json),
-        })),
-      );
+    await this.auditStore.appendBatch(
+      rows.map((row) => ({
+        id: row.id,
+        createdAt: row.created_at,
+        actorId: row.actor_id,
+        actorEmail: row.actor_email,
+        role: row.role,
+        action: row.action,
+        entityType: row.entity_type,
+        entityId: row.entity_id,
+        merchantId: row.merchant_id,
+        approvalRequestId: row.approval_request_id,
+        requestId: row.request_id,
+        clientIp: row.client_ip,
+        userAgent: row.user_agent,
+        beforeJson: asRecord(row.before_json),
+        afterJson: asRecord(row.after_json),
+      })),
+    );
 
-      const ids = rows.map((row) => row.id);
-      await tx.$executeRawUnsafe(
-        `UPDATE audit_outbox SET shipped_at = now() WHERE id = ANY($1::uuid[])`,
-        ids,
-      );
-      return rows.length;
-    });
+    const ids = rows.map((row) => row.id);
+    await this.db.$executeRawUnsafe(
+      `UPDATE audit_outbox SET shipped_at = now() WHERE id = ANY($1::uuid[])`,
+      ids,
+    );
+    return rows.length;
   }
 }
 

@@ -26,9 +26,35 @@ describe("backup daemon configuration", () => {
     expect(config.WALG_BIN).toBe("wal-g");
     expect(config.BARMAN_BIN).toBe("barman");
     expect(config.PG_BIN_DIR).toBe("/usr/lib/postgresql/18/bin");
-    expect(config.BACKUP_CATALOG_PATH).toBe("/var/lib/pg-backup-daemon/catalog.json");
-    expect(config.BACKUP_SCRATCH_DIR).toBe("/var/lib/pg-backup-scratch");
+    expect(config.BACKUP_CATALOG_PATH).toBe("/var/lib/pg-backup/catalog.json");
+    expect(config.BACKUP_SCRATCH_DIR).toBe("/var/lib/pg-backup/scratch");
+    expect(config.BACKUP_SCRATCH_AUDIT_DIR).toBe("/var/lib/pg-backup/scratch/audit");
+    expect(config.BACKUP_SCRATCH_AUDIT_PORT).toBe(55433);
+    expect(config.BACKUP_CORE_S3_PREFIX).toBe("s3://libya-pg-backups-primary/prod/postgres_core");
+    expect(config.BACKUP_AUDIT_S3_PREFIX).toBe("s3://libya-pg-backups-primary/prod/audit_db");
+    expect(config.BARMAN_AUDIT_SERVER).toBe(config.PG_AUDIT_DB_NAME);
+    expect(config.SCHEDULER_ENABLED).toBe(true);
+    expect(config.SCHEDULER_TICK_MS).toBe(30_000);
     expect(config.BACKUP_ALLOW_INSECURE_HTTP).toBe(false);
+  });
+
+  test("allows explicit S3 prefixes, audit scratch paths and scheduler overrides", () => {
+    const config = makeConfig({
+      BACKUP_CORE_S3_PREFIX: "s3://custom/core",
+      BACKUP_AUDIT_S3_PREFIX: "s3://custom/audit",
+      BACKUP_SCRATCH_AUDIT_DIR: "/tmp/audit-drill",
+      BACKUP_SCRATCH_AUDIT_PORT: "55999",
+      BARMAN_AUDIT_SERVER: "audit-barman",
+      SCHEDULER_ENABLED: "no",
+      SCHEDULER_TICK_MS: "5000",
+    });
+    expect(config.BACKUP_CORE_S3_PREFIX).toBe("s3://custom/core");
+    expect(config.BACKUP_AUDIT_S3_PREFIX).toBe("s3://custom/audit");
+    expect(config.BACKUP_SCRATCH_AUDIT_DIR).toBe("/tmp/audit-drill");
+    expect(config.BACKUP_SCRATCH_AUDIT_PORT).toBe(55999);
+    expect(config.BARMAN_AUDIT_SERVER).toBe("audit-barman");
+    expect(config.SCHEDULER_ENABLED).toBe(false);
+    expect(config.SCHEDULER_TICK_MS).toBe(5000);
   });
 
   test("accepts barman mode and environment overrides", () => {

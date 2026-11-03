@@ -24,8 +24,10 @@ import {
 } from "../../lib/auth";
 import { Vault } from "../../engine/crypto/Vault";
 import { decimal } from "../../engine/ledger/LedgerPoster";
+import { loadShardBalanceRows, naturalShardBalance } from "../../lib/storageEngine/shardBalances";
 import { moneyFromDecimal } from "../../engine/db/money";
 import { getPlatformRuntime } from "../../engine/runtime";
+import { readThroughReplicaOrPrimary } from "../../lib/storageEngine";
 import type { BeneficialOwnerRow, MerchantRow, Tx } from "../../engine/db/ports";
 import {
   MerchantScreeningService,
@@ -36,6 +38,7 @@ import { publishWatchlist } from "../../engine/guards/ScreeningProvider";
 import { asStringArray, resolveVisibleRails } from "../../engine/flow/VisibleRailsCatalog";
 import { json, jsonOptional } from "./json";
 import { requireAuthentication, requireMerchantScope, principalOf } from "../middleware/authDoubleCheck";
+import { writeAudit } from "../../lib/audit/writeAudit";
 
 const router = express.Router();
 
@@ -768,8 +771,8 @@ router.post("/auth/accept-invitation", async (request: Request, response: Respon
     throw new ApiError(400, "INVITATION_INVALID", "The invitation is invalid or has expired");
   }
   const passwordHash = await hashPassword(body.password);
-  await client.$transaction([
-    client.user.update({
+  await client.$transaction(async (tx) => {
+    await tx.user.update({
       where: { id: user.id },
       data: {
         status: "ACTIVE",
@@ -777,8 +780,8 @@ router.post("/auth/accept-invitation", async (request: Request, response: Respon
         invitationTokenHash: null,
         invitationExpiresAt: null,
       },
-    }),
-    client.auditLog.create({
+    });
+    await writeAudit(tx, {
       data: {
         actorId: user.id,
         role: user.role,
@@ -788,8 +791,8 @@ router.post("/auth/accept-invitation", async (request: Request, response: Respon
         beforeJson: { status: "INVITED" },
         afterJson: { status: "ACTIVE" },
       },
-    }),
-  ]);
+    });
+  });
   response.json({ status: "ACTIVE", userId: user.id, merchantId: user.merchantId, loginRequired: true });
 });
 
@@ -1112,7 +1115,7 @@ router.post("/onboarding/kyb-documents", async (request: Request, response: Resp
         select: { id: true },
       }))?.id;
     if (auditActorId) {
-      await tx.auditLog.create({
+      await writeAudit(tx, {
         data: {
           actorId: auditActorId,
           role: principal.role ?? "MERCHANT_ADMIN",
@@ -1317,10 +1320,17 @@ router.get("/wallets", async (request: Request, response: Response) => {
     defaultSort: { createdAt: "desc" },
   });
   const where = { merchantId, ...built.where } as never;
-  const [wallets, total] = await Promise.all([
-    client.wallet.findMany({ where, orderBy: built.orderBy as never, include: { glAccount: true }, skip: built.skip, take: built.take }),
-    client.wallet.count({ where }),
-  ]);
+  const { wallets, total } = await readThroughReplicaOrPrimary(
+    client as never,
+    request.header("x-pg-min-lsn") ?? undefined,
+    async (reader) => {
+      const [rows, count] = await Promise.all([
+        reader.wallet.findMany({ where, orderBy: built.orderBy as never, include: { glAccount: true }, skip: built.skip, take: built.take }),
+        reader.wallet.count({ where }),
+      ]);
+      return { wallets: rows, total: count };
+    },
+  );
   response.json(listResponse("wallets", wallets, total, built));
 });
 
@@ -1363,14 +1373,21 @@ router.get("/wallets/:id/balance", async (request: Request, response: Response) 
   if (!wallet) {
     throw new ApiError(404, "WALLET_NOT_FOUND", "The wallet does not exist");
   }
-  const lines = await client.journalLine.findMany({
-    where: { glAccountId: wallet.glAccountId },
-    select: { direction: true, amount: true },
-  });
-  let balance = decimal(0);
-  for (const line of lines) {
-    const value = decimal(line.amount);
-    balance = line.direction === "CREDIT" ? balance.plus(value) : balance.minus(value);
+  const shardRows = await loadShardBalanceRows(client as never, [wallet.glAccountId]);
+  const shardTotal = shardRows[0];
+  let balance: ReturnType<typeof decimal>;
+  if (shardTotal) {
+    balance = decimal(naturalShardBalance(shardTotal.accountType, shardTotal.total));
+  } else {
+    const lines = await client.journalLine.findMany({
+      where: { glAccountId: wallet.glAccountId },
+      select: { direction: true, amount: true },
+    });
+    balance = decimal(wallet.glAccount.checkpointBalance);
+    for (const line of lines) {
+      const value = decimal(line.amount);
+      balance = line.direction === "CREDIT" ? balance.plus(value) : balance.minus(value);
+    }
   }
   response.json({
     walletId: wallet.id,
@@ -1641,10 +1658,17 @@ router.get("/links", async (request: Request, response: Response) => {
     defaultSort: { createdAt: "desc" },
   });
   const where = { merchantId, application: { merchantId }, ...(state ? { state } : {}), ...built.where } as never;
-  const [links, total] = await Promise.all([
-    client.paymentLink.findMany({ where, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
-    client.paymentLink.count({ where }),
-  ]);
+  const { links, total } = await readThroughReplicaOrPrimary(
+    client as never,
+    request.header("x-pg-min-lsn") ?? undefined,
+    async (reader) => {
+      const [rows, count] = await Promise.all([
+        reader.paymentLink.findMany({ where, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
+        reader.paymentLink.count({ where }),
+      ]);
+      return { links: rows, total: count };
+    },
+  );
   response.json(listResponse("links", links, total, built));
 });
 
@@ -1717,10 +1741,17 @@ router.get("/payments", async (request: Request, response: Response) => {
     defaultSort: { createdAt: "desc" },
   });
   const where = { merchantId, ...built.where } as never;
-  const [payments, total] = await Promise.all([
-    client.paymentAttempt.findMany({ where, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
-    client.paymentAttempt.count({ where }),
-  ]);
+  const { payments, total } = await readThroughReplicaOrPrimary(
+    client as never,
+    request.header("x-pg-min-lsn") ?? undefined,
+    async (reader) => {
+      const [rows, count] = await Promise.all([
+        reader.paymentAttempt.findMany({ where, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
+        reader.paymentAttempt.count({ where }),
+      ]);
+      return { payments: rows, total: count };
+    },
+  );
   response.json(listResponse("payments", payments, total, built));
 });
 
@@ -1892,7 +1923,7 @@ router.post("/tokens", async (request: Request, response: Response) => {
         : undefined,
     },
   });
-  await client.auditLog.create({
+  await writeAudit(client, {
     data: {
       actorId: principal.userId ?? created.id,
       role: principal.role ?? "MERCHANT_API",

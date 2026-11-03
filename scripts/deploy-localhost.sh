@@ -2,9 +2,9 @@
 #
 # Local all-in-one deployment for an Arch Linux workstation.
 #
-# It provisions the MariaDB database, applies the Prisma migration, seeds the
-# chart of accounts / blueprints / Fake Rails catalog, builds the four SPAs and
-# starts the five backends + four portals under PM2.
+# It provisions the PostgreSQL 18 database, applies the Prisma migration, seeds
+# the chart of accounts / blueprints / Fake Rails catalog, builds the four SPAs
+# and starts the five backends + four portals under PM2.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -38,11 +38,12 @@ deploy_value() {
 }
 
 DB_HOST="${DB_HOST:-127.0.0.1}"
-DB_PORT="${DB_PORT:-3306}"
-DB_USER="${DB_USER:-admin}"
-DB_PASSWORD="${DB_PASSWORD:-admin}"
+DB_PORT="${DB_PORT:-5432}"
+DB_USER="${DB_USER:-postgres}"
+DB_PASSWORD="${DB_PASSWORD:-postgres}"
 DB_NAME="${DB_NAME:-payment_gateway_monolith}"
-DATABASE_URL="${DATABASE_URL:-mysql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}}"
+DB_ADMIN_DB="${DB_ADMIN_DB:-postgres}"
+DATABASE_URL="${DATABASE_URL:-postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}}"
 
 KMS_MASTER_KEY="${KMS_MASTER_KEY:-local-payment-gateway-master-key-32chars!}"
 FAKE_RAILS_BASE_URL="${FAKE_RAILS_BASE_URL:-$(deploy_value FAKE_RAILS_PUBLIC_BASE_URL http://127.0.0.1:4104)}"
@@ -63,9 +64,17 @@ fi
 
 step() { printf '\n\033[1;36m== %s ==\033[0m\n' "$1"; }
 
-step "MariaDB / database"
-MYSQL_PWD="$DB_PASSWORD" mysql --host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER" --protocol=TCP \
-  -e "CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null
+step "PostgreSQL 18 / database"
+if ! pg_isready --host="$DB_HOST" --port="$DB_PORT" >/dev/null 2>&1; then
+  echo "PostgreSQL is not accepting connections on ${DB_HOST}:${DB_PORT}." >&2
+  echo "Start PostgreSQL 18 (for example: sudo systemctl start postgresql) and retry." >&2
+  exit 1
+fi
+if ! PGPASSWORD="$DB_PASSWORD" psql --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USER" \
+  --dbname="$DB_ADMIN_DB" --tuples-only --no-align \
+  --set=dbname="$DB_NAME" --command="SELECT 1 FROM pg_database WHERE datname = :'dbname'" | grep -q '^1$'; then
+  PGPASSWORD="$DB_PASSWORD" createdb --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USER" "$DB_NAME"
+fi
 
 step "mTLS certificates"
 if [[ ! -f "$ROOT/core-back/certs/core-back.crt" ]]; then

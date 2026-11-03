@@ -12,7 +12,7 @@ import { generateReconciliation } from "./generators/06_reconAndStatements";
 import { generateDisputesCashoutsAdjustments } from "./generators/07_disputesCashoutsAdjustments";
 import { generateAmlAndGovernanceQueues } from "./generators/08_amlAndGovernanceQueues";
 import { generateOperatorCases } from "./generators/09_operatorCasesGenerator";
-import { bulkMysqlWriter } from "./sync/bulkMysqlWriter";
+import { bulkDataWriter } from "./sync/bulkDataWriter";
 import { fakeRailsBulkSync } from "./sync/fakeRailsBulkSyncClient";
 import { enrichKybDocuments } from "./sync/enrichKybDocuments";
 import { auditInMemory, postSeedAudit } from "./verify/postSeedAudit";
@@ -78,7 +78,7 @@ export const runSyntheticSeeder = async (): Promise<void> => {
   }
   console.log(`[synthetic-seeder] in-memory invariant OK (0.0000 LYD drift)`);
 
-  const writeReport = await bulkMysqlWriter(client, ctx);
+  const writeReport = await bulkDataWriter(client, ctx);
   console.log(`[synthetic-seeder] wrote ${writeReport.reduce((sum, row) => sum + row.rows, 0)} rows across ${writeReport.length} tables`);
 
   const kyb = await enrichKybDocuments(client);

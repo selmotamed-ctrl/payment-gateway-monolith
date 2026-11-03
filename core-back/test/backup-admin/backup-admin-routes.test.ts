@@ -92,7 +92,13 @@ const startApp = async (): Promise<RunningApp> => {
     close: async () => {
       server.closeAllConnections?.();
       await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve())),
+        server.close((error) => {
+          if (error && (error as NodeJS.ErrnoException).code !== "ERR_SERVER_NOT_RUNNING") {
+            reject(error);
+            return;
+          }
+          resolve();
+        }),
       );
     },
   };
@@ -175,7 +181,13 @@ const startDaemon = async (): Promise<RunningDaemon> => {
     close: async () => {
       server.closeAllConnections?.();
       await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve())),
+        server.close((error) => {
+          if (error && (error as NodeJS.ErrnoException).code !== "ERR_SERVER_NOT_RUNNING") {
+            reject(error);
+            return;
+          }
+          resolve();
+        }),
       );
     },
   };

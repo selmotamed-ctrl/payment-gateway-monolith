@@ -2,7 +2,7 @@
 
 **Target Repository:** `selmotamed-ctrl/payment-gateway-monolith`  
 **Target Workspace Directories:** `core-back/prisma/syntheticSeeder/` · `fake-rails-back/api/portal/seederSync.ts` · `deploy/`  
-**Database Engine:** MySQL 8.0+ / MariaDB 10.6+ (`@prisma/adapter-mariadb` + `Prisma.Decimal(18,4)`) synchronized with `fake-rails-back` (`bun:sqlite` WAL store)
+**Database Engine:** PostgreSQL 18 (`@prisma/adapter-pg` + `Prisma.Decimal(18,4)`) synchronized with `fake-rails-back` (`bun:sqlite` WAL store)
 
 ## Executive Summary & Architectural Vision
 
@@ -54,7 +54,7 @@ export async function assertSafeToSeedSyntheticData(prisma: PrismaClient): Promi
     );
   }
 
-  // Gate 4: Verify no GatewayEnvironment in MySQL points to a real external non-Fake-Rails host
+  // Gate 4: Verify no GatewayEnvironment in PostgreSQL 18 points to a real external non-Fake-Rails host
   const allowedFakeHosts = new Set(
     (process.env.FAKE_RAILS_ALLOWED_HOSTS ?? "").split(",").map((h) => h.trim()).filter(Boolean)
   );
@@ -201,7 +201,7 @@ Inserting ~120,000 attempts and ~490,000 journal lines one-by-one via individual
                     │                                               │
                     ▼ (Chunked createMany: 2,500 rows/tx)           ▼ (POST /portal-api/internal/bulk-seed)
 ┌───────────────────────────────────────────┐   ┌─────────────────────────────────────┐
-│ PHASE 2A: MYSQL / MARIADB BULK INSERT     │   │ PHASE 2B: FAKE RAILS SQLITE SYNC    │
+│ PHASE 2A: POSTGRESQL 18 BULK INSERT       │   │ PHASE 2B: FAKE RAILS SQLITE SYNC    │
 │  • Inserts all 66 tables in topological   │   │  • Streams chunked NDJSON of all    │
 │    FK order using Prisma createMany       │   │    seeded attempts & step events    │
 │  • Runs InvariantVerifier.verify()        │   │  • Populates fake_transactions &    │
@@ -238,7 +238,7 @@ core-back/prisma/syntheticSeeder/
 │   ├── 07_disputesCashoutsAdjustments.ts# Disputes, SYSTEM_AUTOMATION chargebacks, refunds, cashouts
 │   └── 08_amlAndGovernanceQueues.ts    # AML screenings/matches/cases/reports, OperatorCases, Approvals
 ├── sync/
-│   ├── bulkMysqlWriter.ts              # Topological FK-ordered chunked createMany writer
+│   ├── bulkDataWriter.ts               # Topological FK-ordered chunked createMany writer
 │   └── fakeRailsBulkSyncClient.ts      # Streams seeded transactions to fake-rails-back SQLite store
 └── verify/
     └── postSeedAudit.ts                # Asserts 0.0000 LYD ledger drift, slot invariants & FK integrity
@@ -250,4 +250,4 @@ core-back/prisma/syntheticSeeder/
 - [ ] **`SD-2` Implement Merchant, KYB, Beneficial Owner & Gateway Version Generators (`01`–`03`):** Generate multi-state merchants (`ACTIVE`, `PENDING`, `SUSPENDED`, `REJECTED`, `CLOSED`), join requests across all 9 states, duplicate SHA-256 KYB documents, expired KYB docs, merchant-direct credential sets, and gateway version histories.
 - [ ] **`SD-3` Implement Chronological Payment Attempt & 15-Template Ledger Compiler (`04`–`05`):** Simulate 3.5 years of transactions across all 20 Fake Rails and all 14 `AttemptStatus` values (including active in-flight and `UNKNOWN` attempts at `T_NOW`), generating mathematically balanced `JournalEntry` and `JournalLine` rows and monthly `GlAccount` checkpoints.
 - [ ] **`SD-4` Implement Reconciliation, Disputes, Cashouts, AML & Maker-Checker Generators (`06`–`08`):** Populate 42 months of statement reconciliation runs (with open mismatches), automated chargeback drafts, refunds, cash-outs, negative-balance wallets, AML cases/reports, operator cases, and pending Maker-Checker approvals.
-- [ ] **`SD-5` Implement Chunked MySQL Writer, Fake Rails Bulk Sync & Post-Seed Invariant Audit:** Write `bulkMysqlWriter.ts`, `fakeRailsBulkSyncClient.ts` (`POST /portal-api/internal/bulk-seed`), and `postSeedAudit.ts` verifying `InvariantVerifier` = `0.0000 LYD` drift; wire `RUN_SYNTHETIC_HISTORY_SEED` into `deploy/deploy.ts`.
+- [ ] **`SD-5` Implement Chunked PostgreSQL 18 Writer, Fake Rails Bulk Sync & Post-Seed Invariant Audit:** Write `bulkDataWriter.ts`, `fakeRailsBulkSyncClient.ts` (`POST /portal-api/internal/bulk-seed`), and `postSeedAudit.ts` verifying `InvariantVerifier` = `0.0000 LYD` drift; wire `RUN_SYNTHETIC_HISTORY_SEED` into `deploy/deploy.ts`.

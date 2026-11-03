@@ -1112,7 +1112,7 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
   // leaves a terminal BLOCKED attempt behind and a held payment leaves its
   // money escrowed in `AML_HOLD`.
   const platform = getPlatformRuntime(client as never);
-  const decision = await client.$transaction(async (tx) =>
+  const transaction = await platform.runTransactionWithLsn(async (tx) =>
     platform.guardPipeline.guard(
       {
         linkKey,
@@ -1162,6 +1162,8 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
       tx as never,
     ),
   );
+  const decision = transaction.data;
+  response.setHeader("x-pg-min-lsn", transaction.commitLsn);
 
   if (decision.outcome === "BLOCK") {
     // The customer sees a generic message: the reason of the refusal stays
@@ -1366,6 +1368,10 @@ route.post("/pay/:linkKey/logs/:attemptId/confirm", async (request: Request, res
       (await claimAttemptForConfirm(client, targetAttemptId, idempotencyKeyHash)).claimed,
   });
   const updated = await client.paymentAttempt.findUnique({ where: { id: attempt.id } });
+  const commitLsn = platform.consumeCommitLsn(attempt.id);
+  if (commitLsn) {
+    response.setHeader("x-pg-min-lsn", commitLsn);
+  }
 
   response.json({
     attemptId: attempt.id,

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isValidCronExpression } from "./cron";
 
 /**
  * Environment configuration for pg-backup-daemon.
@@ -29,13 +30,8 @@ const hexKey = z
   .refine((value) => value.length >= 32, "must contain at least 16 bytes")
   .refine((value) => value.length % 2 === 0, "must contain an even number of hex characters");
 
-const CRON_TOKEN = /^[0-9*/,\-]+$/;
-
 /** A deliberately small five-field cron validator (no @macros or seconds). */
-export const isValidCron = (value: string): boolean => {
-  const fields = value.trim().split(/\s+/);
-  return fields.length === 5 && fields.every((field) => CRON_TOKEN.test(field));
-};
+export const isValidCron = (value: string): boolean => isValidCronExpression(value);
 
 const cron = z.string().trim().refine(isValidCron, "must be a five-field cron expression");
 
@@ -54,6 +50,8 @@ export const backupDaemonEnvSchema = z
     BACKUP_PRIMARY_S3_BUCKET: nonEmpty,
     BACKUP_PRIMARY_S3_ACCESS_KEY: z.string().default(""),
     BACKUP_PRIMARY_S3_SECRET_KEY: z.string().default(""),
+    BACKUP_CORE_S3_PREFIX: optionalNonEmpty,
+    BACKUP_AUDIT_S3_PREFIX: optionalNonEmpty,
     BACKUP_SECONDARY_SSH_TARGET: optionalNonEmpty,
     BACKUP_FULL_CRON: cron.default("0 2 * * 0"),
     BACKUP_DELTA_CRON: cron.default("0 2 * * 1-6"),
@@ -79,12 +77,17 @@ export const backupDaemonEnvSchema = z
     BARMAN_BIN: nonEmpty.default("barman"),
     BARMAN_CLOUD_BIN: nonEmpty.default("barman-cloud-backup"),
     BARMAN_SERVER: optionalNonEmpty,
+    BARMAN_AUDIT_SERVER: optionalNonEmpty,
     PG_BIN_DIR: nonEmpty.default("/usr/lib/postgresql/18/bin"),
-    BACKUP_CATALOG_PATH: nonEmpty.default("/var/lib/pg-backup-daemon/catalog.json"),
-    BACKUP_SCRATCH_DIR: nonEmpty.default("/var/lib/pg-backup-scratch"),
+    BACKUP_CATALOG_PATH: nonEmpty.default("/var/lib/pg-backup/catalog.json"),
+    BACKUP_SCRATCH_DIR: nonEmpty.default("/var/lib/pg-backup/scratch"),
     BACKUP_SCRATCH_PORT: port.default(55432),
+    BACKUP_SCRATCH_AUDIT_DIR: optionalNonEmpty,
+    BACKUP_SCRATCH_AUDIT_PORT: port.default(55433),
     BACKUP_ALLOW_INSECURE_HTTP: booleanish.default(false),
     BACKUP_COMMAND_TIMEOUT_MS: z.coerce.number().int().positive().default(30 * 60 * 1000),
+    SCHEDULER_ENABLED: booleanish.default(true),
+    SCHEDULER_TICK_MS: z.coerce.number().int().positive().default(30_000),
     REDIS_URL: optionalNonEmpty,
     REDIS_CLI_BIN: nonEmpty.default("redis-cli"),
   })
@@ -110,6 +113,20 @@ export const backupDaemonEnvSchema = z
         path: ["BACKUP_PRIMARY_S3_ACCESS_KEY"],
       });
     }
+  })
+  .transform((config) => {
+    const joinPrefix = (base: string, suffix: string): string =>
+      `${base.replace(/\/+$/, "")}/${suffix}`;
+    return {
+      ...config,
+      BACKUP_CORE_S3_PREFIX:
+        config.BACKUP_CORE_S3_PREFIX ?? joinPrefix(config.BACKUP_PRIMARY_S3_BUCKET, "postgres_core"),
+      BACKUP_AUDIT_S3_PREFIX:
+        config.BACKUP_AUDIT_S3_PREFIX ?? joinPrefix(config.BACKUP_PRIMARY_S3_BUCKET, "audit_db"),
+      BARMAN_AUDIT_SERVER: config.BARMAN_AUDIT_SERVER ?? config.PG_AUDIT_DB_NAME,
+      BACKUP_SCRATCH_AUDIT_DIR:
+        config.BACKUP_SCRATCH_AUDIT_DIR ?? joinPrefix(config.BACKUP_SCRATCH_DIR, "audit"),
+    };
   });
 
 export type BackupDaemonConfig = z.infer<typeof backupDaemonEnvSchema>;

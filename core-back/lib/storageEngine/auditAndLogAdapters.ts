@@ -117,10 +117,26 @@ export class DedicatedAuditDatabaseDriver implements AuditStorePort {
       );
       let prevHash = last.rows[0]?.row_hash ?? "0".repeat(64);
       const inserted: AuditRecordRow[] = [];
+      const requestedIds = entries
+        .map((entry) => entry.id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0);
+      const existingIds = new Set<string>();
+      if (requestedIds.length > 0) {
+        const existing = await client.query<{ id: string }>(
+          `SELECT id FROM ${this.tableName} WHERE id = ANY($1::uuid[])`,
+          [requestedIds],
+        );
+        for (const row of existing.rows) {
+          existingIds.add(row.id);
+        }
+      }
 
       for (const entry of entries) {
-        const id = uuidv7();
-        const createdAt = new Date();
+        const id = entry.id ?? uuidv7();
+        if (existingIds.has(id)) {
+          continue;
+        }
+        const createdAt = entry.createdAt ?? new Date();
         const rowHash = computeAuditRowHash(prevHash, {
           id,
           createdAt,
@@ -214,8 +230,10 @@ export class DedicatedAuditDatabaseDriver implements AuditStorePort {
     if (params.createdTo) {
       clauses.push(`created_at <= ${push(params.createdTo)}::timestamptz`);
     }
-    if (params.searchPrefix) {
-      const pattern = `${params.searchPrefix.replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
+    const searchTerm = params.searchContains ?? params.searchPrefix;
+    if (searchTerm) {
+      const escaped = searchTerm.replaceAll("%", "\\%").replaceAll("_", "\\_");
+      const pattern = params.searchContains ? `%${escaped}%` : `${escaped}%`;
       const placeholder = push(pattern);
       clauses.push(
         `(action ILIKE ${placeholder} OR entity_type ILIKE ${placeholder} OR entity_id ILIKE ${placeholder} OR actor_email ILIKE ${placeholder})`,
@@ -357,6 +375,15 @@ export class DedicatedPostgresLogSink implements LogSinkPort {
       remembered.shift();
     }
     this.rememberedStepLogs.set(normalized.attemptId, remembered);
+    if (!this.logDbPool && this.rememberedStepLogs.size > 1_000) {
+      const oldest = this.rememberedStepLogs.keys().next();
+      if (!oldest.done) {
+        this.rememberedStepLogs.delete(oldest.value);
+      }
+    }
+    if (!this.logDbPool) {
+      return;
+    }
 
     if (this.stepLogBuffer.length >= 250 && !this.isFlushing) {
       void this.flush();
@@ -364,6 +391,9 @@ export class DedicatedPostgresLogSink implements LogSinkPort {
   }
 
   public writeAccessLog(record: HttpAccessLogRecord): void {
+    if (!this.logDbPool) {
+      return;
+    }
     if (this.accessLogBuffer.length >= this.maxBufferSize) {
       return;
     }

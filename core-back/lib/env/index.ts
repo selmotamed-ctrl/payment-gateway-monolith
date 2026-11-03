@@ -60,7 +60,7 @@ export const envSchema = z.strictObject({
   STORAGE_QUERY_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
   STORAGE_LOG_BUFFER_MAX: z.coerce.number().int().positive().max(100_000).default(5000),
   STORAGE_LOG_FLUSH_INTERVAL_MS: z.coerce.number().int().positive().max(60_000).default(250),
-  STORAGE_SHARD_COUNT: z.coerce.number().int().positive().max(64).default(16),
+  STORAGE_SHARD_COUNT: z.coerce.number().int().positive().max(16).default(16),
   /** pg-backup-daemon mTLS control plane. */
   BACKUP_DAEMON_URL: z.url().optional(),
   BACKUP_DAEMON_CA_CERT_PATH: z.string().min(1).optional(),
