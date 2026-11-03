@@ -1,5 +1,7 @@
-import { moneyToString, type Money } from "../db/money";
-import type { PaymentRepository, Tx } from "../db/ports";
+import { createHash } from "node:crypto";
+import { moneyFromDecimal, moneyToString, type Money } from "../db/money";
+import type { PaymentRepository, PrismaLike, Tx } from "../db/ports";
+import { toCamelRows } from "../db/rawRows";
 
 /**
  * The timezone the gateway books its business day in. It is the timezone
@@ -138,4 +140,229 @@ export const dailyProcessedAmountsByRouteId = (
     output[routeId] = moneyToString(amount);
   }
   return output;
+};
+
+export const ROUTE_DAILY_VOLUME_SHARDS = 16;
+export const ROUTE_DAILY_VOLUME_CACHE_MS = 5_000;
+
+interface RouteVolumeCacheEntry {
+  expiresAt: number;
+  values: Map<string, Money>;
+}
+
+const volumeCache = new Map<string, RouteVolumeCacheEntry>();
+
+const dayFormatterCache = new Map<string, Intl.DateTimeFormat>();
+
+const dayFormatter = (timeZone: string): Intl.DateTimeFormat => {
+  const cached = dayFormatterCache.get(timeZone);
+  if (cached) {
+    return cached;
+  }
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  dayFormatterCache.set(timeZone, formatter);
+  return formatter;
+};
+
+export const businessDayBucket = (
+  now: Date,
+  timeZone: string = DEFAULT_GATEWAY_TIMEZONE,
+): string => {
+  const parts = dayFormatter(timeZone).formatToParts(now);
+  const read = (type: string): string =>
+    parts.find((entry) => entry.type === type)?.value ?? "00";
+  return `${read("year")}-${read("month")}-${read("day")}`;
+};
+
+export const clearRouteDailyVolumeCache = (): void => {
+  volumeCache.clear();
+};
+
+export const shardForRouteVolume = (seed: string): number => {
+  const digest = createHash("sha256").update(seed, "utf8").digest();
+  return digest.readUInt32BE(0) % ROUTE_DAILY_VOLUME_SHARDS;
+};
+
+export const readRouteDailyVolumes = async (
+  db: PrismaLike,
+  options: { now?: Date; timeZone?: string; dayBucket?: string } = {},
+): Promise<Map<string, Money>> => {
+  const now = options.now ?? new Date();
+  const dayBucket = options.dayBucket
+    ?? businessDayBucket(now, options.timeZone ?? DEFAULT_GATEWAY_TIMEZONE);
+  const cached = volumeCache.get(dayBucket);
+  if (cached && cached.expiresAt > Date.now()) {
+    return new Map(cached.values);
+  }
+  const result = await db.$queryRawUnsafe(
+    `SELECT route_id, SUM(total_charged_amount) AS total_charged_amount
+       FROM route_daily_volumes
+      WHERE day_bucket = ?
+      GROUP BY route_id`,
+    dayBucket,
+  );
+  const values = new Map<string, Money>();
+  for (const row of toCamelRows<Record<string, unknown>>(result)) {
+    const routeId = String(row.routeId ?? "");
+    if (!routeId) {
+      continue;
+    }
+    values.set(routeId, moneyFromDecimal(row.totalChargedAmount ?? 0));
+  }
+  volumeCache.set(dayBucket, {
+    expiresAt: Date.now() + ROUTE_DAILY_VOLUME_CACHE_MS,
+    values,
+  });
+  return new Map(values);
+};
+
+export interface RouteDailyVolumeRecord {
+  routeId: string;
+  amount: unknown;
+  now?: Date;
+  timeZone?: string;
+  dayBucket?: string;
+  shardSeed?: string;
+  hardCap?: boolean;
+  dailyCapAmount?: unknown;
+}
+
+export interface RouteDailyVolumeRecordResult {
+  accepted: boolean;
+  shardNo: number;
+  dayBucket: string;
+  hardCap: boolean;
+}
+
+export const recordRouteDailyVolume = async (
+  tx: PrismaLike,
+  input: RouteDailyVolumeRecord,
+): Promise<RouteDailyVolumeRecordResult> => {
+  const routeId = input.routeId;
+  if (!routeId) {
+    return { accepted: false, shardNo: 0, dayBucket: "", hardCap: false };
+  }
+  const now = input.now ?? new Date();
+  const dayBucket = input.dayBucket
+    ?? businessDayBucket(now, input.timeZone ?? DEFAULT_GATEWAY_TIMEZONE);
+  let hardCap = input.hardCap;
+  let dailyCapAmount = input.dailyCapAmount;
+  if (hardCap === undefined || (hardCap && dailyCapAmount === undefined)) {
+    const rows = toCamelRows<Record<string, unknown>>(await tx.$queryRawUnsafe(
+      "SELECT hard_cap, daily_cap_amount FROM rail_routes WHERE id = ? LIMIT 1",
+      routeId,
+    ));
+    const route = rows[0];
+    hardCap = hardCap ?? Boolean(route?.hardCap);
+    dailyCapAmount = dailyCapAmount ?? route?.dailyCapAmount ?? null;
+  }
+  // A soft route may overshoot by the 5 s read-cache TTL. A hard-capped
+  // route keeps its day on one row so the conditional UPDATE is a true global
+  // cap; soft routes spread the writes over the 16 shards.
+  const shardNo = hardCap
+    ? 0
+    : shardForRouteVolume(input.shardSeed ?? `${routeId}:${dayBucket}:${now.getTime()}`);
+  const amount = moneyToString(moneyFromDecimal(input.amount ?? 0));
+
+  if (hardCap && dailyCapAmount !== null && dailyCapAmount !== undefined) {
+    const cap = moneyToString(moneyFromDecimal(dailyCapAmount));
+    await tx.$executeRawUnsafe(
+      `INSERT IGNORE INTO route_daily_volumes
+        (route_id, day_bucket, shard_no, succeeded_count, total_charged_amount)
+       VALUES (?, ?, ?, 0, 0)`,
+      routeId,
+      dayBucket,
+      shardNo,
+    );
+    const updated = Number(await tx.$executeRawUnsafe(
+      `UPDATE route_daily_volumes
+          SET succeeded_count = succeeded_count + 1,
+              total_charged_amount = total_charged_amount + ?
+        WHERE route_id = ? AND day_bucket = ? AND shard_no = ?
+          AND total_charged_amount + ? <= ?`,
+      amount,
+      routeId,
+      dayBucket,
+      shardNo,
+      amount,
+      cap,
+    ) ?? 0);
+    volumeCache.delete(dayBucket);
+    return { accepted: updated > 0, shardNo, dayBucket, hardCap: true };
+  }
+
+  await tx.$executeRawUnsafe(
+    `INSERT INTO route_daily_volumes
+      (route_id, day_bucket, shard_no, succeeded_count, total_charged_amount)
+     VALUES (?, ?, ?, 1, ?)
+     ON DUPLICATE KEY UPDATE succeeded_count = succeeded_count + 1,
+                             total_charged_amount = total_charged_amount + VALUES(total_charged_amount)`,
+    routeId,
+    dayBucket,
+    shardNo,
+    amount,
+  );
+  volumeCache.delete(dayBucket);
+  return { accepted: true, shardNo, dayBucket, hardCap: false };
+};
+
+export const rebuildRouteDailyVolumesForDay = async (
+  db: PrismaLike,
+  options: { dayBucket: string; since?: Date; until?: Date; timeZone?: string },
+): Promise<number> => {
+  const timeZone = options.timeZone ?? DEFAULT_GATEWAY_TIMEZONE;
+  const noon = new Date(`${options.dayBucket}T12:00:00.000Z`);
+  const window = dayWindowInTimeZone(Number.isNaN(noon.getTime()) ? new Date() : noon, timeZone);
+  const since = options.since ?? window.since;
+  const until = options.until ?? window.until;
+  const rows = toCamelRows<Record<string, unknown>>(await db.$queryRawUnsafe(
+    `SELECT route_id, COUNT(*) AS succeeded_count,
+            COALESCE(SUM(total_charged_amount), 0) AS total_charged_amount
+       FROM payment_attempts
+      WHERE status IN ('SUCCEEDED', 'PARTIALLY_REFUNDED', 'REFUNDED', 'DISPUTED')
+        AND route_id IS NOT NULL
+        AND COALESCE(terminal_at, created_at) >= ?
+        AND COALESCE(terminal_at, created_at) < ?
+      GROUP BY route_id`,
+    since,
+    until,
+  ));
+  await db.$transaction(async (tx: Tx) => {
+    await tx.$executeRawUnsafe("DELETE FROM route_daily_volumes WHERE day_bucket = ?", options.dayBucket);
+    for (const row of rows) {
+      const routeId = String(row.routeId ?? "");
+      if (!routeId) {
+        continue;
+      }
+      await tx.$executeRawUnsafe(
+        `INSERT INTO route_daily_volumes
+          (route_id, day_bucket, shard_no, succeeded_count, total_charged_amount)
+         VALUES (?, ?, 0, ?, ?)`,
+        routeId,
+        options.dayBucket,
+        Number(row.succeededCount ?? 0),
+        moneyToString(moneyFromDecimal(row.totalChargedAmount ?? 0)),
+      );
+    }
+  });
+  volumeCache.delete(options.dayBucket);
+  return rows.length;
+};
+
+export const rebuildRouteDailyVolumes = async (
+  db: PrismaLike,
+  now: Date = new Date(),
+  timeZone: string = DEFAULT_GATEWAY_TIMEZONE,
+): Promise<number> => {
+  const window = dayWindowInTimeZone(now, timeZone);
+  return rebuildRouteDailyVolumesForDay(db, {
+    dayBucket: businessDayBucket(now, timeZone),
+    since: window.since,
+    until: window.until,
+  });
 };

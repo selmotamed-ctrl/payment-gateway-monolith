@@ -107,16 +107,18 @@ const main = async (): Promise<void> => {
     }
 
     let glAccount = await tx.glAccount.findFirst({
-      where: { accountType: "MERCHANT_WALLET", ownerId: merchant.id, currency: "LYD" },
+      where: { accountType: "MERCHANT_WALLET",
+        balanceMode: "SYNC", ownerId: merchant.id, currency: "LYD" },
       orderBy: { createdAt: "asc" },
     });
     if (!glAccount) {
       glAccount = await tx.glAccount.create({
         data: {
           accountType: "MERCHANT_WALLET",
+          balanceMode: "SYNC",
           ownerId: merchant.id,
           currency: "LYD",
-          checkpointBalance: new Prisma.Decimal(0),
+          currentBalance: new Prisma.Decimal(0),
         },
       });
     }

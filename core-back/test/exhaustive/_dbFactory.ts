@@ -194,9 +194,16 @@ export const buildRow = async (
 
   // Primary key: Prisma generates uuid(7) on the client, so the database has no
   // default. Supply one ourselves.
-  const primary = meta.columns.find((column) => column.columnKey === "PRI");
-  if (primary) {
-    row[primary.columnName] = valueForColumn(primary, { uniqueValue: token, schemaType: fieldTypeFor(table, primary.columnName) });
+  const primaryColumns = meta.columns.filter((column) => column.columnKey === "PRI");
+  const primary = primaryColumns.length === 1 ? primaryColumns[0] : undefined;
+  const primaryIsForeignKey = primary
+    ? meta.foreignKeys.some((foreignKey) => foreignKey.columnName === primary.columnName)
+    : false;
+  if (primary && !isAuto(primary) && !primaryIsForeignKey) {
+    const primaryType = fieldTypeFor(table, primary.columnName);
+    row[primary.columnName] = primary.columnType.toLowerCase() === "char(36)"
+      ? valueForColumn(primary, { uniqueValue: randomUUID(), schemaType: primaryType })
+      : valueForColumn(primary, { uniqueValue: token, schemaType: primaryType });
   }
 
   for (const column of meta.columns) {
@@ -207,6 +214,9 @@ export const buildRow = async (
     }
     if (options.parentOverride && `${table}.${name}` in options.parentOverride) {
       row[name] = options.parentOverride[`${table}.${name}`];
+      continue;
+    }
+    if (name in row) {
       continue;
     }
     const isRequired = requiredNames.has(name) || forced.has(name);
@@ -261,8 +271,8 @@ const insertRowInternal = async (
   const placeholders = columns.map(() => "?").join(", ");
   const sql = `INSERT INTO \`${table}\` (${columns.map((column) => `\`${column}\``).join(", ")}) VALUES (${placeholders})`;
   const values = columns.map((column) => row[column]);
-  await client.$executeRawUnsafe(sql, ...values);
-  return row;
+  const returned = (await client.$queryRawUnsafe(`${sql} RETURNING *`, ...values)) as Array<Record<string, unknown>>;
+  return returned[0] ? { ...row, ...returned[0] } : row;
 };
 
 export const insertRow = insertRowInternal;

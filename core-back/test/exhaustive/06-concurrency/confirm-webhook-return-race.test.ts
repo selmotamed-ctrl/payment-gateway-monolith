@@ -21,7 +21,7 @@ const db = exhaustiveClient();
 const describeDb = databaseIsReachable ? describe : describe.skip;
 const store = new PrismaSlotReservationStore(db as never);
 const poster = new LedgerPoster(db as never);
-const PREFIX = `race6-${crypto.randomUUID()}`;
+const PREFIX = `r6-${crypto.randomUUID().slice(0, 8)}`;
 
 const linkIds: string[] = [];
 const attemptIds: string[] = [];
@@ -43,37 +43,46 @@ afterAll(async () => {
   if (!databaseIsReachable) {
     return;
   }
-  await db.$executeRawUnsafe(
-    "DELETE jl FROM journal_lines jl JOIN journal_entries je ON je.id = jl.entry_id WHERE je.ref_id LIKE ?",
-    `${PREFIX}%`,
-  );
-  await db.$executeRawUnsafe("DELETE FROM journal_entries WHERE ref_id LIKE ?", `${PREFIX}%`);
-  await db.$executeRawUnsafe(
-    "DELETE FROM adjustments WHERE source_attempt_id IN (SELECT id FROM payment_attempts WHERE link_id IN (SELECT id FROM payment_links WHERE key LIKE ?))",
-    `${PREFIX}%`,
-  ).catch(() => undefined);
-  await db.$executeRawUnsafe(
-    "DELETE FROM operator_cases WHERE attempt_id IN (SELECT id FROM payment_attempts WHERE link_id IN (SELECT id FROM payment_links WHERE key LIKE ?))",
-    `${PREFIX}%`,
-  ).catch(() => undefined);
-  if (attemptIds.length > 0) {
-    await db.$executeRawUnsafe(
-      `DELETE FROM payment_attempts WHERE id IN (${attemptIds.map(() => "?").join(",")})`,
-      ...attemptIds,
+  await db.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("SET @pg_allow_ledger_mutation = 1");
+    await tx.$executeRawUnsafe(
+      "DELETE jl FROM journal_lines jl JOIN journal_entries je ON je.id = jl.entry_id WHERE je.ref_id LIKE ?",
+      `${PREFIX}%`,
     );
-  }
-  if (linkIds.length > 0) {
-    await db.$executeRawUnsafe(
-      `DELETE FROM payment_links WHERE id IN (${linkIds.map(() => "?").join(",")})`,
-      ...linkIds,
-    );
-  }
-  if (accountIds.length > 0) {
-    await db.$executeRawUnsafe(
-      `DELETE FROM gl_accounts WHERE id IN (${accountIds.map(() => "?").join(",")})`,
-      ...accountIds,
-    );
-  }
+    await tx.$executeRawUnsafe("DELETE FROM journal_entries WHERE ref_id LIKE ?", `${PREFIX}%`);
+    await tx.$executeRawUnsafe(
+      "DELETE FROM adjustments WHERE source_attempt_id IN (SELECT id FROM payment_attempts WHERE link_id IN (SELECT id FROM payment_links WHERE key LIKE ?))",
+      `${PREFIX}%`,
+    ).catch(() => undefined);
+    await tx.$executeRawUnsafe(
+      "DELETE FROM operator_cases WHERE attempt_id IN (SELECT id FROM payment_attempts WHERE link_id IN (SELECT id FROM payment_links WHERE key LIKE ?))",
+      `${PREFIX}%`,
+    ).catch(() => undefined);
+    if (attemptIds.length > 0) {
+      await tx.$executeRawUnsafe(
+        `DELETE FROM payment_attempts WHERE id IN (${attemptIds.map(() => "?").join(",")})`,
+        ...attemptIds,
+      );
+    }
+    if (linkIds.length > 0) {
+      await tx.$executeRawUnsafe(
+        `DELETE FROM payment_links WHERE id IN (${linkIds.map(() => "?").join(",")})`,
+        ...linkIds,
+      );
+    }
+    if (accountIds.length > 0) {
+      const placeholders = accountIds.map(() => "?").join(",");
+      await tx.$executeRawUnsafe(
+        `DELETE FROM adjustments WHERE target_gl_account_id IN (${placeholders})`,
+        ...accountIds,
+      ).catch(() => undefined);
+      await tx.$executeRawUnsafe(`DELETE FROM journal_lines WHERE gl_account_id IN (${placeholders})`, ...accountIds);
+      await tx.$executeRawUnsafe(`DELETE FROM gl_balance_shards WHERE gl_account_id IN (${placeholders})`, ...accountIds);
+      await tx.$executeRawUnsafe(`DELETE FROM gl_period_totals WHERE gl_account_id IN (${placeholders})`, ...accountIds);
+      await tx.$executeRawUnsafe(`DELETE FROM gl_accounts WHERE id IN (${placeholders})`, ...accountIds);
+    }
+    await tx.$executeRawUnsafe("SET @pg_allow_ledger_mutation = 0");
+  });
   await assertZeroDrift(db);
   await db.$disconnect();
 });

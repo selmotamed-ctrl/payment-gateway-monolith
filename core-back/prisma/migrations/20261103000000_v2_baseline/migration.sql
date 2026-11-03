@@ -1,42 +1,59 @@
 -- CreateTable
 CREATE TABLE `merchants` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `version` INTEGER NOT NULL DEFAULT 1,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `legalName` TEXT NOT NULL,
-    `tradeName` TEXT NOT NULL,
-    `taxId` TEXT NULL,
-    `registrationNo` TEXT NULL,
-    `businessCategory` TEXT NULL,
+    `legalName` VARCHAR(255) NOT NULL,
+    `tradeName` VARCHAR(255) NOT NULL,
+    `display_name` VARCHAR(255) NULL,
+    `logo_url` TEXT NULL,
+    `support_email` VARCHAR(191) NULL,
+    `support_phone` VARCHAR(191) NULL,
+    `taxId` VARCHAR(64) NULL,
+    `registrationNo` VARCHAR(64) NULL,
+    `businessCategory` VARCHAR(128) NULL,
     `status` ENUM('PENDING', 'ACTIVE', 'SUSPENDED', 'REJECTED', 'CLOSED') NOT NULL DEFAULT 'PENDING',
     `kybStatus` ENUM('UNVERIFIED', 'PENDING', 'VERIFIED', 'REJECTED') NOT NULL DEFAULT 'UNVERIFIED',
     `riskTier` ENUM('LOW', 'STANDARD', 'HIGH') NOT NULL DEFAULT 'STANDARD',
-    `onboardingChannel` VARCHAR(191) NOT NULL,
+    `onboardingChannel` VARCHAR(64) NOT NULL,
     `country` CHAR(2) NOT NULL,
-    `contactPhone` VARCHAR(191) NULL,
+    `contactPhone` VARCHAR(64) NULL,
     `contactEmail` VARCHAR(191) NULL,
     `activatedAt` DATETIME(3) NULL,
     `suspendedAt` DATETIME(3) NULL,
-    `suspensionReasonCode` VARCHAR(191) NULL,
+    `suspensionReasonCode` VARCHAR(64) NULL,
+    `suspension_notes` TEXT NULL,
     `closedAt` DATETIME(3) NULL,
+    `closed_reason_code` VARCHAR(64) NULL,
+    `closed_notes` TEXT NULL,
     `commissionReceivableCeiling` DECIMAL(18, 4) NULL,
     `negativeBalanceCeiling` DECIMAL(18, 4) NOT NULL DEFAULT 0,
     `payoutBankDetailsJson` JSON NULL,
+    `payout_account_hash` CHAR(64) NULL,
+    `next_kyb_review_at` DATETIME(3) NULL,
 
     INDEX `merchants_status_idx`(`status`),
     INDEX `merchants_kybStatus_idx`(`kybStatus`),
     INDEX `merchants_status_created_at_idx`(`status`, `created_at`),
     INDEX `merchants_riskTier_idx`(`riskTier`),
     INDEX `merchants_kybStatus_status_idx`(`kybStatus`, `status`),
+    INDEX `merchants_taxId_idx`(`taxId`),
+    INDEX `merchants_registrationNo_idx`(`registrationNo`),
+    INDEX `merchants_contactPhone_idx`(`contactPhone`),
+    INDEX `merchants_contactEmail_idx`(`contactEmail`),
+    INDEX `merchants_payout_account_hash_idx`(`payout_account_hash`),
+    INDEX `merchants_next_kyb_review_at_idx`(`next_kyb_review_at`),
+    FULLTEXT INDEX `merchants_names_ft_idx`(`legalName`, `tradeName`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
 CREATE TABLE `users` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `merchant_id` VARCHAR(191) NULL,
+    `merchant_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `email` VARCHAR(191) NOT NULL,
     `phone` VARCHAR(191) NULL,
     `password_hash` TEXT NULL,
@@ -47,11 +64,13 @@ CREATE TABLE `users` (
     `is_checker` BOOLEAN NOT NULL DEFAULT false,
     `mfa_required` BOOLEAN NOT NULL DEFAULT true,
     `mfa_secret_ciphertext` TEXT NULL,
+    `invitation_token_hash` CHAR(64) NULL,
+    `invitation_expires_at` DATETIME(3) NULL,
+    `invited_by` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `status` ENUM('INVITED', 'ACTIVE', 'SUSPENDED', 'DISABLED') NOT NULL DEFAULT 'INVITED',
     `academy_progress_json` JSON NULL,
 
     UNIQUE INDEX `users_email_key`(`email`),
-    INDEX `users_merchant_id_idx`(`merchant_id`),
     INDEX `users_role_idx`(`role`),
     INDEX `users_merchant_id_status_idx`(`merchant_id`, `status`),
     PRIMARY KEY (`id`)
@@ -59,19 +78,18 @@ CREATE TABLE `users` (
 
 -- CreateTable
 CREATE TABLE `applications` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `merchant_id` VARCHAR(191) NOT NULL,
+    `merchant_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `name` VARCHAR(191) NOT NULL,
     `businessUseDescription` TEXT NULL,
     `expectedMonthlyVolume` DECIMAL(18, 4) NOT NULL DEFAULT 0,
-    `assigned_wallet_id` VARCHAR(191) NOT NULL,
+    `assigned_wallet_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `rail_whitelist` JSON NULL,
     `redirect_domain_allowlist` JSON NULL,
     `status` ENUM('DRAFT', 'PENDING', 'ACTIVE', 'SUSPENDED', 'CLOSED') NOT NULL DEFAULT 'PENDING',
 
-    INDEX `applications_merchant_id_idx`(`merchant_id`),
     INDEX `applications_assigned_wallet_id_idx`(`assigned_wallet_id`),
     INDEX `applications_merchant_id_status_idx`(`merchant_id`, `status`),
     PRIMARY KEY (`id`)
@@ -79,28 +97,27 @@ CREATE TABLE `applications` (
 
 -- CreateTable
 CREATE TABLE `wallets` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `merchant_id` VARCHAR(191) NOT NULL,
-    `gl_account_id` VARCHAR(191) NOT NULL,
+    `merchant_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `gl_account_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `currency` CHAR(3) NOT NULL DEFAULT 'LYD',
     `status` ENUM('PENDING', 'ACTIVE', 'FROZEN', 'CLOSED') NOT NULL DEFAULT 'PENDING',
 
     UNIQUE INDEX `wallets_gl_account_id_key`(`gl_account_id`),
-    INDEX `wallets_merchant_id_idx`(`merchant_id`),
     INDEX `wallets_merchant_id_status_idx`(`merchant_id`, `status`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
 CREATE TABLE `access_tokens` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `merchant_id` VARCHAR(191) NOT NULL,
-    `application_id` VARCHAR(191) NOT NULL,
-    `name` TEXT NOT NULL,
+    `merchant_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `application_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `name` VARCHAR(128) NOT NULL,
     `token_hash` CHAR(64) NOT NULL,
     `last_four` CHAR(4) NOT NULL,
     `scopes` JSON NOT NULL,
@@ -109,7 +126,6 @@ CREATE TABLE `access_tokens` (
     `last_used_at` DATETIME(3) NULL,
 
     UNIQUE INDEX `access_tokens_token_hash_key`(`token_hash`),
-    INDEX `access_tokens_merchant_id_idx`(`merchant_id`),
     INDEX `access_tokens_application_id_idx`(`application_id`),
     INDEX `access_tokens_merchant_id_revoked_at_idx`(`merchant_id`, `revoked_at`),
     PRIMARY KEY (`id`)
@@ -117,10 +133,10 @@ CREATE TABLE `access_tokens` (
 
 -- CreateTable
 CREATE TABLE `access_token_ips` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `token_id` VARCHAR(191) NOT NULL,
+    `token_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `cidr` VARCHAR(191) NOT NULL,
 
     UNIQUE INDEX `access_token_ips_token_id_cidr_key`(`token_id`, `cidr`),
@@ -129,12 +145,12 @@ CREATE TABLE `access_token_ips` (
 
 -- CreateTable
 CREATE TABLE `payment_links` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `key` VARCHAR(191) NOT NULL,
-    `application_id` VARCHAR(191) NOT NULL,
-    `wallet_id` VARCHAR(191) NOT NULL,
+    `key` VARCHAR(64) NOT NULL,
+    `application_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `wallet_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `amount` DECIMAL(18, 4) NOT NULL,
     `currency` CHAR(3) NOT NULL,
     `fee_bearer` ENUM('MERCHANT_ABSORBS', 'PAYER_SURCHARGE', 'SPLIT') NOT NULL,
@@ -159,10 +175,10 @@ CREATE TABLE `payment_links` (
 
 -- CreateTable
 CREATE TABLE `pos_terminals` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `application_id` VARCHAR(191) NOT NULL,
+    `application_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `name` VARCHAR(191) NOT NULL,
     `location` TEXT NULL,
     `status` ENUM('ACTIVE', 'INACTIVE', 'BLOCKED') NOT NULL DEFAULT 'ACTIVE',
@@ -174,10 +190,10 @@ CREATE TABLE `pos_terminals` (
 
 -- CreateTable
 CREATE TABLE `pos_screens` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `pos_id` VARCHAR(191) NOT NULL,
+    `pos_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `screen_code` VARCHAR(191) NOT NULL,
     `auth_token_hash` CHAR(64) NOT NULL,
     `realtime_room_id` VARCHAR(191) NULL,
@@ -190,18 +206,17 @@ CREATE TABLE `pos_screens` (
 
 -- CreateTable
 CREATE TABLE `gl_accounts` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    `updated_at` DATETIME(3) NOT NULL,
     `account_type` ENUM('TREASURY', 'GATEWAY_CLEARING', 'MERCHANT_WALLET', 'PLATFORM_INCOME', 'PROVIDER_FEE_EXPENSE', 'GATEWAY_FEE_EXPENSE', 'GATEWAY_FEE_ACCRUAL', 'COMMISSION_RECEIVABLE', 'AML_HOLD', 'CHARGEBACK_RESERVE', 'SUSPENSE') NOT NULL,
-    `owner_id` VARCHAR(191) NULL,
-    `gateway_id` VARCHAR(191) NULL,
-    `credential_set_id` VARCHAR(191) NULL,
-    `env` VARCHAR(191) NULL,
+    `balance_mode` ENUM('SYNC', 'SHARDED') NOT NULL DEFAULT 'SHARDED',
+    `owner_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    `gateway_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    `credential_set_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    `env` VARCHAR(16) NULL,
     `currency` CHAR(3) NOT NULL,
-    `last_checkpoint_id` VARCHAR(191) NULL,
-    `checkpoint_balance` DECIMAL(18, 4) NOT NULL DEFAULT 0,
-    `checkpoint_at` DATETIME(3) NULL,
+    `current_balance` DECIMAL(18, 4) NOT NULL DEFAULT 0,
+    `balance_floor` DECIMAL(18, 4) NULL,
     `seed_key` VARCHAR(191) NULL,
 
     UNIQUE INDEX `gl_accounts_seed_key_key`(`seed_key`),
@@ -213,10 +228,30 @@ CREATE TABLE `gl_accounts` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
+CREATE TABLE `gl_balance_shards` (
+    `gl_account_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `shard_no` TINYINT NOT NULL,
+    `balance` DECIMAL(18, 4) NOT NULL DEFAULT 0,
+    `line_count` BIGINT NOT NULL DEFAULT 0,
+
+    PRIMARY KEY (`gl_account_id`, `shard_no`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `gl_period_totals` (
+    `gl_account_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `day` DATE NOT NULL,
+    `debit_total` DECIMAL(20, 4) NOT NULL,
+    `credit_total` DECIMAL(20, 4) NOT NULL,
+    `line_count` BIGINT NOT NULL,
+
+    PRIMARY KEY (`gl_account_id`, `day`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
 CREATE TABLE `journal_entries` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    `updated_at` DATETIME(3) NOT NULL,
     `ref_type` ENUM('PAYMENT_ATTEMPT', 'ADJUSTMENT', 'AML_RELEASE', 'AML_VOID', 'SETTLEMENT_SWEEP', 'FEE_VARIANCE', 'COMMISSION_NETTING', 'DISPUTE_OUTCOME') NOT NULL,
     `ref_id` VARCHAR(191) NOT NULL,
     `description` TEXT NOT NULL,
@@ -227,27 +262,26 @@ CREATE TABLE `journal_entries` (
 
 -- CreateTable
 CREATE TABLE `journal_lines` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    `updated_at` DATETIME(3) NOT NULL,
-    `entry_id` VARCHAR(191) NOT NULL,
-    `gl_account_id` VARCHAR(191) NOT NULL,
+    `entry_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `gl_account_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `direction` ENUM('DEBIT', 'CREDIT') NOT NULL,
     `amount` DECIMAL(18, 4) NOT NULL,
 
-    INDEX `journal_lines_entry_id_idx`(`entry_id`),
-    INDEX `journal_lines_gl_account_id_idx`(`gl_account_id`),
+    INDEX `journal_lines_entry_idx`(`entry_id`),
+    INDEX `journal_lines_acct_time_cov_idx`(`gl_account_id`, `created_at`, `direction`, `amount`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
 CREATE TABLE `commission_profiles` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `merchant_id` VARCHAR(191) NULL,
-    `application_id` VARCHAR(191) NULL,
-    `rail_code` TEXT NOT NULL,
+    `merchant_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    `application_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    `rail_code` VARCHAR(64) NOT NULL,
     `calc_type` ENUM('FLAT', 'PERCENTAGE', 'TIERED', 'HYBRID') NOT NULL,
     `flat_fee` DECIMAL(18, 4) NOT NULL DEFAULT 0,
     `percentage_rate` DECIMAL(8, 6) NOT NULL DEFAULT 0,
@@ -255,22 +289,21 @@ CREATE TABLE `commission_profiles` (
     `min_fee` DECIMAL(18, 4) NOT NULL DEFAULT 0,
     `max_fee` DECIMAL(18, 4) NULL,
     `fee_bearer_default` ENUM('MERCHANT_ABSORBS', 'PAYER_SURCHARGE', 'SPLIT') NOT NULL,
-    `rounding_mode` TEXT NOT NULL,
+    `rounding_mode` VARCHAR(32) NOT NULL,
     `effective_from` DATETIME(3) NOT NULL,
     `effective_to` DATETIME(3) NULL,
     `version` INTEGER NOT NULL DEFAULT 1,
-    `approval_request_id` VARCHAR(191) NULL,
+    `approval_request_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `seed_key` VARCHAR(191) NULL,
 
     UNIQUE INDEX `commission_profiles_seed_key_key`(`seed_key`),
-    INDEX `commission_profiles_merchant_id_idx`(`merchant_id`),
     INDEX `commission_profiles_application_id_idx`(`application_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
 CREATE TABLE `velocity_rules` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
     `scope_type` ENUM('END_CLIENT_IP', 'END_CLIENT_PHONE', 'END_CLIENT_CARD', 'MERCHANT', 'APPLICATION', 'RAIL', 'LINK') NOT NULL,
@@ -283,7 +316,7 @@ CREATE TABLE `velocity_rules` (
     `version` INTEGER NOT NULL DEFAULT 1,
     `effective_from` DATETIME(3) NOT NULL,
     `effective_to` DATETIME(3) NULL,
-    `approval_request_id` VARCHAR(191) NULL,
+    `approval_request_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
 
     INDEX `velocity_rules_scope_type_scope_value_idx`(`scope_type`, `scope_value`),
     INDEX `velocity_rules_active_idx`(`active`),
@@ -292,7 +325,7 @@ CREATE TABLE `velocity_rules` (
 
 -- CreateTable
 CREATE TABLE `aml_cases` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
     `subject_type` ENUM('MERCHANT', 'END_CLIENT', 'PAYMENT_ATTEMPT', 'BENEFICIAL_OWNER') NOT NULL,
@@ -300,13 +333,13 @@ CREATE TABLE `aml_cases` (
     `trigger_reason` TEXT NOT NULL,
     `severity` ENUM('LOW', 'MEDIUM', 'HIGH', 'CRITICAL') NOT NULL,
     `severity_inputs_json` JSON NOT NULL,
-    `screening_id` VARCHAR(191) NULL,
-    `rule_id` VARCHAR(191) NULL,
+    `screening_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    `rule_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `rule_version` INTEGER NULL,
-    `hold_journal_entry_id` VARCHAR(191) NULL,
+    `hold_journal_entry_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `status` ENUM('OPEN', 'IN_REVIEW', 'PENDING_CHECKER', 'RELEASED', 'REJECTED_VOID', 'FROZEN', 'ESCALATED_STR') NOT NULL DEFAULT 'OPEN',
     `sla_due_at` DATETIME(3) NULL,
-    `assigned_reviewer_id` VARCHAR(191) NULL,
+    `assigned_reviewer_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `regulatory_report_id` VARCHAR(191) NULL,
     `confidential` BOOLEAN NOT NULL DEFAULT true,
     `reviewer_notes` TEXT NULL,
@@ -321,21 +354,21 @@ CREATE TABLE `aml_cases` (
 
 -- CreateTable
 CREATE TABLE `adjustments` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
     `type` ENUM('CHARGEBACK', 'REFUND', 'MANUAL_CREDIT', 'MANUAL_DEBIT', 'CORRECTION', 'CASHOUT_SUBTRACTION') NOT NULL,
-    `target_gl_account_id` VARCHAR(191) NOT NULL,
-    `source_attempt_id` VARCHAR(191) NULL,
-    `dispute_id` VARCHAR(191) NULL,
+    `target_gl_account_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `source_attempt_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    `dispute_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `drafted_by_system` BOOLEAN NOT NULL DEFAULT false,
     `amount` DECIMAL(18, 4) NOT NULL,
     `reverse_commission` BOOLEAN NOT NULL DEFAULT false,
     `reason` TEXT NOT NULL,
-    `external_dispute_ref` TEXT NULL,
-    `provider_refund_ref` TEXT NULL,
+    `external_dispute_ref` VARCHAR(191) NULL,
+    `provider_refund_ref` VARCHAR(191) NULL,
     `state` ENUM('DRAFT', 'PENDING_REVIEW', 'APPROVED', 'EXECUTING', 'EXECUTED', 'REJECTED') NOT NULL DEFAULT 'DRAFT',
-    `journal_entry_id` VARCHAR(191) NULL,
+    `journal_entry_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
 
     UNIQUE INDEX `adjustments_dispute_id_key`(`dispute_id`),
     UNIQUE INDEX `adjustments_journal_entry_id_key`(`journal_entry_id`),
@@ -348,17 +381,16 @@ CREATE TABLE `adjustments` (
 
 -- CreateTable
 CREATE TABLE `cashout_requests` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `merchant_id` VARCHAR(191) NOT NULL,
-    `wallet_id` VARCHAR(191) NOT NULL,
+    `merchant_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `wallet_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `amount` DECIMAL(18, 4) NOT NULL,
     `destination_bank_json` JSON NOT NULL,
     `state` ENUM('PENDING', 'REJECTED', 'PROCESSING', 'COMPLETE', 'SUBTRACTED') NOT NULL DEFAULT 'PENDING',
-    `adjustment_id` VARCHAR(191) NULL,
+    `adjustment_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
 
-    INDEX `cashout_requests_merchant_id_idx`(`merchant_id`),
     INDEX `cashout_requests_wallet_id_idx`(`wallet_id`),
     INDEX `cashout_requests_merchant_id_state_created_at_idx`(`merchant_id`, `state`, `created_at`),
     INDEX `cashout_requests_wallet_id_created_at_idx`(`wallet_id`, `created_at`),
@@ -367,18 +399,19 @@ CREATE TABLE `cashout_requests` (
 
 -- CreateTable
 CREATE TABLE `approval_requests` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
     `subject_type` VARCHAR(191) NOT NULL,
     `subject_id` VARCHAR(191) NOT NULL,
     `payload_diff_json` JSON NOT NULL,
+    `maker_reason` TEXT NULL,
     `mode` ENUM('STANDARD', 'EMERGENCY_RATIFICATION') NOT NULL DEFAULT 'STANDARD',
     `base_version` INTEGER NULL,
     `expires_at` DATETIME(3) NULL,
     `ratify_due_at` DATETIME(3) NULL,
-    `maker_user_id` VARCHAR(191) NOT NULL,
-    `checker_user_id` VARCHAR(191) NULL,
+    `maker_user_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `checker_user_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `state` ENUM('DRAFT', 'PENDING_REVIEW', 'APPROVED', 'EXECUTED', 'REJECTED') NOT NULL DEFAULT 'DRAFT',
     `rejection_reason` TEXT NULL,
     `risk_acceptance_note` TEXT NULL,
@@ -393,17 +426,17 @@ CREATE TABLE `approval_requests` (
 
 -- CreateTable
 CREATE TABLE `gateways` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `code` VARCHAR(191) NOT NULL,
-    `name` TEXT NOT NULL,
+    `code` VARCHAR(64) NOT NULL,
+    `name` VARCHAR(191) NOT NULL,
     `operator` VARCHAR(191) NOT NULL,
     `country` CHAR(2) NOT NULL DEFAULT 'LY',
     `aliases` JSON NOT NULL,
     `kind` ENUM('DIRECT', 'AGGREGATOR', 'NATIVE_ADAPTER', 'INTERNAL') NOT NULL,
     `status` ENUM('DRAFT', 'SANDBOX_VERIFIED', 'PENDING_APPROVAL', 'LIVE', 'SUSPENDED', 'RETIRED') NOT NULL DEFAULT 'DRAFT',
-    `active_version_id` VARCHAR(191) NULL,
+    `active_version_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `verificationState` ENUM('VERIFIED', 'UNVERIFIED') NOT NULL DEFAULT 'UNVERIFIED',
     `riskClass` ENUM('NORMAL', 'HIGH_RISK') NOT NULL DEFAULT 'NORMAL',
     `metadata` JSON NULL,
@@ -419,18 +452,18 @@ CREATE TABLE `gateways` (
 
 -- CreateTable
 CREATE TABLE `gateway_versions` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `gateway_id` VARCHAR(191) NOT NULL,
+    `gateway_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `version_number` INTEGER NOT NULL,
     `snapshot_ciphertext` TEXT NOT NULL,
     `content_hash` CHAR(64) NOT NULL,
     `state` ENUM('DRAFT', 'SANDBOX_VERIFIED', 'PENDING_APPROVAL', 'LIVE', 'SUPERSEDED', 'ROLLED_BACK') NOT NULL DEFAULT 'DRAFT',
-    `created_by` VARCHAR(191) NOT NULL,
-    `approval_request_id` VARCHAR(191) NULL,
+    `created_by` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `approval_request_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `change_note` TEXT NULL,
-    `rollback_version_id` VARCHAR(191) NULL,
+    `rollback_version_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
 
     UNIQUE INDEX `gateway_versions_content_hash_key`(`content_hash`),
     INDEX `gateway_versions_state_idx`(`state`),
@@ -440,10 +473,10 @@ CREATE TABLE `gateway_versions` (
 
 -- CreateTable
 CREATE TABLE `gateway_version_evidence` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `gateway_version_id` VARCHAR(191) NOT NULL,
+    `gateway_version_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `evidence_json` JSON NOT NULL,
     `ran_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 
@@ -453,10 +486,10 @@ CREATE TABLE `gateway_version_evidence` (
 
 -- CreateTable
 CREATE TABLE `gateway_environments` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `gateway_version_id` VARCHAR(191) NOT NULL,
+    `gateway_version_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `env` ENUM('SANDBOX', 'LIVE') NOT NULL,
     `base_urls` JSON NOT NULL,
     `allowed_hosts` JSON NOT NULL,
@@ -470,10 +503,10 @@ CREATE TABLE `gateway_environments` (
 
 -- CreateTable
 CREATE TABLE `gateway_auth` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `gateway_version_id` VARCHAR(191) NOT NULL,
+    `gateway_version_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `env` VARCHAR(191) NOT NULL,
     `method` ENUM('NONE', 'API_KEY', 'PERMANENT_TOKEN', 'TOKEN_ENDPOINT', 'REFRESH_TOKEN', 'USERNAME_PASSWORD', 'BASIC', 'REQUEST_SIGNATURE', 'OAUTH2_CLIENT_CREDENTIALS', 'MUTUAL_TLS') NOT NULL,
     `auth_apply` ENUM('HEADER', 'QUERY', 'BODY') NOT NULL,
@@ -485,10 +518,10 @@ CREATE TABLE `gateway_auth` (
 
 -- CreateTable
 CREATE TABLE `gateway_settings` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `gateway_version_id` VARCHAR(191) NOT NULL,
+    `gateway_version_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `amount_scale` INTEGER NOT NULL,
     `amount_precision` INTEGER NOT NULL,
     `amount_rounding` VARCHAR(191) NOT NULL,
@@ -514,13 +547,13 @@ CREATE TABLE `gateway_settings` (
 
 -- CreateTable
 CREATE TABLE `credential_sets` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `gateway_id` VARCHAR(191) NOT NULL,
+    `gateway_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `env` ENUM('SANDBOX', 'LIVE') NOT NULL,
     `owner_type` ENUM('PLATFORM', 'MERCHANT') NOT NULL,
-    `owner_merchant_id` VARCHAR(191) NULL,
+    `owner_merchant_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `external_merchant_id` VARCHAR(191) NULL,
     `settlement_target` ENUM('PLATFORM_CLEARING', 'MERCHANT_DIRECT', 'PROVIDER_HELD') NOT NULL,
     `entries_ciphertext` JSON NOT NULL,
@@ -538,7 +571,7 @@ CREATE TABLE `credential_sets` (
 
 -- CreateTable
 CREATE TABLE `assets` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
     `name` VARCHAR(191) NOT NULL,
@@ -554,13 +587,13 @@ CREATE TABLE `assets` (
 
 -- CreateTable
 CREATE TABLE `rails` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `code` VARCHAR(191) NOT NULL,
-    `name_ar` TEXT NOT NULL,
-    `name_en` TEXT NOT NULL,
-    `logo_asset_id` VARCHAR(191) NULL,
+    `code` VARCHAR(64) NOT NULL,
+    `name_ar` VARCHAR(191) NOT NULL,
+    `name_en` VARCHAR(191) NOT NULL,
+    `logo_asset_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `collection_mode` ENUM('OTP_PULL', 'REDIRECT', 'EMBEDDED', 'PUSH_APPROVAL', 'QR_DISPLAY', 'PAY_CODE', 'DEEP_LINK', 'MANUAL', 'HYBRID') NOT NULL,
     `sub_modes` JSON NULL,
     `currency` CHAR(3) NOT NULL DEFAULT 'LYD',
@@ -583,10 +616,10 @@ CREATE TABLE `rails` (
 
 -- CreateTable
 CREATE TABLE `rail_fields` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `rail_id` VARCHAR(191) NOT NULL,
+    `rail_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `key` VARCHAR(191) NOT NULL,
     `type` ENUM('PHONE', 'NUMBER', 'STRING', 'OTP', 'BIRTH_YEAR', 'CARD_NUMBER', 'PAN', 'WALLET_ID', 'FROM_LIST') NOT NULL,
     `checksum` ENUM('NONE', 'LUHN') NOT NULL DEFAULT 'NONE',
@@ -611,11 +644,11 @@ CREATE TABLE `rail_fields` (
 
 -- CreateTable
 CREATE TABLE `rail_routes` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `rail_id` VARCHAR(191) NOT NULL,
-    `gateway_id` VARCHAR(191) NOT NULL,
+    `rail_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `gateway_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `credential_policy` ENUM('PLATFORM', 'MERCHANT_REQUIRED', 'MERCHANT_OR_PLATFORM') NOT NULL,
     `priority` INTEGER NOT NULL DEFAULT 0,
     `routing_strategy` ENUM('EFFECTIVE_COST', 'STRICT_PRIORITY', 'WEIGHTED') NOT NULL DEFAULT 'EFFECTIVE_COST',
@@ -625,6 +658,7 @@ CREATE TABLE `rail_routes` (
     `min_amount` DECIMAL(18, 4) NOT NULL DEFAULT 0,
     `max_amount` DECIMAL(18, 4) NULL,
     `daily_cap_amount` DECIMAL(18, 4) NULL,
+    `hard_cap` BOOLEAN NOT NULL DEFAULT false,
     `status` ENUM('ACTIVE', 'PAUSED', 'DRAINING') NOT NULL DEFAULT 'ACTIVE',
     `health_state` ENUM('HEALTHY', 'DEGRADED', 'OPEN_BREAKER') NOT NULL DEFAULT 'HEALTHY',
     `maintenance_windows` JSON NULL,
@@ -632,16 +666,17 @@ CREATE TABLE `rail_routes` (
 
     INDEX `rail_routes_status_health_state_idx`(`status`, `health_state`),
     INDEX `rail_routes_credential_policy_idx`(`credential_policy`),
+    INDEX `rail_routes_hard_cap_idx`(`hard_cap`),
     UNIQUE INDEX `rail_routes_rail_id_gateway_id_credential_policy_key`(`rail_id`, `gateway_id`, `credential_policy`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
 CREATE TABLE `crypto_profiles` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `gateway_version_id` VARCHAR(191) NOT NULL,
+    `gateway_version_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `name` VARCHAR(191) NOT NULL,
     `purpose` ENUM('OUTBOUND_SIGN', 'INBOUND_VERIFY') NOT NULL,
     `algorithm` ENUM('HMAC_SHA256', 'HMAC_SHA512', 'RSA_SHA256', 'SHA256') NOT NULL,
@@ -659,11 +694,11 @@ CREATE TABLE `crypto_profiles` (
 
 -- CreateTable
 CREATE TABLE `flows` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `gateway_version_id` VARCHAR(191) NOT NULL,
-    `rail_id` VARCHAR(191) NULL,
+    `gateway_version_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `rail_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `sub_mode` VARCHAR(191) NULL,
     `phase` ENUM('CREDENTIAL_CHECK', 'PRE_INITIATE', 'INITIATE', 'SUBMIT', 'VERIFY', 'CANCEL', 'REFUND', 'VOID', 'CAPTURE', 'SETTLEMENT_FETCH') NOT NULL,
 
@@ -673,10 +708,10 @@ CREATE TABLE `flows` (
 
 -- CreateTable
 CREATE TABLE `flow_steps` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `flow_id` VARCHAR(191) NOT NULL,
+    `flow_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `order_index` INTEGER NOT NULL,
     `type` ENUM('HTTP', 'COMPUTE', 'RENDER', 'WAIT', 'ASSERT', 'BRANCH') NOT NULL,
     `method` VARCHAR(191) NULL,
@@ -696,16 +731,16 @@ CREATE TABLE `flow_steps` (
 
 -- CreateTable
 CREATE TABLE `step_parameters` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `step_id` VARCHAR(191) NOT NULL,
+    `step_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `place` ENUM('HEADERS', 'QUERY', 'PATH', 'BODY', 'FORM', 'MULTIPART', 'XML') NOT NULL,
     `key` VARCHAR(191) NOT NULL,
     `source` ENUM('GATEWAY_META', 'ROUTE_META', 'CREDENTIAL', 'ATTEMPT', 'CUSTOMER_FIELD', 'STATE', 'PREVIOUS_RESPONSE', 'URLS', 'CLIENT_CONTEXT', 'CONSTANT', 'NOW', 'RANDOM', 'COMPUTED', 'CRYPTO_SIGNATURE') NOT NULL,
     `selector` TEXT NULL,
     `constant_value` TEXT NULL,
-    `crypto_profile_id` VARCHAR(191) NULL,
+    `crypto_profile_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `transforms` JSON NOT NULL,
 
     UNIQUE INDEX `step_parameters_step_id_place_key_key`(`step_id`, `place`, `key`),
@@ -714,10 +749,10 @@ CREATE TABLE `step_parameters` (
 
 -- CreateTable
 CREATE TABLE `step_outputs` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `step_id` VARCHAR(191) NOT NULL,
+    `step_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `name` VARCHAR(191) NOT NULL,
     `selector` TEXT NULL,
     `transforms` JSON NOT NULL,
@@ -730,10 +765,10 @@ CREATE TABLE `step_outputs` (
 
 -- CreateTable
 CREATE TABLE `status_rules` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `gateway_version_id` VARCHAR(191) NOT NULL,
+    `gateway_version_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `phase` VARCHAR(191) NOT NULL,
     `order_index` INTEGER NOT NULL,
     `selector` TEXT NOT NULL,
@@ -749,10 +784,10 @@ CREATE TABLE `status_rules` (
 
 -- CreateTable
 CREATE TABLE `error_maps` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `gateway_version_id` VARCHAR(191) NOT NULL,
+    `gateway_version_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `gateway_code` VARCHAR(191) NOT NULL,
     `canonical_error` VARCHAR(191) NOT NULL,
     `classification` ENUM('RETRYABLE_OTP', 'TERMINAL_DECLINE', 'LIMIT_EXCEEDED', 'GATEWAY_FAULT', 'AMBIGUOUS') NOT NULL,
@@ -769,14 +804,14 @@ CREATE TABLE `error_maps` (
 
 -- CreateTable
 CREATE TABLE `confirmation_channels` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `gateway_version_id` VARCHAR(191) NOT NULL,
-    `route_id` VARCHAR(191) NULL,
+    `gateway_version_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `route_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `type` ENUM('WEBHOOK', 'RETURN_URL', 'BROWSER_CALLBACK', 'POLL', 'STATEMENT', 'OPERATOR') NOT NULL,
     `path_token` VARCHAR(191) NOT NULL,
-    `crypto_profile_id` VARCHAR(191) NULL,
+    `crypto_profile_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `verify_method` ENUM('HMAC_BODY', 'HASH_FIELDS', 'SORTED_VALUES_HASH', 'RSA', 'SHARED_TOKEN', 'IP_ONLY', 'NONE_PLUS_INQUIRY') NOT NULL,
     `signature_header` TEXT NULL,
     `timestamp_selector` TEXT NULL,
@@ -798,10 +833,10 @@ CREATE TABLE `confirmation_channels` (
 
 -- CreateTable
 CREATE TABLE `poll_policies` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `route_id` VARCHAR(191) NOT NULL,
+    `route_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `first_after_seconds` INTEGER NOT NULL DEFAULT 5,
     `backoff_seconds` JSON NOT NULL,
     `max_duration_seconds` INTEGER NOT NULL DEFAULT 900,
@@ -813,10 +848,10 @@ CREATE TABLE `poll_policies` (
 
 -- CreateTable
 CREATE TABLE `widget_definitions` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `route_id` VARCHAR(191) NOT NULL,
+    `route_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `kind` ENUM('LIGHTBOX', 'IFRAME', 'SDK_WEBVIEW', 'NATIVE_ANDROID') NOT NULL,
     `sdk_driver` TEXT NULL,
     `script_urls` JSON NOT NULL,
@@ -833,10 +868,10 @@ CREATE TABLE `widget_definitions` (
 
 -- CreateTable
 CREATE TABLE `redirect_definitions` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `route_id` VARCHAR(191) NOT NULL,
+    `route_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `method` ENUM('GET', 'POST_FORM') NOT NULL,
     `url_source_output` TEXT NOT NULL,
     `form_fields_output` TEXT NULL,
@@ -850,10 +885,10 @@ CREATE TABLE `redirect_definitions` (
 
 -- CreateTable
 CREATE TABLE `statement_sources` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `gateway_id` VARCHAR(191) NOT NULL,
+    `gateway_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `type` ENUM('API', 'SFTP', 'UPLOAD') NOT NULL,
     `schedule_cron` TEXT NULL,
     `parser_config` JSON NOT NULL,
@@ -866,10 +901,10 @@ CREATE TABLE `statement_sources` (
 
 -- CreateTable
 CREATE TABLE `manual_instructions` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `rail_id` VARCHAR(191) NOT NULL,
+    `rail_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `instructions_ar` TEXT NOT NULL,
     `instructions_en` TEXT NOT NULL,
     `destination_account_template` TEXT NULL,
@@ -884,10 +919,10 @@ CREATE TABLE `manual_instructions` (
 
 -- CreateTable
 CREATE TABLE `attempt_groups` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `link_id` VARCHAR(191) NOT NULL,
+    `link_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `customer_fingerprint` CHAR(64) NOT NULL,
     `success_count` INTEGER NOT NULL DEFAULT 0,
 
@@ -897,32 +932,32 @@ CREATE TABLE `attempt_groups` (
 
 -- CreateTable
 CREATE TABLE `payment_attempts` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `reference` VARCHAR(191) NOT NULL,
-    `idempotency_key` VARCHAR(191) NULL,
-    `link_id` VARCHAR(191) NOT NULL,
-    `attempt_group_id` VARCHAR(191) NOT NULL,
-    `application_id` VARCHAR(191) NOT NULL,
-    `merchant_id` VARCHAR(191) NOT NULL,
-    `rail_id` VARCHAR(191) NOT NULL,
-    `route_id` VARCHAR(191) NOT NULL,
-    `credential_set_id` VARCHAR(191) NOT NULL,
-    `gateway_version_id` VARCHAR(191) NOT NULL,
-    `commission_profile_id` VARCHAR(191) NOT NULL,
+    `reference` VARCHAR(64) NOT NULL,
+    `idempotency_key` VARCHAR(128) NULL,
+    `link_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `attempt_group_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `application_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `merchant_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `rail_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `route_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `credential_set_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `gateway_version_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `commission_profile_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `env` ENUM('SANDBOX', 'LIVE') NOT NULL,
-    `mode` VARCHAR(191) NOT NULL,
-    `sub_mode` VARCHAR(191) NULL,
+    `mode` VARCHAR(32) NOT NULL,
+    `sub_mode` VARCHAR(64) NULL,
     `status` ENUM('CREATED', 'INITIATING', 'AWAITING_CUSTOMER', 'AUTHORIZING', 'VERIFYING', 'UNKNOWN', 'SUCCEEDED', 'FAILED', 'EXPIRED', 'CANCELLED', 'BLOCKED', 'PARTIALLY_REFUNDED', 'REFUNDED', 'DISPUTED') NOT NULL DEFAULT 'CREATED',
-    `substatus` TEXT NULL,
-    `gateway_reference` VARCHAR(191) NULL,
-    `provider_reference` VARCHAR(191) NULL,
-    `network_reference` VARCHAR(191) NULL,
+    `substatus` VARCHAR(96) NULL,
+    `gateway_reference` VARCHAR(128) NULL,
+    `provider_reference` VARCHAR(128) NULL,
+    `network_reference` VARCHAR(128) NULL,
     `requested_amount` DECIMAL(18, 4) NOT NULL,
     `surcharge_amount` DECIMAL(18, 4) NOT NULL DEFAULT 0,
     `total_charged_amount` DECIMAL(18, 4) NOT NULL,
-    `gateway_amount_wire` TEXT NULL,
+    `gateway_amount_wire` VARCHAR(64) NULL,
     `settled_amount` DECIMAL(18, 4) NULL,
     `gateway_fee_amount` DECIMAL(18, 4) NULL,
     `platform_commission_amount` DECIMAL(18, 4) NOT NULL DEFAULT 0,
@@ -936,44 +971,43 @@ CREATE TABLE `payment_attempts` (
     `point_of_no_return` BOOLEAN NOT NULL DEFAULT false,
     `otp_attempts` INTEGER NOT NULL DEFAULT 0,
     `last_otp_sent_at` DATETIME(3) NULL,
-    `client_ip` TEXT NULL,
+    `client_ip` VARCHAR(45) NULL,
     `user_agent` TEXT NULL,
     `expires_at` DATETIME(3) NOT NULL,
     `grace_expires_at` DATETIME(3) NOT NULL,
     `next_check_at` DATETIME(3) NULL,
-    `ledger_entry_id` VARCHAR(191) NULL,
+    `ledger_entry_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `terminal_at` DATETIME(3) NULL,
 
     UNIQUE INDEX `payment_attempts_reference_key`(`reference`),
     UNIQUE INDEX `payment_attempts_ledger_entry_id_key`(`ledger_entry_id`),
-    INDEX `payment_attempts_link_id_idx`(`link_id`),
-    INDEX `payment_attempts_merchant_id_idx`(`merchant_id`),
-    INDEX `payment_attempts_status_next_check_at_idx`(`status`, `next_check_at`),
     INDEX `payment_attempts_gateway_version_id_idx`(`gateway_version_id`),
-    INDEX `payment_attempts_route_id_status_idx`(`route_id`, `status`),
     INDEX `payment_attempts_merchant_id_created_at_idx`(`merchant_id`, `created_at`),
+    INDEX `payment_attempts_merchant_id_status_created_at_idx`(`merchant_id`, `status`, `created_at`),
     INDEX `payment_attempts_status_created_at_idx`(`status`, `created_at`),
     INDEX `payment_attempts_rail_id_created_at_idx`(`rail_id`, `created_at`),
     INDEX `payment_attempts_application_id_created_at_idx`(`application_id`, `created_at`),
+    INDEX `payment_attempts_provider_ref_idx`(`provider_reference`),
+    INDEX `payment_attempts_gateway_ref_idx`(`gateway_reference`),
+    INDEX `payment_attempts_network_ref_idx`(`network_reference`),
     UNIQUE INDEX `payment_attempts_link_id_idempotency_key_key`(`link_id`, `idempotency_key`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
 CREATE TABLE `attempt_step_logs` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    `updated_at` DATETIME(3) NOT NULL,
-    `attempt_id` VARCHAR(191) NOT NULL,
-    `gateway_version_id` VARCHAR(191) NOT NULL,
-    `phase` TEXT NOT NULL,
-    `step_id` VARCHAR(191) NULL,
+    `attempt_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `gateway_version_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `phase` VARCHAR(32) NOT NULL,
+    `step_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `step_order` INTEGER NOT NULL,
     `redacted_request_json` JSON NOT NULL,
     `redacted_response_text` TEXT NOT NULL,
     `http_status` INTEGER NULL,
     `duration_ms` INTEGER NULL,
-    `outcome` TEXT NOT NULL,
+    `outcome` VARCHAR(64) NOT NULL,
 
     INDEX `attempt_step_logs_attempt_id_idx`(`attempt_id`),
     PRIMARY KEY (`id`)
@@ -981,42 +1015,50 @@ CREATE TABLE `attempt_step_logs` (
 
 -- CreateTable
 CREATE TABLE `inbound_events` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    `updated_at` DATETIME(3) NOT NULL,
-    `channel_id` VARCHAR(191) NOT NULL,
-    `gateway_id` VARCHAR(191) NOT NULL,
-    `env` TEXT NOT NULL,
-    `raw_body_bytes` LONGBLOB NOT NULL,
-    `redacted_headers_json` JSON NOT NULL,
-    `source_ip` TEXT NOT NULL,
+    `channel_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `gateway_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `env` VARCHAR(16) NOT NULL,
+    `source_ip` VARCHAR(45) NOT NULL,
     `verified` BOOLEAN NOT NULL,
     `verification_error` TEXT NULL,
     `dedupe_key` CHAR(64) NOT NULL,
-    `attempt_id` VARCHAR(191) NULL,
+    `attempt_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `received_at` DATETIME(3) NOT NULL,
     `processed_at` DATETIME(3) NULL,
-    `processing_result` TEXT NULL,
+    `processing_result` VARCHAR(191) NULL,
 
     INDEX `inbound_events_gateway_id_idx`(`gateway_id`),
+    INDEX `inbound_events_processed_at_received_at_idx`(`processed_at`, `received_at`),
     UNIQUE INDEX `inbound_events_channel_id_dedupe_key_key`(`channel_id`, `dedupe_key`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
+CREATE TABLE `inbound_event_payloads` (
+    `event_id` BIGINT UNSIGNED NOT NULL,
+    `raw_body_bytes` LONGBLOB NOT NULL,
+    `redacted_headers_json` JSON NOT NULL,
+    `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    PRIMARY KEY (`event_id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
 CREATE TABLE `operator_cases` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `attempt_id` VARCHAR(191) NULL,
-    `reconciliation_item_id` VARCHAR(191) NULL,
+    `attempt_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    `reconciliation_item_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `kind` ENUM('UNKNOWN', 'HELD', 'CONFLICT', 'MISMATCH', 'LATE_SUCCESS', 'MANUAL_REVIEW', 'UNMATCHED_STATEMENT') NOT NULL,
     `priority` ENUM('P1', 'P2', 'P3') NOT NULL,
     `sla_due_at` DATETIME(3) NOT NULL,
     `state` ENUM('OPEN', 'IN_PROGRESS', 'PENDING_CHECKER', 'RESOLVED') NOT NULL DEFAULT 'OPEN',
-    `assignee_user_id` VARCHAR(191) NULL,
+    `assignee_user_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `resolution_notes` TEXT NULL,
-    `approval_request_id` VARCHAR(191) NULL,
+    `approval_request_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
 
     UNIQUE INDEX `operator_cases_reconciliation_item_id_key`(`reconciliation_item_id`),
     INDEX `operator_cases_state_priority_idx`(`state`, `priority`),
@@ -1025,25 +1067,55 @@ CREATE TABLE `operator_cases` (
     INDEX `operator_cases_kind_idx`(`kind`),
     INDEX `operator_cases_sla_due_at_idx`(`sla_due_at`),
     INDEX `operator_cases_assignee_user_id_idx`(`assignee_user_id`),
+    INDEX `operator_cases_attempt_id_idx`(`attempt_id`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `gateway_inquiry_schedules` (
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updated_at` DATETIME(3) NOT NULL,
+    `attempt_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `operator_case_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    `source` ENUM('OPERATOR_CASE', 'AUTOMATIC') NOT NULL DEFAULT 'OPERATOR_CASE',
+    `status` ENUM('SCHEDULED', 'RUNNING', 'RETRYING', 'COMPLETED', 'FAILED', 'CANCELLED', 'EXPIRED') NOT NULL DEFAULT 'SCHEDULED',
+    `scheduled_by_user_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    `reason` TEXT NULL,
+    `checklist` JSON NULL,
+    `previous_next_check_at` DATETIME(3) NULL,
+    `window_started_at` DATETIME(3) NULL,
+    `next_run_at` DATETIME(3) NOT NULL,
+    `last_run_at` DATETIME(3) NULL,
+    `attempts` INTEGER NOT NULL DEFAULT 0,
+    `last_result` TEXT NULL,
+    `last_error` TEXT NULL,
+    `completed_at` DATETIME(3) NULL,
+    `cancelled_at` DATETIME(3) NULL,
+    `cancelled_by_user_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    `cancel_reason` TEXT NULL,
+
+    INDEX `gateway_inquiry_schedules_status_next_run_at_idx`(`status`, `next_run_at`),
+    INDEX `gateway_inquiry_schedules_attempt_id_status_idx`(`attempt_id`, `status`),
+    INDEX `gateway_inquiry_schedules_operator_case_id_idx`(`operator_case_id`),
+    INDEX `gateway_inquiry_schedules_source_status_idx`(`source`, `status`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
 CREATE TABLE `reconciliation_runs` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `statement_source_id` VARCHAR(191) NOT NULL,
+    `statement_source_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `window_start` DATETIME(3) NOT NULL,
     `window_end` DATETIME(3) NOT NULL,
     `file_hash` CHAR(64) NOT NULL,
     `stats_json` JSON NOT NULL,
-    `file_name` TEXT NULL,
-    `file_content` LONGBLOB NULL,
+    `file_name` VARCHAR(255) NULL,
     `ingested_at` DATETIME(3) NULL,
 
     UNIQUE INDEX `reconciliation_runs_file_hash_key`(`file_hash`),
-    INDEX `reconciliation_runs_statement_source_id_idx`(`statement_source_id`),
     INDEX `reconciliation_runs_ingested_at_idx`(`ingested_at`),
     INDEX `reconciliation_runs_created_at_idx`(`created_at`),
     INDEX `reconciliation_runs_statement_source_id_created_at_idx`(`statement_source_id`, `created_at`),
@@ -1051,8 +1123,17 @@ CREATE TABLE `reconciliation_runs` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
+CREATE TABLE `reconciliation_run_files` (
+    `run_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `file_content` LONGBLOB NULL,
+    `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    PRIMARY KEY (`run_id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
 CREATE TABLE `background_jobs` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
     `job_type` ENUM('RECONCILIATION_RUN', 'ADJUSTMENT_EXECUTION') NOT NULL,
@@ -1075,14 +1156,14 @@ CREATE TABLE `background_jobs` (
 
 -- CreateTable
 CREATE TABLE `reconciliation_items` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `run_id` VARCHAR(191) NOT NULL,
-    `attempt_id` VARCHAR(191) NULL,
-    `our_reference` TEXT NOT NULL,
-    `provider_reference` TEXT NOT NULL,
-    `batch_reference` TEXT NULL,
+    `run_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `attempt_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    `our_reference` VARCHAR(191) NOT NULL,
+    `provider_reference` VARCHAR(191) NOT NULL,
+    `batch_reference` VARCHAR(191) NULL,
     `statement_amount` DECIMAL(18, 4) NOT NULL,
     `statement_fee` DECIMAL(18, 4) NOT NULL,
     `result` ENUM('MATCHED', 'AMOUNT_MISMATCH', 'MISSING_AT_GATEWAY', 'MISSING_LOCALLY', 'DUPLICATE') NOT NULL,
@@ -1095,10 +1176,10 @@ CREATE TABLE `reconciliation_items` (
 
 -- CreateTable
 CREATE TABLE `gateway_health_samples` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `route_id` VARCHAR(191) NOT NULL,
+    `route_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `window_start` DATETIME(3) NOT NULL,
     `definitive_failures` INTEGER NOT NULL DEFAULT 0,
     `ambiguous_unknowns` INTEGER NOT NULL DEFAULT 0,
@@ -1114,49 +1195,59 @@ CREATE TABLE `gateway_health_samples` (
 
 -- CreateTable
 CREATE TABLE `detail_change_logs` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `actor_id` VARCHAR(191) NOT NULL,
-    `merchant_id` VARCHAR(191) NULL,
+    `actor_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `merchant_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `entity_type` VARCHAR(191) NOT NULL,
     `entity_id` VARCHAR(191) NOT NULL,
-    `field_name` TEXT NOT NULL,
+    `field_name` VARCHAR(191) NOT NULL,
     `old_value` TEXT NULL,
     `new_value` TEXT NULL,
-    `approval_request_id` VARCHAR(191) NULL,
+    `approval_request_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `source` ENUM('PORTAL', 'ADMIN', 'API', 'SYSTEM') NOT NULL,
-    `request_id` TEXT NOT NULL,
-    `client_ip` TEXT NULL,
+    `request_id` VARCHAR(191) NOT NULL,
+    `client_ip` VARCHAR(45) NULL,
 
     INDEX `detail_change_logs_entity_type_entity_id_idx`(`entity_type`, `entity_id`),
+    INDEX `detail_change_logs_merchant_id_created_at_idx`(`merchant_id`, `created_at`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
 CREATE TABLE `audit_log` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    `updated_at` DATETIME(3) NOT NULL,
-    `actor_id` VARCHAR(191) NOT NULL,
-    `role` TEXT NOT NULL,
-    `action` TEXT NOT NULL,
-    `entity_type` VARCHAR(191) NOT NULL,
-    `entity_id` VARCHAR(191) NOT NULL,
-    `before_json` JSON NOT NULL,
-    `after_json` JSON NOT NULL,
-    `approval_request_id` VARCHAR(191) NULL,
+    `actor_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `actor_email` VARCHAR(191) NOT NULL DEFAULT '',
+    `role` VARCHAR(64) NOT NULL,
+    `action` VARCHAR(96) NOT NULL,
+    `entity_type` VARCHAR(64) NOT NULL,
+    `entity_id` VARCHAR(64) NOT NULL,
+    `approval_request_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
 
-    INDEX `audit_log_entity_type_entity_id_idx`(`entity_type`, `entity_id`),
+    INDEX `audit_log_entity_type_entity_id_created_at_idx`(`entity_type`, `entity_id`, `created_at`),
+    INDEX `audit_log_created_at_idx`(`created_at`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
+CREATE TABLE `audit_log_payloads` (
+    `audit_log_id` BIGINT UNSIGNED NOT NULL,
+    `before_json` JSON NOT NULL,
+    `after_json` JSON NOT NULL,
+    `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    PRIMARY KEY (`audit_log_id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
 CREATE TABLE `user_identities` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `user_id` VARCHAR(191) NOT NULL,
+    `user_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `kind` ENUM('PHONE', 'EMAIL', 'GOOGLE') NOT NULL,
     `identifier_normalized` VARCHAR(191) NOT NULL,
     `provider_subject` VARCHAR(191) NULL,
@@ -1172,17 +1263,17 @@ CREATE TABLE `user_identities` (
 
 -- CreateTable
 CREATE TABLE `join_requests` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `merchant_id` VARCHAR(191) NOT NULL,
-    `submitted_by_user_id` VARCHAR(191) NOT NULL,
+    `merchant_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `submitted_by_user_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `status` ENUM('DRAFT', 'SUBMITTED', 'IN_REVIEW', 'INFO_REQUESTED', 'PENDING_CHECKER', 'APPROVED', 'REJECTED', 'WITHDRAWN', 'EXPIRED') NOT NULL DEFAULT 'DRAFT',
     `onboarding_channel` ENUM('SELF_SERVICE', 'ADMIN_ASSISTED') NOT NULL,
     `submitted_at` DATETIME(3) NULL,
-    `assigned_reviewer_id` VARCHAR(191) NULL,
+    `assigned_reviewer_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `sla_due_at` DATETIME(3) NOT NULL,
-    `screening_id` VARCHAR(191) NULL,
+    `screening_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `proposed_risk_tier` ENUM('LOW', 'STANDARD', 'HIGH') NOT NULL DEFAULT 'STANDARD',
     `four_eyes_required` BOOLEAN NOT NULL DEFAULT true,
     `four_eyes_reasons` JSON NULL,
@@ -1190,10 +1281,15 @@ CREATE TABLE `join_requests` (
     `decision_reason_code` TEXT NULL,
     `decision_notes` TEXT NULL,
     `info_request_json` JSON NULL,
-    `resubmission_of_id` VARCHAR(191) NULL,
-    `approval_request_id` VARCHAR(191) NULL,
+    `profile_json` JSON NULL,
+    `review_checklist_json` JSON NULL,
+    `duplicate_flags_json` JSON NULL,
+    `sla_paused_at` DATETIME(3) NULL,
+    `sla_remaining_seconds` INTEGER NULL,
+    `last_screened_at` DATETIME(3) NULL,
+    `resubmission_of_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    `approval_request_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
 
-    INDEX `join_requests_merchant_id_idx`(`merchant_id`),
     INDEX `join_requests_status_idx`(`status`),
     INDEX `join_requests_status_created_at_idx`(`status`, `created_at`),
     INDEX `join_requests_proposed_risk_tier_idx`(`proposed_risk_tier`),
@@ -1204,42 +1300,85 @@ CREATE TABLE `join_requests` (
 
 -- CreateTable
 CREATE TABLE `kyb_documents` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `merchant_id` VARCHAR(191) NOT NULL,
-    `join_request_id` VARCHAR(191) NULL,
+    `merchant_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `join_request_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `subject_type` ENUM('MERCHANT', 'BENEFICIAL_OWNER') NOT NULL,
     `subject_id` VARCHAR(191) NOT NULL,
     `doc_type` ENUM('COMMERCIAL_REGISTRY', 'TAX_CERTIFICATE', 'ARTICLES_OF_ASSOCIATION', 'OWNER_ID', 'SIGNATORY_ID', 'PROOF_OF_ADDRESS', 'BANK_LETTER', 'SECTOR_LICENSE', 'OTHER') NOT NULL,
     `storage_key` TEXT NOT NULL,
+    `original_file_name` TEXT NULL,
+    `content_ciphertext` LONGTEXT NULL,
     `sha256` CHAR(64) NOT NULL,
+    `duplicate_of_merchant_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `mime` TEXT NOT NULL,
     `size_bytes` INTEGER NOT NULL,
     `av_status` ENUM('PENDING', 'CLEAN', 'INFECTED') NOT NULL DEFAULT 'PENDING',
     `status` ENUM('UPLOADED', 'ACCEPTED', 'REJECTED', 'EXPIRED') NOT NULL DEFAULT 'UPLOADED',
-    `reviewed_by` VARCHAR(191) NULL,
+    `uploaded_by` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    `reviewed_by` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `reviewed_at` DATETIME(3) NULL,
     `expires_on` DATE NULL,
     `rejection_reason_code` TEXT NULL,
+    `review_notes` TEXT NULL,
+    `duplicate_justification` TEXT NULL,
+    `status_changed_at` DATETIME(3) NULL,
+    `expiry_notice_30_sent_at` DATETIME(3) NULL,
+    `expiry_notice_7_sent_at` DATETIME(3) NULL,
+    `expired_at` DATETIME(3) NULL,
 
-    INDEX `kyb_documents_merchant_id_idx`(`merchant_id`),
+    INDEX `kyb_documents_join_request_id_idx`(`join_request_id`),
     INDEX `kyb_documents_sha256_idx`(`sha256`),
+    INDEX `kyb_documents_duplicate_of_merchant_idx`(`duplicate_of_merchant_id`),
     INDEX `kyb_documents_merchant_id_status_idx`(`merchant_id`, `status`),
+    INDEX `kyb_documents_status_av_status_created_at_idx`(`status`, `av_status`, `created_at`),
     INDEX `kyb_documents_doc_type_idx`(`doc_type`),
     INDEX `kyb_documents_expires_on_idx`(`expires_on`),
+    INDEX `kyb_documents_uploaded_by_idx`(`uploaded_by`),
+    INDEX `kyb_documents_reviewed_by_idx`(`reviewed_by`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `kyb_revalidation_requests` (
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updated_at` DATETIME(3) NOT NULL,
+    `merchant_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `join_request_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    `document_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    `doc_type` ENUM('COMMERCIAL_REGISTRY', 'TAX_CERTIFICATE', 'ARTICLES_OF_ASSOCIATION', 'OWNER_ID', 'SIGNATORY_ID', 'PROOF_OF_ADDRESS', 'BANK_LETTER', 'SECTOR_LICENSE', 'OTHER') NOT NULL,
+    `reason_code` TEXT NOT NULL,
+    `message` TEXT NOT NULL,
+    `status` ENUM('OPEN', 'FULFILLED', 'CANCELLED', 'EXPIRED') NOT NULL DEFAULT 'OPEN',
+    `requested_by` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `requested_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `due_at` DATETIME(3) NULL,
+    `fulfilled_at` DATETIME(3) NULL,
+    `fulfilled_document_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    `resolution_notes` TEXT NULL,
+
+    UNIQUE INDEX `kyb_revalidation_requests_fulfilled_document_id_key`(`fulfilled_document_id`),
+    INDEX `kyb_revalidation_requests_merchant_id_status_idx`(`merchant_id`, `status`),
+    INDEX `kyb_revalidation_requests_status_due_at_idx`(`status`, `due_at`),
+    INDEX `kyb_revalidation_requests_document_id_idx`(`document_id`),
+    INDEX `kyb_revalidation_requests_join_request_id_idx`(`join_request_id`),
+    INDEX `kyb_revalidation_requests_requested_by_idx`(`requested_by`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
 CREATE TABLE `beneficial_owners` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `merchant_id` VARCHAR(191) NOT NULL,
+    `merchant_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `full_name_ar` TEXT NOT NULL,
     `full_name_en` TEXT NULL,
     `national_id_ciphertext` TEXT NOT NULL,
+    `national_id_hash` CHAR(64) NULL,
     `date_of_birth` DATE NOT NULL,
     `nationality` CHAR(2) NOT NULL,
     `ownership_percent` DECIMAL(5, 2) NULL,
@@ -1250,21 +1389,21 @@ CREATE TABLE `beneficial_owners` (
     `valid_from` DATETIME(3) NOT NULL,
     `valid_to` DATETIME(3) NULL,
 
-    INDEX `beneficial_owners_merchant_id_idx`(`merchant_id`),
     INDEX `beneficial_owners_screening_status_idx`(`screening_status`),
+    INDEX `beneficial_owners_national_id_hash_idx`(`national_id_hash`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
 CREATE TABLE `aml_screenings` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
     `subject_type` ENUM('MERCHANT', 'BENEFICIAL_OWNER', 'END_CLIENT', 'PAYMENT_ATTEMPT') NOT NULL,
     `subject_id` VARCHAR(191) NOT NULL,
     `trigger` ENUM('ONBOARDING', 'PERIODIC', 'LIST_UPDATE', 'OWNER_CHANGE', 'TRANSACTION', 'MANUAL') NOT NULL,
-    `provider_code` VARCHAR(191) NOT NULL,
-    `provider_request_ref` TEXT NULL,
+    `provider_code` VARCHAR(64) NOT NULL,
+    `provider_request_ref` VARCHAR(191) NULL,
     `list_versions_json` JSON NOT NULL,
     `input_hash` CHAR(64) NOT NULL,
     `result` ENUM('CLEAR', 'POTENTIAL_MATCH', 'CONFIRMED_MATCH', 'ERROR') NOT NULL,
@@ -1282,10 +1421,10 @@ CREATE TABLE `aml_screenings` (
 
 -- CreateTable
 CREATE TABLE `aml_screening_matches` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `screening_id` VARCHAR(191) NOT NULL,
+    `screening_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `list_type` ENUM('SANCTIONS', 'PEP', 'ADVERSE_MEDIA', 'INTERNAL_WATCHLIST') NOT NULL,
     `list_name` TEXT NOT NULL,
     `list_entry_ref` TEXT NOT NULL,
@@ -1293,7 +1432,7 @@ CREATE TABLE `aml_screening_matches` (
     `score` DECIMAL(5, 2) NOT NULL,
     `attributes_json` JSON NOT NULL,
     `disposition` ENUM('UNREVIEWED', 'FALSE_POSITIVE', 'TRUE_MATCH', 'ESCALATED') NOT NULL DEFAULT 'UNREVIEWED',
-    `disposition_by` VARCHAR(191) NULL,
+    `disposition_by` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `disposition_notes` TEXT NULL,
     `suppress_future` BOOLEAN NOT NULL DEFAULT false,
     `suppress_until` DATE NULL,
@@ -1304,7 +1443,7 @@ CREATE TABLE `aml_screening_matches` (
 
 -- CreateTable
 CREATE TABLE `aml_rules` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
     `code` VARCHAR(191) NOT NULL,
@@ -1318,7 +1457,7 @@ CREATE TABLE `aml_rules` (
     `version` INTEGER NOT NULL DEFAULT 1,
     `effective_from` DATETIME(3) NOT NULL,
     `effective_to` DATETIME(3) NULL,
-    `approval_request_id` VARCHAR(191) NULL,
+    `approval_request_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
 
     UNIQUE INDEX `aml_rules_code_key`(`code`),
     INDEX `aml_rules_active_idx`(`active`),
@@ -1329,7 +1468,7 @@ CREATE TABLE `aml_rules` (
 
 -- CreateTable
 CREATE TABLE `reporting_rules` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
     `authority` VARCHAR(64) NOT NULL DEFAULT 'CBL',
@@ -1342,7 +1481,7 @@ CREATE TABLE `reporting_rules` (
     `status` ENUM('PROVISIONAL', 'CONFIRMED') NOT NULL DEFAULT 'PROVISIONAL',
     `effective_from` DATETIME(3) NOT NULL,
     `effective_to` DATETIME(3) NULL,
-    `approval_request_id` VARCHAR(191) NULL,
+    `approval_request_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
 
     INDEX `reporting_rules_status_idx`(`status`),
     PRIMARY KEY (`id`)
@@ -1350,23 +1489,23 @@ CREATE TABLE `reporting_rules` (
 
 -- CreateTable
 CREATE TABLE `regulatory_reports` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
     `report_type` ENUM('LARGE_TRANSACTION', 'SUSPICIOUS_ACTIVITY', 'PERIODIC_RETURN') NOT NULL,
-    `authority` TEXT NOT NULL,
-    `subject_type` TEXT NOT NULL,
-    `subject_id` TEXT NOT NULL,
-    `aml_case_id` VARCHAR(191) NULL,
+    `authority` VARCHAR(64) NOT NULL,
+    `subject_type` VARCHAR(64) NOT NULL,
+    `subject_id` VARCHAR(64) NOT NULL,
+    `aml_case_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `period_start` DATETIME(3) NULL,
     `period_end` DATETIME(3) NULL,
     `status` ENUM('DRAFT', 'PENDING_CHECKER', 'APPROVED', 'SUBMITTED', 'ACKNOWLEDGED', 'REJECTED_BY_AUTHORITY') NOT NULL DEFAULT 'DRAFT',
     `payload_ciphertext` TEXT NOT NULL,
     `payload_sha256` CHAR(64) NOT NULL,
-    `submission_ref` TEXT NULL,
+    `submission_ref` VARCHAR(255) NULL,
     `submitted_at` DATETIME(3) NULL,
     `confidential` BOOLEAN NOT NULL DEFAULT true,
-    `approval_request_id` VARCHAR(191) NULL,
+    `approval_request_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
 
     UNIQUE INDEX `regulatory_reports_aml_case_id_key`(`aml_case_id`),
     INDEX `regulatory_reports_status_idx`(`status`),
@@ -1377,12 +1516,12 @@ CREATE TABLE `regulatory_reports` (
 
 -- CreateTable
 CREATE TABLE `disputes` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
-    `attempt_id` VARCHAR(191) NOT NULL,
-    `gateway_id` VARCHAR(191) NOT NULL,
-    `rail_id` VARCHAR(191) NOT NULL,
+    `attempt_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `gateway_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `rail_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `external_dispute_ref` VARCHAR(191) NOT NULL,
     `source` ENUM('WEBHOOK', 'STATEMENT', 'MANUAL') NOT NULL,
     `reason_code` TEXT NULL,
@@ -1397,14 +1536,14 @@ CREATE TABLE `disputes` (
 
     INDEX `disputes_attempt_id_idx`(`attempt_id`),
     INDEX `disputes_status_opened_at_idx`(`status`, `opened_at`),
-    INDEX `disputes_evidence_due_at_idx`(`evidence_due_at`),
+    INDEX `disputes_status_evidence_due_at_idx`(`status`, `evidence_due_at`),
     UNIQUE INDEX `disputes_gateway_id_external_dispute_ref_key`(`gateway_id`, `external_dispute_ref`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
 CREATE TABLE `notification_templates` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
     `code` VARCHAR(191) NOT NULL,
@@ -1423,31 +1562,32 @@ CREATE TABLE `notification_templates` (
 
 -- CreateTable
 CREATE TABLE `notifications` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
     `event_id` VARCHAR(191) NOT NULL,
-    `recipient_user_id` VARCHAR(191) NULL,
-    `recipient_merchant_id` VARCHAR(191) NULL,
+    `recipient_user_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    `recipient_merchant_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
     `address_masked` TEXT NOT NULL,
     `address_ciphertext` TEXT NOT NULL,
-    `template_code` TEXT NOT NULL,
+    `template_code` VARCHAR(64) NOT NULL,
     `channel` ENUM('SMS', 'EMAIL', 'IN_APP') NOT NULL,
     `lang` ENUM('AR', 'EN') NOT NULL,
     `payload_json` JSON NOT NULL,
     `status` ENUM('QUEUED', 'SENT', 'DELIVERED', 'FAILED', 'SUPPRESSED') NOT NULL DEFAULT 'QUEUED',
-    `provider_message_id` TEXT NULL,
+    `provider_message_id` VARCHAR(191) NULL,
     `attempts` INTEGER NOT NULL DEFAULT 0,
     `next_attempt_at` DATETIME(3) NULL,
 
     UNIQUE INDEX `notifications_event_id_key`(`event_id`),
     INDEX `notifications_status_next_attempt_at_idx`(`status`, `next_attempt_at`),
+    INDEX `notifications_recipient_merchant_id_created_at_idx`(`recipient_merchant_id`, `created_at`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
 CREATE TABLE `platform_settings` (
-    `id` VARCHAR(191) NOT NULL,
+    `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
     `key` VARCHAR(191) NOT NULL,
@@ -1455,15 +1595,85 @@ CREATE TABLE `platform_settings` (
     `value_json` JSON NOT NULL,
     `version` INTEGER NOT NULL DEFAULT 1,
     `effective_from` DATETIME(3) NOT NULL,
-    `approval_request_id` VARCHAR(191) NULL,
+    `approval_request_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
 
     INDEX `platform_settings_key_scope_idx`(`key`, `scope`),
     UNIQUE INDEX `platform_settings_key_scope_version_key`(`key`, `scope`, `version`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
+-- CreateTable
+CREATE TABLE `attempt_deadlines` (
+    `attempt_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `kind` ENUM('EXPIRE', 'POLL', 'GRACE_END') NOT NULL,
+    `due_at` DATETIME(3) NOT NULL,
+    `claimed_until` DATETIME(3) NULL,
+    `claimed_by` VARCHAR(64) NULL,
+
+    INDEX `attempt_deadlines_due_idx`(`due_at`),
+    PRIMARY KEY (`attempt_id`, `kind`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `velocity_counters` (
+    `scope_type` ENUM('END_CLIENT_IP', 'END_CLIENT_PHONE', 'END_CLIENT_CARD', 'MERCHANT', 'APPLICATION', 'RAIL', 'LINK') NOT NULL,
+    `scope_key` CHAR(64) NOT NULL,
+    `granularity` TINYINT NOT NULL,
+    `bucket` INTEGER NOT NULL,
+    `attempts` INTEGER NOT NULL DEFAULT 0,
+    `succeeded` INTEGER NOT NULL DEFAULT 0,
+    `amount` DECIMAL(18, 4) NOT NULL DEFAULT 0,
+
+    PRIMARY KEY (`scope_type`, `scope_key`, `granularity`, `bucket`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `route_daily_volumes` (
+    `route_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `day_bucket` CHAR(10) NOT NULL,
+    `shard_no` TINYINT NOT NULL,
+    `succeeded_count` INTEGER NOT NULL DEFAULT 0,
+    `total_charged_amount` DECIMAL(18, 4) NOT NULL DEFAULT 0,
+
+    INDEX `rdv_day_bucket_idx`(`day_bucket`),
+    PRIMARY KEY (`route_id`, `day_bucket`, `shard_no`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `merchant_daily_stats` (
+    `merchant_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `day_bucket` CHAR(10) NOT NULL,
+    `rail_code` VARCHAR(64) NOT NULL,
+    `initiated_count` INTEGER NOT NULL DEFAULT 0,
+    `succeeded_count` INTEGER NOT NULL DEFAULT 0,
+    `failed_count` INTEGER NOT NULL DEFAULT 0,
+    `expired_count` INTEGER NOT NULL DEFAULT 0,
+    `refunded_count` INTEGER NOT NULL DEFAULT 0,
+    `disputed_count` INTEGER NOT NULL DEFAULT 0,
+    `gross_succeeded_amount` DECIMAL(18, 4) NOT NULL DEFAULT 0,
+    `platform_commission_amount` DECIMAL(18, 4) NOT NULL DEFAULT 0,
+    `net_merchant_amount` DECIMAL(18, 4) NOT NULL DEFAULT 0,
+
+    INDEX `mds_day_rail_idx`(`day_bucket`, `rail_code`),
+    PRIMARY KEY (`merchant_id`, `day_bucket`, `rail_code`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `cache_invalidation_events` (
+    `event_seq` BIGINT NOT NULL AUTO_INCREMENT,
+    `topic` VARCHAR(64) NOT NULL,
+    `payload_key` VARCHAR(128) NULL,
+    `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    INDEX `cie_created_at_idx`(`created_at`),
+    PRIMARY KEY (`event_seq`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
 -- AddForeignKey
 ALTER TABLE `users` ADD CONSTRAINT `users_merchant_id_fkey` FOREIGN KEY (`merchant_id`) REFERENCES `merchants`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `users` ADD CONSTRAINT `users_invited_by_fkey` FOREIGN KEY (`invited_by`) REFERENCES `users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `applications` ADD CONSTRAINT `applications_merchant_id_fkey` FOREIGN KEY (`merchant_id`) REFERENCES `merchants`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -1503,6 +1713,12 @@ ALTER TABLE `gl_accounts` ADD CONSTRAINT `gl_accounts_gateway_id_fkey` FOREIGN K
 
 -- AddForeignKey
 ALTER TABLE `gl_accounts` ADD CONSTRAINT `gl_accounts_credential_set_id_fkey` FOREIGN KEY (`credential_set_id`) REFERENCES `credential_sets`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `gl_balance_shards` ADD CONSTRAINT `gl_balance_shards_gl_account_id_fkey` FOREIGN KEY (`gl_account_id`) REFERENCES `gl_accounts`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `gl_period_totals` ADD CONSTRAINT `gl_period_totals_gl_account_id_fkey` FOREIGN KEY (`gl_account_id`) REFERENCES `gl_accounts`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `journal_lines` ADD CONSTRAINT `journal_lines_entry_id_fkey` FOREIGN KEY (`entry_id`) REFERENCES `journal_entries`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -1709,6 +1925,9 @@ ALTER TABLE `inbound_events` ADD CONSTRAINT `inbound_events_gateway_id_fkey` FOR
 ALTER TABLE `inbound_events` ADD CONSTRAINT `inbound_events_attempt_id_fkey` FOREIGN KEY (`attempt_id`) REFERENCES `payment_attempts`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `inbound_event_payloads` ADD CONSTRAINT `inbound_event_payloads_event_id_fkey` FOREIGN KEY (`event_id`) REFERENCES `inbound_events`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE `operator_cases` ADD CONSTRAINT `operator_cases_attempt_id_fkey` FOREIGN KEY (`attempt_id`) REFERENCES `payment_attempts`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -1721,7 +1940,22 @@ ALTER TABLE `operator_cases` ADD CONSTRAINT `operator_cases_assignee_user_id_fke
 ALTER TABLE `operator_cases` ADD CONSTRAINT `operator_cases_approval_request_id_fkey` FOREIGN KEY (`approval_request_id`) REFERENCES `approval_requests`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `gateway_inquiry_schedules` ADD CONSTRAINT `gateway_inquiry_schedules_attempt_id_fkey` FOREIGN KEY (`attempt_id`) REFERENCES `payment_attempts`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `gateway_inquiry_schedules` ADD CONSTRAINT `gateway_inquiry_schedules_operator_case_id_fkey` FOREIGN KEY (`operator_case_id`) REFERENCES `operator_cases`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `gateway_inquiry_schedules` ADD CONSTRAINT `gateway_inquiry_schedules_scheduled_by_user_id_fkey` FOREIGN KEY (`scheduled_by_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `gateway_inquiry_schedules` ADD CONSTRAINT `gateway_inquiry_schedules_cancelled_by_user_id_fkey` FOREIGN KEY (`cancelled_by_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE `reconciliation_runs` ADD CONSTRAINT `reconciliation_runs_statement_source_id_fkey` FOREIGN KEY (`statement_source_id`) REFERENCES `statement_sources`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `reconciliation_run_files` ADD CONSTRAINT `reconciliation_run_files_run_id_fkey` FOREIGN KEY (`run_id`) REFERENCES `reconciliation_runs`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `reconciliation_items` ADD CONSTRAINT `reconciliation_items_run_id_fkey` FOREIGN KEY (`run_id`) REFERENCES `reconciliation_runs`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1746,6 +1980,9 @@ ALTER TABLE `audit_log` ADD CONSTRAINT `audit_log_actor_id_fkey` FOREIGN KEY (`a
 
 -- AddForeignKey
 ALTER TABLE `audit_log` ADD CONSTRAINT `audit_log_approval_request_id_fkey` FOREIGN KEY (`approval_request_id`) REFERENCES `approval_requests`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `audit_log_payloads` ADD CONSTRAINT `audit_log_payloads_audit_log_id_fkey` FOREIGN KEY (`audit_log_id`) REFERENCES `audit_log`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `user_identities` ADD CONSTRAINT `user_identities_user_id_fkey` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1775,7 +2012,25 @@ ALTER TABLE `kyb_documents` ADD CONSTRAINT `kyb_documents_merchant_id_fkey` FORE
 ALTER TABLE `kyb_documents` ADD CONSTRAINT `kyb_documents_join_request_id_fkey` FOREIGN KEY (`join_request_id`) REFERENCES `join_requests`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `kyb_documents` ADD CONSTRAINT `kyb_documents_uploaded_by_fkey` FOREIGN KEY (`uploaded_by`) REFERENCES `users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE `kyb_documents` ADD CONSTRAINT `kyb_documents_reviewed_by_fkey` FOREIGN KEY (`reviewed_by`) REFERENCES `users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `kyb_revalidation_requests` ADD CONSTRAINT `kyb_revalidation_requests_merchant_id_fkey` FOREIGN KEY (`merchant_id`) REFERENCES `merchants`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `kyb_revalidation_requests` ADD CONSTRAINT `kyb_revalidation_requests_join_request_id_fkey` FOREIGN KEY (`join_request_id`) REFERENCES `join_requests`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `kyb_revalidation_requests` ADD CONSTRAINT `kyb_revalidation_requests_document_id_fkey` FOREIGN KEY (`document_id`) REFERENCES `kyb_documents`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `kyb_revalidation_requests` ADD CONSTRAINT `kyb_revalidation_requests_fulfilled_document_id_fkey` FOREIGN KEY (`fulfilled_document_id`) REFERENCES `kyb_documents`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `kyb_revalidation_requests` ADD CONSTRAINT `kyb_revalidation_requests_requested_by_fkey` FOREIGN KEY (`requested_by`) REFERENCES `users`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `beneficial_owners` ADD CONSTRAINT `beneficial_owners_merchant_id_fkey` FOREIGN KEY (`merchant_id`) REFERENCES `merchants`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -1817,15 +2072,65 @@ ALTER TABLE `notifications` ADD CONSTRAINT `notifications_recipient_merchant_id_
 ALTER TABLE `platform_settings` ADD CONSTRAINT `platform_settings_approval_request_id_fkey` FOREIGN KEY (`approval_request_id`) REFERENCES `approval_requests`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 
--- =============================================================================
--- Domain invariants and tables managed outside the Prisma datamodel.
--- =============================================================================
 
-ALTER TABLE `journal_lines` ADD CONSTRAINT `journal_lines_amount_positive` CHECK (`amount` > 0);
-ALTER TABLE `attempt_groups` ADD CONSTRAINT `attempt_groups_single_success` CHECK (`success_count` <= 1);
-ALTER TABLE `payment_links` ADD CONSTRAINT `payment_links_slot_reservation_invariant` CHECK (`infinite_use` = true OR (`confirmed_count` + `active_locked_count`) <= `use_count`);
+-- Manual SQL (see design/db_manual_sql.md)
+ALTER TABLE `attempt_groups`
+  ADD CONSTRAINT `attempt_groups_single_success` CHECK (`success_count` <= 1);
+ALTER TABLE `payment_links`
+  ADD CONSTRAINT `payment_links_slot_reservation_invariant`
+  CHECK (`infinite_use` = 1 OR `confirmed_count` + `active_locked_count` <= `use_count`);
 
--- Schema version support (single-row table checked by the core at boot).
+CREATE TRIGGER `approval_requests_checker_not_maker` BEFORE INSERT ON `approval_requests`
+FOR EACH ROW
+BEGIN
+  IF NEW.checker_user_id IS NOT NULL AND NEW.checker_user_id = NEW.maker_user_id THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'checker_user_id must differ from maker_user_id';
+  END IF;
+END;
+CREATE TRIGGER `approval_requests_checker_not_maker_update` BEFORE UPDATE ON `approval_requests`
+FOR EACH ROW
+BEGIN
+  IF NEW.checker_user_id IS NOT NULL AND NEW.checker_user_id = NEW.maker_user_id THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'checker_user_id must differ from maker_user_id';
+  END IF;
+END;
+
+ALTER TABLE `inbound_event_payloads` ROW_FORMAT=COMPRESSED;
+ALTER TABLE `audit_log_payloads` ROW_FORMAT=COMPRESSED;
+ALTER TABLE `reconciliation_run_files` ROW_FORMAT=COMPRESSED;
+
+ALTER TABLE `journal_lines`
+  ADD CONSTRAINT `journal_lines_amount_positive` CHECK (`amount` > 0);
+
+CREATE TRIGGER `journal_lines_no_update` BEFORE UPDATE ON `journal_lines`
+FOR EACH ROW
+BEGIN
+  IF COALESCE(@pg_allow_ledger_mutation, 0) <> 1 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'LEDGER_IMMUTABLE';
+  END IF;
+END;
+CREATE TRIGGER `journal_lines_no_delete` BEFORE DELETE ON `journal_lines`
+FOR EACH ROW
+BEGIN
+  IF COALESCE(@pg_allow_ledger_mutation, 0) <> 1 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'LEDGER_IMMUTABLE';
+  END IF;
+END;
+CREATE TRIGGER `journal_entries_no_update` BEFORE UPDATE ON `journal_entries`
+FOR EACH ROW
+BEGIN
+  IF COALESCE(@pg_allow_ledger_mutation, 0) <> 1 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'LEDGER_IMMUTABLE';
+  END IF;
+END;
+CREATE TRIGGER `journal_entries_no_delete` BEFORE DELETE ON `journal_entries`
+FOR EACH ROW
+BEGIN
+  IF COALESCE(@pg_allow_ledger_mutation, 0) <> 1 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'LEDGER_IMMUTABLE';
+  END IF;
+END;
+
 CREATE TABLE IF NOT EXISTS `schema_versions` (
     `id` INTEGER NOT NULL DEFAULT 1,
     `version` INTEGER NOT NULL,
@@ -1834,16 +2139,5 @@ CREATE TABLE IF NOT EXISTS `schema_versions` (
     CONSTRAINT `schema_versions_pkey` PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO `schema_versions` (`id`, `version`) VALUES (1, 6)
+INSERT INTO `schema_versions` (`id`, `version`) VALUES (1, 7)
 ON DUPLICATE KEY UPDATE `version` = VALUES(`version`);
-
--- MariaDB forbids a CHECK constraint on a column that is part of a foreign
--- key, so the maker != checker invariant is enforced by a trigger instead.
-DROP TRIGGER IF EXISTS `approval_requests_checker_not_maker`;
-CREATE TRIGGER `approval_requests_checker_not_maker` BEFORE INSERT ON `approval_requests`
-FOR EACH ROW
-BEGIN
-    IF NEW.`checker_user_id` IS NOT NULL AND NEW.`checker_user_id` = NEW.`maker_user_id` THEN
-        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'checker_user_id must differ from maker_user_id';
-    END IF;
-END;

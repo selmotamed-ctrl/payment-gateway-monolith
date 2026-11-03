@@ -178,41 +178,37 @@ describe("global search plugin engine", () => {
 });
 
 describe("global search authority matrix", () => {
-  test("registers all built-in providers with unique types and order", () => {
+  test("registers the six master-data providers with unique types and order", () => {
     const providers = defaultSearchRegistry.getAllOrdered();
-    expect(providers).toHaveLength(20);
-    expect(new Set(providers.map((provider) => provider.type)).size).toBe(20);
-    expect(new Set(providers.map((provider) => provider.order)).size).toBe(20);
+    expect(providers.map((provider) => provider.type)).toEqual([
+      "merchant",
+      "payment_attempt",
+      "gateway",
+      "rail",
+      "route",
+      "user",
+    ]);
+    expect(new Set(providers.map((provider) => provider.type)).size).toBe(6);
+    expect(new Set(providers.map((provider) => provider.order)).size).toBe(6);
   });
 
   const can = (type: string, role: string, authorities: string[]): boolean =>
     defaultSearchRegistry.get(type)?.canAccess(actor(role, authorities)) ?? false;
 
-  test("support sees merchant and attempt results but no sensitive merchant matching", () => {
+  test("support sees merchants, attempts and users but no sensitive merchant matching", () => {
     expect(can("merchant", "SUPPORT", ["merchant:read"])).toBe(true);
     expect(can("payment_attempt", "SUPPORT", ["merchant:read", "attempt:read"])).toBe(true);
-    expect(can("audit_log", "SUPPORT", ["security:read"])).toBe(true);
+    expect(can("user", "SUPPORT", ["security:read"])).toBe(true);
     expect(hasMerchantSensitiveAccess(actor("SUPPORT", ["merchant:write", "compliance:read"]))).toBe(false);
   });
 
-  test("operator and finance are not confidential AML users by role alone", () => {
-    expect(can("operator_case", "OPERATOR", ["case:read"])).toBe(true);
-    expect(can("aml_case", "OPERATOR", ["case:read"])).toBe(false);
-    expect(can("adjustment", "FINANCE", ["finance:read"])).toBe(true);
-    expect(can("aml_case", "FINANCE", ["finance:read"])).toBe(false);
-    expect(hasConfidentialAmlAccess(actor("FINANCE", ["aml:read"]))).toBe(true);
-  });
-
-  test("compliance, MLRO, gateway and security roles receive their own groups", () => {
-    expect(can("aml_case", "COMPLIANCE", [])).toBe(true);
-    expect(can("aml_screening", "MLRO", [])).toBe(true);
-    expect(can("join_request", "COMPLIANCE", ["compliance:read"])).toBe(true);
-    expect(can("kyb_document", "COMPLIANCE", ["compliance:read"])).toBe(true);
+  test("master-data authorities gate the gateway, rail and route groups", () => {
     expect(can("gateway", "GATEWAY_ADMIN", ["gateway:read"])).toBe(true);
     expect(can("rail", "GATEWAY_ADMIN", ["gateway:read"])).toBe(true);
     expect(can("route", "GATEWAY_ADMIN", ["gateway:read"])).toBe(true);
+    expect(can("gateway", "SUPPORT", [])).toBe(false);
     expect(can("user", "SECURITY_ADMIN", ["security:read"])).toBe(true);
-    expect(can("audit_log", "SECURITY_ADMIN", ["security:read"])).toBe(true);
+    expect(can("user", "OPERATOR", ["case:read"])).toBe(false);
   });
 
   test("wildcard authority grants access", () => {

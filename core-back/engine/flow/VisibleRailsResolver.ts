@@ -47,6 +47,7 @@ export interface RailRouteRecord {
   minAmount: DecimalInput;
   maxAmount?: DecimalInput | null;
   dailyCapAmount?: DecimalInput | null;
+  hardCap?: boolean;
   status: RouteStatus;
   healthState: RouteHealthState;
   maintenanceWindows?: readonly MaintenanceWindow[] | null;

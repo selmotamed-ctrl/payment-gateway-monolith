@@ -35,19 +35,13 @@ const makeJournalLine = async (direction: "DEBIT" | "CREDIT", amount: string): P
   const opposite = direction === "DEBIT" ? "CREDIT" : "DEBIT";
   try {
     await db.$executeRawUnsafe(
-      `INSERT INTO journal_lines (id, created_at, updated_at, entry_id, gl_account_id, direction, amount) VALUES
-        (?, ?, ?, ?, ?, ?, ?),
-        (?, ?, ?, ?, ?, ?, ?)`,
-      crypto.randomUUID(),
-      new Date(),
-      new Date(),
+      `INSERT INTO journal_lines (entry_id, gl_account_id, direction, amount) VALUES
+        (?, ?, ?, ?),
+        (?, ?, ?, ?)`,
       journalEntryId,
       direction === "DEBIT" ? glDebitId : glCreditId,
       direction,
       amount,
-      crypto.randomUUID(),
-      new Date(),
-      new Date(),
       journalEntryId,
       opposite === "DEBIT" ? glDebitId : glCreditId,
       opposite,
@@ -60,7 +54,11 @@ const makeJournalLine = async (direction: "DEBIT" | "CREDIT", amount: string): P
 };
 
 const removeJournalLines = async (): Promise<void> => {
-  await db.$executeRawUnsafe("DELETE FROM journal_lines WHERE entry_id = ?", journalEntryId);
+  await db.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("SET @pg_allow_ledger_mutation = 1");
+    await tx.$executeRawUnsafe("DELETE FROM journal_lines WHERE entry_id = ?", journalEntryId);
+    await tx.$executeRawUnsafe("SET @pg_allow_ledger_mutation = 0");
+  });
 };
 
 const tryUpdateLink = async (

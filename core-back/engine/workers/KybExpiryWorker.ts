@@ -9,6 +9,7 @@ import {
 } from "../../lib/kybReview";
 import { queueKybNotification } from "../../lib/kybNotifications";
 import { BaseWorker } from "./workerRuntime";
+import { createAuditLog } from "../../lib/auditLog";
 
 /**
  * The KYB lifecycle worker (design §16.4 and §16.10).
@@ -58,7 +59,7 @@ export class KybExpiryWorker extends BaseWorker {
           data: { status: "EXPIRED", statusChangedAt: now, expiredAt: now },
         });
         if (changed.count === 0) continue;
-        await tx.auditLog.create({
+        await createAuditLog(tx, {
           data: {
             actorId,
             role: "SYSTEM",
@@ -188,7 +189,7 @@ export class KybExpiryWorker extends BaseWorker {
         });
         if (updated.count === 0) return false;
         const actorId = await ensureSystemAutomationUser(tx as never);
-        await tx.auditLog.create({
+        await createAuditLog(tx, {
           data: {
             actorId,
             role: "SYSTEM",
@@ -271,7 +272,7 @@ export class KybExpiryWorker extends BaseWorker {
             },
           });
           created.push({ id: request.id, docType });
-          await tx.auditLog.create({
+          await createAuditLog(tx, {
             data: {
               actorId,
               role: "SYSTEM",
@@ -323,7 +324,7 @@ export class KybExpiryWorker extends BaseWorker {
       if (changed.count === 0) continue;
       await db.$transaction(async (tx) => {
         const actorId = await ensureSystemAutomationUser(tx as never);
-        await tx.auditLog.create({
+        await createAuditLog(tx, {
           data: {
             actorId,
             role: "SYSTEM",

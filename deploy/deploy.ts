@@ -115,6 +115,328 @@ const pm2Ecosystem = (service: ServicePlan, releaseDir: string): string => {
 `;
 };
 
+export type DatabaseServerFlavor = "mariadb" | "mysql";
+
+export interface DatabaseTuningOptions {
+  flavor: DatabaseServerFlavor;
+  hostRamMb?: number;
+  cpuCores?: number;
+  /** Variables the target server actually exposes (from information_schema). */
+  supportedVariables?: ReadonlySet<string>;
+}
+
+export interface DatabaseTuningResult {
+  variables: Record<string, string | number>;
+  problems: string[];
+  skipped: string[];
+  bufferPoolSizeMb?: number;
+}
+
+/**
+ * Resolves the buffer pool size. An explicit size wins; otherwise the
+ * configured percentage of the detected host RAM is rounded to 64 MiB. When
+ * the RAM cannot be detected the variable is omitted instead of inventing a
+ * value for the host.
+ */
+export const resolveBufferPoolSizeMb = (
+  config: DeployConfig,
+  hostRamMb?: number,
+): number | undefined => {
+  if (config.DB_INNODB_BUFFER_POOL_SIZE_MB !== undefined) {
+    return config.DB_INNODB_BUFFER_POOL_SIZE_MB;
+  }
+  if (hostRamMb === undefined || !Number.isFinite(hostRamMb) || hostRamMb <= 0) {
+    return undefined;
+  }
+  const target = Math.floor((hostRamMb * config.DB_INNODB_BUFFER_POOL_PERCENT) / 100);
+  return Math.max(128, Math.round(target / 64) * 64);
+};
+
+/**
+ * The MariaDB/MySQL tuning variables of design §2.12.
+ *
+ * Removed from the v1 proposal and never written: the obsolete buffer-pool
+ * instance-count setting and the non-portable deadlock-detection setting.
+ * Thread-pool settings are produced only for MariaDB; a MySQL server receives
+ * the portable subset so an unknown variable cannot stop it from starting.
+ */
+export const buildDatabaseTuning = (
+  config: DeployConfig,
+  options: DatabaseTuningOptions,
+): DatabaseTuningResult => {
+  const variables: Record<string, string | number> = {};
+  const problems: string[] = [];
+  const skipped: string[] = [];
+  const supported = options.supportedVariables;
+  const add = (name: string, value: string | number): void => {
+    if (supported && !supported.has(name.toLowerCase())) {
+      skipped.push(name);
+      return;
+    }
+    variables[name] = value;
+  };
+
+  const bufferPoolSizeMb = resolveBufferPoolSizeMb(config, options.hostRamMb);
+  if (bufferPoolSizeMb !== undefined) {
+    add("innodb_buffer_pool_size", `${bufferPoolSizeMb}M`);
+  }
+
+  add("character_set_server", "utf8mb4");
+  add("collation_server", "utf8mb4_unicode_ci");
+  add("transaction_isolation", "READ-COMMITTED");
+  add("innodb_log_file_size", `${config.DB_INNODB_LOG_FILE_SIZE_MB}M`);
+  add("innodb_log_buffer_size", `${config.DB_INNODB_LOG_BUFFER_SIZE_MB}M`);
+  add("innodb_flush_log_at_trx_commit", 1);
+  add("sync_binlog", 1);
+  add("innodb_flush_method", "O_DIRECT");
+  add("innodb_io_capacity", config.DB_INNODB_IO_CAPACITY);
+  add("innodb_io_capacity_max", config.DB_INNODB_IO_CAPACITY_MAX);
+  add("innodb_lock_wait_timeout", config.DB_INNODB_LOCK_WAIT_TIMEOUT);
+  add("max_connections", config.DB_MAX_CONNECTIONS);
+  add("table_open_cache", config.DB_TABLE_OPEN_CACHE);
+  add("tmp_table_size", `${config.DB_TMP_TABLE_SIZE_MB}M`);
+  add("max_heap_table_size", `${config.DB_MAX_HEAP_TABLE_SIZE_MB}M`);
+  add("performance_schema", config.DB_PERFORMANCE_SCHEMA ? "ON" : "OFF");
+  add("slow_query_log", config.DB_SLOW_QUERY_LOG ? "ON" : "OFF");
+  add("long_query_time", config.DB_LONG_QUERY_TIME_SECONDS);
+  add("log_slow_admin_statements", config.DB_LOG_SLOW_ADMIN_STATEMENTS ? "ON" : "OFF");
+  add("innodb_ft_min_token_size", config.DB_FULLTEXT_MIN_TOKEN_SIZE);
+  add("log_bin_trust_function_creators", 1);
+  if (config.DB_LOG_QUERIES_NOT_USING_INDEXES) {
+    add("log_queries_not_using_indexes", "ON");
+  }
+  if (config.DB_PRINT_ALL_DEADLOCKS) {
+    add("innodb_print_all_deadlocks", "ON");
+  }
+
+  // `thread_handling=pool-of-threads` and `thread_pool_size` are MariaDB
+  // options. MySQL has a different thread-pool plugin, so it is skipped.
+  if (options.flavor === "mariadb") {
+    add("thread_handling", "pool-of-threads");
+    const threadPoolSize = config.DB_THREAD_POOL_SIZE ?? options.cpuCores;
+    if (threadPoolSize !== undefined && threadPoolSize > 0) {
+      add("thread_pool_size", threadPoolSize);
+    }
+  }
+
+  if (bufferPoolSizeMb === undefined) {
+    skipped.push("innodb_buffer_pool_size (set DB_INNODB_BUFFER_POOL_SIZE_MB or detect host RAM)");
+  }
+  problems.push(...validateDatabaseTuningValues(variables));
+  return { variables, problems, skipped, bufferPoolSizeMb };
+};
+
+/** Validates the generated values before they are written to the server. */
+export const validateDatabaseTuningValues = (
+  variables: Record<string, string | number>,
+): string[] => {
+  const problems: string[] = [];
+  const numeric = (name: string): number | undefined => {
+    const value = variables[name];
+    if (value === undefined) {
+      return undefined;
+    }
+    const parsed = Number(String(value).replace(/[MG]$/i, ""));
+    return Number.isFinite(parsed) ? parsed : undefined;
+  };
+
+  const bufferPool = numeric("innodb_buffer_pool_size");
+  if (bufferPool !== undefined && bufferPool < 128) {
+    problems.push("innodb_buffer_pool_size must be at least 128M");
+  }
+  const logFile = numeric("innodb_log_file_size");
+  if (logFile !== undefined && logFile < 256) {
+    problems.push("innodb_log_file_size must be at least 256M");
+  }
+  const maxConnections = numeric("max_connections");
+  if (maxConnections !== undefined && maxConnections < 50) {
+    problems.push("max_connections must be at least 50");
+  }
+  const threadPool = numeric("thread_pool_size");
+  if (threadPool !== undefined) {
+    if (threadPool < 1) {
+      problems.push("thread_pool_size must be at least 1");
+    }
+    if (maxConnections !== undefined && threadPool > maxConnections) {
+      problems.push("thread_pool_size must not exceed max_connections");
+    }
+  }
+  const fulltextToken = numeric("innodb_ft_min_token_size");
+  if (fulltextToken !== undefined && (fulltextToken < 1 || fulltextToken > 10)) {
+    problems.push("innodb_ft_min_token_size must be between 1 and 10");
+  }
+  const longQuery = numeric("long_query_time");
+  if (longQuery !== undefined && longQuery <= 0) {
+    problems.push("long_query_time must be greater than zero");
+  }
+  const capacity = numeric("innodb_io_capacity");
+  const capacityMax = numeric("innodb_io_capacity_max");
+  if (capacity !== undefined && capacityMax !== undefined && capacityMax < capacity) {
+    problems.push("innodb_io_capacity_max must be greater than or equal to innodb_io_capacity");
+  }
+  return problems;
+};
+
+export const renderDatabaseTuning = (
+  config: DeployConfig,
+  options: DatabaseTuningOptions,
+): string => {
+  const result = buildDatabaseTuning(config, options);
+  if (result.problems.length > 0) {
+    throw new Error(`Invalid database tuning:\n- ${result.problems.join("\n- ")}`);
+  }
+  const lines = [
+    "# Generated by deploy/deploy.ts (design high_scale_db_architecture_v2.md §2.12).",
+    "# This deploy writes the file only; it never restarts MySQL/MariaDB.",
+    "[mysqld]",
+    ...Object.entries(result.variables).map(([name, value]) => `${name} = ${value}`),
+  ];
+  if (result.skipped.length > 0) {
+    lines.push("", "# Not supported by this server and therefore skipped:", ...result.skipped.map((name) => `# ${name}`));
+  }
+  return `${lines.join("\n")}\n`;
+};
+
+export const renderMariaDbConfig = renderDatabaseTuning;
+export const renderMariaDbTuning = renderDatabaseTuning;
+export const renderDatabaseConfig = renderDatabaseTuning;
+export const buildMariaDbTuning = buildDatabaseTuning;
+export const validateMariaDbTuning = validateDatabaseTuningValues;
+export const validateDatabaseVariables = validateDatabaseTuningValues;
+
+const sqlString = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`;
+
+const runMysqlQuery = (
+  runner: SshRunner,
+  host: HostPlan,
+  sql: string,
+): string =>
+  runner.capture(host.ssh, `mysql --protocol=socket -N -B -e ${sqlString(sql)}`, { sudo: true }).trim();
+
+const detectDatabaseFlavor = (
+  runner: SshRunner,
+  config: DeployConfig,
+  host: HostPlan,
+): DatabaseServerFlavor => {
+  if (config.DB_SERVER_FLAVOR !== "auto") {
+    return config.DB_SERVER_FLAVOR;
+  }
+  if (runner.dryRun) {
+    return "mariadb";
+  }
+  try {
+    const version = runMysqlQuery(runner, host, "SELECT VERSION()");
+    return /mariadb/i.test(version) ? "mariadb" : "mysql";
+  } catch (error) {
+    warn(`cannot detect the database flavour (${(error as Error).message}); using the portable MySQL subset`);
+    return "mysql";
+  }
+};
+
+const detectHostRamMb = (runner: SshRunner, host: HostPlan): number | undefined => {
+  if (runner.dryRun) {
+    return undefined;
+  }
+  try {
+    const memTotalKb = Number(
+      runner.capture(host.ssh, "awk '/MemTotal/ {print $2}' /proc/meminfo").trim(),
+    );
+    return Number.isFinite(memTotalKb) && memTotalKb > 0 ? Math.floor(memTotalKb / 1024) : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const detectCpuCores = (runner: SshRunner, host: HostPlan): number | undefined => {
+  if (runner.dryRun) {
+    return undefined;
+  }
+  try {
+    const cores = Number(runner.capture(host.ssh, "nproc").trim());
+    return Number.isInteger(cores) && cores > 0 ? cores : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const detectSupportedVariables = (
+  runner: SshRunner,
+  host: HostPlan,
+  names: readonly string[],
+): ReadonlySet<string> | undefined => {
+  if (runner.dryRun || names.length === 0) {
+    return undefined;
+  }
+  const list = names.map((name) => sqlString(name)).join(",");
+  const output = runMysqlQuery(
+    runner,
+    host,
+    `SELECT VARIABLE_NAME FROM information_schema.SYSTEM_VARIABLES WHERE VARIABLE_NAME IN (${list})`,
+  );
+  if (!output) {
+    return undefined;
+  }
+  return new Set(
+    output.split(/\r?\n/).map((line) => line.trim().toLowerCase()).filter(Boolean),
+  );
+};
+
+const applyDatabaseTuning = (input: {
+  runner: SshRunner;
+  config: DeployConfig;
+  host: HostPlan;
+}): void => {
+  const { runner, config, host } = input;
+  if (!config.DB_APPLY_TUNING) {
+    // Preserve the trigger flag from the previous deploys without touching
+    // the rest of the server configuration.
+    runner.writeRemoteFile({
+      target: host.ssh,
+      path: "/etc/mysql/conf.d/zz-payment-gateway.cnf",
+      content: "[mysqld]\nlog_bin_trust_function_creators = 1\n",
+      mode: 0o644,
+      sudo: true,
+    });
+    log("  database tuning skipped (DB_APPLY_TUNING=false)");
+    return;
+  }
+
+  const flavor = detectDatabaseFlavor(runner, config, host);
+  const hostRamMb = detectHostRamMb(runner, host);
+  const cpuCores = detectCpuCores(runner, host);
+  const initial = buildDatabaseTuning(config, { flavor, hostRamMb, cpuCores });
+  const supported = detectSupportedVariables(runner, host, Object.keys(initial.variables));
+  const result = buildDatabaseTuning(config, {
+    flavor,
+    ...(hostRamMb === undefined ? {} : { hostRamMb }),
+    ...(cpuCores === undefined ? {} : { cpuCores }),
+    ...(supported === undefined ? {} : { supportedVariables: supported }),
+  });
+  if (result.problems.length > 0) {
+    throw new Error(`Invalid database tuning:\n- ${result.problems.join("\n- ")}`);
+  }
+  for (const name of result.skipped) {
+    warn(`database variable ${name} is not supported by ${flavor}; skipped`);
+  }
+  const content = renderDatabaseTuning(config, {
+    flavor,
+    ...(hostRamMb === undefined ? {} : { hostRamMb }),
+    ...(cpuCores === undefined ? {} : { cpuCores }),
+    ...(supported === undefined ? {} : { supportedVariables: supported }),
+  });
+  runner.writeRemoteFile({
+    target: host.ssh,
+    path: "/etc/mysql/conf.d/zz-payment-gateway.cnf",
+    content,
+    mode: 0o644,
+    sudo: true,
+  });
+  log(
+    `  ${flavor} tuning written (${Object.keys(result.variables).length} variables, `
+      + `${result.bufferPoolSizeMb ?? "unknown"}M buffer pool); restart is manual`,
+  );
+};
+
 const FRONTENDS: Record<"admin" | "merchant" | "checkout" | "fake-rails", string> = {
   admin: "admin-front",
   merchant: "merchant-front",
@@ -414,13 +736,7 @@ const provisionDatabase = (input: {
   // SUPER, so raise the flag here (and persist it for the next restart).
   if (config.DB_ENGINE === "mysql") {
     runner.run(host.ssh, `mysql --protocol=socket -e "SET GLOBAL log_bin_trust_function_creators = 1"`, { sudo: true });
-    runner.writeRemoteFile({
-      target: host.ssh,
-      path: "/etc/mysql/conf.d/zz-payment-gateway.cnf",
-      content: "[mysqld]\nlog_bin_trust_function_creators = 1\n",
-      mode: 0o644,
-      sudo: true,
-    });
+    applyDatabaseTuning({ runner, config, host });
     log("  log_bin_trust_function_creators=1 (required for the maker≠checker trigger)");
   }
   log(`  database ${config.DB_NAME} and user ${config.DB_USER} ready on ${config.DB_PRIVATE_IP ?? host.ssh.host}`);

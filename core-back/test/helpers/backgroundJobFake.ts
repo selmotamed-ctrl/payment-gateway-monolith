@@ -288,6 +288,24 @@ const runRawQuery = (sql: string, params: unknown[]): unknown[] => {
 };
 
 const runRawExecute = (sql: string, params: unknown[]): number => {
+  if (sql.trim().startsWith("UPDATE `gl_accounts` SET `current_balance` = `current_balance` + ?")) {
+    const delta = Number(params[0]);
+    const accountId = String(params[1] ?? "");
+    const row = table("glAccount").find((entry) => entry.id === accountId);
+    if (!row) {
+      return 0;
+    }
+    const current = Number(row.currentBalance ?? 0);
+    const floor = row.balanceFloor === null || row.balanceFloor === undefined
+      ? null
+      : Number(row.balanceFloor);
+    const next = current + delta;
+    if (delta < 0 && floor !== null && next < floor) {
+      return 0;
+    }
+    row.currentBalance = next;
+    return 1;
+  }
   const update = /^UPDATE\s+`?(\w+)`?\s+SET\s+([\s\S]*?)(?:\bWHERE\b|$)/i.exec(sql.trim());
   if (!update) {
     return 0;
@@ -352,7 +370,10 @@ export const createFakePrisma = (): FakePrisma => {
   const client: Any = {
     backgroundJob: model("backgroundJob"),
     reconciliationRun: model("reconciliationRun"),
+    reconciliationRunFile: model("reconciliationRunFile"),
     reconciliationItem: model("reconciliationItem"),
+    glBalanceShard: model("glBalanceShard"),
+    glPeriodTotal: model("glPeriodTotal"),
     statementSource: model("statementSource"),
     paymentAttempt: model("paymentAttempt"),
     journalEntry: model("journalEntry"),

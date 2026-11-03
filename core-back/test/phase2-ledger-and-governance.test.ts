@@ -178,18 +178,17 @@ describe("phase 2 ledger", () => {
     ).toThrow();
   });
 
-  test("resolves the live balance from the checkpoint plus the journal lines", async () => {
+  test("resolves the materialized live balance", async () => {
     const account = {
       id: "wallet",
       accountType: "MERCHANT_WALLET",
+      balanceMode: "SYNC",
       ownerId: "merchant-1",
       gatewayId: null,
       credentialSetId: null,
       env: null,
       currency: "LYD",
-      checkpointBalance: decimal("10.0000"),
-      checkpointAt: new Date("2026-01-01T00:00:00.000Z"),
-      lastCheckpointId: "cp-1",
+      currentBalance: decimal("7.0000"),
     };
     const client = {
       glAccount: { findUnique: async () => account },
@@ -203,7 +202,7 @@ describe("phase 2 ledger", () => {
     const service = new CheckpointService(client as never);
     const balance = await service.getLiveBalance("wallet");
     expect(balance.liveBalance.toFixed(4)).toBe("7.0000");
-    expect(balance.checkpointBalance.toFixed(4)).toBe("10.0000");
+    expect(balance.checkpointBalance.toFixed(4)).toBe("0.0000");
     expect(balance.accountType).toBe("MERCHANT_WALLET");
   });
 

@@ -477,7 +477,10 @@ describe("currency scoped GL accounts", () => {
         );
         expect(matches.length).toBe(1);
         expect(matches[0]?.seedKey).toBe(systemGlAccountSeedKey(accountType, currency));
-        expect(String(matches[0]?.checkpointBalance)).toBe("0");
+        expect(String(matches[0]?.currentBalance)).toBe("0");
+        expect(matches[0]?.balanceMode).toBe(
+          accountType === "COMMISSION_RECEIVABLE" ? "SYNC" : "SHARDED",
+        );
       }
     }
 

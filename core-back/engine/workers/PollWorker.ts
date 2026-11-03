@@ -1,5 +1,10 @@
 import { toCamelRows, mysqlPlaceholders } from "../db/rawRows";
 import type { PaymentAttemptRow, Tx } from "../db/ports";
+import {
+  ATTEMPT_WORKER_COLUMNS,
+  claimAttemptDeadlines,
+  deleteAttemptDeadlines,
+} from "../../lib/counters/attemptDeadlines";
 import { BaseWorker, type WorkerOptions } from "./workerRuntime";
 import type { InquiryOutcome, InquiryPort } from "./ExpirySweeperWorker";
 import {
@@ -96,17 +101,27 @@ export class PollWorker extends BaseWorker {
   }
 
   private async lockDueAttempts(now: Date): Promise<PaymentAttemptRow[]> {
+    const claimed = await claimAttemptDeadlines(this.db, {
+      kinds: ["POLL"],
+      now,
+      limit: this.batchSize,
+      workerId: this.name,
+    });
+    const ids = [...new Set(claimed.map((entry) => entry.attemptId))];
+    if (ids.length === 0) {
+      return [];
+    }
+    const idPlaceholders = mysqlPlaceholders(ids.length);
     const statusPlaceholders = mysqlPlaceholders(POLLABLE_STATUSES.length);
-    const sql =
-      "SELECT * FROM payment_attempts" +
-      " WHERE next_check_at IS NOT NULL" +
-      " AND next_check_at <= ?" +
-      " AND terminal_at IS NULL" +
-      ` AND status IN (${statusPlaceholders})` +
-      " ORDER BY next_check_at ASC" +
-      " LIMIT ?" +
-      " FOR UPDATE SKIP LOCKED";
-    const result = await this.db.$queryRawUnsafe(sql, now, ...POLLABLE_STATUSES, this.batchSize);
+    const result = await this.db.$queryRawUnsafe(
+      `SELECT ${ATTEMPT_WORKER_COLUMNS}
+         FROM payment_attempts
+        WHERE id IN (${idPlaceholders})
+          AND terminal_at IS NULL
+          AND status IN (${statusPlaceholders})`,
+      ...ids,
+      ...POLLABLE_STATUSES,
+    );
     return toCamelRows<PaymentAttemptRow>(result);
   }
 
@@ -249,13 +264,19 @@ export class PollWorker extends BaseWorker {
    * nodes at the same time.
    */
   private async terminate(attemptId: string, status: string, now: Date): Promise<boolean> {
-    const result = await this.db.$executeRawUnsafe(
-      "UPDATE payment_attempts SET status = ?, terminal_at = ?, next_check_at = NULL, updated_at = NOW() WHERE id = ? AND terminal_at IS NULL",
-      status,
-      now,
-      attemptId,
-    );
-    return Number(result ?? 0) > 0;
+    return this.db.$transaction(async (tx: Tx) => {
+      const result = await tx.$executeRawUnsafe(
+        "UPDATE payment_attempts SET status = ?, terminal_at = ?, next_check_at = NULL, updated_at = NOW(3) WHERE id = ? AND terminal_at IS NULL",
+        status,
+        now,
+        attemptId,
+      );
+      const transitioned = Number(result ?? 0) > 0;
+      if (transitioned) {
+        await deleteAttemptDeadlines(tx, attemptId);
+      }
+      return transitioned;
+    });
   }
 
   private async releaseSlot(attempt: PaymentAttemptRow): Promise<void> {

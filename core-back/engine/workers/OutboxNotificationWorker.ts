@@ -44,14 +44,35 @@ export class OutboxNotificationWorker extends BaseWorker {
   }
 
   private async lockQueuedNotifications(now: Date): Promise<NotificationRow[]> {
-    const sql =
-      "SELECT * FROM notifications" +
-      " WHERE status = 'QUEUED'" +
-      " AND (next_attempt_at IS NULL OR next_attempt_at <= ?)" +
-      " ORDER BY next_attempt_at ASC" +
-      " LIMIT ?" +
-      " FOR UPDATE SKIP LOCKED";
-    const result = await this.db.$queryRawUnsafe(sql, now, this.batchSize);
+    const columns = [
+      "id",
+      "created_at",
+      "updated_at",
+      "event_id",
+      "recipient_user_id",
+      "recipient_merchant_id",
+      "address_masked",
+      "address_ciphertext",
+      "template_code",
+      "channel",
+      "lang",
+      "payload_json",
+      "status",
+      "provider_message_id",
+      "attempts",
+      "next_attempt_at",
+    ].join(", ");
+    const result = await this.db.$queryRawUnsafe(
+      `SELECT ${columns}
+         FROM notifications
+        WHERE status = 'QUEUED'
+          AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+        ORDER BY next_attempt_at ASC
+        LIMIT ?
+        FOR UPDATE SKIP LOCKED`,
+      now,
+      this.batchSize,
+    );
     return toCamelRows<NotificationRow>(result);
   }
 

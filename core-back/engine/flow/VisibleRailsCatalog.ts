@@ -1,7 +1,8 @@
 import { moneyToString } from "../db/money";
 import { PrismaRepositories } from "../db/repositories";
 import type { PrismaLike } from "../db/ports";
-import { dailyProcessedAmountByRoute } from "./DailyRouteVolume";
+import { dailyProcessedAmountByRoute, resolveGatewayTimezone } from "./DailyRouteVolume";
+import { readRouteDailyVolumes } from "../../lib/counters/routeDailyVolume";
 import {
   VisibleRailsResolver,
   type CommissionProfileRecord,
@@ -64,7 +65,18 @@ export const loadRailCatalog = async (
 ): Promise<RailCatalog> => {
   const now = options.now ?? new Date();
   const repositories = new PrismaRepositories(db);
-  const processed = await dailyProcessedAmountByRoute(repositories.payments, db, { now });
+  const timeZone = await resolveGatewayTimezone(db);
+  let processed: Map<string, bigint>;
+  try {
+    processed = await readRouteDailyVolumes(db, { now, timeZone });
+  } catch {
+    processed = new Map();
+  }
+  if (processed.size === 0) {
+    // Before the first materialised row exists (a fresh day or an upgraded
+    // database), the exact attempt aggregate is the safe fallback.
+    processed = await dailyProcessedAmountByRoute(repositories.payments, db, { now, timeZone });
+  }
   const [rails, routes, credentialSets, commissionProfiles] = await Promise.all([
     db.rail.findMany({ orderBy: { displayOrder: "asc" } }),
     db.railRoute.findMany(),
@@ -96,6 +108,7 @@ export const loadRailCatalog = async (
       minAmount: entry.minAmount as RailRouteRecord["minAmount"],
       maxAmount: (entry.maxAmount ?? null) as RailRouteRecord["maxAmount"],
       dailyCapAmount: (entry.dailyCapAmount ?? null) as RailRouteRecord["dailyCapAmount"],
+      hardCap: Boolean(entry.hardCap),
       status: entry.status as RailRouteRecord["status"],
       healthState: entry.healthState as RailRouteRecord["healthState"],
       maintenanceWindows: (entry.maintenanceWindows ?? undefined) as RailRouteRecord["maintenanceWindows"],

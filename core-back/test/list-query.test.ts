@@ -19,7 +19,7 @@ describe("shared list query", () => {
     expect(built.where).toEqual({
       AND: [{ OR: [{ code: { contains: "sadad" } }, { name: { contains: "sadad" } }] }, { status: { in: ["ACTIVE", "PAUSED"] } }],
     });
-    expect(built.orderBy).toEqual([{ code: "asc" }, { id: "desc" }]);
+    expect(built.orderBy).toEqual([{ code: "asc" }, { id: "asc" }]);
   });
 
   test("dates are inclusive and support a future window", () => {

@@ -67,7 +67,8 @@ export interface GlAccountSeedClient {
       create: {
         accountType: GlAccountType;
         currency: string;
-        checkpointBalance: Prisma.Decimal;
+        balanceMode: "SYNC" | "SHARDED";
+        currentBalance: Prisma.Decimal;
         seedKey: string;
       };
     }): Promise<unknown>;
@@ -77,9 +78,8 @@ export interface GlAccountSeedClient {
 /**
  * Seeds the system GL accounts of every supported currency.
  *
- * The balances stay at zero: the balance of an account is derived from the
- * journal lines, the checkpoint balance is only the anchor of the periodic
- * invariant check.
+ * The balances stay at zero: the balance of an account is materialized from
+ * the journal lines by the ledger poster and verified against the ledger.
  */
 export const seedSystemGlAccounts = async (
   client: GlAccountSeedClient,
@@ -94,7 +94,8 @@ export const seedSystemGlAccounts = async (
         create: {
           accountType,
           currency,
-          checkpointBalance: new Prisma.Decimal(0),
+          balanceMode: accountType === "COMMISSION_RECEIVABLE" ? "SYNC" : "SHARDED",
+          currentBalance: new Prisma.Decimal(0),
           seedKey,
         },
       });

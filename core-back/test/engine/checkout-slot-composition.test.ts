@@ -157,7 +157,7 @@ describe("infinite-use link lifecycle", () => {
       infinite_use: 1,
       use_count: 1,
       confirmed_count: 0,
-      active_locked_count: 1,
+      active_locked_count: 0,
       state: "PENDING",
     });
     const store = new PrismaSlotReservationStore(harness.client);
@@ -165,19 +165,19 @@ describe("infinite-use link lifecycle", () => {
     const first = await store.commitSlot({ id: "attempt-1", linkId: harness.link.id } as never);
     expect(first).toMatchObject({ outcome: "COMMITTED" });
     expect(harness.link.state).toBe("PENDING");
-    expect(harness.link.confirmed_count).toBe(1);
+    expect(harness.link.confirmed_count).toBe(0);
     expect(harness.link.active_locked_count).toBe(0);
 
     const reservation = await store.reserveSlot(
       { id: "attempt-2", linkId: harness.link.id } as never,
     );
     expect(reservation.linkId).toBe(harness.link.id);
-    expect(harness.link.active_locked_count).toBe(1);
+    expect(harness.link.active_locked_count).toBe(0);
 
     const second = await store.commitSlot({ id: "attempt-2", linkId: harness.link.id } as never);
     expect(second).toMatchObject({ outcome: "COMMITTED" });
     expect(harness.link.state).toBe("PENDING");
-    expect(harness.link.confirmed_count).toBe(2);
+    expect(harness.link.confirmed_count).toBe(0);
     expect(harness.link.active_locked_count).toBe(0);
   });
 });

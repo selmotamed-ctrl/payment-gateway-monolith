@@ -45,7 +45,7 @@ afterAll(async () => {
 
 const uploadKyb = (filename: string, mime: string, bytes: Buffer) => {
   const form = new FormData();
-  form.set("documentType", "REGISTRATION_CERTIFICATE");
+  form.set("documentType", "COMMERCIAL_REGISTRY");
   form.set("document", new Blob([new Uint8Array(bytes)], { type: mime }), filename);
   return fetch(`${edgeUrl}/api/v1/merchant/onboarding/kyb-documents`, {
     method: "POST",
@@ -104,7 +104,7 @@ describe("merchant kyb upload validation", () => {
 
   test("rejects a missing document", async () => {
     const form = new FormData();
-    form.set("documentType", "REGISTRATION_CERTIFICATE");
+    form.set("documentType", "COMMERCIAL_REGISTRY");
     const response = await fetch(`${edgeUrl}/api/v1/merchant/onboarding/kyb-documents`, {
       method: "POST",
       headers: { authorization: "Bearer merchant-session-token" },

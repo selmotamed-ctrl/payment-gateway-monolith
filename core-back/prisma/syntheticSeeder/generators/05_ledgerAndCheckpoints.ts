@@ -2,11 +2,9 @@ import type { SeederContext } from "../context";
 import { addDays, ensureSystemAccounts, postLedger } from "../builders";
 
 /**
- * Posts every financial event through balanced double-entry templates and
- * snapshots the historical months into `gl_accounts.checkpoint_balance`.
- *
- * October 2026 (the current month) stays post-checkpoint, so the live balance
- * formula `checkpoint_balance + SUM(lines > last_checkpoint_id)` is exercised.
+ * Posts every financial event through balanced double-entry templates. The
+ * writer rebuilds the materialized account balances and shards after the bulk
+ * journal-line insert; this generator only produces the append-only ledger.
  */
 export const generateLedgerAndCheckpoints = (ctx: SeederContext): void => {
   const system = ensureSystemAccounts(ctx);
@@ -91,49 +89,7 @@ export const generateLedgerAndCheckpoints = (ctx: SeederContext): void => {
     }
   }
 
-  // ---- monthly checkpoints -------------------------------------------------
-  const monthKeys: string[] = [];
-  const cursor = new Date(ctx.timeline.start);
-  cursor.setUTCDate(1);
-  cursor.setUTCHours(0, 0, 0, 0);
-  while (cursor <= ctx.timeline.end) {
-    monthKeys.push(`${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, "0")}`);
-    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
-  }
-  const currentMonth = `${ctx.timeline.end.getUTCFullYear()}-${String(ctx.timeline.end.getUTCMonth() + 1).padStart(2, "0")}`;
+  // Balances are materialized after the bulk journal-line insert by the
+  // writer. The generator only keeps the append-only ledger rows here.
 
-  const balances = new Map<string, number>();
-  for (const line of ctx.dataset.journalLines) {
-    const at = new Date(line.createdAt as Date);
-    const key = `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, "0")}`;
-    const delta = line.direction === "DEBIT" ? Number(line.amount) : -Number(line.amount);
-    balances.set(`${key}:${line.glAccountId}`, (balances.get(`${key}:${line.glAccountId}`) ?? 0) + delta);
-  }
-
-  const running = new Map<string, number>();
-  for (const month of monthKeys) {
-    if (month === currentMonth) break;
-    for (const account of ctx.refs.glAccounts) {
-      const delta = balances.get(`${month}:${account.id}`) ?? 0;
-      const next = (running.get(account.id) ?? 0) + delta;
-      running.set(account.id, next);
-      const at = new Date(`${month}-01T23:59:59.000Z`);
-      at.setUTCMonth(at.getUTCMonth() + 1);
-      at.setUTCDate(0);
-      ctx.checkpoints.set(account.id, {
-        balance: next.toFixed(4),
-        at,
-        lastCheckpointId: `checkpoint-${month}`,
-      });
-    }
-  }
-
-  for (const account of ctx.dataset.glAccounts) {
-    const checkpoint = ctx.checkpoints.get(account.id);
-    if (checkpoint) {
-      account.checkpointBalance = checkpoint.balance;
-      account.checkpointAt = checkpoint.at;
-      account.lastCheckpointId = checkpoint.lastCheckpointId;
-    }
-  }
 };

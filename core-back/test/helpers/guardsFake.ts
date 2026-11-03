@@ -401,6 +401,7 @@ export const createGuardFixture = (overrides: Partial<GuardState> = {}): GuardFi
         applicationId === state.link.applicationId ? state.merchant : null,
     },
     payments: {
+      findLinkByKey: async (_tx: Tx, key: string) => (key === state.link.key ? state.link : null),
       lockLinkByKey: async (_tx: Tx, key: string) => (key === state.link.key ? state.link : null),
       findAttemptByIdempotencyKey: async () => null,
       resolveSettlementTarget: async () => "PLATFORM_CLEARING",

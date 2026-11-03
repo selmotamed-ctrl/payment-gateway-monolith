@@ -232,8 +232,6 @@ describe("generated client type compatibility", () => {
       action: "TEST",
       entityType: "PAYMENT_ATTEMPT",
       entityId: "attempt-1",
-      beforeJson: {},
-      afterJson: {},
     };
     const settingData: Prisma.PlatformSettingCreateInput = {
       key: "onboarding.sandbox_before_approval",

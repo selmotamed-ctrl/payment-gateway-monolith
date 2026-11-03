@@ -197,10 +197,13 @@ const buildCatalog = async (): Promise<Catalog> => {
       data: {
         accountType: accountType as Prisma.GlAccountCreateInput["accountType"],
         ownerId: merchant.id,
-        credentialSetId: credentialSet.id,
+        credentialSet: { connect: { id: credentialSet.id } },
         env: ENVIRONMENT,
         currency: CURRENCY,
-        checkpointBalance: new Prisma.Decimal(0),
+        balanceMode: accountType === "MERCHANT_WALLET" || accountType === "COMMISSION_RECEIVABLE"
+          ? "SYNC"
+          : "SHARDED",
+        currentBalance: new Prisma.Decimal(0),
       },
     });
     return account.id;
@@ -736,6 +739,7 @@ const cleanup = async (): Promise<void> => {
   if (!catalog) {
     return;
   }
+  const activeCatalog = catalog;
   const steps = await client.flowStep.findMany({
     where: { flow: { gatewayVersionId: catalog.gatewayVersionId } },
     select: { id: true },
@@ -752,11 +756,19 @@ const cleanup = async (): Promise<void> => {
   // The attempts and their journal entries reference the gateway version, so
   // they have to go first.
   await client.paymentAttempt.deleteMany({ where: { id: { in: [catalog.attemptId, catalog.secondAttemptId] } } });
-  await client.journalLine.deleteMany({
-    where: { entry: { refType: "PAYMENT_ATTEMPT", refId: { in: [catalog.attemptId, catalog.secondAttemptId] } } },
-  });
-  await client.journalEntry.deleteMany({
-    where: { refType: "PAYMENT_ATTEMPT", refId: { in: [catalog.attemptId, catalog.secondAttemptId] } },
+  await client.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("SET @pg_allow_ledger_mutation = 1");
+    await tx.journalLine.deleteMany({
+      where: { entry: { refType: "PAYMENT_ATTEMPT", refId: { in: [activeCatalog.attemptId, activeCatalog.secondAttemptId] } } },
+    });
+    await tx.journalEntry.deleteMany({
+      where: { refType: "PAYMENT_ATTEMPT", refId: { in: [activeCatalog.attemptId, activeCatalog.secondAttemptId] } },
+    });
+    const accountIds = Object.values(activeCatalog.glAccountIds);
+    const placeholders = accountIds.map(() => "?").join(",");
+    await tx.$executeRawUnsafe(`DELETE FROM gl_balance_shards WHERE gl_account_id IN (${placeholders})`, ...accountIds);
+    await tx.$executeRawUnsafe(`DELETE FROM gl_period_totals WHERE gl_account_id IN (${placeholders})`, ...accountIds);
+    await tx.$executeRawUnsafe("SET @pg_allow_ledger_mutation = 0");
   });
   await client.gateway.update({ where: { id: catalog.gatewayId }, data: { activeVersionId: null } });
   await client.gatewayVersion.deleteMany({ where: { id: catalog.gatewayVersionId } });

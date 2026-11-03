@@ -81,6 +81,11 @@ export interface SlotReservationStore {
   reserveSlot(attempt: DynamicAttempt, transaction?: unknown): Promise<SlotReservation>;
   releaseSlot(attempt: DynamicAttempt, reason: string, transaction?: unknown): Promise<void>;
   commitSlot(attempt: DynamicAttempt, transaction?: unknown): Promise<SlotCommitResult | void>;
+  /**
+   * Lifecycle hook: removes the open-deadline work rows when the attempt
+   * reaches a final state. It is optional so an in-memory store can ignore it.
+   */
+  syncAttemptDeadlines?(attempt: DynamicAttempt, transaction?: unknown): Promise<void>;
 }
 
 export interface FlowProvider {
@@ -679,6 +684,9 @@ export class DynamicRailEngine {
     }
     attempt.status = nextStatus;
     const updated = await this.options.attempts.updateAttempt(attempt.id, { status: nextStatus, ...patch });
+    if (this.options.slots.syncAttemptDeadlines) {
+      await this.options.slots.syncAttemptDeadlines(attempt);
+    }
     await this.transitionBus.publish(ATTEMPT_TRANSITION_TOPIC, {
       attemptId: attempt.id,
       status: nextStatus,

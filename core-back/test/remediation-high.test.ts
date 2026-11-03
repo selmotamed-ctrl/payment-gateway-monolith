@@ -122,6 +122,9 @@ const extendFake = (base: FakePrisma): FakePrisma => {
     .$transaction.bind(base);
   const proxy: Record<string, unknown> = new Proxy(base as unknown as Record<string, unknown>, {
     get(target, property) {
+      if (property === "$executeRawUnsafe" || property === "$executeRaw") {
+        return async () => 1;
+      }
       if (property === "$transaction") {
         return async <R>(callback: (tx: FakePrisma) => Promise<R>): Promise<R> =>
           baseTransaction(async () => callback(proxy as unknown as FakePrisma));
@@ -918,7 +921,13 @@ describe("money-integrity remediations (113, 126, 39, 48)", () => {
 
   test("defect 48: the commission receivable ceiling comparison pauses or nets traffic", async () => {
     await fixture.client.glAccount.create({
-      data: { id: "acc-receivable", accountType: "COMMISSION_RECEIVABLE", currency: "LYD" },
+      data: {
+        id: "acc-receivable",
+        accountType: "COMMISSION_RECEIVABLE",
+        balanceMode: "SYNC",
+        currency: "LYD",
+        currentBalance: new Decimal(120),
+      },
     });
     await fixture.client.journalEntry.create({
       data: { id: "receivable-entry", refType: "PAYMENT_ATTEMPT", refId: "attempt-1" },

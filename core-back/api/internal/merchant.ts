@@ -24,6 +24,7 @@ import {
 } from "../../lib/auth";
 import { Vault } from "../../engine/crypto/Vault";
 import { decimal } from "../../engine/ledger/LedgerPoster";
+import { GlBalanceStore } from "../../engine/ledger/GlBalanceStore";
 import { moneyFromDecimal } from "../../engine/db/money";
 import { getPlatformRuntime } from "../../engine/runtime";
 import type { BeneficialOwnerRow, MerchantRow, Tx } from "../../engine/db/ports";
@@ -36,6 +37,7 @@ import { publishWatchlist } from "../../engine/guards/ScreeningProvider";
 import { asStringArray, resolveVisibleRails } from "../../engine/flow/VisibleRailsCatalog";
 import { json, jsonOptional } from "./json";
 import { requireAuthentication, requireMerchantScope, principalOf } from "../middleware/authDoubleCheck";
+import { createAuditLog } from "../../lib/auditLog";
 
 const router = express.Router();
 
@@ -677,9 +679,9 @@ router.post("/auth/register", async (request: Request, response: Response) => {
     const glAccount = await tx.glAccount.create({
       data: {
         accountType: "MERCHANT_WALLET",
+        balanceMode: "SYNC",
         ownerId: merchant.id,
         currency: "LYD",
-        checkpointBalance: new Prisma.Decimal(0),
       },
     });
     const wallet = await tx.wallet.create({
@@ -768,8 +770,8 @@ router.post("/auth/accept-invitation", async (request: Request, response: Respon
     throw new ApiError(400, "INVITATION_INVALID", "The invitation is invalid or has expired");
   }
   const passwordHash = await hashPassword(body.password);
-  await client.$transaction([
-    client.user.update({
+  await client.$transaction(async (tx) => {
+    await tx.user.update({
       where: { id: user.id },
       data: {
         status: "ACTIVE",
@@ -777,8 +779,8 @@ router.post("/auth/accept-invitation", async (request: Request, response: Respon
         invitationTokenHash: null,
         invitationExpiresAt: null,
       },
-    }),
-    client.auditLog.create({
+    });
+    await createAuditLog(tx, {
       data: {
         actorId: user.id,
         role: user.role,
@@ -788,8 +790,8 @@ router.post("/auth/accept-invitation", async (request: Request, response: Respon
         beforeJson: { status: "INVITED" },
         afterJson: { status: "ACTIVE" },
       },
-    }),
-  ]);
+    });
+  });
   response.json({ status: "ACTIVE", userId: user.id, merchantId: user.merchantId, loginRequired: true });
 });
 
@@ -1112,7 +1114,7 @@ router.post("/onboarding/kyb-documents", async (request: Request, response: Resp
         select: { id: true },
       }))?.id;
     if (auditActorId) {
-      await tx.auditLog.create({
+      await createAuditLog(tx, {
         data: {
           actorId: auditActorId,
           role: principal.role ?? "MERCHANT_ADMIN",
@@ -1334,9 +1336,9 @@ router.post("/wallets", async (request: Request, response: Response) => {
     const glAccount = await tx.glAccount.create({
       data: {
         accountType: "MERCHANT_WALLET",
+        balanceMode: "SYNC",
         ownerId: merchantId,
         currency: body.currency.toUpperCase(),
-        checkpointBalance: new Prisma.Decimal(0),
       },
     });
     return tx.wallet.create({
@@ -1363,20 +1365,13 @@ router.get("/wallets/:id/balance", async (request: Request, response: Response) 
   if (!wallet) {
     throw new ApiError(404, "WALLET_NOT_FOUND", "The wallet does not exist");
   }
-  const lines = await client.journalLine.findMany({
-    where: { glAccountId: wallet.glAccountId },
-    select: { direction: true, amount: true },
-  });
-  let balance = decimal(0);
-  for (const line of lines) {
-    const value = decimal(line.amount);
-    balance = line.direction === "CREDIT" ? balance.plus(value) : balance.minus(value);
-  }
+  const snapshot = await new GlBalanceStore(client).readBalance(client, wallet.glAccount);
+  const balance = snapshot.balance.negated();
   response.json({
     walletId: wallet.id,
     currency: wallet.currency,
     balance: balance.toFixed(4),
-    checkpointBalance: decimal(wallet.glAccount.checkpointBalance).toFixed(4),
+    checkpointBalance: balance.toFixed(4),
   });
 });
 
@@ -1892,7 +1887,7 @@ router.post("/tokens", async (request: Request, response: Response) => {
         : undefined,
     },
   });
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: principal.userId ?? created.id,
       role: principal.role ?? "MERCHANT_API",
@@ -2456,13 +2451,31 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
   const [wallets, pendingCashouts] = await Promise.all([
     client.wallet.findMany({
       where: { merchantId },
-      select: { currency: true, glAccount: { select: { checkpointBalance: true } } },
+      select: {
+        currency: true,
+        glAccount: {
+          select: {
+            id: true,
+            accountType: true,
+            balanceMode: true,
+            currentBalance: true,
+            currency: true,
+            shards: { select: { balance: true } },
+          },
+        },
+      },
     }),
     client.cashoutRequest.count({ where: { merchantId, state: { in: ["PENDING", "PROCESSING"] } } }),
   ]);
 
   const walletBalance = wallets.reduce(
-    (total, wallet) => total.plus(decimal(wallet.glAccount?.checkpointBalance ?? 0)),
+    (total, wallet) => {
+      const account = wallet.glAccount;
+      const balance = account.balanceMode === "SYNC"
+        ? decimal(account.currentBalance)
+        : account.shards.reduce((sum, shard) => sum.plus(decimal(shard.balance)), decimal(0));
+      return total.minus(balance);
+    },
     decimal(0),
   );
   const currency = wallets[0]?.currency ?? attempts[0]?.currency ?? "LYD";

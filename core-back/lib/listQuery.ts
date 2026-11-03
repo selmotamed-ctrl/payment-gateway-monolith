@@ -14,6 +14,7 @@ export interface ListQuery {
   pageSize: number;
   sortKey?: string;
   sortDirection: "asc" | "desc";
+  cursor?: string;
   status?: string;
   state?: string;
   kind?: string;
@@ -38,6 +39,23 @@ export interface ListQuery {
   maxScore?: string;
   [key: string]: unknown;
 }
+
+export const LIST_COUNT_CAP = 10_001;
+export const LIST_COUNT_CACHE_MS = 15_000;
+
+interface CountCacheEntry {
+  expiresAt: number;
+  total: number;
+  totalIsCapped: boolean;
+}
+
+const countCache = new Map<string, CountCacheEntry>();
+
+export const clearListQueryCaches = (): void => {
+  countCache.clear();
+};
+
+export const clearListQueryCache = clearListQueryCaches;
 
 const asString = (value: unknown): string | undefined => {
   if (Array.isArray(value)) {
@@ -103,6 +121,17 @@ const setPath = (target: Record<string, unknown>, path: string, value: unknown):
   return target;
 };
 
+const readPath = (source: unknown, path: string): unknown => {
+  let cursor: unknown = source;
+  for (const part of path.split(".")) {
+    if (!cursor || typeof cursor !== "object") {
+      return undefined;
+    }
+    cursor = (cursor as Record<string, unknown>)[part];
+  }
+  return cursor;
+};
+
 export interface ListSpec {
   /** Dot paths searched with a case-insensitive `contains`, OR-ed together. */
   search?: string[];
@@ -127,6 +156,14 @@ export interface ListSpec {
   defaultPageSize?: number;
 }
 
+export interface ListCursorPayload {
+  key: string;
+  direction: "asc" | "desc";
+  value: unknown;
+  valueType: "date" | "number" | "string" | "boolean";
+  id: string;
+}
+
 export interface BuiltListQuery {
   where: Record<string, unknown>;
   orderBy: Array<Record<string, unknown>>;
@@ -134,7 +171,141 @@ export interface BuiltListQuery {
   pageSize: number;
   skip: number;
   take: number;
+  cursor?: ListCursorPayload;
+  cursorMode: boolean;
+  sortPath?: string;
+  sortDirection: "asc" | "desc";
 }
+
+export const encodeListCursor = (payload: ListCursorPayload): string =>
+  Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+
+const encodeCursor = encodeListCursor;
+
+export const decodeListCursor = (value: string | undefined): ListCursorPayload | null => {
+  if (!value) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<ListCursorPayload>;
+    if (
+      typeof parsed.key !== "string"
+      || (parsed.direction !== "asc" && parsed.direction !== "desc")
+      || typeof parsed.id !== "string"
+      || (parsed.valueType !== "date"
+        && parsed.valueType !== "number"
+        && parsed.valueType !== "string"
+        && parsed.valueType !== "boolean")
+    ) {
+      return null;
+    }
+    let decoded = parsed.value;
+    if (parsed.valueType === "date" && typeof decoded === "string") {
+      const date = new Date(decoded);
+      decoded = Number.isNaN(date.getTime()) ? decoded : date;
+    }
+    return {
+      key: parsed.key,
+      direction: parsed.direction,
+      value: decoded,
+      valueType: parsed.valueType,
+      id: parsed.id,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const cursorValueType = (value: unknown): ListCursorPayload["valueType"] => {
+  if (value instanceof Date) {
+    return "date";
+  }
+  if (typeof value === "number") {
+    return "number";
+  }
+  if (typeof value === "boolean") {
+    return "boolean";
+  }
+  return "string";
+};
+
+export const cursorForRow = (
+  row: unknown,
+  sortPath: string | undefined,
+  direction: "asc" | "desc",
+): string | null => {
+  if (!row || typeof row !== "object") {
+    return null;
+  }
+  const idValue = readPath(row, "id");
+  if (idValue === null || idValue === undefined) {
+    return null;
+  }
+  const key = sortPath && sortPath.length > 0 ? sortPath : "createdAt";
+  const value = readPath(row, key);
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const valueType = cursorValueType(value);
+  return encodeCursor({
+    key,
+    direction,
+    value: value instanceof Date ? value.toISOString() : value,
+    valueType,
+    id: String(idValue),
+  });
+};
+
+const applyCursorCondition = (
+  conditions: Record<string, unknown>[],
+  cursor: ListCursorPayload,
+): void => {
+  if (cursor.key === "id") {
+    conditions.push({ id: cursor.direction === "asc" ? { gt: cursor.id } : { lt: cursor.id } });
+    return;
+  }
+  const comparison = cursor.direction === "asc" ? { gt: cursor.value } : { lt: cursor.value };
+  conditions.push({
+    OR: [
+      setPath({}, cursor.key, comparison),
+      {
+        AND: [
+          setPath({}, cursor.key, { equals: cursor.value }),
+          { id: cursor.direction === "asc" ? { gt: cursor.id } : { lt: cursor.id } },
+        ],
+      },
+    ],
+  });
+};
+
+const resolveSort = (
+  query: ListQuery,
+  spec: ListSpec,
+): { path?: string; direction: "asc" | "desc"; defaultOrder: Array<Record<string, unknown>> } => {
+  const sortPath = query.sortKey && spec.sortable ? spec.sortable[query.sortKey] : undefined;
+  if (sortPath) {
+    return {
+      path: sortPath,
+      direction: query.sortDirection,
+      defaultOrder: [],
+    };
+  }
+  if (Array.isArray(spec.defaultSort)) {
+    const last = spec.defaultSort[spec.defaultSort.length - 1];
+    const entry = last ? Object.entries(last)[0] : undefined;
+    return {
+      path: entry?.[0],
+      direction: (entry?.[1] as "asc" | "desc" | undefined) ?? "desc",
+      defaultOrder: [...spec.defaultSort],
+    };
+  }
+  const entry = Object.entries(spec.defaultSort)[0];
+  return {
+    path: entry?.[0],
+    direction: (entry?.[1] as "asc" | "desc" | undefined) ?? "desc",
+    defaultOrder: [{ ...spec.defaultSort }],
+  };
+};
 
 export const buildListQuery = (raw: unknown, spec: ListSpec): BuiltListQuery => {
   const query = parseListQuery(raw);
@@ -204,25 +375,98 @@ export const buildListQuery = (raw: unknown, spec: ListSpec): BuiltListQuery => 
     }
   }
 
-  const where = conditions.length === 0 ? {} : { AND: conditions };
+  const sort = resolveSort(query, spec);
+  const cursor = decodeListCursor(query.cursor);
+  const cursorMode = Boolean(cursor && (!sort.path || cursor.key === sort.path));
+  if (cursorMode && cursor) {
+    applyCursorCondition(conditions, cursor);
+  }
 
-  const sortPath = query.sortKey && spec.sortable ? spec.sortable[query.sortKey] : undefined;
-  const orderBy: Array<Record<string, unknown>> = sortPath
-    ? [setPath({}, sortPath, query.sortDirection), { id: "desc" }]
-    : Array.isArray(spec.defaultSort)
-      ? [...spec.defaultSort, { id: "desc" }]
-      : [{ ...spec.defaultSort }, { id: "desc" }];
+  const where = conditions.length === 0 ? {} : { AND: conditions };
+  const orderBy: Array<Record<string, unknown>> = sort.path
+    ? sort.path === "id"
+      ? [{ id: sort.direction }]
+      : [...sort.defaultOrder.filter((entry) => !(sort.path! in entry)), setPath({}, sort.path, sort.direction), { id: sort.direction }]
+    : [...sort.defaultOrder, { id: sort.direction }];
 
   const rawSource = (raw ?? {}) as Record<string, unknown>;
   const requestedPageSize = typeof rawSource.pageSize === "string" && rawSource.pageSize !== "";
   const pageSize = Math.min(200, Math.max(1, requestedPageSize ? query.pageSize : spec.defaultPageSize ?? query.pageSize));
-  const page = query.page;
-  return { where, orderBy, page, pageSize, skip: (page - 1) * pageSize, take: pageSize };
+  const page = cursorMode ? 1 : query.page;
+  return {
+    where,
+    orderBy,
+    page,
+    pageSize,
+    skip: cursorMode ? 0 : Math.min((page - 1) * pageSize, 1_000),
+    take: pageSize,
+    cursor: cursor ?? undefined,
+    cursorMode,
+    sortPath: sort.path,
+    sortDirection: sort.direction,
+  };
 };
 
 export const listResponse = <T>(
   key: string,
   rows: T[],
   total: number,
-  built: Pick<BuiltListQuery, "page" | "pageSize">,
-): Record<string, unknown> => ({ [key]: rows, total, page: built.page, pageSize: built.pageSize });
+  built: Pick<BuiltListQuery, "page" | "pageSize"> & Partial<Pick<BuiltListQuery, "sortPath" | "sortDirection" | "cursorMode">>,
+): Record<string, unknown> => {
+  const totalIsCapped = total >= LIST_COUNT_CAP;
+  const boundedTotal = Math.min(total, LIST_COUNT_CAP);
+  const last = rows[rows.length - 1];
+  const nextCursor = rows.length >= built.pageSize && last !== undefined
+    ? cursorForRow(last, built.sortPath, built.sortDirection ?? "desc")
+    : null;
+  return {
+    [key]: rows,
+    total: boundedTotal,
+    page: built.page,
+    pageSize: built.pageSize,
+    nextCursor,
+    totalIsCapped,
+  };
+};
+
+export interface BoundedCountResult {
+  total: number;
+  totalIsCapped: boolean;
+}
+
+const cacheKeyOf = (key: string): string => key;
+
+export const boundedListCount = async (
+  count: () => Promise<number>,
+  cacheKey: string,
+  ttlMs: number = LIST_COUNT_CACHE_MS,
+): Promise<BoundedCountResult> => {
+  const key = cacheKeyOf(cacheKey);
+  const cached = countCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { total: cached.total, totalIsCapped: cached.totalIsCapped };
+  }
+  const raw = Math.max(0, Math.trunc(await count()));
+  const total = Math.min(raw, LIST_COUNT_CAP);
+  const result = { total, totalIsCapped: raw >= LIST_COUNT_CAP };
+  countCache.set(key, { expiresAt: Date.now() + ttlMs, ...result });
+  return result;
+};
+
+export const boundedCountQuery = async (
+  db: { $queryRawUnsafe: (...args: any[]) => Promise<any> },
+  input: { table: string; whereSql?: string; params?: unknown[]; cacheKey: string },
+): Promise<BoundedCountResult> => {
+  if (!/^[A-Za-z0-9_]+$/.test(input.table)) {
+    throw new Error("Invalid table name for a bounded count");
+  }
+  const where = input.whereSql && input.whereSql.trim() !== "" ? ` WHERE ${input.whereSql}` : "";
+  return boundedListCount(async () => {
+    const rows = (await db.$queryRawUnsafe(
+      `SELECT COUNT(*) AS total FROM (SELECT 1 FROM ${input.table}${where} LIMIT ${LIST_COUNT_CAP}) AS bounded`,
+      ...(input.params ?? []),
+    )) as Array<Record<string, unknown>>;
+    const row = Array.isArray(rows) ? rows[0] : undefined;
+    return Number(row?.total ?? 0);
+  }, input.cacheKey);
+};

@@ -77,6 +77,8 @@ import {
 } from "../../lib/merchantOps";
 import { scanKybBytes } from "../../lib/kybScan";
 import { mysqlPlaceholders } from "../../engine/db/rawRows";
+import { attachAuditPayloads, createAuditLog, findAuditLogs, parseAuditLogId } from "../../lib/auditLog";
+import { attachInboundEventPayloads } from "../../lib/inboundPayloads";
 import {
   generateMfaCode,
   hashMfaCode,
@@ -331,7 +333,7 @@ export const createRegulatoryReportViaApproval = async (
       where: { id: report.id },
       data: { approvalRequestId: approval.id },
     });
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: actor.userId,
         role: actor.role ?? "SYSTEM",
@@ -410,7 +412,7 @@ export const submitRegulatoryReport = async (
       where: { id: current.id },
       data: { status: "SUBMITTED", submissionRef: input.submissionRef, submittedAt },
     });
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: input.actorUserId,
         role: input.actorRole ?? "SYSTEM",
@@ -483,7 +485,7 @@ export const acknowledgeRegulatoryReport = async (
       where: { id: current.id },
       data: { status: input.status },
     });
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: input.actorUserId,
         role: input.actorRole ?? "SYSTEM",
@@ -543,7 +545,7 @@ export const proposeReportingRulePromotion = async (
       where: { id: rule.id },
       data: { approvalRequestId: approval.id },
     });
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: input.actorUserId,
         role: input.actorRole ?? "SYSTEM",
@@ -694,7 +696,7 @@ router.post("/search", async (request: Request, response: Response) => {
 });
 
 const recentActivityRows = async (limit: number) => {
-  const rows = await client.auditLog.findMany({
+  const rows = await findAuditLogs(client, {
     orderBy: { createdAt: "desc" },
     take: limit,
     include: { actor: { select: { email: true } } },
@@ -733,7 +735,7 @@ router.get("/stats/recent-activity/export", async (request: Request, response: R
     .map((entry) => entry.trim())
     .filter((entry) => allowedChecklist.has(entry));
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -924,7 +926,7 @@ router.post("/stats/export-audit", async (request: Request, response: Response) 
     request.body ?? {},
   );
   const actor = actorFromRequest(request);
-  const created = await client.auditLog.create({
+  const created = await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -1097,7 +1099,7 @@ router.get("/users/export", async (request: Request, response: Response) => {
     client.user.count({ where: built.where as never }),
   ]);
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -1177,7 +1179,7 @@ router.get("/users/summary/export", async (request: Request, response: Response)
   const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
     .map((entry) => entry.trim())
     .filter((entry) => allowedChecklist.has(entry));
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -1248,7 +1250,7 @@ router.get("/users/:id", async (request: Request, response: Response) => {
         checker: { select: { id: true, email: true } },
       },
     }),
-    client.auditLog.findMany({
+    findAuditLogs(client, {
       where: { actorId: user.id },
       orderBy: { createdAt: "desc" },
       take: 50,
@@ -1259,8 +1261,6 @@ router.get("/users/:id", async (request: Request, response: Response) => {
         role: true,
         entityType: true,
         entityId: true,
-        beforeJson: true,
-        afterJson: true,
         approvalRequestId: true,
       },
     }),
@@ -1312,7 +1312,7 @@ router.post("/users", async (request: Request, response: Response) => {
     },
   });
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -1378,7 +1378,7 @@ router.patch("/users", async (request: Request, response: Response) => {
     },
   });
   if (body.status !== undefined) {
-    await client.auditLog.create({
+    await createAuditLog(client, {
       data: {
         actorId: actor.userId,
         role: actor.role,
@@ -1441,7 +1441,7 @@ router.patch("/users/:id", async (request: Request, response: Response) => {
     data: { status: body.status },
   });
   if (body.status !== undefined) {
-    await client.auditLog.create({
+    await createAuditLog(client, {
       data: {
         actorId: actorFromRequest(request).userId,
         role: actorFromRequest(request).role,
@@ -1626,7 +1626,7 @@ const maybeRaiseDuplicateAmlCase = async (input: {
         reviewerNotes: "The same KYB document hash was reused by multiple merchants and accepted with reviewer justification.",
       },
     });
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: input.actorUserId,
         role: input.actorRole,
@@ -1862,7 +1862,7 @@ const joinRequestDetail = async (id: string, role: string | null) => {
     orderBy: [{ active: "desc" }, { createdAt: "asc" }],
   });
   const readiness = await computeJoinRequestReadiness(client, id);
-  const auditTrail = await client.auditLog.findMany({
+  const auditTrail = await findAuditLogs(client, {
     where: { entityType: "JOIN_REQUEST", entityId: id },
     orderBy: { createdAt: "desc" },
     take: 100,
@@ -1871,8 +1871,6 @@ const joinRequestDetail = async (id: string, role: string | null) => {
       createdAt: true,
       action: true,
       role: true,
-      beforeJson: true,
-      afterJson: true,
       approvalRequestId: true,
       actor: { select: { id: true, email: true } },
     },
@@ -1949,7 +1947,7 @@ router.get("/join-requests/export", async (request: Request, response: Response)
     client.joinRequest.count({ where: built.where as never }),
   ]);
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -2044,7 +2042,7 @@ router.get("/join-requests/summary/export", async (request: Request, response: R
   requireAuthorities(request, ["kyb:read", "compliance:read"]);
   const snapshot = await buildJoinRequestSummary();
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -2131,7 +2129,7 @@ router.post("/join-requests/admin-assisted", async (request: Request, response: 
           profileJson: profileJson as Prisma.InputJsonValue,
         },
       });
-      await tx.auditLog.create({
+      await createAuditLog(tx, {
         data: {
           actorId: actor.userId,
           role: actor.role ?? "SYSTEM",
@@ -2230,9 +2228,9 @@ router.post("/join-requests/admin-assisted", async (request: Request, response: 
     const glAccount = await tx.glAccount.create({
       data: {
         accountType: "MERCHANT_WALLET",
+        balanceMode: "SYNC",
         ownerId: merchant.id,
         currency: "LYD",
-        checkpointBalance: new Prisma.Decimal(0),
       },
     });
     await tx.wallet.create({
@@ -2251,7 +2249,7 @@ router.post("/join-requests/admin-assisted", async (request: Request, response: 
         profileJson: profileJson as Prisma.InputJsonValue,
       },
     });
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: actor.userId,
         role: actor.role ?? "SYSTEM",
@@ -2302,7 +2300,7 @@ router.patch("/join-requests/:id/profile", async (request: Request, response: Re
       where: { id },
       data: { profileJson: profileJson as Prisma.InputJsonValue },
     });
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: actor.userId,
         role: actor.role ?? "SYSTEM",
@@ -2339,7 +2337,7 @@ router.post("/join-requests/:id/beneficial-owners", async (request: Request, res
     if (wasSubmitted) {
       await tx.joinRequest.update({ where: { id }, data: { status: "IN_REVIEW" } });
     }
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: actor.userId,
         role: actor.role ?? "SYSTEM",
@@ -2404,7 +2402,7 @@ router.patch("/join-requests/:id/beneficial-owners/:ownerId", async (request: Re
     if (wasSubmitted) {
       await tx.joinRequest.update({ where: { id: params.id }, data: { status: "IN_REVIEW" } });
     }
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: actor.userId,
         role: actor.role ?? "SYSTEM",
@@ -2456,7 +2454,7 @@ router.delete("/join-requests/:id/beneficial-owners/:ownerId", async (request: R
     if (wasSubmitted) {
       await tx.joinRequest.update({ where: { id: params.id }, data: { status: "IN_REVIEW" } });
     }
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: actor.userId,
         role: actor.role ?? "SYSTEM",
@@ -2546,7 +2544,7 @@ router.post("/join-requests/:id/kyb-documents", async (request: Request, respons
     },
   });
   const duplicateFlags = await refreshJoinDuplicateFlags(id);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "SYSTEM",
@@ -2601,7 +2599,7 @@ router.delete("/join-requests/:id/kyb-documents/:docId", async (request: Request
     throw new ApiError(404, "KIB_DOCUMENT_NOT_FOUND", "The KYB document does not exist");
   }
   await client.kybDocument.delete({ where: { id: document.id } });
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "SYSTEM",
@@ -2632,7 +2630,7 @@ router.get("/kyb-documents/:id/content", async (request: Request, response: Resp
   }
   const base64 = await vault.decryptSecret(document.contentCiphertext);
   const content = Buffer.from(base64, "base64");
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "SYSTEM",
@@ -2720,7 +2718,7 @@ router.post("/join-requests/:id/submit", async (request: Request, response: Resp
       infoRequestJson: Prisma.DbNull,
     },
   });
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "SYSTEM",
@@ -2763,7 +2761,7 @@ router.post("/join-requests/:id/withdraw", async (request: Request, response: Re
       where: { id },
       data: { status: "WITHDRAWN", approvalRequestId: null },
     });
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: actor.userId,
         role: actor.role ?? "SYSTEM",
@@ -2805,7 +2803,7 @@ router.patch("/join-requests/:id/checklist", async (request: Request, response: 
       where: { id },
       data: { reviewChecklistJson: checklist as Prisma.InputJsonValue },
     });
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: actor.userId,
         role: actor.role ?? "SYSTEM",
@@ -2839,7 +2837,7 @@ router.post("/join-requests/:id/screening/retry", async (request: Request, respo
     });
   }
   const duplicateFlags = await refreshJoinDuplicateFlags(id);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "SYSTEM",
@@ -2893,7 +2891,7 @@ router.post("/join-requests/:id/request-info", async (request: Request, response
       slaRemainingSeconds: remainingSeconds,
     },
   });
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "SYSTEM",
@@ -2984,12 +2982,12 @@ router.post("/join-requests/:id/decide", async (request: Request, response: Resp
         expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
       },
     });
-    await client.$transaction([
-      client.joinRequest.update({
+    await client.$transaction(async (tx) => {
+      await tx.joinRequest.update({
         where: { id },
         data: { status: "PENDING_CHECKER", approvalRequestId: approval.id },
-      }),
-      client.auditLog.create({
+      });
+      await createAuditLog(tx, {
         data: {
           actorId: actor.userId,
           role: actor.role ?? "SYSTEM",
@@ -3002,8 +3000,8 @@ router.post("/join-requests/:id/decide", async (request: Request, response: Resp
           afterJson: { status: "PENDING_CHECKER", decision: body.decision, approvalRequestId: approval.id },
           approvalRequestId: approval.id,
         },
-      }),
-    ]);
+      });
+    });
     response.status(202).json({
       status: "PENDING_CHECKER",
       approvalRequestId: approval.id,
@@ -3048,7 +3046,7 @@ router.post("/join-requests/:id/decide", async (request: Request, response: Resp
         },
       });
     }
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: actor.userId,
         role: actor.role ?? "SYSTEM",
@@ -3307,7 +3305,7 @@ router.get("/kyb-documents/export", async (request: Request, response: Response)
     client.kybDocument.count({ where: where as never }),
   ]);
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -3405,7 +3403,7 @@ router.get("/kyb-documents/summary/export", async (request: Request, response: R
   requireAuthorities(request, ["kyb:read", "compliance:read"]);
   const snapshot = await buildKybDocumentSummary();
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -3452,7 +3450,7 @@ router.get("/kyb-documents/:id", async (request: Request, response: Response) =>
       where: { documentId: document.id, status: "OPEN" },
       orderBy: { requestedAt: "desc" },
     }),
-    client.auditLog.findMany({
+    findAuditLogs(client, {
       where: { entityType: "KYB_DOCUMENT", entityId: document.id },
       orderBy: { createdAt: "desc" },
       take: 100,
@@ -3461,8 +3459,6 @@ router.get("/kyb-documents/:id", async (request: Request, response: Response) =>
         createdAt: true,
         action: true,
         role: true,
-        beforeJson: true,
-        afterJson: true,
         approvalRequestId: true,
         actor: { select: { id: true, email: true } },
       },
@@ -3581,7 +3577,7 @@ router.post("/kyb-documents/:id/review", async (request: Request, response: Resp
         ...(body.decision === "ACCEPTED" ? { expiredAt: null } : {}),
       },
     });
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: actor.userId,
         role: actor.role ?? "SYSTEM",
@@ -3684,7 +3680,7 @@ router.post("/kyb-documents/:id/request-replacement", async (request: Request, r
         slaRemainingSeconds: remainingSeconds,
       },
     });
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: actor.userId,
         role: actor.role ?? "SYSTEM",
@@ -3778,7 +3774,7 @@ router.post("/kyb-documents/:id/request-revalidation", async (request: Request, 
       where: { id: document.merchantId },
       data: { kybStatus: "PENDING" },
     });
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: actor.userId,
         role: actor.role ?? "SYSTEM",
@@ -4372,7 +4368,7 @@ router.get("/merchants/export", async (request: Request, response: Response) => 
     pendingCount.set(approval.subjectId, (pendingCount.get(approval.subjectId) ?? 0) + 1);
   }
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -4454,7 +4450,7 @@ router.get("/merchants/summary/export", async (request: Request, response: Respo
   requireAuthorities(request, ["merchant:read"]);
   const snapshot = await buildMerchantSummary();
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -4508,7 +4504,7 @@ router.get("/merchants/:id/summary/export", async (request: Request, response: R
   ]);
   const summary = serializeMerchantSummary(merchant as never, flags, pendingApprovalCount);
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -4941,7 +4937,7 @@ router.get("/merchants/:id/wallets", async (request: Request, response: Response
         glAccountId: true,
         createdAt: true,
         _count: { select: { applications: true, paymentLinks: true, cashoutRequests: true } },
-        glAccount: { select: { checkpointBalance: true } },
+        glAccount: { select: { currentBalance: true, balanceMode: true } },
       },
     }),
     client.wallet.count({ where: where as never }),
@@ -4965,7 +4961,7 @@ router.get("/merchants/:id/wallets", async (request: Request, response: Response
       status: wallet.status,
       glAccountId: wallet.glAccountId,
       balance: flags.canFinancial ? balanceMap.get(wallet.id) ?? "0.0000" : null,
-      checkpointBalance: flags.canFinancial ? merchantMoney(wallet.glAccount.checkpointBalance) : null,
+      checkpointBalance: flags.canFinancial ? balanceMap.get(wallet.id) ?? "0.0000" : null,
       applicationCount: wallet._count.applications,
       paymentLinkCount: wallet._count.paymentLinks,
       cashoutCount: wallet._count.cashoutRequests,
@@ -5203,7 +5199,7 @@ router.get("/merchants/:id/audit-events", async (request: Request, response: Res
   const conditions = Array.isArray(built.where.AND) ? built.where.AND : [];
   const where = { AND: [{ entityType: "MERCHANT", entityId: id }, ...conditions] };
   const [events, total] = await Promise.all([
-    client.auditLog.findMany({
+    findAuditLogs(client, {
       where: where as never,
       orderBy: built.orderBy as never,
       skip: built.skip,
@@ -5214,8 +5210,6 @@ router.get("/merchants/:id/audit-events", async (request: Request, response: Res
         role: true,
         entityType: true,
         entityId: true,
-        beforeJson: true,
-        afterJson: true,
         approvalRequestId: true,
         createdAt: true,
         actor: { select: { email: true } },
@@ -5368,7 +5362,7 @@ router.patch("/merchants/:id/descriptive", async (request: Request, response: Re
         },
       });
     }
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: actor.userId,
         role: actor.role ?? "SYSTEM",
@@ -5511,7 +5505,7 @@ router.post("/merchants/:id/suspend", async (request: Request, response: Respons
           },
         });
       }
-      await tx.auditLog.create({
+      await createAuditLog(tx, {
         data: {
           actorId: actor.userId,
           role: actor.role ?? "SYSTEM",
@@ -5714,7 +5708,7 @@ router.post("/merchants/:id/pending-changes/:approvalId/withdraw", async (reques
     where: { id: approval.id },
     data: { state: "REJECTED", rejectionReason: body.reason ? `WITHDRAWN_BY_MAKER: ${body.reason}` : "WITHDRAWN_BY_MAKER" },
   });
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "SYSTEM",
@@ -5866,7 +5860,7 @@ router.get("/approvals/export", async (request: Request, response: Response) => 
     client.approvalRequest.count({ where: where as never }),
   ]);
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -5946,7 +5940,7 @@ router.get("/approvals/summary/export", async (request: Request, response: Respo
   const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
     .map((entry) => entry.trim())
     .filter((entry) => allowedChecklist.has(entry));
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -6121,7 +6115,7 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
       await invalidationBus.invalidateGateway(version.gatewayId, "gateway-version-live");
     }
   }
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -6217,7 +6211,7 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
           where: { id: row.subjectId, state: "PENDING_CHECKER" },
           data: { state: "IN_PROGRESS" },
         });
-        await tx.auditLog.create({
+        await createAuditLog(tx, {
           data: {
             actorId: actor.userId,
             role: actor.role,
@@ -6238,7 +6232,7 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
           where: { id: row.subjectId },
           data: { status: "IN_REVIEW", approvalRequestId: null },
         });
-        await tx.auditLog.create({
+        await createAuditLog(tx, {
           data: {
             actorId: actor.userId,
             role: actor.role,
@@ -6254,7 +6248,7 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
     }
     if (subjectType === "MERCHANT") {
       const kind = merchantApprovalKind(row.payloadDiffJson);
-      await tx.auditLog.create({
+      await createAuditLog(tx, {
         data: {
           actorId: actor.userId,
           role: actor.role,
@@ -6271,7 +6265,7 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
     }
     return row;
   });
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -6372,7 +6366,7 @@ router.get("/aml/screenings/export", async (request: Request, response: Response
   ]);
   const maps = await amlCaseSubjectMaps(screenings.map((screening) => ({ subjectType: screening.subjectType, subjectId: screening.subjectId })));
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -6424,7 +6418,7 @@ router.get("/aml/screenings/summary/export", async (request: Request, response: 
   assertConfidential(request);
   const summary = await buildAmlScreeningSummary();
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -6518,7 +6512,7 @@ router.post("/aml/matches/:id/disposition", async (request: Request, response: R
         suppressUntil: body.suppressUntil ? new Date(body.suppressUntil) : null,
       },
     });
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: actor.userId,
         role: actor.role ?? "COMPLIANCE",
@@ -6686,7 +6680,7 @@ router.get("/aml/cases/export", async (request: Request, response: Response) => 
   ]);
   const maps = await amlCaseSubjectMaps(cases.map((entry) => ({ subjectType: entry.subjectType, subjectId: entry.subjectId })));
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -6757,7 +6751,7 @@ router.get("/aml/cases/summary/export", async (request: Request, response: Respo
   const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
     .map((entry) => entry.trim())
     .filter((entry) => allowedChecklist.has(entry));
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -6942,7 +6936,7 @@ router.get("/aml/rules/export", async (request: Request, response: Response) => 
     if (!approvalMap.has(approval.subjectId)) approvalMap.set(approval.subjectId, { id: approval.id, state: approval.state });
   }
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -6993,7 +6987,7 @@ router.get("/aml/rules/summary/export", async (request: Request, response: Respo
   assertConfidential(request);
   const summary = await buildAmlRuleSummary();
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -7072,7 +7066,7 @@ router.post("/aml/rules", async (request: Request, response: Response) => {
           expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         },
       });
-      await tx.auditLog.create({
+      await createAuditLog(tx, {
         data: {
           actorId: actor.userId,
           role: actor.role ?? "COMPLIANCE",
@@ -7275,7 +7269,7 @@ router.get("/aml/reports/export", async (request: Request, response: Response) =
       });
   const ruleNames = new Map(rules.map((rule) => [rule.id, rule.sourceReference ?? `${rule.reportType} · ${rule.status}`]));
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -7330,7 +7324,7 @@ router.get("/aml/reports/summary/export", async (request: Request, response: Res
   assertConfidential(request);
   const summary = await buildAmlReportSummary();
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -7448,7 +7442,7 @@ router.post("/aml/reports/:id/submit", async (request: Request, response: Respon
     actorUserId: actor.userId,
     actorRole: actor.role,
   });
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -7500,7 +7494,7 @@ router.post("/aml/reports/:id/acknowledge", async (request: Request, response: R
     actorUserId: actor.userId,
     actorRole: actor.role,
   });
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -7769,8 +7763,6 @@ const operatorCaseDetailInclude = {
           channelId: true,
           gatewayId: true,
           env: true,
-          rawBodyBytes: true,
-          redactedHeadersJson: true,
           sourceIp: true,
           verified: true,
           verificationError: true,
@@ -8056,7 +8048,7 @@ const writeGatewayInquiryAudit = async (
     afterJson?: unknown;
   },
 ) => {
-  await target.auditLog.create({
+  await createAuditLog(target, {
     data: {
       actorId: input.actor.userId,
       role: input.actor.role ?? "OPERATOR",
@@ -8151,7 +8143,7 @@ const scheduleOperatorCaseInquiry = async (
       });
       scheduleId = created.id;
     }
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: actor.userId,
         role: actor.role ?? "OPERATOR",
@@ -8263,7 +8255,7 @@ router.get("/operator-cases/export", async (request: Request, response: Response
     client.operatorCase.count({ where: built.where as never }),
   ]);
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -8362,7 +8354,7 @@ router.get("/operator-cases/summary/export", async (request: Request, response: 
   const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
     .map((entry) => entry.trim())
     .filter((entry) => allowedChecklist.has(entry));
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -8475,7 +8467,7 @@ router.get("/gateway-inquiries/:id", async (request: Request, response: Response
   if (!schedule) {
     throw new ApiError(404, "GATEWAY_INQUIRY_NOT_FOUND", "The gateway inquiry schedule does not exist");
   }
-  const auditTrail = await client.auditLog.findMany({
+  const auditTrail = await findAuditLogs(client, {
     where: { entityType: "GATEWAY_INQUIRY", entityId: id },
     orderBy: { createdAt: "desc" },
     take: 200,
@@ -8650,17 +8642,18 @@ router.get("/operator-cases/:id", async (request: Request, response: Response) =
   if (!operatorCase) {
     throw new ApiError(404, "OPERATOR_CASE_NOT_FOUND", "The operator case does not exist");
   }
-  const auditTrail = await client.auditLog.findMany({
+  const auditTrail = await findAuditLogs(client, {
     where: { entityType: "OPERATOR_CASE", entityId: id },
     orderBy: { createdAt: "desc" },
     take: 200,
     include: { actor: { select: { id: true, email: true, role: true } } },
   });
   const flattened = flattenOperatorCase(operatorCase) as Record<string, any>;
+  const inboundEvents = await attachInboundEventPayloads(client, flattened.attempt?.inboundEvents ?? []);
   const attempt = flattened.attempt
     ? {
         ...flattened.attempt,
-        inboundEvents: (flattened.attempt.inboundEvents ?? []).map((event: any) => {
+        inboundEvents: inboundEvents.map((event: any) => {
           const { rawBodyBytes, ...rest } = event;
           return { ...rest, rawBodyPreview: bytesPreview(rawBodyBytes) };
         }),
@@ -8779,7 +8772,7 @@ router.post("/operator-cases/bulk-inquire", async (request: Request, response: R
       });
     }
   }
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "OPERATOR",
@@ -8857,7 +8850,7 @@ router.post("/operator-cases/bulk-assign", async (request: Request, response: Re
           ...(nextState !== current.state ? { state: nextState } : {}),
         },
       });
-      await tx.auditLog.create({
+      await createAuditLog(tx, {
         data: {
           actorId: actor.userId,
           role: actor.role ?? "OPERATOR",
@@ -8930,7 +8923,7 @@ router.post("/operator-cases/bulk-state", async (request: Request, response: Res
         where: { id: caseId },
         data: { state: body.state },
       });
-      await tx.auditLog.create({
+      await createAuditLog(tx, {
         data: {
           actorId: actor.userId,
           role: actor.role ?? "OPERATOR",
@@ -8999,7 +8992,7 @@ router.patch("/operator-cases/:id", async (request: Request, response: Response)
         ...(body.state !== undefined || nextState !== current.state ? { state: nextState } : {}),
       },
     });
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: actor.userId,
         role: actor.role ?? "OPERATOR",
@@ -9114,7 +9107,7 @@ router.post("/operator-cases/:id/resolve", async (request: Request, response: Re
       where: { id: operatorCase.id },
       data: { state: "PENDING_CHECKER", approvalRequestId: created.id },
     });
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: actor.userId,
         role: actor.role ?? "OPERATOR",
@@ -9189,7 +9182,7 @@ router.post("/attempts/:id/inquire", async (request: Request, response: Response
       where: { attemptId: id, state: { in: ["OPEN", "IN_PROGRESS"] } },
       data: { state: "IN_PROGRESS" },
     });
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: actor.userId,
         role: actor.role ?? "OPERATOR",
@@ -9322,7 +9315,7 @@ router.post("/gateways/spec-import", async (request: Request, response: Response
     }
   }
 
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -9437,7 +9430,7 @@ router.get("/gateways/export", async (request: Request, response: Response) => {
     healthMap.set(row.gatewayId, current);
   }
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -9532,7 +9525,7 @@ router.get("/gateways/summary/export", async (request: Request, response: Respon
   const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
     .map((entry) => entry.trim())
     .filter((entry) => allowedChecklist.has(entry));
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -9918,7 +9911,7 @@ router.post("/gateway-versions/:vid/clone", async (request: Request, response: R
       });
     }
 
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: actor.userId,
         role: actor.role,
@@ -10008,7 +10001,7 @@ router.post("/gateways/:id/rollback", async (request: Request, response: Respons
   const gateway = await client.$transaction(async (tx) =>
     rollbackGatewayVersionInTransaction(tx as never, id, body.versionId, actor.userId)
   );
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -10262,7 +10255,7 @@ router.post("/credential-sets/:id/revoke", async (request: Request, response: Re
     data: { status: "REVOKED" },
   });
   await invalidationBus.invalidateCredential(updated.id, "credential-set-revoked");
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role,
@@ -11230,7 +11223,7 @@ router.post("/gateway-versions/:vid/dry-run", async (request: Request, response:
     include: { steps: { orderBy: { orderIndex: "asc" } } },
   });
   const credentialChecklist = (body.checklist ?? []).some((entry) => entry.startsWith("CREDENTIAL_") || entry === "ENVIRONMENT_MATCH_REVIEWED" || entry === "SECRET_STORAGE_VERIFIED");
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actorFromRequest(request).userId,
       role: actorFromRequest(request).role,
@@ -11293,7 +11286,7 @@ router.post("/gateway-versions/:vid/run-suite", async (request: Request, respons
     checkerUserId: checker?.checkerUserId ?? "",
     ...evidence,
   });
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actorFromRequest(request).userId,
       role: actorFromRequest(request).role,
@@ -11344,7 +11337,7 @@ router.post("/gateway-versions/:vid/submit-approval", async (request: Request, r
     where: { id: version.id },
     data: { state: "PENDING_APPROVAL", approvalRequestId: approval.id },
   });
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -12132,7 +12125,7 @@ router.get("/rails/export", async (request: Request, response: Response) => {
     healthMap.set(row.railId, current);
   }
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -12211,7 +12204,7 @@ router.get("/rails/summary/export", async (request: Request, response: Response)
   const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
     .map((entry) => entry.trim())
     .filter((entry) => allowedChecklist.has(entry));
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -12337,7 +12330,7 @@ router.patch("/rails/:id", async (request: Request, response: Response) => {
       instructionsEn: body.instructionsEn,
     },
   });
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actorFromRequest(request).userId,
       role: actorFromRequest(request).role,
@@ -12422,7 +12415,7 @@ router.put("/rails/:id/fields", async (request: Request, response: Response) => 
       }),
     ),
   );
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actorFromRequest(request).userId,
       role: actorFromRequest(request).role,
@@ -12497,7 +12490,7 @@ router.get("/routes/export", async (request: Request, response: Response) => {
     client.railRoute.count({ where: built.where as never }),
   ]);
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -12563,7 +12556,7 @@ router.get("/routes/summary/export", async (request: Request, response: Response
   const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
     .map((entry) => entry.trim())
     .filter((entry) => allowedChecklist.has(entry));
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -12700,7 +12693,7 @@ router.post("/routes/:id/state", async (request: Request, response: Response) =>
     throw new ApiError(404, "ROUTE_NOT_FOUND", "The route does not exist");
   }
   const updated = await client.railRoute.update({ where: { id }, data: { status: body.status } });
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actorFromRequest(request).userId,
       role: actorFromRequest(request).role,
@@ -12874,7 +12867,7 @@ router.patch("/reconciliation/sources/:id", async (request: Request, response: R
         parserConfig: json(nextParser),
       },
     });
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: actor.userId,
         role: actor.role ?? "OPERATOR",
@@ -13033,7 +13026,7 @@ router.get("/reconciliation/summary/export", async (request: Request, response: 
   const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
     .map((entry) => entry.trim())
     .filter((entry) => allowedChecklist.has(entry));
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -13148,7 +13141,7 @@ router.get("/reconciliation/runs/:id/export", async (request: Request, response:
     client.reconciliationItem.count({ where: where as never }),
   ]);
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -13335,7 +13328,7 @@ router.get("/disputes/export", async (request: Request, response: Response) => {
     client.dispute.count({ where: where as never }),
   ]);
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -13408,7 +13401,7 @@ router.get("/disputes/summary/export", async (request: Request, response: Respon
   const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
     .map((entry) => entry.trim())
     .filter((entry) => allowedChecklist.has(entry));
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -13515,7 +13508,7 @@ router.post("/disputes/:id/evidence", async (request: Request, response: Respons
       where: { id },
       data: { status: "EVIDENCE_SUBMITTED", evidenceJson: json(evidenceJson) },
     });
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: actor.userId,
         role: actor.role ?? "OPERATOR",
@@ -13741,7 +13734,7 @@ router.get("/adjustments/export", async (request: Request, response: Response) =
     }
   }
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -13817,7 +13810,7 @@ router.get("/adjustments/summary/export", async (request: Request, response: Res
   const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
     .map((entry) => entry.trim())
     .filter((entry) => allowedChecklist.has(entry));
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -14027,7 +14020,7 @@ router.get("/cashouts/export", async (request: Request, response: Response) => {
     client.cashoutRequest.count({ where: built.where as never }),
   ]);
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -14099,7 +14092,7 @@ router.get("/cashouts/summary/export", async (request: Request, response: Respon
   const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
     .map((entry) => entry.trim())
     .filter((entry) => allowedChecklist.has(entry));
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -14178,7 +14171,7 @@ router.post("/cashouts/:id/process", async (request: Request, response: Response
   );
   const cashout = await client.cashoutRequest.findUnique({ where: { id } });
   if (result.idempotent !== true) {
-    await client.auditLog.create({
+    await createAuditLog(client, {
       data: {
         actorId: actor.userId,
         role: actor.role ?? "UNKNOWN",
@@ -14291,7 +14284,7 @@ router.post("/commission-profiles", async (request: Request, response: Response)
       effectiveFrom: body.effectiveFrom ? new Date(body.effectiveFrom) : new Date(),
     },
   });
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actorFromRequest(request).userId,
       role: actorFromRequest(request).role,
@@ -14316,7 +14309,7 @@ router.get("/commission-profiles/:id/history", async (request: Request, response
   const { id } = parseOrThrow(idSchema, request.params);
   const profile = await client.commissionProfile.findUnique({ where: { id }, select: { id: true, railCode: true } });
   if (!profile) throw new ApiError(404, "COMMISSION_PROFILE_NOT_FOUND", "The commission profile does not exist");
-  const history = await client.auditLog.findMany({
+  const history = await findAuditLogs(client, {
     where: { entityType: "COMMISSION_PROFILE", entityId: id },
     orderBy: { createdAt: "desc" },
     take: 100,
@@ -14325,8 +14318,6 @@ router.get("/commission-profiles/:id/history", async (request: Request, response
       createdAt: true,
       action: true,
       role: true,
-      beforeJson: true,
-      afterJson: true,
       approvalRequestId: true,
       actor: { select: { id: true, email: true } },
     },
@@ -14414,7 +14405,7 @@ router.get("/velocity-rules/:id/history", async (request: Request, response: Res
   const { id } = parseOrThrow(idSchema, request.params);
   const rule = await client.velocityRule.findUnique({ where: { id }, select: { id: true, scopeType: true } });
   if (!rule) throw new ApiError(404, "VELOCITY_RULE_NOT_FOUND", "The velocity rule does not exist");
-  const history = await client.auditLog.findMany({
+  const history = await findAuditLogs(client, {
     where: { entityType: "VELOCITY_RULE", entityId: id },
     orderBy: { createdAt: "desc" },
     take: 100,
@@ -14423,8 +14414,6 @@ router.get("/velocity-rules/:id/history", async (request: Request, response: Res
       createdAt: true,
       action: true,
       role: true,
-      beforeJson: true,
-      afterJson: true,
       approvalRequestId: true,
       actor: { select: { id: true, email: true } },
     },
@@ -14533,7 +14522,7 @@ router.post("/velocity-rules", async (request: Request, response: Response) => {
       effectiveFrom: new Date(),
     },
   });
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actorFromRequest(request).userId,
       role: actorFromRequest(request).role,
@@ -14561,20 +14550,20 @@ router.post("/velocity-rules", async (request: Request, response: Response) => {
  * window the checkpoint already covers.
  */
 const loadLedgerBalances = async (): Promise<Map<string, Decimal>> => {
-  const accounts = await client.glAccount.findMany();
+  const accounts = await client.glAccount.findMany({
+    select: {
+      id: true,
+      accountType: true,
+      balanceMode: true,
+      currentBalance: true,
+      shards: { select: { balance: true } },
+    },
+  });
   const balances = new Map<string, Decimal>();
   for (const account of accounts) {
-    const lines = await client.journalLine.findMany({
-      where: account.checkpointAt
-        ? { glAccountId: account.id, createdAt: { gt: account.checkpointAt } }
-        : { glAccountId: account.id },
-      select: { direction: true, amount: true },
-    });
-    let balance = decimal(account.checkpointBalance ?? 0);
-    for (const line of lines) {
-      const value = decimal(line.amount);
-      balance = line.direction === "DEBIT" ? balance.plus(value) : balance.minus(value);
-    }
+    const balance = account.balanceMode === "SYNC"
+      ? decimal(account.currentBalance)
+      : account.shards.reduce((sum, shard) => sum.plus(decimal(shard.balance)), decimal(0));
     balances.set(account.accountType, (balances.get(account.accountType) ?? decimal(0)).plus(balance));
   }
   return balances;
@@ -14763,7 +14752,7 @@ router.get("/finance/profitability/export", async (request: Request, response: R
   requireAuthorities(request, ["finance:read"]);
   const snapshot = await buildProfitabilitySnapshot(request.query);
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -14881,7 +14870,14 @@ const buildLiquiditySnapshot = async () => {
   );
   const clearingAccounts = await client.glAccount.findMany({
     where: { accountType: "GATEWAY_CLEARING" },
-    select: { id: true, gatewayId: true, checkpointAt: true, checkpointBalance: true, gateway: { select: { code: true, name: true } } },
+    select: {
+      id: true,
+      gatewayId: true,
+      balanceMode: true,
+      currentBalance: true,
+      shards: { select: { balance: true } },
+      gateway: { select: { code: true, name: true } },
+    },
   });
   const clearingAccountIds = clearingAccounts.map((account) => account.id);
   const clearingLines = clearingAccountIds.length === 0
@@ -14894,11 +14890,12 @@ const buildLiquiditySnapshot = async () => {
   const clearingBucketsByGateway = new Map<string, { t0: Decimal; t1: Decimal; t2: Decimal; older: Decimal }>();
   for (const account of clearingAccounts) {
     if (!account.gatewayId) continue;
-    let balance = decimal(account.checkpointBalance ?? 0);
+    let balance = account.balanceMode === "SYNC"
+      ? decimal(account.currentBalance)
+      : account.shards.reduce((sum, shard) => sum.plus(decimal(shard.balance)), decimal(0));
     const buckets = { t0: decimal(0), t1: decimal(0), t2: decimal(0), older: decimal(0) };
     for (const line of clearingLines) {
       if (line.glAccountId !== account.id) continue;
-      if (account.checkpointAt && line.createdAt <= account.checkpointAt) continue;
       const value = decimal(line.amount);
       if (line.direction === "DEBIT") balance = balance.plus(value);
       else balance = balance.minus(value);
@@ -14988,7 +14985,7 @@ router.get("/finance/liquidity/export", async (request: Request, response: Respo
   requireAuthorities(request, ["finance:read"]);
   const snapshot = await buildLiquiditySnapshot();
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -15061,7 +15058,7 @@ const buildInvariantSnapshot = async () => {
       accountType: account.accountType,
       liveBalance: account.liveBalance.toFixed(4),
       naturalBalance: naturalBalance(account.accountType, account.liveBalance).toFixed(4),
-      checkpointAt: account.checkpointAt ?? null,
+      balanceMode: account.balanceMode ?? null,
     })),
   };
 };
@@ -15075,7 +15072,7 @@ router.get("/finance/invariant-check/export", async (request: Request, response:
   requireAuthorities(request, ["finance:read"]);
   const snapshot = await buildInvariantSnapshot();
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -15206,7 +15203,7 @@ router.get("/settings/checkout-support/summary/export", async (request: Request,
   requireAuthorities(request, ["settings:read"]);
   const snapshot = await buildCheckoutSupportSummary();
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -15263,7 +15260,7 @@ router.put("/settings/checkout-support", async (request: Request, response: Resp
         },
       });
   const created = await task;
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actorFromRequest(request).userId,
       role: actorFromRequest(request).role,
@@ -15274,7 +15271,7 @@ router.put("/settings/checkout-support", async (request: Request, response: Resp
       afterJson: value,
     },
   });
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actorFromRequest(request).userId,
       role: actorFromRequest(request).role,
@@ -15422,7 +15419,7 @@ router.get("/academy/progress/overview/summary/export", async (request: Request,
   const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
     .map((entry) => entry.trim())
     .filter((entry) => allowedChecklist.has(entry));
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -15480,7 +15477,7 @@ router.get("/academy/progress/overview/export", async (request: Request, respons
   const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
     .map((entry) => entry.trim())
     .filter((entry) => allowedChecklist.has(entry));
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -15508,7 +15505,7 @@ router.get("/academy/progress/overview/export", async (request: Request, respons
 router.get("/audit-logs", async (request: Request, response: Response) => {
   requireAuthorities(request, ["security:read"]);
   const built = buildListQuery(request.query, {
-    search: ["action", "entityType", "entityId", "actor.email"],
+    search: ["action", "entityType", "entityId", "actorEmail"],
     contains: {
       action: "action",
       entityType: "entityType",
@@ -15522,20 +15519,20 @@ router.get("/audit-logs", async (request: Request, response: Response) => {
     defaultPageSize: 20,
   });
   const [rows, total] = await Promise.all([
-    client.auditLog.findMany({
+    findAuditLogs(client, {
       where: built.where as never,
       orderBy: built.orderBy as never,
       skip: built.skip,
       take: built.take,
-      include: { actor: { select: { id: true, email: true, role: true } } },
     }),
     client.auditLog.count({ where: built.where as never }),
   ]);
-  response.json(listResponse("auditLogs", rows.map((row) => ({
+  const withPayloads = rows;
+  response.json(listResponse("auditLogs", withPayloads.map((row) => ({
     id: row.id,
     createdAt: row.createdAt,
     actorId: row.actorId,
-    actorEmail: row.actor?.email ?? "",
+    actorEmail: row.actorEmail,
     role: row.role,
     action: row.action,
     entityType: row.entityType,
@@ -15549,7 +15546,7 @@ router.get("/audit-logs", async (request: Request, response: Response) => {
 router.get("/audit-logs/export", async (request: Request, response: Response) => {
   requireAuthorities(request, ["security:read"]);
   const built = buildListQuery(request.query, {
-    search: ["action", "entityType", "entityId", "actor.email"],
+    search: ["action", "entityType", "entityId", "actorEmail"],
     contains: {
       action: "action",
       entityType: "entityType",
@@ -15564,16 +15561,16 @@ router.get("/audit-logs/export", async (request: Request, response: Response) =>
   });
   const take = 5000;
   const [rows, total] = await Promise.all([
-    client.auditLog.findMany({
+    findAuditLogs(client, {
       where: built.where as never,
       orderBy: built.orderBy as never,
       take,
-      include: { actor: { select: { email: true } } },
     }),
     client.auditLog.count({ where: built.where as never }),
   ]);
+  const rowsWithPayloads = rows;
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -15585,11 +15582,11 @@ router.get("/audit-logs/export", async (request: Request, response: Response) =>
     },
   });
   response.json({
-    auditLogs: rows.map((row) => ({
+    auditLogs: rowsWithPayloads.map((row) => ({
       id: row.id,
       createdAt: row.createdAt,
       actorId: row.actorId,
-      actorEmail: row.actor?.email ?? "",
+      actorEmail: row.actorEmail,
       role: row.role,
       action: row.action,
       entityType: row.entityType,
@@ -15646,7 +15643,7 @@ router.get("/audit-logs/summary/export", async (request: Request, response: Resp
   const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
     .map((entry) => entry.trim())
     .filter((entry) => allowedChecklist.has(entry));
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -15669,26 +15666,25 @@ router.get("/audit-logs/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["security:read"]);
   response.setHeader("Cache-Control", "no-store");
   const { id } = parseOrThrow(idSchema, request.params);
-  const row = await client.auditLog.findUnique({
-    where: { id },
-    include: { actor: { select: { id: true, email: true, role: true } } },
-  });
+  const numericId = parseAuditLogId(id);
+  const row = numericId === null ? null : await client.auditLog.findUnique({ where: { id: numericId } });
   if (!row) {
     throw new ApiError(404, "AUDIT_LOG_NOT_FOUND", "The audit log entry does not exist");
   }
+  const withPayload = (await attachAuditPayloads(client, [row]))[0]!;
   response.json({
     auditLog: {
-      id: row.id,
-      createdAt: row.createdAt,
-      actorId: row.actorId,
-      actorEmail: row.actor?.email ?? "",
-      role: row.role,
-      action: row.action,
-      entityType: row.entityType,
-      entityId: row.entityId,
-      beforeJson: row.beforeJson,
-      afterJson: row.afterJson,
-      approvalRequestId: row.approvalRequestId,
+      id: withPayload.id,
+      createdAt: withPayload.createdAt,
+      actorId: withPayload.actorId,
+      actorEmail: withPayload.actorEmail,
+      role: withPayload.role,
+      action: withPayload.action,
+      entityType: withPayload.entityType,
+      entityId: withPayload.entityId,
+      beforeJson: withPayload.beforeJson,
+      afterJson: withPayload.afterJson,
+      approvalRequestId: withPayload.approvalRequestId,
     },
   });
 });
@@ -15767,7 +15763,7 @@ router.post("/settings/restore-preview", async (request: Request, response: Resp
     missingInBackup: [...latest.keys()].filter((key) => !seen.has(key)).length,
   };
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -15853,7 +15849,7 @@ router.post("/settings/restore-apply", async (request: Request, response: Respon
       });
       written.push({ key, scope, version: created.version });
     }
-    await tx.auditLog.create({
+    await createAuditLog(tx, {
       data: {
         actorId: actor.userId,
         role: actor.role ?? "UNKNOWN",
@@ -15881,7 +15877,7 @@ router.get("/settings/export", async (request: Request, response: Response) => {
   }
   const exportedAt = new Date().toISOString();
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -15949,7 +15945,7 @@ router.get("/settings/summary/export", async (request: Request, response: Respon
   const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
     .map((entry) => entry.trim())
     .filter((entry) => allowedChecklist.has(entry));
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -16016,7 +16012,7 @@ router.put("/settings", async (request: Request, response: Response) => {
     });
     written.push({ key: created.key, version: created.version });
   }
-  await client.auditLog.create({
+  await createAuditLog(client, {
     data: {
       actorId: actor.userId,
       role: actor.role,

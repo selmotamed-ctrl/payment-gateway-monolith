@@ -25,6 +25,7 @@ import {
   type LedgerPostContext,
   type LedgerOwnershipMode,
 } from "../ledger/LedgerPoster";
+import { GlBalanceStore } from "../ledger/GlBalanceStore";
 import type { Repositories, Tx } from "../db/ports";
 import { applyJsonPatch, type JsonPatchOperation } from "./ApprovalService";
 import {
@@ -485,6 +486,31 @@ export const decideCommissionReceivableCeiling = (input: {
   };
 };
 
+const resolveCommissionReceivableBalance = async (tx: Tx, merchantId: string): Promise<Decimal | null> => {
+  const glAccounts = (tx as Record<string, any>).glAccount;
+  if (!glAccounts || typeof glAccounts.findMany !== "function") {
+    return null;
+  }
+  let accounts: any[];
+  try {
+    accounts = await glAccounts.findMany({
+      where: { accountType: "COMMISSION_RECEIVABLE", ownerId: merchantId },
+    });
+  } catch {
+    return null;
+  }
+  if (!accounts.length) {
+    return null;
+  }
+  const store = new GlBalanceStore();
+  let balance = new Decimal(0);
+  for (const account of accounts) {
+    const snapshot = await store.readBalance(tx, account);
+    balance = balance.plus(snapshot.balance);
+  }
+  return balance;
+};
+
 export const evaluateCommissionReceivableCeiling = async (
   ctx: Pick<GovernanceExecutionContext, "repositories">,
   tx: Tx,
@@ -494,10 +520,11 @@ export const evaluateCommissionReceivableCeiling = async (
   const merchant = await ctx.repositories.merchants.findMerchantById(tx, merchantId);
   const rawCeiling = merchant?.commissionReceivableCeiling;
   const ceiling = rawCeiling === null || rawCeiling === undefined ? null : toDecimal(rawCeiling);
+  const direct = await resolveCommissionReceivableBalance(tx, merchantId);
   const receivableQuery = ctx.repositories.merchants.getCommissionReceivableBalance;
-  const receivable = receivableQuery
+  const receivable = direct ?? (receivableQuery
     ? moneyToDecimal(await receivableQuery(tx, merchantId))
-    : new Decimal(0);
+    : new Decimal(0));
   return decideCommissionReceivableCeiling({
     merchantId,
     receivable,
@@ -507,21 +534,27 @@ export const evaluateCommissionReceivableCeiling = async (
 };
 
 /**
- * The merchant wallet balance, computed from the posted journal lines.
+ * The merchant wallet balance in the credit-positive merchant-facing sign.
  */
 const resolveMerchantWalletBalance = async (tx: Tx, merchantId: string): Promise<Decimal> => {
-  const glAccounts = modelOf(tx, "glAccount");
-  const journalLines = modelOf(tx, "journalLine");
-  const accounts = await glAccounts.findMany({ where: { accountType: "MERCHANT_WALLET", ownerId: merchantId } });
+  const glAccounts = (tx as Record<string, any>).glAccount;
+  if (!glAccounts || typeof glAccounts.findMany !== "function") {
+    return new Decimal(0);
+  }
+  let accounts: any[];
+  try {
+    accounts = await glAccounts.findMany({ where: { accountType: "MERCHANT_WALLET", ownerId: merchantId } });
+  } catch {
+    return new Decimal(0);
+  }
   if (!accounts.length) {
     return new Decimal(0);
   }
-  const ids = accounts.map((account: any) => String(account.id));
-  const lines = await journalLines.findMany({ where: { glAccountId: { in: ids } } });
+  const store = new GlBalanceStore();
   let balance = new Decimal(0);
-  for (const line of lines) {
-    const amount = toDecimal(line.amount);
-    balance = line.direction === "CREDIT" ? balance.plus(amount) : balance.minus(amount);
+  for (const account of accounts) {
+    const snapshot = await store.readBalance(tx, account);
+    balance = balance.minus(snapshot.balance);
   }
   return balance;
 };
@@ -625,9 +658,10 @@ export async function activateApprovedJoinRequest(
     const glAccount = await glAccounts.create({
       data: {
         accountType: "MERCHANT_WALLET",
+        balanceMode: "SYNC",
         ownerId: merchantId,
         currency: "LYD",
-        checkpointBalance: 0,
+        currentBalance: 0,
       },
     });
     await wallets.create({

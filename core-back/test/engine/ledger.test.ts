@@ -421,7 +421,14 @@ describe("LedgerPoster posting behaviour", () => {
 describe("checkpoint service and live balances", () => {
   const buildClient = () => {
     const accounts = [
-      { id: "acc-treasury", accountType: "TREASURY" as const, checkpointBalance: 0, checkpointAt: null },
+      {
+        id: "acc-treasury",
+        accountType: "TREASURY" as const,
+        balanceMode: "SHARDED" as const,
+        currentBalance: "70",
+        checkpointBalance: 0,
+        checkpointAt: null,
+      },
     ];
     const lines: JournalLineRecord[] = [
       {
@@ -466,11 +473,11 @@ describe("checkpoint service and live balances", () => {
     };
   };
 
-  test("captures a checkpoint and resolves the live balance", async () => {
+  test("resolves the materialized live balance without a checkpoint write", async () => {
     const { client, accounts } = buildClient();
     const service = new CheckpointService(client);
     const checkpoint = await service.captureCheckpoint("acc-treasury", new Date("2026-01-15T00:00:00Z"));
-    expect(decimal(checkpoint.balance).toFixed(4)).toBe("100.0000");
+    expect(decimal(checkpoint.balance).toFixed(4)).toBe("70.0000");
     expect(accounts[0]?.checkpointBalance).toBeDefined();
     const live = await service.getLiveBalance("acc-treasury");
     expect(live.liveBalance.toFixed(4)).toBe("70.0000");

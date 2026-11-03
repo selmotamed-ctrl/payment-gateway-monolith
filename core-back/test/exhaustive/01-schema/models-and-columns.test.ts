@@ -1,5 +1,5 @@
 /**
- * Suite 01.1 — 66-model structural & type fidelity matrix.
+ * Suite 01.1 — v2 schema structural & type fidelity matrix.
  *
  * Dynamically introspects the live INFORMATION_SCHEMA and compares it
  * one-to-one against `prisma/schema.prisma`. Every model contributes fifteen
@@ -17,7 +17,7 @@ import {
   schemaColumnName,
   type ColumnInfo,
 } from "../_harness";
-import { createRow } from "../_dbFactory";
+import { createRow, insertRow } from "../_dbFactory";
 
 const db = exhaustiveClient();
 const schema = parseSchema();
@@ -47,8 +47,8 @@ afterAll(async () => {
 });
 
 describeDb("Suite 01 · model & column fidelity", () => {
-  test("the schema defines exactly 66 models and at least 100 enums", () => {
-    expect(schema.models.length).toBe(66);
+  test("the schema defines exactly 78 v2 models and at least 100 enums", () => {
+    expect(schema.models.length).toBe(78);
     expect(schema.enums.length).toBeGreaterThanOrEqual(100);
   });
 
@@ -86,14 +86,18 @@ describeDb("Suite 01 · model & column fidelity", () => {
       expect(livePrimary.map((column) => column.columnName)).toEqual([primary.dbName]);
     });
 
-    test(`${model.tableName} [6/15] the id column is a client-generated VARCHAR(191)`, () => {
+    test(`${model.tableName} [6/15] ids are CHAR(36) ascii or BIGINT auto-increment`, () => {
       const id = actual.get("id");
       if (!id) {
         expect(true).toBe(true);
         return;
       }
-      expect(id.dataType.toLowerCase()).toBe("varchar");
-      expect(id.columnType.toLowerCase()).toBe("varchar(191)");
+      if (id.dataType.toLowerCase() === "bigint") {
+        expect(id.extra).toMatch(/auto_increment/i);
+      } else {
+        expect(id.dataType.toLowerCase()).toBe("char");
+        expect(id.columnType.toLowerCase()).toBe("char(36)");
+      }
       expect(id.isNullable).toBe("NO");
     });
 
@@ -111,7 +115,11 @@ describeDb("Suite 01 · model & column fidelity", () => {
     test(`${model.tableName} [8/15] every monetary column is DECIMAL(18,4)`, () => {
       for (const column of actual.values()) {
         if (MONEY_COLUMNS.includes(column.columnName as (typeof MONEY_COLUMNS)[number])) {
-          expect(column.columnType.toLowerCase()).toBe("decimal(18,4)");
+          const expected = model.tableName === "gl_period_totals"
+            && ["debit_total", "credit_total"].includes(column.columnName)
+            ? "decimal(20,4)"
+            : "decimal(18,4)";
+          expect(column.columnType.toLowerCase()).toBe(expected);
           expect(column.dataType.toLowerCase()).toBe("decimal");
         }
       }
@@ -176,7 +184,7 @@ describeDb("Suite 01 · model & column fidelity", () => {
   }
 
   test(`the structural matrix contributes ${schema.models.length * TABLE_CHECK_COUNT} checks`, () => {
-    expect(schema.models.length * TABLE_CHECK_COUNT).toBe(990);
+    expect(schema.models.length * TABLE_CHECK_COUNT).toBe(1170);
   });
 });
 
@@ -189,13 +197,13 @@ describeDb("Suite 01 · boundary round-trips", () => {
       for (const value of boundary) {
         test(`${table}.${columnName} round-trips ${value} without precision loss`, async () => {
           const column = columnsByTable(table).get(columnName);
-          if (!column) {
+          if (!column || !columnsByTable(table).has("id")) {
             expect(true).toBe(true);
             return;
           }
           if (
             (table === "journal_lines")
-            || (table === "gl_accounts" && columnName === "checkpoint_balance")
+            || (table === "gl_accounts" && columnName === "current_balance")
           ) {
             // These two columns feed the continuous double-entry invariant.
             // A single boundary write is intentionally not made here because
@@ -232,36 +240,42 @@ describeDb("Suite 01 · boundary round-trips", () => {
     }
   }
 
-  test("inbound_events.raw_body_bytes stores a 1.5 MB binary buffer byte-for-byte", async () => {
+  test("inbound_event_payloads.raw_body_bytes stores a 1.5 MB binary buffer byte-for-byte", async () => {
     const payload = Buffer.alloc(1_572_864);
     for (let index = 0; index < payload.length; index += 1) {
       payload[index] = index % 251;
     }
-    const row = await createRow("inbound_events", { raw_body_bytes: payload });
+    const event = await createRow("inbound_events");
+    await insertRow("inbound_event_payloads", {
+      event_id: event.id,
+      raw_body_bytes: payload,
+      redacted_headers_json: JSON.stringify({}),
+    });
     const rows = (await db.$queryRawUnsafe(
-      "SELECT raw_body_bytes FROM inbound_events WHERE id = ?",
-      row.id,
+      "SELECT raw_body_bytes FROM inbound_event_payloads WHERE event_id = ?",
+      event.id,
     )) as Array<{ raw_body_bytes: Buffer }>;
     const stored = Buffer.from(rows[0]?.raw_body_bytes ?? []);
     expect(stored.length).toBe(payload.length);
     expect(stored.equals(payload)).toBe(true);
   });
 
-  test("reconciliation_runs.file_content stores a 1.5 MB binary buffer byte-for-byte", async () => {
+  test("reconciliation_run_files.file_content stores a 1.5 MB binary buffer byte-for-byte", async () => {
     const payload = Buffer.alloc(1_572_864, 7);
-    const row = await createRow("reconciliation_runs", { file_content: payload });
+    const run = await createRow("reconciliation_runs");
+    await insertRow("reconciliation_run_files", { run_id: run.id, file_content: payload });
     const rows = (await db.$queryRawUnsafe(
-      "SELECT file_content FROM reconciliation_runs WHERE id = ?",
-      row.id,
+      "SELECT file_content FROM reconciliation_run_files WHERE run_id = ?",
+      run.id,
     )) as Array<{ file_content: Buffer }>;
     expect(Buffer.from(rows[0]?.file_content ?? []).equals(payload)).toBe(true);
   });
 
   test("TEXT columns store 10,000 Arabic and English characters without truncation", async () => {
     const arabic = "ب".repeat(10_000);
-    const row = await createRow("merchants", { legalName: arabic });
+    const row = await createRow("merchants", { suspension_notes: arabic });
     const rows = (await db.$queryRawUnsafe(
-      "SELECT CHAR_LENGTH(legalName) AS length FROM merchants WHERE id = ?",
+      "SELECT CHAR_LENGTH(suspension_notes) AS length FROM merchants WHERE id = ?",
       row.id,
     )) as Array<{ length: number | bigint }>;
     expect(Number(rows[0]?.length)).toBe(10_000);

@@ -28,6 +28,8 @@ const designModelNames = [
   "PosTerminal",
   "PosScreen",
   "GlAccount",
+  "GlBalanceShard",
+  "GlPeriodTotal",
   "JournalEntry",
   "JournalLine",
   "CommissionProfile",
@@ -63,13 +65,16 @@ const designModelNames = [
   "PaymentAttempt",
   "AttemptStepLog",
   "InboundEvent",
+  "InboundEventPayload",
   "OperatorCase",
   "GatewayInquirySchedule",
   "ReconciliationRun",
+  "ReconciliationRunFile",
   "ReconciliationItem",
   "GatewayHealthSample",
   "DetailChangeLog",
   "AuditLog",
+  "AuditLogPayload",
   "UserIdentity",
   "JoinRequest",
   "KybDocument",
@@ -88,27 +93,67 @@ const designModelNames = [
   "BackgroundJob",
   // The persisted evidence the 12 go-live gates are evaluated against.
   "GatewayVersionEvidence",
+  // V2 hot-path and cache tables.
+  "AttemptDeadline",
+  "VelocityCounter",
+  "RouteDailyVolume",
+  "MerchantDailyStat",
+  "CacheInvalidationEvent",
 ];
 
 describe("prisma schema", () => {
   const schema = fs.readFileSync(schemaPath, "utf8");
 
-  test("declares exactly the 68 design models", () => {
+  test("declares exactly the 78 v2 design models", () => {
     const modelNames = [...schema.matchAll(/^model\s+(\w+)\s*\{/gm)].map(
       (match) => match[1] as string,
     );
-    expect(modelNames.length).toBe(68);
+    expect(modelNames.length).toBe(78);
     expect([...modelNames].sort()).toEqual([...designModelNames].sort());
   });
 
-  test("every model carries id, createdAt and updatedAt", () => {
+  test("every model carries a primary key and append-only tables omit updatedAt", () => {
+    const wholeRowKey = new Set([
+      "GlBalanceShard",
+      "GlPeriodTotal",
+      "AttemptDeadline",
+      "VelocityCounter",
+      "RouteDailyVolume",
+      "MerchantDailyStat",
+    ]);
+    const noCreatedAt = new Set(wholeRowKey);
+    const immutable = new Set([
+      "GlAccount",
+      "AuditLog",
+      "AuditLogPayload",
+      "InboundEvent",
+      "InboundEventPayload",
+      "JournalEntry",
+      "JournalLine",
+      "AttemptStepLog",
+      "GlBalanceShard",
+      "GlPeriodTotal",
+      "ReconciliationRunFile",
+      "AttemptDeadline",
+      "VelocityCounter",
+      "RouteDailyVolume",
+      "MerchantDailyStat",
+      "CacheInvalidationEvent",
+    ]);
     const modelBlocks = schema.split(/^model\s+/m).slice(1);
     for (const block of modelBlocks) {
       const modelName = block.split(/\s/)[0] as string;
-      expect(block).toMatch(/^\s*id\s+\S+\s+@id/m);
-      expect(block).toMatch(/^\s*createdAt\s+DateTime\s+@default\(now\(\)\)/m);
-      expect(block).toMatch(/^\s*updatedAt\s+DateTime\s+@updatedAt/m);
-      expect(modelName.length).toBeGreaterThan(0);
+      if (wholeRowKey.has(modelName)) {
+        expect(block).toMatch(/^\s*@@id\(/m);
+      } else {
+        expect(block).toMatch(/^\s*\w+\s+\S+\s+@id/m);
+      }
+      if (!noCreatedAt.has(modelName)) {
+        expect(block).toMatch(/^\s*createdAt\s+DateTime\s+@default\(now\(\)\)/m);
+      }
+      if (!immutable.has(modelName)) {
+        expect(block).toMatch(/^\s*updatedAt\s+DateTime\s+@updatedAt/m);
+      }
     }
   });
 

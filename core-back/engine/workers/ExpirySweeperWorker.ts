@@ -1,6 +1,13 @@
 import { moneyToString, type Money } from "../db/money";
 import { toCamelRows, mysqlPlaceholders } from "../db/rawRows";
 import type { PaymentAttemptRow, Tx } from "../db/ports";
+import {
+  ATTEMPT_WORKER_COLUMNS,
+  claimAttemptDeadlines,
+  deleteAttemptDeadlines,
+} from "../../lib/counters/attemptDeadlines";
+import { purgeVelocityCounters } from "../../lib/counters/velocity";
+import { rollupMerchantDailyStats } from "../../lib/counters/merchantDailyStats";
 import { BaseWorker, type WorkerOptions } from "./workerRuntime";
 
 export interface InquiryOutcome {
@@ -31,6 +38,7 @@ const AML_HOLD_SUBSTATUS = "AML_HOLD";
 export class ExpirySweeperWorker extends BaseWorker {
   private readonly inquiry: InquiryPort | undefined;
   private inquirySupport = new Map<string, boolean>();
+  private lastRollupAt = 0;
 
   constructor(deps: ExpirySweeperWorkerDeps) {
     super(deps);
@@ -39,11 +47,27 @@ export class ExpirySweeperWorker extends BaseWorker {
 
   protected async tick(): Promise<void> {
     const now = this.clock();
+    await this.rollup(now);
     const attempts = await this.lockExpiredAttempts(now);
     if (attempts.length === 0) return;
     await this.refreshInquirySupport();
     for (const attempt of attempts) {
       await this.handleAttempt(attempt, now);
+    }
+  }
+
+  private async rollup(now: Date): Promise<void> {
+    if (now.getTime() - this.lastRollupAt < 10 * 60_000) {
+      return;
+    }
+    this.lastRollupAt = now.getTime();
+    try {
+      await purgeVelocityCounters(this.db, now);
+      await rollupMerchantDailyStats(this.db, { now });
+    } catch (error) {
+      this.logger.warn("ExpirySweeperWorker: rollup failed", {
+        error: (error as Error).message,
+      });
     }
   }
 
@@ -59,23 +83,28 @@ export class ExpirySweeperWorker extends BaseWorker {
   }
 
   private async lockExpiredAttempts(now: Date): Promise<PaymentAttemptRow[]> {
-    const statusPlaceholders = mysqlPlaceholders(EXPIRABLE_STATUSES.length);
-    const sql =
-      "SELECT * FROM payment_attempts" +
-      " WHERE expires_at IS NOT NULL" +
-      " AND expires_at <= ?" +
-      " AND terminal_at IS NULL" +
-      ` AND status IN (${statusPlaceholders})` +
-      " AND (substatus IS NULL OR substatus <> ?)" +
-      " ORDER BY expires_at ASC" +
-      " LIMIT ?" +
-      " FOR UPDATE SKIP LOCKED";
-    const result = await this.db.$queryRawUnsafe(
-      sql,
+    const claimed = await claimAttemptDeadlines(this.db, {
+      kinds: ["EXPIRE", "GRACE_END"],
       now,
+      limit: this.batchSize,
+      workerId: this.name,
+    });
+    const ids = [...new Set(claimed.map((entry) => entry.attemptId))];
+    if (ids.length === 0) {
+      return [];
+    }
+    const idPlaceholders = mysqlPlaceholders(ids.length);
+    const statusPlaceholders = mysqlPlaceholders(EXPIRABLE_STATUSES.length);
+    const result = await this.db.$queryRawUnsafe(
+      `SELECT ${ATTEMPT_WORKER_COLUMNS}
+         FROM payment_attempts
+        WHERE id IN (${idPlaceholders})
+          AND terminal_at IS NULL
+          AND status IN (${statusPlaceholders})
+          AND (substatus IS NULL OR substatus <> ?)`,
+      ...ids,
       ...EXPIRABLE_STATUSES,
       AML_HOLD_SUBSTATUS,
-      this.batchSize,
     );
     return toCamelRows<PaymentAttemptRow>(result);
   }
@@ -190,13 +219,19 @@ export class ExpirySweeperWorker extends BaseWorker {
     attemptId: string,
     columns: { status: string; terminal_at: Date; next_check_at: null },
   ): Promise<boolean> {
-    const result = await this.db.$executeRawUnsafe(
-      "UPDATE payment_attempts SET status = ?, terminal_at = ?, next_check_at = NULL, updated_at = NOW() WHERE id = ? AND terminal_at IS NULL",
-      columns.status,
-      columns.terminal_at,
-      attemptId,
-    );
-    return Number(result ?? 0) > 0;
+    return this.db.$transaction(async (tx: Tx) => {
+      const result = await tx.$executeRawUnsafe(
+        "UPDATE payment_attempts SET status = ?, terminal_at = ?, next_check_at = NULL, updated_at = NOW(3) WHERE id = ? AND terminal_at IS NULL",
+        columns.status,
+        columns.terminal_at,
+        attemptId,
+      );
+      const transitioned = Number(result ?? 0) > 0;
+      if (transitioned) {
+        await deleteAttemptDeadlines(tx, attemptId);
+      }
+      return transitioned;
+    });
   }
 
   private async releaseSlot(attempt: PaymentAttemptRow): Promise<void> {

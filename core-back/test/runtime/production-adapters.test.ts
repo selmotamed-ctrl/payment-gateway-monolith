@@ -114,6 +114,10 @@ const createFakeClient = (options: FakeOptions = {}) => {
       if (text.includes("SELECT id FROM payment_links")) {
         return lockSlot();
       }
+      if (text.includes("SELECT infinite_use FROM payment_links")) {
+        const link = rows(store, "paymentLink")[0];
+        return link ? [{ infinite_use: link.infiniteUse ? 1 : 0 }] : [];
+      }
       return [];
     },
     $executeRawUnsafe: async (sql: string, ..._params: unknown[]) =>
@@ -511,12 +515,11 @@ describe("production ledger invariant", () => {
   test("the checkpoint is not double counted", async () => {
     // The checkpoint already covers the window that was closed, so a line that
     // was posted BEFORE the checkpoint must not be added to it again.
-    const checkpointAt = new Date("2026-03-01T00:00:00.000Z");
     const before = new Date("2026-02-28T00:00:00.000Z");
     const accounts = [
-      { id: "clearing", accountType: "GATEWAY_CLEARING", checkpointBalance: "100.0000", checkpointAt },
+      { id: "clearing", accountType: "GATEWAY_CLEARING", balanceMode: "SYNC", currentBalance: "100.0000" },
       // A credit-normal account keeps a NEGATIVE debit-positive balance.
-      { id: "wallet", accountType: "MERCHANT_WALLET", checkpointBalance: "-100.0000", checkpointAt },
+      { id: "wallet", accountType: "MERCHANT_WALLET", balanceMode: "SYNC", currentBalance: "-100.0000" },
     ];
     const lines = [
       { id: "l1", glAccountId: "clearing", direction: "DEBIT", amount: "100.0000", createdAt: before },
@@ -545,7 +548,7 @@ describe("production ledger invariant", () => {
     const verifier = new InvariantVerifier(client);
     const result = await verifier.verify();
     const clearing = result.accountBalances.find((balance) => balance.accountType === "GATEWAY_CLEARING");
-    expect(clearing?.checkpointBalance.toFixed(4)).toBe("100.0000");
+    expect(clearing?.checkpointBalance.toFixed(4)).toBe("0.0000");
     expect(clearing?.delta.toFixed(4)).toBe("0.0000");
     expect(clearing?.liveBalance.toFixed(4)).toBe("100.0000");
     expect(result.ok).toBe(true);

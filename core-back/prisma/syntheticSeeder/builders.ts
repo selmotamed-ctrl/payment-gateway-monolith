@@ -148,16 +148,15 @@ export const ensureSystemAccounts = (ctx: SeederContext): SystemAccounts => {
     ctx.dataset.glAccounts.push({
       id,
       createdAt: ctx.timeline.start,
-      updatedAt: ctx.timeline.end,
       accountType: type,
       ownerId,
       gatewayId,
       credentialSetId: null,
       env,
       currency: "LYD",
-      lastCheckpointId: null,
-      checkpointBalance: "0.0000",
-      checkpointAt: null,
+      balanceMode: type === "COMMISSION_RECEIVABLE" ? "SYNC" : "SHARDED",
+      currentBalance: "0.0000",
+      balanceFloor: null,
       seedKey: `synthetic:${ctx.config.namespace}:${type}:${gatewayId ?? "platform"}:${env ?? "all"}`,
     });
     ctx.refs.glAccounts.push({ id, accountType: type, gatewayId, env, ownerId });
@@ -194,16 +193,15 @@ export const createWalletAccount = (
   ctx.dataset.glAccounts.push({
     id,
     createdAt: at,
-    updatedAt: at,
     accountType: "MERCHANT_WALLET",
     ownerId: merchantId,
     gatewayId: null,
     credentialSetId: null,
     env: null,
     currency: "LYD",
-    lastCheckpointId: null,
-    checkpointBalance: "0.0000",
-    checkpointAt: null,
+    balanceMode: "SYNC",
+    currentBalance: "0.0000",
+    balanceFloor: null,
     seedKey: `synthetic:${ctx.config.namespace}:wallet:${merchantId}`,
   });
   ctx.refs.glAccounts.push({ id, accountType: "MERCHANT_WALLET", gatewayId: null, env: null, ownerId: merchantId });

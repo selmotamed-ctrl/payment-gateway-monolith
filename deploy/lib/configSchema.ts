@@ -89,8 +89,34 @@ const base = z.strictObject({
     .min(1)
     .max(64)
     .regex(/^[A-Za-z0-9_]+$/, "must be an identifier"),
-  DB_PASSWORD: z.string().min(2).max(256),
+  DB_PASSWORD: z.string().min(8).max(256),
   DATABASE_URL: z.string().trim().min(1).max(1000),
+
+  // 1a. Engine tuning (design high_scale_db_architecture_v2.md §2.12).
+  // The deploy detects the remote server flavour; "auto" resolves to MariaDB
+  // or MySQL from `SELECT VERSION()`. MariaDB-only options are never written
+  // to a MySQL server, and no restart is performed by the deploy.
+  DB_SERVER_FLAVOR: z.enum(["auto", "mariadb", "mysql"]).default("auto"),
+  DB_APPLY_TUNING: booleanish.default(true),
+  DB_INNODB_BUFFER_POOL_PERCENT: z.coerce.number().int().min(10).max(90).default(70),
+  DB_INNODB_BUFFER_POOL_SIZE_MB: z.coerce.number().int().min(128).max(1_048_576).optional(),
+  DB_INNODB_LOG_FILE_SIZE_MB: z.coerce.number().int().min(256).max(65_536).default(4_096),
+  DB_INNODB_LOG_BUFFER_SIZE_MB: z.coerce.number().int().min(8).max(1_024).default(64),
+  DB_INNODB_IO_CAPACITY: z.coerce.number().int().min(100).max(100_000).default(2_000),
+  DB_INNODB_IO_CAPACITY_MAX: z.coerce.number().int().min(100).max(200_000).default(4_000),
+  DB_INNODB_LOCK_WAIT_TIMEOUT: z.coerce.number().int().min(1).max(120).default(5),
+  DB_MAX_CONNECTIONS: z.coerce.number().int().min(50).max(100_000).default(300),
+  DB_THREAD_POOL_SIZE: z.coerce.number().int().min(1).max(256).optional(),
+  DB_TABLE_OPEN_CACHE: z.coerce.number().int().min(400).max(1_000_000).default(6_000),
+  DB_TMP_TABLE_SIZE_MB: z.coerce.number().int().min(16).max(4_096).default(128),
+  DB_MAX_HEAP_TABLE_SIZE_MB: z.coerce.number().int().min(16).max(4_096).default(128),
+  DB_SLOW_QUERY_LOG: booleanish.default(true),
+  DB_LONG_QUERY_TIME_SECONDS: z.coerce.number().min(0.01).max(60).default(0.2),
+  DB_LOG_SLOW_ADMIN_STATEMENTS: booleanish.default(true),
+  DB_PERFORMANCE_SCHEMA: booleanish.default(true),
+  DB_FULLTEXT_MIN_TOKEN_SIZE: z.coerce.number().int().min(1).max(10).default(2),
+  DB_LOG_QUERIES_NOT_USING_INDEXES: booleanish.default(false),
+  DB_PRINT_ALL_DEADLOCKS: booleanish.default(false),
 
   // 2. Core
   CORE_SSH_HOST: ipv4,
@@ -311,6 +337,21 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
       if (config.FAKE_RAILS_NGINX_PORT === port) {
         problems.push(`FAKE_RAILS_NGINX_PORT must not be the public ${port}`);
       }
+    }
+  }
+
+  if (config.DB_ENGINE === "mysql") {
+    if (config.DB_INNODB_IO_CAPACITY_MAX < config.DB_INNODB_IO_CAPACITY) {
+      problems.push("DB_INNODB_IO_CAPACITY_MAX must be greater than or equal to DB_INNODB_IO_CAPACITY");
+    }
+    if (config.DB_THREAD_POOL_SIZE !== undefined && config.DB_THREAD_POOL_SIZE > config.DB_MAX_CONNECTIONS) {
+      problems.push("DB_THREAD_POOL_SIZE must not exceed DB_MAX_CONNECTIONS");
+    }
+    if (config.DB_INNODB_BUFFER_POOL_SIZE_MB !== undefined && config.DB_INNODB_BUFFER_POOL_SIZE_MB < 128) {
+      problems.push("DB_INNODB_BUFFER_POOL_SIZE_MB must be at least 128");
+    }
+    if (config.DB_INNODB_LOG_FILE_SIZE_MB < 256) {
+      problems.push("DB_INNODB_LOG_FILE_SIZE_MB must be at least 256");
     }
   }
 

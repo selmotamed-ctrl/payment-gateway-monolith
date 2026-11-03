@@ -1,14 +1,17 @@
 import { Decimal } from "decimal.js";
-import { decimal, type JournalLineRecord, type LedgerAccountRecord } from "./LedgerPoster";
+import { decimal, type LedgerAccountRecord } from "./LedgerPoster";
 import type { AccountBalance } from "./CheckpointService";
+import {
+  GlBalanceStore,
+  type AccountBalanceVerification,
+  type ClosedPeriodVerification,
+  type GlBalanceStoreClient,
+  type PeriodTotalOptions,
+} from "./GlBalanceStore";
 
-export interface InvariantPrismaClient {
-  glAccount: {
-    findMany(args?: { select?: Record<string, boolean> }): Promise<LedgerAccountRecord[]>;
-  };
-  journalLine: {
-    findMany(args?: { where?: Record<string, unknown> }): Promise<JournalLineRecord[]>;
-  };
+export interface InvariantPrismaClient extends GlBalanceStoreClient {
+  glAccount?: any;
+  journalLine?: any;
 }
 
 export interface InvariantBalanceProvider {
@@ -99,38 +102,90 @@ export class InvariantVerifier {
     return result;
   }
 
-  /**
-   * The live balance of an account is the checkpoint balance plus the journal
-   * lines that were posted after the checkpoint. Summing every line would
-   * double count the window that the checkpoint already covers.
-   */
+  async verifyClosedPeriod(
+    day: Date | string | PeriodTotalOptions,
+    accountId?: string,
+  ): Promise<ClosedPeriodVerification> {
+    if (!this.client) {
+      throw new Error("The invariant verifier has no database client for period verification");
+    }
+    const options: PeriodTotalOptions = day instanceof Date || typeof day === "string"
+      ? { day, ...(accountId ? { accountId } : {}) }
+      : day;
+    return new GlBalanceStore(this.client).verifyClosedPeriod(this.client, options);
+  }
+
+  async verifyPeriodTotals(
+    day: Date | string | PeriodTotalOptions,
+    accountId?: string,
+  ): Promise<ClosedPeriodVerification> {
+    return this.verifyClosedPeriod(day, accountId);
+  }
+
+  async verifyAccountBalance(
+    accountId: string,
+    firstOpenDay?: Date | string,
+  ): Promise<AccountBalanceVerification> {
+    if (!this.client) {
+      throw new Error("The invariant verifier has no database client for account verification");
+    }
+    return new GlBalanceStore(this.client).verifyAccountBalance(this.client, accountId, firstOpenDay);
+  }
+
+  async verifyAccount(
+    accountId: string,
+    firstOpenDay?: Date | string,
+  ): Promise<AccountBalanceVerification> {
+    return this.verifyAccountBalance(accountId, firstOpenDay);
+  }
+
   private async loadBalances(): Promise<AccountBalance[]> {
     if (!this.client) {
       return [];
     }
-    const accounts = await this.client.glAccount.findMany();
+    const store = new GlBalanceStore(this.client);
+    const accounts = await this.loadAccounts();
     const balances: AccountBalance[] = [];
     for (const account of accounts) {
-      const checkpointBalance = decimal(account.checkpointBalance ?? 0);
-      const lines = await this.client.journalLine.findMany({
-        where: account.checkpointAt
-          ? { glAccountId: account.id, createdAt: { gt: account.checkpointAt } }
-          : { glAccountId: account.id },
-      });
-      let delta = new Decimal(0);
-      for (const line of lines) {
-        const amount = decimal(line.amount);
-        delta = line.direction === "DEBIT" ? delta.plus(amount) : delta.minus(amount);
-      }
+      const snapshot = await store.readBalance(this.client, account);
       balances.push({
-        accountId: account.id,
-        accountType: account.accountType,
-        checkpointBalance,
-        delta,
-        liveBalance: checkpointBalance.plus(delta),
-        checkpointAt: account.checkpointAt ?? undefined,
+        accountId: snapshot.accountId,
+        accountType: snapshot.accountType as LedgerAccountRecord["accountType"],
+        balance: snapshot.balance,
+        currentBalance: snapshot.balance,
+        checkpointBalance: new Decimal(0),
+        delta: new Decimal(0),
+        liveBalance: snapshot.balance,
+        balanceMode: snapshot.balanceMode,
       });
     }
     return balances;
+  }
+
+  private async loadAccounts(): Promise<LedgerAccountRecord[]> {
+    if (!this.client) {
+      return [];
+    }
+    const delegate = this.client.glAccount;
+    if (delegate && typeof delegate.findMany === "function") {
+      const rows = await delegate.findMany({
+        select: {
+          id: true,
+          accountType: true,
+          balanceMode: true,
+          currentBalance: true,
+          balanceFloor: true,
+          currency: true,
+        },
+      });
+      return Array.isArray(rows) ? rows as LedgerAccountRecord[] : [];
+    }
+    if (typeof this.client.$queryRawUnsafe === "function") {
+      const rows = await this.client.$queryRawUnsafe(
+        "SELECT `id`, `account_type` AS `accountType`, `balance_mode` AS `balanceMode`, `current_balance` AS `currentBalance`, `balance_floor` AS `balanceFloor`, `currency` FROM `gl_accounts`",
+      );
+      return Array.isArray(rows) ? rows as LedgerAccountRecord[] : [];
+    }
+    return [];
   }
 }

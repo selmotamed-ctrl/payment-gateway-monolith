@@ -8,27 +8,22 @@ import type {
 } from "../flow/DynamicRailEngine";
 import { buildLedgerTemplate, decimal, LedgerPoster, type LedgerPostContext } from "../ledger/LedgerPoster";
 import { ApiError } from "../../lib/error";
+import {
+  deleteAttemptDeadlines,
+  isTerminalAttemptStatus,
+} from "../../lib/counters/attemptDeadlines";
+import { recordRouteDailyVolume } from "../../lib/counters/routeDailyVolume";
 
 /**
  * Prisma-backed slot reservation store.
  *
- * MySQL/MariaDB has no `UPDATE ... RETURNING`, so the reservation is a pair
- * of statements that run in a single transaction:
+ * A finite link is reserved and committed with one conditional UPDATE, so
+ * the row lock and the capacity decision are the same statement. When the
+ * update affects no row the reservation failed.
  *
- *   SELECT id FROM payment_links
- *    WHERE id = ?
- *      AND (infinite_use = 1 OR confirmed_count + active_locked_count < use_count)
- *    FOR UPDATE
- *
- *   UPDATE payment_links
- *      SET active_locked_count = active_locked_count + 1, updated_at = NOW()
- *    WHERE id = ?
- *      AND (infinite_use = 1 OR confirmed_count + active_locked_count < use_count)
- *
- * The row lock is taken before the counter is incremented, so two cluster
- * nodes can never both take the last slot: the second one waits for the lock
- * and then finds no free slot anymore. When the update affects no row the
- * reservation failed.
+ * An infinite-use link has no counter to protect. It is read without a lock
+ * and its row is never written by the reserve / commit / release path, so
+ * the most contended link in the system cannot serialise checkout traffic.
  *
  * The slot is released on a terminal non-successful outcome and committed
  * (converted into a confirmed slot) when the attempt succeeds.
@@ -46,24 +41,35 @@ export class PrismaSlotReservationStore implements SlotReservationStore {
     if (!linkId) {
       throw new ApiError(409, "SLOT_RESERVATION_FAILED", "The attempt is not bound to a payment link");
     }
-    const reserve = async (tx: PrismaLike): Promise<boolean> => {
-      const locked = (await tx.$queryRawUnsafe(
-        "SELECT id FROM payment_links WHERE id = ? AND (infinite_use = 1 OR confirmed_count + active_locked_count < use_count) FOR UPDATE",
+    const reserve = async (tx: PrismaLike): Promise<"INFINITE" | "RESERVED" | "UNAVAILABLE"> => {
+      const rows = (await tx.$queryRawUnsafe(
+        "SELECT infinite_use FROM payment_links WHERE id = ? LIMIT 1",
         linkId,
-      )) as Array<{ id: string }>;
-      if (!Array.isArray(locked) || locked.length === 0) {
-        return false;
+      )) as Array<Record<string, unknown>>;
+      const link = Array.isArray(rows) ? rows[0] : undefined;
+      if (!link) {
+        return "UNAVAILABLE";
       }
+      if (Boolean(link.infinite_use ?? link.infiniteUse)) {
+        return "INFINITE";
+      }
+      // A finite link is reserved with one conditional UPDATE. There is no
+      // read-then-write gap: the row lock and the decision are the same
+      // statement, so two nodes can never take the last slot.
       const updated = await tx.$executeRawUnsafe(
-        "UPDATE payment_links SET active_locked_count = active_locked_count + 1, updated_at = NOW() WHERE id = ? AND (infinite_use = 1 OR confirmed_count + active_locked_count < use_count)",
+        `UPDATE payment_links
+            SET active_locked_count = active_locked_count + 1, updated_at = NOW(3)
+          WHERE id = ?
+            AND infinite_use = 0
+            AND confirmed_count + active_locked_count < use_count`,
         linkId,
       );
-      return Number(updated ?? 0) > 0;
+      return Number(updated ?? 0) > 0 ? "RESERVED" : "UNAVAILABLE";
     };
     const reserved = transaction
       ? await reserve(target)
       : await this.client.$transaction((tx: Tx) => reserve(tx as PrismaLike));
-    if (!reserved) {
+    if (reserved === "UNAVAILABLE") {
       throw new ApiError(409, "PAYMENT_LINK_SLOT_UNAVAILABLE", "The payment link has no available slot");
     }
     return { reservationId: `${linkId}:${attempt.id}`, linkId };
@@ -75,14 +81,30 @@ export class PrismaSlotReservationStore implements SlotReservationStore {
     if (!linkId) {
       return;
     }
-    await target.$executeRawUnsafe(
-      "UPDATE payment_links SET active_locked_count = GREATEST(0, active_locked_count - 1), updated_at = NOW() WHERE id = ?",
+    const rows = (await target.$queryRawUnsafe(
+      "SELECT infinite_use FROM payment_links WHERE id = ? LIMIT 1",
       linkId,
-    );
+    )) as Array<Record<string, unknown>>;
+    const link = Array.isArray(rows) ? rows[0] : undefined;
+    if (link && !Boolean(link.infinite_use ?? link.infiniteUse)) {
+      await target.$executeRawUnsafe(
+        "UPDATE payment_links SET active_locked_count = GREATEST(0, active_locked_count - 1), updated_at = NOW(3) WHERE id = ? AND infinite_use = 0",
+        linkId,
+      );
+    }
     await target.paymentAttempt.update({
       where: { id: attempt.id },
       data: { substatus: reason },
     });
+    if (isTerminalAttemptStatus(attempt.status)) {
+      await deleteAttemptDeadlines(target, attempt.id);
+    }
+  }
+
+  async syncAttemptDeadlines(attempt: DynamicAttempt): Promise<void> {
+    if (isTerminalAttemptStatus(attempt.status)) {
+      await deleteAttemptDeadlines(this.client, attempt.id);
+    }
   }
 
   /**
@@ -103,6 +125,19 @@ export class PrismaSlotReservationStore implements SlotReservationStore {
     if (!linkId) {
       return { outcome: "COMMITTED" };
     }
+    const linkRows = (await target.$queryRawUnsafe(
+      "SELECT infinite_use FROM payment_links WHERE id = ? LIMIT 1",
+      linkId,
+    )) as Array<Record<string, unknown>>;
+    const currentLink = Array.isArray(linkRows) ? linkRows[0] : undefined;
+    if (!currentLink) {
+      return this.routeToSuspense(target, attempt, linkId, 0, 1);
+    }
+    if (Boolean(currentLink.infinite_use ?? currentLink.infiniteUse)) {
+      await this.recordRouteVolume(target, attempt);
+      await deleteAttemptDeadlines(target, attempt.id);
+      return { outcome: "COMMITTED" };
+    }
     // The conditional update is the atomic decision: it takes the row lock
     // and only advances the counters when a slot is still free. The state is
     // settled before the counters move because MySQL evaluates the assignments
@@ -110,16 +145,19 @@ export class PrismaSlotReservationStore implements SlotReservationStore {
     const updated = Number(
       await target.$executeRawUnsafe(
         `UPDATE payment_links
-            SET state = CASE WHEN infinite_use = 0 AND confirmed_count + 1 >= use_count THEN 'COMPLETED' ELSE state END,
+            SET state = CASE WHEN confirmed_count + 1 >= use_count THEN 'COMPLETED' ELSE state END,
                 confirmed_count = confirmed_count + 1,
                 active_locked_count = GREATEST(0, active_locked_count - 1),
-                updated_at = NOW()
+                updated_at = NOW(3)
           WHERE id = ?
-            AND (infinite_use = 1 OR confirmed_count + 1 <= use_count)`,
+            AND infinite_use = 0
+            AND confirmed_count + 1 <= use_count`,
         linkId,
       ) ?? 0,
     );
     if (updated > 0) {
+      await this.recordRouteVolume(target, attempt);
+      await deleteAttemptDeadlines(target, attempt.id);
       return { outcome: "COMMITTED" };
     }
     // No row moved: either the link is gone, or the settlement would have
@@ -158,6 +196,8 @@ export class PrismaSlotReservationStore implements SlotReservationStore {
     confirmedCount: number,
     useCount: number,
   ): Promise<SlotCommitResult> {
+    await this.recordRouteVolume(target, attempt);
+    await deleteAttemptDeadlines(target, attempt.id);
     // Release the reservation the attempt may still hold. `confirmed_count`
     // is never incremented, so `payment_links_slot_reservation_invariant`
     // cannot be violated.
@@ -165,8 +205,8 @@ export class PrismaSlotReservationStore implements SlotReservationStore {
       `UPDATE payment_links
           SET state = CASE WHEN infinite_use = 0 AND confirmed_count >= use_count THEN 'COMPLETED' ELSE state END,
               active_locked_count = GREATEST(0, active_locked_count - 1),
-              updated_at = NOW()
-        WHERE id = ?`,
+              updated_at = NOW(3)
+        WHERE id = ? AND infinite_use = 0`,
       linkId,
     );
 
@@ -198,6 +238,23 @@ export class PrismaSlotReservationStore implements SlotReservationStore {
       operatorCaseId: String(operatorCase.id),
       reason: "SLOT_ALREADY_SETTLED",
     };
+  }
+
+  private async recordRouteVolume(target: PrismaLike, attempt: DynamicAttempt): Promise<void> {
+    if (!attempt.routeId) {
+      return;
+    }
+    try {
+      await recordRouteDailyVolume(target, {
+        routeId: attempt.routeId,
+        amount: attempt.totalChargedAmount ?? attempt.requestedAmount,
+        shardSeed: attempt.id,
+      });
+    } catch {
+      // The settlement is already decided. A failed counter write must never
+      // turn a captured payment into an error; the route volume is rebuilt
+      // from the attempts by the rollup worker.
+    }
   }
 
   private ledgerContext(attempt: DynamicAttempt): LedgerPostContext {

@@ -149,7 +149,8 @@ describeDb("Suite 06 · slot reservation races", () => {
     const results = await Promise.allSettled(attempts.map((attempt) => store.reserveSlot(attempt)));
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(50);
     const link = await readLink(linkId);
-    expect(Number(link.active_locked_count)).toBe(50);
+    // Infinite links are read without reservation writes, so no counter moves.
+    expect(Number(link.active_locked_count)).toBe(0);
   }, 120_000);
 
   test("releasing below zero is clamped by GREATEST(0, ...)", async () => {

@@ -1,6 +1,7 @@
 import { ApiError } from "./error";
 import type { PrismaClient } from "../generated/prisma/client";
 import { decimal } from "../engine/ledger/LedgerPoster";
+import { GlBalanceStore } from "../engine/ledger/GlBalanceStore";
 
 export const MERCHANT_DESCRIPTIVE_FIELDS = [
   "tradeName",
@@ -187,31 +188,18 @@ export const merchantWalletBalance = async (
     select: { id: true, currency: true, status: true, glAccountId: true },
   });
   if (wallets.length === 0) return { balance: "0.0000", wallets: [] };
-  const accounts = await db.glAccount.findMany({
-    where: { id: { in: wallets.map((wallet) => wallet.glAccountId) } },
-    select: { id: true, checkpointBalance: true },
-  });
+  const accountIds = [...new Set(wallets.map((wallet) => wallet.glAccountId))];
+  const store = new GlBalanceStore(db as never);
+  const snapshots = await store.readBalances(db as never, accountIds);
   const accountBalance = new Map(
-    accounts.map((account) => [account.id, decimal(account.checkpointBalance ?? 0)]),
+    snapshots.map((snapshot) => [snapshot.accountId, snapshot.balance]),
   );
-  const lines = await db.journalLine.findMany({
-    where: { glAccountId: { in: wallets.map((wallet) => wallet.glAccountId) } },
-    select: { glAccountId: true, direction: true, amount: true },
-  });
-  for (const line of lines) {
-    const current = accountBalance.get(line.glAccountId) ?? decimal(0);
-    const value = decimal(line.amount);
-    accountBalance.set(
-      line.glAccountId,
-      line.direction === "CREDIT" ? current.plus(value) : current.minus(value),
-    );
-  }
   const rows = wallets.map((wallet) => ({
     id: wallet.id,
     walletId: wallet.id,
     currency: wallet.currency,
     status: String(wallet.status),
-    balance: (accountBalance.get(wallet.glAccountId) ?? decimal(0)).toFixed(4),
+    balance: (accountBalance.get(wallet.glAccountId) ?? decimal(0)).negated().toFixed(4),
   }));
   const total = rows.reduce((sum, row) => sum.plus(decimal(row.balance)), decimal(0));
   return { balance: total.toFixed(4), wallets: rows };

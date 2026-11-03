@@ -136,6 +136,7 @@ export interface KybDocumentRow {
   docType: string;
   storageKey: string;
   sha256: string;
+  duplicateOfMerchantId?: string | null;
   mime: string;
   sizeBytes: number;
   avStatus: "PENDING" | "CLEAN" | "INFECTED";
@@ -816,3 +817,19 @@ export interface Repositories {
   reconciliation: ReconciliationRepository;
   jobs: BackgroundJobRepository;
 }
+
+export {
+  BACKGROUND_TX_OPTIONS,
+  BACKGROUND_TX_SETTINGS,
+  TRANSACTIONAL_TX_OPTIONS,
+  TRANSACTIONAL_TX_SETTINGS,
+  isRetryableTransactionError,
+  withReadCommitted,
+  withTxRetry,
+  withTxRetryTransaction,
+  withTxSettings,
+} from "./repositories";
+export type {
+  TransactionRetryOptions,
+  TransactionSettings,
+} from "./repositories";

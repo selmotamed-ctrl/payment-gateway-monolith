@@ -17,6 +17,15 @@ import type {
   VelocityRuleRow,
 } from "../db/ports";
 import { evaluateCommissionReceivableCeiling } from "../governance/GovernanceExecution";
+import {
+  bufferVelocityCounter,
+  hashVelocityScopeValue,
+  incrementVelocityCounter,
+  readVelocityWindow,
+  readVelocityWindowWithBuffer,
+  velocityCountersFeatureEnabled,
+  type VelocityScope,
+} from "../../lib/counters/velocity";
 import { buildLedgerTemplate, LedgerPoster } from "../ledger/LedgerPoster";
 import { AmlRuleEngine, slaHoursForSeverity, type AmlRuleHit } from "./AmlRuleEngine";
 import {
@@ -366,9 +375,15 @@ export class AttemptGuardPipeline {
         }
       }
 
-      const link = await this.repositories.payments.lockLinkByKey(tx, request.linkKey);
+      let link = await this.repositories.payments.findLinkByKey(tx, request.linkKey);
       if (!link) {
         throw new ApiError(404, "PAYMENT_LINK_NOT_FOUND", "Payment link not found");
+      }
+      // Infinite-use links have no slot to protect. They are read without a
+      // row lock and are never written by the reservation path, so the most
+      // contended link in the system cannot serialise checkout traffic.
+      if (!link.infiniteUse) {
+        link = await this.repositories.payments.lockLinkByKey(tx, request.linkKey) ?? link;
       }
       if (link.state !== "PENDING") {
         throw new ApiError(409, "PAYMENT_LINK_NOT_AVAILABLE", "Payment link is not available");
@@ -668,7 +683,9 @@ export class AttemptGuardPipeline {
         );
       }
 
-      await this.repositories.payments.updateLinkSlotCount(tx, link.id, 1);
+      if (!link.infiniteUse) {
+        await this.repositories.payments.updateLinkSlotCount(tx, link.id, 1);
+      }
       const attemptGroupId = await this.resolveAttemptGroup(tx, link.id, customer, clientIp, clientPhone);
       // A held attempt waits for the resolution of its case, so it outlives
       // the session of the payment: the slot of the link stays reserved
@@ -922,16 +939,39 @@ export class AttemptGuardPipeline {
     clientIp: string | null,
     clientPhone: string | null,
   ): Promise<string> {
-    const client = tx as Record<string, any>;
     const fingerprint = createHash("sha256")
       .update([customer.deviceFingerprint, clientPhone, clientIp].filter(Boolean).join(":"))
       .digest("hex");
-    const group = await client.attemptGroup.upsert({
-      where: { linkId_customerFingerprint: { linkId, customerFingerprint: fingerprint } },
-      create: { linkId, customerFingerprint: fingerprint },
-      update: {},
-    });
-    return group.id;
+    const groups = (tx as unknown as Record<string, any>).attemptGroup;
+    if (groups?.upsert) {
+      const group = await groups.upsert({
+        where: { linkId_customerFingerprint: { linkId, customerFingerprint: fingerprint } },
+        create: { id: randomUUID(), linkId, customerFingerprint: fingerprint, successCount: 0 },
+        update: {},
+      });
+      return String(group.id);
+    }
+    if (typeof tx.$executeRawUnsafe === "function" && typeof tx.$queryRawUnsafe === "function") {
+      await tx.$executeRawUnsafe(
+        `INSERT INTO attempt_groups (id, created_at, updated_at, link_id, customer_fingerprint, success_count)
+         VALUES (?, NOW(3), NOW(3), ?, ?, 0)
+         ON DUPLICATE KEY UPDATE id = id`,
+        randomUUID(),
+        linkId,
+        fingerprint,
+      );
+      const rows = (await tx.$queryRawUnsafe(
+        "SELECT id FROM attempt_groups WHERE link_id = ? AND customer_fingerprint = ? LIMIT 1",
+        linkId,
+        fingerprint,
+      )) as Array<Record<string, unknown>>;
+      const group = Array.isArray(rows) ? rows[0] : undefined;
+      if (!group) {
+        throw new ApiError(500, "ATTEMPT_GROUP_UNAVAILABLE", "The attempt group could not be resolved");
+      }
+      return String(group.id);
+    }
+    throw new ApiError(500, "ATTEMPT_GROUP_UNAVAILABLE", "The attempt group could not be resolved");
   }
 
   private async merchantPosture(
@@ -1141,6 +1181,29 @@ export class AttemptGuardPipeline {
     },
   ): Promise<VelocityEvaluation[]> {
     const results: VelocityEvaluation[] = [];
+    const scopeValueFor = (scopeType: VelocityRuleRow["scopeType"]): string | null => {
+      switch (scopeType) {
+        case "MERCHANT":
+          return input.merchant.id;
+        case "APPLICATION":
+          return input.link.applicationId;
+        case "LINK":
+          return input.link.id;
+        case "RAIL":
+          return input.route.railId ?? input.request.railCode ?? null;
+        case "END_CLIENT_IP":
+          return input.clientIp;
+        case "END_CLIENT_PHONE":
+          return input.clientPhone;
+        case "END_CLIENT_CARD":
+          return input.cardAlias;
+        default:
+          return null;
+      }
+    };
+    const isPayerScope = (scopeType: VelocityRuleRow["scopeType"]): boolean =>
+      scopeType === "END_CLIENT_IP" || scopeType === "END_CLIENT_PHONE" || scopeType === "END_CLIENT_CARD";
+    const matchedRules: VelocityRuleRow[] = [];
     for (const rule of input.rules) {
       if (!rule.active) {
         continue;
@@ -1160,29 +1223,113 @@ export class AttemptGuardPipeline {
         clientPhone: input.clientPhone,
         cardAlias: input.cardAlias,
       });
-      if (!matched) {
-        continue;
+      if (matched) {
+        matchedRules.push(rule);
       }
+    }
+
+    const countersEnabled = velocityCountersFeatureEnabled();
+    const recordedPayerScopes = new Set<string>();
+    const recordedSoftScopes = new Set<string>();
+    if (countersEnabled) {
+      for (const rule of matchedRules) {
+        const rawValue = scopeValueFor(rule.scopeType);
+        if (!rawValue) {
+          continue;
+        }
+        if (isPayerScope(rule.scopeType)) {
+          const scopeKey = hashVelocityScopeValue(rawValue);
+          const token = `${rule.scopeType}:${scopeKey}`;
+          if (recordedPayerScopes.has(token)) {
+            continue;
+          }
+          recordedPayerScopes.add(token);
+          try {
+            await incrementVelocityCounter(tx, {
+              scopeType: rule.scopeType as VelocityScope,
+              scopeKey,
+              amount: input.amounts.totalCharged,
+              now: input.now,
+            });
+          } catch {
+            recordedPayerScopes.delete(token);
+          }
+        } else {
+          const token = `${rule.scopeType}:${rawValue}`;
+          if (!recordedSoftScopes.has(token)) {
+            recordedSoftScopes.add(token);
+            bufferVelocityCounter(this.db, {
+              scopeType: rule.scopeType as VelocityScope,
+              scopeKey: rawValue,
+              amount: input.amounts.totalCharged,
+              now: input.now,
+            });
+          }
+        }
+      }
+    }
+
+    for (const rule of matchedRules) {
       const since = new Date(input.now.getTime() - Math.max(1, rule.windowSeconds) * 1000);
-      const stats = await this.collectScopedWindowStats(tx, {
-        scopeType: rule.scopeType,
-        merchantId: input.merchant.id,
-        applicationId: input.link.applicationId,
-        linkId: input.link.id,
-        railId: input.route.railId,
-        clientIp: input.clientIp,
-        clientPhone: input.clientPhone,
-        cardAlias: input.cardAlias,
-        since,
-      });
+      let stats: AttemptWindowStats | null = null;
+      let includesCurrentAttempt = false;
+      const rawValue = scopeValueFor(rule.scopeType);
+      if (countersEnabled && rawValue) {
+        try {
+          const scopeType = rule.scopeType as VelocityScope;
+          const scopeKey = isPayerScope(rule.scopeType) ? hashVelocityScopeValue(rawValue) : rawValue;
+          const counterStats = isPayerScope(rule.scopeType)
+            ? await readVelocityWindow(tx, {
+                scopeType,
+                scopeKey,
+                now: input.now,
+                windowSeconds: rule.windowSeconds,
+              })
+            : await readVelocityWindowWithBuffer(tx, {
+                scopeType,
+                scopeKey,
+                now: input.now,
+                windowSeconds: rule.windowSeconds,
+              });
+          if (counterStats.rows > 0 || recordedPayerScopes.has(`${rule.scopeType}:${scopeKey}`)) {
+            stats = {
+              count: counterStats.count,
+              totalAmount: counterStats.totalAmount,
+              amounts: [],
+            };
+            includesCurrentAttempt = true;
+          }
+        } catch {
+          stats = null;
+        }
+      }
+      if (!stats) {
+        stats = await this.collectScopedWindowStats(tx, {
+          scopeType: rule.scopeType,
+          merchantId: input.merchant.id,
+          applicationId: input.link.applicationId,
+          linkId: input.link.id,
+          railId: input.route.railId,
+          clientIp: input.clientIp,
+          clientPhone: input.clientPhone,
+          cardAlias: input.cardAlias,
+          since,
+        });
+      }
       const maxCount = rule.maxCount === null || rule.maxCount === undefined ? null : Number(rule.maxCount);
       const maxAmount = rule.maxAmount === null || rule.maxAmount === undefined ? null : moneyFromDecimal(rule.maxAmount);
-      const countExceeded = maxCount !== null && stats.count >= maxCount;
-      const amountExceeded = maxAmount !== null && stats.totalAmount + input.amounts.totalCharged > maxAmount;
+      const countExceeded = maxCount !== null
+        && (includesCurrentAttempt ? stats.count > maxCount : stats.count >= maxCount);
+      const amountExceeded = maxAmount !== null
+        && (includesCurrentAttempt
+          ? stats.totalAmount > maxAmount
+          : stats.totalAmount + input.amounts.totalCharged > maxAmount);
       results.push({
         rule,
-        count: stats.count,
-        totalAmount: stats.totalAmount,
+        count: includesCurrentAttempt ? Math.max(0, stats.count - 1) : stats.count,
+        totalAmount: includesCurrentAttempt
+          ? stats.totalAmount - input.amounts.totalCharged
+          : stats.totalAmount,
         exceeded: countExceeded || amountExceeded,
       });
     }

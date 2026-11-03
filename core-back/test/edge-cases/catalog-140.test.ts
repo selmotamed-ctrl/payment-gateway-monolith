@@ -338,9 +338,15 @@ const checks: Record<string, Check> = {
     expect(patches.some((patch) => patch.settledAmount === "100.0000")).toBe(true);
     const terminal = calls.find((call) => call.kind === "execute" && call.sql.includes("UPDATE payment_attempts"));
     expect(terminal?.args[0]).toBe("SUCCEEDED");
-    const select = calls.find((call) => call.kind === "query" && call.sql.includes("FROM payment_attempts"));
-    expect(select?.sql).toContain("expires_at <= ?");
+    const select = calls.find((call) =>
+      call.kind === "query" && call.sql.includes("AND (substatus IS NULL OR substatus <> ?)")
+    );
+    expect(select?.sql).toContain("FROM payment_attempts");
     expect(select?.sql).toContain("terminal_at IS NULL");
+    const deadlines = calls.find((call) =>
+      call.kind === "query" && call.sql.includes("FROM attempt_deadlines")
+    );
+    expect(deadlines?.sql).toContain("FOR UPDATE SKIP LOCKED");
   },
 
   async otp_resend_cooldown() {
@@ -447,8 +453,7 @@ const checks: Record<string, Check> = {
     const statements = [...expiry.calls, ...poll.calls, ...jobs.calls]
       .filter((call) => call.kind === "query")
       .map((call) => call.sql);
-    expect(statements.some((sql) => sql.includes("expires_at <= ?") && sql.includes("FOR UPDATE SKIP LOCKED"))).toBe(true);
-    expect(statements.some((sql) => sql.includes("next_check_at <= ?") && sql.includes("FOR UPDATE SKIP LOCKED"))).toBe(true);
+    expect(statements.some((sql) => sql.includes("FROM attempt_deadlines") && sql.includes("FOR UPDATE SKIP LOCKED"))).toBe(true);
     expect(statements.some((sql) => sql.includes("FROM background_jobs") && sql.includes("FOR UPDATE SKIP LOCKED"))).toBe(true);
 
     const terminate = createRecordingDb({
@@ -472,11 +477,10 @@ const checks: Record<string, Check> = {
       store.reserveSlot(makeAttempt({ id: "attempt-2", linkId: harness.link.id })),
       "PAYMENT_LINK_SLOT_UNAVAILABLE",
     );
-    const select = harness.statements.find((entry) => entry.sql.includes("SELECT id FROM payment_links"));
-    expect(select?.sql).toContain("FOR UPDATE");
-    expect(select?.sql).toContain("confirmed_count + active_locked_count < use_count");
     const update = harness.statements.find((entry) => entry.sql.includes("active_locked_count = active_locked_count + 1"));
+    expect(update?.sql).toContain("confirmed_count + active_locked_count < use_count");
     expect(update?.sql).toContain("WHERE id = ?");
+    expect(harness.statements.some((entry) => entry.sql.includes("SELECT id FROM payment_links") && entry.sql.includes("FOR UPDATE"))).toBe(false);
     expect(harness.link.active_locked_count).toBe(1);
   },
 
@@ -866,9 +870,11 @@ const checks: Record<string, Check> = {
       verificationError: null,
       dedupeKey: "dedupe-1",
     });
-    const insert = calls.find((call) => call.sql.includes("INSERT INTO inbound_events"));
-    const storedBody = insert?.args.find((arg) => Buffer.isBuffer(arg)) as Buffer | undefined;
+    const payloadInsert = calls.find((call) => call.sql.includes("INSERT INTO inbound_event_payloads"));
+    const storedBody = payloadInsert?.args.find((arg) => Buffer.isBuffer(arg)) as Buffer | undefined;
     expect(storedBody?.equals(raw)).toBe(true);
+    const parentInsert = calls.find((call) => call.sql.includes("INSERT INTO inbound_events"));
+    expect(parentInsert?.args.some((arg) => Buffer.isBuffer(arg))).toBe(false);
   },
 
   async return_url_is_hint() {
@@ -2514,40 +2520,37 @@ const checks: Record<string, Check> = {
   },
 
   async checkpoint_row_lock() {
-    const statements: Array<{ sql: string; args: unknown[] }> = [];
-    let lockHeld = false;
-    let lineReadAfterLock = false;
+    let journalReads = 0;
+    let lockRows = 0;
     const checkpoint = new CheckpointService({
-      $queryRawUnsafe: async (sql: string, ...args: unknown[]) => {
-        statements.push({ sql, args });
-        lockHeld = true;
-        return [{ id: "acc-1", accountType: "GATEWAY_CLEARING", checkpointBalance: "0", checkpointAt: null }];
+      $queryRawUnsafe: async (sql: string) => {
+        if (sql.includes("FOR UPDATE")) {
+          lockRows += 1;
+        }
+        return [{ id: "acc-1", account_type: "GATEWAY_CLEARING", balance_mode: "SYNC", current_balance: "10" }];
       },
       glAccount: {
-        findUnique: async () => ({ id: "acc-1", accountType: "GATEWAY_CLEARING", checkpointBalance: "0", checkpointAt: null }),
+        findUnique: async () => ({
+          id: "acc-1",
+          accountType: "GATEWAY_CLEARING",
+          balanceMode: "SYNC",
+          currentBalance: "10",
+        }),
         findMany: async () => [],
-        update: async (args: { where: { id: string }; data: Record<string, unknown> }) => ({ id: args.where.id, accountType: "GATEWAY_CLEARING", ...args.data }),
       },
       journalLine: {
         findMany: async () => {
-          statements.push({ sql: "journalLine.findMany", args: ["acc-1"] });
-          lineReadAfterLock = lockHeld;
-          return [{ id: "line-1", entryId: "e1", glAccountId: "acc-1", direction: "DEBIT", amount: "10" }];
+          journalReads += 1;
+          return [];
         },
       },
-      journalEntry: { findFirst: async () => ({ id: "entry-1" }) },
     });
     const record = await checkpoint.captureCheckpoint("acc-1");
     expect(decimal(record.balance).toFixed(4)).toBe("10.0000");
-
-    const lockIndex = statements.findIndex((entry) => entry.sql.includes("FOR UPDATE"));
-    const linesIndex = statements.findIndex((entry) => entry.sql === "journalLine.findMany");
-    expect(lockIndex).toBeGreaterThanOrEqual(0);
-    expect(linesIndex).toBeGreaterThan(lockIndex);
-    expect(lineReadAfterLock).toBe(true);
-    const lock = statements[lockIndex];
-    expect(lock?.sql).toContain("SELECT * FROM `gl_accounts` WHERE `id` = ? FOR UPDATE");
-    expect(lock?.args).toEqual(["acc-1"]);
+    // V2 checkpoints are read-only snapshots of the materialized balance:
+    // no checkpoint row lock and no per-call journal aggregate.
+    expect(lockRows).toBe(0);
+    expect(journalReads).toBe(0);
   },
 
   async cashout_destination_snapshot() {

@@ -274,10 +274,12 @@ describe("the statement reconciliation upload", () => {
     expect(jobRows()[0]?.referenceId).toBe(response.body.runId);
     expect(fakeTable("reconciliationItem")).toHaveLength(0);
 
-    // The uploaded file is stored in the run record.
+    // The uploaded file is stored in the child payload table.
     const runs = fakeTable("reconciliationRun");
     expect(runs).toHaveLength(1);
-    expect((runs[0]?.fileContent as Buffer).toString("utf8")).toBe(statement);
+    const files = fakeTable("reconciliationRunFile");
+    expect(files).toHaveLength(1);
+    expect((files[0]?.fileContent as Buffer).toString("utf8")).toBe(statement);
     expect(runs[0]?.ingestedAt).toBeNull();
   });
 
@@ -350,16 +352,23 @@ describe("the statement reconciliation upload", () => {
 describe("the dispute and the adjustment execution", () => {
   const prepare = (client: FakePrisma): void => {
     client.glAccount.create({
-      data: { id: "acc-treasury", accountType: "TREASURY", currency: "LYD" },
+      data: { id: "acc-treasury", accountType: "TREASURY", balanceMode: "SHARDED", currency: "LYD" },
     });
     client.glAccount.create({
-      data: { id: "acc-wallet", accountType: "MERCHANT_WALLET", ownerId: "merchant-1", currency: "LYD" },
+      data: {
+        id: "acc-wallet",
+        accountType: "MERCHANT_WALLET",
+        balanceMode: "SYNC",
+        ownerId: "merchant-1",
+        currency: "LYD",
+        currentBalance: new Decimal(-1000),
+      },
     });
     client.glAccount.create({
-      data: { id: "acc-income", accountType: "PLATFORM_INCOME", currency: "LYD" },
+      data: { id: "acc-income", accountType: "PLATFORM_INCOME", balanceMode: "SHARDED", currency: "LYD" },
     });
     client.glAccount.create({
-      data: { id: "acc-chargeback", accountType: "CHARGEBACK_RESERVE", currency: "LYD" },
+      data: { id: "acc-chargeback", accountType: "CHARGEBACK_RESERVE", balanceMode: "SHARDED", currency: "LYD" },
     });
     client.user.create({
       data: {

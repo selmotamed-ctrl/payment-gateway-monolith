@@ -146,19 +146,19 @@ export const merchantProvider = defineSearchProvider({
       where: {
         ...(status ? { status } : {}),
         OR: [
-          { id: { contains: query } },
-          { legalName: { contains: query } },
-          { tradeName: { contains: query } },
-          { displayName: { contains: query } },
-          { contactEmail: { contains: query } },
-          { contactPhone: { contains: query } },
+          { id: query },
+          { legalName: { startsWith: query } },
+          { tradeName: { startsWith: query } },
+          { displayName: { startsWith: query } },
+          { contactEmail: { startsWith: query } },
+          { contactPhone: { startsWith: query } },
           ...parsed.phoneVariants.map((phone) => ({
-            contactPhone: { contains: phone },
+            contactPhone: { startsWith: phone },
           })),
           ...(allowSensitive
             ? [
-                { taxId: { contains: query } },
-                { registrationNo: { contains: query } },
+                { taxId: query },
+                { registrationNo: query },
               ]
             : []),
         ],
@@ -235,14 +235,12 @@ export const paymentAttemptProvider = defineSearchProvider({
           : {}),
         ...(status ? { status } : {}),
         OR: [
-          { id: { contains: query } },
-          { reference: { contains: query } },
-          { providerReference: { contains: query } },
-          { networkReference: { contains: query } },
-          { gatewayReference: { contains: query } },
-          { idempotencyKey: { contains: query } },
-          { merchant: { is: { tradeName: { contains: query } } } },
-          { merchant: { is: { legalName: { contains: query } } } },
+          { id: query },
+          { reference: query },
+          { providerReference: query },
+          { networkReference: query },
+          { gatewayReference: query },
+          { idempotencyKey: query },
         ],
       },
       select: {
@@ -1326,10 +1324,10 @@ export const gatewayProvider = defineSearchProvider({
       where: {
         ...(status ? { status } : {}),
         OR: [
-          { id: { contains: query } },
-          { code: { contains: query } },
-          { name: { contains: query } },
-          { operator: { contains: query } },
+          { id: query },
+          { code: query },
+          { name: { startsWith: query } },
+          { operator: { startsWith: query } },
         ],
       },
       select: {
@@ -1375,10 +1373,10 @@ export const railProvider = defineSearchProvider({
       where: {
         ...(blocked === undefined ? {} : { blocked }),
         OR: [
-          { id: { contains: query } },
-          { code: { contains: query } },
-          { nameEn: { contains: query } },
-          { nameAr: { contains: query } },
+          { id: query },
+          { code: query },
+          { nameEn: { startsWith: query } },
+          { nameAr: { startsWith: query } },
         ],
       },
       select: {
@@ -1422,13 +1420,13 @@ export const routeProvider = defineSearchProvider({
       where: {
         ...(status ? { status } : {}),
         OR: [
-          { id: { contains: query } },
-          { rail: { is: { code: { contains: query } } } },
-          { rail: { is: { nameEn: { contains: query } } } },
-          { rail: { is: { nameAr: { contains: query } } } },
-          { gateway: { is: { code: { contains: query } } } },
-          { gateway: { is: { name: { contains: query } } } },
-          { gateway: { is: { operator: { contains: query } } } },
+          { id: query },
+          { rail: { is: { code: query } } },
+          { rail: { is: { nameEn: { startsWith: query } } } },
+          { rail: { is: { nameAr: { startsWith: query } } } },
+          { gateway: { is: { code: query } } },
+          { gateway: { is: { name: { startsWith: query } } } },
+          { gateway: { is: { operator: { startsWith: query } } } },
         ],
       },
       select: {
@@ -1496,11 +1494,11 @@ export const userProvider = defineSearchProvider({
           : {}),
         ...(status ? { status } : {}),
         OR: [
-          { id: { contains: query } },
-          { email: { contains: query } },
-          { phone: { contains: query } },
+          { id: query },
+          { email: query },
+          { phone: { startsWith: query } },
           ...parsed.phoneVariants.map((phone) => ({
-            phone: { contains: phone },
+            phone: { startsWith: phone },
           })),
         ],
       },
@@ -1543,11 +1541,10 @@ export const auditLogProvider = defineSearchProvider({
     return prisma.auditLog.findMany({
       where: {
         OR: [
-          { id: { contains: query } },
           { action: { contains: query } },
           { entityType: { contains: query } },
           { entityId: { contains: query } },
-          { actor: { is: { email: { contains: query } } } },
+          { actorEmail: { contains: query } },
         ],
       },
       select: {
@@ -1556,79 +1553,47 @@ export const auditLogProvider = defineSearchProvider({
         entityType: true,
         entityId: true,
         createdAt: true,
-        actor: {
-          select: {
-            email: true,
-            role: true,
-          },
-        },
+        actorEmail: true,
+        role: true,
       },
       orderBy: { createdAt: "desc" },
       take,
     });
   },
   extractMatchSignals: (row) => ({
-    exactFields: [row.id, row.entityId, row.actor.email, row.action],
+    exactFields: [String(row.id), row.entityId, row.actorEmail, row.action],
     primaryTextFields: [row.entityType],
-    secondaryTextFields: [row.actor.role],
+    secondaryTextFields: [row.role],
     timestamp: row.createdAt,
   }),
   toResultItem: (row) => ({
-    id: row.id,
+    id: String(row.id),
     title: `${row.action} (${row.entityType})`,
     subtitle: compact([
-      row.actor.email,
+      row.actorEmail,
       row.entityId ? `Target: ${row.entityId}` : null,
-      row.actor.role,
+      row.role,
     ]),
-    reference: row.entityId || row.id,
+    reference: row.entityId || String(row.id),
   }),
 });
 
 export const builtinSearchProviders = [
   merchantProvider,
   paymentAttemptProvider,
-  operatorCaseProvider,
-  gatewayInquiryProvider,
-  approvalProvider,
-  joinRequestProvider,
-  kybDocumentProvider,
-  disputeProvider,
-  adjustmentProvider,
-  cashoutProvider,
-  reconciliationRunProvider,
-  amlCaseProvider,
-  amlScreeningProvider,
-  amlRuleProvider,
-  amlReportProvider,
+  userProvider,
   gatewayProvider,
   railProvider,
   routeProvider,
-  userProvider,
-  auditLogProvider,
 ] as const;
 
 defaultSearchRegistry
   .register(merchantProvider)
   .register(paymentAttemptProvider)
-  .register(operatorCaseProvider)
-  .register(gatewayInquiryProvider)
-  .register(approvalProvider)
-  .register(joinRequestProvider)
-  .register(kybDocumentProvider)
-  .register(disputeProvider)
-  .register(adjustmentProvider)
-  .register(cashoutProvider)
-  .register(reconciliationRunProvider)
-  .register(amlCaseProvider)
-  .register(amlScreeningProvider)
-  .register(amlRuleProvider)
-  .register(amlReportProvider)
+  .register(userProvider)
   .register(gatewayProvider)
   .register(railProvider)
-  .register(routeProvider)
-  .register(userProvider)
-  .register(auditLogProvider);
+  .register(routeProvider);
 
 export const globalSearchRequestSchema = z
   .object({

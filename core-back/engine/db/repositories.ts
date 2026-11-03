@@ -1,4 +1,9 @@
+import { createAuditLog } from "../../lib/auditLog";
 import { moneyFromDecimal, type Money } from "./money";
+import {
+  resolveKybDuplicateOfMerchant,
+} from "../../lib/counters/kybDuplicates";
+import { syncAttemptDeadlinesFromAttempt } from "../../lib/counters/attemptDeadlines";
 import type {
   AdjustmentRow,
   AmlCaseRow,
@@ -76,6 +81,142 @@ const mapRawRow = <T>(value: unknown): T => {
 const mapRawRows = <T>(value: unknown): T[] => rows<unknown>(value).map((entry) => mapRawRow<T>(entry));
 
 export const SYSTEM_AUDIT_ACTOR_EMAIL = "system-automation@payment-gateway.internal";
+
+export interface TransactionRetryOptions {
+  attempts?: number;
+  maxAttempts?: number;
+  idempotent?: boolean;
+  minDelayMs?: number;
+  maxDelayMs?: number;
+  onRetry?: (error: unknown, attempt: number) => void;
+}
+
+const RETRYABLE_MYSQL_ERRORS = new Set([1205, 1213]);
+
+export const isRetryableTransactionError = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const candidate = error as {
+    errno?: unknown;
+    code?: unknown;
+    sqlState?: unknown;
+    message?: unknown;
+  };
+  if (typeof candidate.errno === "number" && RETRYABLE_MYSQL_ERRORS.has(candidate.errno)) {
+    return true;
+  }
+  if (candidate.code === "ER_LOCK_DEADLOCK" || candidate.code === "ER_LOCK_WAIT_TIMEOUT") {
+    return true;
+  }
+  if (typeof candidate.code === "string" && /^(1213|1205)$/.test(candidate.code)) {
+    return true;
+  }
+  if (candidate.sqlState === "40001") {
+    return true;
+  }
+  const message = typeof candidate.message === "string" ? candidate.message : "";
+  return /\b(1213|1205)\b/.test(message)
+    || /deadlock found/i.test(message)
+    || /lock wait timeout/i.test(message);
+};
+
+const delay = (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+export const withTxRetry = async <T>(
+  operation: (attempt: number) => Promise<T>,
+  options: TransactionRetryOptions = {},
+): Promise<T> => {
+  const attempts = options.idempotent === false
+    ? 1
+    : Math.max(1, Math.trunc(options.attempts ?? options.maxAttempts ?? 3));
+  const minDelay = Math.max(0, options.minDelayMs ?? 5);
+  const maxDelay = Math.max(minDelay, options.maxDelayMs ?? 40);
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await operation(attempt);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts || !isRetryableTransactionError(error)) {
+        throw error;
+      }
+      options.onRetry?.(error, attempt);
+      const jitter = minDelay + Math.floor(Math.random() * (maxDelay - minDelay + 1));
+      await delay(jitter);
+    }
+  }
+  throw lastError;
+};
+
+export interface TransactionSettings {
+  isolationLevel?: "ReadCommitted" | "RepeatableRead" | "Serializable";
+  timeoutMs?: number;
+  maxWaitMs?: number;
+  lockWaitTimeoutSeconds?: number;
+  maxStatementTimeSeconds?: number;
+}
+
+export const TRANSACTIONAL_TX_SETTINGS: TransactionSettings = {
+  isolationLevel: "ReadCommitted",
+  timeoutMs: 15_000,
+  lockWaitTimeoutSeconds: 5,
+  maxStatementTimeSeconds: 15,
+};
+
+export const BACKGROUND_TX_SETTINGS: TransactionSettings = {
+  isolationLevel: "ReadCommitted",
+  timeoutMs: 60_000,
+  lockWaitTimeoutSeconds: 5,
+  maxStatementTimeSeconds: 120,
+};
+
+export const TRANSACTIONAL_TX_OPTIONS = TRANSACTIONAL_TX_SETTINGS;
+export const BACKGROUND_TX_OPTIONS = BACKGROUND_TX_SETTINGS;
+
+export const withTxSettings = async <T>(
+  db: PrismaLike,
+  callback: (tx: Tx) => Promise<T>,
+  settings: TransactionSettings = TRANSACTIONAL_TX_SETTINGS,
+): Promise<T> => {
+  const run = async (tx: Tx): Promise<T> => {
+    if (settings.lockWaitTimeoutSeconds !== undefined) {
+      await tx.$executeRawUnsafe(
+        `SET SESSION innodb_lock_wait_timeout = ${Math.max(1, Math.trunc(settings.lockWaitTimeoutSeconds))}`,
+      );
+    }
+    if (settings.maxStatementTimeSeconds !== undefined) {
+      await tx.$executeRawUnsafe(
+        `SET SESSION max_statement_time = ${Math.max(1, Math.trunc(settings.maxStatementTimeSeconds))}`,
+      );
+    }
+    return callback(tx);
+  };
+  const options = {
+    ...(settings.isolationLevel ? { isolationLevel: settings.isolationLevel } : {}),
+    ...(settings.timeoutMs ? { timeout: settings.timeoutMs } : {}),
+    ...(settings.maxWaitMs ? { maxWait: settings.maxWaitMs } : {}),
+  };
+  try {
+    return await db.$transaction(run, options);
+  } catch (error) {
+    if (!isRetryableTransactionError(error)) {
+      throw error;
+    }
+    return withTxRetry(() => db.$transaction(run, options));
+  }
+};
+
+export const withTxRetryTransaction = <T>(
+  db: PrismaLike,
+  callback: (tx: Tx) => Promise<T>,
+  settings: TransactionSettings = TRANSACTIONAL_TX_SETTINGS,
+): Promise<T> => withTxSettings(db, callback, settings);
+
+export const withReadCommitted = withTxSettings;
 
 export class PrismaRepositories implements Repositories {
   private readonly db: PrismaLike;
@@ -260,7 +401,14 @@ export class PrismaRepositories implements Repositories {
       return model(tx, "joinRequest").update({ where: { id }, data: patch }) as Promise<JoinRequestRow>;
     },
     createKybDocument: async (tx, data) => {
-      return model(tx, "kybDocument").create({ data }) as Promise<KybDocumentRow>;
+      const duplicateOfMerchantId = await resolveKybDuplicateOfMerchant(tx, {
+        sha256: data.sha256 ?? "",
+        merchantId: data.merchantId,
+        duplicateOfMerchantId: data.duplicateOfMerchantId,
+      });
+      return model(tx, "kybDocument").create({
+        data: { ...data, duplicateOfMerchantId },
+      }) as Promise<KybDocumentRow>;
     },
     findKybDocumentById: async (tx, id) => {
       return (await model(tx, "kybDocument").findUnique({ where: { id } })) as KybDocumentRow | null;
@@ -418,10 +566,21 @@ export class PrismaRepositories implements Repositories {
       return (await model(tx, "paymentLink").findUnique({ where: { id } })) as PaymentLinkRow | null;
     },
     updateLinkSlotCount: async (tx, linkId, delta) => {
+      if (delta > 0) {
+        await tx.$executeRaw`
+          UPDATE payment_links
+          SET active_locked_count = active_locked_count + ${delta}, updated_at = NOW(3)
+          WHERE id = ${linkId}
+            AND infinite_use = 0
+            AND confirmed_count + active_locked_count < use_count
+        `;
+        return;
+      }
       await tx.$executeRaw`
         UPDATE payment_links
-        SET active_locked_count = GREATEST(0, active_locked_count + ${delta})
+        SET active_locked_count = GREATEST(0, active_locked_count + ${delta}), updated_at = NOW(3)
         WHERE id = ${linkId}
+          AND infinite_use = 0
       `;
     },
     resolveSettlementTarget: async (tx, input) => {
@@ -443,7 +602,9 @@ export class PrismaRepositories implements Repositories {
       return "PLATFORM_CLEARING";
     },
     createAttempt: async (tx, data) => {
-      return model(tx, "paymentAttempt").create({ data }) as Promise<PaymentAttemptRow>;
+      const attempt = await model(tx, "paymentAttempt").create({ data }) as PaymentAttemptRow;
+      await syncAttemptDeadlinesFromAttempt(tx, attempt);
+      return attempt;
     },
     findAttemptById: async (tx, id) => {
       return (await model(tx, "paymentAttempt").findUnique({ where: { id } })) as PaymentAttemptRow | null;
@@ -474,7 +635,9 @@ export class PrismaRepositories implements Repositories {
       })) as PaymentAttemptRow | null;
     },
     updateAttempt: async (tx, id, patch) => {
-      return model(tx, "paymentAttempt").update({ where: { id }, data: patch }) as Promise<PaymentAttemptRow>;
+      const attempt = await model(tx, "paymentAttempt").update({ where: { id }, data: patch }) as PaymentAttemptRow;
+      await syncAttemptDeadlinesFromAttempt(tx, attempt);
+      return attempt;
     },
     collectWindowStats: async (tx, filter) => {
       const or: Any[] = [{ merchantId: filter.merchantId }];
@@ -653,7 +816,7 @@ export class PrismaRepositories implements Repositories {
       if (!actorId) {
         return;
       }
-      await model(tx, "auditLog").create({
+      await createAuditLog(tx as never, {
         data: {
           actorId,
           role: data.role ?? "SYSTEM",
@@ -708,14 +871,34 @@ export class PrismaRepositories implements Repositories {
       return (await model(tx, "reconciliationRun").findUnique({ where: { fileHash: fileHash } })) as ReconciliationRunRow | null;
     },
     findRunById: async (tx, id) => {
-      return (await model(tx, "reconciliationRun").findUnique({ where: { id } })) as ReconciliationRunRow | null;
+      const run = (await model(tx, "reconciliationRun").findUnique({ where: { id } })) as ReconciliationRunRow | null;
+      if (!run) return null;
+      const fileTable = (tx as any).reconciliationRunFile;
+      if (fileTable?.findUnique) {
+        const file = await fileTable.findUnique({
+          where: { runId: id },
+          select: { fileContent: true },
+        });
+        return {
+          ...run,
+          fileContent: file?.fileContent ?? (run as any).fileContent ?? null,
+        };
+      }
+      return run;
     },
     createRun: async (tx, data) => {
       // A run starts as "not ingested": the marker is set by the background
-      // job that matched the statement.
-      return model(tx, "reconciliationRun").create({
-        data: { ...data, ingestedAt: null },
-      }) as Promise<ReconciliationRunRow>;
+      // job that matched the statement. The statement bytes live only in the
+      // cold child table.
+      const { fileContent, ...runData } = data as typeof data & { fileContent?: unknown };
+      const run = await model(tx, "reconciliationRun").create({
+        data: { ...runData, ingestedAt: null },
+      }) as ReconciliationRunRow;
+      const fileTable = (tx as any).reconciliationRunFile;
+      if (fileContent !== undefined && fileContent !== null && fileTable?.create) {
+        await fileTable.create({ data: { runId: run.id, fileContent } });
+      }
+      return { ...run, fileContent: fileContent ?? null } as ReconciliationRunRow;
     },
     updateRunStats: async (tx, id, stats) => {
       await model(tx, "reconciliationRun").update({ where: { id }, data: { statsJson: stats } });

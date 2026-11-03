@@ -1,4 +1,5 @@
 import type { PrismaLike } from "../db/ports";
+import { dbBackground } from "../../prisma/client";
 import { env } from "../../lib/env";
 import { getPlatformRuntime } from "../runtime";
 import type { InquiryOutcome, InquiryPort } from "./ExpirySweeperWorker";
@@ -29,7 +30,8 @@ import {
 } from "../notifications/NotificationTransport";
 
 export interface ProductionWorkerRuntimeOptions {
-  db: PrismaLike;
+  /** Defaults to the background pool; tests inject their own client. */
+  db?: PrismaLike;
   intervalMs?: number;
   batchSize?: number;
   maxAttempts?: number;
@@ -198,8 +200,11 @@ export const readBackgroundJobQueueHealth = async (
 export const createProductionWorkerRuntime = (
   options: ProductionWorkerRuntimeOptions,
 ): ProductionWorkerRuntime => {
-  const platform = getPlatformRuntime(options.db);
-  const repositories = new PrismaRepositories(options.db);
+  // Every worker, rollup, verifier and export uses the background pool
+  // (design §2.11); the transactional pool belongs to the request path.
+  const db = options.db ?? (dbBackground as unknown as PrismaLike);
+  const platform = getPlatformRuntime(db);
+  const repositories = new PrismaRepositories(db);
 
   const inquiry: InquiryPort = {
     inquire: async (attempt): Promise<InquiryOutcome> => {
@@ -216,7 +221,7 @@ export const createProductionWorkerRuntime = (
   const handler: InboundEventHandler = {
     handle: async (event) => {
       const rawBody = toBuffer(event.rawBodyBytes);
-      const channel = await options.db.confirmationChannel.findUnique({
+      const channel = await db.confirmationChannel.findUnique({
         where: { id: event.channelId },
       });
       if (!channel) {
@@ -253,7 +258,7 @@ export const createProductionWorkerRuntime = (
   };
 
   const workerOptions = {
-    db: options.db,
+    db,
     repositories,
     intervalMs: options.intervalMs,
     batchSize: options.batchSize,
@@ -309,12 +314,12 @@ export const createProductionWorkerRuntime = (
             leaseSeconds: options.backgroundJobsLeaseSeconds ?? env.WORKER_BACKGROUND_JOBS_LEASE_SECONDS,
             handlers: {
               RECONCILIATION_RUN: createReconciliationJobHandler({
-                db: options.db,
+                db,
                 repositories,
                 feeVariancePoster: createFeeVariancePoster(platform.ledgerPoster),
               }),
               ADJUSTMENT_EXECUTION: createAdjustmentJobHandler({
-                db: options.db,
+                db,
                 ledgerPoster: platform.ledgerPoster,
                 repositories,
               }),

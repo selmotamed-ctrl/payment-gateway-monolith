@@ -23,6 +23,7 @@ import { VaultContextCipher } from "./contextCipher";
 import { PrismaOperatorCaseSink } from "../compliance/OperatorCaseSink";
 import { PrismaReportingRuleSource, ReportingRuleEvaluator } from "../compliance/ReportingRuleEvaluator";
 import { invalidationBus } from "../../lib/invalidationBus";
+import { prismaTransactionOptionsForClient } from "../../prisma/client/base";
 import { ApiError } from "../../lib/error";
 import { ApiConsumerError } from "../apiConsumer/ApiConsumer";
 import type { DynamicAttempt } from "../flow/DynamicRailEngine";
@@ -68,6 +69,9 @@ export interface ConsumerConfigKey {
  * all share the same ledger poster, the same registry and the same cache.
  */
 export const createPlatformRuntime = (db: PrismaLike): PlatformRuntime => {
+  // §2.6: the transactional pool uses a 15 s transaction timeout; a runtime
+  // built on the background pool uses its 60 s timeout.
+  const transactionOptions = prismaTransactionOptionsForClient(db);
   const vault = new Vault();
   const crypto = new CryptoEngine();
   const repositories = new PrismaRepositories(db);
@@ -155,7 +159,8 @@ export const createPlatformRuntime = (db: PrismaLike): PlatformRuntime => {
       }
       return resolveCredentialValues(db, vault, attempt.credentialSetId);
     },
-    transactionRunner: async (callback) => db.$transaction(async (tx: PrismaLike) => callback(tx)),
+    transactionRunner: async (callback) =>
+      db.$transaction(async (tx: PrismaLike) => callback(tx), transactionOptions),
   });
 
   const screening = new CachedScreeningProvider(new InternalWatchlistProvider());

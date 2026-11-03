@@ -96,6 +96,17 @@ enum GlAccountType {
   SUSPENSE
 }
 
+enum GlBalanceMode {
+  SYNC
+  SHARDED
+}
+
+enum AttemptDeadlineKind {
+  EXPIRE
+  POLL
+  GRACE_END
+}
+
 enum JournalRefType {
   PAYMENT_ATTEMPT
   ADJUSTMENT
@@ -825,32 +836,32 @@ enum NotificationStatus {
 }
 
 model Merchant {
-  id                          String         @id @default(uuid(7))
+  id                          String         @id @default(uuid(7)) @db.Char(36)
   version                     Int            @default(1)
   createdAt                   DateTime       @default(now()) @map("created_at")
   updatedAt                   DateTime       @updatedAt @map("updated_at")
-  legalName                   String         @db.Text
-  tradeName                   String         @db.Text
-  displayName                 String?        @map("display_name") @db.Text
+  legalName                   String         @db.VarChar(255)
+  tradeName                   String         @db.VarChar(255)
+  displayName                 String?        @map("display_name") @db.VarChar(255)
   logoUrl                     String?        @map("logo_url") @db.Text
   supportEmail                String?        @map("support_email")
   supportPhone                String?        @map("support_phone")
-  taxId                       String?        @db.Text
-  registrationNo              String?        @db.Text
-  businessCategory            String?        @db.Text
+  taxId                       String?        @db.VarChar(64)
+  registrationNo              String?        @db.VarChar(64)
+  businessCategory            String?        @db.VarChar(128)
   status                      MerchantStatus @default(PENDING)
   kybStatus                   KybStatus      @default(UNVERIFIED)
   riskTier                    RiskTier       @default(STANDARD)
-  onboardingChannel           String
+  onboardingChannel           String         @db.VarChar(64)
   country                     String         @db.Char(2)
-  contactPhone                String?
-  contactEmail                String?
+  contactPhone                String?        @db.VarChar(64)
+  contactEmail                String?        @db.VarChar(191)
   activatedAt                 DateTime?
   suspendedAt                 DateTime?
-  suspensionReasonCode        String?
+  suspensionReasonCode        String?        @db.VarChar(64)
   suspensionNotes             String?        @map("suspension_notes") @db.Text
   closedAt                    DateTime?
-  closedReasonCode            String?        @map("closed_reason_code") @db.Text
+  closedReasonCode            String?        @map("closed_reason_code") @db.VarChar(64)
   closedNotes                 String?        @map("closed_notes") @db.Text
   commissionReceivableCeiling Decimal?       @db.Decimal(18, 4)
   negativeBalanceCeiling      Decimal        @default(0) @db.Decimal(18, 4)
@@ -878,20 +889,21 @@ model Merchant {
   @@index([status, createdAt])
   @@index([riskTier])
   @@index([kybStatus, status])
-  @@index([taxId(length: 100)])
-  @@index([registrationNo(length: 100)])
+  @@index([taxId])
+  @@index([registrationNo])
   @@index([contactPhone])
   @@index([contactEmail])
   @@index([payoutAccountHash])
   @@index([nextKybReviewAt])
+  @@fulltext([legalName, tradeName], map: "merchants_names_ft_idx")
   @@map("merchants")
 }
 
 model User {
-  id                  String     @id @default(uuid(7))
+  id                  String     @id @default(uuid(7)) @db.Char(36)
   createdAt           DateTime   @default(now()) @map("created_at")
   updatedAt           DateTime   @updatedAt @map("updated_at")
-  merchantId          String?    @map("merchant_id")
+  merchantId          String?    @map("merchant_id") @db.Char(36)
   email               String     @unique
   phone               String?
   passwordHash        String?    @map("password_hash") @db.Text
@@ -904,7 +916,7 @@ model User {
   mfaSecretCiphertext String?    @map("mfa_secret_ciphertext") @db.Text
   invitationTokenHash String?    @map("invitation_token_hash") @db.Char(64)
   invitationExpiresAt DateTime?  @map("invitation_expires_at")
-  invitedById         String?    @map("invited_by")
+  invitedById         String?    @map("invited_by") @db.Char(36)
   status              UserStatus @default(INVITED)
   /**
    * The Employee Academy progress of this user: completed module ids, quiz
@@ -934,21 +946,20 @@ model User {
   auditLogs                 AuditLog[]               @relation("AuditLogActor")
   notifications             Notification[]           @relation("NotificationRecipient")
 
-  @@index([merchantId])
   @@index([role])
   @@index([merchantId, status])
   @@map("users")
 }
 
 model Application {
-  id                      String            @id @default(uuid(7))
+  id                      String            @id @default(uuid(7)) @db.Char(36)
   createdAt               DateTime          @default(now()) @map("created_at")
   updatedAt               DateTime          @updatedAt @map("updated_at")
-  merchantId              String            @map("merchant_id")
+  merchantId              String            @map("merchant_id") @db.Char(36)
   name                    String
   businessUseDescription  String?           @db.Text
   expectedMonthlyVolume   Decimal           @default(0) @db.Decimal(18, 4)
-  assignedWalletId        String            @map("assigned_wallet_id")
+  assignedWalletId        String            @map("assigned_wallet_id") @db.Char(36)
   railWhitelist           Json?             @map("rail_whitelist")
   redirectDomainAllowlist Json?             @map("redirect_domain_allowlist")
   status                  ApplicationStatus @default(PENDING)
@@ -961,18 +972,17 @@ model Application {
   commissionProfiles CommissionProfile[] @relation("ApplicationCommissionProfiles")
   paymentAttempts    PaymentAttempt[]    @relation("ApplicationPaymentAttempts")
 
-  @@index([merchantId])
   @@index([assignedWalletId])
   @@index([merchantId, status])
   @@map("applications")
 }
 
 model Wallet {
-  id          String       @id @default(uuid(7))
+  id          String       @id @default(uuid(7)) @db.Char(36)
   createdAt   DateTime     @default(now()) @map("created_at")
   updatedAt   DateTime     @updatedAt @map("updated_at")
-  merchantId  String       @map("merchant_id")
-  glAccountId String       @unique @map("gl_account_id")
+  merchantId  String       @map("merchant_id") @db.Char(36)
+  glAccountId String       @unique @map("gl_account_id") @db.Char(36)
   currency    String       @default("LYD") @db.Char(3)
   status      WalletStatus @default(PENDING)
 
@@ -982,18 +992,17 @@ model Wallet {
   paymentLinks    PaymentLink[]
   cashoutRequests CashoutRequest[]
 
-  @@index([merchantId])
   @@index([merchantId, status])
   @@map("wallets")
 }
 
 model AccessToken {
-  id                 String    @id @default(uuid(7))
+  id                 String    @id @default(uuid(7)) @db.Char(36)
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
-  merchantId         String    @map("merchant_id")
-  applicationId      String    @map("application_id")
-  name               String    @db.Text
+  merchantId         String    @map("merchant_id") @db.Char(36)
+  applicationId      String    @map("application_id") @db.Char(36)
+  name               String    @db.VarChar(128)
   tokenHash          String    @unique @map("token_hash") @db.Char(64)
   lastFour           String    @map("last_four") @db.Char(4)
   scopes             Json
@@ -1005,17 +1014,16 @@ model AccessToken {
   application Application     @relation(fields: [applicationId], references: [id], onDelete: Restrict)
   ips         AccessTokenIp[]
 
-  @@index([merchantId])
   @@index([applicationId])
   @@index([merchantId, revokedAt])
   @@map("access_tokens")
 }
 
 model AccessTokenIp {
-  id        String   @id @default(uuid(7))
+  id        String   @id @default(uuid(7)) @db.Char(36)
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
-  tokenId   String   @map("token_id")
+  tokenId   String   @map("token_id") @db.Char(36)
   cidr      String
 
   token AccessToken @relation(fields: [tokenId], references: [id], onDelete: Cascade)
@@ -1025,12 +1033,12 @@ model AccessTokenIp {
 }
 
 model PaymentLink {
-  id                String           @id @default(uuid(7))
+  id                String           @id @default(uuid(7)) @db.Char(36)
   createdAt         DateTime         @default(now()) @map("created_at")
   updatedAt         DateTime         @updatedAt @map("updated_at")
-  key               String           @unique
-  applicationId     String           @map("application_id")
-  walletId          String           @map("wallet_id")
+  key               String           @unique @db.VarChar(64)
+  applicationId     String           @map("application_id") @db.Char(36)
+  walletId          String           @map("wallet_id") @db.Char(36)
   amount            Decimal          @db.Decimal(18, 4)
   currency          String           @db.Char(3)
   feeBearer         FeeBearer        @map("fee_bearer")
@@ -1058,10 +1066,10 @@ model PaymentLink {
 }
 
 model PosTerminal {
-  id            String    @id @default(uuid(7))
+  id            String    @id @default(uuid(7)) @db.Char(36)
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
-  applicationId String    @map("application_id")
+  applicationId String    @map("application_id") @db.Char(36)
   name          String
   location      String?   @db.Text
   status        PosStatus @default(ACTIVE)
@@ -1075,10 +1083,10 @@ model PosTerminal {
 }
 
 model PosScreen {
-  id             String    @id @default(uuid(7))
+  id             String    @id @default(uuid(7)) @db.Char(36)
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
-  posId          String    @map("pos_id")
+  posId          String    @map("pos_id") @db.Char(36)
   screenCode     String    @unique @map("screen_code")
   authTokenHash  String    @map("auth_token_hash") @db.Char(64)
   realtimeRoomId String?   @map("realtime_room_id")
@@ -1091,25 +1099,26 @@ model PosScreen {
 }
 
 model GlAccount {
-  id                String        @id @default(uuid(7))
-  createdAt         DateTime      @default(now()) @map("created_at")
-  updatedAt         DateTime      @updatedAt @map("updated_at")
-  accountType       GlAccountType @map("account_type")
-  ownerId           String?       @map("owner_id")
-  gatewayId         String?       @map("gateway_id")
-  credentialSetId   String?       @map("credential_set_id")
-  env               String?
-  currency          String        @db.Char(3)
-  lastCheckpointId  String?       @map("last_checkpoint_id")
-  checkpointBalance Decimal       @default(0) @map("checkpoint_balance") @db.Decimal(18, 4)
-  checkpointAt      DateTime?     @map("checkpoint_at")
-  seedKey           String?       @unique @map("seed_key")
+  id              String        @id @default(uuid(7)) @db.Char(36)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  accountType     GlAccountType @map("account_type")
+  balanceMode     GlBalanceMode @default(SHARDED) @map("balance_mode")
+  ownerId         String?       @map("owner_id") @db.Char(36)
+  gatewayId       String?       @map("gateway_id") @db.Char(36)
+  credentialSetId String?       @map("credential_set_id") @db.Char(36)
+  env             String?       @db.VarChar(16)
+  currency        String        @db.Char(3)
+  currentBalance  Decimal       @default(0) @map("current_balance") @db.Decimal(18, 4)
+  balanceFloor    Decimal?      @map("balance_floor") @db.Decimal(18, 4)
+  seedKey         String?       @unique @map("seed_key") @db.VarChar(191)
 
-  wallet        Wallet?        @relation("WalletGlAccount")
-  gateway       Gateway?       @relation("GatewayClearingAccounts", fields: [gatewayId], references: [id], onDelete: Restrict)
-  credentialSet CredentialSet? @relation("CredentialSetGlAccounts", fields: [credentialSetId], references: [id], onDelete: Restrict)
+  wallet        Wallet?          @relation("WalletGlAccount")
+  gateway       Gateway?         @relation("GatewayClearingAccounts", fields: [gatewayId], references: [id], onDelete: Restrict)
+  credentialSet CredentialSet?   @relation("CredentialSetGlAccounts", fields: [credentialSetId], references: [id], onDelete: Restrict)
   journalLines  JournalLine[]
-  adjustments   Adjustment[]   @relation("AdjustmentTargetAccount")
+  adjustments   Adjustment[]     @relation("AdjustmentTargetAccount")
+  shards        GlBalanceShard[]
+  periodTotals  GlPeriodTotal[]
 
   @@unique([gatewayId, env, credentialSetId])
   @@index([accountType])
@@ -1118,12 +1127,34 @@ model GlAccount {
   @@map("gl_accounts")
 }
 
+model GlBalanceShard {
+  glAccountId String    @map("gl_account_id") @db.Char(36)
+  shardNo     Int       @map("shard_no") @db.TinyInt
+  balance     Decimal   @default(0) @db.Decimal(18, 4)
+  lineCount   BigInt    @default(0) @map("line_count")
+  account     GlAccount @relation(fields: [glAccountId], references: [id], onDelete: Restrict)
+
+  @@id([glAccountId, shardNo])
+  @@map("gl_balance_shards")
+}
+
+model GlPeriodTotal {
+  glAccountId String    @map("gl_account_id") @db.Char(36)
+  day         DateTime  @db.Date
+  debitTotal  Decimal   @map("debit_total") @db.Decimal(20, 4)
+  creditTotal Decimal   @map("credit_total") @db.Decimal(20, 4)
+  lineCount   BigInt    @map("line_count")
+  account     GlAccount @relation(fields: [glAccountId], references: [id], onDelete: Restrict)
+
+  @@id([glAccountId, day])
+  @@map("gl_period_totals")
+}
+
 model JournalEntry {
-  id          String         @id @default(uuid(7))
+  id          String         @id @default(uuid(7)) @db.Char(36)
   createdAt   DateTime       @default(now()) @map("created_at")
-  updatedAt   DateTime       @updatedAt @map("updated_at")
   refType     JournalRefType @map("ref_type")
-  refId       String         @map("ref_id")
+  refId       String         @map("ref_id") @db.VarChar(191)
   description String         @db.Text
 
   journalLines    JournalLine[]
@@ -1136,29 +1167,28 @@ model JournalEntry {
 }
 
 model JournalLine {
-  id          String           @id @default(uuid(7))
-  createdAt   DateTime         @default(now()) @map("created_at")
-  updatedAt   DateTime         @updatedAt @map("updated_at")
-  entryId     String           @map("entry_id")
-  glAccountId String           @map("gl_account_id")
+  id          BigInt           @id @default(autoincrement()) @db.UnsignedBigInt
+  createdAt   DateTime         @default(now()) @map("created_at") @db.DateTime(3)
+  entryId     String           @map("entry_id") @db.Char(36)
+  glAccountId String           @map("gl_account_id") @db.Char(36)
   direction   JournalDirection
   amount      Decimal          @db.Decimal(18, 4)
 
   entry     JournalEntry @relation(fields: [entryId], references: [id], onDelete: Restrict)
   glAccount GlAccount    @relation(fields: [glAccountId], references: [id], onDelete: Restrict)
 
-  @@index([entryId])
-  @@index([glAccountId])
+  @@index([entryId], map: "journal_lines_entry_idx")
+  @@index([glAccountId, createdAt, direction, amount], map: "journal_lines_acct_time_cov_idx")
   @@map("journal_lines")
 }
 
 model CommissionProfile {
-  id                String             @id @default(uuid(7))
+  id                String             @id @default(uuid(7)) @db.Char(36)
   createdAt         DateTime           @default(now()) @map("created_at")
   updatedAt         DateTime           @updatedAt @map("updated_at")
-  merchantId        String?            @map("merchant_id")
-  applicationId     String?            @map("application_id")
-  railCode          String             @map("rail_code") @db.Text
+  merchantId        String?            @map("merchant_id") @db.Char(36)
+  applicationId     String?            @map("application_id") @db.Char(36)
+  railCode          String             @map("rail_code") @db.VarChar(64)
   calcType          CommissionCalcType @map("calc_type")
   flatFee           Decimal            @default(0) @map("flat_fee") @db.Decimal(18, 4)
   percentageRate    Decimal            @default(0) @map("percentage_rate") @db.Decimal(8, 6)
@@ -1166,11 +1196,11 @@ model CommissionProfile {
   minFee            Decimal            @default(0) @map("min_fee") @db.Decimal(18, 4)
   maxFee            Decimal?           @map("max_fee") @db.Decimal(18, 4)
   feeBearerDefault  FeeBearer          @map("fee_bearer_default")
-  roundingMode      String             @map("rounding_mode") @db.Text
+  roundingMode      String             @map("rounding_mode") @db.VarChar(32)
   effectiveFrom     DateTime           @map("effective_from")
   effectiveTo       DateTime?          @map("effective_to")
   version           Int                @default(1)
-  approvalRequestId String?            @map("approval_request_id")
+  approvalRequestId String?            @map("approval_request_id") @db.Char(36)
   seedKey           String?            @unique @map("seed_key")
 
   merchant        Merchant?        @relation("MerchantCommissionProfiles", fields: [merchantId], references: [id], onDelete: Restrict)
@@ -1178,13 +1208,12 @@ model CommissionProfile {
   approvalRequest ApprovalRequest? @relation("CommissionProfileApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
   paymentAttempts PaymentAttempt[]
 
-  @@index([merchantId])
   @@index([applicationId])
   @@map("commission_profiles")
 }
 
 model VelocityRule {
-  id                String            @id @default(uuid(7))
+  id                String            @id @default(uuid(7)) @db.Char(36)
   createdAt         DateTime          @default(now()) @map("created_at")
   updatedAt         DateTime          @updatedAt @map("updated_at")
   scopeType         VelocityScopeType @map("scope_type")
@@ -1197,7 +1226,7 @@ model VelocityRule {
   version           Int               @default(1)
   effectiveFrom     DateTime          @map("effective_from")
   effectiveTo       DateTime?         @map("effective_to")
-  approvalRequestId String?           @map("approval_request_id")
+  approvalRequestId String?           @map("approval_request_id") @db.Char(36)
 
   approvalRequest ApprovalRequest? @relation("VelocityRuleApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
 
@@ -1207,7 +1236,7 @@ model VelocityRule {
 }
 
 model AmlCase {
-  id                 String         @id @default(uuid(7))
+  id                 String         @id @default(uuid(7)) @db.Char(36)
   createdAt          DateTime       @default(now()) @map("created_at")
   updatedAt          DateTime       @updatedAt @map("updated_at")
   subjectType        AmlSubjectType @map("subject_type")
@@ -1215,13 +1244,13 @@ model AmlCase {
   triggerReason      String         @map("trigger_reason") @db.Text
   severity           AmlSeverity
   severityInputsJson Json           @map("severity_inputs_json")
-  screeningId        String?        @map("screening_id")
-  ruleId             String?        @map("rule_id")
+  screeningId        String?        @map("screening_id") @db.Char(36)
+  ruleId             String?        @map("rule_id") @db.Char(36)
   ruleVersion        Int?           @map("rule_version")
-  holdJournalEntryId String?        @map("hold_journal_entry_id")
+  holdJournalEntryId String?        @map("hold_journal_entry_id") @db.Char(36)
   status             AmlCaseStatus  @default(OPEN)
   slaDueAt           DateTime?      @map("sla_due_at")
-  assignedReviewerId String?        @map("assigned_reviewer_id")
+  assignedReviewerId String?        @map("assigned_reviewer_id") @db.Char(36)
   regulatoryReportId String?        @map("regulatory_report_id")
   confidential       Boolean        @default(true)
   reviewerNotes      String?        @map("reviewer_notes") @db.Text
@@ -1241,21 +1270,21 @@ model AmlCase {
 }
 
 model Adjustment {
-  id                 String          @id @default(uuid(7))
+  id                 String          @id @default(uuid(7)) @db.Char(36)
   createdAt          DateTime        @default(now()) @map("created_at")
   updatedAt          DateTime        @updatedAt @map("updated_at")
   type               AdjustmentType
-  targetGlAccountId  String          @map("target_gl_account_id")
-  sourceAttemptId    String?         @map("source_attempt_id")
-  disputeId          String?         @unique @map("dispute_id")
+  targetGlAccountId  String          @map("target_gl_account_id") @db.Char(36)
+  sourceAttemptId    String?         @map("source_attempt_id") @db.Char(36)
+  disputeId          String?         @unique @map("dispute_id") @db.Char(36)
   draftedBySystem    Boolean         @default(false) @map("drafted_by_system")
   amount             Decimal         @db.Decimal(18, 4)
   reverseCommission  Boolean         @default(false) @map("reverse_commission")
   reason             String          @db.Text
-  externalDisputeRef String?         @map("external_dispute_ref") @db.Text
-  providerRefundRef  String?         @map("provider_refund_ref") @db.Text
+  externalDisputeRef String?         @map("external_dispute_ref") @db.VarChar(191)
+  providerRefundRef  String?         @map("provider_refund_ref") @db.VarChar(191)
   state              AdjustmentState @default(DRAFT)
-  journalEntryId     String?         @unique @map("journal_entry_id")
+  journalEntryId     String?         @unique @map("journal_entry_id") @db.Char(36)
 
   targetGlAccount GlAccount        @relation("AdjustmentTargetAccount", fields: [targetGlAccountId], references: [id], onDelete: Restrict)
   sourceAttempt   PaymentAttempt?  @relation("AdjustmentSourceAttempt", fields: [sourceAttemptId], references: [id], onDelete: SetNull)
@@ -1271,21 +1300,20 @@ model Adjustment {
 }
 
 model CashoutRequest {
-  id                  String       @id @default(uuid(7))
+  id                  String       @id @default(uuid(7)) @db.Char(36)
   createdAt           DateTime     @default(now()) @map("created_at")
   updatedAt           DateTime     @updatedAt @map("updated_at")
-  merchantId          String       @map("merchant_id")
-  walletId            String       @map("wallet_id")
+  merchantId          String       @map("merchant_id") @db.Char(36)
+  walletId            String       @map("wallet_id") @db.Char(36)
   amount              Decimal      @db.Decimal(18, 4)
   destinationBankJson Json         @map("destination_bank_json")
   state               CashoutState @default(PENDING)
-  adjustmentId        String?      @map("adjustment_id")
+  adjustmentId        String?      @map("adjustment_id") @db.Char(36)
 
   merchant   Merchant    @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   wallet     Wallet      @relation(fields: [walletId], references: [id], onDelete: Restrict)
   adjustment Adjustment? @relation("AdjustmentCashout", fields: [adjustmentId], references: [id], onDelete: SetNull)
 
-  @@index([merchantId])
   @@index([walletId])
   @@index([merchantId, state, createdAt])
   @@index([walletId, createdAt])
@@ -1293,7 +1321,7 @@ model CashoutRequest {
 }
 
 model ApprovalRequest {
-  id                 String        @id @default(uuid(7))
+  id                 String        @id @default(uuid(7)) @db.Char(36)
   createdAt          DateTime      @default(now()) @map("created_at")
   updatedAt          DateTime      @updatedAt @map("updated_at")
   subjectType        String        @map("subject_type")
@@ -1304,8 +1332,8 @@ model ApprovalRequest {
   baseVersion        Int?          @map("base_version")
   expiresAt          DateTime?     @map("expires_at")
   ratifyDueAt        DateTime?     @map("ratify_due_at")
-  makerUserId        String        @map("maker_user_id")
-  checkerUserId      String?       @map("checker_user_id")
+  makerUserId        String        @map("maker_user_id") @db.Char(36)
+  checkerUserId      String?       @map("checker_user_id") @db.Char(36)
   state              ApprovalState @default(DRAFT)
   rejectionReason    String?       @map("rejection_reason") @db.Text
   riskAcceptanceNote String?       @map("risk_acceptance_note") @db.Text
@@ -1333,17 +1361,17 @@ model ApprovalRequest {
 }
 
 model Gateway {
-  id                String                   @id @default(uuid(7))
+  id                String                   @id @default(uuid(7)) @db.Char(36)
   createdAt         DateTime                 @default(now()) @map("created_at")
   updatedAt         DateTime                 @updatedAt @map("updated_at")
-  code              String                   @unique
-  name              String                   @db.Text
-  operator          String
+  code              String                   @unique @db.VarChar(64)
+  name              String                   @db.VarChar(191)
+  operator          String                   @db.VarChar(191)
   country           String                   @default("LY") @db.Char(2)
   aliases           Json
   kind              GatewayKind
   status            GatewayStatus            @default(DRAFT)
-  activeVersionId   String?                  @unique @map("active_version_id")
+  activeVersionId   String?                  @unique @map("active_version_id") @db.Char(36)
   verificationState GatewayVerificationState @default(UNVERIFIED)
   riskClass         GatewayRiskClass         @default(NORMAL)
   metadata          Json?
@@ -1365,18 +1393,18 @@ model Gateway {
 }
 
 model GatewayVersion {
-  id                 String              @id @default(uuid(7))
+  id                 String              @id @default(uuid(7)) @db.Char(36)
   createdAt          DateTime            @default(now()) @map("created_at")
   updatedAt          DateTime            @updatedAt @map("updated_at")
-  gatewayId          String              @map("gateway_id")
+  gatewayId          String              @map("gateway_id") @db.Char(36)
   versionNumber      Int                 @map("version_number")
   snapshotCiphertext String              @map("snapshot_ciphertext") @db.Text
   contentHash        String              @unique @map("content_hash") @db.Char(64)
   state              GatewayVersionState @default(DRAFT)
-  createdById        String              @map("created_by")
-  approvalRequestId  String?             @map("approval_request_id")
+  createdById        String              @map("created_by") @db.Char(36)
+  approvalRequestId  String?             @map("approval_request_id") @db.Char(36)
   changeNote         String?             @map("change_note") @db.Text
-  rollbackVersionId  String?             @map("rollback_version_id")
+  rollbackVersionId  String?             @map("rollback_version_id") @db.Char(36)
 
   gateway              Gateway                 @relation("GatewayVersions", fields: [gatewayId], references: [id], onDelete: Cascade)
   activeForGateway     Gateway?                @relation("GatewayActiveVersion")
@@ -1410,10 +1438,10 @@ model GatewayVersion {
  * hard-coded constants.
  */
 model GatewayVersionEvidence {
-  id               String   @id @default(uuid(7))
+  id               String   @id @default(uuid(7)) @db.Char(36)
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
-  gatewayVersionId String   @unique @map("gateway_version_id")
+  gatewayVersionId String   @unique @map("gateway_version_id") @db.Char(36)
   evidenceJson     Json     @map("evidence_json")
   ranAt            DateTime @default(now()) @map("ran_at")
 
@@ -1423,10 +1451,10 @@ model GatewayVersionEvidence {
 }
 
 model GatewayEnvironment {
-  id                 String                 @id @default(uuid(7))
+  id                 String                 @id @default(uuid(7)) @db.Char(36)
   createdAt          DateTime               @default(now()) @map("created_at")
   updatedAt          DateTime               @updatedAt @map("updated_at")
-  gatewayVersionId   String                 @map("gateway_version_id")
+  gatewayVersionId   String                 @map("gateway_version_id") @db.Char(36)
   env                GatewayEnvironmentType
   baseUrls           Json                   @map("base_urls")
   allowedHosts       Json                   @map("allowed_hosts")
@@ -1441,10 +1469,10 @@ model GatewayEnvironment {
 }
 
 model GatewayAuth {
-  id                String     @id @default(uuid(7))
+  id                String     @id @default(uuid(7)) @db.Char(36)
   createdAt         DateTime   @default(now()) @map("created_at")
   updatedAt         DateTime   @updatedAt @map("updated_at")
-  gatewayVersionId  String     @map("gateway_version_id")
+  gatewayVersionId  String     @map("gateway_version_id") @db.Char(36)
   env               String
   method            AuthMethod
   authApply         AuthApply  @map("auth_apply")
@@ -1457,10 +1485,10 @@ model GatewayAuth {
 }
 
 model GatewaySetting {
-  id                       String   @id @default(uuid(7))
+  id                       String   @id @default(uuid(7)) @db.Char(36)
   createdAt                DateTime @default(now()) @map("created_at")
   updatedAt                DateTime @updatedAt @map("updated_at")
-  gatewayVersionId         String   @unique @map("gateway_version_id")
+  gatewayVersionId         String   @unique @map("gateway_version_id") @db.Char(36)
   amountScale              Int      @map("amount_scale")
   amountPrecision          Int      @map("amount_precision")
   amountRounding           String   @map("amount_rounding")
@@ -1486,13 +1514,13 @@ model GatewaySetting {
 }
 
 model CredentialSet {
-  id                 String                 @id @default(uuid(7))
+  id                 String                 @id @default(uuid(7)) @db.Char(36)
   createdAt          DateTime               @default(now()) @map("created_at")
   updatedAt          DateTime               @updatedAt @map("updated_at")
-  gatewayId          String                 @map("gateway_id")
+  gatewayId          String                 @map("gateway_id") @db.Char(36)
   env                GatewayEnvironmentType
   ownerType          CredentialOwnerType    @map("owner_type")
-  ownerMerchantId    String?                @map("owner_merchant_id")
+  ownerMerchantId    String?                @map("owner_merchant_id") @db.Char(36)
   externalMerchantId String?                @map("external_merchant_id")
   settlementTarget   SettlementTarget       @map("settlement_target")
   entriesCiphertext  Json                   @map("entries_ciphertext")
@@ -1514,7 +1542,7 @@ model CredentialSet {
 }
 
 model Asset {
-  id         String    @id @default(uuid(7))
+  id         String    @id @default(uuid(7)) @db.Char(36)
   createdAt  DateTime  @default(now()) @map("created_at")
   updatedAt  DateTime  @updatedAt @map("updated_at")
   name       String    @unique
@@ -1529,13 +1557,13 @@ model Asset {
 }
 
 model Rail {
-  id               String         @id @default(uuid(7))
+  id               String         @id @default(uuid(7)) @db.Char(36)
   createdAt        DateTime       @default(now()) @map("created_at")
   updatedAt        DateTime       @updatedAt @map("updated_at")
-  code             String         @unique
-  nameAr           String         @map("name_ar") @db.Text
-  nameEn           String         @map("name_en") @db.Text
-  logoAssetId      String?        @map("logo_asset_id")
+  code             String         @unique @db.VarChar(64)
+  nameAr           String         @map("name_ar") @db.VarChar(191)
+  nameEn           String         @map("name_en") @db.VarChar(191)
+  logoAssetId      String?        @map("logo_asset_id") @db.Char(36)
   collectionMode   CollectionMode @map("collection_mode")
   subModes         Json?          @map("sub_modes")
   currency         String         @default("LYD") @db.Char(3)
@@ -1569,10 +1597,10 @@ model Rail {
 }
 
 model RailField {
-  id            String               @id @default(uuid(7))
+  id            String               @id @default(uuid(7)) @db.Char(36)
   createdAt     DateTime             @default(now()) @map("created_at")
   updatedAt     DateTime             @updatedAt @map("updated_at")
-  railId        String               @map("rail_id")
+  railId        String               @map("rail_id") @db.Char(36)
   key           String
   type          RailFieldType
   checksum      ChecksumType         @default(NONE)
@@ -1598,11 +1626,11 @@ model RailField {
 }
 
 model RailRoute {
-  id                 String           @id @default(uuid(7))
+  id                 String           @id @default(uuid(7)) @db.Char(36)
   createdAt          DateTime         @default(now()) @map("created_at")
   updatedAt          DateTime         @updatedAt @map("updated_at")
-  railId             String           @map("rail_id")
-  gatewayId          String           @map("gateway_id")
+  railId             String           @map("rail_id") @db.Char(36)
+  gatewayId          String           @map("gateway_id") @db.Char(36)
   credentialPolicy   CredentialPolicy @map("credential_policy")
   priority           Int              @default(0)
   routingStrategy    RoutingStrategy  @default(EFFECTIVE_COST) @map("routing_strategy")
@@ -1612,6 +1640,7 @@ model RailRoute {
   minAmount          Decimal          @default(0) @map("min_amount") @db.Decimal(18, 4)
   maxAmount          Decimal?         @map("max_amount") @db.Decimal(18, 4)
   dailyCapAmount     Decimal?         @map("daily_cap_amount") @db.Decimal(18, 4)
+  hardCap            Boolean          @default(false) @map("hard_cap")
   status             RouteStatus      @default(ACTIVE)
   healthState        HealthState      @default(HEALTHY) @map("health_state")
   maintenanceWindows Json?            @map("maintenance_windows")
@@ -1629,14 +1658,15 @@ model RailRoute {
   @@unique([railId, gatewayId, credentialPolicy])
   @@index([status, healthState])
   @@index([credentialPolicy])
+  @@index([hardCap], map: "rail_routes_hard_cap_idx")
   @@map("rail_routes")
 }
 
 model CryptoProfile {
-  id                   String               @id @default(uuid(7))
+  id                   String               @id @default(uuid(7)) @db.Char(36)
   createdAt            DateTime             @default(now()) @map("created_at")
   updatedAt            DateTime             @updatedAt @map("updated_at")
-  gatewayVersionId     String               @map("gateway_version_id")
+  gatewayVersionId     String               @map("gateway_version_id") @db.Char(36)
   name                 String
   purpose              CryptoPurpose
   algorithm            CryptoAlgorithm
@@ -1657,11 +1687,11 @@ model CryptoProfile {
 }
 
 model Flow {
-  id               String    @id @default(uuid(7))
+  id               String    @id @default(uuid(7)) @db.Char(36)
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
-  gatewayVersionId String    @map("gateway_version_id")
-  railId           String?   @map("rail_id")
+  gatewayVersionId String    @map("gateway_version_id") @db.Char(36)
+  railId           String?   @map("rail_id") @db.Char(36)
   subMode          String?   @map("sub_mode")
   phase            FlowPhase
 
@@ -1674,10 +1704,10 @@ model Flow {
 }
 
 model FlowStep {
-  id                String       @id @default(uuid(7))
+  id                String       @id @default(uuid(7)) @db.Char(36)
   createdAt         DateTime     @default(now()) @map("created_at")
   updatedAt         DateTime     @updatedAt @map("updated_at")
-  flowId            String       @map("flow_id")
+  flowId            String       @map("flow_id") @db.Char(36)
   orderIndex        Int          @map("order_index")
   type              FlowStepType
   method            String?
@@ -1701,16 +1731,16 @@ model FlowStep {
 }
 
 model StepParameter {
-  id              String              @id @default(uuid(7))
+  id              String              @id @default(uuid(7)) @db.Char(36)
   createdAt       DateTime            @default(now()) @map("created_at")
   updatedAt       DateTime            @updatedAt @map("updated_at")
-  stepId          String              @map("step_id")
+  stepId          String              @map("step_id") @db.Char(36)
   place           StepParameterPlace
   key             String
   source          StepParameterSource
   selector        String?             @db.Text
   constantValue   String?             @map("constant_value") @db.Text
-  cryptoProfileId String?             @map("crypto_profile_id")
+  cryptoProfileId String?             @map("crypto_profile_id") @db.Char(36)
   transforms      Json
 
   step          FlowStep       @relation(fields: [stepId], references: [id], onDelete: Cascade)
@@ -1721,10 +1751,10 @@ model StepParameter {
 }
 
 model StepOutput {
-  id         String            @id @default(uuid(7))
+  id         String            @id @default(uuid(7)) @db.Char(36)
   createdAt  DateTime          @default(now()) @map("created_at")
   updatedAt  DateTime          @updatedAt @map("updated_at")
-  stepId     String            @map("step_id")
+  stepId     String            @map("step_id") @db.Char(36)
   name       String
   selector   String?           @db.Text
   transforms Json
@@ -1738,10 +1768,10 @@ model StepOutput {
 }
 
 model StatusRule {
-  id                 String          @id @default(uuid(7))
+  id                 String          @id @default(uuid(7)) @db.Char(36)
   createdAt          DateTime        @default(now()) @map("created_at")
   updatedAt          DateTime        @updatedAt @map("updated_at")
-  gatewayVersionId   String          @map("gateway_version_id")
+  gatewayVersionId   String          @map("gateway_version_id") @db.Char(36)
   phase              String
   orderIndex         Int             @map("order_index")
   selector           String          @db.Text
@@ -1758,10 +1788,10 @@ model StatusRule {
 }
 
 model ErrorMap {
-  id                  String              @id @default(uuid(7))
+  id                  String              @id @default(uuid(7)) @db.Char(36)
   createdAt           DateTime            @default(now()) @map("created_at")
   updatedAt           DateTime            @updatedAt @map("updated_at")
-  gatewayVersionId    String              @map("gateway_version_id")
+  gatewayVersionId    String              @map("gateway_version_id") @db.Char(36)
   gatewayCode         String              @map("gateway_code")
   canonicalError      String              @map("canonical_error")
   classification      ErrorClassification
@@ -1779,14 +1809,14 @@ model ErrorMap {
 }
 
 model ConfirmationChannel {
-  id                    String                  @id @default(uuid(7))
+  id                    String                  @id @default(uuid(7)) @db.Char(36)
   createdAt             DateTime                @default(now()) @map("created_at")
   updatedAt             DateTime                @updatedAt @map("updated_at")
-  gatewayVersionId      String                  @map("gateway_version_id")
-  routeId               String?                 @map("route_id")
+  gatewayVersionId      String                  @map("gateway_version_id") @db.Char(36)
+  routeId               String?                 @map("route_id") @db.Char(36)
   type                  ConfirmationChannelType
   pathToken             String                  @unique @map("path_token")
-  cryptoProfileId       String?                 @map("crypto_profile_id")
+  cryptoProfileId       String?                 @map("crypto_profile_id") @db.Char(36)
   verifyMethod          VerifyMethod            @map("verify_method")
   signatureHeader       String?                 @map("signature_header") @db.Text
   timestampSelector     String?                 @map("timestamp_selector") @db.Text
@@ -1811,10 +1841,10 @@ model ConfirmationChannel {
 }
 
 model PollPolicy {
-  id                 String   @id @default(uuid(7))
+  id                 String   @id @default(uuid(7)) @db.Char(36)
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
-  routeId            String   @map("route_id")
+  routeId            String   @map("route_id") @db.Char(36)
   firstAfterSeconds  Int      @default(5) @map("first_after_seconds")
   backoffSeconds     Json     @map("backoff_seconds")
   maxDurationSeconds Int      @default(900) @map("max_duration_seconds")
@@ -1827,10 +1857,10 @@ model PollPolicy {
 }
 
 model WidgetDefinition {
-  id                 String     @id @default(uuid(7))
+  id                 String     @id @default(uuid(7)) @db.Char(36)
   createdAt          DateTime   @default(now()) @map("created_at")
   updatedAt          DateTime   @updatedAt @map("updated_at")
-  routeId            String     @map("route_id")
+  routeId            String     @map("route_id") @db.Char(36)
   kind               WidgetKind
   sdkDriver          String?    @map("sdk_driver") @db.Text
   scriptUrls         Json       @map("script_urls")
@@ -1848,10 +1878,10 @@ model WidgetDefinition {
 }
 
 model RedirectDefinition {
-  id                   String         @id @default(uuid(7))
+  id                   String         @id @default(uuid(7)) @db.Char(36)
   createdAt            DateTime       @default(now()) @map("created_at")
   updatedAt            DateTime       @updatedAt @map("updated_at")
-  routeId              String         @map("route_id")
+  routeId              String         @map("route_id") @db.Char(36)
   method               RedirectMethod
   urlSourceOutput      String         @map("url_source_output") @db.Text
   formFieldsOutput     String?        @map("form_fields_output") @db.Text
@@ -1866,10 +1896,10 @@ model RedirectDefinition {
 }
 
 model StatementSource {
-  id                String              @id @default(uuid(7))
+  id                String              @id @default(uuid(7)) @db.Char(36)
   createdAt         DateTime            @default(now()) @map("created_at")
   updatedAt         DateTime            @updatedAt @map("updated_at")
-  gatewayId         String              @map("gateway_id")
+  gatewayId         String              @map("gateway_id") @db.Char(36)
   type              StatementSourceType
   scheduleCron      String?             @map("schedule_cron") @db.Text
   parserConfig      Json                @map("parser_config")
@@ -1884,10 +1914,10 @@ model StatementSource {
 }
 
 model ManualInstruction {
-  id                         String   @id @default(uuid(7))
+  id                         String   @id @default(uuid(7)) @db.Char(36)
   createdAt                  DateTime @default(now()) @map("created_at")
   updatedAt                  DateTime @updatedAt @map("updated_at")
-  railId                     String   @map("rail_id")
+  railId                     String   @map("rail_id") @db.Char(36)
   instructionsAr             String   @map("instructions_ar") @db.Text
   instructionsEn             String   @map("instructions_en") @db.Text
   destinationAccountTemplate String?  @map("destination_account_template") @db.Text
@@ -1903,10 +1933,10 @@ model ManualInstruction {
 }
 
 model AttemptGroup {
-  id                  String   @id @default(uuid(7))
+  id                  String   @id @default(uuid(7)) @db.Char(36)
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
-  linkId              String   @map("link_id")
+  linkId              String   @map("link_id") @db.Char(36)
   customerFingerprint String   @map("customer_fingerprint") @db.Char(64)
   successCount        Int      @default(0) @map("success_count")
 
@@ -1918,32 +1948,32 @@ model AttemptGroup {
 }
 
 model PaymentAttempt {
-  id                       String                 @id @default(uuid(7))
+  id                       String                 @id @default(uuid(7)) @db.Char(36)
   createdAt                DateTime               @default(now()) @map("created_at")
   updatedAt                DateTime               @updatedAt @map("updated_at")
-  reference                String                 @unique
-  idempotencyKey           String?                @map("idempotency_key")
-  linkId                   String                 @map("link_id")
-  attemptGroupId           String                 @map("attempt_group_id")
-  applicationId            String                 @map("application_id")
-  merchantId               String                 @map("merchant_id")
-  railId                   String                 @map("rail_id")
-  routeId                  String                 @map("route_id")
-  credentialSetId          String                 @map("credential_set_id")
-  gatewayVersionId         String                 @map("gateway_version_id")
-  commissionProfileId      String                 @map("commission_profile_id")
+  reference                String                 @unique @db.VarChar(64)
+  idempotencyKey           String?                @map("idempotency_key") @db.VarChar(128)
+  linkId                   String                 @map("link_id") @db.Char(36)
+  attemptGroupId           String                 @map("attempt_group_id") @db.Char(36)
+  applicationId            String                 @map("application_id") @db.Char(36)
+  merchantId               String                 @map("merchant_id") @db.Char(36)
+  railId                   String                 @map("rail_id") @db.Char(36)
+  routeId                  String                 @map("route_id") @db.Char(36)
+  credentialSetId          String                 @map("credential_set_id") @db.Char(36)
+  gatewayVersionId         String                 @map("gateway_version_id") @db.Char(36)
+  commissionProfileId      String                 @map("commission_profile_id") @db.Char(36)
   env                      GatewayEnvironmentType
-  mode                     String
-  subMode                  String?                @map("sub_mode")
+  mode                     String                 @db.VarChar(32)
+  subMode                  String?                @map("sub_mode") @db.VarChar(64)
   status                   AttemptStatus          @default(CREATED)
-  substatus                String?                @db.Text
-  gatewayReference         String?                @map("gateway_reference")
-  providerReference        String?                @map("provider_reference")
-  networkReference         String?                @map("network_reference")
+  substatus                String?                @db.VarChar(96)
+  gatewayReference         String?                @map("gateway_reference") @db.VarChar(128)
+  providerReference        String?                @map("provider_reference") @db.VarChar(128)
+  networkReference         String?                @map("network_reference") @db.VarChar(128)
   requestedAmount          Decimal                @map("requested_amount") @db.Decimal(18, 4)
   surchargeAmount          Decimal                @default(0) @map("surcharge_amount") @db.Decimal(18, 4)
   totalChargedAmount       Decimal                @map("total_charged_amount") @db.Decimal(18, 4)
-  gatewayAmountWire        String?                @map("gateway_amount_wire") @db.Text
+  gatewayAmountWire        String?                @map("gateway_amount_wire") @db.VarChar(64)
   settledAmount            Decimal?               @map("settled_amount") @db.Decimal(18, 4)
   gatewayFeeAmount         Decimal?               @map("gateway_fee_amount") @db.Decimal(18, 4)
   platformCommissionAmount Decimal                @default(0) @map("platform_commission_amount") @db.Decimal(18, 4)
@@ -1957,12 +1987,12 @@ model PaymentAttempt {
   pointOfNoReturn          Boolean                @default(false) @map("point_of_no_return")
   otpAttempts              Int                    @default(0) @map("otp_attempts")
   lastOtpSentAt            DateTime?              @map("last_otp_sent_at")
-  clientIp                 String?                @map("client_ip") @db.Text
+  clientIp                 String?                @map("client_ip") @db.VarChar(45)
   userAgent                String?                @map("user_agent") @db.Text
   expiresAt                DateTime               @map("expires_at")
   graceExpiresAt           DateTime               @map("grace_expires_at")
   nextCheckAt              DateTime?              @map("next_check_at")
-  ledgerEntryId            String?                @unique @map("ledger_entry_id")
+  ledgerEntryId            String?                @unique @map("ledger_entry_id") @db.Char(36)
   terminalAt               DateTime?              @map("terminal_at")
 
   link                PaymentLink              @relation(fields: [linkId], references: [id], onDelete: Restrict)
@@ -1984,35 +2014,33 @@ model PaymentAttempt {
   reconciliationItems ReconciliationItem[]
 
   @@unique([linkId, idempotencyKey])
-  @@index([linkId])
-  @@index([merchantId])
-  @@index([status, nextCheckAt])
   @@index([gatewayVersionId])
   // The daily volume aggregate of the rail resolution groups the succeeded
   // attempts by route, so the pair is indexed.
-  @@index([routeId, status])
   @@index([merchantId, createdAt])
   @@index([merchantId, status, createdAt])
   @@index([status, createdAt])
   @@index([railId, createdAt])
   @@index([applicationId, createdAt])
+  @@index([providerReference], map: "payment_attempts_provider_ref_idx")
+  @@index([gatewayReference], map: "payment_attempts_gateway_ref_idx")
+  @@index([networkReference], map: "payment_attempts_network_ref_idx")
   @@map("payment_attempts")
 }
 
 model AttemptStepLog {
-  id                   String   @id @default(uuid(7))
-  createdAt            DateTime @default(now()) @map("created_at")
-  updatedAt            DateTime @updatedAt @map("updated_at")
-  attemptId            String   @map("attempt_id")
-  gatewayVersionId     String   @map("gateway_version_id")
-  phase                String   @db.Text
-  stepId               String?  @map("step_id")
+  id                   BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  createdAt            DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  attemptId            String   @map("attempt_id") @db.Char(36)
+  gatewayVersionId     String   @map("gateway_version_id") @db.Char(36)
+  phase                String   @db.VarChar(32)
+  stepId               String?  @map("step_id") @db.Char(36)
   stepOrder            Int      @map("step_order")
   redactedRequestJson  Json     @map("redacted_request_json")
   redactedResponseText String   @map("redacted_response_text") @db.Text
   httpStatus           Int?     @map("http_status")
   durationMs           Int?     @map("duration_ms")
-  outcome              String   @db.Text
+  outcome              String   @db.VarChar(64)
 
   attempt        PaymentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   gatewayVersion GatewayVersion @relation(fields: [gatewayVersionId], references: [id], onDelete: Restrict)
@@ -2023,45 +2051,55 @@ model AttemptStepLog {
 }
 
 model InboundEvent {
-  id                  String    @id @default(uuid(7))
-  createdAt           DateTime  @default(now()) @map("created_at")
-  updatedAt           DateTime  @updatedAt @map("updated_at")
-  channelId           String    @map("channel_id")
-  gatewayId           String    @map("gateway_id")
-  env                 String    @db.Text
-  rawBodyBytes        Bytes     @map("raw_body_bytes") @db.LongBlob
-  redactedHeadersJson Json      @map("redacted_headers_json")
-  sourceIp            String    @map("source_ip") @db.Text
-  verified            Boolean
-  verificationError   String?   @map("verification_error") @db.Text
-  dedupeKey           String    @map("dedupe_key") @db.Char(64)
-  attemptId           String?   @map("attempt_id")
-  receivedAt          DateTime  @map("received_at")
-  processedAt         DateTime? @map("processed_at")
-  processingResult    String?   @map("processing_result") @db.Text
+  id                BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  createdAt         DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  channelId         String    @map("channel_id") @db.Char(36)
+  gatewayId         String    @map("gateway_id") @db.Char(36)
+  env               String    @db.VarChar(16)
+  sourceIp          String    @map("source_ip") @db.VarChar(45)
+  verified          Boolean
+  verificationError String?   @map("verification_error") @db.Text
+  dedupeKey         String    @map("dedupe_key") @db.Char(64)
+  attemptId         String?   @map("attempt_id") @db.Char(36)
+  receivedAt        DateTime  @map("received_at")
+  processedAt       DateTime? @map("processed_at")
+  processingResult  String?   @map("processing_result") @db.VarChar(191)
 
-  channel ConfirmationChannel @relation(fields: [channelId], references: [id], onDelete: Restrict)
-  gateway Gateway             @relation(fields: [gatewayId], references: [id], onDelete: Restrict)
-  attempt PaymentAttempt?     @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+  channel ConfirmationChannel  @relation(fields: [channelId], references: [id], onDelete: Restrict)
+  gateway Gateway              @relation(fields: [gatewayId], references: [id], onDelete: Restrict)
+  attempt PaymentAttempt?      @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+  payload InboundEventPayload?
 
   @@unique([channelId, dedupeKey])
   @@index([gatewayId])
+  @@index([processedAt, receivedAt], map: "inbound_events_processed_at_received_at_idx")
   @@map("inbound_events")
 }
 
+model InboundEventPayload {
+  eventId             BigInt   @id @map("event_id") @db.UnsignedBigInt
+  rawBodyBytes        Bytes    @map("raw_body_bytes") @db.LongBlob
+  redactedHeadersJson Json     @map("redacted_headers_json")
+  createdAt           DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  event InboundEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@map("inbound_event_payloads")
+}
+
 model OperatorCase {
-  id                   String               @id @default(uuid(7))
+  id                   String               @id @default(uuid(7)) @db.Char(36)
   createdAt            DateTime             @default(now()) @map("created_at")
   updatedAt            DateTime             @updatedAt @map("updated_at")
-  attemptId            String?              @map("attempt_id")
-  reconciliationItemId String?              @unique @map("reconciliation_item_id")
+  attemptId            String?              @map("attempt_id") @db.Char(36)
+  reconciliationItemId String?              @unique @map("reconciliation_item_id") @db.Char(36)
   kind                 OperatorCaseKind
   priority             OperatorCasePriority
   slaDueAt             DateTime             @map("sla_due_at")
   state                OperatorCaseState    @default(OPEN)
-  assigneeUserId       String?              @map("assignee_user_id")
+  assigneeUserId       String?              @map("assignee_user_id") @db.Char(36)
   resolutionNotes      String?              @map("resolution_notes") @db.Text
-  approvalRequestId    String?              @map("approval_request_id")
+  approvalRequestId    String?              @map("approval_request_id") @db.Char(36)
 
   attempt            PaymentAttempt?          @relation(fields: [attemptId], references: [id], onDelete: SetNull)
   reconciliationItem ReconciliationItem?      @relation("OperatorCaseReconciliationItem", fields: [reconciliationItemId], references: [id], onDelete: SetNull)
@@ -2085,14 +2123,14 @@ model OperatorCase {
 /// worker uses; this row records why the inquiry was requested, who requested
 /// it, the latest status and the action history for the operator portal.
 model GatewayInquirySchedule {
-  id                  String                       @id @default(uuid(7))
+  id                  String                       @id @default(uuid(7)) @db.Char(36)
   createdAt           DateTime                     @default(now()) @map("created_at")
   updatedAt           DateTime                     @updatedAt @map("updated_at")
-  attemptId           String                       @map("attempt_id")
-  operatorCaseId      String?                      @map("operator_case_id")
+  attemptId           String                       @map("attempt_id") @db.Char(36)
+  operatorCaseId      String?                      @map("operator_case_id") @db.Char(36)
   source              GatewayInquiryScheduleSource @default(OPERATOR_CASE)
   status              GatewayInquiryScheduleStatus @default(SCHEDULED)
-  scheduledByUserId   String?                      @map("scheduled_by_user_id")
+  scheduledByUserId   String?                      @map("scheduled_by_user_id") @db.Char(36)
   reason              String?                      @db.Text
   checklist           Json?
   previousNextCheckAt DateTime?                    @map("previous_next_check_at")
@@ -2104,7 +2142,7 @@ model GatewayInquirySchedule {
   lastError           String?                      @map("last_error") @db.Text
   completedAt         DateTime?                    @map("completed_at")
   cancelledAt         DateTime?                    @map("cancelled_at")
-  cancelledByUserId   String?                      @map("cancelled_by_user_id")
+  cancelledByUserId   String?                      @map("cancelled_by_user_id") @db.Char(36)
   cancelReason        String?                      @map("cancel_reason") @db.Text
 
   attempt      PaymentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
@@ -2120,32 +2158,35 @@ model GatewayInquirySchedule {
 }
 
 model ReconciliationRun {
-  id                String    @id @default(uuid(7))
+  id                String    @id @default(uuid(7)) @db.Char(36)
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
-  statementSourceId String    @map("statement_source_id")
+  statementSourceId String    @map("statement_source_id") @db.Char(36)
   windowStart       DateTime  @map("window_start")
   windowEnd         DateTime  @map("window_end")
   fileHash          String    @unique @map("file_hash") @db.Char(64)
   statsJson         Json      @map("stats_json")
-  /// The name of the uploaded statement file.
-  fileName          String?   @map("file_name") @db.Text
-  /// The uploaded statement file itself: the reconciliation is a background
-  /// job, so the bytes have to survive the request that stored them.
-  fileContent       Bytes?    @map("file_content") @db.LongBlob
-  /// Set when the background reconciliation job finished the run. It is the
-  /// idempotency marker of the ingestion: a retried job never matches the
-  /// same statement twice.
+  fileName          String?   @map("file_name") @db.VarChar(255)
   ingestedAt        DateTime? @map("ingested_at")
 
-  statementSource StatementSource      @relation(fields: [statementSourceId], references: [id], onDelete: Restrict)
+  statementSource StatementSource        @relation(fields: [statementSourceId], references: [id], onDelete: Restrict)
   items           ReconciliationItem[]
+  file            ReconciliationRunFile?
 
-  @@index([statementSourceId])
   @@index([ingestedAt])
   @@index([createdAt])
   @@index([statementSourceId, createdAt])
   @@map("reconciliation_runs")
+}
+
+model ReconciliationRunFile {
+  runId       String   @id @map("run_id") @db.Char(36)
+  fileContent Bytes?   @map("file_content") @db.LongBlob
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  run ReconciliationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@map("reconciliation_run_files")
 }
 
 /// The durable job queue of `core-back`.
@@ -2155,7 +2196,7 @@ model ReconciliationRun {
 /// the durable timer of the retry backoff and `locked_at` is the lease of the
 /// node that currently owns the job.
 model BackgroundJob {
-  id            String             @id @default(uuid(7))
+  id            String             @id @default(uuid(7)) @db.Char(36)
   createdAt     DateTime           @default(now()) @map("created_at")
   updatedAt     DateTime           @updatedAt @map("updated_at")
   jobType       BackgroundJobType  @map("job_type")
@@ -2177,14 +2218,14 @@ model BackgroundJob {
 }
 
 model ReconciliationItem {
-  id                String               @id @default(uuid(7))
+  id                String               @id @default(uuid(7)) @db.Char(36)
   createdAt         DateTime             @default(now()) @map("created_at")
   updatedAt         DateTime             @updatedAt @map("updated_at")
-  runId             String               @map("run_id")
-  attemptId         String?              @map("attempt_id")
-  ourReference      String               @map("our_reference") @db.Text
-  providerReference String               @map("provider_reference") @db.Text
-  batchReference    String?              @map("batch_reference") @db.Text
+  runId             String               @map("run_id") @db.Char(36)
+  attemptId         String?              @map("attempt_id") @db.Char(36)
+  ourReference      String               @map("our_reference") @db.VarChar(191)
+  providerReference String               @map("provider_reference") @db.VarChar(191)
+  batchReference    String?              @map("batch_reference") @db.VarChar(191)
   statementAmount   Decimal              @map("statement_amount") @db.Decimal(18, 4)
   statementFee      Decimal              @map("statement_fee") @db.Decimal(18, 4)
   result            ReconciliationResult
@@ -2200,10 +2241,10 @@ model ReconciliationItem {
 }
 
 model GatewayHealthSample {
-  id                 String   @id @default(uuid(7))
+  id                 String   @id @default(uuid(7)) @db.Char(36)
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
-  routeId            String   @map("route_id")
+  routeId            String   @map("route_id") @db.Char(36)
   windowStart        DateTime @map("window_start")
   definitiveFailures Int      @default(0) @map("definitive_failures")
   ambiguousUnknowns  Int      @default(0) @map("ambiguous_unknowns")
@@ -2220,20 +2261,20 @@ model GatewayHealthSample {
 }
 
 model DetailChangeLog {
-  id                String             @id @default(uuid(7))
+  id                String             @id @default(uuid(7)) @db.Char(36)
   createdAt         DateTime           @default(now()) @map("created_at")
   updatedAt         DateTime           @updatedAt @map("updated_at")
-  actorId           String             @map("actor_id")
-  merchantId        String?            @map("merchant_id")
+  actorId           String             @map("actor_id") @db.Char(36)
+  merchantId        String?            @map("merchant_id") @db.Char(36)
   entityType        String             @map("entity_type")
   entityId          String             @map("entity_id")
-  fieldName         String             @map("field_name") @db.Text
+  fieldName         String             @map("field_name") @db.VarChar(191)
   oldValue          String?            @map("old_value") @db.Text
   newValue          String?            @map("new_value") @db.Text
-  approvalRequestId String?            @map("approval_request_id")
+  approvalRequestId String?            @map("approval_request_id") @db.Char(36)
   source            DetailChangeSource
-  requestId         String             @map("request_id") @db.Text
-  clientIp          String?            @map("client_ip") @db.Text
+  requestId         String             @map("request_id") @db.VarChar(191)
+  clientIp          String?            @map("client_ip") @db.VarChar(45)
 
   actor           User             @relation("DetailChangeLogActor", fields: [actorId], references: [id], onDelete: Restrict)
   merchant        Merchant?        @relation("MerchantDetailChangeLogs", fields: [merchantId], references: [id], onDelete: SetNull)
@@ -2245,31 +2286,41 @@ model DetailChangeLog {
 }
 
 model AuditLog {
-  id                String   @id @default(uuid(7))
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
-  actorId           String   @map("actor_id")
-  role              String   @db.Text
-  action            String   @db.Text
-  entityType        String   @map("entity_type")
-  entityId          String   @map("entity_id")
-  beforeJson        Json     @map("before_json")
-  afterJson         Json     @map("after_json")
-  approvalRequestId String?  @map("approval_request_id")
+  id                BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  createdAt         DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  actorId           String   @map("actor_id") @db.Char(36)
+  actorEmail        String   @default("") @map("actor_email") @db.VarChar(191)
+  role              String   @db.VarChar(64)
+  action            String   @db.VarChar(96)
+  entityType        String   @map("entity_type") @db.VarChar(64)
+  entityId          String   @map("entity_id") @db.VarChar(64)
+  approvalRequestId String?  @map("approval_request_id") @db.Char(36)
 
   actor           User             @relation("AuditLogActor", fields: [actorId], references: [id], onDelete: Restrict)
   approvalRequest ApprovalRequest? @relation("AuditLogApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
+  payload         AuditLogPayload?
 
-  @@index([entityType, entityId])
   @@index([entityType, entityId, createdAt])
+  @@index([createdAt], map: "audit_log_created_at_idx")
   @@map("audit_log")
 }
 
+model AuditLogPayload {
+  auditLogId BigInt   @id @map("audit_log_id") @db.UnsignedBigInt
+  beforeJson Json     @map("before_json")
+  afterJson  Json     @map("after_json")
+  createdAt  DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  auditLog AuditLog @relation(fields: [auditLogId], references: [id], onDelete: Cascade)
+
+  @@map("audit_log_payloads")
+}
+
 model UserIdentity {
-  id                   String       @id @default(uuid(7))
+  id                   String       @id @default(uuid(7)) @db.Char(36)
   createdAt            DateTime     @default(now()) @map("created_at")
   updatedAt            DateTime     @updatedAt @map("updated_at")
-  userId               String       @map("user_id")
+  userId               String       @map("user_id") @db.Char(36)
   kind                 IdentityKind
   identifierNormalized String       @map("identifier_normalized")
   providerSubject      String?      @unique @map("provider_subject")
@@ -2285,17 +2336,17 @@ model UserIdentity {
 }
 
 model JoinRequest {
-  id                  String            @id @default(uuid(7))
+  id                  String            @id @default(uuid(7)) @db.Char(36)
   createdAt           DateTime          @default(now()) @map("created_at")
   updatedAt           DateTime          @updatedAt @map("updated_at")
-  merchantId          String            @map("merchant_id")
-  submittedByUserId   String            @map("submitted_by_user_id")
+  merchantId          String            @map("merchant_id") @db.Char(36)
+  submittedByUserId   String            @map("submitted_by_user_id") @db.Char(36)
   status              JoinRequestStatus @default(DRAFT)
   onboardingChannel   OnboardingChannel @map("onboarding_channel")
   submittedAt         DateTime?         @map("submitted_at")
-  assignedReviewerId  String?           @map("assigned_reviewer_id")
+  assignedReviewerId  String?           @map("assigned_reviewer_id") @db.Char(36)
   slaDueAt            DateTime          @map("sla_due_at")
-  screeningId         String?           @map("screening_id")
+  screeningId         String?           @map("screening_id") @db.Char(36)
   proposedRiskTier    RiskTier          @default(STANDARD) @map("proposed_risk_tier")
   fourEyesRequired    Boolean           @default(true) @map("four_eyes_required")
   fourEyesReasons     Json?             @map("four_eyes_reasons")
@@ -2309,8 +2360,8 @@ model JoinRequest {
   slaPausedAt         DateTime?         @map("sla_paused_at")
   slaRemainingSeconds Int?              @map("sla_remaining_seconds")
   lastScreenedAt      DateTime?         @map("last_screened_at")
-  resubmissionOfId    String?           @map("resubmission_of_id")
-  approvalRequestId   String?           @map("approval_request_id")
+  resubmissionOfId    String?           @map("resubmission_of_id") @db.Char(36)
+  approvalRequestId   String?           @map("approval_request_id") @db.Char(36)
 
   merchant                Merchant                 @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   submittedBy             User                     @relation("JoinRequestSubmitter", fields: [submittedByUserId], references: [id], onDelete: Restrict)
@@ -2322,7 +2373,6 @@ model JoinRequest {
   kybDocuments            KybDocument[]
   kybRevalidationRequests KybRevalidationRequest[]
 
-  @@index([merchantId])
   @@index([status])
   @@index([status, createdAt])
   @@index([proposedRiskTier])
@@ -2332,11 +2382,11 @@ model JoinRequest {
 }
 
 model KybDocument {
-  id                     String            @id @default(uuid(7))
+  id                     String            @id @default(uuid(7)) @db.Char(36)
   createdAt              DateTime          @default(now()) @map("created_at")
   updatedAt              DateTime          @updatedAt @map("updated_at")
-  merchantId             String            @map("merchant_id")
-  joinRequestId          String?           @map("join_request_id")
+  merchantId             String            @map("merchant_id") @db.Char(36)
+  joinRequestId          String?           @map("join_request_id") @db.Char(36)
   subjectType            KybSubjectType    @map("subject_type")
   subjectId              String            @map("subject_id")
   docType                KybDocumentType   @map("doc_type")
@@ -2344,12 +2394,13 @@ model KybDocument {
   originalFileName       String?           @map("original_file_name") @db.Text
   contentCiphertext      String?           @map("content_ciphertext") @db.LongText
   sha256                 String            @db.Char(64)
+  duplicateOfMerchantId  String?           @map("duplicate_of_merchant_id") @db.Char(36)
   mime                   String            @db.Text
   sizeBytes              Int               @map("size_bytes")
   avStatus               AvStatus          @default(PENDING) @map("av_status")
   status                 KybDocumentStatus @default(UPLOADED)
-  uploadedById           String?           @map("uploaded_by")
-  reviewedById           String?           @map("reviewed_by")
+  uploadedById           String?           @map("uploaded_by") @db.Char(36)
+  reviewedById           String?           @map("reviewed_by") @db.Char(36)
   reviewedAt             DateTime?         @map("reviewed_at")
   expiresOn              DateTime?         @map("expires_on") @db.Date
   rejectionReasonCode    String?           @map("rejection_reason_code") @db.Text
@@ -2367,9 +2418,9 @@ model KybDocument {
   revalidationSourceRequests    KybRevalidationRequest[] @relation("KybRevalidationSourceDocument")
   fulfilledRevalidationRequests KybRevalidationRequest[] @relation("KybRevalidationFulfilledDocument")
 
-  @@index([merchantId])
   @@index([joinRequestId])
   @@index([sha256])
+  @@index([duplicateOfMerchantId], map: "kyb_documents_duplicate_of_merchant_idx")
   @@index([merchantId, status])
   @@index([status, avStatus, createdAt])
   @@index([docType])
@@ -2380,21 +2431,21 @@ model KybDocument {
 }
 
 model KybRevalidationRequest {
-  id                  String                @id @default(uuid(7))
+  id                  String                @id @default(uuid(7)) @db.Char(36)
   createdAt           DateTime              @default(now()) @map("created_at")
   updatedAt           DateTime              @updatedAt @map("updated_at")
-  merchantId          String                @map("merchant_id")
-  joinRequestId       String?               @map("join_request_id")
-  documentId          String?               @map("document_id")
+  merchantId          String                @map("merchant_id") @db.Char(36)
+  joinRequestId       String?               @map("join_request_id") @db.Char(36)
+  documentId          String?               @map("document_id") @db.Char(36)
   docType             KybDocumentType       @map("doc_type")
   reasonCode          String                @map("reason_code") @db.Text
   message             String                @db.Text
   status              KybRevalidationStatus @default(OPEN)
-  requestedById       String                @map("requested_by")
+  requestedById       String                @map("requested_by") @db.Char(36)
   requestedAt         DateTime              @default(now()) @map("requested_at")
   dueAt               DateTime?             @map("due_at")
   fulfilledAt         DateTime?             @map("fulfilled_at")
-  fulfilledDocumentId String?               @unique @map("fulfilled_document_id")
+  fulfilledDocumentId String?               @unique @map("fulfilled_document_id") @db.Char(36)
   resolutionNotes     String?               @map("resolution_notes") @db.Text
 
   merchant          Merchant     @relation(fields: [merchantId], references: [id], onDelete: Restrict)
@@ -2412,10 +2463,10 @@ model KybRevalidationRequest {
 }
 
 model BeneficialOwner {
-  id                   String              @id @default(uuid(7))
+  id                   String              @id @default(uuid(7)) @db.Char(36)
   createdAt            DateTime            @default(now()) @map("created_at")
   updatedAt            DateTime            @updatedAt @map("updated_at")
-  merchantId           String              @map("merchant_id")
+  merchantId           String              @map("merchant_id") @db.Char(36)
   fullNameAr           String              @map("full_name_ar") @db.Text
   fullNameEn           String?             @map("full_name_en") @db.Text
   nationalIdCiphertext String              @map("national_id_ciphertext") @db.Text
@@ -2432,21 +2483,20 @@ model BeneficialOwner {
 
   merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Restrict)
 
-  @@index([merchantId])
   @@index([screeningStatus])
   @@index([nationalIdHash])
   @@map("beneficial_owners")
 }
 
 model AmlScreening {
-  id                 String                  @id @default(uuid(7))
+  id                 String                  @id @default(uuid(7)) @db.Char(36)
   createdAt          DateTime                @default(now()) @map("created_at")
   updatedAt          DateTime                @updatedAt @map("updated_at")
   subjectType        AmlScreeningSubjectType @map("subject_type")
   subjectId          String                  @map("subject_id")
   trigger            AmlScreeningTrigger
-  providerCode       String                  @map("provider_code")
-  providerRequestRef String?                 @map("provider_request_ref") @db.Text
+  providerCode       String                  @map("provider_code") @db.VarChar(64)
+  providerRequestRef String?                 @map("provider_request_ref") @db.VarChar(191)
   listVersionsJson   Json                    @map("list_versions_json")
   inputHash          String                  @map("input_hash") @db.Char(64)
   result             AmlScreeningResult
@@ -2467,10 +2517,10 @@ model AmlScreening {
 }
 
 model AmlScreeningMatch {
-  id               String              @id @default(uuid(7))
+  id               String              @id @default(uuid(7)) @db.Char(36)
   createdAt        DateTime            @default(now()) @map("created_at")
   updatedAt        DateTime            @updatedAt @map("updated_at")
-  screeningId      String              @map("screening_id")
+  screeningId      String              @map("screening_id") @db.Char(36)
   listType         AmlMatchListType    @map("list_type")
   listName         String              @map("list_name") @db.Text
   listEntryRef     String              @map("list_entry_ref") @db.Text
@@ -2478,7 +2528,7 @@ model AmlScreeningMatch {
   score            Decimal             @db.Decimal(5, 2)
   attributesJson   Json                @map("attributes_json")
   disposition      AmlMatchDisposition @default(UNREVIEWED)
-  dispositionById  String?             @map("disposition_by")
+  dispositionById  String?             @map("disposition_by") @db.Char(36)
   dispositionNotes String?             @map("disposition_notes") @db.Text
   suppressFuture   Boolean             @default(false) @map("suppress_future")
   suppressUntil    DateTime?           @map("suppress_until") @db.Date
@@ -2491,7 +2541,7 @@ model AmlScreeningMatch {
 }
 
 model AmlRule {
-  id                String          @id @default(uuid(7))
+  id                String          @id @default(uuid(7)) @db.Char(36)
   createdAt         DateTime        @default(now()) @map("created_at")
   updatedAt         DateTime        @updatedAt @map("updated_at")
   code              String          @unique
@@ -2505,7 +2555,7 @@ model AmlRule {
   version           Int             @default(1)
   effectiveFrom     DateTime        @map("effective_from")
   effectiveTo       DateTime?       @map("effective_to")
-  approvalRequestId String?         @map("approval_request_id")
+  approvalRequestId String?         @map("approval_request_id") @db.Char(36)
 
   approvalRequest ApprovalRequest? @relation("AmlRuleApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
   amlCases        AmlCase[]        @relation("AmlCaseRule")
@@ -2517,7 +2567,7 @@ model AmlRule {
 }
 
 model ReportingRule {
-  id                String              @id @default(uuid(7))
+  id                String              @id @default(uuid(7)) @db.Char(36)
   createdAt         DateTime            @default(now()) @map("created_at")
   updatedAt         DateTime            @updatedAt @map("updated_at")
   authority         String              @default("CBL") @db.VarChar(64)
@@ -2530,7 +2580,7 @@ model ReportingRule {
   status            ReportingRuleStatus @default(PROVISIONAL)
   effectiveFrom     DateTime            @map("effective_from")
   effectiveTo       DateTime?           @map("effective_to")
-  approvalRequestId String?             @map("approval_request_id")
+  approvalRequestId String?             @map("approval_request_id") @db.Char(36)
 
   approvalRequest ApprovalRequest? @relation("ReportingRuleApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
 
@@ -2539,23 +2589,23 @@ model ReportingRule {
 }
 
 model RegulatoryReport {
-  id                String                 @id @default(uuid(7))
+  id                String                 @id @default(uuid(7)) @db.Char(36)
   createdAt         DateTime               @default(now()) @map("created_at")
   updatedAt         DateTime               @updatedAt @map("updated_at")
   reportType        ReportingType          @map("report_type")
-  authority         String                 @db.Text
-  subjectType       String                 @map("subject_type") @db.Text
-  subjectId         String                 @map("subject_id") @db.Text
-  amlCaseId         String?                @unique @map("aml_case_id")
+  authority         String                 @db.VarChar(64)
+  subjectType       String                 @map("subject_type") @db.VarChar(64)
+  subjectId         String                 @map("subject_id") @db.VarChar(64)
+  amlCaseId         String?                @unique @map("aml_case_id") @db.Char(36)
   periodStart       DateTime?              @map("period_start")
   periodEnd         DateTime?              @map("period_end")
   status            RegulatoryReportStatus @default(DRAFT)
   payloadCiphertext String                 @map("payload_ciphertext") @db.Text
   payloadSha256     String                 @map("payload_sha256") @db.Char(64)
-  submissionRef     String?                @map("submission_ref") @db.Text
+  submissionRef     String?                @map("submission_ref") @db.VarChar(255)
   submittedAt       DateTime?              @map("submitted_at")
   confidential      Boolean                @default(true)
-  approvalRequestId String?                @map("approval_request_id")
+  approvalRequestId String?                @map("approval_request_id") @db.Char(36)
 
   amlCase         AmlCase?         @relation("RegulatoryReportAmlCase", fields: [amlCaseId], references: [id], onDelete: SetNull)
   approvalRequest ApprovalRequest? @relation("RegulatoryReportApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
@@ -2567,12 +2617,12 @@ model RegulatoryReport {
 }
 
 model Dispute {
-  id                 String        @id @default(uuid(7))
+  id                 String        @id @default(uuid(7)) @db.Char(36)
   createdAt          DateTime      @default(now()) @map("created_at")
   updatedAt          DateTime      @updatedAt @map("updated_at")
-  attemptId          String        @map("attempt_id")
-  gatewayId          String        @map("gateway_id")
-  railId             String        @map("rail_id")
+  attemptId          String        @map("attempt_id") @db.Char(36)
+  gatewayId          String        @map("gateway_id") @db.Char(36)
+  railId             String        @map("rail_id") @db.Char(36)
   externalDisputeRef String        @map("external_dispute_ref")
   source             DisputeSource
   reasonCode         String?       @map("reason_code") @db.Text
@@ -2598,7 +2648,7 @@ model Dispute {
 }
 
 model NotificationTemplate {
-  id                   String               @id @default(uuid(7))
+  id                   String               @id @default(uuid(7)) @db.Char(36)
   createdAt            DateTime             @default(now()) @map("created_at")
   updatedAt            DateTime             @updatedAt @map("updated_at")
   code                 String
@@ -2616,20 +2666,20 @@ model NotificationTemplate {
 }
 
 model Notification {
-  id                  String              @id @default(uuid(7))
+  id                  String              @id @default(uuid(7)) @db.Char(36)
   createdAt           DateTime            @default(now()) @map("created_at")
   updatedAt           DateTime            @updatedAt @map("updated_at")
   eventId             String              @unique @map("event_id")
-  recipientUserId     String?             @map("recipient_user_id")
-  recipientMerchantId String?             @map("recipient_merchant_id")
+  recipientUserId     String?             @map("recipient_user_id") @db.Char(36)
+  recipientMerchantId String?             @map("recipient_merchant_id") @db.Char(36)
   addressMasked       String              @map("address_masked") @db.Text
   addressCiphertext   String              @map("address_ciphertext") @db.Text
-  templateCode        String              @map("template_code") @db.Text
+  templateCode        String              @map("template_code") @db.VarChar(64)
   channel             NotificationChannel
   lang                NotificationLang
   payloadJson         Json                @map("payload_json")
   status              NotificationStatus  @default(QUEUED)
-  providerMessageId   String?             @map("provider_message_id") @db.Text
+  providerMessageId   String?             @map("provider_message_id") @db.VarChar(191)
   attempts            Int                 @default(0)
   nextAttemptAt       DateTime?           @map("next_attempt_at")
 
@@ -2642,7 +2692,7 @@ model Notification {
 }
 
 model PlatformSetting {
-  id                String   @id @default(uuid(7))
+  id                String   @id @default(uuid(7)) @db.Char(36)
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
   key               String
@@ -2650,11 +2700,81 @@ model PlatformSetting {
   valueJson         Json     @map("value_json")
   version           Int      @default(1)
   effectiveFrom     DateTime @map("effective_from")
-  approvalRequestId String?  @map("approval_request_id")
+  approvalRequestId String?  @map("approval_request_id") @db.Char(36)
 
   approvalRequest ApprovalRequest? @relation("PlatformSettingApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
 
   @@unique([key, scope, version])
   @@index([key, scope])
   @@map("platform_settings")
+}
+
+// ---------------------------------------------------------------------------
+// v2 high-scale hot/cold split and materialized counters.
+// ---------------------------------------------------------------------------
+
+model AttemptDeadline {
+  attemptId    String              @map("attempt_id") @db.Char(36)
+  kind         AttemptDeadlineKind
+  dueAt        DateTime            @map("due_at") @db.DateTime(3)
+  claimedUntil DateTime?           @map("claimed_until") @db.DateTime(3)
+  claimedBy    String?             @map("claimed_by") @db.VarChar(64)
+
+  @@id([attemptId, kind])
+  @@index([dueAt], map: "attempt_deadlines_due_idx")
+  @@map("attempt_deadlines")
+}
+
+model VelocityCounter {
+  scopeType   VelocityScopeType @map("scope_type")
+  scopeKey    String            @map("scope_key") @db.Char(64)
+  granularity Int               @db.TinyInt
+  bucket      Int
+  attempts    Int               @default(0)
+  succeeded   Int               @default(0)
+  amount      Decimal           @default(0) @db.Decimal(18, 4)
+
+  @@id([scopeType, scopeKey, granularity, bucket])
+  @@map("velocity_counters")
+}
+
+model RouteDailyVolume {
+  routeId            String  @map("route_id") @db.Char(36)
+  dayBucket          String  @map("day_bucket") @db.Char(10)
+  shardNo            Int     @map("shard_no") @db.TinyInt
+  succeededCount     Int     @default(0) @map("succeeded_count")
+  totalChargedAmount Decimal @default(0) @map("total_charged_amount") @db.Decimal(18, 4)
+
+  @@id([routeId, dayBucket, shardNo])
+  @@index([dayBucket], map: "rdv_day_bucket_idx")
+  @@map("route_daily_volumes")
+}
+
+model MerchantDailyStat {
+  merchantId               String  @map("merchant_id") @db.Char(36)
+  dayBucket                String  @map("day_bucket") @db.Char(10)
+  railCode                 String  @map("rail_code") @db.VarChar(64)
+  initiatedCount           Int     @default(0) @map("initiated_count")
+  succeededCount           Int     @default(0) @map("succeeded_count")
+  failedCount              Int     @default(0) @map("failed_count")
+  expiredCount             Int     @default(0) @map("expired_count")
+  refundedCount            Int     @default(0) @map("refunded_count")
+  disputedCount            Int     @default(0) @map("disputed_count")
+  grossSucceededAmount     Decimal @default(0) @map("gross_succeeded_amount") @db.Decimal(18, 4)
+  platformCommissionAmount Decimal @default(0) @map("platform_commission_amount") @db.Decimal(18, 4)
+  netMerchantAmount        Decimal @default(0) @map("net_merchant_amount") @db.Decimal(18, 4)
+
+  @@id([merchantId, dayBucket, railCode])
+  @@index([dayBucket, railCode], map: "mds_day_rail_idx")
+  @@map("merchant_daily_stats")
+}
+
+model CacheInvalidationEvent {
+  eventSeq   BigInt   @id @default(autoincrement()) @map("event_seq")
+  topic      String   @db.VarChar(64)
+  payloadKey String?  @map("payload_key") @db.VarChar(128)
+  createdAt  DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  @@index([createdAt], map: "cie_created_at_idx")
+  @@map("cache_invalidation_events")
 }

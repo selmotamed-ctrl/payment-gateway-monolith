@@ -138,16 +138,16 @@ describe("RetentionWorker", () => {
       {
         id: "gl-clearing",
         accountType: "GATEWAY_CLEARING",
+        balanceMode: "SYNC",
         currency: "LYD",
-        checkpoint_balance: "0.0000",
-        checkpoint_at: null,
+        current_balance: "100.0000",
       },
       {
         id: "gl-wallet",
         accountType: "MERCHANT_WALLET",
+        balanceMode: "SYNC",
         currency: "LYD",
-        checkpoint_balance: "0.0000",
-        checkpoint_at: null,
+        current_balance: "-100.0000",
       },
     ]);
     fake.seed("payment_attempts", [

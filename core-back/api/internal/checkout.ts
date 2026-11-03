@@ -1509,22 +1509,31 @@ route.post("/inbound/:gateway/:env/:pathToken", async (request: Request, respons
     return;
   }
 
-  const stored = await client.inboundEvent.create({
-    data: {
-      channelId: channel.id,
-      gatewayId: channel.gatewayVersion.gatewayId,
-      env: environment,
-      rawBodyBytes: new Uint8Array(rawBody),
-      redactedHeadersJson: json({
-        "content-type": request.headers["content-type"] ?? null,
-        "content-length": rawBody.byteLength,
-      }),
-      sourceIp,
-      verified: false,
-      verificationError: "VERIFICATION_PENDING",
-      dedupeKey,
-      receivedAt: new Date(),
-    },
+  const redactedHeadersJson = json({
+    "content-type": request.headers["content-type"] ?? null,
+    "content-length": rawBody.byteLength,
+  });
+  const stored = await client.$transaction(async (tx) => {
+    const event = await tx.inboundEvent.create({
+      data: {
+        channelId: channel.id,
+        gatewayId: channel.gatewayVersion.gatewayId,
+        env: environment,
+        sourceIp,
+        verified: false,
+        verificationError: "VERIFICATION_PENDING",
+        dedupeKey,
+        receivedAt: new Date(),
+      },
+    });
+    await tx.inboundEventPayload.create({
+      data: {
+        eventId: event.id,
+        rawBodyBytes: new Uint8Array(rawBody),
+        redactedHeadersJson,
+      },
+    });
+    return event;
   });
 
   const correlation = extractCorrelation(rawBody, channel.correlationSelector);
@@ -1584,7 +1593,7 @@ route.post("/inbound/:gateway/:env/:pathToken", async (request: Request, respons
 
   response.status(channel.ackStatus).send(
     channel.ackBodyTemplate
-      ? renderTemplate(channel.ackBodyTemplate, { eventId: stored.id, attemptId: attempt?.id ?? "" })
+      ? renderTemplate(channel.ackBodyTemplate, { eventId: String(stored.id), attemptId: attempt?.id ?? "" })
       : "",
   );
 });

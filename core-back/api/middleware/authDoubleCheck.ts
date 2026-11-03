@@ -5,6 +5,77 @@ import { client } from "../../prisma/client";
 import { ApiError } from "../../lib/error";
 import { hashAccessToken, verifySessionToken } from "../../lib/auth";
 
+/**
+ * `last_used_at` is operational metadata, not a security decision. Writing it
+ * on every request turns every authenticated call into an UPDATE and contends
+ * on the token row, so it is refreshed at most once per five minutes
+ * (design §2.9/§2.11). Revocation is still read on every request and is never
+ * throttled.
+ */
+export const LAST_USED_AT_UPDATE_INTERVAL_MS = 5 * 60 * 1_000;
+export const LAST_USED_AT_WRITE_INTERVAL_MS = LAST_USED_AT_UPDATE_INTERVAL_MS;
+export const LAST_USED_AT_THROTTLE_MS = LAST_USED_AT_UPDATE_INTERVAL_MS;
+const lastUsedAtWriteTimes = new Map<string, number>();
+
+export const shouldUpdateLastUsedAt = (
+  lastUsedAt: Date | string | null | undefined,
+  now: number = Date.now(),
+  intervalMs: number = LAST_USED_AT_UPDATE_INTERVAL_MS,
+): boolean => {
+  if (!lastUsedAt) {
+    return true;
+  }
+  const timestamp = lastUsedAt instanceof Date ? lastUsedAt.getTime() : Date.parse(lastUsedAt);
+  if (!Number.isFinite(timestamp)) {
+    return true;
+  }
+  return now - timestamp >= intervalMs;
+};
+
+export const shouldWriteLastUsedAt = shouldUpdateLastUsedAt;
+
+/** Test helper: forget the in-process throttle state. */
+export const resetLastUsedAtThrottle = (): void => {
+  lastUsedAtWriteTimes.clear();
+};
+
+const touchAccessToken = async (
+  record: { id: string; lastUsedAt: Date | null },
+  now: number,
+): Promise<void> => {
+  const lastWrite = lastUsedAtWriteTimes.get(record.id);
+  if (lastWrite !== undefined && now - lastWrite < LAST_USED_AT_UPDATE_INTERVAL_MS) {
+    return;
+  }
+  if (!shouldUpdateLastUsedAt(record.lastUsedAt, now)) {
+    const timestamp = record.lastUsedAt
+      ? (record.lastUsedAt instanceof Date ? record.lastUsedAt.getTime() : Date.parse(record.lastUsedAt))
+      : now;
+    lastUsedAtWriteTimes.set(record.id, Math.min(now, Number.isFinite(timestamp) ? timestamp : now));
+    return;
+  }
+  lastUsedAtWriteTimes.set(record.id, now);
+  try {
+    // `revoked_at IS NULL` makes the write a no-op once a concurrent
+    // revocation committed: a usage timestamp can never revive a token.
+    await client.accessToken.updateMany({
+      where: {
+        id: record.id,
+        revokedAt: null,
+        OR: [
+          { lastUsedAt: null },
+          { lastUsedAt: { lt: new Date(now - LAST_USED_AT_UPDATE_INTERVAL_MS) } },
+        ],
+      },
+      data: { lastUsedAt: new Date(now) },
+    });
+  } catch {
+    // A failed usage timestamp must not turn a valid authentication into a
+    // 500; the next request retries it after the throttle window.
+    lastUsedAtWriteTimes.delete(record.id);
+  }
+};
+
 export type PrincipalKind = "session" | "apiToken";
 
 export interface Principal {
@@ -103,10 +174,7 @@ const resolveApiTokenPrincipal = async (token: string, request: Request): Promis
       throw new ApiError(403, "ACCESS_TOKEN_IP_NOT_ALLOWED", "The request origin is not allowed for this access token");
     }
   }
-  await client.accessToken.update({
-    where: { id: record.id },
-    data: { lastUsedAt: new Date() },
-  });
+  await touchAccessToken(record, Date.now());
   return {
     kind: "apiToken",
     userId: null,

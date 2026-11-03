@@ -34,7 +34,11 @@ export interface PeriodicScreeningWorkerDeps extends WorkerOptions {
  * epoch of the `COALESCE` fallback, then the cut-off, then the batch size.
  */
 export const DUE_MERCHANTS_SQL =
-  "SELECT m.* FROM merchants m" +
+  "SELECT m.id, m.created_at, m.updated_at, m.legal_name, m.trade_name, m.display_name," +
+  " m.tax_id, m.registration_no, m.business_category, m.status, m.kyb_status, m.risk_tier," +
+  " m.onboarding_channel, m.country, m.contact_phone, m.contact_email, m.activated_at," +
+  " m.suspended_at, m.suspension_reason_code, m.commission_receivable_ceiling," +
+  " m.negative_balance_ceiling, m.payout_bank_details_json, m.next_kyb_review_at FROM merchants m" +
   " WHERE m.status = 'ACTIVE'" +
   " AND COALESCE(" +
   " (SELECT MAX(s.requested_at) FROM aml_screenings s" +

@@ -14,7 +14,18 @@ import { env } from "./lib/env";
 import { isApiError, toErrorEnvelope } from "./lib/error";
 import { requestLoggerMiddleware } from "./lib/requestLogger";
 import { rawBodyMiddleware } from "./lib/rawBody";
-import { client } from "./prisma/client";
+import { client, dbBackground } from "./prisma/client";
+
+// Prisma returns BIGINT ids for the append-only audit/ledger/inbound tables.
+// JSON has no native bigint: serialize them as decimal strings at the API
+// boundary so IDs remain lossless and the existing SPA contracts keep working.
+if (typeof (BigInt.prototype as { toJSON?: () => string }).toJSON !== "function") {
+  (BigInt.prototype as { toJSON?: () => string }).toJSON = function toJSON(this: bigint): string {
+    return this.toString();
+  };
+}
+import { invalidationBus } from "./lib/invalidationBus";
+import { configCacheRegistry } from "./lib/cache/ConfigCacheRegistry";
 
 declare global {
   namespace Express {
@@ -202,10 +213,17 @@ export const start = async () => {
     workerEnabled: env.WORKER_ENABLED,
     backgroundJobsEnabled: env.WORKER_BACKGROUND_JOBS_ENABLED,
   });
+  // The invalidation bus persists events to `cache_invalidation_events` and
+  // every node polls it (1 s) and purges rows older than 1 h (§2.9). The
+  // background pool owns this work, never the request pool.
+  invalidationBus.attachDatabase(dbBackground as never);
+  invalidationBus.startDatabasePolling();
+  configCacheRegistry.start();
+
   const server = createHttpsServer();
   const workers = env.WORKER_ENABLED
     ? createProductionWorkerRuntime({
-        db: client as never,
+        db: dbBackground as never,
         intervalMs: env.WORKER_POLL_INTERVAL_MS,
         batchSize: env.WORKER_BATCH_SIZE,
         maxAttempts: env.WORKER_MAX_ATTEMPTS,
@@ -234,6 +252,8 @@ export const start = async () => {
 
   const stop = async (): Promise<void> => {
     workers?.stop();
+    configCacheRegistry.stop();
+    invalidationBus.stopDatabasePolling();
     await new Promise<void>((resolve) => {
       server.close(() => resolve());
     });

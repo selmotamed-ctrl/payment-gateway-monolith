@@ -29,7 +29,8 @@
     "create-admin": "bun ./scripts/create-admin.ts",
     "create-dev-users": "bun ./scripts/create-dev-users.ts",
     "seed-fake-rails": "bun ./prisma/seedFakeRails.ts",
-    "seed-synthetic-history": "bun ./prisma/syntheticSeeder/index.ts"
+    "seed-synthetic-history": "bun ./prisma/syntheticSeeder/index.ts",
+    "db-benchmark": "bun scripts/db-benchmark.ts"
   },
   "peerDependencies": {
     "typescript": "^7"

@@ -48,13 +48,13 @@ const createWorker = (
 
 describe("expiry sweeper and AML holds", () => {
   test("the expirable query excludes AML-held attempts", async () => {
-    const { worker, calls } = createWorker([]);
+    const { worker, calls } = createWorker([attemptRow()]);
     await worker.runOnce();
 
     const select = calls.find((call) =>
-      call.kind === "query" && call.sql.includes("FROM payment_attempts")
+      call.kind === "query" && call.sql.includes("AND (substatus IS NULL OR substatus <> ?)")
     );
-    expect(select?.sql).toContain("substatus <> ?");
+    expect(select?.sql).toContain("FROM payment_attempts");
     expect(select?.args).toContain("AML_HOLD");
   });
 

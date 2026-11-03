@@ -79,7 +79,7 @@ export class BackgroundJobWorker extends BaseWorker {
         "SELECT * FROM background_jobs" +
         " WHERE state = 'QUEUED'" +
         " AND available_at <= ?" +
-        " ORDER BY available_at ASC, created_at ASC" +
+        " ORDER BY available_at ASC" +
         " LIMIT ?" +
         " FOR UPDATE SKIP LOCKED";
       const rows = await tx.$queryRawUnsafe(sql, now, this.batchSize);

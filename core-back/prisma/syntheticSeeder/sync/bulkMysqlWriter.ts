@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { PrismaClient } from "../../../generated/prisma/client";
 import type { SeederContext } from "../context";
 
@@ -18,6 +19,12 @@ interface Step {
 }
 
 const CHUNK = 2500;
+
+/** Deterministic 60-bit BIGINT for append-only seeded rows. */
+const stableBigInt = (value: unknown): bigint => {
+  const digest = createHash("sha256").update(String(value)).digest("hex").slice(0, 15);
+  return BigInt(`0x${digest}`) || 1n;
+};
 
 const STEPS: Step[] = [
   // Merchants precede users because a merchant user carries merchant_id.
@@ -47,12 +54,14 @@ const STEPS: Step[] = [
   { model: "paymentLink", key: "paymentLinks" },
   { model: "attemptGroup", key: "attemptGroups" },
   // Journal entries precede attempts because attempts carry ledgerEntryId.
-  { model: "journalEntry", key: "journalEntries" },
+  { model: "journalEntry", key: "journalEntries", transform: (rows) => rows.map(({ updatedAt: _updatedAt, ...rest }) => rest) },
   { model: "paymentAttempt", key: "paymentAttempts" },
-  { model: "attemptStepLog", key: "attemptStepLogs" },
-  { model: "inboundEvent", key: "inboundEvents" },
-  { model: "journalLine", key: "journalLines" },
-  { model: "reconciliationRun", key: "reconciliationRuns" },
+  { model: "attemptStepLog", key: "attemptStepLogs", transform: (rows) => rows.map(({ id, updatedAt: _updatedAt, ...rest }) => ({ ...rest, id: stableBigInt(id) })) },
+  { model: "inboundEvent", key: "inboundEvents", transform: (rows) => rows.map(({ rawBodyBytes: _raw, redactedHeadersJson: _headers, updatedAt: _updatedAt, ...rest }) => ({ ...rest, id: stableBigInt(rest.id) })) },
+  { model: "inboundEventPayload", key: "inboundEvents", transform: (rows) => rows.map((row) => ({ eventId: stableBigInt(row.id), rawBodyBytes: row.rawBodyBytes, redactedHeadersJson: row.redactedHeadersJson })) },
+  { model: "journalLine", key: "journalLines", transform: (rows) => rows.map(({ id: _id, updatedAt: _updatedAt, ...rest }) => rest) },
+  { model: "reconciliationRun", key: "reconciliationRuns", transform: (rows) => rows.map(({ fileContent: _fileContent, ...rest }) => rest) },
+  { model: "reconciliationRunFile", key: "reconciliationRuns", transform: (rows) => rows.map((row) => ({ runId: row.id, fileContent: row.fileContent })) },
   { model: "reconciliationItem", key: "reconciliationItems" },
   // The dispute <-> adjustment pair is circular; strip both sides, link later.
   { model: "dispute", key: "disputes", transform: (rows) => rows.map(({ adjustmentId: _adjustmentId, ...rest }) => ({ ...rest, adjustmentId: null })) },
@@ -66,7 +75,8 @@ const STEPS: Step[] = [
   { model: "operatorCase", key: "operatorCases" },
   { model: "notificationTemplate", key: "notificationTemplates" },
   { model: "notification", key: "notifications" },
-  { model: "auditLog", key: "auditLogs" },
+  { model: "auditLog", key: "auditLogs", transform: (rows) => rows.map(({ beforeJson: _before, afterJson: _after, updatedAt: _updatedAt, ...rest }) => ({ ...rest, id: stableBigInt(rest.id), actorEmail: rest.actorEmail ?? "" })) },
+  { model: "auditLogPayload", key: "auditLogs", transform: (rows) => rows.map((row) => ({ auditLogId: stableBigInt(row.id), beforeJson: row.beforeJson ?? {}, afterJson: row.afterJson ?? {} })) },
   { model: "detailChangeLog", key: "detailChangeLogs" },
   { model: "velocityRule", key: "velocityRules" },
   { model: "amlRule", key: "amlRules" },
@@ -123,19 +133,34 @@ export const bulkMysqlWriter = async (
     }
   }
 
-  // Apply the monthly GL checkpoints (including the already-seeded accounts).
-  for (const [accountId, checkpoint] of ctx.checkpoints) {
-    await prisma.glAccount
-      .update({
-        where: { id: accountId },
-        data: {
-          checkpointBalance: checkpoint.balance,
-          checkpointAt: checkpoint.at,
-          lastCheckpointId: checkpoint.lastCheckpointId,
-        },
-      })
-      .catch(() => undefined);
-  }
+  // Rebuild materialized GL balances from the seeded journal lines. SYNC
+  // accounts get an exact current_balance; SHARDED accounts get one shard row
+  // (the seeder is not a throughput benchmark for the live shard fan-out).
+  await prisma.$executeRawUnsafe(
+    `UPDATE gl_accounts g
+     LEFT JOIN (
+       SELECT gl_account_id,
+              SUM(CASE WHEN direction = 'DEBIT' THEN amount ELSE -amount END) AS balance,
+              COUNT(*) AS line_count
+         FROM journal_lines
+        GROUP BY gl_account_id
+     ) l ON l.gl_account_id = g.id
+     SET g.current_balance = CASE WHEN g.balance_mode = 'SYNC' THEN COALESCE(l.balance, 0) ELSE 0 END`,
+  );
+  await prisma.$executeRawUnsafe("DELETE FROM gl_balance_shards");
+  await prisma.$executeRawUnsafe(
+    `INSERT INTO gl_balance_shards (gl_account_id, shard_no, balance, line_count)
+     SELECT g.id, 0, COALESCE(l.balance, 0), COALESCE(l.line_count, 0)
+       FROM gl_accounts g
+       LEFT JOIN (
+         SELECT gl_account_id,
+                SUM(CASE WHEN direction = 'DEBIT' THEN amount ELSE -amount END) AS balance,
+                COUNT(*) AS line_count
+           FROM journal_lines
+          GROUP BY gl_account_id
+       ) l ON l.gl_account_id = g.id
+      WHERE g.balance_mode = 'SHARDED'`,
+  );
 
   return report;
 };

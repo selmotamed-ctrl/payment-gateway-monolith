@@ -43,38 +43,22 @@ let poster: LedgerPoster;
 let checkpointTreasury = "";
 let checkpointIncome = "";
 
-const resetCheckpoints = async (): Promise<void> => {
-  if (accountIds.length === 0) {
-    return;
-  }
-  await db.$executeRawUnsafe(
-    `UPDATE gl_accounts SET checkpoint_balance = 0, checkpoint_at = NULL WHERE id IN (${accountIds.map(() => "?").join(",")})`,
-    ...accountIds,
-  );
-};
-
-const maxLineDate = async (accountId: string): Promise<Date> => {
-  const rows = (await db.$queryRawUnsafe(
-    "SELECT MAX(created_at) AS latest FROM journal_lines WHERE gl_account_id = ?",
-    accountId,
-  )) as Array<{ latest: Date | string | null }>;
-  const latest = rows[0]?.latest;
-  return latest ? new Date(latest) : new Date();
-};
-
 const cleanup = async (): Promise<void> => {
-  await resetCheckpoints();
-  await db.$executeRawUnsafe(
-    "DELETE jl FROM journal_lines jl JOIN journal_entries je ON je.id = jl.entry_id WHERE je.ref_id LIKE ?",
-    `${PREFIX}%`,
-  );
-  await db.$executeRawUnsafe("DELETE FROM journal_entries WHERE ref_id LIKE ?", `${PREFIX}%`);
-  if (accountIds.length > 0) {
-    await db.$executeRawUnsafe(
-      `DELETE FROM gl_accounts WHERE id IN (${accountIds.map(() => "?").join(",")})`,
-      ...accountIds,
+  await db.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("SET @pg_allow_ledger_mutation = 1");
+    await tx.$executeRawUnsafe(
+      "DELETE jl FROM journal_lines jl JOIN journal_entries je ON je.id = jl.entry_id WHERE je.ref_id LIKE ?",
+      `${PREFIX}%`,
     );
-  }
+    await tx.$executeRawUnsafe("DELETE FROM journal_entries WHERE ref_id LIKE ?", `${PREFIX}%`);
+    if (accountIds.length > 0) {
+      const placeholders = accountIds.map(() => "?").join(",");
+      await tx.$executeRawUnsafe(`DELETE FROM gl_balance_shards WHERE gl_account_id IN (${placeholders})`, ...accountIds);
+      await tx.$executeRawUnsafe(`DELETE FROM gl_period_totals WHERE gl_account_id IN (${placeholders})`, ...accountIds);
+      await tx.$executeRawUnsafe(`DELETE FROM gl_accounts WHERE id IN (${placeholders})`, ...accountIds);
+    }
+    await tx.$executeRawUnsafe("SET @pg_allow_ledger_mutation = 0");
+  });
 };
 
 beforeAll(async () => {
@@ -107,7 +91,7 @@ afterAll(async () => {
 });
 
 describeDb("Suite 02 · checkpoints", () => {
-  test("captureCheckpoint snapshots the balance and getLiveBalance adds later lines", async () => {
+  test("captures the materialized balance without a checkpoint write", async () => {
     const treasury = checkpointTreasury;
     const context: LedgerPostContext = {
       accounts: { ...accounts, TREASURY: checkpointTreasury, PLATFORM_INCOME: checkpointIncome },
@@ -119,12 +103,10 @@ describeDb("Suite 02 · checkpoints", () => {
       { amount: "10.0000" },
       context,
     );
-    await Bun.sleep(15);
     const service = new CheckpointService(db as never);
-    const checkpoint = await service.captureCheckpoint(treasury, await maxLineDate(treasury));
+    const checkpoint = await service.captureCheckpoint(treasury);
     expect(new Decimal(String(checkpoint.balance)).toFixed(4)).toBe("-10.0000");
 
-    await Bun.sleep(15);
     await poster.postScenario(
       "CASHOUT",
       `${PREFIX}-cp-second`,
@@ -133,9 +115,9 @@ describeDb("Suite 02 · checkpoints", () => {
     );
 
     const live = await service.getLiveBalance(treasury);
-    expect(live.checkpointBalance.toFixed(4)).toBe("-10.0000");
-    expect(live.delta.toFixed(4)).toBe("-5.0000");
     expect(live.liveBalance.toFixed(4)).toBe("-15.0000");
+    expect(live.checkpointBalance.toFixed(4)).toBe("0.0000");
+    expect(live.delta.toFixed(4)).toBe("0.0000");
   });
 
   test("getLiveBalances enumerates every account", async () => {
@@ -144,12 +126,11 @@ describeDb("Suite 02 · checkpoints", () => {
     expect(balances.length).toBeGreaterThanOrEqual(ACCOUNT_TYPES.length);
   });
 
-  test("a checkpoint does not double count the window it covers", async () => {
+  test("the read-only snapshot matches the materialized balance", async () => {
     const account = checkpointIncome;
     const service = new CheckpointService(db as never);
     const before = await service.getLiveBalance(account);
-    await Bun.sleep(15);
-    const checkpoint = await service.captureCheckpoint(account, await maxLineDate(account));
+    const checkpoint = await service.captureCheckpoint(account);
     const after = await service.getLiveBalance(account);
     expect(new Decimal(String(checkpoint.balance)).toFixed(4)).toBe(before.liveBalance.toFixed(4));
     expect(after.liveBalance.toFixed(4)).toBe(before.liveBalance.toFixed(4));
