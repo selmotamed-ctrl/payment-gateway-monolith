@@ -13,14 +13,22 @@ outbound gateway calls. It is reachable exclusively over Mutual TLS on the priva
 
 ## Database
 
-- **Engine:** MySQL 8.0+ / MariaDB 10.6+. The Prisma datasource is `provider = "mysql"`.
-- **Adapter & driver:** `@prisma/adapter-mariadb` on top of the `mariadb` driver package.
-- **Schema:** `prisma/schema.prisma`; the initial migration
-  `prisma/migrations/20261029203000_init/migration.sql` is plain MySQL / MariaDB DDL.
-- **Type mapping:** `String` → `VARCHAR(191)` (free-form content is declared `@db.Text`),
-  `Bytes` → `BLOB` (the webhook body is `@db.LongBlob`), `Json` → `JSON`, money →
-  `DECIMAL(18,4)`, Prisma enums → native `ENUM` columns.
-- **Row locks:** `SELECT ... FOR UPDATE SKIP LOCKED` requires MySQL 8.0+ / MariaDB 10.6+.
+- **Engine:** PostgreSQL 18. The Prisma datasource is `provider = "postgresql"`.
+- **Adapter & driver:** `@prisma/adapter-pg` (`PrismaPg`) on top of the `pg` driver package.
+- **Schema:** `prisma/schema.prisma`; the PostgreSQL baseline is
+  `prisma/migrations/20261103000000_postgres18_init/migration.sql`, followed by the storage
+  engine (`partial`, covering, BRIN and GIN/trigram indexes) and CQRS read-model migrations.
+- **Legacy history:** the old MySQL / MariaDB migrations are preserved under
+  `prisma/migrations-mysql-legacy/`; the runtime still accepts `mysql://` / `mariadb://` URLs for
+  the legacy adapter, but PostgreSQL 18 is the supported production engine.
+- **Type mapping:** UUID primary keys (`@db.Uuid`), `String` → `TEXT` (fixed-size values use
+  `@db.Char(n)` / `@db.VarChar(n)`), `Bytes` → `BYTEA`, `Json` → `JSONB`, money →
+  `NUMERIC(18,4)`, timestamps → `TIMESTAMP(3)` (`TIMESTAMPTZ(3)` for `@db.Timestamptz`), and
+  Prisma enums → native PostgreSQL enum types.
+- **Row locks:** `SELECT ... FOR UPDATE SKIP LOCKED` is native PostgreSQL.
+- **Storage engine:** the transactional outbox / audit outbox, `gl_account_shards`, backup
+  catalog / restore-drill tables and the `rm_*` read models are part of the baseline. Worker
+  queues use partial indexes and the hot append-only tables use BRIN and covering indexes.
 - **Durable job queue:** `background_jobs` is the queue of the heavy request-path work. The
   request stores the work (`reconciliation_runs.file_content`, the dispute intake payload, the
   approval of an adjustment) and answers `202 Accepted`; the stateless `BackgroundJobWorker`
@@ -30,25 +38,35 @@ outbound gateway calls. It is reachable exclusively over Mutual TLS on the priva
 ## Runtime
 
 ```bash
-./scripts/prepare-databases.sh # create the application and test databases on the MySQL server
+# The repository's local PostgreSQL 18 server listens on 127.0.0.1:55432.
+POSTGRES_PORT=55432 POSTGRES_ADMIN_USER=postgres ./scripts/prepare-databases.sh
 bun run generate-mtls-certs   # internal CA, server certificate, three client certificates
-bun run migrate-deploy         # apply the 64 table migration
+bun run migrate-deploy         # apply the PostgreSQL baseline + storage/CQRS migrations
 bun run db-seed                # GL accounts, OD-1..OD-11 settings, roles, blueprints
 bun run start                  # TLS 1.3 mTLS server on $PORT (default 4000)
 bun run typecheck
 bun test
 ```
 
-`test/e2e/mariadb-payment.test.ts` drives a complete payment against the live
-database. It skips itself when MariaDB is not reachable, so `bun test` stays
-green on a machine without a database.
+The tests use the dedicated PostgreSQL test database. Export either
+`POSTGRES_TEST_DATABASE_URL` or `DATABASE_URL`; without either the harness
+falls back to the local server:
+
+```bash
+export DATABASE_URL=postgresql://postgres@127.0.0.1:55432/payment_gateway_monolith_test
+bun test
+```
+
+`test/e2e/postgres-payment.test.ts` drives a complete payment against the live
+PostgreSQL database. It skips itself when PostgreSQL is not reachable, so
+`bun test` stays green on a machine without a database.
 
 ## Environment
 
 | Variable | Purpose |
 | :--- | :--- |
 | `PORT` / `HOST` | Listener binding, defaults `4000` / `127.0.0.1` |
-| `DATABASE_URL` | MySQL / MariaDB connection string (`mysql://user:password@host:3306/payment_gateway_monolith`) |
+| `DATABASE_URL` | PostgreSQL connection string (`postgresql://user:password@host:5432/payment_gateway_monolith`) |
 | `MTLS_CA_CERT_PATH` | Internal CA used to verify client certificates |
 | `MTLS_SERVER_CERT_PATH` / `MTLS_SERVER_KEY_PATH` | Server certificate and key |
 | `KMS_MASTER_KEY` | Root key for the AES-256-GCM vault and session signing |

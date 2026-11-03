@@ -54,7 +54,7 @@ describe("expiry sweeper and AML holds", () => {
     const select = calls.find((call) =>
       call.kind === "query" && call.sql.includes("FROM payment_attempts")
     );
-    expect(select?.sql).toContain("substatus <> ?");
+    expect(select?.sql).toMatch(/substatus <> \$\d+/);
     expect(select?.args).toContain("AML_HOLD");
   });
 

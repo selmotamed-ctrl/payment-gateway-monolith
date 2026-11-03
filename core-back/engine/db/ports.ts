@@ -3,8 +3,9 @@ import type { Money } from "./money";
 /**
  * The slice of the Prisma client the engine talks to.
  *
- * The raw methods speak the MySQL/MariaDB dialect: the values are bound
- * positionally with `?` and the identifiers are quoted with backticks.
+ * The raw methods speak the PostgreSQL dialect: the values are bound
+ * positionally with `$1`, `$2`, ... and the identifiers are unquoted
+ * snake_case (or double quoted when needed).
  * `$queryRaw`/`$queryRawUnsafe` resolve with the selected rows, while
  * `$executeRaw`/`$executeRawUnsafe` resolve with the number of affected rows.
  */

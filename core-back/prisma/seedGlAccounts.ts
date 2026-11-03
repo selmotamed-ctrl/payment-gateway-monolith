@@ -71,8 +71,20 @@ export interface GlAccountSeedClient {
         seedKey: string;
       };
     }): Promise<unknown>;
+    findMany?(args: {
+      where: { seedKey: { not: null } };
+      select: { id: true; accountType: true };
+    }): Promise<Array<{ id: string; accountType: GlAccountType }>>;
+  };
+  glAccountShard?: {
+    createMany(args: {
+      data: Array<{ glAccountId: string; shardId: number }>;
+      skipDuplicates: true;
+    }): Promise<unknown>;
   };
 }
+
+export const GL_ACCOUNT_SHARD_COUNT = 16;
 
 /**
  * Seeds the system GL accounts of every supported currency.
@@ -98,6 +110,28 @@ export const seedSystemGlAccounts = async (
           seedKey,
         },
       });
+    }
+  }
+
+  if (
+    typeof client.glAccount.findMany === "function" &&
+    client.glAccountShard &&
+    typeof client.glAccountShard.createMany === "function"
+  ) {
+    const accounts = await client.glAccount.findMany({
+      where: { seedKey: { not: null } },
+      select: { id: true, accountType: true },
+    });
+    const data = accounts.flatMap((account) =>
+      account.accountType === GlAccountType.MERCHANT_WALLET
+        ? [{ glAccountId: account.id, shardId: 0 }]
+        : Array.from({ length: GL_ACCOUNT_SHARD_COUNT }, (_value, shardId) => ({
+            glAccountId: account.id,
+            shardId,
+          })),
+    );
+    if (data.length > 0) {
+      await client.glAccountShard.createMany({ data, skipDuplicates: true });
     }
   }
 };

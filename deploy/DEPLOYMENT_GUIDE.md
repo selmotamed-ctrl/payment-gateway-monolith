@@ -438,3 +438,89 @@ Common failures:
   CIDR check still applies).
 - The edge `.env` files contain no `DATABASE_URL`, no `KMS_MASTER_KEY` and no
   other host's certificate.
+
+## 9. Horizontal multi-node, storage and backup
+
+Every compute tier can be scaled from one host to `1..N` nodes without changing
+the service code. Add nodes to the comma-separated arrays in `deploy.env`:
+
+```dotenv
+CORE_NODES="core-1@10.10.1.11:22:10.10.1.11:4000,core-2@10.10.1.12:22:10.10.1.12:4000"
+ADMIN_NODES="admin-1@10.10.2.11:22:10.10.2.11:4101"
+MERCHANT_NODES="merch-1@203.0.113.11:22:10.10.3.11:4102,merch-2@203.0.113.12:22:10.10.3.12:4102"
+CHECKOUT_NODES="chk-1@203.0.113.21:22:10.10.4.11:4103,chk-2@203.0.113.22:22:10.10.4.12:4103"
+```
+
+The format is `nodeId@sshHost:sshPort:privateIp:servicePort`. Node arrays
+override the legacy single-host `*_SSH_HOST` / `*_PRIVATE_IP` / `*_BACK_PORT`
+fields for planning. Node ids must be unique; private IPs must be unique within
+one tier. Roles that share an SSH endpoint are merged into one host, but each
+node still receives its own PM2 service and a unique service suffix.
+
+`deploy.ts` derives `CORE_BACK_URLS` as
+`https://<core-private-ip>:<core-port>,...` for every edge `.env` and keeps
+`CORE_BACK_URL` pointing at the first core node for compatibility. The core
+server certificate SAN contains **all** core private IPs, so a rolling deploy
+of one core node never breaks mTLS on the others.
+
+Rolling batches are enabled with `--rolling-batch=<n>` (default
+`ROLLING_BATCH_SIZE`, or `1`). Within each role the nodes are deployed one
+batch at a time, and the batch is health-checked before the next batch starts.
+`--nodes=core-1,chk-2` limits a run to named nodes; `--only` accepts the new
+storage targets `pg`, `redis`, `audit-db`, `log-db`, `backup` and the aggregate
+`storage`.
+
+### Storage provisioning
+
+Enable the dedicated storage fields and set `DB_ENGINE="postgresql"` whenever
+any `PG_*` field is in use:
+
+```dotenv
+DB_ENGINE="postgresql"
+PG_MANAGE_VIA_SSH="true"
+PG_PRIMARY_NODE="pg-pri@10.10.10.10:22:10.10.10.10:5432"
+PG_REPLICA_NODES="pg-rep-1@10.10.10.11:22:10.10.10.11:5432,pg-rep-2@10.10.10.12:22:10.10.10.12:5432"
+PGBOUNCER_ENABLED="true"
+PGBOUNCER_PORT="6432"
+REDIS_MANAGE_VIA_SSH="true"
+REDIS_NODES="redis-1@10.10.11.10:22:10.10.11.10:6379"
+AUDIT_DB_MANAGE_VIA_SSH="true"
+AUDIT_DB_NODE="audit-db@10.10.12.10:22:10.10.12.10:5432"
+LOG_DB_MANAGE_VIA_SSH="true"
+LOG_DB_NODE="log-db@10.10.12.20:22:10.10.12.20:5432"
+```
+
+After the OS bootstrap the orchestrator runs the modular provisioners:
+
+| Provisioner | What it applies |
+| :--- | :--- |
+| `postgres18Provisioner` | PostgreSQL 18 install, the exact `zz-pg-switch.conf` tuning (`io_method='io_uring'`, `synchronous_commit=on`, `wal_level=replica`, ...), application/replication roles, SCRAM `pg_hba`, physical replication slots, `pg_basebackup -R` on every replica and PgBouncer transaction pooling (`6432`, `max_prepared_statements=256`). |
+| `redisProvisioner` | Redis bound to the node's private IP, `requirepass`, `save 3600 1`, `maxmemory`, and UFW `6379` only from the core + backup nodes. |
+| `auditAndLogDbProvisioner` | `pg_audit_db` with the hash-chain table, immutable trigger and `REVOKE UPDATE, DELETE, TRUNCATE`; `pg_logs_db` with monthly `attempt_step_logs` / `http_access_logs` partitions, six months ahead, the `ensure_log_partitions` function and its cron. |
+| `backupEngineProvisioner` | WAL-G/Barman, `zstd`, `rclone`, backup-daemon environment + systemd unit (`:4090` mTLS), `archive_command` on the primary and audit DB, S3/secondary-SSH verification, full/delta/drill cron and the scratch-restore invariant verifier. |
+
+The firewall matrix is generated from the same plan: `5432` primary↔replicas,
+`6432` from core nodes, `6379` from core + backup, audit/log `5432` from
+core + backup, and backup-daemon `4090` from core nodes.
+
+### Backups and restore drills
+
+```dotenv
+BACKUP_ENABLED="true"
+BACKUP_NODE="backup-1@10.10.13.10:22:10.10.13.10:4090"
+BACKUP_ENGINE_MODE="barman"          # or "wal-g"
+BACKUP_COMPRESSION="zstd"
+BACKUP_ENCRYPTION_KEY_HEX="<64 hex chars; openssl rand -hex 32>"
+BACKUP_PRIMARY_S3_BUCKET="s3://payment-gateway-backups/prod"
+BACKUP_SECONDARY_SSH_TARGET="backup-vault@198.51.100.99:/mnt/offsite-vault/pg"
+BACKUP_FULL_CRON="0 2 * * 0"
+BACKUP_DELTA_CRON="0 2 * * 1-6"
+BACKUP_DRILL_CRON="0 4 * * 0"
+```
+
+`BACKUP_ENABLED=true` requires `BACKUP_NODE`, an S3 bucket and a 64-hex
+encryption key. The health verifier additionally probes every core node, every
+edge node against every core URL, `pg_isready` + `SELECT 1` on the primary and
+replicas, PgBouncer on `6432`, Redis `PING`, audit/log `SELECT 1`, and the
+backup-daemon `/health` over mTLS. When no storage fields are configured the
+original probes and behavior are unchanged.

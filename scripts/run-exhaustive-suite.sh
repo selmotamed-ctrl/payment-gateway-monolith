@@ -60,7 +60,11 @@ step "T-EX-07  Onboarding, AML, reconciliation & go-live gates"
 step "T-EX-08  Edge catalog, STRIDE threats & safeguards"
 (cd core-back && bun test --parallel=1 test/exhaustive/08-security-edge)
 
-step "T-EX-09  Full-surface Playwright UI matrix"
+step "T-EX-09  PostgreSQL storage engine, backups, CQRS & performance"
+(cd core-back && bun test --parallel=1 test/storage-engine test/backup-admin)
+(cd deploy/backup-daemon && bun test --parallel=1)
+
+step "T-EX-09b  Full-surface Playwright UI matrix"
 (cd tests && bun run test:unit && bunx playwright test -c playwright.exhaustive.config.ts)
 
 step "T-EX-10  Cross-service E2E, synthetic seeder & deploy matrix"

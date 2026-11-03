@@ -33,25 +33,22 @@ const listMigrationDirectories = () =>
     .sort();
 
 const schemaVersionSql = `-- Schema version support (single-row table managed outside the Prisma datamodel).
-CREATE TABLE IF NOT EXISTS \`${schemaVersionsTable}\` (
-    \`id\` INTEGER NOT NULL DEFAULT 1,
-    \`version\` INTEGER NOT NULL,
-    \`created_at\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    \`updated_at\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    CONSTRAINT \`${schemaVersionsTable}_pkey\` PRIMARY KEY (\`id\`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS "${schemaVersionsTable}" (
+    "id" INTEGER NOT NULL DEFAULT 1,
+    "version" INTEGER NOT NULL,
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT now(),
+    "updated_at" TIMESTAMPTZ(3) NOT NULL DEFAULT now(),
+    CONSTRAINT "${schemaVersionsTable}_pkey" PRIMARY KEY ("id")
+);
 
-INSERT INTO \`${schemaVersionsTable}\` (\`id\`, \`version\`) VALUES (1, ${REQUIRED_SCHEMA_VERSION})
-ON DUPLICATE KEY UPDATE \`version\` = VALUES(\`version\`);
+INSERT INTO "${schemaVersionsTable}" ("id", "version") VALUES (1, ${REQUIRED_SCHEMA_VERSION})
+ON CONFLICT ("id") DO UPDATE SET "version" = EXCLUDED."version", "updated_at" = now();
 `;
 
 export const patchMigrationSql = (migrationSql: string): string => {
   const lines = migrationSql.split("\n");
   const withoutSchemaVersionDrop: string[] = [];
-  const dropStatements = [
-    `DROP TABLE "${schemaVersionsTable}";`,
-    `DROP TABLE \`${schemaVersionsTable}\`;`,
-  ];
+  const dropStatements = [`DROP TABLE "${schemaVersionsTable}";`];
 
   for (const line of lines) {
     const trimmed = line.trim();

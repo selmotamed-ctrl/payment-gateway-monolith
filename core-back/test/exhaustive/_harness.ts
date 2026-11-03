@@ -3,13 +3,13 @@
  *
  * The suites in `test/exhaustive/**` are deliberately NOT mock-against-mock:
  * they drive the real production modules and, where the design demands it,
- * the live MySQL/MariaDB schema. This harness provides:
+ * the live PostgreSQL 18 schema. This harness provides:
  *
  *  - an isolated Prisma client against the dedicated test database,
  *  - a deterministic `xoshiro128**` seeded PRNG (seed "pg-exhaustive-2026"),
  *  - the continuous double-entry invariant hook,
  *  - a parser for `prisma/schema.prisma` used by the schema suite,
- *  - INFORMATION_SCHEMA readers for the live database,
+ *  - PostgreSQL catalog readers for the live database,
  *  - small id / money / decimal helpers.
  *
  * Nothing here is a stand-in for production behaviour: it only provisions
@@ -19,17 +19,17 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Decimal } from "decimal.js";
-import { PrismaMariaDb } from "@prisma/adapter-mariadb";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../../generated/prisma/client";
-import { buildMariaDbPoolConfig } from "../../lib/db/connectionConfig";
+import { buildPostgresPoolConfig } from "../../lib/db/connectionConfig";
 import { InvariantVerifier } from "../../engine/ledger/InvariantVerifier";
 
 export const EXHAUSTIVE_SEED = "pg-exhaustive-2026";
 
 export const EXHAUSTIVE_DATABASE_URL =
-  process.env.MARIADB_TEST_DATABASE_URL
-  ?? process.env.EXHAUSTIVE_DATABASE_URL
-  ?? "mysql://admin:admin@127.0.0.1:3306/payment_gateway_monolith_test";
+  process.env.EXHAUSTIVE_DATABASE_URL
+  ?? process.env.POSTGRES_TEST_DATABASE_URL
+  ?? "postgresql://postgres@127.0.0.1:55432/payment_gateway_monolith_test";
 
 let clientInstance: PrismaClient | undefined;
 
@@ -37,7 +37,7 @@ let clientInstance: PrismaClient | undefined;
 export const exhaustiveClient = (): PrismaClient => {
   if (!clientInstance) {
     clientInstance = new PrismaClient({
-      adapter: new PrismaMariaDb(buildMariaDbPoolConfig(EXHAUSTIVE_DATABASE_URL) as never),
+      adapter: new PrismaPg(buildPostgresPoolConfig(EXHAUSTIVE_DATABASE_URL)),
       log: [],
     });
   }
@@ -47,7 +47,11 @@ export const exhaustiveClient = (): PrismaClient => {
 /** A fresh client, for tests that model independent worker nodes. */
 export const createExhaustiveClient = (): PrismaClient =>
   new PrismaClient({
-    adapter: new PrismaMariaDb(buildMariaDbPoolConfig(EXHAUSTIVE_DATABASE_URL) as never),
+    adapter: new PrismaPg(
+      buildPostgresPoolConfig(EXHAUSTIVE_DATABASE_URL, {
+        applicationName: `pg-core-back-exhaustive-${randomUUID().slice(0, 8)}`,
+      }),
+    ),
     log: [],
   });
 
@@ -241,7 +245,7 @@ export const assertZeroDrift = async (client: PrismaClient = exhaustiveClient())
 /* -------------------------------------------------------------------------- */
 
 export const currentDatabase = async (client: PrismaClient = exhaustiveClient()): Promise<string> => {
-  const rows = (await client.$queryRawUnsafe("SELECT DATABASE() AS db")) as Array<{ db: string }>;
+  const rows = (await client.$queryRawUnsafe("SELECT current_database() AS db")) as Array<{ db: string }>;
   return String(rows[0]?.db ?? "");
 };
 
@@ -250,12 +254,15 @@ export interface ColumnInfo {
   columnName: string;
   columnType: string;
   dataType: string;
+  udtName: string;
   isNullable: string;
   columnDefault: string | null;
   columnKey: string;
   extra: string;
   numericPrecision: number | null;
   numericScale: number | null;
+  characterMaximumLength: number | null;
+  isIdentity: string;
 }
 
 export const listColumns = async (
@@ -263,19 +270,45 @@ export const listColumns = async (
   table?: string,
 ): Promise<ColumnInfo[]> => {
   const rows = (await client.$queryRawUnsafe(
-    `SELECT TABLE_NAME as tableName, COLUMN_NAME as columnName, COLUMN_TYPE as columnType,
-            DATA_TYPE as dataType, IS_NULLABLE as isNullable, COLUMN_DEFAULT as columnDefault,
-            COLUMN_KEY as columnKey, EXTRA as extra, NUMERIC_PRECISION as numericPrecision,
-            NUMERIC_SCALE as numericScale
-       FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_SCHEMA = DATABASE() ${table ? "AND TABLE_NAME = ?" : ""}
-      ORDER BY TABLE_NAME, ORDINAL_POSITION`,
+    `SELECT c.table_name::text AS "tableName",
+            c.column_name::text AS "columnName",
+            pg_catalog.format_type(a.atttypid, a.atttypmod) AS "columnType",
+            c.data_type::text AS "dataType",
+            c.udt_name::text AS "udtName",
+            c.is_nullable::text AS "isNullable",
+            c.column_default AS "columnDefault",
+            CASE WHEN EXISTS (
+              SELECT 1
+                FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage kcu
+                  ON kcu.constraint_name = tc.constraint_name
+                 AND kcu.constraint_schema = tc.constraint_schema
+                 AND kcu.table_name = tc.table_name
+               WHERE tc.constraint_type = 'PRIMARY KEY'
+                 AND tc.table_schema = c.table_schema
+                 AND tc.table_name = c.table_name
+                 AND kcu.column_name = c.column_name
+            ) THEN 'PRI' ELSE '' END AS "columnKey",
+            '' AS extra,
+            c.numeric_precision AS "numericPrecision",
+            c.numeric_scale AS "numericScale",
+            c.character_maximum_length AS "characterMaximumLength",
+            c.is_identity::text AS "isIdentity"
+       FROM information_schema.columns c
+       JOIN pg_catalog.pg_namespace n ON n.nspname = c.table_schema
+       JOIN pg_catalog.pg_class cl ON cl.relname = c.table_name AND cl.relnamespace = n.oid
+       JOIN pg_catalog.pg_attribute a
+         ON a.attrelid = cl.oid AND a.attname = c.column_name AND a.attnum > 0 AND NOT a.attisdropped
+      WHERE c.table_schema = 'public' ${table ? "AND c.table_name = $1" : ""}
+      ORDER BY c.table_name, c.ordinal_position`,
     ...(table ? [table] : []),
   )) as ColumnInfo[];
   return rows.map((row) => ({
     ...row,
     numericPrecision: row.numericPrecision === null ? null : Number(row.numericPrecision),
     numericScale: row.numericScale === null ? null : Number(row.numericScale),
+    characterMaximumLength:
+      row.characterMaximumLength === null ? null : Number(row.characterMaximumLength),
   }));
 };
 
@@ -285,6 +318,9 @@ export interface IndexInfo {
   nonUnique: number;
   seqInIndex: number;
   columnName: string;
+  indexType: string;
+  isPrimary: boolean;
+  isPartial: boolean;
 }
 
 export const listIndexes = async (
@@ -292,17 +328,37 @@ export const listIndexes = async (
   table?: string,
 ): Promise<IndexInfo[]> => {
   const rows = (await client.$queryRawUnsafe(
-    `SELECT TABLE_NAME as tableName, INDEX_NAME as indexName, NON_UNIQUE as nonUnique,
-            SEQ_IN_INDEX as seqInIndex, COLUMN_NAME as columnName
-       FROM INFORMATION_SCHEMA.STATISTICS
-      WHERE TABLE_SCHEMA = DATABASE() ${table ? "AND TABLE_NAME = ?" : ""}
-      ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX`,
+    `SELECT t.relname::text AS "tableName",
+            i.relname::text AS "indexName",
+            CASE WHEN ix.indisunique THEN 0 ELSE 1 END AS "nonUnique",
+            k.ord AS "seqInIndex",
+            a.attname::text AS "columnName",
+            am.amname::text AS "indexType",
+            ix.indisprimary AS "isPrimary",
+            (ix.indpred IS NOT NULL) AS "isPartial"
+       FROM pg_catalog.pg_index ix
+       JOIN pg_catalog.pg_class t ON t.oid = ix.indrelid
+       JOIN pg_catalog.pg_class i ON i.oid = ix.indexrelid
+       JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+       JOIN pg_catalog.pg_am am ON am.oid = i.relam
+       CROSS JOIN LATERAL generate_series(1, ix.indnkeyatts) AS k(ord)
+       JOIN pg_catalog.pg_attribute a
+         ON a.attrelid = t.oid AND a.attnum = ix.indkey[k.ord - 1]
+      WHERE n.nspname = 'public' ${table ? "AND t.relname = $1" : ""}
+      ORDER BY t.relname, i.relname, k.ord`,
     ...(table ? [table] : []),
-  )) as IndexInfo[];
+  )) as Array<Omit<IndexInfo, "nonUnique" | "seqInIndex" | "isPrimary" | "isPartial"> & {
+    nonUnique: number | bigint | boolean;
+    seqInIndex: number | bigint;
+    isPrimary: boolean;
+    isPartial: boolean;
+  }>;
   return rows.map((row) => ({
     ...row,
     nonUnique: Number(row.nonUnique),
     seqInIndex: Number(row.seqInIndex),
+    isPrimary: Boolean(row.isPrimary),
+    isPartial: Boolean(row.isPartial),
   }));
 };
 
@@ -314,27 +370,64 @@ export interface ForeignKeyInfo {
   referencedColumnName: string;
   deleteRule: string;
   updateRule: string;
+  ordinalPosition: number;
 }
+
+const referentialAction = (code: string): string => {
+  switch (code) {
+    case "a":
+      return "NO ACTION";
+    case "r":
+      return "RESTRICT";
+    case "c":
+      return "CASCADE";
+    case "n":
+      return "SET NULL";
+    case "d":
+      return "SET DEFAULT";
+    default:
+      return "NO ACTION";
+  }
+};
 
 export const listForeignKeys = async (
   client: PrismaClient = exhaustiveClient(),
   table?: string,
 ): Promise<ForeignKeyInfo[]> => {
   const rows = (await client.$queryRawUnsafe(
-    `SELECT kcu.CONSTRAINT_NAME as constraintName, kcu.TABLE_NAME as tableName,
-            kcu.COLUMN_NAME as columnName, kcu.REFERENCED_TABLE_NAME as referencedTableName,
-            kcu.REFERENCED_COLUMN_NAME as referencedColumnName,
-            rc.DELETE_RULE as deleteRule, rc.UPDATE_RULE as updateRule
-       FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
-       JOIN INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc
-         ON rc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA
-        AND rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
-      WHERE kcu.TABLE_SCHEMA = DATABASE() AND kcu.REFERENCED_TABLE_NAME IS NOT NULL
-        ${table ? "AND kcu.TABLE_NAME = ?" : ""}
-      ORDER BY kcu.TABLE_NAME, kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION`,
+    `SELECT con.conname::text AS "constraintName",
+            src.relname::text AS "tableName",
+            sa.attname::text AS "columnName",
+            tgt.relname::text AS "referencedTableName",
+            ta.attname::text AS "referencedColumnName",
+            con.confdeltype::text AS "deleteActionCode",
+            con.confupdtype::text AS "updateActionCode",
+            k.ord AS "ordinalPosition"
+       FROM pg_catalog.pg_constraint con
+       JOIN pg_catalog.pg_class src ON src.oid = con.conrelid
+       JOIN pg_catalog.pg_class tgt ON tgt.oid = con.confrelid
+       JOIN pg_catalog.pg_namespace n ON n.oid = src.relnamespace
+       CROSS JOIN LATERAL unnest(con.conkey, con.confkey) WITH ORDINALITY AS k(srcatt, tgtatt, ord)
+       JOIN pg_catalog.pg_attribute sa ON sa.attrelid = con.conrelid AND sa.attnum = k.srcatt
+       JOIN pg_catalog.pg_attribute ta ON ta.attrelid = con.confrelid AND ta.attnum = k.tgtatt
+      WHERE con.contype = 'f'
+        AND n.nspname = 'public' ${table ? "AND src.relname = $1" : ""}
+      ORDER BY src.relname, con.conname, k.ord`,
     ...(table ? [table] : []),
-  )) as ForeignKeyInfo[];
-  return rows;
+  )) as Array<Omit<ForeignKeyInfo, "deleteRule" | "updateRule"> & {
+    deleteActionCode: string;
+    updateActionCode: string;
+  }>;
+  return rows.map((row) => ({
+    constraintName: row.constraintName,
+    tableName: row.tableName,
+    columnName: row.columnName,
+    referencedTableName: row.referencedTableName,
+    referencedColumnName: row.referencedColumnName,
+    deleteRule: referentialAction(row.deleteActionCode),
+    updateRule: referentialAction(row.updateActionCode),
+    ordinalPosition: Number(row.ordinalPosition),
+  }));
 };
 
 export interface CheckConstraintInfo {
@@ -347,14 +440,14 @@ export const listCheckConstraints = async (
   client: PrismaClient = exhaustiveClient(),
 ): Promise<CheckConstraintInfo[]> => {
   const rows = (await client.$queryRawUnsafe(
-    `SELECT tc.CONSTRAINT_NAME as constraintName, tc.TABLE_NAME as tableName,
-            cc.CHECK_CLAUSE as checkClause
-       FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
-       JOIN INFORMATION_SCHEMA.CHECK_CONSTRAINTS cc
-         ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA
-        AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
-      WHERE tc.TABLE_SCHEMA = DATABASE() AND tc.CONSTRAINT_TYPE = 'CHECK'
-      ORDER BY tc.TABLE_NAME, tc.CONSTRAINT_NAME`,
+    `SELECT con.conname::text AS "constraintName",
+            rel.relname::text AS "tableName",
+            pg_catalog.pg_get_constraintdef(con.oid) AS "checkClause"
+       FROM pg_catalog.pg_constraint con
+       JOIN pg_catalog.pg_class rel ON rel.oid = con.conrelid
+       JOIN pg_catalog.pg_namespace n ON n.oid = rel.relnamespace
+      WHERE con.contype = 'c' AND n.nspname = 'public'
+      ORDER BY rel.relname, con.conname`,
   )) as CheckConstraintInfo[];
   return rows;
 };
@@ -371,12 +464,14 @@ export const listTriggers = async (
   client: PrismaClient = exhaustiveClient(),
 ): Promise<TriggerInfo[]> => {
   const rows = (await client.$queryRawUnsafe(
-    `SELECT TRIGGER_NAME as triggerName, EVENT_OBJECT_TABLE as eventObjectTable,
-            ACTION_TIMING as actionTiming, EVENT_MANIPULATION as eventManipulation,
-            ACTION_STATEMENT as actionStatement
-       FROM INFORMATION_SCHEMA.TRIGGERS
-      WHERE TRIGGER_SCHEMA = DATABASE()
-      ORDER BY EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION`,
+    `SELECT trigger_name AS "triggerName",
+            event_object_table AS "eventObjectTable",
+            action_timing AS "actionTiming",
+            event_manipulation AS "eventManipulation",
+            action_statement AS "actionStatement"
+       FROM information_schema.triggers
+      WHERE trigger_schema = 'public'
+      ORDER BY event_object_table, action_timing, event_manipulation`,
   )) as TriggerInfo[];
   return rows;
 };
@@ -412,6 +507,7 @@ export interface SchemaModel {
   fields: SchemaField[];
   block: string;
   uniqueBlocks: string[][];
+  idBlocks: string[][];
   indexBlocks: string[][];
 }
 
@@ -522,6 +618,7 @@ export const parseSchema = (): ParsedSchema => {
       const block = blockLines.join("\n");
       const fields: SchemaField[] = [];
       const uniqueBlocks: string[][] = [];
+      const idBlocks: string[][] = [];
       const indexBlocks: string[][] = [];
       let tableName = name;
 
@@ -573,7 +670,7 @@ export const parseSchema = (): ParsedSchema => {
         if (entry.startsWith("@@id(")) {
           const match = /@@id\(\[([^\]]+)\]\)/.exec(entry);
           if (match) {
-            uniqueBlocks.push(parseList(match[1] as string));
+            idBlocks.push(parseList(match[1] as string));
           }
           continue;
         }
@@ -617,7 +714,7 @@ export const parseSchema = (): ParsedSchema => {
           dbScale: dbArgs[1],
         });
       }
-      models.push({ name, tableName, fields, block, uniqueBlocks, indexBlocks });
+      models.push({ name, tableName, fields, block, uniqueBlocks, idBlocks, indexBlocks });
       continue;
     }
 
@@ -668,49 +765,51 @@ export const expectedColumnType = (field: SchemaField): string | null => {
   }
   if (field.dbType) {
     switch (field.dbType) {
+      case "Uuid":
+        return "uuid";
       case "Decimal":
-        return `decimal(${field.dbPrecision ?? 65},${field.dbScale ?? 30})`;
+        return `numeric(${field.dbPrecision ?? 65},${field.dbScale ?? 30})`;
       case "Char":
-        return `char(${field.dbLength ?? 1})`;
+        return `character(${field.dbLength ?? 1})`;
       case "VarChar":
-        return `varchar(${field.dbLength ?? 191})`;
+        return `character varying(${field.dbLength ?? 191})`;
       case "Text":
         return "text";
-      case "LongText":
-        return "longtext";
-      case "LongBlob":
-        return "longblob";
-      case "Blob":
-        return "blob";
+      case "ByteA":
+        return "bytea";
       case "Date":
         return "date";
       case "DateTime":
-        return "datetime(3)";
+        return "timestamp(3) without time zone";
+      case "Timestamptz":
+        return "timestamp(3) with time zone";
       case "Json":
-        return "json";
+        return "jsonb";
+      case "SmallInt":
+        return "smallint";
       default:
         return field.dbType.toLowerCase();
     }
   }
   switch (field.type) {
     case "String":
-      return "varchar(191)";
+      return "text";
     case "Int":
-      return "int(11)";
+      return "integer";
     case "BigInt":
-      return "bigint(20)";
+      return "bigint";
     case "Float":
-      return "double";
+      return "double precision";
     case "Boolean":
-      return "tinyint(1)";
+      return "boolean";
     case "DateTime":
-      return "datetime(3)";
+      return "timestamp(3) without time zone";
     case "Json":
-      return "json";
+      return "jsonb";
     case "Bytes":
-      return "blob";
+      return "bytea";
     default:
-      return "enum";
+      return "USER-DEFINED";
   }
 };
 

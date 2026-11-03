@@ -12,6 +12,7 @@ import { getPlatformRuntime } from "../../engine/runtime";
 import type { DynamicAttempt } from "../../engine/flow/DynamicRailEngine";
 import { fingerprint, principalOf } from "../middleware/authDoubleCheck";
 import { json } from "./json";
+import { postgresPlaceholders } from "../../engine/db/rawRows";
 
 const PLATFORM_TTL_CEILINGS: Record<string, number> = {
   OTP_PULL: 1200,
@@ -761,26 +762,28 @@ export const claimAttemptForConfirm = async (
   attemptId: string,
   idempotencyKeyHash: string,
 ): Promise<ConfirmClaimResult> => {
-  const statusPlaceholders = CONFIRM_CLAIMABLE_STATUSES.map(() => "?").join(", ");
+  const statusPlaceholders = postgresPlaceholders(CONFIRM_CLAIMABLE_STATUSES.length, 3);
+  const keyPlaceholder = `$${CONFIRM_CLAIMABLE_STATUSES.length + 3}`;
   const affected = Number(
     await db.$executeRawUnsafe(
       `UPDATE payment_attempts
           SET status = 'AUTHORIZING',
-              point_of_no_return = 1,
-              customer_fields_masked = JSON_SET(
+              point_of_no_return = true,
+              customer_fields_masked = jsonb_set(
                 customer_fields_masked,
-                '$.${CONFIRM_IDEMPOTENCY_FIELD}',
-                ?
+                '{${CONFIRM_IDEMPOTENCY_FIELD}}',
+                to_jsonb($1::text),
+                true
               ),
-              updated_at = NOW()
-        WHERE id = ?
+              updated_at = now()
+        WHERE id = $2::uuid
           AND terminal_at IS NULL
           AND status IN (${statusPlaceholders})
-          AND NOT (status = 'UNKNOWN' AND point_of_no_return = 1)
+          AND NOT (status = 'UNKNOWN' AND point_of_no_return = true)
           AND (substatus IS NULL OR substatus <> '${AML_HOLD_SUBSTATUS}')
           AND (
-            JSON_UNQUOTE(JSON_EXTRACT(customer_fields_masked, '$.${CONFIRM_IDEMPOTENCY_FIELD}')) IS NULL
-            OR JSON_UNQUOTE(JSON_EXTRACT(customer_fields_masked, '$.${CONFIRM_IDEMPOTENCY_FIELD}')) <> ?
+            (customer_fields_masked #>> '{${CONFIRM_IDEMPOTENCY_FIELD}}') IS NULL
+            OR (customer_fields_masked #>> '{${CONFIRM_IDEMPOTENCY_FIELD}}') <> ${keyPlaceholder}
           )`,
       idempotencyKeyHash,
       attemptId,
@@ -813,15 +816,16 @@ export const cancelAttemptAtomically = async (
   attempt: { id: string; linkId: string },
 ): Promise<CancelAttemptResult> =>
   db.$transaction(async (tx) => {
+    const statusPlaceholders = postgresPlaceholders(NON_CANCELLABLE_STATUSES.length, 3);
     const affected = Number(
       await tx.$executeRawUnsafe(
         `UPDATE payment_attempts
-            SET status = 'CANCELLED', terminal_at = ?, next_check_at = NULL, updated_at = NOW()
-          WHERE id = ?
+            SET status = 'CANCELLED', terminal_at = $1, next_check_at = NULL, updated_at = now()
+          WHERE id = $2::uuid
             AND terminal_at IS NULL
-            AND point_of_no_return = 0
+            AND point_of_no_return = false
             AND (substatus IS NULL OR substatus <> '${AML_HOLD_SUBSTATUS}')
-            AND status NOT IN (${NON_CANCELLABLE_STATUSES.map(() => "?").join(", ")})`,
+            AND status NOT IN (${statusPlaceholders})`,
         new Date(),
         attempt.id,
         ...NON_CANCELLABLE_STATUSES,
@@ -829,7 +833,7 @@ export const cancelAttemptAtomically = async (
     );
     if (affected > 0) {
       await tx.$executeRawUnsafe(
-        "UPDATE payment_links SET active_locked_count = GREATEST(0, active_locked_count - 1), updated_at = NOW() WHERE id = ?",
+        "UPDATE payment_links SET active_locked_count = GREATEST(0, active_locked_count - 1), updated_at = now() WHERE id = $1::uuid",
         attempt.linkId,
       );
     }

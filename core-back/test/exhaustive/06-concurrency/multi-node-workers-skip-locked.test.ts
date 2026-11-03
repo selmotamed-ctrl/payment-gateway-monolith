@@ -21,6 +21,8 @@ const db = exhaustiveClient();
 const describeDb = databaseIsReachable ? describe : describe.skip;
 const PREFIX = `worker6-${crypto.randomUUID()}`;
 const jobIds: string[] = [];
+const placeholders = (count: number): string =>
+  Array.from({ length: count }, (_value, index) => `$${index + 1}`).join(",");
 
 const makeJob = async (overrides: Record<string, unknown> = {}): Promise<string> => {
   const row = await createRow("background_jobs", {
@@ -37,7 +39,7 @@ const makeJob = async (overrides: Record<string, unknown> = {}): Promise<string>
 
 const readJob = async (id: string) => {
   const rows = (await db.$queryRawUnsafe(
-    "SELECT state, attempts, locked_at, last_error FROM background_jobs WHERE id = ?",
+    'SELECT "state", "attempts", "locked_at", "last_error" FROM "background_jobs" WHERE "id" = $1',
     id,
   )) as Array<Record<string, unknown>>;
   return rows[0] as { state: string; attempts: number | bigint; locked_at: Date | null; last_error: string | null };
@@ -65,7 +67,7 @@ afterEach(async () => {
   }
   if (jobIds.length > 0) {
     await db.$executeRawUnsafe(
-      `DELETE FROM background_jobs WHERE id IN (${jobIds.map(() => "?").join(",")})`,
+      `DELETE FROM "background_jobs" WHERE "id" IN (${placeholders(jobIds.length)})`,
       ...jobIds,
     );
     jobIds.length = 0;
@@ -77,7 +79,10 @@ afterAll(async () => {
   if (!databaseIsReachable) {
     return;
   }
-  await db.$executeRawUnsafe("DELETE FROM background_jobs WHERE reference_type = 'EXHAUSTIVE'").catch(() => undefined);
+  await db.$executeRawUnsafe(
+    'DELETE FROM "background_jobs" WHERE "reference_type" = $1',
+    "EXHAUSTIVE",
+  ).catch(() => undefined);
   await assertZeroDrift(db);
   await db.$disconnect();
 });
@@ -96,7 +101,7 @@ describeDb("Suite 06 · multi-node durable queue", () => {
     for (let round = 0; round < 10; round += 1) {
       await Promise.all(workers.map((instance) => instance.runOnce()));
       const pending = (await db.$queryRawUnsafe(
-        `SELECT COUNT(*) AS count FROM background_jobs WHERE id IN (${ids.map(() => "?").join(",")}) AND state IN ('QUEUED','RUNNING')`,
+        `SELECT COUNT(*) AS count FROM "background_jobs" WHERE "id" IN (${placeholders(ids.length)}) AND "state" IN ('QUEUED','RUNNING')`,
         ...ids,
       )) as Array<{ count: bigint }>;
       if (Number(pending[0]?.count) === 0) {
@@ -106,7 +111,7 @@ describeDb("Suite 06 · multi-node durable queue", () => {
     expect(handled.size).toBe(200);
     expect([...handled.values()].every((count) => count === 1)).toBe(true);
     const rows = (await db.$queryRawUnsafe(
-      `SELECT state, COUNT(*) AS count FROM background_jobs WHERE id IN (${ids.map(() => "?").join(",")}) GROUP BY state`,
+      `SELECT "state", COUNT(*) AS count FROM "background_jobs" WHERE "id" IN (${placeholders(ids.length)}) GROUP BY "state"`,
       ...ids,
     )) as Array<{ state: string; count: bigint }>;
     expect(rows).toHaveLength(1);
@@ -153,7 +158,10 @@ describeDb("Suite 06 · multi-node durable queue", () => {
     await flaky.runOnce();
     expect((await readJob(id)).state).toBe("QUEUED");
     // Make the retry immediately available.
-    await db.$executeRawUnsafe("UPDATE background_jobs SET available_at = NOW() WHERE id = ?", id);
+    await db.$executeRawUnsafe(
+      'UPDATE "background_jobs" SET "available_at" = now() WHERE "id" = $1',
+      id,
+    );
     await flaky.runOnce();
     expect(attempts).toBe(2);
     expect((await readJob(id)).state).toBe("SUCCEEDED");

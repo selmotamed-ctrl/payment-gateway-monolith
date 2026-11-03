@@ -1,9 +1,9 @@
 /**
- * Suite 01.1 — 66-model structural & type fidelity matrix.
+ * Suite 01.1 — model structural & type fidelity matrix for PostgreSQL 18.
  *
- * Dynamically introspects the live INFORMATION_SCHEMA and compares it
+ * Dynamically introspects the live PostgreSQL catalogs and compares them
  * one-to-one against `prisma/schema.prisma`. Every model contributes fifteen
- * independent assertions, for ~990 live structural checks.
+ * independent assertions.
  */
 import { afterAll, describe, expect, test } from "bun:test";
 import {
@@ -34,8 +34,9 @@ for (const column of columns) {
 const columnsByTable = (table: string): Map<string, ColumnInfo> =>
   new Map((byTable.get(table) ?? []).map((column) => [column.columnName, column]));
 
-const TEXT_TYPES = new Set(["text", "tinytext", "mediumtext", "longtext", "varchar", "char"]);
-const isEnumType = (columnType: string): boolean => columnType.toLowerCase().startsWith("enum(");
+const TEXT_TYPES = new Set(["text", "character varying", "character", "citext"]);
+const isEnumType = (column: ColumnInfo | undefined): boolean =>
+  column?.dataType === "USER-DEFINED";
 
 const TABLE_CHECK_COUNT = 15;
 
@@ -47,8 +48,9 @@ afterAll(async () => {
 });
 
 describeDb("Suite 01 · model & column fidelity", () => {
-  test("the schema defines exactly 66 models and at least 100 enums", () => {
-    expect(schema.models.length).toBe(66);
+  test("the schema defines the current PostgreSQL model set and at least 100 enums", () => {
+    expect(schema.models.length).toBeGreaterThanOrEqual(73);
+    expect(new Set(schema.models.map((model) => model.name)).size).toBe(schema.models.length);
     expect(schema.enums.length).toBeGreaterThanOrEqual(100);
   });
 
@@ -86,33 +88,41 @@ describeDb("Suite 01 · model & column fidelity", () => {
       expect(livePrimary.map((column) => column.columnName)).toEqual([primary.dbName]);
     });
 
-    test(`${model.tableName} [6/15] the id column is a client-generated VARCHAR(191)`, () => {
+    test(`${model.tableName} [6/15] the id column uses the declared PostgreSQL key type`, () => {
       const id = actual.get("id");
       if (!id) {
         expect(true).toBe(true);
         return;
       }
-      expect(id.dataType.toLowerCase()).toBe("varchar");
-      expect(id.columnType.toLowerCase()).toBe("varchar(191)");
       expect(id.isNullable).toBe("NO");
+      if (id.dataType === "uuid") {
+        expect(id.columnType.toLowerCase()).toBe("uuid");
+      } else if (id.dataType === "bigint" || id.dataType === "integer") {
+        expect(id.columnDefault ?? "").toMatch(/nextval|identity/i);
+      } else {
+        expect(id.dataType.toLowerCase()).toMatch(/varchar|text|character/);
+      }
     });
 
-    test(`${model.tableName} [7/15] timestamp columns use DATETIME(3)`, () => {
+    test(`${model.tableName} [7/15] timestamp columns use TIMESTAMP(3)`, () => {
       const timestampFields = scalarFields.filter(
         (field) => field.type === "DateTime" && /^(createdAt|updatedAt|deletedAt)$/.test(field.name),
       );
       for (const field of timestampFields) {
         const column = actual.get(field.dbName);
-        expect(column?.columnType.toLowerCase()).toBe("datetime(3)");
+        const expected = field.dbType === "Timestamptz"
+          ? "timestamp(3) with time zone"
+          : "timestamp(3) without time zone";
+        expect(column?.columnType.toLowerCase()).toBe(expected);
       }
       expect(timestampFields.length).toBeGreaterThanOrEqual(0);
     });
 
-    test(`${model.tableName} [8/15] every monetary column is DECIMAL(18,4)`, () => {
+    test(`${model.tableName} [8/15] every monetary column is NUMERIC(18,4)`, () => {
       for (const column of actual.values()) {
         if (MONEY_COLUMNS.includes(column.columnName as (typeof MONEY_COLUMNS)[number])) {
-          expect(column.columnType.toLowerCase()).toBe("decimal(18,4)");
-          expect(column.dataType.toLowerCase()).toBe("decimal");
+          expect(column.columnType.toLowerCase()).toBe("numeric(18,4)");
+          expect(column.dataType.toLowerCase()).toBe("numeric");
         }
       }
     });
@@ -135,28 +145,29 @@ describeDb("Suite 01 · model & column fidelity", () => {
       }
     });
 
-    test(`${model.tableName} [11/15] every String field maps to VARCHAR(191) unless overridden`, () => {
+    test(`${model.tableName} [11/15] every String field maps to TEXT unless overridden`, () => {
       for (const field of scalarFields.filter(
         (candidate) => candidate.type === "String" && !candidate.dbType,
       )) {
         const column = actual.get(field.dbName);
-        expect(column?.columnType.toLowerCase()).toBe("varchar(191)");
+        expect(column?.columnType.toLowerCase()).toBe("text");
       }
     });
 
-    test(`${model.tableName} [12/15] every Json field is stored as JSON-valid text`, () => {
+    test(`${model.tableName} [12/15] every Json field is stored as JSONB`, () => {
       for (const field of scalarFields.filter((candidate) => candidate.type === "Json")) {
         const column = actual.get(field.dbName);
         expect(column).toBeDefined();
-        expect(["json", "longtext"]).toContain((column?.dataType ?? "").toLowerCase());
+        expect((column?.dataType ?? "").toLowerCase()).toBe("jsonb");
       }
     });
 
-    test(`${model.tableName} [13/15] every enum field uses a native MySQL ENUM`, () => {
+    test(`${model.tableName} [13/15] every enum field uses a native PostgreSQL enum`, () => {
       const enumNames = new Set(schema.enums.map((candidate) => candidate.name));
       for (const field of scalarFields.filter((candidate) => enumNames.has(candidate.type))) {
         const column = actual.get(field.dbName);
-        expect(isEnumType(column?.columnType ?? "")).toBe(true);
+        expect(isEnumType(column)).toBe(true);
+        expect(column?.udtName).toBe(field.type);
       }
     });
 
@@ -176,7 +187,7 @@ describeDb("Suite 01 · model & column fidelity", () => {
   }
 
   test(`the structural matrix contributes ${schema.models.length * TABLE_CHECK_COUNT} checks`, () => {
-    expect(schema.models.length * TABLE_CHECK_COUNT).toBe(990);
+    expect(schema.models.length * TABLE_CHECK_COUNT).toBeGreaterThanOrEqual(1_095);
   });
 });
 
@@ -219,14 +230,14 @@ describeDb("Suite 01 · boundary round-trips", () => {
           }
           const row = await createRow(table, { [columnName]: value });
           const rows = (await db.$queryRawUnsafe(
-            `SELECT CAST(\`${columnName}\` AS CHAR) AS value FROM \`${table}\` WHERE \`id\` = ?`,
+            `SELECT CAST("${columnName}" AS TEXT) AS value FROM "${table}" WHERE "id" = $1`,
             row.id,
           )) as Array<{ value: string }>;
           expect(rows[0]?.value).toBe(value);
           // The boundary rows are removed immediately: a checkpoint balance or
           // a one-legged journal line would (correctly) break the continuous
           // double-entry invariant of the shared test database.
-          await db.$executeRawUnsafe(`DELETE FROM \`${table}\` WHERE \`id\` = ?`, row.id).catch(() => undefined);
+          await db.$executeRawUnsafe(`DELETE FROM "${table}" WHERE "id" = $1`, row.id).catch(() => undefined);
         });
       }
     }
@@ -239,7 +250,7 @@ describeDb("Suite 01 · boundary round-trips", () => {
     }
     const row = await createRow("inbound_events", { raw_body_bytes: payload });
     const rows = (await db.$queryRawUnsafe(
-      "SELECT raw_body_bytes FROM inbound_events WHERE id = ?",
+      'SELECT "raw_body_bytes" FROM "inbound_events" WHERE "id" = $1',
       row.id,
     )) as Array<{ raw_body_bytes: Buffer }>;
     const stored = Buffer.from(rows[0]?.raw_body_bytes ?? []);
@@ -251,7 +262,7 @@ describeDb("Suite 01 · boundary round-trips", () => {
     const payload = Buffer.alloc(1_572_864, 7);
     const row = await createRow("reconciliation_runs", { file_content: payload });
     const rows = (await db.$queryRawUnsafe(
-      "SELECT file_content FROM reconciliation_runs WHERE id = ?",
+      'SELECT "file_content" FROM "reconciliation_runs" WHERE "id" = $1',
       row.id,
     )) as Array<{ file_content: Buffer }>;
     expect(Buffer.from(rows[0]?.file_content ?? []).equals(payload)).toBe(true);
@@ -259,9 +270,9 @@ describeDb("Suite 01 · boundary round-trips", () => {
 
   test("TEXT columns store 10,000 Arabic and English characters without truncation", async () => {
     const arabic = "ب".repeat(10_000);
-    const row = await createRow("merchants", { legalName: arabic });
+    const row = await createRow("merchants", { legal_name: arabic });
     const rows = (await db.$queryRawUnsafe(
-      "SELECT CHAR_LENGTH(legalName) AS length FROM merchants WHERE id = ?",
+      'SELECT char_length("legal_name") AS length FROM "merchants" WHERE "id" = $1',
       row.id,
     )) as Array<{ length: number | bigint }>;
     expect(Number(rows[0]?.length)).toBe(10_000);

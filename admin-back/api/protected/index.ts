@@ -6,6 +6,7 @@ import { academyRouter } from "./academy";
 import { amlRouter } from "./aml";
 import { approvalsRouter } from "./approvals";
 import { assetsRouter } from "./assets";
+import { backupsRouter } from "./backups";
 import { credentialSetsRouter } from "./credentialSets";
 import { financeRouter } from "./finance";
 import { gatewaysRouter, gatewayVersionsRouter } from "./gateways";
@@ -59,6 +60,7 @@ router.use("/options", optionsRouter);
 router.use("/stats", statsRouter);
 router.use("/audit-logs", auditLogsRouter);
 router.use("/kyb-documents", kybReviewRouter);
+router.use("/system/backups", backupsRouter);
 router.use("/", operationsRouter);
 router.use("/", financeRouter);
 

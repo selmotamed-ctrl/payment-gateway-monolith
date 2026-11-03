@@ -17,13 +17,24 @@ const booleanFromEnvironment = z.preprocess((value) => {
   return value;
 }, z.boolean());
 
-const mysqlUrl = z
-  .string()
-  .min(1, "DATABASE_URL is required")
-  .refine(
-    (value) => /^mysql:\/\//i.test(value),
-    "DATABASE_URL must be a MySQL/MariaDB URL (mysql://user:password@host:port/database)",
-  );
+const postgresUrl = (label: string) =>
+  z
+    .string()
+    .min(1, `${label} is required`)
+    .refine(
+      (value) => /^postgres(ql)?:\/\//i.test(value),
+      `${label} must be a PostgreSQL URL (postgresql://user:password@host:port/database)`,
+    );
+
+const optionalPostgresUrl = (label: string) =>
+  z
+    .string()
+    .min(1)
+    .refine(
+      (value) => /^postgres(ql)?:\/\//i.test(value),
+      `${label} must be a PostgreSQL URL (postgresql://user:password@host:port/database)`,
+    )
+    .optional();
 
 const filePath = (label: string) =>
   z
@@ -35,7 +46,27 @@ export const envSchema = z.strictObject({
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
   HOST: z.string().min(1).default("127.0.0.1"),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  DATABASE_URL: mysqlUrl,
+  DATABASE_URL: postgresUrl("DATABASE_URL"),
+  /** Comma-separated streaming replica URLs used by ReadStore routing. */
+  DATABASE_REPLICA_URLS: z.string().default(""),
+  /** Dedicated tamper-evident audit database (pg_audit_db). */
+  AUDIT_DATABASE_URL: optionalPostgresUrl("AUDIT_DATABASE_URL"),
+  /** Dedicated high-volume operational/step log database (pg_logs_db). */
+  LOG_DATABASE_URL: optionalPostgresUrl("LOG_DATABASE_URL"),
+  /** L1 + L2 Redis cache / velocity engine. */
+  REDIS_URL: z.string().min(1).optional(),
+  REDIS_NODES: z.string().default(""),
+  READ_REPLICA_MAX_LAG_MS: z.coerce.number().int().nonnegative().default(2000),
+  STORAGE_QUERY_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+  STORAGE_LOG_BUFFER_MAX: z.coerce.number().int().positive().max(100_000).default(5000),
+  STORAGE_LOG_FLUSH_INTERVAL_MS: z.coerce.number().int().positive().max(60_000).default(250),
+  STORAGE_SHARD_COUNT: z.coerce.number().int().positive().max(64).default(16),
+  /** pg-backup-daemon mTLS control plane. */
+  BACKUP_DAEMON_URL: z.url().optional(),
+  BACKUP_DAEMON_CA_CERT_PATH: z.string().min(1).optional(),
+  BACKUP_DAEMON_CLIENT_CERT_PATH: z.string().min(1).optional(),
+  BACKUP_DAEMON_CLIENT_KEY_PATH: z.string().min(1).optional(),
+  BACKUP_DAEMON_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(15_000),
   MTLS_CA_CERT_PATH: filePath("MTLS_CA_CERT_PATH"),
   MTLS_SERVER_CERT_PATH: filePath("MTLS_SERVER_CERT_PATH"),
   MTLS_SERVER_KEY_PATH: filePath("MTLS_SERVER_KEY_PATH"),
@@ -191,7 +222,22 @@ const resolveEnvironment = (): CoreEnv => {
     PORT: 4000,
     HOST: "127.0.0.1",
     NODE_ENV: "test",
-    DATABASE_URL: "mysql://admin:admin@127.0.0.1:3306/payment_gateway_monolith",
+    DATABASE_URL: "postgresql://postgres@127.0.0.1:55432/payment_gateway_monolith_test",
+    DATABASE_REPLICA_URLS: "",
+    AUDIT_DATABASE_URL: undefined,
+    LOG_DATABASE_URL: undefined,
+    REDIS_URL: undefined,
+    REDIS_NODES: "",
+    READ_REPLICA_MAX_LAG_MS: 2000,
+    STORAGE_QUERY_TIMEOUT_MS: 5000,
+    STORAGE_LOG_BUFFER_MAX: 5000,
+    STORAGE_LOG_FLUSH_INTERVAL_MS: 250,
+    STORAGE_SHARD_COUNT: 16,
+    BACKUP_DAEMON_URL: undefined,
+    BACKUP_DAEMON_CA_CERT_PATH: undefined,
+    BACKUP_DAEMON_CLIENT_CERT_PATH: undefined,
+    BACKUP_DAEMON_CLIENT_KEY_PATH: undefined,
+    BACKUP_DAEMON_TIMEOUT_MS: 15000,
     MTLS_CA_CERT_PATH: "./certs/internal-ca.crt",
     MTLS_SERVER_CERT_PATH: "./certs/core-back.crt",
     MTLS_SERVER_KEY_PATH: "./certs/core-back.key",

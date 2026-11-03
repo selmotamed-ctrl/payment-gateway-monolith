@@ -95,7 +95,7 @@ describe("checkout cancel transition", () => {
       entry.sql.includes("UPDATE payment_attempts")
     );
     expect(update?.sql).toContain("terminal_at IS NULL");
-    expect(update?.sql).toContain("point_of_no_return = 0");
+    expect(update?.sql).toContain("point_of_no_return = false");
     expect(update?.sql).toContain("status NOT IN");
   });
 

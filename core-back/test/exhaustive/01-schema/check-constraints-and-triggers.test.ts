@@ -1,8 +1,9 @@
 /**
- * Suite 01.3 — database-level domain invariants.
+ * Suite 01.3 — database-level domain invariants on PostgreSQL 18.
  *
- * Three CHECK constraints and two Maker != Checker triggers are exercised
- * against the live server with real INSERT / UPDATE statements.
+ * Three CHECK constraints plus the Maker != Checker INSERT CHECK constraint
+ * and UPDATE trigger are exercised against the live server with real INSERT /
+ * UPDATE statements.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
@@ -35,9 +36,9 @@ const makeJournalLine = async (direction: "DEBIT" | "CREDIT", amount: string): P
   const opposite = direction === "DEBIT" ? "CREDIT" : "DEBIT";
   try {
     await db.$executeRawUnsafe(
-      `INSERT INTO journal_lines (id, created_at, updated_at, entry_id, gl_account_id, direction, amount) VALUES
-        (?, ?, ?, ?, ?, ?, ?),
-        (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO "journal_lines" ("id", "created_at", "updated_at", "entry_id", "gl_account_id", "direction", "amount") VALUES
+        ($1, $2, $3, $4, $5, $6, $7),
+        ($8, $9, $10, $11, $12, $13, $14)`,
       crypto.randomUUID(),
       new Date(),
       new Date(),
@@ -60,7 +61,7 @@ const makeJournalLine = async (direction: "DEBIT" | "CREDIT", amount: string): P
 };
 
 const removeJournalLines = async (): Promise<void> => {
-  await db.$executeRawUnsafe("DELETE FROM journal_lines WHERE entry_id = ?", journalEntryId);
+  await db.$executeRawUnsafe('DELETE FROM "journal_lines" WHERE "entry_id" = $1', journalEntryId);
 };
 
 const tryUpdateLink = async (
@@ -69,8 +70,8 @@ const tryUpdateLink = async (
 ): Promise<boolean> => {
   try {
     await db.$executeRawUnsafe(
-      "UPDATE payment_links SET infinite_use = ?, use_count = ?, confirmed_count = ?, active_locked_count = ? WHERE id = ?",
-      fields.infiniteUse ? 1 : 0,
+      'UPDATE "payment_links" SET "infinite_use" = $1, "use_count" = $2, "confirmed_count" = $3, "active_locked_count" = $4 WHERE "id" = $5',
+      fields.infiniteUse,
       fields.useCount,
       fields.confirmed,
       fields.locked,
@@ -97,7 +98,7 @@ beforeAll(async () => {
   journalEntryId = String(entry.id);
 
   const infinite = await createRow("payment_links", {
-    infinite_use: 1,
+    infinite_use: true,
     use_count: 1,
     confirmed_count: 500,
     active_locked_count: 25,
@@ -105,7 +106,7 @@ beforeAll(async () => {
   infiniteLinkId = String(infinite.id);
   for (const useCount of [1, 5, 10]) {
     const link = await createRow("payment_links", {
-      infinite_use: 0,
+      infinite_use: false,
       use_count: useCount,
       confirmed_count: 0,
       active_locked_count: 0,
@@ -113,8 +114,8 @@ beforeAll(async () => {
     finiteLinkIds.set(useCount, String(link.id));
   }
 
-  const maker = await createRow("users", { role: "GATEWAY_ADMIN", is_maker: 1, is_checker: 1 });
-  const checker = await createRow("users", { role: "FINANCE", is_maker: 1, is_checker: 1 });
+  const maker = await createRow("users", { role: "GATEWAY_ADMIN", is_maker: true, is_checker: true });
+  const checker = await createRow("users", { role: "FINANCE", is_maker: true, is_checker: true });
   makerId = String(maker.id);
   checkerId = String(checker.id);
 });
@@ -133,6 +134,7 @@ describeDb("Suite 01 · CHECK constraint metadata", () => {
     "journal_lines_amount_positive",
     "attempt_groups_single_success",
     "payment_links_slot_reservation_invariant",
+    "approval_requests_checker_not_maker_insert",
   ];
 
   for (const name of expected) {
@@ -141,12 +143,11 @@ describeDb("Suite 01 · CHECK constraint metadata", () => {
     });
   }
 
-  test("the approval_requests Maker != Checker triggers exist for INSERT and UPDATE", () => {
-    const insertTrigger = triggers.find(
-      (trigger) =>
-        trigger.eventObjectTable === "approval_requests"
-        && trigger.actionTiming === "BEFORE"
-        && trigger.eventManipulation === "INSERT",
+  test("the approval_requests Maker != Checker INSERT check and UPDATE trigger exist", () => {
+    const insertCheck = checks.find(
+      (check) =>
+        check.tableName === "approval_requests"
+        && check.constraintName === "approval_requests_checker_not_maker_insert",
     );
     const updateTrigger = triggers.find(
       (trigger) =>
@@ -154,9 +155,10 @@ describeDb("Suite 01 · CHECK constraint metadata", () => {
         && trigger.actionTiming === "BEFORE"
         && trigger.eventManipulation === "UPDATE",
     );
-    expect(insertTrigger?.triggerName).toBe("approval_requests_checker_not_maker");
+    expect(insertCheck?.checkClause).toContain("checker_user_id");
+    expect(insertCheck?.checkClause).toContain("maker_user_id");
     expect(updateTrigger?.triggerName).toBe("approval_requests_checker_not_maker_update");
-    expect(updateTrigger?.actionStatement).toContain("45000");
+    expect(updateTrigger?.actionStatement).toContain("approval_requests_checker_not_maker");
   });
 });
 
@@ -242,18 +244,19 @@ describeDb("Suite 01 · approval_requests_checker_not_maker trigger", () => {
     maker_user_id: makerId,
   });
 
-  test("INSERT with checker = maker is rejected with SQLSTATE 45000", async () => {
+  test("INSERT with checker = maker is rejected by the CHECK constraint", async () => {
     let message = "";
     try {
       await insertRow("approval_requests", {
         id: crypto.randomUUID(),
+        updated_at: new Date(),
         ...base(),
         checker_user_id: makerId,
       });
     } catch (error) {
       message = error instanceof Error ? error.message : String(error);
     }
-    expect(message).toContain("checker_user_id must differ from maker_user_id");
+    expect(message).toMatch(/approval_requests_checker_not_maker_insert|violates check constraint/);
   });
 
   test("INSERT with checker = NULL is accepted", async () => {
@@ -266,12 +269,12 @@ describeDb("Suite 01 · approval_requests_checker_not_maker trigger", () => {
     expect(row.id).toBeDefined();
   });
 
-  test("UPDATE setting checker = maker is rejected with SQLSTATE 45000", async () => {
+  test("UPDATE setting checker = maker is rejected by the trigger", async () => {
     const row = await createRow("approval_requests", { ...base(), checker_user_id: checkerId });
     let message = "";
     try {
       await db.$executeRawUnsafe(
-        "UPDATE approval_requests SET checker_user_id = ? WHERE id = ?",
+        'UPDATE "approval_requests" SET "checker_user_id" = $1 WHERE "id" = $2',
         makerId,
         row.id,
       );
@@ -284,12 +287,12 @@ describeDb("Suite 01 · approval_requests_checker_not_maker trigger", () => {
   test("UPDATE with a distinct checker is accepted", async () => {
     const row = await createRow("approval_requests", base());
     await db.$executeRawUnsafe(
-      "UPDATE approval_requests SET checker_user_id = ? WHERE id = ?",
+      'UPDATE "approval_requests" SET "checker_user_id" = $1 WHERE "id" = $2',
       checkerId,
       row.id,
     );
     const rows = (await db.$queryRawUnsafe(
-      "SELECT checker_user_id AS checker FROM approval_requests WHERE id = ?",
+      'SELECT "checker_user_id" AS checker FROM "approval_requests" WHERE "id" = $1',
       row.id,
     )) as Array<{ checker: string }>;
     expect(rows[0]?.checker).toBe(checkerId);
@@ -298,11 +301,11 @@ describeDb("Suite 01 · approval_requests_checker_not_maker trigger", () => {
   test("UPDATE clearing the checker to NULL is accepted", async () => {
     const row = await createRow("approval_requests", { ...base(), checker_user_id: checkerId });
     await db.$executeRawUnsafe(
-      "UPDATE approval_requests SET checker_user_id = NULL WHERE id = ?",
+      'UPDATE "approval_requests" SET "checker_user_id" = NULL WHERE "id" = $1',
       row.id,
     );
     const rows = (await db.$queryRawUnsafe(
-      "SELECT checker_user_id AS checker FROM approval_requests WHERE id = ?",
+      'SELECT "checker_user_id" AS checker FROM "approval_requests" WHERE "id" = $1',
       row.id,
     )) as Array<{ checker: string | null }>;
     expect(rows[0]?.checker).toBeNull();

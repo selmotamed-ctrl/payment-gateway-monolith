@@ -339,7 +339,7 @@ const checks: Record<string, Check> = {
     const terminal = calls.find((call) => call.kind === "execute" && call.sql.includes("UPDATE payment_attempts"));
     expect(terminal?.args[0]).toBe("SUCCEEDED");
     const select = calls.find((call) => call.kind === "query" && call.sql.includes("FROM payment_attempts"));
-    expect(select?.sql).toContain("expires_at <= ?");
+    expect(select?.sql).toMatch(/expires_at <= \$\d+/);
     expect(select?.sql).toContain("terminal_at IS NULL");
   },
 
@@ -447,8 +447,8 @@ const checks: Record<string, Check> = {
     const statements = [...expiry.calls, ...poll.calls, ...jobs.calls]
       .filter((call) => call.kind === "query")
       .map((call) => call.sql);
-    expect(statements.some((sql) => sql.includes("expires_at <= ?") && sql.includes("FOR UPDATE SKIP LOCKED"))).toBe(true);
-    expect(statements.some((sql) => sql.includes("next_check_at <= ?") && sql.includes("FOR UPDATE SKIP LOCKED"))).toBe(true);
+    expect(statements.some((sql) => /expires_at <= \$\d+/.test(sql) && sql.includes("FOR UPDATE SKIP LOCKED"))).toBe(true);
+    expect(statements.some((sql) => /next_check_at <= \$\d+/.test(sql) && sql.includes("FOR UPDATE SKIP LOCKED"))).toBe(true);
     expect(statements.some((sql) => sql.includes("FROM background_jobs") && sql.includes("FOR UPDATE SKIP LOCKED"))).toBe(true);
 
     const terminate = createRecordingDb({
@@ -476,7 +476,7 @@ const checks: Record<string, Check> = {
     expect(select?.sql).toContain("FOR UPDATE");
     expect(select?.sql).toContain("confirmed_count + active_locked_count < use_count");
     const update = harness.statements.find((entry) => entry.sql.includes("active_locked_count = active_locked_count + 1"));
-    expect(update?.sql).toContain("WHERE id = ?");
+    expect(update?.sql).toMatch(/WHERE id = \$\d+/);
     expect(harness.link.active_locked_count).toBe(1);
   },
 
@@ -501,7 +501,7 @@ const checks: Record<string, Check> = {
   async attempt_group_single_success() {
     const sql = readMigrationSql();
     expect(sql).toContain("attempt_groups_single_success");
-    expect(sql).toContain("CHECK (`success_count` <= 1)");
+    expect(sql).toContain('CHECK ("success_count" <= 1)');
     expect(sql).toContain("attempt_groups_link_id_customer_fingerprint_key");
   },
 
@@ -1534,7 +1534,7 @@ const checks: Record<string, Check> = {
   async credential_set_uniqueness() {
     const sql = readMigrationSql();
     expect(sql).toContain("credential_sets_gateway_id_env_external_merchant_id_key");
-    expect(sql).toContain("UNIQUE INDEX `credential_sets_gateway_id_env_external_merchant_id_key`(`gateway_id`, `env`, `external_merchant_id`)");
+    expect(sql).toContain('CREATE UNIQUE INDEX "credential_sets_gateway_id_env_external_merchant_id_key" ON "credential_sets"("gateway_id", "env", "external_merchant_id")');
     const source = readSource("api/internal/admin.ts");
     expect(source).toContain('const PLATFORM_EXTERNAL_MERCHANT_ID = "PLATFORM"');
   },
@@ -2055,7 +2055,7 @@ const checks: Record<string, Check> = {
     );
     const sql = readMigrationSql();
     expect(sql).toContain("approval_requests_checker_not_maker");
-    expect(sql).toContain("SIGNAL SQLSTATE '45000'");
+    expect(sql).toContain("RAISE EXCEPTION 'checker_user_id must differ from maker_user_id'");
   },
 
   async upload_magic_bytes() {
@@ -2422,7 +2422,7 @@ const checks: Record<string, Check> = {
     });
     await worker.runOnce();
     const update = calls.find((call) => call.kind === "execute" && call.sql.includes("UPDATE inbound_events"));
-    expect(update?.sql).toContain("processed_at = ?");
+    expect(update?.sql).toMatch(/processed_at = \$\d+/);
     expect(String(update?.args[1])).toContain("FAILED(5)");
     expect(cases).toHaveLength(1);
     expect(calls.find((call) => call.kind === "query")?.args).toContain(50);
@@ -2546,7 +2546,7 @@ const checks: Record<string, Check> = {
     expect(linesIndex).toBeGreaterThan(lockIndex);
     expect(lineReadAfterLock).toBe(true);
     const lock = statements[lockIndex];
-    expect(lock?.sql).toContain("SELECT * FROM `gl_accounts` WHERE `id` = ? FOR UPDATE");
+    expect(lock?.sql).toContain("SELECT * FROM gl_accounts WHERE id = $1::uuid FOR UPDATE");
     expect(lock?.args).toEqual(["acc-1"]);
   },
 
@@ -2554,7 +2554,7 @@ const checks: Record<string, Check> = {
     const source = readSource("api/internal/merchant.ts");
     expect(source).toContain("destinationBankJson: json(body.destinationBank)");
     const sql = readMigrationSql();
-    expect(sql).toContain("`destination_bank_json`");
+    expect(sql).toContain('"destination_bank_json"');
   },
 
   async alias_capability_probe() {
@@ -2729,7 +2729,7 @@ const checks: Record<string, Check> = {
     ];
     const { db, calls } = createRecordingDb({
       onQuery: (sql) => {
-        if (sql.includes("FROM `join_requests`") && sql.includes("`sla_due_at` <= ?")) {
+        if (sql.includes("FROM join_requests") && /sla_due_at <= \$\d+/.test(sql)) {
           return rows
             .filter(
               (row) =>
@@ -2742,8 +2742,8 @@ const checks: Record<string, Check> = {
         return [];
       },
       onExecute: (sql, args) => {
-        if (sql.includes("`status` = 'DRAFT'") && sql.includes("`status` = 'EXPIRED'")) {
-          const cutoff = args[2] as Date;
+        if (sql.includes("status = 'DRAFT'") && sql.includes("status = 'EXPIRED'")) {
+          const cutoff = args[1] as Date;
           let expired = 0;
           for (const row of rows) {
             if (
@@ -2757,7 +2757,7 @@ const checks: Record<string, Check> = {
           }
           return expired;
         }
-        if (sql.includes("WHERE `id` = ?")) {
+        if (sql.includes("WHERE id = $2::uuid")) {
           const id = args[1] as string;
           const row = rows.find((entry) => entry.id === id);
           if (row && ["SUBMITTED", "IN_REVIEW", "INFO_REQUESTED"].includes(row.status)) {
@@ -2782,12 +2782,12 @@ const checks: Record<string, Check> = {
     expect(rows.find((row) => row.id === "review-on-time")?.status).toBe("IN_REVIEW");
 
     const draftUpdate = calls.find(
-      (call) => call.kind === "execute" && call.sql.includes("`status` = 'DRAFT'"),
+      (call) => call.kind === "execute" && call.sql.includes("status = 'DRAFT'"),
     );
-    expect(draftUpdate?.sql).toContain("UPDATE `join_requests` SET `status` = 'EXPIRED'");
+    expect(draftUpdate?.sql).toContain("UPDATE join_requests SET status = 'EXPIRED'");
     expect((draftUpdate?.args[1] as Date).getTime()).toBe(now.getTime() - ttl);
     const overdueUpdate = calls.find(
-      (call) => call.kind === "execute" && call.sql.includes("WHERE `id` = ?") && call.args[1] === "review-overdue",
+      (call) => call.kind === "execute" && call.sql.includes("WHERE id = $2::uuid") && call.args[1] === "review-overdue",
     );
     expect(overdueUpdate).toBeDefined();
     expect(readMigrationSql()).toContain("'EXPIRED'");

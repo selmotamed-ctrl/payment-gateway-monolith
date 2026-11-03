@@ -1,7 +1,16 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { DeployConfig } from "./configSchema";
+import {
+  auditDbConfigured,
+  backupStorageConfigured,
+  logDbConfigured,
+  parseNodeList,
+  pgStorageConfigured,
+  redisStorageConfigured,
+  type DeployConfig,
+  type HostRole,
+} from "./configSchema";
 
 /**
  * The mTLS PKI.
@@ -34,7 +43,11 @@ export interface PkiBundle {
   server: CertMaterial;
   /** The Fake Rails Nginx server certificate (CA-signed, SAN-bound). */
   fakeRails: CertMaterial;
+  /** The pg-backup-daemon mTLS server certificate. */
+  backup: CertMaterial;
   clients: CertMaterial[];
+  /** Optional client certificates for storage/backup mTLS links. */
+  storageClients: CertMaterial[];
 }
 
 export interface PkiOptions {
@@ -107,9 +120,17 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
     cn: "Payment Gateway Internal CA",
   };
 
-  // The SAN must carry the private IP: the edge hosts reach the core by IP and
-  // TLS 1.3 verifies the hostname.
-  const serverSans = [`IP:${config.CORE_PRIVATE_IP}`, "IP:127.0.0.1", "DNS:core-back.internal"];
+  // The SAN must carry every core private IP: the edge hosts reach the core
+  // nodes by IP and TLS 1.3 verifies the hostname.
+  const coreNodeIps = parseNodeList(config.CORE_NODES).map((node) => node.privateIp);
+  const coreIps = [...new Set(coreNodeIps.length > 0
+    ? coreNodeIps
+    : (config.CORE_PRIVATE_IP ? [config.CORE_PRIVATE_IP] : []))];
+  const serverSans = [
+    ...coreIps.map((ip) => `IP:${ip}`),
+    "IP:127.0.0.1",
+    "DNS:core-back.internal",
+  ];
   const server: CertMaterial = {
     name: "core-back",
     certPath: join(directory, "core-back.crt"),
@@ -123,6 +144,44 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
     { name: "merchant-back-client", certPath: join(directory, "merchant-back-client.crt"), keyPath: join(directory, "merchant-back-client.key"), kind: "client", cn: "merchant-back" },
     { name: "checkout-back-client", certPath: join(directory, "checkout-back-client.crt"), keyPath: join(directory, "checkout-back-client.key"), kind: "client", cn: "checkout-back" },
   ];
+  const backupIp = parseNodeList(config.BACKUP_NODE)[0]?.privateIp;
+  const backup: CertMaterial = {
+    name: "backup-daemon",
+    certPath: join(directory, "backup-daemon.crt"),
+    keyPath: join(directory, "backup-daemon.key"),
+    kind: "server",
+    cn: "backup-daemon.internal",
+    sans: [
+      ...(backupIp ? [`IP:${backupIp}`] : []),
+      "IP:127.0.0.1",
+      "DNS:backup-daemon.internal",
+    ],
+  };
+  const storageClients: CertMaterial[] = [];
+  for (const [name, enabled] of [
+    ["pg-client", pgStorageConfigured(config)],
+    ["redis-client", redisStorageConfigured(config)],
+    ["audit-db-client", auditDbConfigured(config)],
+    ["log-db-client", logDbConfigured(config)],
+  ] as const) {
+    if (!enabled) continue;
+    storageClients.push({
+      name,
+      certPath: join(directory, `${name}.crt`),
+      keyPath: join(directory, `${name}.key`),
+      kind: "client",
+      cn: name,
+    });
+  }
+  if (backupStorageConfigured(config) && !storageClients.some((client) => client.name === "backup-client")) {
+    storageClients.push({
+      name: "backup-client",
+      certPath: join(directory, "backup-client.crt"),
+      keyPath: join(directory, "backup-client.key"),
+      kind: "client",
+      cn: "backup-client",
+    });
+  }
 
   const fakeRails: CertMaterial = {
     name: "fake-rails",
@@ -136,8 +195,8 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
       "IP:127.0.0.1",
     ],
   };
-  const bundle: PkiBundle = { directory, ca: caMaterial, server, fakeRails, clients };
-  const everythingExists = [caCert, caKey, server.certPath, server.keyPath, fakeRails.certPath, fakeRails.keyPath, ...clients.flatMap((client) => [client.certPath, client.keyPath])]
+  const bundle: PkiBundle = { directory, ca: caMaterial, server, fakeRails, backup, clients, storageClients };
+  const everythingExists = [caCert, caKey, server.certPath, server.keyPath, fakeRails.certPath, fakeRails.keyPath, backup.certPath, backup.keyPath, ...[...clients, ...storageClients].flatMap((client) => [client.certPath, client.keyPath])]
     .every((path) => existsSync(path));
 
   if (everythingExists && !rotate) {
@@ -145,9 +204,9 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
     // moves to a different LAN must get a new server certificate, otherwise the
     // edges reject the core's TLS handshake. Re-sign the leaves (the CA stays).
     const current = inspectCertificate(server.certPath, server.name);
-    const hasIp = current.sans.includes(config.CORE_PRIVATE_IP);
+    const hasAllIps = coreIps.every((ip) => current.sans.includes(ip));
     const hasLoopback = current.sans.includes("127.0.0.1");
-    if (hasIp && hasLoopback) {
+    if (hasAllIps && hasLoopback) {
       verifyPki(bundle);
       return bundle;
     }
@@ -183,6 +242,17 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
     validityDays: config.MTLS_VALIDITY_DAYS,
   });
 
+  // ---- 2a. The backup daemon server certificate --------------------------
+  signLeaf({
+    run,
+    directory,
+    material: backup,
+    ou: "backup",
+    sans: backup.sans ?? [],
+    extendedKeyUsage: "serverAuth,clientAuth",
+    validityDays: config.MTLS_VALIDITY_DAYS,
+  });
+
   // ---- 2b. The Fake Rails Nginx server certificate -----------------------
   signLeaf({
     run,
@@ -194,7 +264,20 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
     validityDays: config.MTLS_VALIDITY_DAYS,
   });
 
-  // ---- 3. The three edge client certificates ----------------------------
+  // ---- 3. Optional storage/backup client certificates --------------------
+  for (const client of storageClients) {
+    signLeaf({
+      run,
+      directory,
+      material: client,
+      ou: "storage-client",
+      sans: [],
+      extendedKeyUsage: "clientAuth",
+      validityDays: config.MTLS_VALIDITY_DAYS,
+    });
+  }
+
+  // ---- 4. The three edge client certificates ----------------------------
   for (const client of clients) {
     const role = client.cn.split("-back")[0] ?? client.cn;
     signLeaf({
@@ -292,7 +375,7 @@ export const inspectCertificate = (certPath: string, name: string, now = new Dat
 
 /** Inspects every certificate of the bundle (used by the audit summary and by the health check). */
 export const verifyPki = (bundle: PkiBundle, now = new Date()): CertVerification[] => {
-  const certificates = [bundle.ca, bundle.server, bundle.fakeRails, ...bundle.clients];
+  const certificates = [bundle.ca, bundle.server, bundle.fakeRails, bundle.backup, ...bundle.clients, ...bundle.storageClients];
   return certificates.map((material) => inspectCertificate(material.certPath, material.name, now));
 };
 
@@ -305,12 +388,12 @@ export const verifyPki = (bundle: PkiBundle, now = new Date()): CertVerification
  */
 export const certFilesForHost = (
   bundle: PkiBundle,
-  roles: readonly ("db" | "core" | "admin" | "merchant" | "checkout" | "fake-rails")[],
+  roles: readonly HostRole[],
 ): CertMaterial[] => {
   const files: CertMaterial[] = [bundle.ca];
   for (const role of roles) {
     if (role === "core") {
-      files.push(bundle.server);
+      files.push(bundle.server, ...bundle.storageClients);
     }
     if (role === "admin") {
       files.push(...bundle.clients.filter((client) => client.cn === "admin-back"));
@@ -323,6 +406,21 @@ export const certFilesForHost = (
     }
     if (role === "fake-rails") {
       files.push(bundle.fakeRails);
+    }
+    if (role === "pg-primary" || role === "pg-replica" || role === "pgbouncer") {
+      files.push(...bundle.storageClients.filter((client) => client.name === "pg-client"));
+    }
+    if (role === "redis") {
+      files.push(...bundle.storageClients.filter((client) => client.name === "redis-client"));
+    }
+    if (role === "audit-db") {
+      files.push(...bundle.storageClients.filter((client) => client.name === "audit-db-client"));
+    }
+    if (role === "log-db") {
+      files.push(...bundle.storageClients.filter((client) => client.name === "log-db-client"));
+    }
+    if (role === "backup") {
+      files.push(bundle.backup, ...bundle.storageClients.filter((client) => client.name === "pg-client" || client.name === "backup-client"));
     }
   }
   // Deduplicate the CA when several roles share a host.

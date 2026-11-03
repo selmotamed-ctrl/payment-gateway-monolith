@@ -5,6 +5,7 @@ import { Prisma, type ContentType } from "../../generated/prisma/client";
 import { client } from "../../prisma/client";
 import { invalidationBus } from "../../lib/invalidationBus";
 import { createReconciliationUploadHandler } from "./reconciliationUpload";
+import { backupInternalRouter } from "./backups";
 import { getPlatformRuntime } from "../../engine/runtime";
 import { InvariantVerifier, naturalBalance } from "../../engine/ledger/InvariantVerifier";
 import { moneyToString } from "../../engine/db/money";
@@ -76,7 +77,7 @@ import {
   queueMerchantLifecycleNotification,
 } from "../../lib/merchantOps";
 import { scanKybBytes } from "../../lib/kybScan";
-import { mysqlPlaceholders } from "../../engine/db/rawRows";
+import { postgresPlaceholders } from "../../engine/db/rawRows";
 import {
   generateMfaCode,
   hashMfaCode,
@@ -89,6 +90,7 @@ import {
 import { buildAdminUserInfo } from "../../lib/auth/uiAuthorities";
 import { hasConfidentialAmlAccess } from "../../lib/auth/confidentialAccess";
 import { executeGlobalSearch } from "../../lib/globalSearch";
+import { getConfiguredAuditStore, readThroughReplica } from "../../lib/storageEngine";
 import type { Decimal } from "decimal.js";
 import { decimal } from "../../engine/ledger/LedgerPoster";
 import { LedgerPoster } from "../../engine/ledger/LedgerPoster";
@@ -673,23 +675,28 @@ router.get("/auth/me", (_request: Request, response: Response) => {
 
 
 router.use(requireAuthentication);
+router.use("/system/backups", backupInternalRouter);
 
 router.post("/search", async (request: Request, response: Response) => {
   response.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
   const principal = principalOf(request);
-  const result = await executeGlobalSearch(request.body ?? {}, {
-    prisma: client,
-    actor: {
-      id: principal.userId ?? principal.tokenId ?? "system",
-      role: principal.role ?? "",
-      authorities: principal.authorities,
-    },
-    requestId: request.requestId,
-    logger: {
-      warn: (message, meta) => request.logger?.warn(`${message} ${JSON.stringify(meta ?? {})}`),
-      error: (message, meta) => request.logger?.error(`${message} ${JSON.stringify(meta ?? {})}`),
-    },
-  });
+  const result = await readThroughReplica(
+    request.header("x-pg-min-lsn") ?? undefined,
+    (reader) =>
+      executeGlobalSearch(request.body ?? {}, {
+        prisma: reader,
+        actor: {
+          id: principal.userId ?? principal.tokenId ?? "system",
+          role: principal.role ?? "",
+          authorities: principal.authorities,
+        },
+        requestId: request.requestId,
+        logger: {
+          warn: (message, meta) => request.logger?.warn(`${message} ${JSON.stringify(meta ?? {})}`),
+          error: (message, meta) => request.logger?.error(`${message} ${JSON.stringify(meta ?? {})}`),
+        },
+      }),
+  );
   response.json(result);
 });
 
@@ -1519,7 +1526,7 @@ const kybDocumentContextSelect = {
 
 const contentAvailabilityForIds = async (ids: string[]): Promise<Map<string, boolean>> => {
   if (ids.length === 0) return new Map();
-  const placeholders = mysqlPlaceholders(ids.length);
+  const placeholders = postgresPlaceholders(ids.length, 1, "uuid");
   const rows = (await client.$queryRawUnsafe(
     `SELECT id, (content_ciphertext IS NOT NULL) AS contentAvailable FROM kyb_documents WHERE id IN (${placeholders})`,
     ...ids,
@@ -15505,6 +15512,62 @@ router.get("/academy/progress/overview/export", async (request: Request, respons
   });
 });
 
+const auditStoreParamsFromRequest = (
+  request: Request,
+  built: ReturnType<typeof buildListQuery>,
+  limit: number,
+  offset: number,
+) => {
+  const first = (name: string): string | undefined => {
+    const value = request.query[name];
+    return typeof value === "string" && value.length > 0 ? value : undefined;
+  };
+  const date = (name: string): Date | undefined => {
+    const value = first(name);
+    if (!value) return undefined;
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+  };
+  return {
+    entityType: first("entityType"),
+    entityId: first("entityId"),
+    actorId: first("actorId"),
+    action: first("action"),
+    role: first("role"),
+    searchPrefix: first("search"),
+    createdFrom: date("from") ?? date("dateFrom"),
+    createdTo: date("to") ?? date("dateTo"),
+    limit,
+    offset,
+  };
+};
+
+const auditStoreRowToApi = (row: {
+  id: string;
+  createdAt: Date;
+  actorId: string;
+  actorEmail?: string | null;
+  role: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  beforeJson: unknown;
+  afterJson: unknown;
+  approvalRequestId?: string | null;
+}) => ({
+  id: row.id,
+  createdAt: row.createdAt,
+  actorId: row.actorId,
+  actorEmail: row.actorEmail ?? "",
+  role: row.role,
+  action: row.action,
+  entityType: row.entityType,
+  entityId: row.entityId,
+  beforeJson: row.beforeJson,
+  afterJson: row.afterJson,
+  approvalRequestId: row.approvalRequestId ?? null,
+});
+
 router.get("/audit-logs", async (request: Request, response: Response) => {
   requireAuthorities(request, ["security:read"]);
   const built = buildListQuery(request.query, {
@@ -15521,6 +15584,16 @@ router.get("/audit-logs", async (request: Request, response: Response) => {
     defaultSort: { createdAt: "desc" },
     defaultPageSize: 20,
   });
+  const store = getConfiguredAuditStore();
+  if (store) {
+    const params = auditStoreParamsFromRequest(request, built, built.take, built.skip);
+    const [page, total] = await Promise.all([
+      store.queryAuditLogs(params),
+      store.countAuditLogs ? store.countAuditLogs(params) : Promise.resolve(0),
+    ]);
+    response.json(listResponse("auditLogs", page.items.map(auditStoreRowToApi), total, built));
+    return;
+  }
   const [rows, total] = await Promise.all([
     client.auditLog.findMany({
       where: built.where as never,
@@ -15562,18 +15635,35 @@ router.get("/audit-logs/export", async (request: Request, response: Response) =>
     defaultSort: { createdAt: "desc" },
     defaultPageSize: 20,
   });
-  const take = 5000;
-  const [rows, total] = await Promise.all([
-    client.auditLog.findMany({
-      where: built.where as never,
-      orderBy: built.orderBy as never,
-      take,
-      include: { actor: { select: { email: true } } },
-    }),
-    client.auditLog.count({ where: built.where as never }),
-  ]);
+  const store = getConfiguredAuditStore();
+  let rows: ReturnType<typeof auditStoreRowToApi>[] = [];
+  let total = 0;
+  if (store) {
+    const params = auditStoreParamsFromRequest(request, built, 5_000, 0);
+    const [page, count] = await Promise.all([
+      store.queryAuditLogs(params),
+      store.countAuditLogs ? store.countAuditLogs(params) : Promise.resolve(0),
+    ]);
+    rows = page.items.map(auditStoreRowToApi);
+    total = count;
+  } else {
+    const [legacyRows, legacyTotal] = await Promise.all([
+      client.auditLog.findMany({
+        where: built.where as never,
+        orderBy: built.orderBy as never,
+        take: 5_000,
+        include: { actor: { select: { email: true } } },
+      }),
+      client.auditLog.count({ where: built.where as never }),
+    ]);
+    rows = legacyRows.map((row) => auditStoreRowToApi({
+      ...row,
+      actorEmail: row.actor?.email ?? "",
+    }));
+    total = legacyTotal;
+  }
   const actor = actorFromRequest(request);
-  await client.auditLog.create({
+  await client.auditOutbox.create({
     data: {
       actorId: actor.userId,
       role: actor.role ?? "UNKNOWN",
@@ -15585,19 +15675,7 @@ router.get("/audit-logs/export", async (request: Request, response: Response) =>
     },
   });
   response.json({
-    auditLogs: rows.map((row) => ({
-      id: row.id,
-      createdAt: row.createdAt,
-      actorId: row.actorId,
-      actorEmail: row.actor?.email ?? "",
-      role: row.role,
-      action: row.action,
-      entityType: row.entityType,
-      entityId: row.entityId,
-      beforeJson: row.beforeJson,
-      afterJson: row.afterJson,
-      approvalRequestId: row.approvalRequestId,
-    })),
+    auditLogs: rows,
     total,
     exported: rows.length,
     truncated: total > rows.length,
@@ -15669,6 +15747,15 @@ router.get("/audit-logs/:id", async (request: Request, response: Response) => {
   requireAuthorities(request, ["security:read"]);
   response.setHeader("Cache-Control", "no-store");
   const { id } = parseOrThrow(idSchema, request.params);
+  const store = getConfiguredAuditStore();
+  if (store) {
+    const record = await store.getAuditLogById(id);
+    if (!record) {
+      throw new ApiError(404, "AUDIT_LOG_NOT_FOUND", "The audit log entry does not exist");
+    }
+    response.json({ auditLog: auditStoreRowToApi(record) });
+    return;
+  }
   const row = await client.auditLog.findUnique({
     where: { id },
     include: { actor: { select: { id: true, email: true, role: true } } },

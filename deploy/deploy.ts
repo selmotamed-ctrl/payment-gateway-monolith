@@ -2,13 +2,17 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { loadDeployConfig, type DeployConfig } from "./lib/configSchema";
+import { loadDeployConfig, pgStorageConfigured, type DeployConfig, type DeployRole } from "./lib/configSchema";
 import { findSshConflicts, planHosts, renderTopology, type DeployPlan, type HostPlan, type ServicePlan } from "./lib/hostPlanner";
 import { buildPki, certFilesForHost, readMaterial, verifyPki } from "./lib/pkiManager";
 import { SshRunner } from "./lib/sshRunner";
 import { applyFirewall, readFirewallStatus } from "./lib/firewallConfigurator";
-import { renderVerification, verifyDeployment } from "./lib/healthVerifier";
+import { probeCoreService, probeEdgeService, renderVerification, verifyDeployment } from "./lib/healthVerifier";
 import { bootstrapPackagesCommand, detectHostOs } from "./lib/osDetector";
+import { provisionPostgres18 } from "./provisioners/postgres18Provisioner";
+import { provisionRedis } from "./provisioners/redisProvisioner";
+import { provisionAuditAndLogDb } from "./provisioners/auditAndLogDbProvisioner";
+import { provisionBackupEngine } from "./provisioners/backupEngineProvisioner";
 
 /**
  * The multi-host deployment orchestrator.
@@ -25,9 +29,12 @@ import { bootstrapPackagesCommand, detectHostOs } from "./lib/osDetector";
 
 const REPO_ROOT = resolve(import.meta.dirname, "..");
 
+type StorageOnlyRole = "pg" | "pg-primary" | "pg-replica" | "pgbouncer" | "redis" | "audit-db" | "log-db" | "backup" | "storage";
+type OnlyRole = DeployRole | StorageOnlyRole;
+
 interface CliOptions {
   envPath: string;
-  only: Set<"db" | "core" | "admin" | "merchant" | "checkout" | "fake-rails">;
+  only: Set<OnlyRole>;
   dryRun: boolean;
   fresh: boolean;
   update: boolean;
@@ -36,7 +43,22 @@ interface CliOptions {
   skipVerify: boolean;
   rotateCerts: boolean;
   keepReleases?: number;
+  rollingBatch?: number;
+  nodes?: Set<string>;
 }
+
+const ONLY_ROLES: OnlyRole[] = ["db", "core", "admin", "merchant", "checkout", "fake-rails", "pg", "pg-primary", "pg-replica", "pgbouncer", "redis", "audit-db", "log-db", "backup", "storage"];
+
+/** Splits an ordered node list into rolling batches without reordering it. */
+export const rollingBatches = <T>(nodes: readonly T[], batchSize: number): T[][] => {
+  if (nodes.length === 0) return [];
+  const size = Number.isFinite(batchSize) && batchSize >= 1 ? Math.floor(batchSize) : 1;
+  const batches: T[][] = [];
+  for (let index = 0; index < nodes.length; index += size) {
+    batches.push(nodes.slice(index, index + size));
+  }
+  return batches;
+};
 
 const parseArgs = (argv: string[]): CliOptions => {
   const options: CliOptions = {
@@ -62,13 +84,20 @@ const parseArgs = (argv: string[]): CliOptions => {
     else if (raw.startsWith("--only=")) {
       for (const role of raw.slice(7).split(",")) {
         const normalized = role.trim().toLowerCase();
-        if (!["db", "core", "admin", "merchant", "checkout", "fake-rails"].includes(normalized)) {
+        if (!ONLY_ROLES.includes(normalized as OnlyRole)) {
           throw new Error(`Unknown --only role '${role}'`);
         }
-        options.only.add(normalized as never);
+        options.only.add(normalized as OnlyRole);
       }
     } else if (raw.startsWith("--keep=")) options.keepReleases = Number(raw.slice(7));
-    else if (raw.startsWith("--")) throw new Error(`Unknown option '${raw}'`);
+    else if (raw.startsWith("--rolling-batch=")) {
+      const value = Number(raw.slice(16));
+      if (!Number.isInteger(value) || value < 1) throw new Error(`Invalid --rolling-batch '${raw.slice(16)}'`);
+      options.rollingBatch = value;
+    } else if (raw.startsWith("--nodes=")) {
+      const ids = raw.slice(8).split(",").map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+      options.nodes = new Set(ids);
+    } else if (raw.startsWith("--")) throw new Error(`Unknown option '${raw}'`);
   }
   return options;
 };
@@ -81,6 +110,34 @@ const step = (index: number, title: string): void => {
 const warn = (message: string): void => console.warn(`  ! ${message}`);
 
 const timestamp = (): string => new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
+
+const STORAGE_CERT_DIR = "/etc/pg-deploy/certs";
+const BACKUP_CERT_DIR = "/var/lib/pg-backup/shared/certs";
+
+const isStorageRole = (role: string): boolean =>
+  ["pg-primary", "pg-replica", "pgbouncer", "redis", "audit-db", "log-db", "backup"].includes(role);
+
+const uploadStorageCertificates = (
+  runner: SshRunner,
+  plan: DeployPlan,
+  pki: ReturnType<typeof buildPki>,
+  dryRun: boolean,
+): void => {
+  for (const host of plan.hosts.filter((candidate) => candidate.roles.some(isStorageRole))) {
+    const directory = host.roles.includes("backup") ? BACKUP_CERT_DIR : STORAGE_CERT_DIR;
+    for (const material of certFilesForHost(pki, host.roles)) {
+      if (dryRun) {
+        runner.writeRemoteFile({ target: host.ssh, path: `${directory}/${material.name}.crt`, content: "", mode: 0o644, sudo: true });
+        continue;
+      }
+      const content = readMaterial(material);
+      runner.writeRemoteFile({ target: host.ssh, path: `${directory}/${material.name}.crt`, content: content.cert, mode: 0o644, sudo: true });
+      if (content.key) {
+        runner.writeRemoteFile({ target: host.ssh, path: `${directory}/${material.name}.key`, content: content.key, mode: 0o600, sudo: true });
+      }
+    }
+  }
+};
 
 const absoluteEnv = (env: Record<string, string>, remoteDir: string): Record<string, string> => {
   const result: Record<string, string> = {};
@@ -488,8 +545,23 @@ const buildFrontends = async (runner: SshRunner, config: DeployConfig): Promise<
   }
 };
 
-const shouldRun = (options: CliOptions, role: "db" | "core" | "admin" | "merchant" | "checkout" | "fake-rails"): boolean =>
+const shouldRun = (options: CliOptions, role: DeployRole): boolean =>
   options.only.size === 0 || options.only.has(role);
+
+const shouldRunStorage = (options: CliOptions, roles: StorageOnlyRole[]): boolean =>
+  options.only.size === 0 || options.only.has("storage") || roles.some((role) => options.only.has(role));
+
+const deploymentUnits = (
+  plan: DeployPlan,
+  role: DeployRole,
+  nodes?: Set<string>,
+): Array<{ host: HostPlan; service: ServicePlan }> =>
+  plan.hosts.flatMap((host) =>
+    host.services
+      .filter((service) => service.role === role)
+      .filter((service) => !nodes || (service.nodeId !== undefined && nodes.has(service.nodeId)))
+      .map((service) => ({ host, service })),
+  );
 
 const main = async (): Promise<void> => {
   const options = parseArgs(process.argv.slice(2));
@@ -530,13 +602,14 @@ const main = async (): Promise<void> => {
   step(3, "Ensure the mTLS PKI");
   const pki = buildPki({ config, rotate: options.rotateCerts, dryRun: options.dryRun });
   if (options.dryRun) {
-    log(`  would ensure: ${[pki.ca, pki.server, ...pki.clients].map((material) => material.name).join(", ")}`);
+    log(`  would ensure: ${[pki.ca, pki.server, pki.backup, ...pki.clients, ...pki.storageClients].map((material) => material.name).join(", ")}`);
     log(`  core SAN: ${(pki.server.sans ?? []).join(",")}`);
   } else {
     for (const certificate of verifyPki(pki)) {
       log(`  ${certificate.name}: valid ${certificate.expiresInDays} day(s)${certificate.sans.length > 0 ? ` SAN=${certificate.sans.join(",")}` : ""}`);
     }
   }
+  uploadStorageCertificates(runner, plan, pki, options.dryRun);
 
   // ---- Step 4: bootstrap the unique hosts -------------------------------
   step(4, "Bootstrap the target hosts and apply the firewall");
@@ -580,20 +653,41 @@ const main = async (): Promise<void> => {
     log("  skipped (update mode; pass --fresh or --enforce-firewall to bootstrap)");
   }
 
-  // ---- Step 5: database provisioning and backup -------------------------
-  step(5, "Provision the database and take a pre-migration backup");
+  // ---- Step 5: storage provisioning and pre-migration backup -------------
+  step(5, "Provision storage engines and take a pre-migration backup");
   const coreHost = plan.hosts.find((host) => host.roles.includes("core"));
   if (!coreHost) {
     throw new Error("The plan has no core host");
   }
   const releaseTimestamp = timestamp();
-  const dbHost = plan.hosts.find((host) => host.roles.includes("db")) ?? coreHost;
-  if (shouldRun(options, "db") || shouldRun(options, "core")) {
+
+  if (config.PG_MANAGE_VIA_SSH && shouldRunStorage(options, ["pg", "pg-primary", "pg-replica", "pgbouncer"])) {
+    const report = provisionPostgres18({ runner, config, dryRun: options.dryRun });
+    log(`  PostgreSQL ${config.PG_VERSION} primary/replicas: ${report.nodes.join(", ") || "none"}`);
+    log(`  PgBouncer ${config.PGBOUNCER_ENABLED ? `:${config.PGBOUNCER_PORT}` : "disabled"}`);
+  } else if (pgStorageConfigured(config)) {
+    log("  PostgreSQL: skipped (--only excludes pg)");
+  }
+  if (config.REDIS_MANAGE_VIA_SSH && shouldRunStorage(options, ["redis"])) {
+    const report = provisionRedis({ runner, config, dryRun: options.dryRun });
+    log(`  Redis nodes: ${report.nodes.join(", ") || "none"}`);
+  }
+  if ((config.AUDIT_DB_MANAGE_VIA_SSH || config.LOG_DB_MANAGE_VIA_SSH) && shouldRunStorage(options, ["audit-db", "log-db"])) {
+    const report = provisionAuditAndLogDb({ runner, config, dryRun: options.dryRun });
+    log(`  Audit/log databases: ${report.nodes.join(", ") || "none"}`);
+  }
+  if (config.BACKUP_ENABLED && shouldRunStorage(options, ["backup"])) {
+    const report = provisionBackupEngine({ runner, config, dryRun: options.dryRun });
+    log(`  Backup engine (${config.BACKUP_ENGINE_MODE}) on: ${report.nodes.join(", ") || "none"}`);
+  }
+
+  if (!pgStorageConfigured(config) && (shouldRun(options, "db") || shouldRun(options, "core"))) {
+    const dbHost = plan.hosts.find((host) => host.roles.includes("db")) ?? coreHost;
     provisionDatabase({ runner, config, host: dbHost });
     if (!fresh) {
       backupDatabase({ runner, config, host: coreHost, releaseTimestamp });
     }
-  } else {
+  } else if (!pgStorageConfigured(config)) {
     log("  skipped (--only excludes db/core)");
   }
 
@@ -613,20 +707,44 @@ const main = async (): Promise<void> => {
       log(`  skipped (--only excludes ${target.role})`);
       continue;
     }
-    const host = plan.hosts.find((candidate) => candidate.roles.includes(target.role));
-    if (!host) {
+    const units = deploymentUnits(plan, target.role, options.nodes);
+    if (units.length === 0) {
+      if (options.nodes) {
+        log(`  skipped (--nodes excludes every ${target.role} node)`);
+        continue;
+      }
       throw new Error(`The plan has no ${target.role} host`);
     }
-    for (const service of host.services.filter((candidate) => candidate.role === target.role)) {
-      deployService({
-        runner,
-        host,
-        service,
-        config,
-        pki,
-        releaseTimestamp,
-        keepReleases: options.keepReleases ?? config.KEEP_RELEASES,
-      });
+    const batchSize = options.rollingBatch ?? config.ROLLING_BATCH_SIZE;
+    const batches = rollingBatches(units, batchSize);
+    for (const [batchIndex, batch] of batches.entries()) {
+      log(`  rolling batch ${batchIndex + 1}/${batches.length} (${batch.map((unit) => unit.service.nodeId ?? unit.service.name).join(", ")})`);
+      for (const unit of batch) {
+        deployService({
+          runner,
+          host: unit.host,
+          service: unit.service,
+          config,
+          pki,
+          releaseTimestamp,
+          keepReleases: options.keepReleases ?? config.KEEP_RELEASES,
+        });
+      }
+      if (options.dryRun) continue;
+      for (const unit of batch) {
+        const probe = target.role === "core"
+          ? probeCoreService(runner, unit.host, unit.service, config)
+          : probeEdgeService(runner, unit.host, unit.service);
+        if (!probe.ok) {
+          throw new Error(
+            `Rolling batch ${batchIndex + 1} failed health check on ${probe.host} ${probe.check}: ${probe.detail}`,
+          );
+        }
+        log(`  PASS ${probe.host} ${probe.check}`);
+      }
+      if (batchIndex < batches.length - 1) {
+        log(`  batch ${batchIndex + 1} healthy; continuing to the next batch`);
+      }
     }
   }
 

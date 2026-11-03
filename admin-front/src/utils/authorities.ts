@@ -42,6 +42,8 @@ export const ADMIN_AUTHORITY_GROUPS: AuthorityGroup[] = [
             { authorityKey: "approvals.reject", title: "Reject Requests", description: "Reject maker-checker requests" },
             { authorityKey: "users_admin.propose", title: "Propose Admin User Changes", description: "Propose admin user and authority changes" },
             { authorityKey: "reports.draft", title: "Draft Reports", description: "Draft regulatory reports" },
+            { authorityKey: "security:read", title: "Read Security Controls", description: "View backup health, schedules and restore drills" },
+            { authorityKey: "security:write", title: "Manage Security Controls", description: "Trigger backups and restore drills and change backup policy" },
         ],
     },
     {

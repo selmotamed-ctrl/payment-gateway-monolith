@@ -1,4 +1,4 @@
-import { mysqlPlaceholders } from "../db/rawRows";
+import { postgresPlaceholders } from "../db/rawRows";
 import type { Tx } from "../db/ports";
 import { env } from "../../lib/env";
 import { BaseWorker, type WorkerOptions } from "./workerRuntime";
@@ -233,16 +233,16 @@ export class RetentionWorker extends BaseWorker {
       {
         table: "notifications",
         summaryKey: "notifications",
-        predicate: "`created_at` < ?",
+        predicate: "created_at < $1",
         params: [cutoff],
-        orderBy: "`created_at` ASC",
+        orderBy: "created_at ASC",
       },
       {
         table: "inbound_events",
         summaryKey: "inboundEvents",
-        predicate: "`received_at` < ?",
+        predicate: "received_at < $1",
         params: [cutoff],
-        orderBy: "`received_at` ASC",
+        orderBy: "received_at ASC",
       },
       {
         table: "attempt_step_logs",
@@ -250,23 +250,23 @@ export class RetentionWorker extends BaseWorker {
         // The log of a live attempt is evidence of a running payment, so it
         // only goes when the attempt itself is expired.
         predicate:
-          "`created_at` < ? AND `attempt_id` IN (SELECT `id` FROM `payment_attempts` WHERE `created_at` < ?)",
+          "created_at < $1 AND attempt_id IN (SELECT id FROM payment_attempts WHERE created_at < $2)",
         params: [cutoff, cutoff],
-        orderBy: "`created_at` ASC",
+        orderBy: "created_at ASC",
       },
       {
         table: "audit_log",
         summaryKey: "auditLog",
-        predicate: "`created_at` < ?",
+        predicate: "created_at < $1",
         params: [cutoff],
-        orderBy: "`created_at` ASC",
+        orderBy: "created_at ASC",
       },
       {
         table: "detail_change_logs",
         summaryKey: "detailChangeLogs",
-        predicate: "`created_at` < ?",
+        predicate: "created_at < $1",
         params: [cutoff],
-        orderBy: "`created_at` ASC",
+        orderBy: "created_at ASC",
       },
     ];
 
@@ -283,11 +283,11 @@ export class RetentionWorker extends BaseWorker {
    */
   private async purgeTable(table: RetentionTable, summary: RetentionSummary): Promise<void> {
     const selectSql =
-      `SELECT \`id\` FROM \`${table.table}\`` +
+      `SELECT id FROM ${table.table}` +
       ` WHERE ${table.predicate}` +
       ` ORDER BY ${table.orderBy}` +
-      " LIMIT ?";
-    const countSql = `SELECT COUNT(*) AS \`total\` FROM \`${table.table}\` WHERE ${table.predicate}`;
+      ` LIMIT $${table.params.length + 1}`;
+    const countSql = `SELECT COUNT(*) AS total FROM ${table.table} WHERE ${table.predicate}`;
 
     for (let batch = 0; batch < MAX_BATCHES_PER_TABLE; batch += 1) {
       const purged = await this.db.$transaction(async (tx: Tx) => {
@@ -301,7 +301,7 @@ export class RetentionWorker extends BaseWorker {
         }
         const affected = Number(
           await tx.$executeRawUnsafe(
-            `DELETE FROM \`${table.table}\` WHERE \`id\` IN (${mysqlPlaceholders(ids.length)})`,
+            `DELETE FROM ${table.table} WHERE id IN (${postgresPlaceholders(ids.length, 1, "uuid")})`,
             ...ids,
           ) ?? 0,
         );
@@ -373,32 +373,32 @@ export class RetentionWorker extends BaseWorker {
         summary.disputes += await this.purgeRows(
           tx,
           "disputes",
-          "`attempt_id` IN (" + mysqlPlaceholders(attemptIds.length) + ")",
+          "attempt_id IN (" + postgresPlaceholders(attemptIds.length, 1, "uuid") + ")",
           attemptIds,
         );
         summary.operatorCases += await this.purgeRows(
           tx,
           "operator_cases",
-          "`attempt_id` IN (" + mysqlPlaceholders(attemptIds.length) + ")",
+          "attempt_id IN (" + postgresPlaceholders(attemptIds.length, 1, "uuid") + ")",
           attemptIds,
         );
         summary.inboundEvents += await this.purgeRows(
           tx,
           "inbound_events",
-          "`attempt_id` IN (" + mysqlPlaceholders(attemptIds.length) + ")",
+          "attempt_id IN (" + postgresPlaceholders(attemptIds.length, 1, "uuid") + ")",
           attemptIds,
         );
         summary.attemptStepLogs += await this.purgeRows(
           tx,
           "attempt_step_logs",
-          "`attempt_id` IN (" + mysqlPlaceholders(attemptIds.length) + ")",
+          "attempt_id IN (" + postgresPlaceholders(attemptIds.length, 1, "uuid") + ")",
           attemptIds,
         );
 
         const purgedAttempts = await this.purgeRows(
           tx,
           "payment_attempts",
-          "`id` IN (" + mysqlPlaceholders(attemptIds.length) + ")",
+          "id IN (" + postgresPlaceholders(attemptIds.length, 1, "uuid") + ")",
           attemptIds,
         );
         summary.paymentAttempts += purgedAttempts;
@@ -411,7 +411,7 @@ export class RetentionWorker extends BaseWorker {
           summary.attemptGroups += await this.purgeRows(
             tx,
             "attempt_groups",
-            "`id` IN (" + mysqlPlaceholders(freeGroups.length) + ")",
+            "id IN (" + postgresPlaceholders(freeGroups.length, 1, "uuid") + ")",
             freeGroups,
           );
         }
@@ -460,10 +460,10 @@ export class RetentionWorker extends BaseWorker {
     cutoff: Date,
   ): Promise<Array<{ id: string; ledgerEntryId: string | null; attemptGroupId: string }>> {
     const rows = await tx.$queryRawUnsafe(
-      "SELECT `id`, `ledger_entry_id`, `attempt_group_id` FROM `payment_attempts`" +
-      " WHERE `terminal_at` IS NOT NULL AND `created_at` < ?" +
-      " ORDER BY `created_at` ASC" +
-      " LIMIT ?",
+      "SELECT id, ledger_entry_id, attempt_group_id FROM payment_attempts" +
+      " WHERE terminal_at IS NOT NULL AND created_at < $1" +
+      " ORDER BY created_at ASC" +
+      " LIMIT $2",
       cutoff,
       this.batchSize,
     );
@@ -502,8 +502,8 @@ export class RetentionWorker extends BaseWorker {
     }
     const existing = await this.selectIds(
       tx,
-      "SELECT `id` FROM `journal_entries`" +
-      " WHERE `id` IN (" + mysqlPlaceholders(entryIds.length) + ")",
+      "SELECT id FROM journal_entries" +
+      " WHERE id IN (" + postgresPlaceholders(entryIds.length, 1, "uuid") + ")",
       entryIds,
     );
     return new Set(existing);
@@ -521,7 +521,7 @@ export class RetentionWorker extends BaseWorker {
     }
     return this.selectIds(
       tx,
-      "SELECT `id` FROM `disputes` WHERE `attempt_id` IN (" + mysqlPlaceholders(attemptIds.length) + ")",
+      "SELECT id FROM disputes WHERE attempt_id IN (" + postgresPlaceholders(attemptIds.length, 1, "uuid") + ")",
       attemptIds,
     );
   }
@@ -538,16 +538,19 @@ export class RetentionWorker extends BaseWorker {
   ): Promise<number> {
     const clauses: string[] = [];
     const params: unknown[] = [];
+    let startIndex = 1;
     if (attemptIds.length > 0) {
-      clauses.push("`source_attempt_id` IN (" + mysqlPlaceholders(attemptIds.length) + ")");
+      clauses.push("source_attempt_id IN (" + postgresPlaceholders(attemptIds.length, startIndex, "uuid") + ")");
       params.push(...attemptIds);
+      startIndex += attemptIds.length;
     }
     if (disputeIds.length > 0) {
-      clauses.push("`dispute_id` IN (" + mysqlPlaceholders(disputeIds.length) + ")");
+      clauses.push("dispute_id IN (" + postgresPlaceholders(disputeIds.length, startIndex, "uuid") + ")");
       params.push(...disputeIds);
+      startIndex += disputeIds.length;
     }
     if (entryIds.length > 0) {
-      clauses.push("`journal_entry_id` IN (" + mysqlPlaceholders(entryIds.length) + ")");
+      clauses.push("journal_entry_id IN (" + postgresPlaceholders(entryIds.length, startIndex, "uuid") + ")");
       params.push(...entryIds);
     }
     if (clauses.length === 0) {
@@ -572,9 +575,9 @@ export class RetentionWorker extends BaseWorker {
       return [];
     }
     const referenced = await tx.$queryRawUnsafe(
-      "SELECT `attempt_group_id` FROM `payment_attempts`" +
-      " WHERE `attempt_group_id` IN (" + mysqlPlaceholders(groupIds.length) + ")" +
-      " AND `id` NOT IN (" + mysqlPlaceholders(purgedAttemptIds.length) + ")",
+      "SELECT attempt_group_id FROM payment_attempts" +
+      " WHERE attempt_group_id IN (" + postgresPlaceholders(groupIds.length, 1, "uuid") + ")" +
+      " AND id NOT IN (" + postgresPlaceholders(purgedAttemptIds.length, groupIds.length + 1, "uuid") + ")",
       ...groupIds,
       ...purgedAttemptIds,
     );
@@ -585,9 +588,9 @@ export class RetentionWorker extends BaseWorker {
     );
     const groups = await this.selectIds(
       tx,
-      "SELECT `id` FROM `attempt_groups`" +
-      " WHERE `id` IN (" + mysqlPlaceholders(groupIds.length) + ")" +
-      " AND `created_at` < ?",
+      "SELECT id FROM attempt_groups" +
+      " WHERE id IN (" + postgresPlaceholders(groupIds.length, 1, "uuid") + ")" +
+      ` AND created_at < $${groupIds.length + 1}`,
       [...groupIds, cutoff],
     );
     return groups.filter((groupId) => !stillUsed.has(groupId));
@@ -611,13 +614,14 @@ export class RetentionWorker extends BaseWorker {
       return 0;
     }
     if (this.dryRun) {
-      return this.countRows(tx, `SELECT COUNT(*) AS \`total\` FROM \`${table}\` WHERE ${predicate}`, params);
+      return this.countRows(tx, `SELECT COUNT(*) AS total FROM ${table} WHERE ${predicate}`, params);
     }
     let total = 0;
     for (;;) {
+      const limitPlaceholder = `$${params.length + 1}`;
       const affected = Number(
         await tx.$executeRawUnsafe(
-          `DELETE FROM \`${table}\` WHERE ${predicate} LIMIT ?`,
+          `DELETE FROM ${table} WHERE id IN (SELECT id FROM ${table} WHERE ${predicate} ORDER BY id LIMIT ${limitPlaceholder})`,
           ...params,
           this.batchSize,
         ) ?? 0,

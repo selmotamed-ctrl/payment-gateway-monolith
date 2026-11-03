@@ -202,6 +202,11 @@ const router = createRouter({
                     name: "AdminCheckoutHelp",
                     component: () => import("@/pages/settings/checkout-help/index"),
                 },
+                {
+                    path: "system/backups",
+                    name: "SystemBackups",
+                    component: () => import("@/pages/system/backups/index"),
+                },
             ],
             meta: {
                 requiresAuth: true,

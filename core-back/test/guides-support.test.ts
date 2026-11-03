@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { buildCheckoutSupportConfig } from "../api/internal/checkout";
 import { getBaseClient } from "../prisma/client/base";
-import { DEFAULT_SUPPORT_CONFIG, RAIL_HELP_GUIDES } from "../prisma/seedGuides";
+import {
+  DEFAULT_SUPPORT_CONFIG,
+  RAIL_HELP_GUIDES,
+  seedCheckoutSupport,
+  seedRailHelpGuides,
+} from "../prisma/seedGuides";
 
 const link = {
   id: "link-1",
@@ -118,15 +123,36 @@ describe("seeded guide rows (live database)", () => {
       console.log("[guides-support] database not reachable, skipping the seeded-row assertions");
       return;
     }
+    // Apply the idempotent seed so this suite proves the persisted rows even
+    // when another test file has already created unguided rails. Ensure at
+    // least one rail with a seeded code exists so the guide update has a
+    // target.
+    await seedCheckoutSupport(client);
+    const seededCode = Object.keys(RAIL_HELP_GUIDES)[0] as string;
+    const existingRail = await client.rail.findUnique({ where: { code: seededCode } });
+    if (!existingRail) {
+      await client.rail.create({
+        data: {
+          code: seededCode,
+          nameAr: `دليل ${seededCode}`,
+          nameEn: `Guide ${seededCode}`,
+          collectionMode: "OTP_PULL",
+          subModes: [],
+          currency: "LYD",
+          capabilities: {},
+          metadata: { seededBy: "guides-support-test" },
+        },
+      });
+    }
+    const updated = await seedRailHelpGuides(client);
+    expect(updated).toBeGreaterThan(0);
     const setting = await client.platformSetting.findFirst({
       where: { key: "checkout.support_config" },
       orderBy: { version: "desc" },
     });
-    // The seed may not have run in this environment; only assert when it did.
-    if (setting) {
-      expect((setting.valueJson as Record<string, unknown>).enabled).toBe(true);
-      expect((setting.valueJson as Record<string, unknown>).support_email).toBeTruthy();
-    }
+    expect(setting).toBeDefined();
+    expect((setting?.valueJson as Record<string, unknown>).enabled).toBe(true);
+    expect((setting?.valueJson as Record<string, unknown>).support_email).toBeTruthy();
     const rails = await client.rail.findMany({ select: { code: true, helpGuideJson: true } });
     if (rails.length > 0) {
       const guided = rails.filter((rail) => rail.helpGuideJson !== null && rail.helpGuideJson !== undefined);

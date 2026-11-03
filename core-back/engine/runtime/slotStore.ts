@@ -8,22 +8,22 @@ import type {
 } from "../flow/DynamicRailEngine";
 import { buildLedgerTemplate, decimal, LedgerPoster, type LedgerPostContext } from "../ledger/LedgerPoster";
 import { ApiError } from "../../lib/error";
+import { createLedgerShardWriter } from "../../lib/storageEngine/ledgerShardWriter";
 
 /**
  * Prisma-backed slot reservation store.
  *
- * MySQL/MariaDB has no `UPDATE ... RETURNING`, so the reservation is a pair
- * of statements that run in a single transaction:
+ * The reservation is a pair of statements that run in a single transaction:
  *
  *   SELECT id FROM payment_links
- *    WHERE id = ?
- *      AND (infinite_use = 1 OR confirmed_count + active_locked_count < use_count)
+ *    WHERE id = $1::uuid
+ *      AND (infinite_use = true OR confirmed_count + active_locked_count < use_count)
  *    FOR UPDATE
  *
  *   UPDATE payment_links
- *      SET active_locked_count = active_locked_count + 1, updated_at = NOW()
- *    WHERE id = ?
- *      AND (infinite_use = 1 OR confirmed_count + active_locked_count < use_count)
+ *      SET active_locked_count = active_locked_count + 1, updated_at = now()
+ *    WHERE id = $1::uuid
+ *      AND (infinite_use = true OR confirmed_count + active_locked_count < use_count)
  *
  * The row lock is taken before the counter is incremented, so two cluster
  * nodes can never both take the last slot: the second one waits for the lock
@@ -48,14 +48,14 @@ export class PrismaSlotReservationStore implements SlotReservationStore {
     }
     const reserve = async (tx: PrismaLike): Promise<boolean> => {
       const locked = (await tx.$queryRawUnsafe(
-        "SELECT id FROM payment_links WHERE id = ? AND (infinite_use = 1 OR confirmed_count + active_locked_count < use_count) FOR UPDATE",
+        "SELECT id FROM payment_links WHERE id = $1::uuid AND (infinite_use = true OR confirmed_count + active_locked_count < use_count) FOR UPDATE",
         linkId,
       )) as Array<{ id: string }>;
       if (!Array.isArray(locked) || locked.length === 0) {
         return false;
       }
       const updated = await tx.$executeRawUnsafe(
-        "UPDATE payment_links SET active_locked_count = active_locked_count + 1, updated_at = NOW() WHERE id = ? AND (infinite_use = 1 OR confirmed_count + active_locked_count < use_count)",
+        "UPDATE payment_links SET active_locked_count = active_locked_count + 1, updated_at = now() WHERE id = $1::uuid AND (infinite_use = true OR confirmed_count + active_locked_count < use_count)",
         linkId,
       );
       return Number(updated ?? 0) > 0;
@@ -76,7 +76,7 @@ export class PrismaSlotReservationStore implements SlotReservationStore {
       return;
     }
     await target.$executeRawUnsafe(
-      "UPDATE payment_links SET active_locked_count = GREATEST(0, active_locked_count - 1), updated_at = NOW() WHERE id = ?",
+      "UPDATE payment_links SET active_locked_count = GREATEST(0, active_locked_count - 1), updated_at = now() WHERE id = $1::uuid",
       linkId,
     );
     await target.paymentAttempt.update({
@@ -104,18 +104,18 @@ export class PrismaSlotReservationStore implements SlotReservationStore {
       return { outcome: "COMMITTED" };
     }
     // The conditional update is the atomic decision: it takes the row lock
-    // and only advances the counters when a slot is still free. The state is
-    // settled before the counters move because MySQL evaluates the assignments
-    // of an UPDATE from left to right.
+    // and only advances the counters when a slot is still free. PostgreSQL
+    // evaluates every assignment against the old row, so the state and the
+    // counters are settled from the same snapshot.
     const updated = Number(
       await target.$executeRawUnsafe(
         `UPDATE payment_links
-            SET state = CASE WHEN infinite_use = 0 AND confirmed_count + 1 >= use_count THEN 'COMPLETED' ELSE state END,
+            SET state = CASE WHEN infinite_use = false AND confirmed_count + 1 >= use_count THEN 'COMPLETED' ELSE state END,
                 confirmed_count = confirmed_count + 1,
                 active_locked_count = GREATEST(0, active_locked_count - 1),
-                updated_at = NOW()
-          WHERE id = ?
-            AND (infinite_use = 1 OR confirmed_count + 1 <= use_count)`,
+                updated_at = now()
+          WHERE id = $1::uuid
+            AND (infinite_use = true OR confirmed_count + 1 <= use_count)`,
         linkId,
       ) ?? 0,
     );
@@ -128,7 +128,7 @@ export class PrismaSlotReservationStore implements SlotReservationStore {
     const rows = (await target.$queryRawUnsafe(
       `SELECT confirmed_count, active_locked_count, use_count, infinite_use, state
          FROM payment_links
-        WHERE id = ?
+        WHERE id = $1::uuid
         FOR UPDATE`,
       linkId,
     )) as Array<Record<string, unknown>>;
@@ -163,10 +163,10 @@ export class PrismaSlotReservationStore implements SlotReservationStore {
     // cannot be violated.
     await target.$executeRawUnsafe(
       `UPDATE payment_links
-          SET state = CASE WHEN infinite_use = 0 AND confirmed_count >= use_count THEN 'COMPLETED' ELSE state END,
+          SET state = CASE WHEN infinite_use = false AND confirmed_count >= use_count THEN 'COMPLETED' ELSE state END,
               active_locked_count = GREATEST(0, active_locked_count - 1),
-              updated_at = NOW()
-        WHERE id = ?`,
+              updated_at = now()
+        WHERE id = $1::uuid`,
       linkId,
     );
 
@@ -176,7 +176,7 @@ export class PrismaSlotReservationStore implements SlotReservationStore {
       ownershipMode: attempt.ownershipMode,
     });
     template.refId = attempt.id;
-    const poster = new LedgerPoster(target as never);
+    const poster = new LedgerPoster(target as never, undefined, createLedgerShardWriter());
     const posted = await poster.post(template, this.ledgerContext(attempt), target as never);
 
     const suspenseAccountId = await this.suspenseAccountId(target, attempt.currency);

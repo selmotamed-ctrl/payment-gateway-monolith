@@ -15,6 +15,7 @@ import { isApiError, toErrorEnvelope } from "./lib/error";
 import { requestLoggerMiddleware } from "./lib/requestLogger";
 import { rawBodyMiddleware } from "./lib/rawBody";
 import { client } from "./prisma/client";
+import { getStorageEngine, shutdownStorageEngine } from "./lib/storageEngine";
 
 declare global {
   namespace Express {
@@ -203,9 +204,11 @@ export const start = async () => {
     backgroundJobsEnabled: env.WORKER_BACKGROUND_JOBS_ENABLED,
   });
   const server = createHttpsServer();
+  const storage = env.WORKER_ENABLED ? getStorageEngine() : undefined;
   const workers = env.WORKER_ENABLED
     ? createProductionWorkerRuntime({
         db: client as never,
+        ...(storage ? { storage } : {}),
         intervalMs: env.WORKER_POLL_INTERVAL_MS,
         batchSize: env.WORKER_BATCH_SIZE,
         maxAttempts: env.WORKER_MAX_ATTEMPTS,
@@ -234,6 +237,7 @@ export const start = async () => {
 
   const stop = async (): Promise<void> => {
     workers?.stop();
+    await shutdownStorageEngine();
     await new Promise<void>((resolve) => {
       server.close(() => resolve());
     });

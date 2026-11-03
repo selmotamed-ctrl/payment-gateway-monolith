@@ -1,6 +1,6 @@
 import { BaseWorker, type WorkerOptions } from "./workerRuntime";
 import type { PrismaLike } from "../db/ports";
-import { toCamelRows, mysqlPlaceholders } from "../db/rawRows";
+import { toCamelRows, postgresPlaceholders } from "../db/rawRows";
 
 export interface JoinRequestExpiryWorkerDeps extends WorkerOptions {
   /**
@@ -39,8 +39,8 @@ export class JoinRequestExpiryWorker extends BaseWorker {
   private async expireAbandonedDrafts(now: Date): Promise<void> {
     const cutoff = new Date(now.getTime() - this.draftTtlMs);
     const result = await this.db.$executeRawUnsafe(
-      "UPDATE `join_requests` SET `status` = 'EXPIRED', `updated_at` = ?" +
-        " WHERE `status` = 'DRAFT' AND `created_at` < ? AND `updated_at` < ?",
+      "UPDATE join_requests SET status = 'EXPIRED', updated_at = $1" +
+        " WHERE status = 'DRAFT' AND created_at < $2 AND updated_at < $3",
       now,
       cutoff,
       cutoff,
@@ -56,12 +56,14 @@ export class JoinRequestExpiryWorker extends BaseWorker {
 
   private async expireOverdueReviews(now: Date): Promise<void> {
     const statuses = ["SUBMITTED", "IN_REVIEW", "INFO_REQUESTED"];
-    const placeholders = mysqlPlaceholders(statuses.length);
+    const placeholders = postgresPlaceholders(statuses.length, 1);
+    const slaDuePlaceholder = `$${statuses.length + 1}`;
+    const limitPlaceholder = `$${statuses.length + 2}`;
     const sql =
-      "SELECT `id` FROM `join_requests`" +
-      ` WHERE \`status\` IN (${placeholders})` +
-      " AND `sla_due_at` <= ? AND `status` <> 'PENDING_CHECKER'" +
-      " ORDER BY `sla_due_at` ASC LIMIT ?";
+      "SELECT id FROM join_requests" +
+      ` WHERE status IN (${placeholders})` +
+      ` AND sla_due_at <= ${slaDuePlaceholder} AND status <> 'PENDING_CHECKER'` +
+      ` ORDER BY sla_due_at ASC LIMIT ${limitPlaceholder}`;
     const rows = toCamelRows<{ id: string }>(
       await this.db.$queryRawUnsafe(sql, ...statuses, now, this.batchSize),
     );
@@ -70,8 +72,8 @@ export class JoinRequestExpiryWorker extends BaseWorker {
     }
     for (const row of rows) {
       await this.db.$executeRawUnsafe(
-        "UPDATE `join_requests` SET `status` = 'EXPIRED', `updated_at` = ?" +
-          " WHERE `id` = ? AND `status` IN ('SUBMITTED','IN_REVIEW','INFO_REQUESTED')",
+        "UPDATE join_requests SET status = 'EXPIRED', updated_at = $1" +
+          " WHERE id = $2::uuid AND status IN ('SUBMITTED','IN_REVIEW','INFO_REQUESTED')",
         now,
         row.id,
       );

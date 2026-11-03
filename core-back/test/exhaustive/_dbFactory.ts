@@ -3,9 +3,9 @@
  *
  * It builds a row that satisfies every NOT NULL column of a table, recursively
  * creating the parent rows of the required foreign keys. It is used by the
- * schema suite to prove that the *real* MariaDB constraints (unique indexes,
- * CHECK constraints, triggers) reject invalid data. It is not a product
- * module and it never stands in for one.
+ * schema suite to prove that the *real* PostgreSQL 18 constraints (unique
+ * indexes, CHECK constraints, triggers) reject invalid data. It is not a
+ * product module and it never stands in for one.
  */
 import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "../../generated/prisma/client";
@@ -66,21 +66,27 @@ export const dbColumnName = (fieldName: string, table?: string): string => {
 
 export const dbColumnFor = (table: string, fieldName: string): string => dbColumnName(fieldName, table);
 
-const enumColumnValues = (columnType: string): string[] => {
-  const match = /^enum\((.*)\)$/i.exec(columnType);
-  if (!match) {
-    return [];
+const enumColumnValues = (column: ColumnInfo, schemaType?: string): string[] => {
+  const candidateNames = [
+    schemaType,
+    column.udtName,
+    column.columnType.replace(/"/g, ""),
+  ].filter((value): value is string => Boolean(value));
+  for (const name of candidateNames) {
+    const enumeration = schema.enums.find((entry) => entry.name === name);
+    if (enumeration) {
+      return enumeration.values;
+    }
   }
-  return (match[1] as string)
-    .split(",")
-    .map((value) => value.trim().replace(/^'(.*)'$/, "$1"));
+  return [];
 };
 
 const isAuto = (column: ColumnInfo): boolean =>
-  /auto_increment/i.test(column.extra);
+  /auto_increment/i.test(column.extra) || column.isIdentity === "YES";
 
 const isGeneratedTime = (column: ColumnInfo): boolean =>
-  column.columnDefault !== null && /CURRENT_TIMESTAMP/i.test(String(column.columnDefault));
+  column.columnDefault !== null
+  && /(CURRENT_TIMESTAMP|now\(\))/i.test(String(column.columnDefault));
 
 const requiredColumns = (meta: TableMeta): ColumnInfo[] =>
   meta.columns.filter(
@@ -118,25 +124,31 @@ export const valueForColumn = (
     return new Date();
   }
   if (options.schemaType === "Boolean") {
-    return 0;
+    return false;
   }
 
-  const enumValues = enumColumnValues(column.columnType);
+  const enumValues = enumColumnValues(column, options.schemaType);
   if (enumValues.length > 0) {
     return enumValues[0] as string;
   }
 
-  if (dataType === "decimal" || dataType === "numeric") {
+  if (dataType === "uuid") {
+    return randomUUID();
+  }
+  if (dataType === "numeric" || dataType === "decimal") {
     return options.forcePositive ? "1.0000" : "0.0000";
   }
-  if (["int", "bigint", "smallint", "tinyint", "mediumint"].includes(dataType)) {
-    if (/tinyint\(1\)/.test(type)) {
-      return 0;
-    }
+  if (
+    ["smallint", "integer", "bigint", "int2", "int4", "int8", "serial", "bigserial", "smallserial"].includes(dataType)
+  ) {
     return options.forcePositive ? 1 : 0;
   }
-  if (type.startsWith("char(")) {
-    const length = Number(/char\((\d+)\)/.exec(type)?.[1] ?? 1);
+  if (dataType === "boolean" || dataType === "bool") {
+    return false;
+  }
+  if (type.startsWith("character(") || type.startsWith("char(")) {
+    const length = column.characterMaximumLength
+      ?? Number(/char(?:acter)?\((\d+)\)/.exec(type)?.[1] ?? 1);
     if (length === 2) {
       return "LY";
     }
@@ -146,24 +158,35 @@ export const valueForColumn = (
     const seed = options.uniqueValue.replace(/-/g, "");
     return seed.repeat(Math.ceil(length / seed.length)).slice(0, length);
   }
-  if (type.startsWith("varchar(")) {
-    const length = Number(/varchar\((\d+)\)/.exec(type)?.[1] ?? 191);
+  if (type.startsWith("character varying(") || type.startsWith("varchar(")) {
+    const length = column.characterMaximumLength
+      ?? Number(/(?:character varying|varchar)\((\d+)\)/.exec(type)?.[1] ?? 191);
     const seed = options.uniqueValue;
     return seed.slice(0, Math.min(length, seed.length));
   }
   if (dataType === "date") {
     return "1990-01-01";
   }
-  if (dataType === "datetime" || dataType === "timestamp") {
+  if (dataType.includes("timestamp") || dataType === "datetime") {
     return new Date();
   }
-  if (dataType === "json") {
+  if (dataType === "json" || dataType === "jsonb") {
     return JSON.stringify({});
   }
-  if (dataType === "blob" || dataType === "longblob" || dataType === "mediumblob" || dataType === "tinyblob") {
+  if (dataType === "bytea" || dataType.includes("blob")) {
     return Buffer.from(options.uniqueValue, "utf8");
   }
-  if (dataType === "text" || dataType === "longtext" || dataType === "mediumtext" || dataType === "tinytext") {
+  if (dataType === "array" || type.endsWith("[]")) {
+    return "{}";
+  }
+  if (
+    dataType === "text"
+    || dataType === "character varying"
+    || dataType === "character"
+    || dataType.includes("text")
+    || dataType === "name"
+    || dataType === "citext"
+  ) {
     return options.uniqueValue;
   }
   return options.uniqueValue;
@@ -192,12 +215,9 @@ export const buildRow = async (
   const requiredNames = new Set(required.map((column) => column.columnName));
   const forced = new Set((options.forceNonNull ?? []).map((field) => dbColumnFor(table, field)));
 
-  // Primary key: Prisma generates uuid(7) on the client, so the database has no
-  // default. Supply one ourselves.
-  const primary = meta.columns.find((column) => column.columnKey === "PRI");
-  if (primary) {
-    row[primary.columnName] = valueForColumn(primary, { uniqueValue: token, schemaType: fieldTypeFor(table, primary.columnName) });
-  }
+  // Prisma generates UUID primary keys on the client. The generic required
+  // column loop below supplies one for every NOT NULL column without a
+  // database default (including composite primary keys).
 
   for (const column of meta.columns) {
     const name = column.columnName;
@@ -209,7 +229,8 @@ export const buildRow = async (
       row[name] = options.parentOverride[`${table}.${name}`];
       continue;
     }
-    const isRequired = requiredNames.has(name) || forced.has(name);
+    const forcedValue = forced.has(name) && column.columnDefault === null && !isAuto(column);
+    const isRequired = requiredNames.has(name) || forcedValue;
     if (!isRequired) {
       continue;
     }
@@ -252,17 +273,75 @@ export const buildRow = async (
   return row;
 };
 
+const coerceValue = (column: ColumnInfo | undefined, value: unknown): unknown => {
+  if (value === undefined || value === null || column === undefined) {
+    return value ?? null;
+  }
+  const dataType = column.dataType.toLowerCase();
+  if (dataType === "boolean" || dataType === "bool") {
+    if (value === 0 || value === "0" || value === "false") {
+      return false;
+    }
+    if (value === 1 || value === "1" || value === "true") {
+      return true;
+    }
+    return Boolean(value);
+  }
+  if (dataType === "json" || dataType === "jsonb") {
+    return typeof value === "string" ? value : JSON.stringify(value);
+  }
+  if (dataType === "bytea") {
+    return Buffer.isBuffer(value) ? value : Buffer.from(String(value), "utf8");
+  }
+  if (dataType === "array" || column.columnType.toLowerCase().endsWith("[]")) {
+    return Array.isArray(value) ? value : value;
+  }
+  return value;
+};
+
 const insertRowInternal = async (
   table: string,
   row: Record<string, unknown>,
   client: PrismaClient = exhaustiveClient(),
 ): Promise<Record<string, unknown>> => {
-  const columns = Object.keys(row);
-  const placeholders = columns.map(() => "?").join(", ");
-  const sql = `INSERT INTO \`${table}\` (${columns.map((column) => `\`${column}\``).join(", ")}) VALUES (${placeholders})`;
-  const values = columns.map((column) => row[column]);
-  await client.$executeRawUnsafe(sql, ...values);
-  return row;
+  const meta = await loadMeta(client, table);
+  const columns = Object.keys(row).filter((column) => row[column] !== undefined);
+  const values = columns.map((column) => coerceValue(meta.byName.get(column), row[column]));
+  const quotedTable = `"${table}"`;
+  const serialPrimary = meta.columns.find(
+    (column) =>
+      column.columnKey === "PRI"
+      && /nextval\(/i.test(String(column.columnDefault ?? "")),
+  );
+  if (serialPrimary && row[serialPrimary.columnName] !== undefined) {
+    const explicit = Number(row[serialPrimary.columnName]);
+    if (Number.isFinite(explicit)) {
+      // An explicit key insert does not advance a PostgreSQL sequence. Keep it
+      // ahead of the explicit value so a later DEFAULT VALUES insert cannot
+      // collide with a key the duplicate-key tests wrote on purpose.
+      await client
+        .$queryRawUnsafe(
+          `SELECT setval(
+             pg_get_serial_sequence($1, $2),
+             GREATEST(
+               (SELECT COALESCE(MAX("${serialPrimary.columnName}"), 0) FROM ${quotedTable}),
+               $3
+             )
+           )`,
+          table,
+          serialPrimary.columnName,
+          explicit,
+        )
+        .catch(() => undefined);
+    }
+  }
+  const sql = columns.length === 0
+    ? `INSERT INTO ${quotedTable} DEFAULT VALUES RETURNING *`
+    : `INSERT INTO ${quotedTable} (${columns.map((column) => `"${column}"`).join(", ")}) VALUES (${columns
+        .map((_column, index) => `$${index + 1}`)
+        .join(", ")}) RETURNING *`;
+  const inserted = (await client.$queryRawUnsafe(sql, ...values)) as Array<Record<string, unknown>>;
+  return inserted[0] ? { ...row, ...inserted[0] } : row;
 };
 
 export const insertRow = insertRowInternal;
@@ -283,7 +362,9 @@ export const deleteRowsByToken = async (
   token: string,
   client: PrismaClient = exhaustiveClient(),
 ): Promise<void> => {
-  await client.$executeRawUnsafe(`DELETE FROM \`${table}\` WHERE \`id\` LIKE ?`, `%${token}%`).catch(() => undefined);
+  await client
+    .$executeRawUnsafe(`DELETE FROM "${table}" WHERE "id"::text LIKE $1`, `%${token}%`)
+    .catch(() => undefined);
 };
 
 /**

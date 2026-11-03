@@ -31,6 +31,7 @@ const ROUTES = [
   "/guide",
   "/academy",
   "/settings/checkout-help",
+  "/system/backups",
 ] as const;
 
 const VIEWPORTS = [

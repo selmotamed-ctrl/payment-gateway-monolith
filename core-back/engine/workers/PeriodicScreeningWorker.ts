@@ -38,11 +38,11 @@ export const DUE_MERCHANTS_SQL =
   " WHERE m.status = 'ACTIVE'" +
   " AND COALESCE(" +
   " (SELECT MAX(s.requested_at) FROM aml_screenings s" +
-  "  WHERE s.subject_type = 'MERCHANT' AND s.subject_id = m.id)," +
-  " ?" +
-  " ) <= ?" +
+  "  WHERE s.subject_type = 'MERCHANT' AND s.subject_id = m.id::text)," +
+  " $1" +
+  " ) <= $2" +
   " ORDER BY m.id" +
-  " LIMIT ?" +
+  " LIMIT $3" +
   " FOR UPDATE SKIP LOCKED";
 
 const OPEN_CASE_STATUSES = ["OPEN", "IN_REVIEW", "PENDING_CHECKER", "FROZEN", "ESCALATED_STR"];

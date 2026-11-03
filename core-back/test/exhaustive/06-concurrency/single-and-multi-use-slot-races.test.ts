@@ -22,7 +22,7 @@ const attemptIds: string[] = [];
 const makeLink = async (useCount: number): Promise<string> => {
   const row = await createRow("payment_links", {
     use_count: useCount,
-    infinite_use: 0,
+    infinite_use: false,
     confirmed_count: 0,
     active_locked_count: 0,
   });
@@ -55,7 +55,7 @@ const makeAttempt = async (linkId: string): Promise<DynamicAttempt> => {
 
 const readLink = async (linkId: string) => {
   const rows = (await db.$queryRawUnsafe(
-    "SELECT active_locked_count, confirmed_count, use_count, infinite_use, state FROM payment_links WHERE id = ?",
+    'SELECT "active_locked_count", "confirmed_count", "use_count", "infinite_use", "state" FROM "payment_links" WHERE "id" = $1',
     linkId,
   )) as Array<Record<string, unknown>>;
   return rows[0] as {
@@ -73,13 +73,13 @@ afterAll(async () => {
   }
   if (attemptIds.length > 0) {
     await db.$executeRawUnsafe(
-      `DELETE FROM payment_attempts WHERE id IN (${attemptIds.map(() => "?").join(",")})`,
+      `DELETE FROM "payment_attempts" WHERE "id" IN (${attemptIds.map((_id, index) => `$${index + 1}`).join(",")})`,
       ...attemptIds,
     );
   }
   if (linkIds.length > 0) {
     await db.$executeRawUnsafe(
-      `DELETE FROM payment_links WHERE id IN (${linkIds.map(() => "?").join(",")})`,
+      `DELETE FROM "payment_links" WHERE "id" IN (${linkIds.map((_id, index) => `$${index + 1}`).join(",")})`,
       ...linkIds,
     );
   }
@@ -138,7 +138,7 @@ describeDb("Suite 06 · slot reservation races", () => {
 
   test("an infinite-use link accepts 50 concurrent reservations", async () => {
     const row = await createRow("payment_links", {
-      infinite_use: 1,
+      infinite_use: true,
       use_count: 1,
       confirmed_count: 0,
       active_locked_count: 0,

@@ -80,7 +80,7 @@ export class CheckpointService {
   private async lockAccount(accountId: string): Promise<LedgerAccountRecord | null> {
     if (this.client.$queryRawUnsafe) {
       const rows = (await this.client.$queryRawUnsafe(
-        "SELECT * FROM `gl_accounts` WHERE `id` = ? FOR UPDATE",
+        "SELECT * FROM gl_accounts WHERE id = $1::uuid FOR UPDATE",
         accountId,
       )) as Array<Record<string, unknown>> | null;
       const locked = Array.isArray(rows) ? rows[0] : undefined;

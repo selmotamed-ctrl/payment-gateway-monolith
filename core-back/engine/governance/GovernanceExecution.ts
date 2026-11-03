@@ -1346,13 +1346,13 @@ const commitAmlLinkSlot = async (tx: Tx, linkId: string): Promise<void> => {
     await client.$executeRawUnsafe(
       `UPDATE payment_links
           SET state = CASE
-                WHEN infinite_use = 0 AND confirmed_count + 1 >= use_count THEN 'COMPLETED'
+                WHEN infinite_use = false AND confirmed_count + 1 >= use_count THEN 'COMPLETED'
                 ELSE state
               END,
               confirmed_count = confirmed_count + 1,
               active_locked_count = GREATEST(0, active_locked_count - 1),
-              updated_at = NOW()
-        WHERE id = ?`,
+              updated_at = now()
+        WHERE id = $1::uuid`,
       linkId,
     );
     return;
@@ -1387,8 +1387,8 @@ const releaseAmlLinkSlot = async (tx: Tx, linkId: string): Promise<void> => {
     await client.$executeRawUnsafe(
       `UPDATE payment_links
           SET active_locked_count = GREATEST(0, active_locked_count - 1),
-              updated_at = NOW()
-        WHERE id = ?`,
+              updated_at = now()
+        WHERE id = $1::uuid`,
       linkId,
     );
     return;

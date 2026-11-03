@@ -139,7 +139,7 @@ export class PrismaRepositories implements Repositories {
     },
     lockMerchantById: async (tx, id) => {
       const result = await tx.$queryRaw`
-        SELECT * FROM merchants WHERE id = ${id} LIMIT 1 FOR UPDATE
+        SELECT * FROM merchants WHERE id = ${id}::uuid LIMIT 1 FOR UPDATE
       `;
       const found = mapRawRows<MerchantRow>(result)[0];
       if (!found) {
@@ -182,9 +182,9 @@ export class PrismaRepositories implements Repositories {
           FROM journal_lines jl
           INNER JOIN gl_accounts a ON a.id = jl.gl_account_id
           INNER JOIN journal_entries je ON je.id = jl.entry_id
-          INNER JOIN payment_attempts pa ON pa.id = je.ref_id
+          INNER JOIN payment_attempts pa ON je.ref_id = pa.id::text
           WHERE a.account_type = 'COMMISSION_RECEIVABLE'
-            AND pa.merchant_id = ${merchantId}
+            AND pa.merchant_id = ${merchantId}::uuid
             AND je.ref_type IN ('PAYMENT_ATTEMPT', 'COMMISSION_NETTING')
         `;
         const first = rows<Any>(result)[0];
@@ -403,7 +403,7 @@ export class PrismaRepositories implements Repositories {
   payments: PaymentRepository = {
     lockLinkByKey: async (tx, key) => {
       const result = await tx.$queryRaw`
-        SELECT * FROM payment_links WHERE \`key\` = ${key} LIMIT 1 FOR UPDATE
+        SELECT * FROM payment_links WHERE "key" = ${key} LIMIT 1 FOR UPDATE
       `;
       const found = mapRawRows<PaymentLinkRow>(result)[0];
       if (!found) {
@@ -430,7 +430,7 @@ export class PrismaRepositories implements Repositories {
         FROM rail_routes r
         INNER JOIN rails rl ON rl.id = r.rail_id
         INNER JOIN credential_sets cs ON cs.gateway_id = r.gateway_id AND cs.env = ${input.env}
-        WHERE (${input.railCode ?? null} IS NULL OR rl.code = ${input.railCode ?? null})
+        WHERE (${input.railCode ?? null}::text IS NULL OR rl.code = ${input.railCode ?? null}::text)
           AND cs.status = 'VERIFIED'
         ORDER BY cs.owner_type ASC
         LIMIT 1
@@ -451,7 +451,7 @@ export class PrismaRepositories implements Repositories {
     lockAttemptById: async (tx, id) => {
       if (typeof (tx as Any).$queryRaw === "function") {
         const result = await tx.$queryRaw`
-          SELECT * FROM payment_attempts WHERE id = ${id} LIMIT 1 FOR UPDATE
+          SELECT * FROM payment_attempts WHERE id = ${id}::uuid LIMIT 1 FOR UPDATE
         `;
         const found = mapRawRows<PaymentAttemptRow>(result)[0];
         if (found) {
@@ -525,7 +525,7 @@ export class PrismaRepositories implements Repositories {
         SELECT pa.*
         FROM payment_attempts pa
         INNER JOIN rail_routes rr ON rr.id = pa.route_id
-        WHERE rr.gateway_id = ${input.gatewayId}
+        WHERE rr.gateway_id = ${input.gatewayId}::uuid
           AND pa.created_at >= ${input.since}
           AND pa.created_at <= ${input.until}
           AND pa.status IN ('SUCCEEDED', 'DISPUTED', 'PARTIALLY_REFUNDED')

@@ -1,3 +1,4 @@
+import { idSearchFilter, isUuid } from "./search/uuidSearch";
 import type { PrismaClient } from "../generated/prisma/client";
 import {
   AdjustmentState,
@@ -146,19 +147,19 @@ export const merchantProvider = defineSearchProvider({
       where: {
         ...(status ? { status } : {}),
         OR: [
-          { id: { contains: query } },
-          { legalName: { contains: query } },
-          { tradeName: { contains: query } },
-          { displayName: { contains: query } },
-          { contactEmail: { contains: query } },
-          { contactPhone: { contains: query } },
+          ...idSearchFilter(query),
+          { legalName: { contains: query , mode: "insensitive" as const} },
+          { tradeName: { contains: query , mode: "insensitive" as const} },
+          { displayName: { contains: query , mode: "insensitive" as const} },
+          { contactEmail: { contains: query , mode: "insensitive" as const} },
+          { contactPhone: { contains: query , mode: "insensitive" as const} },
           ...parsed.phoneVariants.map((phone) => ({
-            contactPhone: { contains: phone },
+            contactPhone: { contains: phone , mode: "insensitive" as const},
           })),
           ...(allowSensitive
             ? [
-                { taxId: { contains: query } },
-                { registrationNo: { contains: query } },
+                { taxId: { contains: query , mode: "insensitive" as const} },
+                { registrationNo: { contains: query , mode: "insensitive" as const} },
               ]
             : []),
         ],
@@ -235,14 +236,14 @@ export const paymentAttemptProvider = defineSearchProvider({
           : {}),
         ...(status ? { status } : {}),
         OR: [
-          { id: { contains: query } },
-          { reference: { contains: query } },
-          { providerReference: { contains: query } },
-          { networkReference: { contains: query } },
-          { gatewayReference: { contains: query } },
-          { idempotencyKey: { contains: query } },
-          { merchant: { is: { tradeName: { contains: query } } } },
-          { merchant: { is: { legalName: { contains: query } } } },
+          ...idSearchFilter(query),
+          { reference: { contains: query , mode: "insensitive" as const} },
+          { providerReference: { contains: query , mode: "insensitive" as const} },
+          { networkReference: { contains: query , mode: "insensitive" as const} },
+          { gatewayReference: { contains: query , mode: "insensitive" as const} },
+          { idempotencyKey: { contains: query , mode: "insensitive" as const} },
+          { merchant: { is: { tradeName: { contains: query , mode: "insensitive" as const} } } },
+          { merchant: { is: { legalName: { contains: query , mode: "insensitive" as const} } } },
         ],
       },
       select: {
@@ -315,29 +316,29 @@ export const operatorCaseProvider = defineSearchProvider({
       where: {
         ...(status ? { state: status } : {}),
         OR: [
-          { id: { contains: query } },
-          { attempt: { is: { reference: { contains: query } } } },
-          { attempt: { is: { providerReference: { contains: query } } } },
-          { attempt: { is: { networkReference: { contains: query } } } },
+          ...idSearchFilter(query),
+          { attempt: { is: { reference: { contains: query , mode: "insensitive" as const} } } },
+          { attempt: { is: { providerReference: { contains: query , mode: "insensitive" as const} } } },
+          { attempt: { is: { networkReference: { contains: query , mode: "insensitive" as const} } } },
           {
             reconciliationItem: {
-              is: { ourReference: { contains: query } },
+              is: { ourReference: { contains: query , mode: "insensitive" as const} },
             },
           },
           {
             reconciliationItem: {
-              is: { providerReference: { contains: query } },
+              is: { providerReference: { contains: query , mode: "insensitive" as const} },
             },
           },
-          { assignee: { is: { email: { contains: query } } } },
+          { assignee: { is: { email: { contains: query , mode: "insensitive" as const} } } },
           {
             attempt: {
-              is: { merchant: { is: { tradeName: { contains: query } } } },
+              is: { merchant: { is: { tradeName: { contains: query , mode: "insensitive" as const} } } },
             },
           },
           {
             attempt: {
-              is: { merchant: { is: { legalName: { contains: query } } } },
+              is: { merchant: { is: { legalName: { contains: query , mode: "insensitive" as const} } } },
             },
           },
         ],
@@ -424,21 +425,21 @@ export const gatewayInquiryProvider = defineSearchProvider({
       where: {
         ...(status ? { status } : {}),
         OR: [
-          { id: { contains: query } },
-          { reason: { contains: query } },
-          { operatorCaseId: { contains: query } },
-          { attempt: { is: { reference: { contains: query } } } },
-          { attempt: { is: { providerReference: { contains: query } } } },
-          { attempt: { is: { gatewayReference: { contains: query } } } },
-          { attempt: { is: { networkReference: { contains: query } } } },
+          ...idSearchFilter(query),
+          { reason: { contains: query , mode: "insensitive" as const} },
+          ...(isUuid(query) ? [{ operatorCaseId: query.trim() }] : []),
+          { attempt: { is: { reference: { contains: query , mode: "insensitive" as const} } } },
+          { attempt: { is: { providerReference: { contains: query , mode: "insensitive" as const} } } },
+          { attempt: { is: { gatewayReference: { contains: query , mode: "insensitive" as const} } } },
+          { attempt: { is: { networkReference: { contains: query , mode: "insensitive" as const} } } },
           {
             attempt: {
-              is: { merchant: { is: { tradeName: { contains: query } } } },
+              is: { merchant: { is: { tradeName: { contains: query , mode: "insensitive" as const} } } },
             },
           },
           {
             attempt: {
-              is: { merchant: { is: { legalName: { contains: query } } } },
+              is: { merchant: { is: { legalName: { contains: query , mode: "insensitive" as const} } } },
             },
           },
         ],
@@ -528,11 +529,11 @@ export const approvalProvider = defineSearchProvider({
       where: {
         ...(status ? { state: status } : {}),
         OR: [
-          { id: { contains: query } },
-          { subjectId: { contains: query } },
-          { subjectType: { contains: query } },
-          { maker: { is: { email: { contains: query } } } },
-          { checker: { is: { email: { contains: query } } } },
+          ...idSearchFilter(query),
+          { subjectId: { contains: query , mode: "insensitive" as const} },
+          { subjectType: { contains: query , mode: "insensitive" as const} },
+          { maker: { is: { email: { contains: query , mode: "insensitive" as const} } } },
+          { checker: { is: { email: { contains: query , mode: "insensitive" as const} } } },
         ],
       },
       select: {
@@ -593,31 +594,31 @@ export const joinRequestProvider = defineSearchProvider({
       where: {
         ...(status ? { status } : {}),
         OR: [
-          { id: { contains: query } },
-          { merchantId: { contains: query } },
+          ...idSearchFilter(query),
+          ...(isUuid(query) ? [{ merchantId: query.trim() }] : []),
           {
             merchant: {
-              is: { legalName: { contains: query } },
+              is: { legalName: { contains: query , mode: "insensitive" as const} },
             },
           },
           {
             merchant: {
-              is: { tradeName: { contains: query } },
+              is: { tradeName: { contains: query , mode: "insensitive" as const} },
             },
           },
           {
             merchant: {
-              is: { contactEmail: { contains: query } },
+              is: { contactEmail: { contains: query , mode: "insensitive" as const} },
             },
           },
           {
             merchant: {
-              is: { contactPhone: { contains: query } },
+              is: { contactPhone: { contains: query , mode: "insensitive" as const} },
             },
           },
           ...parsed.phoneVariants.map((phone) => ({
             merchant: {
-              is: { contactPhone: { contains: phone } },
+              is: { contactPhone: { contains: phone , mode: "insensitive" as const} },
             },
           })),
         ],
@@ -680,17 +681,17 @@ export const kybDocumentProvider = defineSearchProvider({
       where: {
         ...(status ? { status } : {}),
         OR: [
-          { id: { contains: query } },
-          { originalFileName: { contains: query } },
-          { sha256: { contains: query } },
+          ...idSearchFilter(query),
+          { originalFileName: { contains: query , mode: "insensitive" as const} },
+          { sha256: { contains: query , mode: "insensitive" as const} },
           {
             merchant: {
-              is: { tradeName: { contains: query } },
+              is: { tradeName: { contains: query , mode: "insensitive" as const} },
             },
           },
           {
             merchant: {
-              is: { legalName: { contains: query } },
+              is: { legalName: { contains: query , mode: "insensitive" as const} },
             },
           },
         ],
@@ -748,18 +749,18 @@ export const disputeProvider = defineSearchProvider({
       where: {
         ...(status ? { status } : {}),
         OR: [
-          { id: { contains: query } },
-          { externalDisputeRef: { contains: query } },
-          { reasonCode: { contains: query } },
-          { attempt: { is: { reference: { contains: query } } } },
+          ...idSearchFilter(query),
+          { externalDisputeRef: { contains: query , mode: "insensitive" as const} },
+          { reasonCode: { contains: query , mode: "insensitive" as const} },
+          { attempt: { is: { reference: { contains: query , mode: "insensitive" as const} } } },
           {
             attempt: {
-              is: { merchant: { is: { tradeName: { contains: query } } } },
+              is: { merchant: { is: { tradeName: { contains: query , mode: "insensitive" as const} } } },
             },
           },
           {
             attempt: {
-              is: { merchant: { is: { legalName: { contains: query } } } },
+              is: { merchant: { is: { legalName: { contains: query , mode: "insensitive" as const} } } },
             },
           },
         ],
@@ -830,26 +831,26 @@ export const adjustmentProvider = defineSearchProvider({
       where: {
         ...(status ? { state: status } : {}),
         OR: [
-          { id: { contains: query } },
-          { reason: { contains: query } },
-          { externalDisputeRef: { contains: query } },
-          { providerRefundRef: { contains: query } },
+          ...idSearchFilter(query),
+          { reason: { contains: query , mode: "insensitive" as const} },
+          { externalDisputeRef: { contains: query , mode: "insensitive" as const} },
+          { providerRefundRef: { contains: query , mode: "insensitive" as const} },
           {
             sourceAttempt: {
-              is: { reference: { contains: query } },
+              is: { reference: { contains: query , mode: "insensitive" as const} },
             },
           },
           {
             sourceAttempt: {
               is: {
-                merchant: { is: { tradeName: { contains: query } } },
+                merchant: { is: { tradeName: { contains: query , mode: "insensitive" as const} } },
               },
             },
           },
           {
             sourceAttempt: {
               is: {
-                merchant: { is: { legalName: { contains: query } } },
+                merchant: { is: { legalName: { contains: query , mode: "insensitive" as const} } },
               },
             },
           },
@@ -926,16 +927,16 @@ export const cashoutProvider = defineSearchProvider({
       where: {
         ...(status ? { state: status } : {}),
         OR: [
-          { id: { contains: query } },
-          { walletId: { contains: query } },
+          ...idSearchFilter(query),
+          ...(isUuid(query) ? [{ walletId: query.trim() }] : []),
           {
             merchant: {
-              is: { tradeName: { contains: query } },
+              is: { tradeName: { contains: query , mode: "insensitive" as const} },
             },
           },
           {
             merchant: {
-              is: { legalName: { contains: query } },
+              is: { legalName: { contains: query , mode: "insensitive" as const} },
             },
           },
         ],
@@ -994,22 +995,22 @@ export const reconciliationRunProvider = defineSearchProvider({
     return prisma.reconciliationRun.findMany({
       where: {
         OR: [
-          { id: { contains: query } },
-          { fileName: { contains: query } },
-          { fileHash: { contains: query } },
+          ...idSearchFilter(query),
+          { fileName: { contains: query , mode: "insensitive" as const} },
+          { fileHash: { contains: query , mode: "insensitive" as const} },
           {
             statementSource: {
-              is: { gateway: { is: { code: { contains: query } } } },
+              is: { gateway: { is: { code: { contains: query , mode: "insensitive" as const} } } },
             },
           },
           {
             statementSource: {
-              is: { gateway: { is: { name: { contains: query } } } },
+              is: { gateway: { is: { name: { contains: query , mode: "insensitive" as const} } } },
             },
           },
           {
             statementSource: {
-              is: { gateway: { is: { operator: { contains: query } } } },
+              is: { gateway: { is: { operator: { contains: query , mode: "insensitive" as const} } } },
             },
           },
         ],
@@ -1090,14 +1091,14 @@ export const amlCaseProvider = defineSearchProvider({
       where: {
         ...(status ? { status } : {}),
         OR: [
-          { id: { contains: query } },
-          { subjectId: { contains: query } },
-          { triggerReason: { contains: query } },
-          { rule: { is: { code: { contains: query } } } },
-          { rule: { is: { name: { contains: query } } } },
+          ...idSearchFilter(query),
+          { subjectId: { contains: query , mode: "insensitive" as const} },
+          { triggerReason: { contains: query , mode: "insensitive" as const} },
+          { rule: { is: { code: { contains: query , mode: "insensitive" as const} } } },
+          { rule: { is: { name: { contains: query , mode: "insensitive" as const} } } },
           {
             assignedReviewer: {
-              is: { email: { contains: query } },
+              is: { email: { contains: query , mode: "insensitive" as const} },
             },
           },
         ],
@@ -1163,10 +1164,10 @@ export const amlScreeningProvider = defineSearchProvider({
       where: {
         ...(result ? { result } : {}),
         OR: [
-          { id: { contains: query } },
-          { subjectId: { contains: query } },
-          { providerCode: { contains: query } },
-          { providerRequestRef: { contains: query } },
+          ...idSearchFilter(query),
+          { subjectId: { contains: query , mode: "insensitive" as const} },
+          { providerCode: { contains: query , mode: "insensitive" as const} },
+          { providerRequestRef: { contains: query , mode: "insensitive" as const} },
         ],
       },
       select: {
@@ -1224,9 +1225,9 @@ export const amlRuleProvider = defineSearchProvider({
       where: {
         ...(active === undefined ? {} : { active }),
         OR: [
-          { id: { contains: query } },
-          { code: { contains: query } },
-          { name: { contains: query } },
+          ...idSearchFilter(query),
+          { code: { contains: query , mode: "insensitive" as const} },
+          { name: { contains: query , mode: "insensitive" as const} },
         ],
       },
       select: {
@@ -1275,10 +1276,10 @@ export const amlReportProvider = defineSearchProvider({
       where: {
         ...(status ? { status } : {}),
         OR: [
-          { id: { contains: query } },
-          { subjectId: { contains: query } },
-          { submissionRef: { contains: query } },
-          { authority: { contains: query } },
+          ...idSearchFilter(query),
+          { subjectId: { contains: query , mode: "insensitive" as const} },
+          { submissionRef: { contains: query , mode: "insensitive" as const} },
+          { authority: { contains: query , mode: "insensitive" as const} },
         ],
       },
       select: {
@@ -1326,10 +1327,10 @@ export const gatewayProvider = defineSearchProvider({
       where: {
         ...(status ? { status } : {}),
         OR: [
-          { id: { contains: query } },
-          { code: { contains: query } },
-          { name: { contains: query } },
-          { operator: { contains: query } },
+          ...idSearchFilter(query),
+          { code: { contains: query , mode: "insensitive" as const} },
+          { name: { contains: query , mode: "insensitive" as const} },
+          { operator: { contains: query , mode: "insensitive" as const} },
         ],
       },
       select: {
@@ -1375,10 +1376,10 @@ export const railProvider = defineSearchProvider({
       where: {
         ...(blocked === undefined ? {} : { blocked }),
         OR: [
-          { id: { contains: query } },
-          { code: { contains: query } },
-          { nameEn: { contains: query } },
-          { nameAr: { contains: query } },
+          ...idSearchFilter(query),
+          { code: { contains: query , mode: "insensitive" as const} },
+          { nameEn: { contains: query , mode: "insensitive" as const} },
+          { nameAr: { contains: query , mode: "insensitive" as const} },
         ],
       },
       select: {
@@ -1422,13 +1423,13 @@ export const routeProvider = defineSearchProvider({
       where: {
         ...(status ? { status } : {}),
         OR: [
-          { id: { contains: query } },
-          { rail: { is: { code: { contains: query } } } },
-          { rail: { is: { nameEn: { contains: query } } } },
-          { rail: { is: { nameAr: { contains: query } } } },
-          { gateway: { is: { code: { contains: query } } } },
-          { gateway: { is: { name: { contains: query } } } },
-          { gateway: { is: { operator: { contains: query } } } },
+          ...idSearchFilter(query),
+          { rail: { is: { code: { contains: query , mode: "insensitive" as const} } } },
+          { rail: { is: { nameEn: { contains: query , mode: "insensitive" as const} } } },
+          { rail: { is: { nameAr: { contains: query , mode: "insensitive" as const} } } },
+          { gateway: { is: { code: { contains: query , mode: "insensitive" as const} } } },
+          { gateway: { is: { name: { contains: query , mode: "insensitive" as const} } } },
+          { gateway: { is: { operator: { contains: query , mode: "insensitive" as const} } } },
         ],
       },
       select: {
@@ -1496,11 +1497,11 @@ export const userProvider = defineSearchProvider({
           : {}),
         ...(status ? { status } : {}),
         OR: [
-          { id: { contains: query } },
-          { email: { contains: query } },
-          { phone: { contains: query } },
+          ...idSearchFilter(query),
+          { email: { contains: query , mode: "insensitive" as const} },
+          { phone: { contains: query , mode: "insensitive" as const} },
           ...parsed.phoneVariants.map((phone) => ({
-            phone: { contains: phone },
+            phone: { contains: phone , mode: "insensitive" as const},
           })),
         ],
       },
@@ -1543,11 +1544,11 @@ export const auditLogProvider = defineSearchProvider({
     return prisma.auditLog.findMany({
       where: {
         OR: [
-          { id: { contains: query } },
-          { action: { contains: query } },
-          { entityType: { contains: query } },
-          { entityId: { contains: query } },
-          { actor: { is: { email: { contains: query } } } },
+          ...idSearchFilter(query),
+          { action: { contains: query , mode: "insensitive" as const} },
+          { entityType: { contains: query , mode: "insensitive" as const} },
+          { entityId: { contains: query , mode: "insensitive" as const} },
+          { actor: { is: { email: { contains: query , mode: "insensitive" as const} } } },
         ],
       },
       select: {

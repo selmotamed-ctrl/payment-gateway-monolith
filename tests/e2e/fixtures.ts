@@ -20,6 +20,8 @@ const ALL_ADMIN_UI_AUTHORITIES = [
   "gateways.edit",
   "users_admin.propose",
   "merchant:write",
+  "security:read",
+  "security:write",
 ];
 
 export const adminSession = {

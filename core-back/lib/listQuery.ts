@@ -141,7 +141,7 @@ export const buildListQuery = (raw: unknown, spec: ListSpec): BuiltListQuery => 
   const conditions: Record<string, unknown>[] = [];
 
   if (spec.search && query.search) {
-    const or = spec.search.map((path) => setPath({}, path, { contains: query.search }));
+    const or = spec.search.map((path) => setPath({}, path, { contains: query.search, mode: "insensitive" }));
     if (or.length > 0) {
       conditions.push({ OR: or });
     }
@@ -152,7 +152,7 @@ export const buildListQuery = (raw: unknown, spec: ListSpec): BuiltListQuery => 
       continue;
     }
     const paths = Array.isArray(definition) ? definition : [definition];
-    const or = paths.map((path) => setPath({}, path, { contains: value }));
+    const or = paths.map((path) => setPath({}, path, { contains: value, mode: "insensitive" }));
     if (or.length === 1) {
       conditions.push(or[0]!);
     } else if (or.length > 1) {

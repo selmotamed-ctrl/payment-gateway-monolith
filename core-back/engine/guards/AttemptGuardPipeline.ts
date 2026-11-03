@@ -19,6 +19,7 @@ import type {
 import { evaluateCommissionReceivableCeiling } from "../governance/GovernanceExecution";
 import { buildLedgerTemplate, LedgerPoster } from "../ledger/LedgerPoster";
 import { AmlRuleEngine, slaHoursForSeverity, type AmlRuleHit } from "./AmlRuleEngine";
+import { createLedgerShardWriter } from "../../lib/storageEngine/ledgerShardWriter";
 import {
   buildScreeningSubject,
   normalizeIdentifier,
@@ -1402,7 +1403,7 @@ export class AttemptGuardPipeline {
       merchantAmount: 0,
     });
     journal.refId = input.attemptId;
-    const poster = new LedgerPoster(this.db as never);
+    const poster = new LedgerPoster(this.db as never, undefined, createLedgerShardWriter());
     const posted = await poster.post(
       journal,
       { accounts, currency: input.currency },

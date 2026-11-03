@@ -79,6 +79,27 @@ export interface LedgerTransactionRunner {
   <R>(callback: (transaction: LedgerPrismaClient) => Promise<R>): Promise<R>;
 }
 
+export interface LedgerShardLine {
+  entryId: string;
+  refType: LedgerRefType | string;
+  refId: string;
+  glAccountId: string;
+  accountType: LedgerAccountType;
+  direction: LedgerDirection;
+  amount: DecimalInput;
+}
+
+/**
+ * Projects every posted journal line onto `gl_account_shards`. The writer is
+ * optional so the in-memory unit tests keep using the append-only ledger
+ * without a database. When present it runs inside the SAME transaction as the
+ * journal line, so shard balances can never drift from the ledger.
+ */
+export type LedgerShardWriter = (
+  transaction: LedgerPrismaClient,
+  line: LedgerShardLine,
+) => Promise<void>;
+
 export interface LedgerAccountSelector {
   accountType: LedgerAccountType;
   accountId?: string;
@@ -597,7 +618,11 @@ export class LedgerPoster {
   private readonly client: LedgerPrismaClient;
   private readonly transactionRunner: LedgerTransactionRunner;
 
-  constructor(client: LedgerPrismaClient, transactionRunner?: LedgerTransactionRunner) {
+  constructor(
+    client: LedgerPrismaClient,
+    transactionRunner?: LedgerTransactionRunner,
+    private readonly shardWriter?: LedgerShardWriter,
+  ) {
     this.client = client;
     this.transactionRunner = transactionRunner
       ?? (client.$transaction
@@ -657,6 +682,17 @@ export class LedgerPoster {
           },
         });
         lines.push(created);
+        if (this.shardWriter) {
+          await this.shardWriter(runner, {
+            entryId: entry.id,
+            refType: template.refType,
+            refId: template.refId,
+            glAccountId: accountId,
+            accountType: line.account.accountType,
+            direction: line.direction,
+            amount: line.amount,
+          });
+        }
       }
       return { entry, lines, created: true, idempotent: false };
     };

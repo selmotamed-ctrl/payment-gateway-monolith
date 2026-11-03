@@ -26,6 +26,7 @@ import { invalidationBus } from "../../lib/invalidationBus";
 import { ApiError } from "../../lib/error";
 import { ApiConsumerError } from "../apiConsumer/ApiConsumer";
 import type { DynamicAttempt } from "../flow/DynamicRailEngine";
+import { createLedgerShardWriter } from "../../lib/storageEngine/ledgerShardWriter";
 
 export interface PlatformRuntime {
   engine: DynamicRailEngine;
@@ -108,7 +109,7 @@ export const createPlatformRuntime = (db: PrismaLike): PlatformRuntime => {
     },
   });
 
-  const ledgerPoster = new LedgerPoster(db as never);
+  const ledgerPoster = new LedgerPoster(db as never, undefined, createLedgerShardWriter());
   const attempts = new PrismaAttemptRepository(db);
   const slots = new PrismaSlotReservationStore(db);
   const flowProvider = new PrismaFlowProvider(db);

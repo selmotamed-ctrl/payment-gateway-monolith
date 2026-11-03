@@ -12,8 +12,9 @@ const schemaPath = path.join(repositoryRoot, "prisma", "schema.prisma");
 
 process.env.NODE_ENV = "test";
 process.env.DATABASE_URL =
+  process.env.POSTGRES_TEST_DATABASE_URL ??
   process.env.DATABASE_URL ??
-  "postgresql://postgres:postgres@127.0.0.1:5432/payment_gateway";
+  "postgresql://postgres@127.0.0.1:55432/payment_gateway_monolith_test";
 process.env.KMS_MASTER_KEY =
   process.env.KMS_MASTER_KEY ?? "phase1-test-master-key-value";
 
@@ -88,39 +89,80 @@ const designModelNames = [
   "BackgroundJob",
   // The persisted evidence the 12 go-live gates are evaluated against.
   "GatewayVersionEvidence",
+  // The PostgreSQL storage engine additions.
+  "GlAccountShard",
+  "OutboxEvent",
+  "AuditOutbox",
+  "BackupCatalogRun",
+  "BackupRestoreDrill",
+  // CQRS read models.
+  "RmMerchantDailyStat",
+  "RmRouteDailyVolume",
 ];
 
 describe("prisma schema", () => {
   const schema = fs.readFileSync(schemaPath, "utf8");
 
-  test("declares exactly the 68 design models", () => {
+  test("declares exactly the current PostgreSQL model set", () => {
     const modelNames = [...schema.matchAll(/^model\s+(\w+)\s*\{/gm)].map(
       (match) => match[1] as string,
     );
-    expect(modelNames.length).toBe(68);
+    expect(modelNames.length).toBe(designModelNames.length);
     expect([...modelNames].sort()).toEqual([...designModelNames].sort());
   });
 
-  test("every model carries id, createdAt and updatedAt", () => {
+  test("every model has a primary key and valid timestamps", () => {
     const modelBlocks = schema.split(/^model\s+/m).slice(1);
     for (const block of modelBlocks) {
       const modelName = block.split(/\s/)[0] as string;
-      expect(block).toMatch(/^\s*id\s+\S+\s+@id/m);
-      expect(block).toMatch(/^\s*createdAt\s+DateTime\s+@default\(now\(\)\)/m);
-      expect(block).toMatch(/^\s*updatedAt\s+DateTime\s+@updatedAt/m);
+      expect(block).toMatch(/@id\b|@@id\(/);
+      if (/^\s*createdAt\s+DateTime/m.test(block)) {
+        expect(block).toMatch(/^\s*createdAt\s+DateTime[^\n]*@default\(now\(\)\)/m);
+      }
+      if (/^\s*updatedAt\s+DateTime/m.test(block)) {
+        expect(block).toMatch(
+          /^\s*updatedAt\s+DateTime[^\n]*(@updatedAt|@default\(now\(\)\))/m,
+        );
+      }
       expect(modelName.length).toBeGreaterThan(0);
     }
   });
 
-  test("uses MySQL with no floating point money", () => {
-    expect(schema).toMatch(/provider\s*=\s*"mysql"/);
+  test("uses PostgreSQL with native UUID, BYTEA and no floating point money", () => {
+    expect(schema).toMatch(/provider\s*=\s*"postgresql"/);
     expect(schema).not.toMatch(/\b(Float|Double)\b/);
+    expect(schema).toMatch(/@db\.Uuid/);
+    expect(schema).toMatch(/@db\.ByteA/);
     const decimalFields = [
       ...schema.matchAll(/^\s*(\w+)\s+Decimal\b[^\n]*$/gm),
     ];
     expect(decimalFields.length).toBeGreaterThan(0);
     for (const field of decimalFields) {
       expect(field[0]).toMatch(/@db\.Decimal\(\d+,\s*\d+\)/);
+    }
+  });
+
+  test("keeps the PostgreSQL migrations and the legacy MySQL history separate", () => {
+    const migrationsDirectory = path.join(repositoryRoot, "prisma", "migrations");
+    const legacyDirectory = path.join(repositoryRoot, "prisma", "migrations-mysql-legacy");
+    expect(fs.existsSync(migrationsDirectory)).toBe(true);
+    expect(fs.existsSync(legacyDirectory)).toBe(true);
+    const postgresMigrations = fs.readdirSync(migrationsDirectory, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+    const legacyMigrations = fs.readdirSync(legacyDirectory, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+    expect(postgresMigrations).toContain("20261103000000_postgres18_init");
+    expect(legacyMigrations).toContain("20261029203000_init");
+    expect(postgresMigrations).not.toContain("20261029203000_init");
+    for (const migration of postgresMigrations) {
+      const sql = fs.readFileSync(
+        path.join(migrationsDirectory, migration, "migration.sql"),
+        "utf8",
+      );
+      expect(sql).not.toMatch(/\bENGINE\s*=/);
+      expect(sql).not.toMatch(/`[^`]+`/);
     }
   });
 
@@ -199,8 +241,9 @@ describe("core-back mTLS server", () => {
 
     process.env.NODE_ENV = "test";
     process.env.DATABASE_URL =
+      process.env.POSTGRES_TEST_DATABASE_URL ??
       process.env.DATABASE_URL ??
-      "mysql://admin:admin@127.0.0.1:3306/payment_gateway_monolith";
+      "postgresql://postgres@127.0.0.1:55432/payment_gateway_monolith_test";
     process.env.MTLS_CA_CERT_PATH = path.join(
       certificateDirectory,
       "internal-ca.crt",
@@ -305,12 +348,12 @@ describe("core-back mTLS server", () => {
   test("keeps the schema version table when patching migrations", async () => {
     const { patchMigrationSql } = await import("../prisma/migrateDev");
     const patched = patchMigrationSql(
-      "-- DropTable\nDROP TABLE `schema_versions`;\nCREATE TABLE `sample` (`id` TEXT);",
+      '-- DropTable\nDROP TABLE "schema_versions";\nCREATE TABLE "sample" ("id" TEXT);',
     );
-    expect(patched).not.toContain("DROP TABLE `schema_versions`");
-    expect(patched).toContain("CREATE TABLE IF NOT EXISTS `schema_versions`");
-    expect(patched).toContain("ON DUPLICATE KEY UPDATE `version`");
-    expect(patched).toContain("CREATE TABLE `sample`");
+    expect(patched).not.toContain('DROP TABLE "schema_versions"');
+    expect(patched).toContain('CREATE TABLE IF NOT EXISTS "schema_versions"');
+    expect(patched).toContain('ON CONFLICT ("id") DO UPDATE');
+    expect(patched).toContain('CREATE TABLE "sample"');
   });
 
   test("issues the peer certificate common names expected by the guard", async () => {

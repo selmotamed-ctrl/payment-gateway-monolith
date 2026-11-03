@@ -22,6 +22,8 @@ import { InvariantVerifier } from "../../../engine/ledger/InvariantVerifier";
 const db = exhaustiveClient();
 const describeDb = databaseIsReachable ? describe : describe.skip;
 const PREFIX = `exh2-${crypto.randomUUID()}`;
+const placeholders = (count: number): string =>
+  Array.from({ length: count }, (_value, index) => `$${index + 1}`).join(",");
 
 const ACCOUNT_TYPES: readonly LedgerAccountType[] = [
   "TREASURY",
@@ -48,14 +50,14 @@ const resetCheckpoints = async (): Promise<void> => {
     return;
   }
   await db.$executeRawUnsafe(
-    `UPDATE gl_accounts SET checkpoint_balance = 0, checkpoint_at = NULL WHERE id IN (${accountIds.map(() => "?").join(",")})`,
+    `UPDATE "gl_accounts" SET "checkpoint_balance" = 0, "checkpoint_at" = NULL WHERE "id" IN (${placeholders(accountIds.length)})`,
     ...accountIds,
   );
 };
 
 const maxLineDate = async (accountId: string): Promise<Date> => {
   const rows = (await db.$queryRawUnsafe(
-    "SELECT MAX(created_at) AS latest FROM journal_lines WHERE gl_account_id = ?",
+    'SELECT MAX("created_at") AS latest FROM "journal_lines" WHERE "gl_account_id" = $1',
     accountId,
   )) as Array<{ latest: Date | string | null }>;
   const latest = rows[0]?.latest;
@@ -65,13 +67,20 @@ const maxLineDate = async (accountId: string): Promise<Date> => {
 const cleanup = async (): Promise<void> => {
   await resetCheckpoints();
   await db.$executeRawUnsafe(
-    "DELETE jl FROM journal_lines jl JOIN journal_entries je ON je.id = jl.entry_id WHERE je.ref_id LIKE ?",
+    'DELETE FROM "journal_lines" WHERE "entry_id" IN (SELECT "id" FROM "journal_entries" WHERE "ref_id" LIKE $1)',
     `${PREFIX}%`,
   );
-  await db.$executeRawUnsafe("DELETE FROM journal_entries WHERE ref_id LIKE ?", `${PREFIX}%`);
+  await db.$executeRawUnsafe(
+    'DELETE FROM "journal_entries" WHERE "ref_id" LIKE $1',
+    `${PREFIX}%`,
+  );
   if (accountIds.length > 0) {
     await db.$executeRawUnsafe(
-      `DELETE FROM gl_accounts WHERE id IN (${accountIds.map(() => "?").join(",")})`,
+      `DELETE FROM "gl_account_shards" WHERE "gl_account_id" IN (${placeholders(accountIds.length)})`,
+      ...accountIds,
+    ).catch(() => undefined);
+    await db.$executeRawUnsafe(
+      `DELETE FROM "gl_accounts" WHERE "id" IN (${placeholders(accountIds.length)})`,
       ...accountIds,
     );
   }

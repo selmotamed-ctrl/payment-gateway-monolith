@@ -1,0 +1,468 @@
+/**
+ * Shared sandbox helpers for the storage-engine and backup-control tests.
+ *
+ * Everything here is provisioning only: real PostgreSQL databases (the test
+ * database already migrated by the repository), real Redis, dedicated schemas
+ * so files can run in parallel, and deterministic ids. Nothing stands in for a
+ * production adapter.
+ */
+import { randomUUID } from "node:crypto";
+import { describe } from "bun:test";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool, type PoolConfig } from "pg";
+import { createClient as createRedisClient } from "redis";
+import { PrismaClient } from "../../../generated/prisma/client";
+import { buildPostgresPoolConfig } from "../../../lib/db/connectionConfig";
+import { DedicatedAuditDatabaseDriver } from "../../../lib/storageEngine/auditAndLogAdapters";
+
+export const DATABASE_URL =
+  process.env.STORAGE_TEST_DATABASE_URL ??
+  process.env.DATABASE_URL ??
+  "postgresql://postgres@127.0.0.1:55432/payment_gateway_monolith_test";
+
+export const REDIS_URL =
+  process.env.STORAGE_TEST_REDIS_URL ?? "redis://127.0.0.1:56379";
+
+export const RUN_ID = randomUUID().replaceAll("-", "").slice(0, 12);
+
+let sequence = 0;
+export const uniqueId = (prefix = "storage"): string => {
+  sequence += 1;
+  return `${prefix}-${RUN_ID}-${sequence}-${randomUUID().slice(0, 8)}`;
+};
+
+export const uniqueUuid = (): string => randomUUID();
+
+export interface PrismaOptions {
+  url?: string;
+  max?: number;
+}
+
+/** A client that never shares Prisma's cached app singleton. */
+export const createPrisma = (options: PrismaOptions = {}): PrismaClient =>
+  new PrismaClient({
+    adapter: new PrismaPg(
+      buildPostgresPoolConfig(options.url ?? DATABASE_URL, {
+        max: options.max ?? 10,
+        applicationName: `pg-storage-test-${RUN_ID}`,
+      }),
+    ),
+    log: [],
+  });
+
+export interface PoolOptions {
+  url?: string;
+  schema?: string;
+  max?: number;
+  connectionTimeoutMillis?: number;
+}
+
+export const createPool = (options: PoolOptions = {}): Pool => {
+  const config: PoolConfig = {
+    connectionString: options.url ?? DATABASE_URL,
+    max: options.max ?? 5,
+    connectionTimeoutMillis: options.connectionTimeoutMillis ?? 3_000,
+  };
+  if (options.schema) {
+    config.options = `-c search_path=${options.schema}`;
+  }
+  return new Pool(config);
+};
+
+/** A Prisma client whose entire connection pool uses the supplied schema. */
+export const createPrismaForSchema = (
+  schema: string,
+  options: PrismaOptions = {},
+): PrismaClient =>
+  new PrismaClient({
+    adapter: new PrismaPg({
+      ...buildPostgresPoolConfig(options.url ?? DATABASE_URL, {
+        max: options.max ?? 10,
+        applicationName: `pg-storage-test-${RUN_ID}`,
+      }),
+      options: `-c search_path=${schema}`,
+    }),
+    log: [],
+  });
+
+const probe = async (
+  work: () => Promise<unknown>,
+  cleanup: () => Promise<unknown>,
+): Promise<boolean> => {
+  try {
+    await work();
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await cleanup().catch(() => undefined);
+  }
+};
+
+export const databaseIsReachable = await probe(
+  async () => {
+    const pool = createPool({ max: 1, connectionTimeoutMillis: 1_500 });
+    try {
+      await pool.query("SELECT 1");
+    } finally {
+      await pool.end().catch(() => undefined);
+    }
+  },
+  async () => undefined,
+);
+
+export const redisIsReachable = await (async () => {
+  const client = createRedisClient({
+    url: REDIS_URL,
+    socket: { connectTimeout: 1_500, reconnectStrategy: false },
+  });
+  return probe(
+    async () => {
+      client.on("error", () => undefined);
+      await client.connect();
+      await client.ping();
+    },
+    async () => {
+      if (client.isOpen) {
+        await client.quit();
+      } else {
+        client.destroy();
+      }
+    },
+  );
+})();
+
+export const describeDatabase = databaseIsReachable ? describe : describe.skip;
+export const describeRedis = redisIsReachable ? describe : describe.skip;
+
+export const safeSchemaName = (prefix: string): string => {
+  sequence += 1;
+  return `storage_test_${prefix}_${RUN_ID}_${sequence}`.toLowerCase().replaceAll(/[^a-z0-9_]/g, "_");
+};
+
+export const createSchema = async (schema: string): Promise<void> => {
+  const pool = createPool({ max: 1 });
+  try {
+    await pool.query(`CREATE SCHEMA ${schema}`);
+  } finally {
+    await pool.end();
+  }
+};
+
+export const dropSchema = async (schema: string): Promise<void> => {
+  const pool = createPool({ max: 1 });
+  try {
+    await pool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+  } finally {
+    await pool.end();
+  }
+};
+
+/* -------------------------------------------------------------------------- */
+/* Audit database sandbox                                                     */
+/* -------------------------------------------------------------------------- */
+
+const auditDdl = (schema: string): string => `
+CREATE TABLE ${schema}.audit_records (
+  seq_no              BIGINT GENERATED ALWAYS AS IDENTITY UNIQUE,
+  id                  UUID         PRIMARY KEY,
+  created_at          TIMESTAMPTZ  NOT NULL,
+  ingested_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  actor_id            UUID         NOT NULL,
+  actor_email         VARCHAR(191) NULL,
+  role                VARCHAR(64)  NOT NULL,
+  action              VARCHAR(96)  NOT NULL,
+  entity_type         VARCHAR(64)  NOT NULL,
+  entity_id           VARCHAR(64)  NOT NULL,
+  merchant_id         UUID         NULL,
+  approval_request_id UUID         NULL,
+  request_id          VARCHAR(64)  NULL,
+  client_ip           VARCHAR(45)  NULL,
+  user_agent          TEXT         NULL,
+  before_json         JSONB        NOT NULL,
+  after_json          JSONB        NOT NULL,
+  prev_hash           CHAR(64)     NOT NULL,
+  row_hash            CHAR(64)     NOT NULL
+);
+
+CREATE INDEX ${schema}_audit_entity_idx
+  ON ${schema}.audit_records (entity_type, entity_id, created_at DESC, id DESC);
+
+CREATE OR REPLACE FUNCTION ${schema}.forbid_audit_mutation() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'AUDIT_TAMPER_PROHIBITED: audit_records is strictly append-only';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_audit_immutable
+  BEFORE UPDATE OR DELETE OR TRUNCATE ON ${schema}.audit_records
+  FOR EACH STATEMENT EXECUTE FUNCTION ${schema}.forbid_audit_mutation();
+`;
+
+export interface AuditSandbox {
+  schema: string;
+  table: string;
+  pool: Pool;
+  driver: DedicatedAuditDatabaseDriver;
+  cleanup: () => Promise<void>;
+}
+
+export const createAuditSandbox = async (
+  prefix = "audit",
+): Promise<AuditSandbox> => {
+  const schema = safeSchemaName(prefix);
+  const admin = createPool({ max: 1 });
+  await admin.query(`CREATE SCHEMA ${schema}`);
+  await admin.query(auditDdl(schema));
+  await admin.end();
+
+  const pool = createPool({ max: 6 });
+  const table = `${schema}.audit_records`;
+  return {
+    schema,
+    table,
+    pool,
+    driver: new DedicatedAuditDatabaseDriver(pool, table),
+    cleanup: async () => {
+      await pool.end().catch(() => undefined);
+      await dropSchema(schema);
+    },
+  };
+};
+
+/* -------------------------------------------------------------------------- */
+/* Operational log database sandbox (search_path scoped)                      */
+/* -------------------------------------------------------------------------- */
+
+const monthKey = (date: Date): string =>
+  `${date.getUTCFullYear()}_${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+
+const monthStart = (date: Date): string =>
+  `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-01`;
+
+const logDdl = (schema: string): string => {
+  const now = new Date();
+  const partitions: string[] = [];
+  for (let offset = 0; offset < 3; offset += 1) {
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + offset, 1));
+    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + offset + 1, 1));
+    const suffix = monthKey(start);
+    partitions.push(
+      `CREATE TABLE ${schema}.attempt_step_logs_${suffix} PARTITION OF ${schema}.attempt_step_logs FOR VALUES FROM ('${monthStart(start)}') TO ('${monthStart(end)}');`,
+      `CREATE TABLE ${schema}.http_access_logs_${suffix} PARTITION OF ${schema}.http_access_logs FOR VALUES FROM ('${monthStart(start)}') TO ('${monthStart(end)}');`,
+    );
+  }
+  return `
+CREATE TABLE ${schema}.attempt_step_logs (
+  id                     UUID         NOT NULL,
+  attempt_id             UUID         NOT NULL,
+  gateway_version_id     UUID         NOT NULL,
+  phase                  VARCHAR(32)  NOT NULL,
+  step_id                UUID         NULL,
+  step_order             INT          NOT NULL,
+  redacted_request_json  JSONB        NOT NULL,
+  redacted_response_text TEXT         NOT NULL,
+  http_status            INT          NULL,
+  duration_ms            INT          NULL,
+  outcome                VARCHAR(64)  NOT NULL,
+  created_at             TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  PRIMARY KEY (id, created_at)
+) PARTITION BY RANGE (created_at);
+
+CREATE INDEX ${schema}_attempt_step_logs_attempt_idx
+  ON ${schema}.attempt_step_logs (attempt_id, step_order ASC);
+
+CREATE TABLE ${schema}.http_access_logs (
+  id             BIGINT GENERATED ALWAYS AS IDENTITY,
+  request_id     VARCHAR(64)  NOT NULL,
+  channel        VARCHAR(24)  NOT NULL,
+  method         VARCHAR(10)  NOT NULL,
+  route_pattern  VARCHAR(191) NOT NULL,
+  status_code    SMALLINT     NOT NULL,
+  duration_ms    INT          NOT NULL,
+  db_queries     SMALLINT     NOT NULL DEFAULT 0,
+  db_duration_ms INT          NOT NULL DEFAULT 0,
+  actor_id       UUID         NULL,
+  client_ip      VARCHAR(45)  NULL,
+  created_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  PRIMARY KEY (id, created_at)
+) PARTITION BY RANGE (created_at);
+
+${partitions.join("\n")}
+`;
+};
+
+export interface LogSandbox {
+  schema: string;
+  pool: Pool;
+  cleanup: () => Promise<void>;
+}
+
+export const createLogSandbox = async (prefix = "logs"): Promise<LogSandbox> => {
+  const schema = safeSchemaName(prefix);
+  const admin = createPool({ max: 1 });
+  await admin.query(`CREATE SCHEMA ${schema}`);
+  await admin.query(logDdl(schema));
+  await admin.end();
+
+  const pool = createPool({ max: 5, schema });
+  return {
+    schema,
+    pool,
+    cleanup: async () => {
+      await pool.end().catch(() => undefined);
+      await dropSchema(schema);
+    },
+  };
+};
+
+/* -------------------------------------------------------------------------- */
+/* Ledger / shard fixtures                                                    */
+/* -------------------------------------------------------------------------- */
+
+export interface SeedAccountOptions {
+  shardCount?: number;
+  accountType?: "TREASURY" | "MERCHANT_WALLET" | "GATEWAY_CLEARING" | "PLATFORM_INCOME";
+  currency?: string;
+}
+
+export const seedGlAccount = async (
+  client: PrismaClient,
+  options: SeedAccountOptions = {},
+): Promise<{ id: string; shardCount: number }> => {
+  const id = uniqueUuid();
+  const shardCount = options.shardCount ?? 16;
+  await client.glAccount.create({
+    data: {
+      id,
+      accountType: options.accountType ?? "TREASURY",
+      currency: options.currency ?? "LYD",
+    },
+  });
+  if (shardCount > 0) {
+    await client.glAccountShard.createMany({
+      data: Array.from({ length: shardCount }, (_, shardId) => ({
+        glAccountId: id,
+        shardId,
+        currentBalance: 0,
+      })),
+    });
+  }
+  return { id, shardCount };
+};
+
+export const cleanupLedger = async (
+  client: PrismaClient,
+  accountIds: string[],
+  refPrefix: string,
+): Promise<void> => {
+  if (accountIds.length > 0) {
+    await client.journalLine.deleteMany({
+      where: { glAccountId: { in: accountIds } },
+    });
+    await client.glAccountShard.deleteMany({
+      where: { glAccountId: { in: accountIds } },
+    });
+  }
+  await client.journalEntry.deleteMany({
+    where: { refId: { startsWith: refPrefix } },
+  });
+  if (accountIds.length > 0) {
+    await client.glAccount.deleteMany({ where: { id: { in: accountIds } } });
+  }
+};
+
+/* -------------------------------------------------------------------------- */
+/* Worker sandbox: isolated outbox / audit-outbox / read-model schema         */
+/* -------------------------------------------------------------------------- */
+
+const workerTablesDdl = (schema: string): string => `
+CREATE TABLE ${schema}.outbox_events (
+  id             BIGSERIAL    PRIMARY KEY,
+  topic          VARCHAR(64)  NOT NULL,
+  aggregate_type VARCHAR(64)  NOT NULL,
+  aggregate_id   VARCHAR(64)  NOT NULL,
+  merchant_id    UUID         NULL,
+  payload_json   JSONB        NOT NULL,
+  created_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  processed_at   TIMESTAMPTZ  NULL
+);
+
+CREATE TABLE ${schema}.audit_outbox (
+  id                  UUID         PRIMARY KEY,
+  actor_id            UUID         NOT NULL,
+  actor_email         VARCHAR(191) NULL,
+  role                VARCHAR(64)  NOT NULL,
+  action              VARCHAR(96)  NOT NULL,
+  entity_type         VARCHAR(64)  NOT NULL,
+  entity_id           VARCHAR(64)  NOT NULL,
+  merchant_id         UUID         NULL,
+  approval_request_id UUID         NULL,
+  request_id          VARCHAR(64)  NULL,
+  client_ip           VARCHAR(45)  NULL,
+  user_agent          TEXT         NULL,
+  before_json         JSONB        NOT NULL,
+  after_json          JSONB        NOT NULL,
+  created_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  shipped_at          TIMESTAMPTZ  NULL
+);
+
+CREATE TABLE ${schema}.rm_merchant_daily_stats (
+  merchant_id    UUID         NOT NULL,
+  day            DATE         NOT NULL,
+  currency       CHAR(3)      NOT NULL,
+  attempt_count  INT          NOT NULL DEFAULT 0,
+  success_count  INT          NOT NULL DEFAULT 0,
+  failure_count  INT          NOT NULL DEFAULT 0,
+  gross_amount   NUMERIC(18, 4) NOT NULL DEFAULT 0,
+  net_amount     NUMERIC(18, 4) NOT NULL DEFAULT 0,
+  updated_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  PRIMARY KEY (merchant_id, day, currency)
+);
+
+CREATE TABLE ${schema}.rm_route_daily_volumes (
+  route_id       UUID         NOT NULL,
+  day            DATE         NOT NULL,
+  currency       CHAR(3)      NOT NULL,
+  attempt_count  INT          NOT NULL DEFAULT 0,
+  success_count  INT          NOT NULL DEFAULT 0,
+  volume_amount  NUMERIC(18, 4) NOT NULL DEFAULT 0,
+  updated_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  PRIMARY KEY (route_id, day, currency)
+);
+`;
+
+export interface WorkerSandbox {
+  schema: string;
+  client: PrismaClient;
+  newClient: (options?: PrismaOptions) => PrismaClient;
+  cleanup: () => Promise<void>;
+}
+
+export const createWorkerSandbox = async (
+  prefix = "workers",
+): Promise<WorkerSandbox> => {
+  const schema = safeSchemaName(prefix);
+  const admin = createPool({ max: 1 });
+  await admin.query(`CREATE SCHEMA ${schema}`);
+  await admin.query(workerTablesDdl(schema));
+  await admin.end();
+  const client = createPrismaForSchema(schema, { max: 10 });
+  const extras = new Set<PrismaClient>();
+  return {
+    schema,
+    client,
+    newClient: (options = {}) => {
+      const extra = createPrismaForSchema(schema, options);
+      extras.add(extra);
+      return extra;
+    },
+    cleanup: async () => {
+      for (const extra of extras) {
+        await extra.$disconnect().catch(() => undefined);
+      }
+      await client.$disconnect().catch(() => undefined);
+      await dropSchema(schema);
+    },
+  };
+};

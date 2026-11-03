@@ -1,6 +1,6 @@
 /**
  * End-to-end proof that a complete, declarative payment works against the
- * live MariaDB instance.
+ * live PostgreSQL 18 instance.
  *
  * The suite builds a throw-away catalog (merchant, application, wallet, GL
  * accounts, gateway, rail, route, credential set, commission profile, payment
@@ -14,14 +14,14 @@
  *     design prescribes (TREASURY / PROVIDER_FEE_EXPENSE debited,
  *     MERCHANT_WALLET / PLATFORM_INCOME credited),
  *   - the link slot accounting is correct (`confirmed_count = 1`,
- *     `active_locked_count = 0`) and the MySQL `CHECK` invariant holds,
+ *     `active_locked_count = 0`) and the PostgreSQL `CHECK` invariant holds,
  *   - the system-wide ledger invariant reports a drift of `0.0000`,
  *   - the slot reservation is atomic: a second attempt on the exhausted link
  *     fails with a slot error and never books a second journal entry,
- *   - the MariaDB `BEFORE INSERT` trigger refuses an approval request whose
- *     checker is the maker.
+ *   - PostgreSQL refuses an approval request whose checker is the maker
+ *     (INSERT CHECK constraint and UPDATE trigger).
  *
- * The suite never fails because MariaDB is down: the connection is probed
+ * The suite never fails because PostgreSQL is down: the connection is probed
  * before the tests are registered and every test is skipped when the server
  * cannot be reached.
  */
@@ -41,8 +41,9 @@ import type { DynamicAttempt } from "../../engine/flow/DynamicRailEngine";
  * lazily on the first property access, so a module level assignment is enough.
  */
 const DATABASE_URL =
-  process.env.MARIADB_TEST_DATABASE_URL
-  ?? "mysql://admin:admin@127.0.0.1:3306/payment_gateway_monolith_test";
+  process.env.POSTGRES_TEST_DATABASE_URL
+  ?? process.env.DATABASE_URL
+  ?? "postgresql://postgres@127.0.0.1:55432/payment_gateway_monolith_test";
 process.env.DATABASE_URL = DATABASE_URL;
 
 /** Every run uses its own ids so the suite can be repeated on the same server. */
@@ -766,6 +767,13 @@ const cleanup = async (): Promise<void> => {
   // The application references its assigned wallet, so it goes first.
   await client.application.deleteMany({ where: { id: catalog.applicationId } });
   await client.wallet.deleteMany({ where: { id: catalog.walletId } });
+  // The storage engine shards reference the GL account with ON DELETE RESTRICT,
+  // so they have to go before their parent account.
+  await client.glAccountShard.deleteMany({
+    where: { glAccountId: { in: Object.values(catalog.glAccountIds) } },
+  });
+  await client.outboxEvent.deleteMany({ where: { merchantId: catalog.merchantId } });
+  await client.auditOutbox.deleteMany({ where: { merchantId: catalog.merchantId } });
   await client.glAccount.deleteMany({ where: { id: { in: Object.values(catalog.glAccountIds) } } });
   await client.railRoute.deleteMany({ where: { id: catalog.routeId } });
   await client.rail.deleteMany({ where: { id: catalog.railId } });
@@ -775,11 +783,11 @@ const cleanup = async (): Promise<void> => {
   await client.user.deleteMany({ where: { id: catalog.userId } });
 };
 
-describe("mariadb payment (live MariaDB)", () => {
+describe("postgres payment (live PostgreSQL 18)", () => {
   beforeAll(async () => {
     if (!reachable) {
       console.log(
-        `[mariadb-payment] MariaDB is not reachable at ${DATABASE_URL} (${unreachableReason}) - the suite is skipped.`,
+        `[postgres-payment] PostgreSQL is not reachable at ${DATABASE_URL} (${unreachableReason}) - the suite is skipped.`,
       );
       return;
     }
@@ -881,7 +889,7 @@ describe("mariadb payment (live MariaDB)", () => {
     expect(link?.state).toBe("COMPLETED");
 
     const rows = await client.$queryRawUnsafe(
-      "SELECT confirmed_count + active_locked_count AS used, use_count AS total FROM payment_links WHERE id = ?",
+      'SELECT "confirmed_count" + "active_locked_count" AS used, "use_count" AS total FROM "payment_links" WHERE "id" = $1',
       current?.linkId,
     );
     const used = Number((rows as Array<{ used: number | bigint }>)[0]?.used ?? 0);
@@ -918,13 +926,13 @@ describe("mariadb payment (live MariaDB)", () => {
     expect(link?.confirmedCount).toBe(1);
   });
 
-  test.skipIf(!reachable)("lets MariaDB refuse a second slot on the exhausted link", async () => {
+  test.skipIf(!reachable)("lets PostgreSQL refuse a second slot on the exhausted link", async () => {
     const current = catalog;
     let rejected = false;
     let message = "";
     try {
       await client.$executeRawUnsafe(
-        "UPDATE payment_links SET active_locked_count = active_locked_count + 1 WHERE id = ?",
+        'UPDATE "payment_links" SET "active_locked_count" = "active_locked_count" + 1 WHERE "id" = $1',
         current?.linkId,
       );
     } catch (error) {
@@ -935,7 +943,7 @@ describe("mariadb payment (live MariaDB)", () => {
     expect(message).toContain("payment_links_slot_reservation_invariant");
   });
 
-  test.skipIf(!reachable)("lets MariaDB refuse an approval request whose checker is the maker", async () => {
+  test.skipIf(!reachable)("lets PostgreSQL refuse an approval request whose checker is the maker", async () => {
     const current = catalog;
     let rejected = false;
     let message = "";
@@ -955,7 +963,9 @@ describe("mariadb payment (live MariaDB)", () => {
       message = error instanceof Error ? error.message : String(error);
     }
     expect(rejected).toBe(true);
-    expect(message).toContain("checker_user_id must differ from maker_user_id");
+    expect(message).toMatch(
+      /approval_requests_checker_not_maker_insert|checker_user_id must differ from maker_user_id/,
+    );
 
     const leftovers = await client.approvalRequest.count({ where: { makerUserId: current?.userId } });
     expect(leftovers).toBe(0);

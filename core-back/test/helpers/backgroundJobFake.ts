@@ -183,6 +183,25 @@ interface Condition {
   value?: unknown;
 }
 
+const parameterIndex = (token: string): number | null => {
+  if (token === "?") {
+    return 0;
+  }
+  const placeholder = /^\$(\d+)(?:::\w+)?$/.exec(token);
+  return placeholder ? Number(placeholder[1]) - 1 : null;
+};
+
+const takeParameter = (token: string, params: unknown[]): unknown => {
+  if (token === "?") {
+    return params.shift();
+  }
+  const placeholder = /^\$(\d+)(?:::\w+)?$/.exec(token);
+  if (placeholder) {
+    return params[Number(placeholder[1]) - 1];
+  }
+  return undefined;
+};
+
 const parseCondition = (raw: string, params: unknown[]): Condition | null => {
   const text = raw.trim();
   const isNotNull = /^(\w+)\s+IS\s+NOT\s+NULL$/i.exec(text);
@@ -200,8 +219,8 @@ const parseCondition = (raw: string, params: unknown[]): Condition | null => {
   const column = comparison[1] as string;
   const operator = comparison[2] as Condition["operator"];
   const literal = (comparison[3] as string).trim();
-  if (literal === "?") {
-    return { column, operator, value: params.shift() };
+  if (parameterIndex(literal) !== null) {
+    return { column, operator, value: takeParameter(literal, params) };
   }
   const quoted = /^'(.*)'$/.exec(literal);
   return { column, operator, value: quoted ? quoted[1] : literal };
@@ -267,11 +286,11 @@ const runRawQuery = (sql: string, params: unknown[]): unknown[] => {
   }
   const name = select[1] as string;
   const whereMatch = /\bWHERE\b([\s\S]*?)(?:\bORDER BY\b|\bLIMIT\b|$)/i.exec(sql);
-  const limitMatch = /\bLIMIT\s+(\?|\d+)/i.exec(sql);
+  const limitMatch = /\bLIMIT\s+(\?|\$\d+(?:::\w+)?|\d+)/i.exec(sql);
   const conditions = whereMatch ? parseConditions(whereMatch[1] as string, params) : [];
   const limit = limitMatch
-    ? limitMatch[1] === "?"
-      ? Number(params.shift() ?? 0)
+    ? parameterIndex(limitMatch[1] as string) !== null
+      ? Number(takeParameter(limitMatch[1] as string, params) ?? 0)
       : Number(limitMatch[1])
     : undefined;
   const rows = table(modelNameOf(name))
@@ -301,8 +320,8 @@ const runRawExecute = (sql: string, params: unknown[]): number => {
     }
     const column = parsed[1] as string;
     const literal = (parsed[2] as string).trim();
-    if (literal === "?") {
-      assignments.push({ column, value: params.shift() });
+    if (parameterIndex(literal) !== null) {
+      assignments.push({ column, value: takeParameter(literal, params) });
       continue;
     }
     if (literal.toUpperCase() === "NULL") {

@@ -78,17 +78,17 @@ export class BackgroundJobWorker extends BaseWorker {
       const sql =
         "SELECT * FROM background_jobs" +
         " WHERE state = 'QUEUED'" +
-        " AND available_at <= ?" +
+        " AND available_at <= $1" +
         " ORDER BY available_at ASC, created_at ASC" +
-        " LIMIT ?" +
+        " LIMIT $2" +
         " FOR UPDATE SKIP LOCKED";
       const rows = await tx.$queryRawUnsafe(sql, now, this.batchSize);
       const jobs = toCamelRows<BackgroundJobRow>(rows);
       for (const job of jobs) {
         await tx.$executeRawUnsafe(
           "UPDATE background_jobs" +
-          " SET state = 'RUNNING', locked_at = ?, updated_at = ?" +
-          " WHERE id = ? AND state = 'QUEUED'",
+          " SET state = 'RUNNING', locked_at = $1, updated_at = $2" +
+          " WHERE id = $3::uuid AND state = 'QUEUED'",
           now,
           now,
           job.id,
@@ -110,8 +110,8 @@ export class BackgroundJobWorker extends BaseWorker {
     const leaseExpiredAt = new Date(now.getTime() - this.leaseSeconds * 1000);
     const affected = await this.db.$executeRawUnsafe(
       "UPDATE background_jobs" +
-      " SET state = 'QUEUED', locked_at = NULL, available_at = ?, updated_at = ?" +
-      " WHERE state = 'RUNNING' AND locked_at IS NOT NULL AND locked_at <= ?",
+      " SET state = 'QUEUED', locked_at = NULL, available_at = $1, updated_at = $2" +
+      " WHERE state = 'RUNNING' AND locked_at IS NOT NULL AND locked_at <= $3",
       now,
       now,
       leaseExpiredAt,
@@ -143,8 +143,8 @@ export class BackgroundJobWorker extends BaseWorker {
     const now = this.clock();
     await this.db.$executeRawUnsafe(
       "UPDATE background_jobs" +
-      " SET state = 'SUCCEEDED', completed_at = ?, locked_at = NULL, updated_at = ?" +
-      " WHERE id = ?",
+      " SET state = 'SUCCEEDED', completed_at = $1, locked_at = NULL, updated_at = $2" +
+      " WHERE id = $3::uuid",
       now,
       now,
       job.id,
@@ -171,8 +171,8 @@ export class BackgroundJobWorker extends BaseWorker {
     if (attempts >= maxAttempts) {
       await this.db.$executeRawUnsafe(
         "UPDATE background_jobs" +
-        " SET state = 'FAILED', attempts = ?, last_error = ?, completed_at = ?, locked_at = NULL, updated_at = ?" +
-        " WHERE id = ?",
+        " SET state = 'FAILED', attempts = $1, last_error = $2, completed_at = $3, locked_at = NULL, updated_at = $4" +
+        " WHERE id = $5::uuid",
         attempts,
         message,
         now,
@@ -191,8 +191,8 @@ export class BackgroundJobWorker extends BaseWorker {
     const delay = backoffDelayMs(attempts, this.baseBackoffMs, this.maxBackoffMs);
     await this.db.$executeRawUnsafe(
       "UPDATE background_jobs" +
-      " SET state = 'QUEUED', attempts = ?, last_error = ?, available_at = ?, locked_at = NULL, updated_at = ?" +
-      " WHERE id = ?",
+      " SET state = 'QUEUED', attempts = $1, last_error = $2, available_at = $3, locked_at = NULL, updated_at = $4" +
+      " WHERE id = $5::uuid",
       attempts,
       message,
       new Date(now.getTime() + delay),

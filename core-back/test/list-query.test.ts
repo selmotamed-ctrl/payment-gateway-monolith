@@ -17,7 +17,15 @@ describe("shared list query", () => {
       { search: ["code", "name"], in: { status: "status" }, defaultSort: { code: "asc" } },
     );
     expect(built.where).toEqual({
-      AND: [{ OR: [{ code: { contains: "sadad" } }, { name: { contains: "sadad" } }] }, { status: { in: ["ACTIVE", "PAUSED"] } }],
+      AND: [
+        {
+          OR: [
+            { code: { contains: "sadad", mode: "insensitive" } },
+            { name: { contains: "sadad", mode: "insensitive" } },
+          ],
+        },
+        { status: { in: ["ACTIVE", "PAUSED"] } },
+      ],
     });
     expect(built.orderBy).toEqual([{ code: "asc" }, { id: "desc" }]);
   });
@@ -64,14 +72,14 @@ describe("shared list query", () => {
       AND: [
         {
           OR: [
-            { attempt: { reference: { contains: "PA-1" } } },
-            { reconciliationItem: { ourReference: { contains: "PA-1" } } },
+            { attempt: { reference: { contains: "PA-1", mode: "insensitive" } } },
+            { reconciliationItem: { ourReference: { contains: "PA-1", mode: "insensitive" } } },
           ],
         },
         {
           OR: [
-            { attempt: { merchant: { tradeName: { contains: "Acme" } } } },
-            { attempt: { merchant: { legalName: { contains: "Acme" } } } },
+            { attempt: { merchant: { tradeName: { contains: "Acme", mode: "insensitive" } } } },
+            { attempt: { merchant: { legalName: { contains: "Acme", mode: "insensitive" } } } },
           ],
         },
       ],

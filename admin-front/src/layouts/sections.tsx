@@ -49,6 +49,7 @@ export const routesAuthorities: {
     GatewayWizard: ["gateways.edit"],
     Rails: ["gateways.edit"],
     GatewayRoutes: ["gateways.edit"],
+    SystemBackups: ["security:read", "gateway:read"],
 };
 
 export const routesRoles: {
@@ -188,6 +189,12 @@ export const useSections = () => {
                     name: "Reconciliation",
                     icon: "mdi-file-table-outline",
                     if: () => hasOneOfAuthorities(["reconciliation.run", "reconciliation.resolve"]),
+                },
+                {
+                    label: t("Backups"),
+                    name: "SystemBackups",
+                    icon: "mdi-backup-restore",
+                    if: () => hasOneOfAuthorities(["security:read", "gateway:read"]),
                 },
                 {
                     label: t("Platform Settings"),

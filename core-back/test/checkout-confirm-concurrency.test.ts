@@ -221,7 +221,7 @@ describe("checkout confirm concurrency", () => {
     expect(claimStatement?.sql).toContain("status IN");
     expect(claimStatement?.sql).toContain("terminal_at IS NULL");
     expect(claimStatement?.sql).toContain("AUTHORIZING");
-    expect(claimStatement?.sql).toContain("point_of_no_return = 1");
+    expect(claimStatement?.sql).toContain("point_of_no_return = true");
     expect(claimStatement?.params[0]).toBe(confirmIdempotencyHash("confirm-idem-1"));
   });
 

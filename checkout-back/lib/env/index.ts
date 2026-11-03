@@ -28,6 +28,7 @@ export const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(4103),
   BIND_HOST: z.string().min(1).default("0.0.0.0"),
   CORE_BACK_URL: httpsUrl,
+  CORE_BACK_URLS: z.string().optional(),
   MTLS_CLIENT_CERT_PATH: z.string().min(1),
   MTLS_CLIENT_KEY_PATH: z.string().min(1),
   MTLS_CA_CERT_PATH: z.string().min(1),
@@ -85,6 +86,45 @@ export const loadEnv = (): EdgeEnv => {
   }
   cached ??= readEnv();
   return cached;
+};
+
+export const parseCoreBackUrls = (raw: string | undefined, fallback: string): string[] => {
+  const entries = raw !== undefined && raw.trim().length > 0 ? raw.split(",") : [fallback];
+  const seen = new Set<string>();
+  const urls: string[] = [];
+  for (const entry of entries) {
+    const trimmed = entry.trim();
+    if (trimmed.length === 0) {
+      throw new Error("CORE_BACK_URLS must not contain an empty entry");
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(trimmed);
+    } catch {
+      throw new Error(`CORE_BACK_URLS contains a malformed URL: ${trimmed}`);
+    }
+    if (parsed.protocol !== "https:") {
+      throw new Error(`CORE_BACK_URLS only accepts absolute https URLs: ${trimmed}`);
+    }
+    const normalized = parsed.toString();
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    urls.push(trimmed);
+  }
+  return urls;
+};
+
+export const coreBackUrls = (): string[] => {
+  const loaded = loadEnv();
+  return parseCoreBackUrls(loaded.CORE_BACK_URLS, loaded.CORE_BACK_URL);
+};
+
+/**
+ * Drops the cached environment snapshot. Used by the test suites, which boot
+ * several service instances with a different configuration inside one process.
+ */
+export const resetEnvCache = (): void => {
+  cached = undefined;
 };
 
 export const env: EdgeEnv = new Proxy({} as EdgeEnv, {

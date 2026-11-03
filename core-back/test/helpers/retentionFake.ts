@@ -64,7 +64,7 @@ const tokenize = (sql: string): Token[] => {
     }
   };
   for (const character of sql) {
-    if (character === "`") {
+    if (character === "`" || character === "\"") {
       continue;
     }
     if (/\s/.test(character)) {
@@ -188,6 +188,11 @@ class StatementParser {
       this.paramIndex += 1;
       return this.paramIndex - 1;
     }
+    const placeholder = /^\$(\d+)(?:::\w+)?$/.exec(token);
+    if (placeholder) {
+      this.paramIndex = Math.max(this.paramIndex, Number(placeholder[1]));
+      return Number(placeholder[1]) - 1;
+    }
     return Number(token);
   }
 
@@ -237,11 +242,25 @@ class StatementParser {
     return { kind: "compare", column, operator, operand: this.parseOperand() };
   }
 
-  private parseOperand(): Operand {
-    const token = this.next();
+  private parameterIndex(token: string): number | null {
     if (token === "?") {
       this.paramIndex += 1;
-      return { kind: "param", index: this.paramIndex - 1 };
+      return this.paramIndex - 1;
+    }
+    const placeholder = /^\$(\d+)(?:::\w+)?$/.exec(token);
+    if (placeholder) {
+      const index = Number(placeholder[1]) - 1;
+      this.paramIndex = Math.max(this.paramIndex, index + 1);
+      return index;
+    }
+    return null;
+  }
+
+  private parseOperand(): Operand {
+    const token = this.next();
+    const single = this.parameterIndex(token);
+    if (single !== null) {
+      return { kind: "param", index: single };
     }
     if (token === "(") {
       if (this.peek() === "SELECT") {
@@ -249,11 +268,17 @@ class StatementParser {
         this.expect(")");
         return { kind: "subquery", statement };
       }
-      const start = this.paramIndex;
+      let start = -1;
       let length = 0;
       while (this.peek() !== ")") {
-        this.expect("?");
-        this.paramIndex += 1;
+        const item = this.next();
+        const index = this.parameterIndex(item);
+        if (index === null) {
+          throw new Error(`Unsupported list item: ${item}`);
+        }
+        if (start < 0) {
+          start = index;
+        }
         length += 1;
         if (this.peek() === ",") {
           this.next();

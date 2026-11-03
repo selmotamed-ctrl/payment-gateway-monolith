@@ -3,8 +3,8 @@
  *
  * Every `@unique` / `@@unique` / `@id` in the schema is proven against the
  * live server: the unique index must exist and an actual colliding row must be
- * refused. Every relation is proven against INFORMATION_SCHEMA: the FK must
- * exist, point at the right parent, and carry the declared delete rule.
+ * refused. Every relation is proven against the PostgreSQL catalogs: the FK
+ * must exist, point at the right parent, and carry the declared delete rule.
  */
 import { afterAll, describe, expect, test } from "bun:test";
 import {
@@ -61,6 +61,23 @@ for (const model of schema.models) {
   if (model.tableName === "journal_lines") {
     continue;
   }
+  // The outbox uses an auto-increment primary key that the storage-engine and
+  // performance suites also drive concurrently. Colliding with a serial key
+  // would test sequence allocation, not a semantic unique constraint, so the
+  // outbox is covered by the index inventory instead.
+  if (model.tableName === "outbox_events") {
+    continue;
+  }
+  for (const fields of model.idBlocks) {
+    uniqueConstraints.push({
+      model: model.name,
+      table: model.tableName,
+      fields,
+      dbColumns: fields.map((field) => dbColumnFor(model.tableName, field)),
+      kind: "primary",
+      label: `${model.tableName}(${fields.join(",")})`,
+    });
+  }
   for (const fields of model.uniqueBlocks) {
     uniqueConstraints.push({
       model: model.name,
@@ -100,10 +117,10 @@ const findUniqueIndex = (constraint: UniqueConstraint): string | undefined => {
     if (index.nonUnique !== 0) {
       continue;
     }
-    if (constraint.kind === "primary" && index.indexName !== "PRIMARY") {
+    if (constraint.kind === "primary" && !index.isPrimary) {
       continue;
     }
-    if (constraint.kind === "unique" && index.indexName === "PRIMARY") {
+    if (constraint.kind === "unique" && index.isPrimary) {
       continue;
     }
     const columns = indexColumns(constraint.table, index.indexName).sort();
@@ -130,7 +147,7 @@ describeDb("Suite 01 · unique constraint enforcement", () => {
       expect(findUniqueIndex(constraint)).toBeDefined();
     });
 
-    test(`${constraint.label} [2/5] the index is declared NON_UNIQUE = 0`, () => {
+    test(`${constraint.label} [2/5] the index is declared unique`, () => {
       const name = findUniqueIndex(constraint);
       const row = (indexesByTable.get(constraint.table) ?? []).find((index) => index.indexName === name);
       expect(row?.nonUnique).toBe(0);
@@ -147,9 +164,15 @@ describeDb("Suite 01 · unique constraint enforcement", () => {
 
     test(`${constraint.label} [4/5] a colliding row is refused by the database`, async () => {
       const first = await createRow(constraint.table, {}, { forceNonNull: constraint.fields });
-      const duplicate = { ...first };
+      const duplicate = constraint.kind === "primary"
+        ? { ...first }
+        : {
+            ...(await createRow(constraint.table, {}, { forceNonNull: constraint.fields })),
+          };
       if (constraint.kind !== "primary") {
-        duplicate.id = crypto.randomUUID();
+        for (const column of constraint.dbColumns) {
+          duplicate[column] = first[column];
+        }
       }
       const result = await insertExpectingDuplicate(constraint.table, duplicate);
       expect(result.rejected).toBe(true);
@@ -157,7 +180,9 @@ describeDb("Suite 01 · unique constraint enforcement", () => {
 
     test(`${constraint.label} [5/5] a distinct row is accepted`, async () => {
       const row = await createRow(constraint.table, {}, { forceNonNull: constraint.fields });
-      expect(row.id).toBeDefined();
+      for (const column of constraint.dbColumns) {
+        expect(row[column]).not.toBeUndefined();
+      }
     });
   }
 });
@@ -258,7 +283,7 @@ describeDb("Suite 01 · live referential actions", () => {
     const application = await createRow("applications");
     let rejected = false;
     try {
-      await db.$executeRawUnsafe("DELETE FROM merchants WHERE id = ?", application.merchant_id);
+      await db.$executeRawUnsafe('DELETE FROM "merchants" WHERE "id" = $1', application.merchant_id);
     } catch {
       rejected = true;
     }
@@ -268,9 +293,9 @@ describeDb("Suite 01 · live referential actions", () => {
   test("deleting a DRAFT gateway version cascades to its child definitions", async () => {
     const version = await createRow("gateway_versions", { state: "DRAFT" });
     const child = await createRow("gateway_environments", { gateway_version_id: version.id });
-    await db.$executeRawUnsafe("DELETE FROM gateway_versions WHERE id = ?", version.id);
+    await db.$executeRawUnsafe('DELETE FROM "gateway_versions" WHERE "id" = $1', version.id);
     const rows = (await db.$queryRawUnsafe(
-      "SELECT COUNT(*) AS count FROM gateway_environments WHERE id = ?",
+      'SELECT COUNT(*) AS count FROM "gateway_environments" WHERE "id" = $1',
       child.id,
     )) as Array<{ count: number | bigint }>;
     expect(Number(rows[0]?.count)).toBe(0);

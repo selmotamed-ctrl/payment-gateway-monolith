@@ -14,6 +14,13 @@ import { PeriodicScreeningWorker } from "./PeriodicScreeningWorker";
 import { KybExpiryWorker } from "./KybExpiryWorker";
 import { RetentionWorker } from "./RetentionWorker";
 import { BackgroundJobWorker } from "./BackgroundJobWorker";
+import type { StorageEngine } from "../../lib/storageEngine/ports";
+import {
+  AuditShipperWorker,
+  OutboxRelayWorker,
+} from "../../lib/storageEngine/outboxWorkers";
+import { DedicatedAuditDatabaseDriver } from "../../lib/storageEngine/auditAndLogAdapters";
+import type { PrismaClient } from "../../generated/prisma/client";
 import {
   createAdjustmentJobHandler,
   createFeeVariancePoster,
@@ -90,6 +97,8 @@ export interface ProductionWorkerRuntimeOptions {
    * when its lease expired belongs to a crashed node and is re-queued.
    */
   backgroundJobsLeaseSeconds?: number;
+  /** Optional storage engine; when present its CQRS/audit shippers run. */
+  storage?: StorageEngine;
 }
 
 export interface ProductionWorkerRuntime {
@@ -295,6 +304,24 @@ export const createProductionWorkerRuntime = (
             retentionDays: options.retentionDays,
             dryRun: options.retentionDryRun ?? env.RETENTION_DRY_RUN,
           }),
+        ]
+      : []),
+    // The transactional outbox projector maintains the CQRS read models.
+    ...(options.storage
+      ? [
+          new OutboxRelayWorker(options.db as unknown as PrismaClient, {
+            intervalMs: 250,
+            batchSize: Math.max(50, (options.batchSize ?? 50) * 2),
+          }),
+          ...(options.storage.auditStore instanceof DedicatedAuditDatabaseDriver
+            ? [
+                new AuditShipperWorker(
+                  options.db as unknown as PrismaClient,
+                  options.storage.auditStore,
+                  { intervalMs: 500, batchSize: Math.max(50, (options.batchSize ?? 50) * 2) },
+                ),
+              ]
+            : []),
         ]
       : []),
     // The durable job queue: the statement reconciliation and the dispute /
