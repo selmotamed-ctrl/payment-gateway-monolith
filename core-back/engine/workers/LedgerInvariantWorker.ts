@@ -22,7 +22,7 @@ export class LedgerInvariantWorker extends BaseWorker {
   }
 
   protected async tick(): Promise<void> {
-    const verifier = new InvariantVerifier(this.db as never);
+    const verifier = new InvariantVerifier(this.db as never, { sql: true });
     const result = await verifier.verify();
     if (result.ok) {
       return;

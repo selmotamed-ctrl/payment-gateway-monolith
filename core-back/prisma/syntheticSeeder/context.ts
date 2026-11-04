@@ -146,6 +146,8 @@ export interface AttemptMeta {
   refund?: { at: Date; amount: string; full: boolean };
   dispute?: { at: Date };
   failureCode?: string;
+  /** The refund / dispute outcome 07 appends after the SUCCEEDED step. */
+  postSettlement?: "REFUNDED" | "PARTIALLY_REFUNDED" | "DISPUTED";
 }
 
 export interface MerchantInfo {

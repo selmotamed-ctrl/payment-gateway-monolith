@@ -3,7 +3,7 @@ id: platform.observability
 title: Observability
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-04
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/index.ts
@@ -206,7 +206,7 @@ The audit database stores an append-only SHA-256 chain: each row's `row_hash` co
 
 Important actual behavior:
 
-- Shipped audit outbox rows are marked, never deleted. There is no outbox retention or compaction worker.
+- Shipped `audit_outbox` rows and processed `outbox_events` rows are pruned by the relay/shipper after `STORAGE_AUDIT_OUTBOX_RETENTION_MS` / `STORAGE_OUTBOX_RETENTION_MS` (default 1 h; 0 disables). Shipping uses a lease column (`audit_outbox.lease_until`).
 - If the audit database is absent, `auditStore` is null and `AuditShipperWorker` is not started.
 - Admin audit searches use the dedicated audit store when `AUDIT_DATABASE_URL` is configured; otherwise they read the primary `audit_log` table through Prisma.
 - Audit logs are not a substitute for step logs; step logs are operational, audit logs are governance evidence.
@@ -402,7 +402,7 @@ The historical alerts on gateway signature spikes, attempt latency, `UNKNOWN` ag
 ### Partial
 
 - **Access logs.** Zero query counts, no actor, separate console id, no sampling or retention.
-- **Audit retention.** `shipped_at` is never deleted, so `audit_outbox` grows without a maintenance job.
+- **Audit retention.** (Closed 2026-11-04) `audit_outbox` is pruned after the retention window; the dedicated audit database is the durable copy.
 - **Storage health.** Implemented but not exposed over HTTP.
 - **Backup health.** Core `/health` does not include the daemon; operators need the overview route.
 - **Step log durability.** No disk spool; a full buffer drops records.

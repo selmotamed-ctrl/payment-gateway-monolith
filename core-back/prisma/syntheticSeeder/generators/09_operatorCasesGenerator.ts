@@ -1,4 +1,5 @@
 import type { SeederContext } from "../context";
+import { metaOf } from "../context";
 import { addDays, addMinutes, chance } from "../builders";
 
 type OperatorCaseKind =
@@ -26,9 +27,13 @@ const priorityFor = (ctx: SeederContext, kind: OperatorCaseKind, amount: number)
   return amount >= 1000 ? "P1" : ctx.rng.chance(60) ? "P2" : "P3";
 };
 
-const actionFor = (attempt: any | undefined): "MARK_SUCCEEDED" | "MARK_FAILED" | "CLOSE_CASE" => {
-  if (attempt && !attempt.terminalAt && ["UNKNOWN", "VERIFYING"].includes(String(attempt.status))) {
-    return "MARK_FAILED";
+const actionFor = (
+  attempt: any | undefined,
+  truth?: "PAID" | "FAILED" | "PENDING",
+): "MARK_SUCCEEDED" | "MARK_FAILED" | "CLOSE_CASE" => {
+  if (attempt && !attempt.terminalAt && String(attempt.status) === "UNKNOWN") {
+    // The operator follows what the gateway says (the emulator holds the truth).
+    return truth === "PAID" ? "MARK_SUCCEEDED" : "MARK_FAILED";
   }
   return "CLOSE_CASE";
 };
@@ -51,6 +56,9 @@ const reasonFor = (kind: OperatorCaseKind): string => {
       return "Statement line could not be matched to a local attempt.";
   }
 };
+
+const suspense0 = (candidate: Candidate, meta: ReturnType<typeof metaOf>): boolean =>
+  candidate.attempt ? meta.attempts.get(String(candidate.attempt.id))?.kind === "SUSPENSE" : false;
 
 export const generateOperatorCases = (ctx: SeederContext): void => {
   const activePlatformUsers = ctx.dataset.users.filter(
@@ -98,23 +106,24 @@ export const generateOperatorCases = (ctx: SeederContext): void => {
     }
   }
 
+  const meta = metaOf(ctx);
   for (const attempt of ctx.dataset.paymentAttempts) {
     const status = String(attempt.status);
-    const substatus = String(attempt.substatus ?? "");
+    const info = meta.attempts.get(String(attempt.id));
+    if (!info) continue;
     const lastStep = lastStepByAttempt.get(String(attempt.id));
     const lastInbound = lastInboundByAttempt.get(String(attempt.id));
     const stepAt = new Date(lastStep?.createdAt ?? attempt.createdAt);
     const inboundAt = new Date(lastInbound?.receivedAt ?? stepAt);
-    if (status === "UNKNOWN" && substatus === "CONFLICTING_TRUSTED_SIGNALS") {
+    if (status === "UNKNOWN" && info.kind === "CONFLICT") {
       pools.CONFLICT.push({ kind: "CONFLICT", attempt, evidenceAt: lastInbound ? inboundAt : stepAt });
     } else if (status === "UNKNOWN") {
       pools.UNKNOWN.push({ kind: "UNKNOWN", attempt, evidenceAt: stepAt });
-    } else if (status === "VERIFYING" && substatus === "AML_HOLD") {
-      pools.HELD.push({ kind: "HELD", attempt, evidenceAt: stepAt });
-    } else if (status === "EXPIRED" && substatus === "LATE_SUCCESS_PENDING") {
-      pools.LATE_SUCCESS.push({ kind: "LATE_SUCCESS", attempt, evidenceAt: lastInbound ? inboundAt : stepAt });
-    } else if (status === "VERIFYING" && substatus === "MANUAL_REVIEW") {
-      pools.MANUAL_REVIEW.push({ kind: "MANUAL_REVIEW", attempt, evidenceAt: stepAt });
+    } else if (info.kind === "AML_HELD") {
+      // The engine opens a MANUAL_REVIEW case when a hold is escalated and a HELD case otherwise.
+      (info.amlCaseStatus === "ESCALATED_STR" ? pools.MANUAL_REVIEW : pools.HELD).push({ kind: info.amlCaseStatus === "ESCALATED_STR" ? "MANUAL_REVIEW" : "HELD", attempt, evidenceAt: new Date(attempt.createdAt) });
+    } else if (info.kind === "LATE_SUCCESS" || info.kind === "SUSPENSE") {
+      pools.LATE_SUCCESS.push({ kind: "LATE_SUCCESS", attempt, evidenceAt: lastInbound ? inboundAt : new Date(attempt.terminalAt ?? stepAt) });
     }
   }
 
@@ -173,16 +182,20 @@ export const generateOperatorCases = (ctx: SeederContext): void => {
         ?? item?.statementAmount
         ?? 0,
     );
-    const priority = priorityFor(ctx, candidate.kind, amount);
+    const priority = suspense0(candidate, meta) ? "P1" : priorityFor(ctx, candidate.kind, amount);
     const createdAt = new Date(Math.min(
       ctx.timeline.end.getTime(),
       addMinutes(candidate.evidenceAt, ctx.rng.int(2, 45)).getTime(),
     ));
-    let state = ctx.rng.weighted(STATE_WEIGHTS) as keyof typeof STATE_WEIGHTS;
+    const suspense = attempt ? meta.attempts.get(String(attempt.id))?.kind === "SUSPENSE" : false;
+    let state = (suspense ? "OPEN" : ctx.rng.weighted(STATE_WEIGHTS)) as keyof typeof STATE_WEIGHTS;
     // A resolved case must never leave a non-terminal attempt behind: the
     // real resolution workflow would have closed or failed it first.
-    if (state === "RESOLVED" && attempt && !attempt.terminalAt) {
-      state = "PENDING_CHECKER";
+    if (attempt && !attempt.terminalAt) {
+      if (state === "RESOLVED") state = "PENDING_CHECKER";
+      // Only an UNKNOWN attempt can have a proposed MARK_* outcome; a held
+      // payment is resolved through its AML case, not through this queue.
+      if (state === "PENDING_CHECKER" && String(attempt.status) !== "UNKNOWN") state = "IN_PROGRESS";
     }
     const clamp = (date: Date): Date => new Date(Math.min(ctx.timeline.end.getTime(), date.getTime()));
     const assignedAt = clamp(addMinutes(createdAt, ctx.rng.int(2, 90)));
@@ -205,7 +218,7 @@ export const generateOperatorCases = (ctx: SeederContext): void => {
     if (state === "IN_PROGRESS") updatedAt = inquiryAt;
     if ((state === "PENDING_CHECKER" || state === "RESOLVED") && checker) {
       const approvalId = ctx.nextId("approval");
-      const action = actionFor(attempt);
+      const action = actionFor(attempt, attempt ? meta.attempts.get(String(attempt.id))?.gatewayTruth : undefined);
       const providerReference = attempt?.providerReference ?? (candidate.kind === "LATE_SUCCESS" ? `FK-LATE-${String(attempt?.id ?? "").slice(-8)}` : null);
       const payload = {
         action,

@@ -3,7 +3,7 @@ id: merchant-ui.guide
 title: Merchant Guide and Developer API
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-04
 verified_against: 5a24f6f+working-tree
 code:
   - merchant-front/src/content/guide/merchantOperationsGuide.ts
@@ -20,6 +20,8 @@ tests:
   - tests/e2e/exhaustive/exhaustive-merchant-surface.spec.ts
   - tests/e2e/merchant/shell.spec.ts
 gaps:
+  - The sample webhook payload (`X-PG-Signature`) is illustrative: outbound merchant webhooks are not implemented.
+  - `redirectDomainAllowlist` on applications is stored but never enforced (no `REDIRECT_DOMAIN_NOT_ALLOWED` check exists, and links have no `redirectUrl`).
   - The merchant guide ships the implemented 10 operations chapters and 5 developer chapters, not the future guide v2 model.
   - The first-5 checklist is stored in localStorage and auto-detected from list endpoints; completion is a convenience signal, not a server-issued onboarding status.
   - The fee calculator is client-side and estimates the gateway fee; it does not call the commission engine.
@@ -150,7 +152,7 @@ The operations guide includes a generator with:
 - Amount and fee bearer taken from the calculator.
 - Language tabs: TypeScript/Node/Bun, PHP/Laravel, Python/httpx, cURL.
 - Generated calls:
-  - `POST /api/v1/external/links` with `applicationId`, decimal amount, `currency: "LYD"`, `feeBearer`, `infiniteUse`, `useCount`, `redirectUrl`.
+  - `POST /api/v1/external/links` with `title`, decimal amount, `currency: "LYD"`, `feeBearer` (`MERCHANT_ABSORBS | PAYER_SURCHARGE | SPLIT`), `maxUses`. The edge schema is strict: `applicationId`, `infiniteUse`, `useCount`, `redirectUrl` and `railWhitelist` are rejected. The `201` body is `key`, `amount`, `currency`, `feeBearer`, `state`, `visibleRails`, `excludedRails`; the checkout page is `/pay/<key>`.
   - `GET /api/v1/external/links/:key` to check `state` and `confirmedCount`.
   - `GET /api/v1/external/payments/:reference`.
 - A sample webhook request with `X-PG-Signature` and a JSON payload.

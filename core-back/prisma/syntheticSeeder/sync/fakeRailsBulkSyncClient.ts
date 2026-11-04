@@ -1,4 +1,4 @@
-import type { SeederContext } from "../context";
+import { metaOf, type SeederContext } from "../context";
 import { OTP_CODES } from "../libyanDataCatalog";
 
 /**
@@ -12,21 +12,27 @@ import { OTP_CODES } from "../libyanDataCatalog";
 
 const BATCH = 5000;
 
+/**
+ * Core status -> the status the emulator holds. The emulator knows only the
+ * payment state, so a refunded/disputed payment is PAID/REFUNDED there, a
+ * BLOCKED attempt never reached the rail (no transaction is synced), and an
+ * UNKNOWN attempt carries the authoritative truth the emulator will answer on
+ * "Inquire now" (PAID or FAILED, never silently PENDING).
+ */
 const STATUS_MAP: Record<string, string> = {
   SUCCEEDED: "PAID",
   FAILED: "FAILED",
   EXPIRED: "EXPIRED",
   CANCELLED: "CANCELLED",
-  BLOCKED: "FAILED",
   REFUNDED: "REFUNDED",
-  PARTIALLY_REFUNDED: "REFUNDED",
-  DISPUTED: "DISPUTED",
+  PARTIALLY_REFUNDED: "PAID",
+  DISPUTED: "PAID",
   CREATED: "INITIATED",
   INITIATING: "INITIATED",
   AWAITING_CUSTOMER: "AWAITING_ACTION",
   AUTHORIZING: "AWAITING_ACTION",
   VERIFYING: "AWAITING_ACTION",
-  UNKNOWN: "UNKNOWN_SIMULATED",
+  UNKNOWN: "AWAITING_ACTION",
 };
 
 const toIso = (value: unknown): string =>
@@ -43,7 +49,12 @@ export const fakeRailsBulkSync = async (ctx: SeederContext): Promise<{ transacti
   const routeInfo = new Map(ctx.refs.routes.map((route) => [route.id, route]));
   const railById = new Map(ctx.refs.rails.map((rail) => [rail.id, rail]));
 
-  const transactions = ctx.dataset.paymentAttempts.map((attempt) => {
+  const syncable = ctx.dataset.paymentAttempts.filter((attempt) => {
+    const info = metaOf(ctx).attempts.get(String(attempt.id));
+    return info ? info.reachedGateway : String(attempt.status) !== "BLOCKED";
+  });
+  const transactions = syncable.map((attempt) => {
+    const info = metaOf(ctx).attempts.get(String(attempt.id));
     const route = routeInfo.get(String(attempt.routeId));
     const rail = route ? railById.get(route.railId) : undefined;
     const providerReference = attempt.providerReference
@@ -64,11 +75,12 @@ export const fakeRailsBulkSync = async (ctx: SeederContext): Promise<{ transacti
       currency: String(attempt.currency),
       collection_mode: rail?.collectionMode ?? "HYBRID",
       customer_identifier_masked: attempt.customerFieldsMasked?.phone ?? null,
-      expected_otp: OTP_CODES[Number(String(attempt.id).slice(-2)) % OTP_CODES.length],
+      expected_otp: OTP_CODES[parseInt(String(attempt.id).slice(-2), 16) % OTP_CODES.length],
       status: STATUS_MAP[String(attempt.status)] ?? "INITIATED",
+      // An UNKNOWN attempt answers the inquiry with the recorded truth.
       assigned_fail_phase: null,
       assigned_failure_mode: null,
-      inquiry_override_status: null,
+      inquiry_override_status: String(attempt.status) === "UNKNOWN" && info?.gatewayTruth ? info.gatewayTruth : null,
       return_url: null,
       cancel_url: null,
       webhook_url: null,
@@ -78,7 +90,8 @@ export const fakeRailsBulkSync = async (ctx: SeederContext): Promise<{ transacti
     };
   });
 
-  const events = ctx.dataset.attemptStepLogs.map((log) => {
+  const syncedIds = new Set(syncable.map((attempt) => String(attempt.id)));
+  const events = ctx.dataset.attemptStepLogs.filter((log) => syncedIds.has(String(log.attemptId))).map((log) => {
     const attempt = attemptById.get(String(log.attemptId));
     const route = attempt ? routeInfo.get(String(attempt.routeId)) : undefined;
     return {

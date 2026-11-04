@@ -5,9 +5,9 @@ import { createContext } from "./context";
 import { assertSafeToSeedSyntheticData } from "./SeederSafetyGate";
 import { generateAdminAndStaff } from "./generators/01_adminAndStaffGenerator";
 import { generateMerchantCohort } from "./generators/02_merchantCohortGenerator";
-import { generateGatewayLifecycle } from "./generators/03_gatewayLifecycleGenerator";
+import { generateGatewayLifecycle, generateRouteHealth } from "./generators/03_gatewayLifecycleGenerator";
 import { generateLinksAndAttempts } from "./generators/04_linksAndAttemptsGenerator";
-import { generateLedgerAndCheckpoints } from "./generators/05_ledgerAndCheckpoints";
+import { generateCheckpoints, generateLedger } from "./generators/05_ledgerAndCheckpoints";
 import { generateReconciliation } from "./generators/06_reconAndStatements";
 import { generateDisputesCashoutsAdjustments } from "./generators/07_disputesCashoutsAdjustments";
 import { generateAmlAndGovernanceQueues } from "./generators/08_amlAndGovernanceQueues";
@@ -15,6 +15,8 @@ import { generateOperatorCases } from "./generators/09_operatorCasesGenerator";
 import { bulkDataWriter } from "./sync/bulkDataWriter";
 import { fakeRailsBulkSync } from "./sync/fakeRailsBulkSyncClient";
 import { enrichKybDocuments } from "./sync/enrichKybDocuments";
+import { encryptPendingSecrets } from "./sync/encryptSecrets";
+import { writeReadModels } from "./sync/readModels";
 import { auditInMemory, postSeedAudit } from "./verify/postSeedAudit";
 import { findCompletedSeedRun, recordCompletedSeedRun } from "./seedRunRegistry";
 
@@ -55,11 +57,14 @@ export const runSyntheticSeeder = async (): Promise<void> => {
     ["merchants, KYB & owners", () => generateMerchantCohort(ctx)],
     ["gateway lifecycle & health", () => generateGatewayLifecycle(ctx)],
     ["links & attempts", () => generateLinksAndAttempts(ctx)],
-    ["ledger & checkpoints", () => generateLedgerAndCheckpoints(ctx)],
-    ["reconciliation", () => generateReconciliation(ctx)],
-    ["disputes, cashouts & adjustments", () => generateDisputesCashoutsAdjustments(ctx)],
+    ["route health", () => generateRouteHealth(ctx)],
+    ["ledger postings", () => generateLedger(ctx)],
+    ["reconciliation & settlement sweeps", () => generateReconciliation(ctx)],
+    ["refunds, disputes, cashouts & adjustments", () => generateDisputesCashoutsAdjustments(ctx)],
     ["AML & governance queues", () => generateAmlAndGovernanceQueues(ctx)],
     ["operator cases & approvals", () => generateOperatorCases(ctx)],
+    // Checkpoints and shard balances come LAST: every posting is final.
+    ["GL checkpoints & shards", () => generateCheckpoints(ctx)],
   ];
   for (const [label, run] of phases) {
     const phaseStart = Date.now();
@@ -70,16 +75,23 @@ export const runSyntheticSeeder = async (): Promise<void> => {
   const preAudit = auditInMemory(ctx);
   if (!preAudit.ok) {
     console.error("[synthetic-seeder] operator-case audit:", JSON.stringify(preAudit.operatorCases, null, 2));
+    console.error("[synthetic-seeder] invariant violations:", JSON.stringify(preAudit.invariants.byRule), preAudit.invariants.samples.slice(0, 20));
     throw new Error(
       `Synthetic ledger invariant failed before writing: drift=${preAudit.ledgerDrift} unbalanced=${preAudit.unbalancedEntries} ` +
         `succeededWithoutLedger=${preAudit.succeededWithoutLedger} slotViolations=${preAudit.slotViolations} ` +
-        `operatorCaseViolations=${preAudit.operatorCaseViolations}`,
+        `operatorCaseViolations=${preAudit.operatorCaseViolations} invariantViolations=${preAudit.invariants.total}`,
     );
   }
-  console.log(`[synthetic-seeder] in-memory invariant OK (0.0000 LYD drift)`);
+  console.log(`[synthetic-seeder] in-memory invariants OK (0.0000 LYD drift, ${JSON.stringify(preAudit.invariants.metrics)})`);
+
+  const secrets = await encryptPendingSecrets(ctx);
+  console.log(`[synthetic-seeder] encrypted ${secrets} sensitive columns with the Vault`);
 
   const writeReport = await bulkDataWriter(client, ctx);
   console.log(`[synthetic-seeder] wrote ${writeReport.reduce((sum, row) => sum + row.rows, 0)} rows across ${writeReport.length} tables`);
+
+  const readModels = await writeReadModels(client, ctx);
+  console.log(`[synthetic-seeder] projected ${readModels.merchantDays} merchant-day and ${readModels.routeDays} route-day read-model rows`);
 
   const kyb = await enrichKybDocuments(client);
   console.log(
@@ -95,7 +107,7 @@ export const runSyntheticSeeder = async (): Promise<void> => {
     throw new Error(
       `Post-seed audit failed: drift=${audit.ledgerDrift} unbalanced=${audit.unbalancedEntries} ` +
         `succeededWithoutLedger=${audit.succeededWithoutLedger} slotViolations=${audit.slotViolations} ` +
-        `operatorCaseViolations=${audit.operatorCaseViolations}`,
+        `operatorCaseViolations=${audit.operatorCaseViolations} invariantViolations=${audit.invariants.total} databaseViolations=${audit.databaseViolations} ${JSON.stringify(audit.invariants.samples.slice(0, 10))}`,
     );
   }
   await recordCompletedSeedRun(client, config, {

@@ -219,6 +219,8 @@
 | `core-back/lib/env/index.ts` | `STORAGE_LOG_BUFFER_MAX` |
 | `core-back/lib/env/index.ts` | `STORAGE_LOG_FLUSH_INTERVAL_MS` |
 | `core-back/lib/env/index.ts` | `STORAGE_SHARD_COUNT` |
+| `core-back/lib/env/index.ts` | `STORAGE_OUTBOX_RETENTION_MS` |
+| `core-back/lib/env/index.ts` | `STORAGE_AUDIT_OUTBOX_RETENTION_MS` |
 | `core-back/lib/env/index.ts` | `BACKUP_DAEMON_URL` |
 | `core-back/lib/env/index.ts` | `BACKUP_DAEMON_CA_CERT_PATH` |
 | `core-back/lib/env/index.ts` | `BACKUP_DAEMON_CLIENT_CERT_PATH` |

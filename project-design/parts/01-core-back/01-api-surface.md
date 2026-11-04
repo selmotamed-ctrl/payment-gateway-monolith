@@ -3,7 +3,7 @@ id: core.api
 title: Core API Surface
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-04
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/api/index.ts
@@ -41,7 +41,7 @@ gaps:
   - APPLICATION approvals have no executable handler and remain pending.
   - Cashout processing, some settings writes, commission creation and velocity-rule creation execute without the approval queue.
   - Merchant routes do not enforce per-endpoint authorities or API-token scopes.
-  - Pagination is offset-based (skip/take), not keyset.
+  - Pagination is offset-based by default; `buildListQuery` now also supports keyset (`cursor` / `nextCursor`) for NOT NULL sorts, adopted so far by `GET /internal/merchant/payments`. Other lists remain offset (GAP-002 partial).
   - Inbound webhooks are verified and processed synchronously before the ack.
   - The resend endpoint only refreshes a cooldown; it does not call the gateway.
   - Attempt log GET returns hard-coded null clientAction and empty publicOutputs.
@@ -340,7 +340,7 @@ Checkout has no bearer auth. The link key and attempt id are capabilities. The r
   - `skip = (page - 1) * pageSize`, `take = pageSize`.
 - `listResponse(key, rows, total, built)` returns `{ [key]: rows, total, page, pageSize }`.
 
-Offset pagination is used everywhere. There is no keyset/cursor contract despite the historical design.
+Offset pagination is the default. Since 2026-11-04 `buildListQuery` returns a `keyset` plan when every ORDER BY term is a top-level NOT NULL column (`createdAt`, `updatedAt`, `id` plus the spec `keysetFields`); `listResponse` then emits an opaque base64url `nextCursor` for a full page and a valid `cursor` query parameter replaces OFFSET (`skip = 0`). `includeTotal=false` skips the COUNT (`countUnlessSkipped`). Only `GET /internal/merchant/payments` and `/links` pass the helpers so far; the other lists remain offset until adopted.
 
 Export endpoints follow a repeated shape:
 
@@ -527,7 +527,7 @@ Without step 3 the request remains pending and returns `409 NO_EXECUTABLE_SUBJEC
 - **Approval execution.** `APPLICATION` and several other approval subject types have no executable handler.
 - **Maker-checker coverage.** Cash-out process, commission create, velocity create and settings writes bypass the queue.
 - **Merchant authorization.** No per-route authority or token-scope enforcement.
-- **Pagination.** Offset only; no keyset.
+- **Pagination.** Offset by default; keyset/cursor available through `buildListQuery` and adopted by merchant `/payments`.
 - **Webhook processing.** Synchronous verification/processing before ack; the worker is secondary.
 - **Exports.** JSON-only server responses with a 5000-row cap; no server-side XLSX generation in core.
 - **Idempotency.** Attempts have an idempotency key; link creation accepts one but does not use it.

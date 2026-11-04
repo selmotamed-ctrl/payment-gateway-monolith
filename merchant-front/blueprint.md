@@ -6,7 +6,7 @@ Generated from: `merchant-ui.portal`, `merchant-ui.guide`.
 
 ## Merchant Portal
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-04
 
 ## 1. Purpose and scope
 
@@ -40,6 +40,32 @@ The merchant portal is the self-service business workspace:
 - A visitor guard for login/register and a landing-to-dashboard redirect for authenticated users.
 - A `routesAuthorities` check after authentication; missing/empty authority arrays mean no UI gate.
 - A dynamic-import retry path using `localStorage`.
+
+### 3.1a Public landing page (`/`, `Landing`)
+
+`merchant-front/src/pages/public/landing/**` is the visitor-facing marketing page; authenticated users are redirected to the dashboard by the router guard. It was redesigned on 2026-11-04 (research and rationale: `design/06-ui/merchant_landing_page_redesign.md`).
+
+| Section | Content | Implementation |
+| :--- | :--- | :--- |
+| Sticky header | Brand, anchor nav (How it works / Product / Developers / Security, hidden < 960 px), AR/EN toggle, theme toggle, Login, Get started | `index.tsx`; theme/locale switches run inside a View Transition when supported and motion is allowed. |
+| Hero | Two-tone h1 "Collect on any rail. Reconcile every dinar.", lede, CTAs to `Register` and `Login`, three proof points | h1 is the LCP element and is never opacity-hidden. |
+| Hero simulator | Interactive payment-link checkout: five checkout experiences (OTP, QR, push approval, bank redirect, card form = the five `RENDER` client actions), real statuses `AWAITING_CUSTOMER → VERIFYING → SUCCEEDED`, then an illustrative `PLATFORM_CLEARING` journal (Dr gateway clearing / Cr wallet / Cr platform commission) that balances, and a wallet count-up | `HeroDemo.tsx` + `content/landing/landingModel.ts` (decimal.js). Autoplay pauses off-screen, when the tab is hidden and on user pause; play/pause and next-step buttons; rail buttons are `aria-pressed` toggles. |
+| How money moves | Link → hosted checkout → trusted confirmation → double-entry ledger → wallet & cash-out | Responsive horizontal/vertical track that fills on reveal; mirrors in RTL. |
+| Product bento | Payment links & QR, live POS screens, fee preview, wallets & sealed statements, four-eyes changes, disputes, team roles, bring-your-own gateway (`MERCHANT_DIRECT`) | `FeePreview.tsx` computes `MERCHANT_ABSORBS` / `PAYER_SURCHARGE` / `SPLIT` exactly like `MerchantFeeCalculator` and accepts Arabic-Indic digits. |
+| Stats | 5 ways to pay, 3 fee-bearer modes, 2 languages, 0 floating-point operations on money | Count-up on view; screen readers get the final value only. |
+| Developers (lazy chunk) | Token, IP allowlist, decimal-string and verify-by-API points; cURL/TypeScript/Python snippet for `POST /api/v1/external/links` and the real `201` body | `DeveloperSection.tsx` is dynamically imported when the section is within 600 px of the viewport; the snippet fields are tested against core-back `linkCreateSchema`. |
+| Security & compliance | Maker-checker, KYB/AML, mTLS 1.3 between edge and core, AES-256-GCM write-only secrets, append-only ledger, least-privilege teams | Static list + illustrative invariant panel. |
+| Onboarding | The six steps from account creation to go-live (mirrors `/portal/onboarding`) | |
+| FAQ | Commission, own gateway accounts, when to fulfil, what payers see, testing before live | Native `<details>`. |
+| Final CTA and footer | `Register`, `Login`, `MerchantGuide`, `MerchantDeveloperGuide` | All CTAs are `VBtn :to` links (no `<a><button>` nesting). |
+
+Rules:
+
+- **No unverifiable claims.** The page shows no live system status, uptime, fixed commission rate or currency list; numbers in the simulator, statement and invariant panels are labelled or obviously illustrative.
+- **Motion** is CSS-first (`landing.css`, loaded only with the landing chunk): IntersectionObserver reveals, `@property --pgl-sweep`, a scroll-timeline header hairline as progressive enhancement, and View Transitions. Content is only hidden when JS has set `data-motion="on"`; `prefers-reduced-motion: reduce` removes all animation/transitions, starts the simulator on its final state with autoplay off, and skips count-ups. Looping pulses are limited to six iterations.
+- **RTL** uses logical properties; directional icons flip; code, URLs, amounts and the LTR code window carry `dir="ltr"`; Arabic headings have no letter-spacing; inline Latin tokens inside Arabic strings are isolated with U+2066/U+2069.
+- **Copy** lives in `src/constants/landingCatalogue.ts` (EN/AR pairs) merged by `plugins/i18n.ts`; the app catalogue wins on collisions and the landing test forbids them.
+- `document.title` and the meta description are set from the catalogue on mount and on locale change.
 
 ### 3.2 The 16 portal routes
 
@@ -263,6 +289,7 @@ The portal uses no admin checklist/help-panel flags. Its shell always exposes gu
 ### Implemented
 
 - 16 protected portal routes and four public routes.
+- Redesigned public landing page with an interactive payment simulator, fee preview, lazy developer section, reduced-motion and RTL support.
 - 248/56 merchant shell with RTL, theme, search, help and operator card.
 - Onboarding, wallets, statements, applications, links, POS, payments, disputes, cash-outs, tokens, credentials and team pages.
 - Merchant guide and developer guide surfaces.
@@ -299,8 +326,10 @@ The portal uses no admin checklist/help-panel flags. Its shell always exposes gu
 - `tests/e2e/merchant/a11y.spec.ts` covers accessibility basics.
 - `tests/e2e/exhaustive/exhaustive-merchant-surface.spec.ts` enumerates the portal routes and viewport/locale/theme matrix.
 - `merchant-front/src/content/__tests__/content-completeness.test.ts` checks the merchant guide chapter content and tools.
+- `merchant-front/src/content/__tests__/landing-content.test.ts` checks the landing EN/AR catalogue (Arabic present, no collisions, every page literal translated), the fee formulas, the balanced demo journal, the snippet fields against `linkCreateSchema`, and that every landing route name exists.
+- `tests/e2e/merchant/landing.spec.ts` checks the landing headings/CTA hrefs, Arabic RTL with no overflow at 360 px, locale/theme toggles, the keyboard-operable simulator, the fee preview and reduced-motion behavior. It needs only the merchant preview server (no API).
 
-The shell/auth/a11y suites require the live stack. The content test is a Bun test.
+The shell/auth/a11y/landing suites run against `bun run preview` with mocked API routes. The content and landing tests are Bun tests (`bun run test:unit`).
 
 ## 9. Source references
 
@@ -338,10 +367,11 @@ The shell/auth/a11y suites require the live stack. The content test is a Bun tes
 ## 10. Change history
 
 - 2026-11-03 — Initial canonical merchant portal part. Confirms 16 portal routes, the 248/56 shell, onboarding and money/commerce/developer pages, guide surfaces, and the Statements/route authority and Google OIDC gaps.
+- 2026-11-04 — Public landing page redesigned (§3.1a): hero payment simulator, money-flow track, product bento with fee preview, stats, lazy developer section with a schema-accurate snippet, security, onboarding, FAQ; EN/AR landing catalogue; motion/reduced-motion/RTL rules; new landing unit and e2e tests. Removed unverifiable claims from the old page (fixed "3.00%" commission, "LYD · USD · EUR", "Live"/"All systems operational" badges) and nested `<a><button>` CTAs. `SegmentedTabs` arrow keys now follow the rendered direction in RTL.
 
 ## Merchant Guide and Developer API
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-04
 
 ## 1. Purpose and scope
 
@@ -464,7 +494,7 @@ The operations guide includes a generator with:
 - Amount and fee bearer taken from the calculator.
 - Language tabs: TypeScript/Node/Bun, PHP/Laravel, Python/httpx, cURL.
 - Generated calls:
-  - `POST /api/v1/external/links` with `applicationId`, decimal amount, `currency: "LYD"`, `feeBearer`, `infiniteUse`, `useCount`, `redirectUrl`.
+  - `POST /api/v1/external/links` with `title`, decimal amount, `currency: "LYD"`, `feeBearer` (`MERCHANT_ABSORBS | PAYER_SURCHARGE | SPLIT`), `maxUses`. The edge schema is strict: `applicationId`, `infiniteUse`, `useCount`, `redirectUrl` and `railWhitelist` are rejected. The `201` body is `key`, `amount`, `currency`, `feeBearer`, `state`, `visibleRails`, `excludedRails`; the checkout page is `/pay/<key>`.
   - `GET /api/v1/external/links/:key` to check `state` and `confirmedCount`.
   - `GET /api/v1/external/payments/:reference`.
 - A sample webhook request with `X-PG-Signature` and a JSON payload.

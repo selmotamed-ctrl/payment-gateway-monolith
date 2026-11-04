@@ -3,7 +3,7 @@ id: core.storage
 title: Storage Engine
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-04
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/lib/storageEngine/telemetry.ts
@@ -20,9 +20,11 @@ tests:
 gaps:
   - Only the admin merchant list and global search expose `x-pg-served-by`; other list/export routes still read the primary directly.
   - Read models are written by `attempt.transitioned` only and are not read by dashboards.
-  - `ledger.entry_posted` and four other outbox topics have no-op handlers.
-  - `outbox_events` and `audit_outbox` rows are never deleted; `audit_outbox` only gets `shipped_at`.
-  - Keyset pagination is not implemented; `listQuery` uses offset pagination.
+  - `ledger.entry_posted` and four other outbox topics have no-op handlers (`ledger.entry_posted` is no longer emitted by default).
+  - Keyset pagination exists in `listQuery` (2026-11-04) but only the merchant payment list uses it; every other list/export is still offset-paged with a COUNT (GAP-002 partial).
+  - Worker claim loops of ExpirySweeper, Poll, InboundInbox, OutboxNotification and PeriodicScreening run SKIP LOCKED outside a transaction, so the locks do not protect a batch across nodes (GAP-DB-02).
+  - Engine hot path still re-reads the attempt 3-4 times per request, runs the commission-receivable SUM over all receivable lines in the guard, and has no cache for flow/step/credential reads (GAP-DB-04).
+  - Admin lists, exports and summaries still read the primary and pull wide JSON/bytea columns (reconciliation `file_content`, KYB `content_ciphertext`, `credential_sets.entries_ciphertext`) (GAP-DB-05).
   - There is no `gateway_wire_logs` table and no on-disk log spool.
   - Access logging records `dbQueries` and `dbDurationMs` as zero.
   - Storage health is exposed only through the adapter API, not through `/health`.
@@ -68,11 +70,11 @@ The historical storage blueprint defines a thin, ACID write path for a high-volu
 
 The blueprint's implementation claims must not be repeated as current behavior. The actual code differs in these material ways:
 
-- `ledger.entry_posted` is registered but its handler is a no-op; only `attempt.transitioned` projects read models.
+- `ledger.entry_posted` is registered but its handler is a no-op; only `attempt.transitioned` projects read models. (As of 2026-11-04 the topic is not emitted unless `emitOutbox: true`.)
 - The two read models are written but not read by dashboards or list endpoints.
-- `AuditShipperWorker` marks `audit_outbox.shipped_at`; it never deletes shipped rows.
+- ~~`AuditShipperWorker` never deletes shipped rows~~ superseded 2026-11-04: both outboxes are pruned after a retention window (section 12).
 - Replica routing is used by global search and three merchant list endpoints, not by all dashboards, lists and exports.
-- Pagination is offset-based, not keyset-based.
+- ~~Pagination is offset-based, not keyset-based~~ partially superseded 2026-11-04: keyset is available in `listQuery` and used by the merchant payment list; other lists are offset.
 - Access logs record zero database query metrics.
 - There is no `gateway_wire_logs` table and no disk spool for the log sink.
 
@@ -229,7 +231,7 @@ The public `GET /health` in `core-back/index.ts:76-115` does not call `StorageEn
 - Audit ids are UUIDv7 generated in the UoW; the audit chain is append-only and idempotent by id.
 - The audit hash chain canonicalizes JSONB with PostgreSQL `before_json::text`/`after_json::text`; verification reads the same text form. Any change to the trigger field list or canonicalization invalidates historical verification.
 - Outbox handlers must be idempotent: a claimed batch is retried after a crash because `processed_at` is updated only after the handler completes.
-- The outbox relay processes rows in ascending id order and never deletes them.
+- The outbox relay processes rows in ascending id order. Processed rows are deleted only after `STORAGE_OUTBOX_RETENTION_MS` and only below the oldest unprocessed id.
 - Read consistency is one of `primary`, `replica` or `{ atLeastLsn, maxWaitMs? }`. A replica query failure falls back to the primary; callers must not assume a replica served the read.
 - Cache contents are not authoritative. A Redis failure must not fail a payment; velocity falls back to local memory.
 - The in-memory velocity fallback is per process and does not coordinate across core nodes.
@@ -267,6 +269,8 @@ The public `GET /health` in `core-back/index.ts:76-115` does not call `StorageEn
 | `STORAGE_LOG_BUFFER_MAX` | Log buffer bound | `5000` |
 | `STORAGE_LOG_FLUSH_INTERVAL_MS` | Log flush interval | `250` |
 | `STORAGE_SHARD_COUNT` | GL shard count, max 16 | `16` |
+| `STORAGE_OUTBOX_RETENTION_MS` | Processed `outbox_events` older than this are pruned (0 = keep) | `3600000` |
+| `STORAGE_AUDIT_OUTBOX_RETENTION_MS` | Shipped `audit_outbox` rows older than this are pruned (0 = keep) | `3600000` |
 | `BACKUP_DAEMON_URL` | Daemon base URL | unset |
 | `BACKUP_DAEMON_CA_CERT_PATH` | Daemon CA | unset |
 | `BACKUP_DAEMON_CLIENT_CERT_PATH` | Daemon client cert | unset |
@@ -309,7 +313,7 @@ The public `GET /health` in `core-back/index.ts:76-115` does not call `StorageEn
 
 ### Partial
 
-- Read-model adoption: `rm_*` tables are written but no dashboard or list reads them.
+- Read-model adoption: `rm_*` tables are written (batched since 2026-11-04) but no dashboard or list reads them yet.
 - Outbox projection: only `attempt.transitioned` has an effect; `ledger.entry_posted` and four other topics are no-ops.
 - Replica routing: only global search and three merchant list endpoints use it.
 - Cache: Redis/L1 is used primarily by velocity; `getOrLoad` is available but not used by core read paths.
@@ -318,11 +322,10 @@ The public `GET /health` in `core-back/index.ts:76-115` does not call `StorageEn
 
 ### Missing / deferred
 
-- Keyset pagination. `core-back/lib/listQuery.ts:220` returns `skip`/`take`; no cursor pagination exists.
+- Keyset pagination on every list: only the merchant payment list passes `cursor`/`nextCursor` (see section 12).
 - `gateway_wire_logs` table and any raw gateway wire-log persistence. Evidence is stored in redacted step logs only.
 - On-disk log spool and durable log backpressure. The buffer drops instead of spooling.
 - Storage health endpoint. `StorageEngine.health()` is not wired to HTTP.
-- Automatic outbox and audit-outbox pruning/archival.
 - Distributed velocity counters when Redis is unavailable.
 - A real multi-node cache invalidation path through `CachePort.publishInvalidation` (the method is optional and unused).
 - Read models for merchant dashboards or wallet statements. Only the two attempt-derived tables exist.
@@ -330,8 +333,8 @@ The public `GET /health` in `core-back/index.ts:76-115` does not call `StorageEn
 
 ### Known bugs / risks
 
-- `AuditShipperWorker` retains every shipped `audit_outbox` row. At high audit volume this becomes an unbounded primary-database table. Code gap.
-- `OutboxRelayWorker` retains every processed `outbox_events` row. The partial index makes the unprocessed scan cheap, but storage still grows. Code gap.
+- (Fixed 2026-11-04) `AuditShipperWorker` / `OutboxRelayWorker` retained every shipped/processed row; both now prune after a retention window.
+- (Fixed 2026-11-04) `projectAttemptTransition` converted money with `Number(...).toFixed(4)`; amounts now go through decimal.js.
 - A failed log flush requeues step logs but not access logs, so access-log rows can be silently lost. Code gap in `auditAndLogAdapters.ts:485-488`.
 - `RedisCacheAdapter.del` uses `KEYS`, which blocks Redis on large keyspaces. Code risk.
 - The Redis L1 cache returns a 30-second cached value even when the requested L2 TTL is different; invalidation must cover every node. Code risk.
@@ -357,6 +360,8 @@ Relevant test files:
 - `core-back/test/storage-engine/ledger-shards.test.ts` — shard arithmetic and balances.
 - `core-back/test/storage-engine/cache-velocity.test.ts` — memory and live Redis velocity.
 - `core-back/test/storage-engine/engine-factory.test.ts` — factory and health snapshot.
+- `core-back/test/storage-engine/db-optimisation.test.ts` — DB-free tests of delta folding, retention SQL, lease claim, shard folding, batched poster, replica helper, live balance loader.
+- `core-back/test/list-query-keyset.test.ts` — keyset cursor encode/decode and predicates.
 - `core-back/test/storage-engine/performance/storage-performance.test.ts` — pure primitives, UoW, outbox drain, shard reads, audit append, Redis velocity.
 - `core-back/test/storage-engine/performance/write-path-benchmark.test.ts` — audit write and shard-read latency.
 - `core-back/test/backup-admin/*.test.ts` — backup client and internal routes.
@@ -419,6 +424,7 @@ There is no benchmark in this part that proves the blueprint's 1,000+ TPS sustai
 
 ## 10. Change history
 
+- 2026-11-04 — DB read/write optimisation pass (section 12): batched outbox projection with retention, leased audit shipper, batched ledger posting, keyset pagination, single-statement balances, new/removed indexes, schema version 9. See `project-design/TRACKER.md`.
 - 2026-11-03 — Initial canonical extraction. Records the actual UoW/outbox/audit behavior, replica adoption, Redis fallback, shard arithmetic, read-model no-op handlers, missing retention, missing keyset pagination, missing `gateway_wire_logs`, missing disk spool and zero DB log metrics. See `project-design/TRACKER.md`.
 
 ## 11. Two-machine routing and realtime additions (2026-11-03)
@@ -428,3 +434,55 @@ There is no benchmark in this part that proves the blueprint's 1,000+ TPS sustai
 - `AuditShipperWorker` no longer computes `prev_hash`/`row_hash` in Node. Inserts omit both columns and the audit database trigger computes them under `pg_advisory_xact_lock(994001)`; `RETURNING` supplies the actual hashes.
 - `verifyHashChainIntegrity` reads `before_json::text`/`after_json::text` so it verifies the trigger canonical form.
 - Attempt transitions are bridged to `realtime:attempt` on the existing Redis-backed invalidation bus; checkout SSE and merchant POS streams subscribe to it while retaining the database poll fallback.
+
+## 12. 2026-11-04 database read/write optimisation
+
+### 12.1 Plan (prioritised by hot-path impact)
+
+1. **Write path (checkout confirm, ledger posting).** A 4-line posting cost 25-30 statements: per line `glAccount.findFirst` (+ fallback), `journalLine.create`, shard upsert, plus a never-consumed `ledger.entry_posted` outbox insert; shard upserts ran in template order (deadlock window). Batch to: 1 entry insert, 1 account lookup, 1 line insert, 1 sorted shard upsert.
+2. **Outbox/audit.** Per-event double upsert and per-row ack in the relay; shipper claim locks were released before shipping; both tables unbounded; idle polling every 250/500 ms. Batch, lease, prune, back off.
+3. **Reads on hot paths.** Rail catalog (every checkout page/initiate): uncached daily-volume SUM with a non-sargable COALESCE, full-table unfiltered reads incl. `entries_ciphertext`. Checkout re-reads and link/application/merchant loads on every attempt route. Merchant dashboard loaded every attempt of 90 days into JS. Balance fallbacks summed unbounded journal lines.
+4. **Lists.** Offset pagination + COUNT, wide rows (`context_ciphertext`, customer JSON). Add keyset + `includeTotal=false` + column selects.
+5. **Indexes.** Remove prefix-duplicates, add composites that match real WHERE/ORDER BY.
+6. **Workers.** Batch claim updates; fix lock scope (open, GAP-DB-02).
+
+### 12.2 As built
+
+| Area | Before | After | Where |
+| :--- | :--- | :--- | :--- |
+| Ledger posting | findFirst entry + create + per-line (findFirst, create, upsert) + ledger outbox insert | `createManyAndReturn(skipDuplicates)` entry, one `findMany` account lookup, one line `createManyAndReturn`, one `unnest` shard upsert folded and sorted by (account, shard); no `ledger.entry_posted` by default. Clients without the batch methods (test doubles) keep the per-row path. | `engine/ledger/LedgerPoster.ts`, `lib/storageEngine/ledgerShardWriter.ts`, `ledgerPosterFactory.ts` |
+| Attempt read-model projection | 2 upserts per event | one folded delta per key, one `unnest` upsert per read model, one batch ack; money via decimal.js; terminal `BLOCKED` counted as failure; success amounts tracked separately; route volume = succeeded volume | `lib/storageEngine/outboxWorkers.ts` |
+| Outbox retention | none | `OutboxRelayWorker.prune` below the oldest unprocessed id, bounded batches | same |
+| Audit shipper | claim tx committed before append; never pruned | single-statement lease claim (`lease_until`), `shipped_at`+lease clear, prune after retention | same |
+| Poll cadence | fixed 250/500 ms | exponential idle back-off, immediate re-poll on a full batch | `nextPollDelayMs` |
+| Replica helper | a failing query ran on the replica, then twice on the primary | the query runs on the primary at most once; the primary retry only happens when the read store failed before reaching the query | `lib/storageEngine/index.ts` |
+| Balances | merchant balance + `merchantWalletBalance` summed every journal line on top of a debit-positive checkpoint; admin finance looped one query per account; merchant overview used the stale checkpoint | `loadLiveAccountBalances`: one statement, shard total or checkpoint + post-checkpoint lines, natural sign | `shardBalances.ts`, `merchantOps.ts`, `merchant.ts`, `admin.ts` |
+| Invariant check | one `journal_lines` query per account every 60 s | one grouped SQL (opt-in `{ sql: true }` for PostgreSQL clients) | `engine/ledger/InvariantVerifier.ts` |
+| Rail catalog | daily-volume SUM sequentially before four full-table reads incl. encrypted entries | all five in parallel; credential sets limited to VERIFIED rows and 7 columns; commission profiles 6 columns; daily volume served by a partial expression index | `engine/flow/VisibleRailsCatalog.ts` + migration |
+| Checkout | link+application+merchant load on every attempt route; full-row status polls and re-reads | attempt scoped by `link.key` in one query; `select: { status }` re-reads; SSE poll selects 4 columns; widget/redirect/attempt reads in parallel; trimmed link include | `api/internal/checkout.ts` |
+| Merchant API | overview loaded all attempts of the window; POS stream updated every 3 s and joined through applications; list/stream rows included encrypted context; statements ignored month/wallet; CSV filtered 1,000 rows in JS | overview = `groupBy` + one grouped SQL + `take: 6`; heartbeat once a minute; explicit attempt list select; month bounds in SQL; bounded link-attempts (500); disputes via relation filter | `api/internal/merchant.ts` |
+| Pagination | offset only | `buildListQuery` returns `keyset`, accepts `cursor`, `includeTotal=false`; `listResponse` emits `nextCursor` | `lib/listQuery.ts` |
+| Job claim | one UPDATE per claimed job | one `UPDATE ... id = ANY(...)` | `engine/workers/BackgroundJobWorker.ts` |
+
+Indexes: see migration `20261104090000_db_read_write_optimisation` in `core.data`.
+
+### 12.3 Bugs found and fixed
+
+- `GET /internal/merchant/links`: the list filtered by a non-existent `payment_links.merchant_id` (and searched a non-existent `description`); Prisma rejects both. Now filtered by `application.merchantId`, search on `key`.
+- `GET /internal/merchant/payments`: `confirmedAt` filter/sort used a non-existent column; mapped to `terminal_at`.
+- `GET /wallets/:id/statements` ignored the month; CSV export took the latest 1,000 successes then filtered in JS (older months empty).
+- Merchant balance fallback and `merchantWalletBalance` double-counted lines already folded into the checkpoint (no `created_at > checkpoint_at`) and applied a credit-positive sign to a debit-positive checkpoint.
+- `projectAttemptTransition` used floating point for money.
+- `AuditShipperWorker` claim did not hold locks while shipping.
+- `readThroughReplica*` re-ran failing queries up to three times and swallowed the error type.
+- `GET /disputes` loaded every DISPUTED attempt id and shipped it twice as an IN list.
+
+### 12.4 Known pre-existing failures observed (not caused by this change)
+
+- `dedicated audit database > concurrent and duplicate append calls serialize through the advisory lock` expects a gapless `seq_no` but duplicate appends consume sequence values.
+- `writeAudit writes the compatibility row ...` and `300 transactional audit writes ...` fail with `audit_log_actor_id_fkey` against a freshly migrated, unseeded database (fixture needs a seeded actor).
+- Hooks in `test/exhaustive/06-concurrency` exceed the 5 s default on a cold database (pass with `--timeout 60000`).
+
+### 12.5 Open work
+
+GAP-DB-02 (claim loops outside a transaction), GAP-DB-03 (KYB expiry has no cursor), GAP-DB-04 (engine re-reads, commission-receivable SUM scanning all receivable lines through a `pa.id::text` join, velocity per-rule queries, uncached flow/step/credential reads), GAP-DB-05 (admin lists/exports/summaries on the primary with wide columns, `reconciliation/runs` loading `file_content`, join-request mutations re-reading KYB `content_ciphertext`, bulk operator-case loops, `PUT /settings` per-entry reads), GAP-DB-06 (dashboards still do not read `rm_*`; merchant overview could use `rm_merchant_daily_stats` once per-rail and commission columns exist), and adoption of keyset pagination for the remaining lists.

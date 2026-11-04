@@ -15079,7 +15079,7 @@ router.get("/finance/liquidity/export", async (request: Request, response: Respo
 
 
 const buildInvariantSnapshot = async () => {
-  const verifier = new InvariantVerifier(client as never);
+  const verifier = new InvariantVerifier(client as never, { sql: true });
   const result = await verifier.verify();
   const sides = new Map<string, Decimal>();
   for (const balance of result.accountBalances) {

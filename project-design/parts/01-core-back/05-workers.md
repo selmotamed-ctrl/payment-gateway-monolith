@@ -3,7 +3,7 @@ id: core.workers
 title: Background Workers and Outboxes
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-04
 verified_against: 5a24f6f+working-tree
 code:
   - deploy/provisioners/auditAndLogDbProvisioner.ts
@@ -52,8 +52,9 @@ gaps:
   - "The inbound webhook route verifies and processes synchronously; `InboundInboxWorker` is wired but has no producer, so it is effectively idle."
   - "Checkout and POS SSE streams poll the database every 2-3 seconds instead of subscribing to the transition bus."
   - "`RetentionWorker` is disabled by default, does not purge AML/KYB/reporting evidence, and does not purge the ledger by design."
-  - "`OutboxRelayWorker` handles `attempt.transitioned`; `ledger.entry_posted` and the other declared topics are no-ops, so there is no ledger-driven CQRS."
-  - "`AuditShipperWorker` marks `shipped_at` and never deletes shipped rows; `audit_outbox` and `outbox_events` have no retention."
+  - "`OutboxRelayWorker` projects `attempt.transitioned` in batches; `ledger.entry_posted` and the other declared topics are no-ops (and `ledger.entry_posted` is no longer emitted by default), so there is no ledger-driven CQRS."
+  - "`ExpirySweeperWorker`, `PollWorker`, `InboundInboxWorker`, `OutboxNotificationWorker` and `PeriodicScreeningWorker` select `FOR UPDATE SKIP LOCKED` OUTSIDE a transaction (autocommit), so the row locks are released immediately and two nodes can claim the same rows (duplicate gateway inquiries / sends). Open (GAP-DB-02)."
+  - "`KybExpiryWorker` re-reads the first `batchSize` ACTIVE merchants every tick (no cursor), so later merchants are never evaluated. Open (GAP-DB-03)."
   - "`PollWorker` releases a slot for `FAILED`/`CANCELLED` but not for `EXPIRED`/`BLOCKED`, unlike the expiry sweeper's terminal release path."
   - "`JoinRequestExpiryWorker` uses raw updates without audit rows or merchant notifications."
   - "Per-worker health and metrics are not exposed; `/health` reports only durable-queue depth/age."
@@ -120,9 +121,9 @@ The loop is not a distributed lock by itself. Cross-node safety comes from `FOR 
 | `PeriodicScreeningWorker` | every poll interval; 24 h rescreen interval | `FOR UPDATE SKIP LOCKED` on due merchants, then merchant row lock | Refreshes watch-list versions, screens merchant and owners, applies owner statuses, raises one confirmed-match case and suspends the merchant. | Implemented (L2 only) |
 | `KybExpiryWorker` | every 6 h (`WORKER_KYB_EXPIRY_INTERVAL_MS`), batch 200 | Query + per-merchant transaction | Marks expired documents, queues 30/7-day notices, suspends after grace, starts periodic revalidations, expires overdue revalidations. | Implemented |
 | `RetentionWorker` | every hour when enabled; batch 500 | Bounded transactions per table | Purges notifications, inbound events, step logs, audit logs, detail logs, terminal attempts and dependents; never purges the ledger. | Partial / opt-in |
-| `BackgroundJobWorker` | every 2 s when enabled, batch 10 | `FOR UPDATE SKIP LOCKED` claim + `RUNNING` lease | Drains `RECONCILIATION_RUN` and `ADJUSTMENT_EXECUTION` jobs, retries with backoff, recovers expired leases. | Implemented |
-| `OutboxRelayWorker` | every 250 ms, batch >= 100 | `FOR UPDATE SKIP LOCKED` | Projects `attempt.transitioned` into `rm_merchant_daily_stats` and `rm_route_daily_volumes`; marks `processed_at`. Other declared topics are no-ops. | Partial |
-| `AuditShipperWorker` | every 500 ms, batch >= 100 | Claim batch then append to dedicated audit DB | Appends to the audit hash chain, then marks `audit_outbox.shipped_at`; never deletes. | Partial / conditional |
+| `BackgroundJobWorker` | every 2 s when enabled, batch 10 | `FOR UPDATE SKIP LOCKED` claim + ONE batch `RUNNING` update + lease | Drains `RECONCILIATION_RUN` and `ADJUSTMENT_EXECUTION` jobs, retries with backoff, recovers expired leases. | Implemented |
+| `OutboxRelayWorker` | every 250 ms (idle back-off to 2 s), batch >= 100 | `FOR UPDATE SKIP LOCKED`, one batch ack | Projects `attempt.transitioned` into `rm_merchant_daily_stats` and `rm_route_daily_volumes`; marks `processed_at`. Other declared topics are no-ops. | Partial |
+| `AuditShipperWorker` | every 500 ms, batch >= 100 | Lease-claim batch then append to dedicated audit DB | Appends to the audit hash chain, then marks `audit_outbox.shipped_at`; prunes shipped rows after the retention window. | Partial / conditional |
 
 ### 3.4 Expiry sweeper
 
@@ -222,7 +223,7 @@ The job payload never carries an independent checker; the executed adjustment us
 
 ### 3.13 Outbox relay and audit shipper
 
-`OutboxRelayWorker` (`core-back/lib/storageEngine/outboxWorkers.ts:134`) claims unprocessed `outbox_events` with `FOR UPDATE SKIP LOCKED` and marks `processed_at` after the handler. Default handlers:
+`OutboxRelayWorker` (`core-back/lib/storageEngine/outboxWorkers.ts`) claims unprocessed `outbox_events` with `FOR UPDATE SKIP LOCKED` in one transaction, runs the per-topic handlers (topics with a batch handler receive all events of the batch at once), and acknowledges the whole batch with ONE `UPDATE ... WHERE id = ANY(...)`. Since 2026-11-04 an idle relay backs off exponentially (250 ms to 2 s; 500 ms to 5 s for the shipper) and re-polls immediately after a full batch. Default handlers:
 
 | Topic | Handler |
 | :--- | :--- |
@@ -233,9 +234,9 @@ The job payload never carries an independent checker; the executed adjustment us
 | `reconciliation.completed` | No-op. |
 | `config.invalidated` | No-op. |
 
-The relay is instantiated only when a storage engine is supplied. Outbox rows are marked processed, never deleted; there is no outbox retention job.
+The relay is instantiated only when a storage engine is supplied. `attempt.transitioned` events of a batch are folded in memory (`aggregateAttemptTransitions`, decimal.js, no floats) into one delta per (merchant|route, day, currency) and applied with one `INSERT ... SELECT FROM unnest(...) ON CONFLICT DO UPDATE` per read model, sorted by key so concurrent relays lock rows in the same order. Processed rows older than `STORAGE_OUTBOX_RETENTION_MS` (default 1 h, 0 = keep) are pruned oldest-first in bounded batches strictly below the oldest unprocessed id (`OutboxRelayWorker.prune`), once a minute per worker. `rebuildAttemptReadModels(db, { fromDay, toDay })` recomputes both read models from `payment_attempts` after bulk loads.
 
-`AuditShipperWorker` is instantiated only when `options.storage.auditStore` is a `DedicatedAuditDatabaseDriver`. It claims unshipped `audit_outbox` rows, appends them to the dedicated audit database's SHA-256 hash chain, and marks `shipped_at`. It is idempotent on the source id. Shipped rows are retained, not deleted. `writeAudit` only writes `audit_outbox` when `AUDIT_DATABASE_URL` is configured; otherwise `audit_log` is the only sink.
+`AuditShipperWorker` is instantiated only when `options.storage.auditStore` is a `DedicatedAuditDatabaseDriver`. It claims unshipped, unleased `audit_outbox` rows with a single `UPDATE ... SET lease_until = now() + leaseMs WHERE id IN (SELECT ... FOR UPDATE SKIP LOCKED) RETURNING` (the previous claim transaction committed before the append, so its `SKIP LOCKED` locks were already released while shipping and two shippers could ship the same rows), appends them to the dedicated audit database's SHA-256 hash chain, and sets `shipped_at` / clears the lease. It is idempotent on the source id; a crashed shipper's batch is re-claimed after `leaseMs` (default 30 s). Shipped rows older than `STORAGE_AUDIT_OUTBOX_RETENTION_MS` (default 1 h) are deleted by `AuditShipperWorker.prune`; the dedicated audit database is the durable copy. `writeAudit` only writes `audit_outbox` when `AUDIT_DATABASE_URL` is configured; otherwise `audit_log` is the only sink.
 
 ### 3.14 Realtime fan-out reality
 
@@ -333,7 +334,7 @@ It degrades when workers are disabled, the queue cannot be read, or the oldest q
 - **Inbound inbox** — the worker is implemented and wired, but the checkout route processes synchronously and marks the event processed; the worker has no producer. The inbox-first asynchronous design is not in force.
 - **Retention** — opt-in, dry-run capable, bounded, and ledger-safe, but the scope excludes AML/KYB/reporting evidence and the default is off.
 - **Join-request expiry** — expires drafts/reviews but writes no audit row and sends no merchant notification.
-- **Outbox relay / audit shipper** — only `attempt.transitioned` has a projection (`ledger.entry_posted` and four other topics are no-ops); the audit shipper only runs with a dedicated audit DB and never deletes shipped rows.
+- **Outbox relay / audit shipper** — only `attempt.transitioned` has a projection (`ledger.entry_posted` and four other topics are no-ops); the audit shipper only runs with a dedicated audit DB (it now prunes shipped rows after the retention window).
 - **Realtime fan-out** — transition events are published, but checkout/POS clients receive polling SSE, not subscriptions.
 
 ### Missing / deferred

@@ -138,10 +138,10 @@ export const generateAdminAndStaff = (ctx: SeederContext): void => {
   // `tier`, `countries`/`mode`). The old rows carried a generic `threshold`
   // key, so five of the six rules could never fire.
   const amlRules: Array<[string, string, string, Record<string, unknown>, string, string]> = [
-    ["AML-SINGLE-LARGE", "Single large transaction", "SINGLE_AMOUNT", { min_amount: "25000.0000", currency: "LYD" }, "HOLD", "HIGH"],
-    ["AML-STRUCTURING", "Structuring below the CBL threshold", "STRUCTURING", { threshold: "50000.0000", band_percent: 10, min_count: 3, window_seconds: 86_400 }, "CASE_ONLY", "CRITICAL"],
-    ["AML-CUMULATIVE", "Cumulative 24h window", "CUMULATIVE_WINDOW", { max_amount: "120000.0000", max_count: 60, window_seconds: 86_400 }, "FLAG", "MEDIUM"],
-    ["AML-RISK-TIER", "High risk tier large payment", "RISK_TIER", { tier: "HIGH", min_amount: "10000.0000" }, "HOLD", "HIGH"],
+    ["AML-SINGLE-LARGE", "Single large transaction", "SINGLE_AMOUNT", { min_amount: "20000.0000", currency: "LYD" }, "HOLD", "HIGH"],
+    ["AML-STRUCTURING", "Structuring below the CBL threshold", "STRUCTURING", { threshold: "500000.0000", band_percent: 10, min_count: 3, window_seconds: 86_400 }, "CASE_ONLY", "CRITICAL"],
+    ["AML-CUMULATIVE", "Cumulative 24h window", "CUMULATIVE_WINDOW", { max_amount: "5000000.0000", max_count: 5000, window_seconds: 86_400 }, "FLAG", "MEDIUM"],
+    ["AML-RISK-TIER", "High risk tier large payment", "RISK_TIER", { tier: "HIGH", min_amount: "30000.0000" }, "HOLD", "HIGH"],
     ["AML-COUNTERPARTY", "High risk counterparty country", "COUNTERPARTY_COUNTRY", { countries: ["KP", "IR", "SY"], mode: "DENY" }, "BLOCK", "CRITICAL"],
   ];
   for (const [code, name, ruleType, params, action, severity] of amlRules) {

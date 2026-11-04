@@ -35,7 +35,7 @@ gaps:
   - Merchant onboarding progress and guide checklist state are client-assisted; completion is not a server-issued activation authority.
   - The portal has no route-level maker-checker visualization for pending application changes beyond status badges and pending states.
   - The public landing page's developer CTA targets `/portal/guide/developers`, which requires sign-in; the login page always lands on the dashboard (no return-to), so a visitor must navigate to the guide again after signing in.
-  - The developer guide content (D-01/D-04/D-05) and the operations-guide code generator still document `useCount`, `redirectUrl`, `railWhitelist` and a `checkoutUrl`/`id` create-link response that core-back's strict `linkCreateSchema` does not accept/return (and they omit the required `title`); the landing page snippet uses the real schema.
+  - FIXED 2026-11-04: the developer guide content (D-01/D-04/D-05) and the code generator now use the real edge schema (`title`, `maxUses`, no `redirectUrl`/`applicationId`/`infiniteUse`) and the real `201` response (`key`, `state`, `visibleRails`). Remaining: the webhook sample in the generator is unverified (no outbound merchant webhooks are implemented).
 ---
 
 # Merchant Portal

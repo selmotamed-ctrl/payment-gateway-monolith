@@ -50,7 +50,18 @@ export class InvariantVerifier {
   private readonly client?: InvariantPrismaClient;
   private readonly balanceProvider?: InvariantBalanceProvider;
 
-  constructor(clientOrProvider: InvariantPrismaClient | InvariantBalanceProvider) {
+  private readonly useSql: boolean;
+
+  /**
+   * `options.sql` opts into the single-statement SQL aggregation (production
+   * PostgreSQL clients). Test doubles that only implement the Prisma model
+   * methods keep the default per-account path.
+   */
+  constructor(
+    clientOrProvider: InvariantPrismaClient | InvariantBalanceProvider,
+    options: { sql?: boolean } = {},
+  ) {
+    this.useSql = options.sql === true;
     if (typeof clientOrProvider === "function") {
       this.balanceProvider = clientOrProvider;
     } else {
@@ -110,7 +121,7 @@ export class InvariantVerifier {
     if (!this.client) {
       return [];
     }
-    if (typeof this.client.$queryRawUnsafe === "function") {
+    if (this.useSql && typeof this.client.$queryRawUnsafe === "function") {
       // Exact NUMERIC sums in the database, one statement for the whole chart
       // of accounts (was: one journal_lines query per account every 60 s,
       // summed row by row in JS).

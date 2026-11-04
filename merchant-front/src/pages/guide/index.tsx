@@ -321,10 +321,9 @@ const MerchantGuidePage = dc(() => {
 
     const snippets = computed<Record<DeveloperCodeLanguage, string>>(() => {
         const token = sandbox.value.token || "pg_live_your_token";
-        const applicationId = sandbox.value.applicationId || "app_xxxxxxxx";
         const amount = calc.value.amount || "250";
         const feeBearer = calc.value.feeBearer;
-        const redirectUrl = `https://shop.yourcompany.ly/orders/${encodeURIComponent(sandbox.value.reference || "order-1001")}/verify`;
+        const orderRef = sandbox.value.reference || "order-1001";
 
         const typescript = `const PG_BASE_URL = ${JSON.stringify(apiBase())};
 const PG_API_TOKEN = process.env.PG_LIVE_TOKEN ?? ${JSON.stringify(token)};
@@ -337,13 +336,11 @@ export async function createCheckoutLink() {
             "Content-Type": "application/json",
         },
         body: JSON.stringify({
-            applicationId: ${JSON.stringify(applicationId)},
+            title: ${JSON.stringify(`Order ${orderRef}`)},
             amount: ${JSON.stringify(amount)},
             currency: "LYD",
             feeBearer: ${JSON.stringify(feeBearer)},
-            infiniteUse: false,
-            useCount: 1,
-            redirectUrl: ${JSON.stringify(redirectUrl)},
+            maxUses: 1, // single-use link
         }),
     });
 
@@ -351,7 +348,9 @@ export async function createCheckoutLink() {
         const error = await response.json();
         throw new Error(\`Payment Gateway Error [\${error.code}]: \${error.message}\`);
     }
-    return (await response.json()) as { key: string; checkoutUrl: string; state: string };
+    const link = (await response.json()) as { key: string; state: string; visibleRails: string[] };
+    // The hosted checkout page for a link is <your checkout origin>/pay/<key>.
+    return { ...link, checkoutPath: \`/pay/\${link.key}\` };
 }
 
 export async function isLinkPaidAndConfirmed(linkKey: string): Promise<boolean> {
@@ -374,13 +373,11 @@ class PaymentGatewayClient
         $response = Http::withToken(${JSON.stringify(token)})
             ->acceptJson()
             ->post(${JSON.stringify(`${apiBase()}/${urlsMap.externalCreateLink}`)}, [
-                'applicationId' => ${JSON.stringify(applicationId)},
+                'title'         => "Order {$orderId}",
                 'amount'        => $amountLyd, // Always a decimal string, e.g. "150.000"
                 'currency'      => 'LYD',
                 'feeBearer'     => ${JSON.stringify(feeBearer)},
-                'infiniteUse'   => false,
-                'useCount'      => 1,
-                'redirectUrl'   => route('checkout.verify', ['orderId' => $orderId]),
+                'maxUses'       => 1,
             ]);
 
         $response->throw();
@@ -400,13 +397,11 @@ async def create_payment_link(order_id: str, amount_lyd: str) -> dict:
             f"{PG_BASE_URL}/${urlsMap.externalCreateLink}",
             headers={"Authorization": f"Bearer {PG_TOKEN}"},
             json={
-                "applicationId": ${JSON.stringify(applicationId)},
+                "title": f"Order {order_id}",
                 "amount": amount_lyd,
                 "currency": "LYD",
                 "feeBearer": ${JSON.stringify(feeBearer)},
-                "infiniteUse": False,
-                "useCount": 1,
-                "redirectUrl": f"https://shop.yourcompany.ly/orders/{order_id}/verify",
+                "maxUses": 1,
             },
         )
         res.raise_for_status()
@@ -416,13 +411,11 @@ async def create_payment_link(order_id: str, amount_lyd: str) -> dict:
   -H ${shellQuote(`Authorization: Bearer ${token}`)} \\
   -H 'Content-Type: application/json' \\
   -d '{
-    "applicationId": ${JSON.stringify(applicationId)},
+    "title": ${JSON.stringify(`Order ${orderRef}`)},
     "amount": ${JSON.stringify(amount)},
     "currency": "LYD",
     "feeBearer": ${JSON.stringify(feeBearer)},
-    "infiniteUse": false,
-    "useCount": 1,
-    "redirectUrl": ${JSON.stringify(redirectUrl)}
+    "maxUses": 1
   }'
 
 curl ${shellQuote(paymentEndpoint.value)} \\
@@ -586,12 +579,11 @@ curl ${shellQuote(paymentEndpoint.value)} \\
                             </ThemedText>
                             <ThemedText style={{ fontSize: "13px", opacity: 0.7 }}>
                                 {isArabic.value
-                                    ? "أدخل applicationId ورمز pg_live_ ثم انسخ كوداً جاهزاً بأربع لغات."
-                                    : "Enter an applicationId and a pg_live_ bearer token, then copy ready-to-run code in four languages."}
+                                    ? "أدخل رمز pg_live_ ثم انسخ كوداً جاهزاً بأربع لغات."
+                                    : "Enter a pg_live_ bearer token, then copy ready-to-run code in four languages."}
                             </ThemedText>
                         </ThemedView>
                         <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "12px" }}>
-                            <VTextField label={isArabic.value ? "معرّف التطبيق" : "Application ID"} modelValue={sandbox.value.applicationId} onUpdate:modelValue={(value: string) => (sandbox.value.applicationId = value)} style={{ minWidth: "280px", flex: "1 1 280px" }} />
                             <VTextField label={isArabic.value ? "رمز Bearer" : "Bearer token"} modelValue={sandbox.value.token} onUpdate:modelValue={(value: string) => (sandbox.value.token = value)} type="password" style={{ minWidth: "240px", flex: "1 1 240px" }} />
                             <VTextField label={isArabic.value ? "المرجع" : "Payment reference"} modelValue={sandbox.value.reference} onUpdate:modelValue={(value: string) => (sandbox.value.reference = value)} style={{ minWidth: "220px", flex: "1 1 220px" }} />
                         </ThemedView>

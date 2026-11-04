@@ -45,7 +45,7 @@ describe("merchant developer guide content completeness", () => {
             expect((d05?.codeTemplates?.[language] ?? "").length, `${language} length`).toBeGreaterThan(150);
         }
         const allText = MERCHANT_DEVELOPER_CHAPTERS.map((chapter) => chapter.bodyEn).join("\n");
-        for (const phrase of ["pg_live_", "redirect_domain_allowlist", "IP_NOT_ALLOWLISTED", "/api/v1/external/links", "point of no return"]) {
+        for (const phrase of ["pg_live_", "maxUses", "IP_NOT_ALLOWLISTED", "/api/v1/external/links", "point of no return"]) {
             expect(allText.toLowerCase(), phrase).toContain(phrase.toLowerCase());
         }
     });

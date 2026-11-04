@@ -1419,3 +1419,16 @@ Execute this architecture in **7 ordered milestones**:
 * \[ \] **Milestone 7 — End-to-End Verification & Load Benchmark Gates:**
 
   * Verify `UnitOfWork` atomicity, LSN-aware replica Read-Your-Own-Writes routing, `gl_account_shards` 16-way concurrency under parallel checkouts, `pg_audit_db` tamper-rejection trigger and hash-chain verification, `pg_logs_db` non-blocking backpressure drop/spool behavior, all 20 Deep Search groups on replica `pg_trgm` indexes, and an end-to-end Scratch Restore + Ledger Invariant Verification Drill.
+---
+
+## 2026-11-04 corrections / as-built (DB read/write optimisation)
+
+This document is historical; `project-design/parts/01-core-back/06-storage-engine.md` (section 12) is canonical. Where this blueprint is wrong or superseded:
+
+* **Outbox/audit pruning.** The blueprint's shipped-row lifecycle is now implemented: the relay deletes processed `outbox_events` (below the oldest unprocessed id) and the shipper deletes shipped `audit_outbox` rows after `STORAGE_OUTBOX_RETENTION_MS` / `STORAGE_AUDIT_OUTBOX_RETENTION_MS` (default 1 h). The shipper claims with a `lease_until` column instead of holding row locks across the append (`SKIP LOCKED` locks of the old claim transaction were released before shipping).
+* **Read models.** `rm_merchant_daily_stats` / `rm_route_daily_volumes` are projected in batches. `rm_route_daily_volumes.volume_amount` is the *succeeded* volume; `rm_merchant_daily_stats` adds `success_amount` / `success_net_amount`. They are still not read by dashboards or by the daily route cap (the cap SUM uses a partial expression index on `payment_attempts` instead, because the cap day is the gateway-timezone business day while the projection buckets by UTC day).
+* **`ledger.entry_posted`.** It has no consumer, so the ledger poster no longer emits it by default. Balances come from `gl_account_shards`, written synchronously in the posting transaction; the "outbox-driven ledger read model" of section 3.2 is not implemented.
+* **Posting write path.** The "one operational row, one shard row, one outbox row, one audit row" claim is now true in statement count terms: one entry insert, one line insert, one sorted multi-row shard upsert (previously per-line upserts in template order).
+* **Pagination.** Keyset (cursor) pagination exists in `lib/listQuery.ts` and is used by the merchant payment list; other lists remain offset-based.
+* **Replica routing.** Still limited to global search, the admin merchant list and three merchant lists. The read helper no longer re-executes a failing query on the primary.
+* **Schema.** Schema version is 9 (migration `20261104090000_db_read_write_optimisation`); several duplicate prefix indexes were dropped and workload-driven composites added (see `core.data`).

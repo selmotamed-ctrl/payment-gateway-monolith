@@ -136,6 +136,13 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
       joinStatus = status === "REJECTED" ? "REJECTED" : "APPROVED";
       finalCreated = atBusinessTime(sampleOnboardingDay());
     }
+    // Earlier (rejected / expired / withdrawn) requests need room before this
+    // one: each takes up to ~52 days, and none may predate the simulation.
+    const priorCount = joinCounts[index]! - 1;
+    const earliestFinal = new Date(ctx.timeline.start.getTime() + priorCount * 55 * 86_400_000);
+    if (finalCreated.getTime() < earliestFinal.getTime() && earliestFinal.getTime() < addDays(end, -75).getTime()) {
+      finalCreated = addMinutes(earliestFinal, ctx.rng.int(0, 10 * 24 * 60));
+    }
     const submittedAt = joinStatus === "DRAFT" ? null : addMinutes(finalCreated, ctx.rng.int(20, 2 * 24 * 60));
     const reviewStart = submittedAt ? addMinutes(submittedAt, ctx.rng.int(60, 2 * 24 * 60)) : null;
     const infoRequestedAt = joinStatus === "INFO_REQUESTED" && reviewStart ? addMinutes(reviewStart, ctx.rng.int(60, 24 * 60)) : null;
@@ -160,7 +167,6 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
     const kybStatus = joinStatus === "APPROVED" ? "VERIFIED" : joinStatus === "REJECTED" ? "REJECTED" : joinStatus === "DRAFT" ? "UNVERIFIED" : "PENDING";
 
     // ------------------------------------------------ earlier join requests
-    const priorCount = joinCounts[index]! - 1;
     const priors: Array<{ createdAt: Date; submittedAt: Date; decidedAt: Date; outcome: string }> = [];
     let cursor = finalCreated;
     for (let prior = 0; prior < priorCount; prior += 1) {

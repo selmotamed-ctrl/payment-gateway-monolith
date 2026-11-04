@@ -4,16 +4,18 @@
 
 | File | Lines | Literal test declarations |
 | :--- | ---: | ---: |
+| `core-back/test/list-query-keyset.test.ts` | 89 | 7 |
 | `core-back/test/retention-worker.test.ts` | 506 | 17 |
 | `core-back/test/checkout-cancel.test.ts` | 183 | 5 |
 | `core-back/test/helpers/governanceFake.ts` | 235 | 0 |
 | `core-back/test/helpers/guardsFake.ts` | 785 | 0 |
 | `core-back/test/helpers/backgroundJobFake.ts` | 411 | 0 |
 | `core-back/test/helpers/retentionFake.ts` | 586 | 1 |
+| `core-back/test/helpers/seederFixture.ts` | 88 | 0 |
 | `core-back/test/helpers/fakePrisma.ts` | 237 | 0 |
 | `core-back/test/helpers/fakeRepositories.ts` | 329 | 0 |
 | `core-back/test/storage-engine/read-store.test.ts` | 281 | 14 |
-| `core-back/test/storage-engine/helpers/db.ts` | 507 | 0 |
+| `core-back/test/storage-engine/helpers/db.ts` | 510 | 0 |
 | `core-back/test/storage-engine/performance/storage-performance.test.ts` | 363 | 11 |
 | `core-back/test/storage-engine/performance/write-path-benchmark.test.ts` | 110 | 2 |
 | `core-back/test/storage-engine/engine-factory.test.ts` | 107 | 3 |
@@ -21,6 +23,7 @@
 | `core-back/test/storage-engine/telemetry-and-realtime.test.ts` | 38 | 2 |
 | `core-back/test/storage-engine/audit-chain.test.ts` | 237 | 6 |
 | `core-back/test/storage-engine/cache-velocity.test.ts` | 274 | 10 |
+| `core-back/test/storage-engine/db-optimisation.test.ts` | 274 | 14 |
 | `core-back/test/storage-engine/log-sink.test.ts` | 233 | 8 |
 | `core-back/test/storage-engine/outbox-workers.test.ts` | 349 | 6 |
 | `core-back/test/storage-engine/write-path.integration.test.ts` | 134 | 3 |
@@ -31,7 +34,7 @@
 | `core-back/test/backup-admin/backup-control-client.test.ts` | 344 | 6 |
 | `core-back/test/remediation-high.test.ts` | 975 | 18 |
 | `core-back/test/ui-authorities.test.ts` | 35 | 3 |
-| `core-back/test/synthetic-seeder.test.ts` | 161 | 9 |
+| `core-back/test/synthetic-seeder.test.ts` | 166 | 9 |
 | `core-back/test/checkout-confirm-concurrency.test.ts` | 287 | 4 |
 | `core-back/test/regulatory-report-lifecycle.test.ts` | 207 | 5 |
 | `core-back/test/kyb-review.test.ts` | 83 | 7 |
@@ -87,7 +90,7 @@
 | `core-back/test/exhaustive/05-api-matrix/mtls-channel-isolation.test.ts` | 111 | 7 |
 | `core-back/test/exhaustive/05-api-matrix/list-query-filters-all-27-endpoints.test.ts` | 304 | 4 |
 | `core-back/test/exhaustive/05-api-matrix/admin-endpoints-rbac-fuzz.test.ts` | 379 | 18 |
-| `core-back/test/exhaustive/01-schema/indexes-and-query-plans.test.ts` | 163 | 6 |
+| `core-back/test/exhaustive/01-schema/indexes-and-query-plans.test.ts` | 164 | 6 |
 | `core-back/test/exhaustive/01-schema/models-and-columns.test.ts` | 299 | 23 |
 | `core-back/test/exhaustive/01-schema/check-constraints-and-triggers.test.ts` | 314 | 15 |
 | `core-back/test/exhaustive/01-schema/unique-and-fk-constraints.test.ts` | 321 | 15 |
@@ -99,7 +102,7 @@
 | `core-back/test/exhaustive/03-transforms-crypto/transform-pipeline-matrix.test.ts` | 329 | 21 |
 | `core-back/test/exhaustive/03-transforms-crypto/recursive-set-and-select-fuzz.test.ts` | 196 | 17 |
 | `core-back/test/exhaustive/03-transforms-crypto/crypto-profiles-and-vault.test.ts` | 530 | 32 |
-| `core-back/test/exhaustive/10-seeder-and-deploy/synthetic-seeder-safety-and-audit.test.ts` | 286 | 21 |
+| `core-back/test/exhaustive/10-seeder-and-deploy/synthetic-seeder-safety-and-audit.test.ts` | 291 | 21 |
 | `core-back/test/e2e/postgres-payment.test.ts` | 974 | 0 |
 | `core-back/test/governance-execution.test.ts` | 1207 | 27 |
 | `core-back/test/fixtures/otpSpec.ts` | 270 | 0 |
@@ -110,6 +113,7 @@
 | `core-back/test/gateway-inquiry-schedules.test.ts` | 91 | 4 |
 | `core-back/test/spec-materializer.test.ts` | 211 | 4 |
 | `core-back/test/reporting-rule-evaluator.test.ts` | 209 | 5 |
+| `core-back/test/synthetic-seeder-realism.test.ts` | 352 | 34 |
 | `core-back/test/expiry-sweeper-aml.test.ts` | 91 | 3 |
 | `core-back/test/notifications-and-gl-accounts.test.ts` | 522 | 20 |
 | `core-back/test/refund-three-phase.test.ts` | 129 | 3 |
@@ -126,6 +130,7 @@
 | `admin-back/test/helpers/session.ts` | 85 | 0 |
 | `admin-back/test/core-contract.test.ts` | 1594 | 55 |
 | `admin-back/test/core-internal-client.test.ts` | 483 | 16 |
+| `admin-back/test/search.test.ts` | 83 | 2 |
 | `admin-back/test/admin-surface.test.ts` | 1335 | 53 |
 | `admin-back/test/academy-progress.test.ts` | 62 | 3 |
 | `admin-back/test/backups.test.ts` | 417 | 17 |
@@ -160,7 +165,7 @@
 | `deploy/test/exhaustive-deploy-matrix.test.ts` | 309 | 20 |
 | `deploy/test/hostPlannerScale.test.ts` | 157 | 6 |
 | `deploy/test/rollingDeploy.test.ts` | 52 | 5 |
-| `deploy/test/testMatrix.test.ts` | 103 | 6 |
+| `deploy/test/testMatrix.test.ts` | 413 | 33 |
 | `deploy/test/templates.test.ts` | 228 | 16 |
 | `deploy/test/healthVerifierScale.test.ts` | 130 | 3 |
 | `deploy/backup-daemon/test/backupEngine.test.ts` | 350 | 18 |
@@ -189,6 +194,7 @@
 | `tests/e2e/exhaustive/exhaustive-fake-rails-surface.spec.ts` | 66 | 1 |
 | `tests/e2e/exhaustive/exhaustive-admin-surface.spec.ts` | 110 | 1 |
 | `tests/e2e/merchant/shell.spec.ts` | 121 | 9 |
+| `tests/e2e/merchant/landing.spec.ts` | 104 | 5 |
 | `tests/e2e/merchant/a11y.spec.ts` | 28 | 1 |
 | `tests/e2e/merchant/auth.spec.ts` | 47 | 2 |
 | `tests/e2e/checkout/pay.spec.ts` | 46 | 3 |
@@ -199,5 +205,5 @@
 | `tests/unit/global-search.test.ts` | 199 | 9 |
 | `tests/unit/checkout-redirect.test.ts` | 24 | 4 |
 
-- Total files: **194**
-- Total literal test declarations: **1817**
+- Total files: **200**
+- Total literal test declarations: **1906**

@@ -3,7 +3,7 @@ id: core.ledger
 title: Double-Entry Ledger
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-04
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/engine/ledger/LedgerPoster.ts
@@ -137,7 +137,9 @@ The seed creates all 11 system account types per supported currency (`LYD`, `USD
 4. resolves each line's GL account;
 5. creates the journal line with a `Decimal` amount;
 6. invokes the optional shard writer in the same transaction;
-7. invokes the optional `ledger.entry_posted` outbox writer in the same transaction.
+7. invokes the optional `ledger.entry_posted` outbox writer in the same transaction. Since 2026-11-04 `createLedgerPoster` does NOT emit it by default (`emitOutbox: true` opts in) because the topic has no consumer.
+
+Since 2026-11-04 a posting is batched: one entry insert (`createManyAndReturn` with `skipDuplicates`, so a racing duplicate reference returns the existing entry without aborting the transaction), one account lookup (`findMany` over the OR of scoped and platform-wide predicates, same precedence as before), one journal-line `createManyAndReturn`, and one shard upsert (`unnest`, folded per (account, shard) and sorted so concurrent postings lock shard rows in the same order).
 
 If the entry insert races another transaction, a Prisma `P2002`/`UNIQUE_CONSTRAINT_VIOLATION` is caught, the existing entry is looked up, and the call becomes idempotent (`LedgerPoster.ts:674`).
 

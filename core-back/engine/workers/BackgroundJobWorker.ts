@@ -84,14 +84,15 @@ export class BackgroundJobWorker extends BaseWorker {
         " FOR UPDATE SKIP LOCKED";
       const rows = await tx.$queryRawUnsafe(sql, now, this.batchSize);
       const jobs = toCamelRows<BackgroundJobRow>(rows);
-      for (const job of jobs) {
+      if (jobs.length > 0) {
+        // One statement for the whole claimed batch (was one UPDATE per job).
         await tx.$executeRawUnsafe(
           "UPDATE background_jobs" +
           " SET state = 'RUNNING', locked_at = $1, updated_at = $2" +
-          " WHERE id = $3::uuid AND state = 'QUEUED'",
+          " WHERE id = ANY($3::uuid[]) AND state = 'QUEUED'",
           now,
           now,
-          job.id,
+          jobs.map((job) => job.id),
         );
       }
       return jobs;

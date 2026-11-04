@@ -3,7 +3,7 @@ id: future.deferred
 title: Deferred and Partial Features
 status: deferred
 confidence: medium
-last_verified: 2026-11-03
+last_verified: 2026-11-04
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/lib/listQuery.ts
@@ -61,8 +61,8 @@ Most factual counts are now fixed in the canonical parts. The remaining items be
 | D-02 | Admin Guide v2 | `missing` | Current 12-book guide and 8 academy modules only | See `future.guide-v2`; 14 books/125 articles/151 terms/22 cards/29 situations/5 simulators/8 routes, generated and tested |
 | D-03 | Smart AI voucher importer half | `missing` | Gateway importer only in `core-back/engine/specImporter/**` | See `future.smart-ai-voucher`; voucher schema/validator/simulator/materializer/transcript/UI/tests |
 | D-04 | Merchant Google OIDC login | `deferred` | `core-back/api/internal/merchant.ts` `/auth/google` returns `501 GOOGLE_IDENTITY_NOT_CONFIGURED` | Configure issuer/client/audience, verify ID tokens, map identities, test success/failure |
-| D-05 | Keyset pagination | `partial` | `core-back/lib/listQuery.ts` uses `skip/take` offset pagination with page/pageSize | Add stable cursor keys, cursor encode/decode, index coverage, API compatibility and tests at high offsets |
-| D-06 | CQRS ledger read models | `partial` | `ledger.entry_posted` handler is a no-op; only `attempt.transitioned` projects into `rm_merchant_daily_stats`/`rm_route_daily_volumes` | Project ledger entries into read models, make dashboards consume them, test rebuild and idempotency |
+| D-05 | Keyset pagination | `partial` | `core-back/lib/listQuery.ts` supports cursor pagination (2026-11-04) but only merchant `/payments` uses it; the other lists still use `skip/take` | Add stable cursor keys, cursor encode/decode, index coverage, API compatibility and tests at high offsets |
+| D-06 | CQRS ledger read models | `partial` | `ledger.entry_posted` handler is a no-op and the poster no longer emits it by default (2026-11-04); only `attempt.transitioned` projects into `rm_merchant_daily_stats`/`rm_route_daily_volumes` | Project ledger entries into read models, make dashboards consume them, test rebuild and idempotency |
 | D-07 | Replica read routing | `partial` | Only global search and three merchant list endpoints use `readStore`; most dashboards/lists/exports read primary | Route eligible reads through `readStore`, expose `servedBy`, add lag/fallback tests |
 | D-08 | Storage mTLS consumption | `partial` | `pkiManager.ts` generates storage client certs, but PostgreSQL/Redis configs do not consume them | Configure PostgreSQL/Redis TLS, mount certs, verify handshake, add deployment smoke test |
 | D-09 | Backup hourly Redis / schedule breadth | `deferred` | Backup scheduler is UTC full/delta/drill only; Redis is part of a triggered backup, not hourly BGSAVE | Add hourly Redis policy if still required, with retention, metrics and tests |

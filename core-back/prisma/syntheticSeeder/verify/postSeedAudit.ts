@@ -1,5 +1,7 @@
 import type { PrismaClient } from "../../../generated/prisma/client";
 import type { SeederContext } from "../context";
+import { moneyFromString } from "../../../engine/db/money";
+import { checkInvariants, type InvariantReport } from "./invariants";
 
 export interface OperatorCaseAudit {
   total: number;
@@ -30,6 +32,10 @@ export interface AuditReport {
   slotViolations: number;
   operatorCaseViolations: number;
   operatorCases: OperatorCaseAudit;
+  /** Cross-table invariants (relations, lifecycle, ledger math, maker-checker, volumes). */
+  invariants: InvariantReport;
+  /** Violations found by comparing the database with the in-memory dataset. */
+  databaseViolations: number;
   counts: Record<string, number>;
 }
 
@@ -153,26 +159,19 @@ const auditOperatorCases = (ctx: SeederContext): OperatorCaseAudit => {
 };
 
 export const auditInMemory = (ctx: SeederContext): AuditReport => {
-  let debit = 0;
-  let credit = 0;
-  const perEntry = new Map<string, { debit: number; credit: number }>();
+  const invariants = checkInvariants(ctx);
+  const perEntry = new Map<string, bigint>();
+  let drift = 0n;
   for (const line of ctx.dataset.journalLines) {
-    const value = Number(line.amount);
-    if (line.direction === "DEBIT") debit += value;
-    else credit += value;
-    const entry = perEntry.get(String(line.entryId)) ?? { debit: 0, credit: 0 };
-    if (line.direction === "DEBIT") entry.debit += value;
-    else entry.credit += value;
-    perEntry.set(String(line.entryId), entry);
+    const value = moneyFromString(String(line.amount));
+    const signed = line.direction === "DEBIT" ? value : -value;
+    drift += signed;
+    perEntry.set(String(line.entryId), (perEntry.get(String(line.entryId)) ?? 0n) + signed);
   }
-  const unbalancedEntries = [...perEntry.values()].filter(
-    (entry) => Math.abs(entry.debit - entry.credit) > 0.00005,
-  ).length;
-
+  const unbalancedEntries = [...perEntry.values()].filter((total) => total !== 0n).length;
   const succeededWithoutLedger = ctx.dataset.paymentAttempts.filter(
     (attempt) => attempt.status === "SUCCEEDED" && !attempt.ledgerEntryId,
   ).length;
-
   const inFlightByLink = new Map<string, number>();
   for (const attempt of ctx.dataset.paymentAttempts) {
     if (IN_FLIGHT.has(String(attempt.status))) {
@@ -197,20 +196,24 @@ export const auditInMemory = (ctx: SeederContext): AuditReport => {
     + operatorCases.itemBacklinkViolations
     + operatorCases.nonMatchedWithoutCase
     + operatorCases.inboundEventViolations;
-  const drift = debit - credit;
+  const scaled = drift.toString().padStart(5, "0");
+  const ledgerDrift = `${drift < 0n ? "-" : ""}${scaled.replace("-", "").slice(0, -4)}.${scaled.replace("-", "").slice(-4)}`;
   return {
-    ok: Math.abs(drift) <= 0.00005
+    ok: drift === 0n
       && unbalancedEntries === 0
       && succeededWithoutLedger === 0
       && slotViolations === 0
-      && operatorCaseViolations === 0,
-    ledgerDrift: drift.toFixed(4),
+      && operatorCaseViolations === 0
+      && invariants.total === 0,
+    ledgerDrift,
     unbalancedEntries,
     attempts: ctx.dataset.paymentAttempts.length,
     succeededWithoutLedger,
     slotViolations,
     operatorCaseViolations,
     operatorCases,
+    invariants,
+    databaseViolations: 0,
     counts: Object.fromEntries(
       Object.entries(ctx.dataset)
         .filter(([, value]) => Array.isArray(value))
@@ -219,18 +222,64 @@ export const auditInMemory = (ctx: SeederContext): AuditReport => {
   };
 };
 
+/**
+ * After the write: the database must hold EXACTLY what the dataset holds
+ * (a skipped duplicate or a failed chunk is a violation, not a silent
+ * success) and the ledger must balance in SQL, not only in memory.
+ */
 export const postSeedAudit = async (
   prisma: PrismaClient,
   ctx: SeederContext,
 ): Promise<AuditReport> => {
   const report = auditInMemory(ctx);
-  const [attempts, entries, links] = await Promise.all([
-    prisma.paymentAttempt.count(),
-    prisma.journalEntry.count(),
-    prisma.paymentLink.count(),
+  const expected = ctx.dataset;
+  const [attempts, entries, links, lines, merchants, adjustments, disputes] = await Promise.all([
+    countByIds(prisma, "paymentAttempt", expected.paymentAttempts),
+    countByIds(prisma, "journalEntry", expected.journalEntries),
+    countByIds(prisma, "paymentLink", expected.paymentLinks),
+    countByIds(prisma, "journalLine", expected.journalLines),
+    countByIds(prisma, "merchant", expected.merchants),
+    countByIds(prisma, "adjustment", expected.adjustments),
+    countByIds(prisma, "dispute", expected.disputes),
   ]);
   report.counts.dbPaymentAttempts = attempts;
   report.counts.dbJournalEntries = entries;
+  report.counts.dbJournalLines = lines;
   report.counts.dbPaymentLinks = links;
+  const mismatches: Array<[string, number, number]> = [
+    ["paymentAttempts", attempts, expected.paymentAttempts.length],
+    ["journalEntries", entries, expected.journalEntries.length],
+    ["journalLines", lines, expected.journalLines.length],
+    ["paymentLinks", links, expected.paymentLinks.length],
+    ["merchants", merchants, expected.merchants.length],
+    ["adjustments", adjustments, expected.adjustments.length],
+    ["disputes", disputes, expected.disputes.length],
+  ];
+  for (const [name, actual, wanted] of mismatches) {
+    if (actual !== wanted) {
+      report.databaseViolations += 1;
+      report.invariants.samples.push(`database.count ${name}: db=${actual} dataset=${wanted}`);
+    }
+  }
+  const sql = (await prisma.$queryRawUnsafe(
+    `SELECT COALESCE(SUM(CASE direction WHEN 'DEBIT' THEN amount ELSE -amount END), 0)::text AS drift FROM journal_lines`,
+  )) as Array<{ drift: string }>;
+  const unbalanced = (await prisma.$queryRawUnsafe(
+    `SELECT COUNT(*)::int AS n FROM (
+       SELECT entry_id FROM journal_lines GROUP BY entry_id
+       HAVING SUM(CASE direction WHEN 'DEBIT' THEN amount ELSE -amount END) <> 0) t`,
+  )) as Array<{ n: number }>;
+  report.counts.dbUnbalancedEntries = Number(unbalanced[0]?.n ?? 0);
+  if (Number(sql[0]?.drift ?? 0) !== 0 || Number(unbalanced[0]?.n ?? 0) !== 0) report.databaseViolations += 1;
+  report.ok = report.ok && report.databaseViolations === 0;
   return report;
+};
+
+const countByIds = async (prisma: PrismaClient, model: string, rows: Array<Record<string, unknown>>): Promise<number> => {
+  const delegate = (prisma as unknown as Record<string, { count: (args: unknown) => Promise<number> }>)[model]!;
+  let total = 0;
+  for (let offset = 0; offset < rows.length; offset += 20_000) {
+    total += await delegate.count({ where: { id: { in: rows.slice(offset, offset + 20_000).map((row) => row.id) } } });
+  }
+  return total;
 };

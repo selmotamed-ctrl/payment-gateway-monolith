@@ -3,8 +3,8 @@ id: core.seeder
 title: Synthetic Seeder
 status: partial
 confidence: high
-last_verified: 2026-11-03
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-04
+verified_against: 55a2892+working-tree
 code:
   - core-back/prisma/syntheticSeeder/**
   - core-back/prisma/seedFakeRails.ts
@@ -14,17 +14,19 @@ code:
   - deploy/lib/configSchema.ts
 tests:
   - core-back/test/synthetic-seeder.test.ts
+  - core-back/test/synthetic-seeder-realism.test.ts
+  - core-back/test/helpers/seederFixture.ts
   - core-back/test/exhaustive/10-seeder-and-deploy/synthetic-seeder-safety-and-audit.test.ts
   - fake-rails-back/test/api.test.ts
 gaps:
-  - Seven profile volume fields are unused; their collections are derived from merchant count.
-  - Only 49 of the 55 in-memory collections are written by the bulk writer.
-  - Notification template coverage is 10 rows, and generated notifications use only four codes.
-  - Several ciphertext columns are plain base64, not Vault ciphertext.
-  - The seeded admin `authoritiesMap` shape does not match the auth parser; seeded staff resolve to zero authorities.
-  - Deploy writes `SYNTHETIC_SEED_YEARS_SPAN` while the seeder reads `SYNTHETIC_YEARS_SPAN`.
-  - The safety gate does not verify the database host.
-  - `nextId` ignores the namespace and can collide across seed keys.
+  - The DB-backed run (`seed-synthetic-history` against PostgreSQL 18 + Fake Rails) was not executed in the 2026-11-04 rework; FK order, check constraints and the partitioned journal are proven only by the DB-free invariant suite and the `WRITE_ORDER` test.
+  - Baseline gateway versions are created at deploy time, so attempts pinned to them predate the version row (`created_at`); the baseline rows are not backdated.
+  - Reference collections (`rails`, `railFields`, `railRoutes`, `widgets`, `redirects`, `pollPolicies`) are read, never written (expected from the baseline seed).
+  - Not generated: `gateway_inquiry_schedules`, `background_jobs`, `kyb_revalidation_requests` (only the DB-side enrichment adds 12), `outbox_events`/`audit_outbox` (would double-project the read models), WITHDRAWN disputes, EXECUTING adjustments, the SUBTRACTED cash-out state, negative-balance showcase wallets.
+  - Disputes are only generated for platform-cleared (PLATFORM_CLEARING) payments.
+  - `amlCases` is a floor: rule-driven holds (payments >= 20,000 LYD) can exceed the profile volume; `reconciliationItems` is an upper bound capped by the settled attempts the history can feed.
+  - The safety gate still does not verify the database host and the bulk writer is still not transactional/resumable.
+  - Engine observations (not fixed here, see section 7): INTERNAL rails with a payer surcharge cannot balance; AML release books no gateway fee accrual; the ledger resolver credits the merchant's first wallet; `SYSTEM_AUTOMATION` is not a UUID; refund commission splits can exceed 4 decimals.
 ---
 
 # Synthetic Seeder
@@ -38,8 +40,8 @@ It owns:
 - the five-layer safety gate;
 - the scale profiles and environment parsing;
 - the chronological simulation clock and Libyan market seasonality;
-- the nine domain generators;
-- the in-memory 55-collection dataset;
+- the nine domain generators plus route health and checkpoints;
+- the in-memory 56-collection dataset;
 - the topological, chunked bulk writer;
 - Fake Rails transaction/event synchronization;
 - KYB document enrichment through the Vault;
@@ -61,14 +63,12 @@ The historical seeder specification describes:
 - encrypted KYB document payloads, not fake plaintext;
 - a post-seed audit that proves zero ledger drift and balanced entries.
 
-The actual implementation keeps the two-phase design, the safety gate and the audit, but its coverage is narrower than the specification:
+The implementation keeps the two-phase design, the safety gate and the audit. The 2026-11-04 rework (section 3.13) made the data faithful to real operation; what still differs from the specification:
 
-- it writes 49 model collections out of 55 in-memory collections;
-- seven profile volume fields are not used, so join requests, KYB documents, owners, users, wallets, applications and AML cases are derived rather than controlled;
-- several ciphertext fields are plain base64 rather than Vault ciphertext;
-- the seeded staff authority map does not match the auth parser;
-- the deployed years-span key does not match the key the seeder reads;
-- the safety gate checks the declared test flag and Fake Rails hosts but not the database host.
+- it writes 50 model collections out of 56 in-memory collections (the six baseline reference collections are read-only);
+- the safety gate checks the declared test flag and Fake Rails hosts but not the database host;
+- the bulk writer is not transactional;
+- the generated volumes of AML cases and reconciliation items are derived bounds, not exact counts (section 3.2).
 
 ## 3. As-built architecture
 
@@ -99,21 +99,15 @@ The gate does not inspect `DATABASE_URL`, the host name of the core database, or
 | STANDARD | 250 | 65,000 | 120,000 | 95,000 | 2,900 | 3.5 |
 | STRESS | 1,200 | 280,000 | 500,000 | 400,000 | 11,500 | 4.0 |
 
-The seven volume fields not referenced by any generator are `joinRequests`, `kybDocuments`, `beneficialOwners`, `users`, `wallets`, `applications` and `amlCases`. Their collections are produced as a function of merchants: join requests per merchant lifecycle, one or more wallets and GL accounts per merchant, 1–3 applications, 1–4 users per merchant, KYB documents per business category, owners per ownership threshold, and AML cases from a sample of non-clear screenings.
+Since 2026-11-04 every volume drives generation. `joinRequests`, `wallets`, `applications`, `beneficialOwners` and `users` are allocated across merchants with `allocateVolume` (per-merchant bounds 1-3, 1-3, 1-5, 1-6 and 1-8; `users` counts staff plus merchant users), `kybDocuments` is allocated above the per-category required-document count, `paymentLinks`/`paymentAttempts` are exact up to the attempts a link window can host, `reconciliationRuns` is split across statement sources, and `disputes`, `adjustments`, `cashouts`, `amlScreenings`, `operatorCases` and `approvalRequests` act as targets. When a volume is outside the feasible per-merchant bounds the nearest feasible count is generated and the invariant `volume.mismatch` is only enforced for feasible volumes. `amlCases` is a floor (rule-driven holds can add more) and `reconciliationItems` is an upper bound.
 
-`yearsSpan` is used by the timeline. `SYNTHETIC_YEARS_SPAN` is parsed as a positive number and overrides the profile value.
+`yearsSpan` is used by the timeline. `SYNTHETIC_SEED_YEARS_SPAN` (written by the deploy planner), `SYNTHETIC_YEARS_SPAN` and `SYNTHETIC_DATA_YEARS` are accepted in that order; the value must be a number in (0, 10].
 
 ### 3.3 Context and ID factory
 
 `createContext` loads existing references (`gateways`, versions, rails, routes, credentials, GL accounts, admin users, statement sources), builds a seeded PRNG from `seedKey`, builds the timeline, creates an empty dataset, and creates `nextId`.
 
-`nextId` ignores its `entity` argument and returns:
-
-```text
-00000000-0000-7000-8000-<counter hex padded to 12>
-```
-
-This is a UUIDv7-shaped, visually distinct synthetic id. It is stable within a run. Because the counter resets for every run and the namespace is not included, two different seed keys generate the same ids; `skipDuplicates` then drops the second dataset instead of creating a parallel history.
+`nextId` returns `<8 hex>-<4 hex>-7<3 hex>-8<3 hex>-<12 hex counter>` where the first 64 bits come from `sha256(namespace, seedKey)`. Two different seed keys or namespaces therefore never collide (the old factory ignored both and `skipDuplicates` silently dropped the second history), while a run stays deterministic. Rows keep unique keys that matter for re-runs (`seed_key` of GL accounts and commission profiles, e-mails, references) namespaced by seed key as well.
 
 ### 3.4 Timeline
 
@@ -125,25 +119,25 @@ This is a UUIDv7-shaped, visually distinct synthetic id. It is stable within a r
 - `businessHour` returns a Tripoli-style hour distribution;
 - `dateAt` writes the chosen hour with `setUTCHours`.
 
-There is no +2 offset or timezone database conversion. The simulated "Tripoli hour" is stored as a UTC hour. This is a modeling simplification, not a production behavior.
+Local hours are `Africa/Tripoli` wall-clock hours (UTC+2, no DST) and are stored as `hour - 2` UTC (`tripoliDateTime`, `tripoliHour`, `tripoliDay`); the start of the timeline is 08:00 Tripoli. `dayVolumeMultiplier` additionally models the Eid holiday trough (0.55), Ramadan (1.8), the ten days before Eid al-Adha (1.5), Friday 0.72, Saturday 1.05 and the salary window 1.35 on the Tripoli calendar day, with Ramadan/Eid tables for 2021-2028. `businessHour` takes the day: Ramadan traffic moves to the hours after iftar and Friday skips the 11:30-14:30 prayer window.
 
 ### 3.5 The nine generators
 
 | Generator | Main outputs |
 | :--- | :--- |
-| `01_adminAndStaffGenerator` | 12 platform users across `GATEWAY_ADMIN`, `SECURITY_ADMIN`, `FINANCE`, `OPERATOR`, `COMPLIANCE`, `MLRO`, `SUPPORT`; maker/checker flags; user identities; 10 notification templates; velocity, AML and reporting rules |
-| `02_merchantCohortGenerator` | Merchant lifecycle states; wallets and GL accounts; 1–3 applications; merchant users; join requests and status transitions; KYB documents; beneficial owners; duplicate-document showcase |
-| `03_gatewayLifecycleGenerator` | Version history (`SUPERSEDED`, `LIVE`, and up to two `PENDING_APPROVAL`); environments; auth rows; settings; confirmation channels; go-live evidence; statement sources; 30 days of hourly route health samples |
-| `04_linksAndAttemptsGenerator` | Payment links across states; attempt groups; attempts across all 14 statuses; masked customer fields; step logs; inbound events; OTP/failure/conflict/late-success/manual-review substatuses |
-| `05_ledgerAndCheckpoints` | Balanced journal entries for succeeded/refunded/partially refunded/disputed attempts; refund, partial-refund and chargeback entries; monthly GL checkpoints except the current month |
-| `06_reconAndStatements` | Reconciliation runs across the span; statement items with matched and exception results; stats JSON; exception budget derived from operator-case volume |
-| `07_disputesCashoutsAdjustments` | Disputes across seven statuses; chargeback/refund adjustments; cash-out requests; negative-balance wallets after post-cashout chargebacks |
-| `08_amlAndGovernanceQueues` | Screenings and matches across the seven-layer history; AML cases; regulatory reports; approvals; notifications; audit logs; detail change logs |
-| `09_operatorCasesGenerator` | Operator cases for UNKNOWN, HELD, CONFLICT, MISMATCH, LATE_SUCCESS, MANUAL_REVIEW and UNMATCHED_STATEMENT; SLA/priority; evidence links; maker-checker resolutions |
+| `01_adminAndStaffGenerator` | 13 platform staff seats and the disabled system drafter; flat authority lists and maker/checker flags from `scripts/createAdminPlan.ts`; velocity rules with operational thresholds; AML rules whose `params` keys are the ones `AmlRuleEngine` reads. Notification templates, CBL reporting rules and the environment setting belong to the baseline seed and are no longer duplicated. |
+| `02_merchantCohortGenerator` | Merchants with a consistent lifecycle (request -> submission -> review -> proposal -> decision -> activation -> suspension/closure), category-driven profiles, unique phones, IBAN-shaped payout accounts; earlier REJECTED/EXPIRED/WITHDRAWN join requests linked by `resubmission_of_id`; KYB document chains (superseded copies, expiry, 30-day notice, duplicate-hash showcase); beneficial owners summing to 100 %; wallets + GL accounts; applications; users and identities; tokens; POS terminals only for counter categories; merchant-owned credentials; negotiated commission profiles (fractional rates) and the historical platform default. National ids are queued for Vault encryption. |
+| `03_gatewayLifecycleGenerator` | Later versions next to the baseline LIVE version (ROLLED_BACK -> baseline, SANDBOX_VERIFIED/DRAFT, PENDING_APPROVAL for two gateways) with environments, auth, settings and evidence; webhook channels only for baseline versions without one; statement sources; route health DERIVED from the generated attempts (last 30 days). |
+| `04_linksAndAttemptsGenerator` | Heavy-tailed merchant volumes, category ticket bands, rail popularity, per-rail decline/abandon pressure; links with fee bearer, reuse and expiry; attempts built from engine-valid status paths with monotonic timestamps; pricing mirrored from the checkout (`money.ts`); step logs, inbound webhooks, attempt groups; live tail of in-flight/UNKNOWN/held attempts near `T_NOW`; late successes and SUSPENSE settlements. |
+| `05_ledgerAndCheckpoints` | Confirmation, AML hold/release/void and SUSPENSE postings through the engine templates; AML hold cases; shard balances and one checkpoint instant for all accounts, computed after every posting (`generateCheckpoints`). |
+| `06_reconAndStatements` | Per-source windows fed by the settled attempts (each once); MATCHED lines carry the settled amount and fee; exceptions (mismatch, missing at gateway, missing locally, duplicate) within the operator-case budget; `SETTLEMENT_SWEEP` for platform-cleared matched lines. |
+| `07_disputesCashoutsAdjustments` | Executed REFUND adjustments with `FULL_REFUND`/`INTERNAL_REFUND` journals and the REFUNDED/PARTIALLY_REFUNDED step; disputes with the reserve journal, drafted CHARGEBACK adjustments and WON/LOST outcomes; cash-outs and manual debits sized so wallets never go negative; manual credits and corrections; open refund requests. |
+| `08_amlAndGovernanceQueues` | Onboarding/owner/periodic screenings with matches, screening AML cases, STR reports, approvals bound to real subjects (join requests, adjustments, AML cases, gateway versions, merchants, commission profiles) with maker != checker and role flags, notifications from the baseline catalogue, audit rows derived from real events, detail change logs. |
+| `09_operatorCasesGenerator` | Operator cases from reconciliation exceptions, UNKNOWN/CONFLICT attempts, held/escalated payments, late successes and SUSPENSE settlements; only an UNKNOWN attempt can carry a proposed MARK_* action (following the emulator truth); maker-checker resolutions. |
 
-### 3.6 The 55 in-memory collections
+### 3.6 The 56 in-memory collections
 
-`core-back/prisma/syntheticSeeder/dataset.ts` defines 55 arrays:
+`core-back/prisma/syntheticSeeder/dataset.ts` defines 56 arrays (the 2026-11-02 list below plus `glAccountShards` and `notificationTemplates`):
 
 - Identity and onboarding: `users`, `userIdentities`, `merchants`, `joinRequests`, `kybDocuments`, `beneficialOwners`, `wallets`, `glAccounts`, `applications`, `accessTokens`, `accessTokenIps`, `posTerminals`, `posScreens`, `commissionProfiles`.
 - Catalogue and credentials: `credentialSets`, `gatewayVersions`, `gatewayVersionEvidence`, `gatewayEnvironments`, `gatewayAuths`, `gatewaySettings`, `confirmationChannels`, `statementSources`.
@@ -154,7 +148,7 @@ There is no +2 offset or timezone database conversion. The simulated "Tripoli ho
 
 ### 3.7 Bulk writer
 
-`core-back/prisma/syntheticSeeder/sync/bulkDataWriter.ts` writes **49 models** in topological FK order:
+`core-back/prisma/syntheticSeeder/sync/bulkDataWriter.ts` writes **50 models** in topological FK order (`encryptPendingSecrets` runs first and fills every Vault-encrypted column; `writeReadModels` projects `rm_*` afterwards):
 
 - merchants before users, because users carry `merchant_id`;
 - GL accounts before wallets;
@@ -165,7 +159,7 @@ There is no +2 offset or timezone database conversion. The simulated "Tripoli ho
 
 Each model is written in 2,500-row `createMany` chunks with `skipDuplicates: true`. The writer skips any empty collection. The six in-memory collections not written are `rails`, `railFields`, `railRoutes`, `widgets`, `redirects` and `pollPolicies`; these are expected to exist from the baseline blueprint seed and are only used as read-only references.
 
-The writer is not a transaction. A failure partway through leaves the previous chunks committed; re-running with the same seed key is not automatic because the completed-run marker is written only at the end. A failed run can be retried, but duplicate ids are skipped and a partial dataset may remain.
+The `WRITE_ORDER` is exported and tested (parents before children; approvals right after users; disputes before adjustments; items before cases; no strip-and-relink). The writer is not a transaction. A failure partway through leaves the previous chunks committed; re-running with the same seed key is not automatic because the completed-run marker is written only at the end. A failed run can be retried, but duplicate ids are skipped and a partial dataset may remain.
 
 ### 3.8 Fake Rails synchronization
 
@@ -173,7 +167,7 @@ The writer is not a transaction. A failure partway through leaves the previous c
 
 - `POST /portal-api/internal/bulk-seed` with `x-fake-rails-seeder-token`;
 - transactions first, then events;
-- status mapping from core statuses to Fake Rails statuses (`SUCCEEDED` → `PAID`, in-flight → `INITIATED`/`AWAITING_ACTION`, `UNKNOWN` → `UNKNOWN_SIMULATED`);
+- status mapping from core statuses to Fake Rails statuses (`SUCCEEDED`/`PARTIALLY_REFUNDED`/`DISPUTED` -> `PAID`, `REFUNDED` -> `REFUNDED`, in-flight and `UNKNOWN` -> `INITIATED`/`AWAITING_ACTION`); BLOCKED and never-dispatched attempts are not synced; an `UNKNOWN` attempt gets `inquiry_override_status` = the recorded gateway truth (`PAID` or `FAILED`), so "Inquire now" resolves it;
 - provider references, OTP code selection, amounts, timestamps and gateway/rail codes.
 
 Fake Rails stores the history so "Inquire now" on a seeded UNKNOWN attempt, refunds on seeded successes and statement reconciliation return coherent answers. The sync does not create refunds, disputes or cash-out records in Fake Rails; those remain core-side histories.
@@ -204,15 +198,19 @@ Unlike the base generators, this enrichment uses the real Vault.
 
 ### 3.11 Post-seed audit
 
-`verify/postSeedAudit.ts` runs an in-memory audit before writing and again after:
+`verify/invariants.ts#checkInvariants` runs on the in-memory graph before the write (a violation aborts) and `postSeedAudit` repeats it, then compares the database with the dataset. Exact money (BigInt scaled by 10^4) is used throughout. It asserts, per rule name:
 
-- computes debit and credit totals and per-entry balance;
-- counts succeeded attempts without a ledger entry;
-- verifies `active_locked_count` matches in-flight attempts per link;
-- audits operator cases for missing/wrong evidence, maker-checker violations, invalid resolution actions, duplicate open cases, timestamp violations, item backlinks, missing cases for non-MATCHED items and inbound-event integrity;
-- returns `ok`, drift, unbalanced entries, counts by collection and an operator-case summary.
+- **relations**: every foreign key (`FK_EDGES`, 78 edges incl. baseline references) points at an existing row; wallet GL account is the merchant's `MERCHANT_WALLET`; link wallet/application/merchant coherence; unique ids, e-mails, references, idempotency keys, journal `(ref_type, ref_id)`, dispute `(gateway, ref)`;
+- **ledger**: every entry balanced, every line > 0 and a 4-decimal string, system drift exactly 0, lines dated like their entry, nothing in the future; checkpoint + lines after the checkpoint = plain sum for every account; shard sums = line sums;
+- **settlement math**: wallet credit = `net_merchant_amount`, income credit = commission, fee accrual = gateway fee (accrual routes), MERCHANT_DIRECT never credits a wallet, the credited wallet is the link's wallet;
+- **lifecycle**: each attempt's path is made of engine transitions (`lifecycle.ts`, compared with `ALLOWED_TRANSITIONS` by a test), starts at CREATED/BLOCKED, ends at its status, timestamps monotonic and <= `T_NOW`, `terminal_at` iff terminal, in-flight attempts still inside their TTL, amounts consistent with the fee-bearer breakdown, settled amount only on settled statuses, ledger entry only on settled attempts and unique;
+- **links**: `confirmed_count`/`active_locked_count` equal the attempts, no slot overflow, COMPLETED exactly when full, no stale PENDING, attempt-group success counts;
+- **governance**: maker != checker, maker `is_maker`, checker `is_checker`, decided approvals have a checker, pending ones none; adjustments executed iff journaled, refunds <= charge, REFUNDED iff refunds sum to the charge, dispute <-> adjustment bidirectional and consistent with the status, cash-outs linked, wallets never below `-negative_balance_ceiling` at any instant, reconciliation stats and windows;
+- **time**: no `created_at` after `T_NOW`, `updated_at >= created_at` everywhere;
+- **volumes**: merchants, join requests, wallets, applications, owners, users equal the profile when feasible; business-hour share, negative wallets and volume ratios are reported as metrics;
+- **operator cases**: the pre-existing case audit (evidence, backlinks, maker-checker, SLA timestamps, duplicates).
 
-The post-seed version adds database counts for attempts, journal entries and links. It does not assert that the database counts equal the in-memory dataset counts; it only reports both.
+After the write, `postSeedAudit` asserts that the database row counts of attempts, journal entries, journal lines, links, merchants, adjustments and disputes equal the dataset (a skipped duplicate is now a failure) and that the SQL ledger drift and unbalanced-entry count are zero.
 
 ### 3.12 Execution flow
 
@@ -223,28 +221,53 @@ The post-seed version adds database counts for attempts, journal entries and lin
 3. skip when the seed key is already complete;
 4. run the safety gate and print Fake Rails health;
 5. load references and reject empty gateways/rails;
-6. run the nine generators in order;
-7. run the in-memory audit and fail on any violation;
-8. bulk-write 49 models;
-9. enrich KYB documents;
+6. run the generators in order (route health, then ledger, reconciliation, refunds/disputes/cash-outs, governance, operator cases, and the checkpoints last);
+7. run the in-memory audit (ledger + the full invariant suite) and fail on any violation;
+8. encrypt every pending sensitive column with the Vault, then bulk-write 50 models;
+9. project the `rm_*` read models and enrich KYB documents;
 10. sync transactions/events to Fake Rails;
-11. run the post-seed audit and fail on any violation;
+11. run the post-seed audit (invariants + database/dataset equality + SQL drift) and fail on any violation;
 12. record the completed run.
 
 The console summary reports profile, span, phase timings, rows written, KYB enrichment counts, Fake Rails sync counts and final attempts/journal lines/drift.
+
+### 3.13 2026-11-04 realism rework
+
+The data was re-derived from the real engine rules instead of random rows. Defects fixed:
+
+| Area | Defect | Fix |
+| :--- | :--- | :--- |
+| Ledger | Hand-written account choice, float sums, per-gateway/env clearing accounts the baseline never creates; settlement-sweep and refund legs invented | `postTemplate` posts the engine's `buildPaymentConfirmationTemplate`/`buildLedgerTemplate` output, validated by `LedgerPoster.validateTemplate`, with accounts resolved like `LedgerPoster.resolveAccountId` (platform fallback); decimal.js/BigInt only |
+| Checkpoints | Taken before refunds/cash-outs were posted, so lines dated before the checkpoint were missed | `generateCheckpoints` runs last; one instant for all accounts |
+| Fees | Random 0.2-0.9 % gateway fee and 0.5-2.5 % commission; surcharge ignored | Commission profile hierarchy, fee-bearer breakdown, route cost model and wire rounding mirrored from the checkout (`money.ts`) |
+| Lifecycle | Terminal times random 1-120 min after creation, in-flight attempts years old, `EXPIRED + LATE_SUCCESS_PENDING` and `VERIFYING + AML_HOLD` statuses the engine never produces, no refund/dispute sequencing | Engine-valid paths with one timestamp per step; late successes end SUCCEEDED (or SUSPENSE); held payments are `CREATED + AML_HOLD` with a hold entry and case; live tail only near `T_NOW`; refunds/disputes append their status step |
+| Links | Counters patched after the fact; random link for each attempt | Counters follow the attempts; sequential retries respect the slot rule |
+| Relations | Adjustments/disputes/AML cases not tied to approvals, journal entries or holds; approvals pointed at random subjects with invalid state; join-request approval FK order | Every adjustment/AML case/report/version/profile has the approval the real flow would create (maker != checker, role flags); writer order fixed |
+| Governance | Staff `authoritiesMap` nested object (zero authorities); `SUPPORT`/`MLRO` flags wrong; maker/checker ignored role flags | Flat authority lists and flags from `createAdminPlan.ts` |
+| Merchants | Single join request, uniform random statuses/dates, suspension dates unrelated to activation, owners not summing to 100 %, KYB documents unrelated to required types, duplicate phones, 0.5-3.5 commission rates (50-350 %), base64 "ciphertext" | Lifecycle-ordered timestamps, resubmission chains, required-document chains, 100 % ownership, unique phones, fractional rates, Vault encryption |
+| Catalogue | 15 Arabic vs 14 English surnames (misaligned, one `undefined`), uniform categories | Aligned lists; categories with ticket bands, weights and counter flags |
+| Time | Tripoli hour written as UTC, Eid treated as a peak, uniform hour for reusable links | UTC+2 conversion, Eid trough, Ramadan evening shift, Friday prayer dip |
+| Config | `SYNTHETIC_SEED_YEARS_SPAN` ignored; ids ignored namespace and seed key | Both fixed |
+| Volumes | Seven profile fields unused | All drive generation (section 3.2) |
+| Verify | Audit checked drift, succeeded-without-ledger, slot counts and operator cases only; DB counts reported not asserted | Section 3.11 |
+| Fake Rails | BLOCKED attempts synced; UNKNOWN mapped to `UNKNOWN_SIMULATED` with no truth; OTP selection from the decimal tail of a hex id | Skip never-dispatched attempts, truth in `inquiry_override_status`, hex-aware OTP |
+| Read models | `rm_*` empty after a seed | `writeReadModels` projects them like `projectAttemptTransition` |
+
+`fake-rails-back/api/portal/seederSync.ts` and `core-back/prisma/seedFakeRails.ts` were reviewed and needed no change.
 
 ## 4. Contracts and invariants
 
 - The seeder must never run unless `IS_TEST_SERVER=true`, Fake Rails is enabled with a public URL, the production guard is satisfied when applicable, every gateway host is allowed and the live handshake succeeds.
 - The seeder requires the baseline seed (gateways, rails, routes, credential sets, GL accounts, statement sources) and Fake Rails blueprints. Empty gateways or rails abort.
 - The dataset must be deterministic for a given `seedKey`, profile and current time. The PRNG and the chronological clock are seeded from the key.
-- The generated ledger must satisfy `SUM(DEBIT) = SUM(CREDIT)` per entry and system-wide within 0.00005 LYD.
+- The generated ledger must satisfy `SUM(DEBIT) = SUM(CREDIT)` per entry and system-wide, exactly (no tolerance).
 - Every SUCCEEDED attempt must have a journal entry; attempts in flight must match each link's `active_locked_count`.
 - Every non-MATCHED reconciliation item must have a candidate operator case; the operator-case generator uses the same exception budget.
-- Maker-checker seeded approvals must have `makerUserId <> checkerUserId`; resolved cases must have notes and an executed approval.
+- Maker-checker seeded approvals must have `makerUserId <> checkerUserId`, an `is_maker` maker and an `is_checker` checker; resolved cases must have notes and an executed approval.
+- The full invariant list of section 3.11 holds before any row is written and again after the write.
 - All linked evidence (attempt, reconciliation item, confirmation channel, inbound event) must exist and be consistent.
 - The completed-run marker is written only after the post-seed audit passes.
-- Re-running the same seed key is a no-op. A new seed key must not assume a clean database; `skipDuplicates` can mask id collisions.
+- Re-running the same seed key is a no-op. Ids and unique keys are namespaced by seed key, so a different key adds a parallel history (the post-seed audit compares the database with the dataset, so a collision fails loudly).
 
 ## 5. Data / API / config / deployment surface
 
@@ -302,7 +325,7 @@ Both require the seeder token and are implemented in `fake-rails-back/api/portal
 - Five-layer safety gate with live Fake Rails handshake.
 - Three profiles, a deterministic PRNG and a multi-year timeline.
 - Nine generators covering merchant/onboarding, gateway lifecycle, links/attempts, ledger/checkpoints, reconciliation, disputes/cash-outs/adjustments, AML/governance, operator cases and admin/staff.
-- 55 in-memory collections and a 49-model topological bulk writer with 2,500-row chunks.
+- 56 in-memory collections and a 50-model topological bulk writer with 2,500-row chunks.
 - Fake Rails transaction/event synchronization in 5,000-row batches.
 - Vault-backed KYB document enrichment.
 - Completed-run registry in `platform_settings`.
@@ -311,46 +334,26 @@ Both require the seeder token and are implemented in `fake-rails-back/api/portal
 
 ### Partial
 
-- Volume control: seven `ProfileVolumes` fields are unused; the counts of join requests, KYB documents, owners, users, wallets, applications and AML cases are derived from merchant volume and randomness.
-- Collection coverage: 49 of 55 collections are written; the six reference collections are assumed to come from the baseline.
-- Template coverage: 10 notification templates are seeded, and generated notifications use only `PAYMENT_SUCCEEDED`, `PAYMENT_FAILED`, `KYB_DOC_EXPIRING` and `CASHOUT_COMPLETE`. There is no complete bilingual catalogue for every event.
-- Ciphertext realism: KYB content uses the Vault; merchant national ids, attempt context, AML report payloads and notification addresses use plain base64.
-- Authority realism: seeded staff have a nested authority map that the auth parser does not understand.
-- Temporal realism: the Tripoli hour distribution is written as UTC without an offset.
+- Collection coverage: 50 of 56 collections are written; the six reference collections come from the baseline.
+- Notifications use the baseline catalogue codes `PAYMENT_SUCCEEDED`, `PAYMENT_FAILED`, `DISPUTE_OPENED`, `CASHOUT_REQUESTED` and `APPROVAL_REQUIRED` only where a template for the channel/language exists; the seeder creates no templates.
 - Safety: the gate checks the declared test flag and gateway hosts, not the database host or existing data.
-
-### Missing / deferred
-
-- A generator that uses `joinRequests`, `kybDocuments`, `beneficialOwners`, `users`, `wallets`, `applications` and `amlCases` volumes directly.
-- Writing for the six reference collections.
-- A full notification template catalogue with both languages for every code.
-- Vault encryption for the remaining synthetic ciphertext fields.
-- A flat or boolean authority map compatible with `parseAuthorities`.
-- Correct deploy propagation of the years-span key.
-- Database-host and data-presence checks in the safety gate.
-- Namespace-aware id generation.
-- An exact database-versus-dataset count assertion in the post-seed audit.
-- A transactional or resumable bulk writer.
+- Baseline versions are not backdated (attempts predate the version row's `created_at`).
+- Several model families are not generated (see the `gaps` list).
 
 ### Known bugs / risks
 
-- `nextId` ignores its entity argument and namespace. Two seed keys produce the same ids; `skipDuplicates` silently keeps the first history and drops the second. Code gap.
-- `hostPlanner` writes `SYNTHETIC_SEED_YEARS_SPAN` while the seeder reads `SYNTHETIC_YEARS_SPAN`, so deployed years span is ignored. Code gap.
-- The seeded `authoritiesMap` is `{ gateway: ["read", ...] }`; `parseAuthorities` accepts arrays or flat boolean maps, so seeded platform users resolve to no authorities. They can authenticate but fail authority checks. Code gap.
-- `nationalIdCiphertext`, `contextCiphertext`, `payloadCiphertext`, `addressCiphertext` and similar fields are base64, not encrypted. Any code that tries to decrypt them with the Vault will fail or produce garbage. Code gap.
-- The bulk writer is not transactional. An interrupted run leaves partial rows and the next retry skips duplicates rather than repairing missing links. Operational risk.
-- The completion marker is per key only. A new key over a dirty database can duplicate semantic histories while id collisions drop rows. Operational risk.
+- The bulk writer is not transactional. An interrupted run leaves partial rows; the retry skips duplicates and the post-seed audit (database/dataset equality) fails instead of passing silently. Operational risk.
 - The seeder does not clear previously seeded rows. A rebuild requires a database reset.
-- The safety gate assumes all gateway environments point at Fake Rails. A stray live gateway host blocks the seed, which is safe but can be confusing after a partial blueprint seed. Operational risk.
-- `FAKE_RAILS_SEEDER_TOKEN` may be empty in the handshake if the environment is misconfigured; the Fake Rails side decides whether to reject. Code/configuration risk.
-- The timeline's adoption/seasonality is applied to link/attempt generation but not to every collection, so some histories are not volume-curved. Modeling limitation.
-- The post-seed audit reports database counts but does not fail on a dataset/database mismatch, so a partially skipped bulk write can pass the audit. Code gap.
+- The DB-backed path (writer, Vault enrichment, SQL audit, read-model SQL) has not run in this environment: no PostgreSQL/Redis exist here, DB suites skip. Verification risk.
+- Engine observations found while mirroring its rules (the seeder works around them; not changed because they are outside the seeder): (1) `INTERNAL_CONFIRMATION` books the requested amount only, so an INTERNAL rail with a payer surcharge cannot balance - the seeder keeps INTERNAL/MERCHANT_DIRECT rails on MERCHANT_ABSORBS; (2) `AML_HOLD_AND_RELEASE` (release) books no gateway fee accrual, so a released hold leaves the fee unaccrued; (3) `LedgerPoster` resolves the merchant wallet by `ownerId` only, i.e. the merchant's first wallet, not the link's wallet (the seeder maps the link's wallet explicitly); (4) `SYSTEM_AUTOMATION_USER_ID = "SYSTEM_AUTOMATION"` is not a UUID but is written to `users.id` (a `uuid` column); (5) the refund commission split is not rounded to 4 decimals, so the journal amounts can be re-rounded on write; (6) the guard writes BLOCKED attempts with `MERCHANT_ABSORBS` but the real bearer's amounts; (7) `postSettlementSweeps` dedupes by `batchReference`, so a batch reference shared by many items sweeps only the first.
+- `SYNTHETIC_SEED_YEARS_SPAN` is now accepted; the deploy planner needs no change.
 
 ## 8. Verification and tests
 
 Relevant test files:
 
-- `core-back/test/synthetic-seeder.test.ts` — safety gate, config, generators and audit behavior.
+- `core-back/test/synthetic-seeder-realism.test.ts` — DB-free end-to-end proof (35 tests): every generator runs against a baseline lookalike (`test/helpers/seederFixture.ts`) and the full invariant suite must report nothing for several seeds; volumes, determinism, id isolation, Tripoli time/seasonality, engine mirrors (transition table parsed from `DynamicRailEngine.ts`, pricing, ledger math), tamper tests proving the audit catches each defect class, Vault encryption, writer order, Fake Rails sync payload, read models.
+- `core-back/test/synthetic-seeder.test.ts` — safety gate, config and audit behavior on sparse rows.
 - `core-back/test/exhaustive/10-seeder-and-deploy/synthetic-seeder-safety-and-audit.test.ts` — exhaustive safety/audit suite.
 - `fake-rails-back/test/api.test.ts` — seeder handshake and bulk-seed endpoints.
 - `fake-rails-back/test/exhaustive/05-api-matrix/fake-rails-portal-and-chaos-api.test.ts` — broader Fake Rails API matrix.
@@ -358,13 +361,13 @@ Relevant test files:
 Commands:
 
 ```bash
-cd core-back && bun test test/synthetic-seeder.test.ts
+cd core-back && bun test test/synthetic-seeder-realism.test.ts test/synthetic-seeder.test.ts
 cd core-back && bun test test/exhaustive/10-seeder-and-deploy
 cd fake-rails-back && bun test
 cd core-back && bun run seed-synthetic-history
 ```
 
-The unit tests do not require a live database or Fake Rails; they use fakes for most behavior. The actual `seed-synthetic-history` command requires PostgreSQL 18, the baseline seed, Fake Rails and all safety variables. The deploy-time run is not part of the default test gate. No seeder run was performed for this documentation change.
+The unit tests do not require a live database or Fake Rails. The actual `seed-synthetic-history` command requires PostgreSQL 18, the baseline seed, Fake Rails and all safety variables; the deploy-time run is not part of the default test gate and was NOT executed in the 2026-11-04 rework (no PostgreSQL available): the COMPACT profile was generated in memory in about 1.4 s (14.9k attempts, 8.5k links, ~60k journal lines, zero invariant violations).
 
 ## 9. Source references
 
@@ -418,3 +421,4 @@ The unit tests do not require a live database or Fake Rails; they use fakes for 
 ## 10. Change history
 
 - 2026-11-03 — Initial canonical extraction. Records the safety gate, profiles, 9 generators, 55 collections, 49-model bulk writer, timeline, Fake Rails sync, KYB enrichment, run registry, post-seed audit, and the unused volumes, template coverage, base64 ciphertexts, authority shape and deploy env mismatch. See `project-design/TRACKER.md`.
+- 2026-11-04 — Realism rework: engine-template ledger, lifecycle-valid attempts, profile volumes drive generation, Tripoli time, Vault-encrypted columns, approvals bound to real subjects, namespaced ids, derived route health, read models, full invariant suite and DB/dataset equality in the audit, 35 new DB-free tests. See section 3.13 and `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md` (2026-11-04 corrections).

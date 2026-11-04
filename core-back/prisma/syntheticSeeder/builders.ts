@@ -301,25 +301,10 @@ export const ensureSystemAccounts = (ctx: SeederContext): SystemAccounts => {
     });
   };
 
+  // The baseline seed only owns platform-wide system accounts; the live
+  // resolver falls back to them when no scoped clearing account exists, so the
+  // synthetic history does the same (no per-credential clearing accounts).
   const clearing = new Map<string, string>();
-  for (const credential of ctx.refs.credentials) {
-    if (credential.ownerType !== "PLATFORM" || credential.settlementTarget === "MERCHANT_DIRECT") continue;
-    const existing = ctx.refs.glAccounts.find((account) =>
-      account.accountType === "GATEWAY_CLEARING"
-      && account.gatewayId === credential.gatewayId
-      && account.env === credential.env
-      && account.credentialSetId === credential.id);
-    const id = existing?.id ?? newGlAccount(ctx, {
-      type: "GATEWAY_CLEARING",
-      gatewayId: credential.gatewayId,
-      env: credential.env,
-      credentialSetId: credential.id,
-      seedKey: `synthetic:${ctx.config.namespace}:${ctx.config.seedKey}:clearing:${credential.id}`,
-      at: ctx.timeline.start,
-    });
-    clearing.set(`${credential.gatewayId}:${credential.env}:${credential.id}`, id);
-  }
-
   return {
     treasury: platformAccount("TREASURY"),
     platformIncome: platformAccount("PLATFORM_INCOME"),
@@ -330,7 +315,6 @@ export const ensureSystemAccounts = (ctx: SeederContext): SystemAccounts => {
     amlHold: platformAccount("AML_HOLD"),
     chargebackReserve: platformAccount("CHARGEBACK_RESERVE"),
     suspense: platformAccount("SUSPENSE"),
-    // The platform-wide clearing account is the resolver fallback.
     clearing: (() => {
       platformAccount("GATEWAY_CLEARING");
       return clearing;

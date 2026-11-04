@@ -19,13 +19,24 @@ interface Step {
 
 const CHUNK = 2500;
 
+/**
+ * Topological FK order. Notes:
+ * - `approval_requests` only reference users, but join requests, gateway
+ *   versions, commission profiles, reports, operator cases and audit rows
+ *   reference approvals, so approvals come right after users;
+ * - `aml_cases` reference screenings, AML rules and hold journal entries;
+ * - `disputes.adjustment_id` is a plain column and `adjustments.dispute_id` is
+ *   the FK, so disputes are inserted first and nothing needs relinking;
+ * - `reconciliation_items.operator_case_id` is a plain column, the FK is on
+ *   `operator_cases.reconciliation_item_id`, so items precede cases.
+ */
 const STEPS: Step[] = [
-  // Merchants precede users because a merchant user carries merchant_id.
   { model: "merchant", key: "merchants" },
   { model: "user", key: "users" },
   { model: "userIdentity", key: "userIdentities" },
-  // Join requests carry screeningId, so screenings must be inserted first.
+  { model: "approvalRequest", key: "approvalRequests" },
   { model: "amlScreening", key: "amlScreenings" },
+  { model: "amlScreeningMatch", key: "amlScreeningMatches" },
   { model: "joinRequest", key: "joinRequests" },
   { model: "kybDocument", key: "kybDocuments" },
   { model: "beneficialOwner", key: "beneficialOwners" },
@@ -49,7 +60,6 @@ const STEPS: Step[] = [
   { model: "statementSource", key: "statementSources" },
   { model: "paymentLink", key: "paymentLinks" },
   { model: "attemptGroup", key: "attemptGroups" },
-  // Journal entries precede attempts because attempts carry ledgerEntryId.
   { model: "journalEntry", key: "journalEntries" },
   { model: "paymentAttempt", key: "paymentAttempts" },
   { model: "attemptStepLog", key: "attemptStepLogs" },
@@ -57,24 +67,24 @@ const STEPS: Step[] = [
   { model: "journalLine", key: "journalLines" },
   { model: "reconciliationRun", key: "reconciliationRuns" },
   { model: "reconciliationItem", key: "reconciliationItems" },
-  // The dispute <-> adjustment pair is circular; strip both sides, link later.
-  { model: "dispute", key: "disputes", transform: (rows) => rows.map(({ adjustmentId: _adjustmentId, ...rest }) => ({ ...rest, adjustmentId: null })) },
-  { model: "adjustment", key: "adjustments", transform: (rows) => rows.map(({ disputeId: _disputeId, ...rest }) => ({ ...rest, disputeId: null })) },
+  { model: "dispute", key: "disputes" },
+  { model: "adjustment", key: "adjustments" },
   { model: "cashoutRequest", key: "cashoutRequests" },
-  { model: "amlScreeningMatch", key: "amlScreeningMatches" },
+  { model: "amlRule", key: "amlRules" },
   { model: "amlCase", key: "amlCases" },
   { model: "regulatoryReport", key: "regulatoryReports" },
-  { model: "approvalRequest", key: "approvalRequests" },
   { model: "operatorCase", key: "operatorCases" },
   { model: "notificationTemplate", key: "notificationTemplates" },
   { model: "notification", key: "notifications" },
   { model: "auditLog", key: "auditLogs" },
   { model: "detailChangeLog", key: "detailChangeLogs" },
   { model: "velocityRule", key: "velocityRules" },
-  { model: "amlRule", key: "amlRules" },
   { model: "reportingRule", key: "reportingRules" },
   { model: "platformSetting", key: "platformSettings" },
 ];
+
+/** The ordered model names the writer inserts (exported for the tests). */
+export const WRITE_ORDER: readonly string[] = STEPS.map((step) => step.model);
 
 const insertChunked = async (
   prisma: PrismaClient,
@@ -126,18 +136,6 @@ export const bulkDataWriter = async (
     }
   }
 
-  // Link the circular dispute <-> adjustment references now that both exist.
-  for (const dispute of ctx.dataset.disputes) {
-    if (dispute.adjustmentId) {
-      await prisma.dispute.update({ where: { id: dispute.id }, data: { adjustmentId: dispute.adjustmentId } }).catch(() => undefined);
-    }
-  }
-  for (const adjustment of ctx.dataset.adjustments) {
-    if (adjustment.disputeId) {
-      await prisma.adjustment.update({ where: { id: adjustment.id }, data: { disputeId: adjustment.disputeId } }).catch(() => undefined);
-    }
-  }
-
   // Apply the monthly GL checkpoints (including the already-seeded accounts).
   for (const [accountId, checkpoint] of ctx.checkpoints) {
     await prisma.glAccount
@@ -148,8 +146,7 @@ export const bulkDataWriter = async (
           checkpointAt: checkpoint.at,
           lastCheckpointId: checkpoint.lastCheckpointId,
         },
-      })
-      .catch(() => undefined);
+      });
   }
 
   return report;

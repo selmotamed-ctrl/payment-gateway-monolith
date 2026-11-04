@@ -6,7 +6,7 @@ Generated from: `core.foundations`, `core.api`, `core.engine`, `core.ledger`, `c
 
 ## Core Foundations
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-04
 
 ## 1. Purpose and scope
 
@@ -199,7 +199,7 @@ TCP + TLS 1.3 handshake (client cert required)
 6. **Unexpected errors do not leak internals.** The response is `SERVER_ERROR` with `Internal server error` and a reference.
 7. **The database client is lazy and process-global.** Module import does not connect.
 8. **The storage engine is the transactional owner.** Routes should not open ad-hoc long transactions when a storage port exists.
-9. **Schema version 8 is required.** The seeders enforce it; the API currently does not at boot.
+9. **Schema version 9 is required.** The seeders enforce it; the API currently does not at boot.
 10. **The TLS server requires a client certificate.** There is no optional-client-cert mode in production startup.
 
 ## 5. Data / API / config / deployment surface
@@ -243,7 +243,7 @@ TCP + TLS 1.3 handshake (client cert required)
 1. Generate certs.
 2. Set `DATABASE_URL`.
 3. Apply migrations.
-4. Seed (this also checks schema version 8).
+4. Seed (this also checks schema version 9).
 5. `bun run start`.
 6. Probe `/health` over mTLS with a client cert.
 
@@ -336,7 +336,7 @@ No build or test was run for this documentation change.
 
 ## Core API Surface
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-04
 
 ## 1. Purpose and scope
 
@@ -628,7 +628,7 @@ Checkout has no bearer auth. The link key and attempt id are capabilities. The r
   - `skip = (page - 1) * pageSize`, `take = pageSize`.
 - `listResponse(key, rows, total, built)` returns `{ [key]: rows, total, page, pageSize }`.
 
-Offset pagination is used everywhere. There is no keyset/cursor contract despite the historical design.
+Offset pagination is the default. Since 2026-11-04 `buildListQuery` returns a `keyset` plan when every ORDER BY term is a top-level NOT NULL column (`createdAt`, `updatedAt`, `id` plus the spec `keysetFields`); `listResponse` then emits an opaque base64url `nextCursor` for a full page and a valid `cursor` query parameter replaces OFFSET (`skip = 0`). `includeTotal=false` skips the COUNT (`countUnlessSkipped`). Only `GET /internal/merchant/payments` and `/links` pass the helpers so far; the other lists remain offset until adopted.
 
 Export endpoints follow a repeated shape:
 
@@ -815,7 +815,7 @@ Without step 3 the request remains pending and returns `409 NO_EXECUTABLE_SUBJEC
 - **Approval execution.** `APPLICATION` and several other approval subject types have no executable handler.
 - **Maker-checker coverage.** Cash-out process, commission create, velocity create and settings writes bypass the queue.
 - **Merchant authorization.** No per-route authority or token-scope enforcement.
-- **Pagination.** Offset only; no keyset.
+- **Pagination.** Offset by default; keyset/cursor available through `buildListQuery` and adopted by merchant `/payments`.
 - **Webhook processing.** Synchronous verification/processing before ack; the worker is secondary.
 - **Exports.** JSON-only server responses with a 5000-row cap; no server-side XLSX generation in core.
 - **Idempotency.** Attempts have an idempotency key; link creation accepts one but does not use it.
@@ -1508,7 +1508,7 @@ No build or test was run for this documentation change. Tests that require Postg
 
 ## Double-Entry Ledger
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-04
 
 ## 1. Purpose and scope
 
@@ -1606,7 +1606,9 @@ The seed creates all 11 system account types per supported currency (`LYD`, `USD
 4. resolves each line's GL account;
 5. creates the journal line with a `Decimal` amount;
 6. invokes the optional shard writer in the same transaction;
-7. invokes the optional `ledger.entry_posted` outbox writer in the same transaction.
+7. invokes the optional `ledger.entry_posted` outbox writer in the same transaction. Since 2026-11-04 `createLedgerPoster` does NOT emit it by default (`emitOutbox: true` opts in) because the topic has no consumer.
+
+Since 2026-11-04 a posting is batched: one entry insert (`createManyAndReturn` with `skipDuplicates`, so a racing duplicate reference returns the existing entry without aborting the transaction), one account lookup (`findMany` over the OR of scoped and platform-wide predicates, same precedence as before), one journal-line `createManyAndReturn`, and one shard upsert (`unnest`, folded per (account, shard) and sorted so concurrent postings lock shard rows in the same order).
 
 If the entry insert races another transaction, a Prisma `P2002`/`UNIQUE_CONSTRAINT_VIOLATION` is caught, the existing entry is looked up, and the call becomes idempotent (`LedgerPoster.ts:674`).
 
@@ -2208,7 +2210,7 @@ Some governance tests use fake clients; database-backed suites require PostgreSQ
 
 ## Background Workers and Outboxes
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-04
 
 ## 1. Purpose and scope
 
@@ -2268,9 +2270,9 @@ The loop is not a distributed lock by itself. Cross-node safety comes from `FOR 
 | `PeriodicScreeningWorker` | every poll interval; 24 h rescreen interval | `FOR UPDATE SKIP LOCKED` on due merchants, then merchant row lock | Refreshes watch-list versions, screens merchant and owners, applies owner statuses, raises one confirmed-match case and suspends the merchant. | Implemented (L2 only) |
 | `KybExpiryWorker` | every 6 h (`WORKER_KYB_EXPIRY_INTERVAL_MS`), batch 200 | Query + per-merchant transaction | Marks expired documents, queues 30/7-day notices, suspends after grace, starts periodic revalidations, expires overdue revalidations. | Implemented |
 | `RetentionWorker` | every hour when enabled; batch 500 | Bounded transactions per table | Purges notifications, inbound events, step logs, audit logs, detail logs, terminal attempts and dependents; never purges the ledger. | Partial / opt-in |
-| `BackgroundJobWorker` | every 2 s when enabled, batch 10 | `FOR UPDATE SKIP LOCKED` claim + `RUNNING` lease | Drains `RECONCILIATION_RUN` and `ADJUSTMENT_EXECUTION` jobs, retries with backoff, recovers expired leases. | Implemented |
-| `OutboxRelayWorker` | every 250 ms, batch >= 100 | `FOR UPDATE SKIP LOCKED` | Projects `attempt.transitioned` into `rm_merchant_daily_stats` and `rm_route_daily_volumes`; marks `processed_at`. Other declared topics are no-ops. | Partial |
-| `AuditShipperWorker` | every 500 ms, batch >= 100 | Claim batch then append to dedicated audit DB | Appends to the audit hash chain, then marks `audit_outbox.shipped_at`; never deletes. | Partial / conditional |
+| `BackgroundJobWorker` | every 2 s when enabled, batch 10 | `FOR UPDATE SKIP LOCKED` claim + ONE batch `RUNNING` update + lease | Drains `RECONCILIATION_RUN` and `ADJUSTMENT_EXECUTION` jobs, retries with backoff, recovers expired leases. | Implemented |
+| `OutboxRelayWorker` | every 250 ms (idle back-off to 2 s), batch >= 100 | `FOR UPDATE SKIP LOCKED`, one batch ack | Projects `attempt.transitioned` into `rm_merchant_daily_stats` and `rm_route_daily_volumes`; marks `processed_at`. Other declared topics are no-ops. | Partial |
+| `AuditShipperWorker` | every 500 ms, batch >= 100 | Lease-claim batch then append to dedicated audit DB | Appends to the audit hash chain, then marks `audit_outbox.shipped_at`; prunes shipped rows after the retention window. | Partial / conditional |
 
 ### 3.4 Expiry sweeper
 
@@ -2370,7 +2372,7 @@ The job payload never carries an independent checker; the executed adjustment us
 
 ### 3.13 Outbox relay and audit shipper
 
-`OutboxRelayWorker` (`core-back/lib/storageEngine/outboxWorkers.ts:134`) claims unprocessed `outbox_events` with `FOR UPDATE SKIP LOCKED` and marks `processed_at` after the handler. Default handlers:
+`OutboxRelayWorker` (`core-back/lib/storageEngine/outboxWorkers.ts`) claims unprocessed `outbox_events` with `FOR UPDATE SKIP LOCKED` in one transaction, runs the per-topic handlers (topics with a batch handler receive all events of the batch at once), and acknowledges the whole batch with ONE `UPDATE ... WHERE id = ANY(...)`. Since 2026-11-04 an idle relay backs off exponentially (250 ms to 2 s; 500 ms to 5 s for the shipper) and re-polls immediately after a full batch. Default handlers:
 
 | Topic | Handler |
 | :--- | :--- |
@@ -2381,9 +2383,9 @@ The job payload never carries an independent checker; the executed adjustment us
 | `reconciliation.completed` | No-op. |
 | `config.invalidated` | No-op. |
 
-The relay is instantiated only when a storage engine is supplied. Outbox rows are marked processed, never deleted; there is no outbox retention job.
+The relay is instantiated only when a storage engine is supplied. `attempt.transitioned` events of a batch are folded in memory (`aggregateAttemptTransitions`, decimal.js, no floats) into one delta per (merchant|route, day, currency) and applied with one `INSERT ... SELECT FROM unnest(...) ON CONFLICT DO UPDATE` per read model, sorted by key so concurrent relays lock rows in the same order. Processed rows older than `STORAGE_OUTBOX_RETENTION_MS` (default 1 h, 0 = keep) are pruned oldest-first in bounded batches strictly below the oldest unprocessed id (`OutboxRelayWorker.prune`), once a minute per worker. `rebuildAttemptReadModels(db, { fromDay, toDay })` recomputes both read models from `payment_attempts` after bulk loads.
 
-`AuditShipperWorker` is instantiated only when `options.storage.auditStore` is a `DedicatedAuditDatabaseDriver`. It claims unshipped `audit_outbox` rows, appends them to the dedicated audit database's SHA-256 hash chain, and marks `shipped_at`. It is idempotent on the source id. Shipped rows are retained, not deleted. `writeAudit` only writes `audit_outbox` when `AUDIT_DATABASE_URL` is configured; otherwise `audit_log` is the only sink.
+`AuditShipperWorker` is instantiated only when `options.storage.auditStore` is a `DedicatedAuditDatabaseDriver`. It claims unshipped, unleased `audit_outbox` rows with a single `UPDATE ... SET lease_until = now() + leaseMs WHERE id IN (SELECT ... FOR UPDATE SKIP LOCKED) RETURNING` (the previous claim transaction committed before the append, so its `SKIP LOCKED` locks were already released while shipping and two shippers could ship the same rows), appends them to the dedicated audit database's SHA-256 hash chain, and sets `shipped_at` / clears the lease. It is idempotent on the source id; a crashed shipper's batch is re-claimed after `leaseMs` (default 30 s). Shipped rows older than `STORAGE_AUDIT_OUTBOX_RETENTION_MS` (default 1 h) are deleted by `AuditShipperWorker.prune`; the dedicated audit database is the durable copy. `writeAudit` only writes `audit_outbox` when `AUDIT_DATABASE_URL` is configured; otherwise `audit_log` is the only sink.
 
 ### 3.14 Realtime fan-out reality
 
@@ -2481,7 +2483,7 @@ It degrades when workers are disabled, the queue cannot be read, or the oldest q
 - **Inbound inbox** — the worker is implemented and wired, but the checkout route processes synchronously and marks the event processed; the worker has no producer. The inbox-first asynchronous design is not in force.
 - **Retention** — opt-in, dry-run capable, bounded, and ledger-safe, but the scope excludes AML/KYB/reporting evidence and the default is off.
 - **Join-request expiry** — expires drafts/reviews but writes no audit row and sends no merchant notification.
-- **Outbox relay / audit shipper** — only `attempt.transitioned` has a projection (`ledger.entry_posted` and four other topics are no-ops); the audit shipper only runs with a dedicated audit DB and never deletes shipped rows.
+- **Outbox relay / audit shipper** — only `attempt.transitioned` has a projection (`ledger.entry_posted` and four other topics are no-ops); the audit shipper only runs with a dedicated audit DB (it now prunes shipped rows after the retention window).
 - **Realtime fan-out** — transition events are published, but checkout/POS clients receive polling SSE, not subscriptions.
 
 ### Missing / deferred
@@ -2557,7 +2559,7 @@ Database-backed suites require PostgreSQL 18; Redis-backed invalidation tests re
 
 ## Storage Engine
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-04
 
 ## 1. Purpose and scope
 
@@ -2596,11 +2598,11 @@ The historical storage blueprint defines a thin, ACID write path for a high-volu
 
 The blueprint's implementation claims must not be repeated as current behavior. The actual code differs in these material ways:
 
-- `ledger.entry_posted` is registered but its handler is a no-op; only `attempt.transitioned` projects read models.
+- `ledger.entry_posted` is registered but its handler is a no-op; only `attempt.transitioned` projects read models. (As of 2026-11-04 the topic is not emitted unless `emitOutbox: true`.)
 - The two read models are written but not read by dashboards or list endpoints.
-- `AuditShipperWorker` marks `audit_outbox.shipped_at`; it never deletes shipped rows.
+- ~~`AuditShipperWorker` never deletes shipped rows~~ superseded 2026-11-04: both outboxes are pruned after a retention window (section 12).
 - Replica routing is used by global search and three merchant list endpoints, not by all dashboards, lists and exports.
-- Pagination is offset-based, not keyset-based.
+- ~~Pagination is offset-based, not keyset-based~~ partially superseded 2026-11-04: keyset is available in `listQuery` and used by the merchant payment list; other lists are offset.
 - Access logs record zero database query metrics.
 - There is no `gateway_wire_logs` table and no disk spool for the log sink.
 
@@ -2757,7 +2759,7 @@ The public `GET /health` in `core-back/index.ts:76-115` does not call `StorageEn
 - Audit ids are UUIDv7 generated in the UoW; the audit chain is append-only and idempotent by id.
 - The audit hash chain canonicalizes JSONB with PostgreSQL `before_json::text`/`after_json::text`; verification reads the same text form. Any change to the trigger field list or canonicalization invalidates historical verification.
 - Outbox handlers must be idempotent: a claimed batch is retried after a crash because `processed_at` is updated only after the handler completes.
-- The outbox relay processes rows in ascending id order and never deletes them.
+- The outbox relay processes rows in ascending id order. Processed rows are deleted only after `STORAGE_OUTBOX_RETENTION_MS` and only below the oldest unprocessed id.
 - Read consistency is one of `primary`, `replica` or `{ atLeastLsn, maxWaitMs? }`. A replica query failure falls back to the primary; callers must not assume a replica served the read.
 - Cache contents are not authoritative. A Redis failure must not fail a payment; velocity falls back to local memory.
 - The in-memory velocity fallback is per process and does not coordinate across core nodes.
@@ -2795,6 +2797,8 @@ The public `GET /health` in `core-back/index.ts:76-115` does not call `StorageEn
 | `STORAGE_LOG_BUFFER_MAX` | Log buffer bound | `5000` |
 | `STORAGE_LOG_FLUSH_INTERVAL_MS` | Log flush interval | `250` |
 | `STORAGE_SHARD_COUNT` | GL shard count, max 16 | `16` |
+| `STORAGE_OUTBOX_RETENTION_MS` | Processed `outbox_events` older than this are pruned (0 = keep) | `3600000` |
+| `STORAGE_AUDIT_OUTBOX_RETENTION_MS` | Shipped `audit_outbox` rows older than this are pruned (0 = keep) | `3600000` |
 | `BACKUP_DAEMON_URL` | Daemon base URL | unset |
 | `BACKUP_DAEMON_CA_CERT_PATH` | Daemon CA | unset |
 | `BACKUP_DAEMON_CLIENT_CERT_PATH` | Daemon client cert | unset |
@@ -2837,7 +2841,7 @@ The public `GET /health` in `core-back/index.ts:76-115` does not call `StorageEn
 
 ### Partial
 
-- Read-model adoption: `rm_*` tables are written but no dashboard or list reads them.
+- Read-model adoption: `rm_*` tables are written (batched since 2026-11-04) but no dashboard or list reads them yet.
 - Outbox projection: only `attempt.transitioned` has an effect; `ledger.entry_posted` and four other topics are no-ops.
 - Replica routing: only global search and three merchant list endpoints use it.
 - Cache: Redis/L1 is used primarily by velocity; `getOrLoad` is available but not used by core read paths.
@@ -2846,11 +2850,10 @@ The public `GET /health` in `core-back/index.ts:76-115` does not call `StorageEn
 
 ### Missing / deferred
 
-- Keyset pagination. `core-back/lib/listQuery.ts:220` returns `skip`/`take`; no cursor pagination exists.
+- Keyset pagination on every list: only the merchant payment list passes `cursor`/`nextCursor` (see section 12).
 - `gateway_wire_logs` table and any raw gateway wire-log persistence. Evidence is stored in redacted step logs only.
 - On-disk log spool and durable log backpressure. The buffer drops instead of spooling.
 - Storage health endpoint. `StorageEngine.health()` is not wired to HTTP.
-- Automatic outbox and audit-outbox pruning/archival.
 - Distributed velocity counters when Redis is unavailable.
 - A real multi-node cache invalidation path through `CachePort.publishInvalidation` (the method is optional and unused).
 - Read models for merchant dashboards or wallet statements. Only the two attempt-derived tables exist.
@@ -2858,8 +2861,8 @@ The public `GET /health` in `core-back/index.ts:76-115` does not call `StorageEn
 
 ### Known bugs / risks
 
-- `AuditShipperWorker` retains every shipped `audit_outbox` row. At high audit volume this becomes an unbounded primary-database table. Code gap.
-- `OutboxRelayWorker` retains every processed `outbox_events` row. The partial index makes the unprocessed scan cheap, but storage still grows. Code gap.
+- (Fixed 2026-11-04) `AuditShipperWorker` / `OutboxRelayWorker` retained every shipped/processed row; both now prune after a retention window.
+- (Fixed 2026-11-04) `projectAttemptTransition` converted money with `Number(...).toFixed(4)`; amounts now go through decimal.js.
 - A failed log flush requeues step logs but not access logs, so access-log rows can be silently lost. Code gap in `auditAndLogAdapters.ts:485-488`.
 - `RedisCacheAdapter.del` uses `KEYS`, which blocks Redis on large keyspaces. Code risk.
 - The Redis L1 cache returns a 30-second cached value even when the requested L2 TTL is different; invalidation must cover every node. Code risk.
@@ -2885,6 +2888,8 @@ Relevant test files:
 - `core-back/test/storage-engine/ledger-shards.test.ts` — shard arithmetic and balances.
 - `core-back/test/storage-engine/cache-velocity.test.ts` — memory and live Redis velocity.
 - `core-back/test/storage-engine/engine-factory.test.ts` — factory and health snapshot.
+- `core-back/test/storage-engine/db-optimisation.test.ts` — DB-free tests of delta folding, retention SQL, lease claim, shard folding, batched poster, replica helper, live balance loader.
+- `core-back/test/list-query-keyset.test.ts` — keyset cursor encode/decode and predicates.
 - `core-back/test/storage-engine/performance/storage-performance.test.ts` — pure primitives, UoW, outbox drain, shard reads, audit append, Redis velocity.
 - `core-back/test/storage-engine/performance/write-path-benchmark.test.ts` — audit write and shard-read latency.
 - `core-back/test/backup-admin/*.test.ts` — backup client and internal routes.
@@ -2947,6 +2952,7 @@ There is no benchmark in this part that proves the blueprint's 1,000+ TPS sustai
 
 ## 10. Change history
 
+- 2026-11-04 — DB read/write optimisation pass (section 12): batched outbox projection with retention, leased audit shipper, batched ledger posting, keyset pagination, single-statement balances, new/removed indexes, schema version 9. See `project-design/TRACKER.md`.
 - 2026-11-03 — Initial canonical extraction. Records the actual UoW/outbox/audit behavior, replica adoption, Redis fallback, shard arithmetic, read-model no-op handlers, missing retention, missing keyset pagination, missing `gateway_wire_logs`, missing disk spool and zero DB log metrics. See `project-design/TRACKER.md`.
 
 ## 11. Two-machine routing and realtime additions (2026-11-03)
@@ -2957,9 +2963,61 @@ There is no benchmark in this part that proves the blueprint's 1,000+ TPS sustai
 - `verifyHashChainIntegrity` reads `before_json::text`/`after_json::text` so it verifies the trigger canonical form.
 - Attempt transitions are bridged to `realtime:attempt` on the existing Redis-backed invalidation bus; checkout SSE and merchant POS streams subscribe to it while retaining the database poll fallback.
 
+## 12. 2026-11-04 database read/write optimisation
+
+### 12.1 Plan (prioritised by hot-path impact)
+
+1. **Write path (checkout confirm, ledger posting).** A 4-line posting cost 25-30 statements: per line `glAccount.findFirst` (+ fallback), `journalLine.create`, shard upsert, plus a never-consumed `ledger.entry_posted` outbox insert; shard upserts ran in template order (deadlock window). Batch to: 1 entry insert, 1 account lookup, 1 line insert, 1 sorted shard upsert.
+2. **Outbox/audit.** Per-event double upsert and per-row ack in the relay; shipper claim locks were released before shipping; both tables unbounded; idle polling every 250/500 ms. Batch, lease, prune, back off.
+3. **Reads on hot paths.** Rail catalog (every checkout page/initiate): uncached daily-volume SUM with a non-sargable COALESCE, full-table unfiltered reads incl. `entries_ciphertext`. Checkout re-reads and link/application/merchant loads on every attempt route. Merchant dashboard loaded every attempt of 90 days into JS. Balance fallbacks summed unbounded journal lines.
+4. **Lists.** Offset pagination + COUNT, wide rows (`context_ciphertext`, customer JSON). Add keyset + `includeTotal=false` + column selects.
+5. **Indexes.** Remove prefix-duplicates, add composites that match real WHERE/ORDER BY.
+6. **Workers.** Batch claim updates; fix lock scope (open, GAP-DB-02).
+
+### 12.2 As built
+
+| Area | Before | After | Where |
+| :--- | :--- | :--- | :--- |
+| Ledger posting | findFirst entry + create + per-line (findFirst, create, upsert) + ledger outbox insert | `createManyAndReturn(skipDuplicates)` entry, one `findMany` account lookup, one line `createManyAndReturn`, one `unnest` shard upsert folded and sorted by (account, shard); no `ledger.entry_posted` by default. Clients without the batch methods (test doubles) keep the per-row path. | `engine/ledger/LedgerPoster.ts`, `lib/storageEngine/ledgerShardWriter.ts`, `ledgerPosterFactory.ts` |
+| Attempt read-model projection | 2 upserts per event | one folded delta per key, one `unnest` upsert per read model, one batch ack; money via decimal.js; terminal `BLOCKED` counted as failure; success amounts tracked separately; route volume = succeeded volume | `lib/storageEngine/outboxWorkers.ts` |
+| Outbox retention | none | `OutboxRelayWorker.prune` below the oldest unprocessed id, bounded batches | same |
+| Audit shipper | claim tx committed before append; never pruned | single-statement lease claim (`lease_until`), `shipped_at`+lease clear, prune after retention | same |
+| Poll cadence | fixed 250/500 ms | exponential idle back-off, immediate re-poll on a full batch | `nextPollDelayMs` |
+| Replica helper | a failing query ran on the replica, then twice on the primary | the query runs on the primary at most once; the primary retry only happens when the read store failed before reaching the query | `lib/storageEngine/index.ts` |
+| Balances | merchant balance + `merchantWalletBalance` summed every journal line on top of a debit-positive checkpoint; admin finance looped one query per account; merchant overview used the stale checkpoint | `loadLiveAccountBalances`: one statement, shard total or checkpoint + post-checkpoint lines, natural sign | `shardBalances.ts`, `merchantOps.ts`, `merchant.ts`, `admin.ts` |
+| Invariant check | one `journal_lines` query per account every 60 s | one grouped SQL (opt-in `{ sql: true }` for PostgreSQL clients) | `engine/ledger/InvariantVerifier.ts` |
+| Rail catalog | daily-volume SUM sequentially before four full-table reads incl. encrypted entries | all five in parallel; credential sets limited to VERIFIED rows and 7 columns; commission profiles 6 columns; daily volume served by a partial expression index | `engine/flow/VisibleRailsCatalog.ts` + migration |
+| Checkout | link+application+merchant load on every attempt route; full-row status polls and re-reads | attempt scoped by `link.key` in one query; `select: { status }` re-reads; SSE poll selects 4 columns; widget/redirect/attempt reads in parallel; trimmed link include | `api/internal/checkout.ts` |
+| Merchant API | overview loaded all attempts of the window; POS stream updated every 3 s and joined through applications; list/stream rows included encrypted context; statements ignored month/wallet; CSV filtered 1,000 rows in JS | overview = `groupBy` + one grouped SQL + `take: 6`; heartbeat once a minute; explicit attempt list select; month bounds in SQL; bounded link-attempts (500); disputes via relation filter | `api/internal/merchant.ts` |
+| Pagination | offset only | `buildListQuery` returns `keyset`, accepts `cursor`, `includeTotal=false`; `listResponse` emits `nextCursor` | `lib/listQuery.ts` |
+| Job claim | one UPDATE per claimed job | one `UPDATE ... id = ANY(...)` | `engine/workers/BackgroundJobWorker.ts` |
+
+Indexes: see migration `20261104090000_db_read_write_optimisation` in `core.data`.
+
+### 12.3 Bugs found and fixed
+
+- `GET /internal/merchant/links`: the list filtered by a non-existent `payment_links.merchant_id` (and searched a non-existent `description`); Prisma rejects both. Now filtered by `application.merchantId`, search on `key`.
+- `GET /internal/merchant/payments`: `confirmedAt` filter/sort used a non-existent column; mapped to `terminal_at`.
+- `GET /wallets/:id/statements` ignored the month; CSV export took the latest 1,000 successes then filtered in JS (older months empty).
+- Merchant balance fallback and `merchantWalletBalance` double-counted lines already folded into the checkpoint (no `created_at > checkpoint_at`) and applied a credit-positive sign to a debit-positive checkpoint.
+- `projectAttemptTransition` used floating point for money.
+- `AuditShipperWorker` claim did not hold locks while shipping.
+- `readThroughReplica*` re-ran failing queries up to three times and swallowed the error type.
+- `GET /disputes` loaded every DISPUTED attempt id and shipped it twice as an IN list.
+
+### 12.4 Known pre-existing failures observed (not caused by this change)
+
+- `dedicated audit database > concurrent and duplicate append calls serialize through the advisory lock` expects a gapless `seq_no` but duplicate appends consume sequence values.
+- `writeAudit writes the compatibility row ...` and `300 transactional audit writes ...` fail with `audit_log_actor_id_fkey` against a freshly migrated, unseeded database (fixture needs a seeded actor).
+- Hooks in `test/exhaustive/06-concurrency` exceed the 5 s default on a cold database (pass with `--timeout 60000`).
+
+### 12.5 Open work
+
+GAP-DB-02 (claim loops outside a transaction), GAP-DB-03 (KYB expiry has no cursor), GAP-DB-04 (engine re-reads, commission-receivable SUM scanning all receivable lines through a `pa.id::text` join, velocity per-rule queries, uncached flow/step/credential reads), GAP-DB-05 (admin lists/exports/summaries on the primary with wide columns, `reconciliation/runs` loading `file_content`, join-request mutations re-reading KYB `content_ciphertext`, bulk operator-case loops, `PUT /settings` per-entry reads), GAP-DB-06 (dashboards still do not read `rm_*`; merchant overview could use `rm_merchant_daily_stats` once per-rail and commission columns exist), and adoption of keyset pagination for the remaining lists.
+
 ## Data Schema and Migrations
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-04
 
 ## 1. Purpose and scope
 
@@ -2968,8 +3026,8 @@ This part owns the PostgreSQL 18 relational model, the committed migration histo
 It covers:
 
 - `core-back/prisma/schema.prisma` — 75 Prisma models and 105 enums;
-- `core-back/prisma/migrations/**` — four committed migrations;
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 8 and the boot guard;
+- `core-back/prisma/migrations/**` — five committed migrations;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 9 and the boot guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -3024,20 +3082,20 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 8`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 9`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
 - it connects through the base client;
 - it reads `schema_versions.version` where `id = 1`;
-- it throws when the row is missing or does not equal 8;
+- it throws when the row is missing or does not equal 9;
 - it caches the successful check and resets the cached promise after a failure so a later call can retry.
 
 `core-back/prisma/seed.ts`, `seedFakeRails.ts` and `syntheticSeeder/index.ts` call `ensureSchemaVersion()` before writing. A stale database is therefore rejected by these seeders and by any caller that explicitly asserts the version. The core HTTP start path does not call it.
 
 ### 3.3 Migration history
 
-There are exactly four committed migrations:
+There are exactly five committed migrations:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -3045,6 +3103,7 @@ There are exactly four committed migrations:
 | `20261103120000_postgres18_storage_engine` | Adds `pg_trgm` and `btree_gin`; replaces outbox/audit indexes with partial/BRIN indexes; adds covering/BRIN journal indexes; adds worker-claim partial indexes; adds attempt reference indexes and trigram search indexes. |
 | `20261103130000_cqrs_read_models` | Creates `rm_merchant_daily_stats` and `rm_route_daily_volumes` plus their day indexes. |
 | `20261103180000_storage_hardening` | Adds `pg_stat_statements` when available; sets `gl_account_shards.shard_id` default and range check; converts `journal_lines` to monthly range partitions; adds partition maintenance function; adds broader trigram indexes; updates schema version to 8. |
+| `20261104090000_db_read_write_optimisation` | Part A (Prisma diff): drops the redundant `payment_attempts(link_id)`, `payment_attempts(merchant_id)`, `attempt_step_logs(attempt_id)`, `reconciliation_items(run_id)` and `audit_log(entity_type, entity_id)` indexes (each is a prefix of a kept or new composite); adds `approval_requests(subject_type, subject_id, state)`, `payment_attempts(link_id, created_at)`, `attempt_step_logs(attempt_id, created_at)`, `inbound_events(attempt_id, received_at)`, `reconciliation_items(run_id, created_at)` and `(created_at)`, `audit_log(created_at)` and `(actor_id, created_at)`; adds `audit_outbox.lease_until` and `rm_merchant_daily_stats.success_amount` / `success_net_amount`. Part B (raw SQL): partial expression index `payment_attempts_succeeded_settled_at_idx` on `COALESCE(terminal_at, created_at)` INCLUDE `(route_id, total_charged_amount)` WHERE `status = 'SUCCEEDED'` (daily route volume), `audit_outbox_unshipped_idx` recreated INCLUDE `lease_until`, `audit_outbox_shipped_idx` (partial btree) replacing the BRIN. Sets schema version 9. |
 
 The baseline creates the tables, not the storage migration. The storage migration is index-only. The hardening migration is the one that rewrites `journal_lines` into a partitioned table:
 
@@ -3071,7 +3130,7 @@ The index strategy has four layers:
 3. Covering and BRIN indexes:
    - `journal_lines_account_id_cov_idx` includes direction, amount and created_at;
    - BRIN indexes on `journal_lines.created_at`, `payment_attempts.created_at`, `outbox_events.created_at` and `audit_outbox.shipped_at`;
-   - `payment_attempts_merchant_keyset_cov_idx` exists even though the application does not yet use keyset pagination.
+   - `payment_attempts_merchant_keyset_cov_idx` backs keyset pagination of the merchant payment list (cursor predicate on `(created_at, id)`).
 4. Trigram GIN indexes for search candidates on merchants, attempts, join requests, users, gateway inquiries, approvals, KYB documents, disputes, adjustments, reconciliations, AML cases/screenings/rules, regulatory reports, gateways, rails and `audit_log`.
 
 ### 3.5 Constraints and triggers
@@ -3165,7 +3224,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 - UUIDv7 is the preferred identifier for new domain rows. Do not use random UUIDv4 for high-volume insert paths without a measured reason.
 - Seeders must be safe to rerun. Baseline seeders use existence checks; the synthetic seeder uses a completed-run marker and `skipDuplicates`.
 - The Fake Rails bridge requires `FAKE_RAILS_SEEDER_TOKEN`; it must not silently fall back to an empty secret.
-- `rm_*` tables are derived data, not the source of truth. A rebuild must be possible from the outbox/ledger.
+- `rm_*` tables are derived data, not the source of truth. A rebuild must be possible from the outbox/ledger. `rebuildAttemptReadModels(db, { fromDay, toDay })` (`outboxWorkers.ts`) recomputes both attempt read models from `payment_attempts`; run it after bulk loads that bypass the outbox (the synthetic seeder). Since 2026-11-04 `rm_route_daily_volumes.volume_amount` is the SUCCEEDED volume (the daily route-cap semantics) and `rm_merchant_daily_stats` carries separate `success_amount` / `success_net_amount` columns next to the creation-time `gross_amount` / `net_amount`.
 
 ## 5. Data / API / config / deployment surface
 
@@ -3724,7 +3783,7 @@ The core test is a unit/authority suite and does not require PostgreSQL. The Pla
 
 ## Backup Control
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-04
 
 ## 1. Purpose and scope
 
@@ -4017,7 +4076,7 @@ The scratch clusters use `--auth=trust` and listen only on loopback. The drill d
 - For a policy change, submit without an approval id, then have a different `security:write` user submit with the returned id.
 - Watch `archiveLagSeconds` against `BACKUP_ALERT_LAG_SECONDS`. A non-zero lag with a healthy bucket usually means archive_command, credentials or the archive process is failing.
 - Inspect `backup_catalog_runs` and `backup_restore_drills` for the local copy and the daemon catalog for the in-process view. A failed drill's three checks identify double-entry, parity or audit-chain failure.
-- After a real restore, verify schema version 8, the ledger invariant, shard parity and audit chain.
+- After a real restore, verify schema version 9, the ledger invariant, shard parity and audit chain.
 - Do not rely on policy `fullRetentionDays` for WAL-G pruning; WAL-G uses `BACKUP_RETENTION_FULL_COUNT` and Barman uses its server-side policy.
 
 ## 7. Status and deviations
@@ -4146,7 +4205,7 @@ Core backup-admin route tests that touch PostgreSQL skip when the database is un
 
 ## Synthetic Seeder
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-04
 
 ## 1. Purpose and scope
 
@@ -4157,8 +4216,8 @@ It owns:
 - the five-layer safety gate;
 - the scale profiles and environment parsing;
 - the chronological simulation clock and Libyan market seasonality;
-- the nine domain generators;
-- the in-memory 55-collection dataset;
+- the nine domain generators plus route health and checkpoints;
+- the in-memory 56-collection dataset;
 - the topological, chunked bulk writer;
 - Fake Rails transaction/event synchronization;
 - KYB document enrichment through the Vault;
@@ -4180,14 +4239,12 @@ The historical seeder specification describes:
 - encrypted KYB document payloads, not fake plaintext;
 - a post-seed audit that proves zero ledger drift and balanced entries.
 
-The actual implementation keeps the two-phase design, the safety gate and the audit, but its coverage is narrower than the specification:
+The implementation keeps the two-phase design, the safety gate and the audit. The 2026-11-04 rework (section 3.13) made the data faithful to real operation; what still differs from the specification:
 
-- it writes 49 model collections out of 55 in-memory collections;
-- seven profile volume fields are not used, so join requests, KYB documents, owners, users, wallets, applications and AML cases are derived rather than controlled;
-- several ciphertext fields are plain base64 rather than Vault ciphertext;
-- the seeded staff authority map does not match the auth parser;
-- the deployed years-span key does not match the key the seeder reads;
-- the safety gate checks the declared test flag and Fake Rails hosts but not the database host.
+- it writes 50 model collections out of 56 in-memory collections (the six baseline reference collections are read-only);
+- the safety gate checks the declared test flag and Fake Rails hosts but not the database host;
+- the bulk writer is not transactional;
+- the generated volumes of AML cases and reconciliation items are derived bounds, not exact counts (section 3.2).
 
 ## 3. As-built architecture
 
@@ -4218,21 +4275,15 @@ The gate does not inspect `DATABASE_URL`, the host name of the core database, or
 | STANDARD | 250 | 65,000 | 120,000 | 95,000 | 2,900 | 3.5 |
 | STRESS | 1,200 | 280,000 | 500,000 | 400,000 | 11,500 | 4.0 |
 
-The seven volume fields not referenced by any generator are `joinRequests`, `kybDocuments`, `beneficialOwners`, `users`, `wallets`, `applications` and `amlCases`. Their collections are produced as a function of merchants: join requests per merchant lifecycle, one or more wallets and GL accounts per merchant, 1–3 applications, 1–4 users per merchant, KYB documents per business category, owners per ownership threshold, and AML cases from a sample of non-clear screenings.
+Since 2026-11-04 every volume drives generation. `joinRequests`, `wallets`, `applications`, `beneficialOwners` and `users` are allocated across merchants with `allocateVolume` (per-merchant bounds 1-3, 1-3, 1-5, 1-6 and 1-8; `users` counts staff plus merchant users), `kybDocuments` is allocated above the per-category required-document count, `paymentLinks`/`paymentAttempts` are exact up to the attempts a link window can host, `reconciliationRuns` is split across statement sources, and `disputes`, `adjustments`, `cashouts`, `amlScreenings`, `operatorCases` and `approvalRequests` act as targets. When a volume is outside the feasible per-merchant bounds the nearest feasible count is generated and the invariant `volume.mismatch` is only enforced for feasible volumes. `amlCases` is a floor (rule-driven holds can add more) and `reconciliationItems` is an upper bound.
 
-`yearsSpan` is used by the timeline. `SYNTHETIC_YEARS_SPAN` is parsed as a positive number and overrides the profile value.
+`yearsSpan` is used by the timeline. `SYNTHETIC_SEED_YEARS_SPAN` (written by the deploy planner), `SYNTHETIC_YEARS_SPAN` and `SYNTHETIC_DATA_YEARS` are accepted in that order; the value must be a number in (0, 10].
 
 ### 3.3 Context and ID factory
 
 `createContext` loads existing references (`gateways`, versions, rails, routes, credentials, GL accounts, admin users, statement sources), builds a seeded PRNG from `seedKey`, builds the timeline, creates an empty dataset, and creates `nextId`.
 
-`nextId` ignores its `entity` argument and returns:
-
-```text
-00000000-0000-7000-8000-<counter hex padded to 12>
-```
-
-This is a UUIDv7-shaped, visually distinct synthetic id. It is stable within a run. Because the counter resets for every run and the namespace is not included, two different seed keys generate the same ids; `skipDuplicates` then drops the second dataset instead of creating a parallel history.
+`nextId` returns `<8 hex>-<4 hex>-7<3 hex>-8<3 hex>-<12 hex counter>` where the first 64 bits come from `sha256(namespace, seedKey)`. Two different seed keys or namespaces therefore never collide (the old factory ignored both and `skipDuplicates` silently dropped the second history), while a run stays deterministic. Rows keep unique keys that matter for re-runs (`seed_key` of GL accounts and commission profiles, e-mails, references) namespaced by seed key as well.
 
 ### 3.4 Timeline
 
@@ -4244,25 +4295,25 @@ This is a UUIDv7-shaped, visually distinct synthetic id. It is stable within a r
 - `businessHour` returns a Tripoli-style hour distribution;
 - `dateAt` writes the chosen hour with `setUTCHours`.
 
-There is no +2 offset or timezone database conversion. The simulated "Tripoli hour" is stored as a UTC hour. This is a modeling simplification, not a production behavior.
+Local hours are `Africa/Tripoli` wall-clock hours (UTC+2, no DST) and are stored as `hour - 2` UTC (`tripoliDateTime`, `tripoliHour`, `tripoliDay`); the start of the timeline is 08:00 Tripoli. `dayVolumeMultiplier` additionally models the Eid holiday trough (0.55), Ramadan (1.8), the ten days before Eid al-Adha (1.5), Friday 0.72, Saturday 1.05 and the salary window 1.35 on the Tripoli calendar day, with Ramadan/Eid tables for 2021-2028. `businessHour` takes the day: Ramadan traffic moves to the hours after iftar and Friday skips the 11:30-14:30 prayer window.
 
 ### 3.5 The nine generators
 
 | Generator | Main outputs |
 | :--- | :--- |
-| `01_adminAndStaffGenerator` | 12 platform users across `GATEWAY_ADMIN`, `SECURITY_ADMIN`, `FINANCE`, `OPERATOR`, `COMPLIANCE`, `MLRO`, `SUPPORT`; maker/checker flags; user identities; 10 notification templates; velocity, AML and reporting rules |
-| `02_merchantCohortGenerator` | Merchant lifecycle states; wallets and GL accounts; 1–3 applications; merchant users; join requests and status transitions; KYB documents; beneficial owners; duplicate-document showcase |
-| `03_gatewayLifecycleGenerator` | Version history (`SUPERSEDED`, `LIVE`, and up to two `PENDING_APPROVAL`); environments; auth rows; settings; confirmation channels; go-live evidence; statement sources; 30 days of hourly route health samples |
-| `04_linksAndAttemptsGenerator` | Payment links across states; attempt groups; attempts across all 14 statuses; masked customer fields; step logs; inbound events; OTP/failure/conflict/late-success/manual-review substatuses |
-| `05_ledgerAndCheckpoints` | Balanced journal entries for succeeded/refunded/partially refunded/disputed attempts; refund, partial-refund and chargeback entries; monthly GL checkpoints except the current month |
-| `06_reconAndStatements` | Reconciliation runs across the span; statement items with matched and exception results; stats JSON; exception budget derived from operator-case volume |
-| `07_disputesCashoutsAdjustments` | Disputes across seven statuses; chargeback/refund adjustments; cash-out requests; negative-balance wallets after post-cashout chargebacks |
-| `08_amlAndGovernanceQueues` | Screenings and matches across the seven-layer history; AML cases; regulatory reports; approvals; notifications; audit logs; detail change logs |
-| `09_operatorCasesGenerator` | Operator cases for UNKNOWN, HELD, CONFLICT, MISMATCH, LATE_SUCCESS, MANUAL_REVIEW and UNMATCHED_STATEMENT; SLA/priority; evidence links; maker-checker resolutions |
+| `01_adminAndStaffGenerator` | 13 platform staff seats and the disabled system drafter; flat authority lists and maker/checker flags from `scripts/createAdminPlan.ts`; velocity rules with operational thresholds; AML rules whose `params` keys are the ones `AmlRuleEngine` reads. Notification templates, CBL reporting rules and the environment setting belong to the baseline seed and are no longer duplicated. |
+| `02_merchantCohortGenerator` | Merchants with a consistent lifecycle (request -> submission -> review -> proposal -> decision -> activation -> suspension/closure), category-driven profiles, unique phones, IBAN-shaped payout accounts; earlier REJECTED/EXPIRED/WITHDRAWN join requests linked by `resubmission_of_id`; KYB document chains (superseded copies, expiry, 30-day notice, duplicate-hash showcase); beneficial owners summing to 100 %; wallets + GL accounts; applications; users and identities; tokens; POS terminals only for counter categories; merchant-owned credentials; negotiated commission profiles (fractional rates) and the historical platform default. National ids are queued for Vault encryption. |
+| `03_gatewayLifecycleGenerator` | Later versions next to the baseline LIVE version (ROLLED_BACK -> baseline, SANDBOX_VERIFIED/DRAFT, PENDING_APPROVAL for two gateways) with environments, auth, settings and evidence; webhook channels only for baseline versions without one; statement sources; route health DERIVED from the generated attempts (last 30 days). |
+| `04_linksAndAttemptsGenerator` | Heavy-tailed merchant volumes, category ticket bands, rail popularity, per-rail decline/abandon pressure; links with fee bearer, reuse and expiry; attempts built from engine-valid status paths with monotonic timestamps; pricing mirrored from the checkout (`money.ts`); step logs, inbound webhooks, attempt groups; live tail of in-flight/UNKNOWN/held attempts near `T_NOW`; late successes and SUSPENSE settlements. |
+| `05_ledgerAndCheckpoints` | Confirmation, AML hold/release/void and SUSPENSE postings through the engine templates; AML hold cases; shard balances and one checkpoint instant for all accounts, computed after every posting (`generateCheckpoints`). |
+| `06_reconAndStatements` | Per-source windows fed by the settled attempts (each once); MATCHED lines carry the settled amount and fee; exceptions (mismatch, missing at gateway, missing locally, duplicate) within the operator-case budget; `SETTLEMENT_SWEEP` for platform-cleared matched lines. |
+| `07_disputesCashoutsAdjustments` | Executed REFUND adjustments with `FULL_REFUND`/`INTERNAL_REFUND` journals and the REFUNDED/PARTIALLY_REFUNDED step; disputes with the reserve journal, drafted CHARGEBACK adjustments and WON/LOST outcomes; cash-outs and manual debits sized so wallets never go negative; manual credits and corrections; open refund requests. |
+| `08_amlAndGovernanceQueues` | Onboarding/owner/periodic screenings with matches, screening AML cases, STR reports, approvals bound to real subjects (join requests, adjustments, AML cases, gateway versions, merchants, commission profiles) with maker != checker and role flags, notifications from the baseline catalogue, audit rows derived from real events, detail change logs. |
+| `09_operatorCasesGenerator` | Operator cases from reconciliation exceptions, UNKNOWN/CONFLICT attempts, held/escalated payments, late successes and SUSPENSE settlements; only an UNKNOWN attempt can carry a proposed MARK_* action (following the emulator truth); maker-checker resolutions. |
 
-### 3.6 The 55 in-memory collections
+### 3.6 The 56 in-memory collections
 
-`core-back/prisma/syntheticSeeder/dataset.ts` defines 55 arrays:
+`core-back/prisma/syntheticSeeder/dataset.ts` defines 56 arrays (the 2026-11-02 list below plus `glAccountShards` and `notificationTemplates`):
 
 - Identity and onboarding: `users`, `userIdentities`, `merchants`, `joinRequests`, `kybDocuments`, `beneficialOwners`, `wallets`, `glAccounts`, `applications`, `accessTokens`, `accessTokenIps`, `posTerminals`, `posScreens`, `commissionProfiles`.
 - Catalogue and credentials: `credentialSets`, `gatewayVersions`, `gatewayVersionEvidence`, `gatewayEnvironments`, `gatewayAuths`, `gatewaySettings`, `confirmationChannels`, `statementSources`.
@@ -4273,7 +4324,7 @@ There is no +2 offset or timezone database conversion. The simulated "Tripoli ho
 
 ### 3.7 Bulk writer
 
-`core-back/prisma/syntheticSeeder/sync/bulkDataWriter.ts` writes **49 models** in topological FK order:
+`core-back/prisma/syntheticSeeder/sync/bulkDataWriter.ts` writes **50 models** in topological FK order (`encryptPendingSecrets` runs first and fills every Vault-encrypted column; `writeReadModels` projects `rm_*` afterwards):
 
 - merchants before users, because users carry `merchant_id`;
 - GL accounts before wallets;
@@ -4284,7 +4335,7 @@ There is no +2 offset or timezone database conversion. The simulated "Tripoli ho
 
 Each model is written in 2,500-row `createMany` chunks with `skipDuplicates: true`. The writer skips any empty collection. The six in-memory collections not written are `rails`, `railFields`, `railRoutes`, `widgets`, `redirects` and `pollPolicies`; these are expected to exist from the baseline blueprint seed and are only used as read-only references.
 
-The writer is not a transaction. A failure partway through leaves the previous chunks committed; re-running with the same seed key is not automatic because the completed-run marker is written only at the end. A failed run can be retried, but duplicate ids are skipped and a partial dataset may remain.
+The `WRITE_ORDER` is exported and tested (parents before children; approvals right after users; disputes before adjustments; items before cases; no strip-and-relink). The writer is not a transaction. A failure partway through leaves the previous chunks committed; re-running with the same seed key is not automatic because the completed-run marker is written only at the end. A failed run can be retried, but duplicate ids are skipped and a partial dataset may remain.
 
 ### 3.8 Fake Rails synchronization
 
@@ -4292,7 +4343,7 @@ The writer is not a transaction. A failure partway through leaves the previous c
 
 - `POST /portal-api/internal/bulk-seed` with `x-fake-rails-seeder-token`;
 - transactions first, then events;
-- status mapping from core statuses to Fake Rails statuses (`SUCCEEDED` → `PAID`, in-flight → `INITIATED`/`AWAITING_ACTION`, `UNKNOWN` → `UNKNOWN_SIMULATED`);
+- status mapping from core statuses to Fake Rails statuses (`SUCCEEDED`/`PARTIALLY_REFUNDED`/`DISPUTED` -> `PAID`, `REFUNDED` -> `REFUNDED`, in-flight and `UNKNOWN` -> `INITIATED`/`AWAITING_ACTION`); BLOCKED and never-dispatched attempts are not synced; an `UNKNOWN` attempt gets `inquiry_override_status` = the recorded gateway truth (`PAID` or `FAILED`), so "Inquire now" resolves it;
 - provider references, OTP code selection, amounts, timestamps and gateway/rail codes.
 
 Fake Rails stores the history so "Inquire now" on a seeded UNKNOWN attempt, refunds on seeded successes and statement reconciliation return coherent answers. The sync does not create refunds, disputes or cash-out records in Fake Rails; those remain core-side histories.
@@ -4323,15 +4374,19 @@ Unlike the base generators, this enrichment uses the real Vault.
 
 ### 3.11 Post-seed audit
 
-`verify/postSeedAudit.ts` runs an in-memory audit before writing and again after:
+`verify/invariants.ts#checkInvariants` runs on the in-memory graph before the write (a violation aborts) and `postSeedAudit` repeats it, then compares the database with the dataset. Exact money (BigInt scaled by 10^4) is used throughout. It asserts, per rule name:
 
-- computes debit and credit totals and per-entry balance;
-- counts succeeded attempts without a ledger entry;
-- verifies `active_locked_count` matches in-flight attempts per link;
-- audits operator cases for missing/wrong evidence, maker-checker violations, invalid resolution actions, duplicate open cases, timestamp violations, item backlinks, missing cases for non-MATCHED items and inbound-event integrity;
-- returns `ok`, drift, unbalanced entries, counts by collection and an operator-case summary.
+- **relations**: every foreign key (`FK_EDGES`, 78 edges incl. baseline references) points at an existing row; wallet GL account is the merchant's `MERCHANT_WALLET`; link wallet/application/merchant coherence; unique ids, e-mails, references, idempotency keys, journal `(ref_type, ref_id)`, dispute `(gateway, ref)`;
+- **ledger**: every entry balanced, every line > 0 and a 4-decimal string, system drift exactly 0, lines dated like their entry, nothing in the future; checkpoint + lines after the checkpoint = plain sum for every account; shard sums = line sums;
+- **settlement math**: wallet credit = `net_merchant_amount`, income credit = commission, fee accrual = gateway fee (accrual routes), MERCHANT_DIRECT never credits a wallet, the credited wallet is the link's wallet;
+- **lifecycle**: each attempt's path is made of engine transitions (`lifecycle.ts`, compared with `ALLOWED_TRANSITIONS` by a test), starts at CREATED/BLOCKED, ends at its status, timestamps monotonic and <= `T_NOW`, `terminal_at` iff terminal, in-flight attempts still inside their TTL, amounts consistent with the fee-bearer breakdown, settled amount only on settled statuses, ledger entry only on settled attempts and unique;
+- **links**: `confirmed_count`/`active_locked_count` equal the attempts, no slot overflow, COMPLETED exactly when full, no stale PENDING, attempt-group success counts;
+- **governance**: maker != checker, maker `is_maker`, checker `is_checker`, decided approvals have a checker, pending ones none; adjustments executed iff journaled, refunds <= charge, REFUNDED iff refunds sum to the charge, dispute <-> adjustment bidirectional and consistent with the status, cash-outs linked, wallets never below `-negative_balance_ceiling` at any instant, reconciliation stats and windows;
+- **time**: no `created_at` after `T_NOW`, `updated_at >= created_at` everywhere;
+- **volumes**: merchants, join requests, wallets, applications, owners, users equal the profile when feasible; business-hour share, negative wallets and volume ratios are reported as metrics;
+- **operator cases**: the pre-existing case audit (evidence, backlinks, maker-checker, SLA timestamps, duplicates).
 
-The post-seed version adds database counts for attempts, journal entries and links. It does not assert that the database counts equal the in-memory dataset counts; it only reports both.
+After the write, `postSeedAudit` asserts that the database row counts of attempts, journal entries, journal lines, links, merchants, adjustments and disputes equal the dataset (a skipped duplicate is now a failure) and that the SQL ledger drift and unbalanced-entry count are zero.
 
 ### 3.12 Execution flow
 
@@ -4342,28 +4397,53 @@ The post-seed version adds database counts for attempts, journal entries and lin
 3. skip when the seed key is already complete;
 4. run the safety gate and print Fake Rails health;
 5. load references and reject empty gateways/rails;
-6. run the nine generators in order;
-7. run the in-memory audit and fail on any violation;
-8. bulk-write 49 models;
-9. enrich KYB documents;
+6. run the generators in order (route health, then ledger, reconciliation, refunds/disputes/cash-outs, governance, operator cases, and the checkpoints last);
+7. run the in-memory audit (ledger + the full invariant suite) and fail on any violation;
+8. encrypt every pending sensitive column with the Vault, then bulk-write 50 models;
+9. project the `rm_*` read models and enrich KYB documents;
 10. sync transactions/events to Fake Rails;
-11. run the post-seed audit and fail on any violation;
+11. run the post-seed audit (invariants + database/dataset equality + SQL drift) and fail on any violation;
 12. record the completed run.
 
 The console summary reports profile, span, phase timings, rows written, KYB enrichment counts, Fake Rails sync counts and final attempts/journal lines/drift.
+
+### 3.13 2026-11-04 realism rework
+
+The data was re-derived from the real engine rules instead of random rows. Defects fixed:
+
+| Area | Defect | Fix |
+| :--- | :--- | :--- |
+| Ledger | Hand-written account choice, float sums, per-gateway/env clearing accounts the baseline never creates; settlement-sweep and refund legs invented | `postTemplate` posts the engine's `buildPaymentConfirmationTemplate`/`buildLedgerTemplate` output, validated by `LedgerPoster.validateTemplate`, with accounts resolved like `LedgerPoster.resolveAccountId` (platform fallback); decimal.js/BigInt only |
+| Checkpoints | Taken before refunds/cash-outs were posted, so lines dated before the checkpoint were missed | `generateCheckpoints` runs last; one instant for all accounts |
+| Fees | Random 0.2-0.9 % gateway fee and 0.5-2.5 % commission; surcharge ignored | Commission profile hierarchy, fee-bearer breakdown, route cost model and wire rounding mirrored from the checkout (`money.ts`) |
+| Lifecycle | Terminal times random 1-120 min after creation, in-flight attempts years old, `EXPIRED + LATE_SUCCESS_PENDING` and `VERIFYING + AML_HOLD` statuses the engine never produces, no refund/dispute sequencing | Engine-valid paths with one timestamp per step; late successes end SUCCEEDED (or SUSPENSE); held payments are `CREATED + AML_HOLD` with a hold entry and case; live tail only near `T_NOW`; refunds/disputes append their status step |
+| Links | Counters patched after the fact; random link for each attempt | Counters follow the attempts; sequential retries respect the slot rule |
+| Relations | Adjustments/disputes/AML cases not tied to approvals, journal entries or holds; approvals pointed at random subjects with invalid state; join-request approval FK order | Every adjustment/AML case/report/version/profile has the approval the real flow would create (maker != checker, role flags); writer order fixed |
+| Governance | Staff `authoritiesMap` nested object (zero authorities); `SUPPORT`/`MLRO` flags wrong; maker/checker ignored role flags | Flat authority lists and flags from `createAdminPlan.ts` |
+| Merchants | Single join request, uniform random statuses/dates, suspension dates unrelated to activation, owners not summing to 100 %, KYB documents unrelated to required types, duplicate phones, 0.5-3.5 commission rates (50-350 %), base64 "ciphertext" | Lifecycle-ordered timestamps, resubmission chains, required-document chains, 100 % ownership, unique phones, fractional rates, Vault encryption |
+| Catalogue | 15 Arabic vs 14 English surnames (misaligned, one `undefined`), uniform categories | Aligned lists; categories with ticket bands, weights and counter flags |
+| Time | Tripoli hour written as UTC, Eid treated as a peak, uniform hour for reusable links | UTC+2 conversion, Eid trough, Ramadan evening shift, Friday prayer dip |
+| Config | `SYNTHETIC_SEED_YEARS_SPAN` ignored; ids ignored namespace and seed key | Both fixed |
+| Volumes | Seven profile fields unused | All drive generation (section 3.2) |
+| Verify | Audit checked drift, succeeded-without-ledger, slot counts and operator cases only; DB counts reported not asserted | Section 3.11 |
+| Fake Rails | BLOCKED attempts synced; UNKNOWN mapped to `UNKNOWN_SIMULATED` with no truth; OTP selection from the decimal tail of a hex id | Skip never-dispatched attempts, truth in `inquiry_override_status`, hex-aware OTP |
+| Read models | `rm_*` empty after a seed | `writeReadModels` projects them like `projectAttemptTransition` |
+
+`fake-rails-back/api/portal/seederSync.ts` and `core-back/prisma/seedFakeRails.ts` were reviewed and needed no change.
 
 ## 4. Contracts and invariants
 
 - The seeder must never run unless `IS_TEST_SERVER=true`, Fake Rails is enabled with a public URL, the production guard is satisfied when applicable, every gateway host is allowed and the live handshake succeeds.
 - The seeder requires the baseline seed (gateways, rails, routes, credential sets, GL accounts, statement sources) and Fake Rails blueprints. Empty gateways or rails abort.
 - The dataset must be deterministic for a given `seedKey`, profile and current time. The PRNG and the chronological clock are seeded from the key.
-- The generated ledger must satisfy `SUM(DEBIT) = SUM(CREDIT)` per entry and system-wide within 0.00005 LYD.
+- The generated ledger must satisfy `SUM(DEBIT) = SUM(CREDIT)` per entry and system-wide, exactly (no tolerance).
 - Every SUCCEEDED attempt must have a journal entry; attempts in flight must match each link's `active_locked_count`.
 - Every non-MATCHED reconciliation item must have a candidate operator case; the operator-case generator uses the same exception budget.
-- Maker-checker seeded approvals must have `makerUserId <> checkerUserId`; resolved cases must have notes and an executed approval.
+- Maker-checker seeded approvals must have `makerUserId <> checkerUserId`, an `is_maker` maker and an `is_checker` checker; resolved cases must have notes and an executed approval.
+- The full invariant list of section 3.11 holds before any row is written and again after the write.
 - All linked evidence (attempt, reconciliation item, confirmation channel, inbound event) must exist and be consistent.
 - The completed-run marker is written only after the post-seed audit passes.
-- Re-running the same seed key is a no-op. A new seed key must not assume a clean database; `skipDuplicates` can mask id collisions.
+- Re-running the same seed key is a no-op. Ids and unique keys are namespaced by seed key, so a different key adds a parallel history (the post-seed audit compares the database with the dataset, so a collision fails loudly).
 
 ## 5. Data / API / config / deployment surface
 
@@ -4421,7 +4501,7 @@ Both require the seeder token and are implemented in `fake-rails-back/api/portal
 - Five-layer safety gate with live Fake Rails handshake.
 - Three profiles, a deterministic PRNG and a multi-year timeline.
 - Nine generators covering merchant/onboarding, gateway lifecycle, links/attempts, ledger/checkpoints, reconciliation, disputes/cash-outs/adjustments, AML/governance, operator cases and admin/staff.
-- 55 in-memory collections and a 49-model topological bulk writer with 2,500-row chunks.
+- 56 in-memory collections and a 50-model topological bulk writer with 2,500-row chunks.
 - Fake Rails transaction/event synchronization in 5,000-row batches.
 - Vault-backed KYB document enrichment.
 - Completed-run registry in `platform_settings`.
@@ -4430,46 +4510,26 @@ Both require the seeder token and are implemented in `fake-rails-back/api/portal
 
 ### Partial
 
-- Volume control: seven `ProfileVolumes` fields are unused; the counts of join requests, KYB documents, owners, users, wallets, applications and AML cases are derived from merchant volume and randomness.
-- Collection coverage: 49 of 55 collections are written; the six reference collections are assumed to come from the baseline.
-- Template coverage: 10 notification templates are seeded, and generated notifications use only `PAYMENT_SUCCEEDED`, `PAYMENT_FAILED`, `KYB_DOC_EXPIRING` and `CASHOUT_COMPLETE`. There is no complete bilingual catalogue for every event.
-- Ciphertext realism: KYB content uses the Vault; merchant national ids, attempt context, AML report payloads and notification addresses use plain base64.
-- Authority realism: seeded staff have a nested authority map that the auth parser does not understand.
-- Temporal realism: the Tripoli hour distribution is written as UTC without an offset.
+- Collection coverage: 50 of 56 collections are written; the six reference collections come from the baseline.
+- Notifications use the baseline catalogue codes `PAYMENT_SUCCEEDED`, `PAYMENT_FAILED`, `DISPUTE_OPENED`, `CASHOUT_REQUESTED` and `APPROVAL_REQUIRED` only where a template for the channel/language exists; the seeder creates no templates.
 - Safety: the gate checks the declared test flag and gateway hosts, not the database host or existing data.
-
-### Missing / deferred
-
-- A generator that uses `joinRequests`, `kybDocuments`, `beneficialOwners`, `users`, `wallets`, `applications` and `amlCases` volumes directly.
-- Writing for the six reference collections.
-- A full notification template catalogue with both languages for every code.
-- Vault encryption for the remaining synthetic ciphertext fields.
-- A flat or boolean authority map compatible with `parseAuthorities`.
-- Correct deploy propagation of the years-span key.
-- Database-host and data-presence checks in the safety gate.
-- Namespace-aware id generation.
-- An exact database-versus-dataset count assertion in the post-seed audit.
-- A transactional or resumable bulk writer.
+- Baseline versions are not backdated (attempts predate the version row's `created_at`).
+- Several model families are not generated (see the `gaps` list).
 
 ### Known bugs / risks
 
-- `nextId` ignores its entity argument and namespace. Two seed keys produce the same ids; `skipDuplicates` silently keeps the first history and drops the second. Code gap.
-- `hostPlanner` writes `SYNTHETIC_SEED_YEARS_SPAN` while the seeder reads `SYNTHETIC_YEARS_SPAN`, so deployed years span is ignored. Code gap.
-- The seeded `authoritiesMap` is `{ gateway: ["read", ...] }`; `parseAuthorities` accepts arrays or flat boolean maps, so seeded platform users resolve to no authorities. They can authenticate but fail authority checks. Code gap.
-- `nationalIdCiphertext`, `contextCiphertext`, `payloadCiphertext`, `addressCiphertext` and similar fields are base64, not encrypted. Any code that tries to decrypt them with the Vault will fail or produce garbage. Code gap.
-- The bulk writer is not transactional. An interrupted run leaves partial rows and the next retry skips duplicates rather than repairing missing links. Operational risk.
-- The completion marker is per key only. A new key over a dirty database can duplicate semantic histories while id collisions drop rows. Operational risk.
+- The bulk writer is not transactional. An interrupted run leaves partial rows; the retry skips duplicates and the post-seed audit (database/dataset equality) fails instead of passing silently. Operational risk.
 - The seeder does not clear previously seeded rows. A rebuild requires a database reset.
-- The safety gate assumes all gateway environments point at Fake Rails. A stray live gateway host blocks the seed, which is safe but can be confusing after a partial blueprint seed. Operational risk.
-- `FAKE_RAILS_SEEDER_TOKEN` may be empty in the handshake if the environment is misconfigured; the Fake Rails side decides whether to reject. Code/configuration risk.
-- The timeline's adoption/seasonality is applied to link/attempt generation but not to every collection, so some histories are not volume-curved. Modeling limitation.
-- The post-seed audit reports database counts but does not fail on a dataset/database mismatch, so a partially skipped bulk write can pass the audit. Code gap.
+- The DB-backed path (writer, Vault enrichment, SQL audit, read-model SQL) has not run in this environment: no PostgreSQL/Redis exist here, DB suites skip. Verification risk.
+- Engine observations found while mirroring its rules (the seeder works around them; not changed because they are outside the seeder): (1) `INTERNAL_CONFIRMATION` books the requested amount only, so an INTERNAL rail with a payer surcharge cannot balance - the seeder keeps INTERNAL/MERCHANT_DIRECT rails on MERCHANT_ABSORBS; (2) `AML_HOLD_AND_RELEASE` (release) books no gateway fee accrual, so a released hold leaves the fee unaccrued; (3) `LedgerPoster` resolves the merchant wallet by `ownerId` only, i.e. the merchant's first wallet, not the link's wallet (the seeder maps the link's wallet explicitly); (4) `SYSTEM_AUTOMATION_USER_ID = "SYSTEM_AUTOMATION"` is not a UUID but is written to `users.id` (a `uuid` column); (5) the refund commission split is not rounded to 4 decimals, so the journal amounts can be re-rounded on write; (6) the guard writes BLOCKED attempts with `MERCHANT_ABSORBS` but the real bearer's amounts; (7) `postSettlementSweeps` dedupes by `batchReference`, so a batch reference shared by many items sweeps only the first.
+- `SYNTHETIC_SEED_YEARS_SPAN` is now accepted; the deploy planner needs no change.
 
 ## 8. Verification and tests
 
 Relevant test files:
 
-- `core-back/test/synthetic-seeder.test.ts` — safety gate, config, generators and audit behavior.
+- `core-back/test/synthetic-seeder-realism.test.ts` — DB-free end-to-end proof (35 tests): every generator runs against a baseline lookalike (`test/helpers/seederFixture.ts`) and the full invariant suite must report nothing for several seeds; volumes, determinism, id isolation, Tripoli time/seasonality, engine mirrors (transition table parsed from `DynamicRailEngine.ts`, pricing, ledger math), tamper tests proving the audit catches each defect class, Vault encryption, writer order, Fake Rails sync payload, read models.
+- `core-back/test/synthetic-seeder.test.ts` — safety gate, config and audit behavior on sparse rows.
 - `core-back/test/exhaustive/10-seeder-and-deploy/synthetic-seeder-safety-and-audit.test.ts` — exhaustive safety/audit suite.
 - `fake-rails-back/test/api.test.ts` — seeder handshake and bulk-seed endpoints.
 - `fake-rails-back/test/exhaustive/05-api-matrix/fake-rails-portal-and-chaos-api.test.ts` — broader Fake Rails API matrix.
@@ -4477,13 +4537,13 @@ Relevant test files:
 Commands:
 
 ```bash
-cd core-back && bun test test/synthetic-seeder.test.ts
+cd core-back && bun test test/synthetic-seeder-realism.test.ts test/synthetic-seeder.test.ts
 cd core-back && bun test test/exhaustive/10-seeder-and-deploy
 cd fake-rails-back && bun test
 cd core-back && bun run seed-synthetic-history
 ```
 
-The unit tests do not require a live database or Fake Rails; they use fakes for most behavior. The actual `seed-synthetic-history` command requires PostgreSQL 18, the baseline seed, Fake Rails and all safety variables. The deploy-time run is not part of the default test gate. No seeder run was performed for this documentation change.
+The unit tests do not require a live database or Fake Rails. The actual `seed-synthetic-history` command requires PostgreSQL 18, the baseline seed, Fake Rails and all safety variables; the deploy-time run is not part of the default test gate and was NOT executed in the 2026-11-04 rework (no PostgreSQL available): the COMPACT profile was generated in memory in about 1.4 s (14.9k attempts, 8.5k links, ~60k journal lines, zero invariant violations).
 
 ## 9. Source references
 
@@ -4537,6 +4597,7 @@ The unit tests do not require a live database or Fake Rails; they use fakes for 
 ## 10. Change history
 
 - 2026-11-03 — Initial canonical extraction. Records the safety gate, profiles, 9 generators, 55 collections, 49-model bulk writer, timeline, Fake Rails sync, KYB enrichment, run registry, post-seed audit, and the unused volumes, template coverage, base64 ciphertexts, authority shape and deploy env mismatch. See `project-design/TRACKER.md`.
+- 2026-11-04 — Realism rework: engine-template ledger, lifecycle-valid attempts, profile volumes drive generation, Tripoli time, Vault-encrypted columns, approvals bound to real subjects, namespaced ids, derived route health, read models, full invariant suite and DB/dataset equality in the audit, 35 new DB-free tests. See section 3.13 and `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md` (2026-11-04 corrections).
 
 ## Tests and Benchmarks
 
