@@ -18,7 +18,8 @@
         "format": "prettier --write src/",
         "test:unit": "bun test src/content/__tests__ && vitest run",
         "test:unit:watch": "bun test --watch src/content/__tests__",
-        "content:guide": "bun scripts/extract-guide-content.ts"
+        "content:guide": "bun scripts/extract-guide-content.ts",
+        "content:academy": "bun scripts/extract-academy-content.ts"
     },
     "dependencies": {
         "@mdi/font": "^7.4.47",

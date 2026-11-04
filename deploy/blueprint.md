@@ -1436,6 +1436,15 @@ No test performs a real multi-host deployment, migration, PM2 restart or Nginx r
 - The deploy no longer trips over a stale empty migration directory; only committed `migration.sql` files are applied.
 - A real single-machine run completed all 14 steps, including core/admin/merchant/checkout releases, Nginx, PM2, storage probes and final verification.
 
+## 13. Backup object store, ownership, orphaned apps (2026-11-04)
+
+Found by deploying the single-machine `deploy/deploy.env` repeatedly until it completed (14/14, Verification OK):
+
+- **Object store**: see `05-storage-provisioners.md` ("Object store provisioning"). The engine installs/starts MinIO when the S3 endpoint is the backup host. MinIO no longer publishes binaries (`dl.min.io` returns 410), so the install uses an existing binary, `BACKUP_MINIO_BINARY_URL`, or a Go source build (~6 min). The install script now fails loudly (an earlier version used `[ -x ] || { a && b; }` under `set -e`, which silently continued past a failed download and started a unit with no binary). Buckets are created with a SigV4-signed `curl`; `mc` is not needed.
+- **Database ownership**: `primaryBootstrapSql` ends with `ownershipReconcileSql`: `ALTER DATABASE ... OWNER TO <PG_DB_USER>` and `REASSIGN OWNED` for any non-superuser role owning `public` objects. A database created by an earlier deploy under another role (`core_user` vs `gw_core_user`) otherwise fails the pre-migration `pg_dump` with `permission denied for table _prisma_migrations`.
+- **Orphaned PM2 apps**: `retireOrphanedPm2Apps` runs before each service start and deletes same-tier PM2 apps (`<base>` or `<base>-*`) that are not in the plan. Leftover `pg-core-back-core-1/2` and `pg-checkout-back-chk-1/2` from an earlier two-instance topology kept ports 4000/4001 bound with stale credentials, so the new core died with `EADDRINUSE` while `/health` probes hit the stale process and reported `QUEUE_HEALTH_UNAVAILABLE`.
+- **Synthetic seed**: an already-seeded database under another seed key is skipped instead of failing (see `01-core-back/10-synthetic-seeder.md` §3.10); the deploy log reports it as skipped.
+
 ## Storage Provisioners
 
 > Status: `partial` · Last verified: 2026-11-04
@@ -1584,11 +1593,23 @@ The same archive configuration is applied to the audit database when `AUDIT_DB_M
 
 The provisioner also runs `verifyBackupTargetCommands()`:
 
-- `curl -fsS <BACKUP_PRIMARY_S3_ENDPOINT>/minio/health/live`;
+- managed MinIO: `curl -fsS <BACKUP_PRIMARY_S3_ENDPOINT>/minio/health/live`; external S3 (R2/AWS/another host): any HTTP response from the endpoint (those services have no MinIO route), with an actionable error otherwise;
 - an SSH `true` to the secondary target when configured;
 - a non-empty encryption key check.
 
 The MinIO health check verifies the local S3-compatible endpoint without requiring an rclone remote configuration.
+
+### Object store provisioning and engine auto-selection (2026-11-04)
+
+Before verification, `ensureObjectStore()` runs on the backup host:
+
+- `BACKUP_S3_MODE` = `auto` (default) | `managed-minio` | `external`. `auto` resolves to `managed-minio` when the endpoint host is loopback, the backup node private IP or its SSH host, otherwise `external` (`resolveBackupS3Mode`).
+- `external`: never touched, only verified.
+- `managed-minio`: a healthy endpoint is left running; otherwise the engine installs `minio` (MinIO no longer publishes binaries and `dl.min.io` answers 410, so: an existing `minio` on the host, else `BACKUP_MINIO_BINARY_URL` (http(s):// or file://), else a source build with Go, `go install github.com/minio/minio@BACKUP_MINIO_VERSION`, several minutes; with none of these it fails with an actionable message), creates the `minio-user` account and `BACKUP_MINIO_DATA_DIR`, writes `/etc/default/minio` (0640 root:minio-user; root user/password = `BACKUP_PRIMARY_S3_ACCESS_KEY`/`SECRET_KEY`) and a `minio.service` unit, starts it, waits for health and creates the bucket from `BACKUP_PRIMARY_S3_BUCKET` (SigV4-signed `curl -X PUT`, HTTP 200/409 accepted; no `mc` needed). Install steps fail loudly: an earlier version continued past a failed download and started a unit with no binary. Loopback endpoints bind 127.0.0.1 only; others bind 0.0.0.0. Console port: `BACKUP_MINIO_CONSOLE_PORT`.
+- Config validation (managed only): access key ≥3 chars, secret ≥8, bucket `s3://dns-bucket[/prefix]`, http endpoint requires `BACKUP_ALLOW_INSECURE_HTTP=true`, https endpoints are rejected (no TLS is provisioned; use `external`).
+- `BACKUP_ENGINE_MODE=auto` resolves at load time: `wal-g` when `BACKUP_NODE` shares the PG primary's private IP, `barman` when it is a different host. Explicit `wal-g`/`barman` unchanged.
+- `BACKUP_ENGINE_MODE=auto` and `BACKUP_S3_MODE` keys are validated at load; MinIO install order and failure behaviour are described above (and in `04-pipeline.md` §13).
+- The two-machine test matrix sets `BACKUP_S3_MODE=external` because it provisions its own object store.
 
 The systemd unit runs `bun run src/index.ts` as `pgbackup` with `EnvironmentFile=/etc/pg-backup/backup.env`, `ProtectSystem=strict`, `NoNewPrivileges=true`, and `ReadWritePaths` for the backup, log, catalog, cert, scratch and pgpass directories.
 
@@ -1616,7 +1637,7 @@ The systemd unit runs `bun run src/index.ts` as `pgbackup` with `EnvironmentFile
 | Redis | `REDIS_MANAGE_VIA_SSH`, `REDIS_NODES`, `REDIS_SSH_*`, `REDIS_PASSWORD`, `REDIS_MAXMEMORY`, `REDIS_URL` |
 | Audit | `AUDIT_DB_MANAGE_VIA_SSH`, `AUDIT_DB_NODE`, `AUDIT_DB_SSH_*`, `AUDIT_DB_NAME`, `AUDIT_DB_USER`, `AUDIT_DB_PASSWORD` |
 | Log | `LOG_DB_MANAGE_VIA_SSH`, `LOG_DB_NODE`, `LOG_DB_SSH_*`, `LOG_DB_NAME`, `LOG_DB_USER`, `LOG_DB_PASSWORD`, `LOG_RETENTION_MONTHS` |
-| Backup | `BACKUP_ENABLED`, `BACKUP_NODE`, `BACKUP_ENGINE_MODE`, `BACKUP_PRIMARY_S3_*`, `BACKUP_CORE_S3_PREFIX`, `BACKUP_AUDIT_S3_PREFIX`, `BACKUP_SECONDARY_SSH_TARGET`, `BACKUP_FULL_CRON`, `BACKUP_DELTA_CRON`, `BACKUP_DRILL_CRON`, retention/alert keys, `BACKUP_WALG_BIN`, `BACKUP_BARMAN_BIN`, `BACKUP_BARMAN_CLOUD_BIN` |
+| Backup | `BACKUP_ENABLED`, `BACKUP_NODE`, `BACKUP_ENGINE_MODE` (`wal-g`/`barman`/`auto`), `BACKUP_PRIMARY_S3_*`, `BACKUP_S3_MODE`, `BACKUP_MINIO_*`, `BACKUP_CORE_S3_PREFIX`, `BACKUP_AUDIT_S3_PREFIX`, `BACKUP_SECONDARY_SSH_TARGET`, `BACKUP_FULL_CRON`, `BACKUP_DELTA_CRON`, `BACKUP_DRILL_CRON`, retention/alert keys, `BACKUP_WALG_BIN`, `BACKUP_BARMAN_BIN`, `BACKUP_BARMAN_CLOUD_BIN` |
 
 ### Generated files
 
@@ -1765,6 +1786,7 @@ Not covered:
 
 - Journal partition cron uses the primary cluster port (`psql -p <port>`), not the default 5432.
 - Log partition cron uses the log cluster port (`psql -p <port>`), so a log cluster on 5435 is maintained instead of accidentally touching the main cluster.
+- Postgres bootstrap reconciles database/object ownership to `PG_DB_USER` (see `04-pipeline.md` §13).
 - Backup target verification checks the MinIO health endpoint instead of an unconfigured rclone remote.
 
 ## 13. PgBouncer config ownership fix (2026-11-04)

@@ -115,7 +115,7 @@ All routes are prefixed with `/api/v1/admin`. The auth routes are inside the LAN
 | :--- | :--- |
 | Auth | `POST /auth/login`, `GET /auth/me`, `POST /auth/mfa` |
 | Search | `POST /search` |
-| Academy | `GET, PUT /academy/progress`, `GET /academy/progress/overview`, plus summary/export variants |
+| Academy | `GET, PUT /academy/progress`, `GET /academy/exams/:examId/eligibility`, `POST /academy/exams/:examId/start`, `POST /academy/exams/:examId/submit`, `GET /academy/team` (`SECURITY_ADMIN`); 60 requests/minute per user |
 | Users | `GET, POST, PATCH /users`, `GET /users/:id`, `PATCH /users/:id`, `GET /users/export`, `GET /users/summary`, `GET /users/summary/export` |
 | Join requests | `GET /join-requests`, `GET /join-requests/:id`, `POST /join-requests/admin-assisted`, `PATCH /join-requests/:id/profile`, `POST /join-requests/:id/beneficial-owners`, `PATCH, DELETE /join-requests/:id/beneficial-owners/:ownerId`, `POST, DELETE /join-requests/:id/kyb-documents[/:docId]`, `POST /join-requests/:id/submit`, `POST /join-requests/:id/withdraw`, `PATCH /join-requests/:id/checklist`, `POST /join-requests/:id/screening/retry`, `POST /join-requests/:id/assign`, `POST /join-requests/:id/request-info`, `POST /join-requests/:id/decide` |
 | KYB documents | `GET /kyb-documents`, `GET /kyb-documents/:id`, `GET /kyb-documents/:id/content`, `POST /kyb-documents/:id/review`, `POST /kyb-documents/:id/request-replacement`, `POST /kyb-documents/:id/request-revalidation`, plus export/summary variants |
@@ -240,7 +240,7 @@ Key suites:
 - `admin-back/test/core-internal-client.test.ts`: pool, retry, headers and LSN.
 - `admin-back/test/mtls-client.test.ts`: channel confinement and error mapping.
 - `admin-back/test/backups.test.ts`: backup proxy schema and authority behavior.
-- `admin-back/test/academy-progress.test.ts`: academy route forwarding.
+- `admin-back/test/academy-progress.test.ts`: academy proxy validation, per-user rate limit and team-view role gate.
 - `admin-back/test/env-isolation.test.ts`: edge environment has no database/KMS secrets.
 
 The tests use a local HTTPS/HTTP stub and do not require PostgreSQL or Redis. A live mTLS check is part of `deploy/lib/healthVerifier.ts`.

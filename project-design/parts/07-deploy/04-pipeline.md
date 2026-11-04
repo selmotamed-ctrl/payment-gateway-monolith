@@ -353,3 +353,12 @@ No test performs a real multi-host deployment, migration, PM2 restart or Nginx r
 - Core migrations now run on the first core node in `auto`/`update` mode as well as `fresh` mode. Previously `RUN_PRISMA_SEED=true` could run the seed against a database whose migrations had never been applied.
 - The deploy no longer trips over a stale empty migration directory; only committed `migration.sql` files are applied.
 - A real single-machine run completed all 14 steps, including core/admin/merchant/checkout releases, Nginx, PM2, storage probes and final verification.
+
+## 13. Backup object store, ownership, orphaned apps (2026-11-04)
+
+Found by deploying the single-machine `deploy/deploy.env` repeatedly until it completed (14/14, Verification OK):
+
+- **Object store**: see `05-storage-provisioners.md` ("Object store provisioning"). The engine installs/starts MinIO when the S3 endpoint is the backup host. MinIO no longer publishes binaries (`dl.min.io` returns 410), so the install uses an existing binary, `BACKUP_MINIO_BINARY_URL`, or a Go source build (~6 min). The install script now fails loudly (an earlier version used `[ -x ] || { a && b; }` under `set -e`, which silently continued past a failed download and started a unit with no binary). Buckets are created with a SigV4-signed `curl`; `mc` is not needed.
+- **Database ownership**: `primaryBootstrapSql` ends with `ownershipReconcileSql`: `ALTER DATABASE ... OWNER TO <PG_DB_USER>` and `REASSIGN OWNED` for any non-superuser role owning `public` objects. A database created by an earlier deploy under another role (`core_user` vs `gw_core_user`) otherwise fails the pre-migration `pg_dump` with `permission denied for table _prisma_migrations`.
+- **Orphaned PM2 apps**: `retireOrphanedPm2Apps` runs before each service start and deletes same-tier PM2 apps (`<base>` or `<base>-*`) that are not in the plan. Leftover `pg-core-back-core-1/2` and `pg-checkout-back-chk-1/2` from an earlier two-instance topology kept ports 4000/4001 bound with stale credentials, so the new core died with `EADDRINUSE` while `/health` probes hit the stale process and reported `QUEUE_HEALTH_UNAVAILABLE`.
+- **Synthetic seed**: an already-seeded database under another seed key is skipped instead of failing (see `01-core-back/10-synthetic-seeder.md` §3.10); the deploy log reports it as skipped.

@@ -1,5 +1,5 @@
 import { dirname } from "node:path";
-import { parseNodeList, type DeployConfig } from "../lib/configSchema";
+import { parseNodeList, resolveBackupS3Mode, type DeployConfig } from "../lib/configSchema";
 import type { SshTarget } from "../lib/hostPlanner";
 import { pgClusterFor, type ProvisionReport, type ProvisionRunner } from "./postgres18Provisioner";
 
@@ -342,17 +342,177 @@ export const journalLinePartitionCronLine = (config: DeployConfig): string => {
 };
 
 /**
- * Dry-run-safe command builders used to verify the primary S3 bucket and the
+ * Object-store (S3) layer. When the endpoint is served from the backup host
+ * (`BACKUP_S3_MODE=managed-minio`, or `auto` resolving to it) the engine
+ * detects a running MinIO, and installs + configures + starts one when it is
+ * missing, using BACKUP_PRIMARY_S3_ACCESS_KEY/SECRET_KEY as the root
+ * credentials and creating the bucket named in BACKUP_PRIMARY_S3_BUCKET.
+ * External stores (R2/AWS/an existing MinIO) are never touched, only verified.
+ */
+const s3EndpointUrl = (config: DeployConfig): URL => new URL(config.BACKUP_PRIMARY_S3_ENDPOINT);
+
+const s3Endpoint = (config: DeployConfig): string => trimTrailingSlash(config.BACKUP_PRIMARY_S3_ENDPOINT);
+
+export const s3BucketName = (config: DeployConfig): string =>
+  config.BACKUP_PRIMARY_S3_BUCKET.replace(/^s3:\/\//, "").split("/")[0] ?? "";
+
+const MINIO_ENV_PATH = "/etc/default/minio";
+const MINIO_UNIT_PATH = "/etc/systemd/system/minio.service";
+
+export const minioEnvFile = (config: DeployConfig): string => {
+  const endpoint = s3EndpointUrl(config);
+  const port = endpoint.port || (endpoint.protocol === "https:" ? "443" : "80");
+  // Bind all interfaces only when the endpoint is not loopback, so a loopback
+  // dev endpoint is not exposed on the LAN.
+  const host = ["127.0.0.1", "localhost", "::1", "[::1]"].includes(endpoint.hostname) ? "127.0.0.1" : "0.0.0.0";
+  return renderEnvFile({
+    MINIO_ROOT_USER: config.BACKUP_PRIMARY_S3_ACCESS_KEY,
+    MINIO_ROOT_PASSWORD: config.BACKUP_PRIMARY_S3_SECRET_KEY,
+    MINIO_VOLUMES: config.BACKUP_MINIO_DATA_DIR,
+    MINIO_OPTS: `--address ${host}:${port} --console-address ${host}:${config.BACKUP_MINIO_CONSOLE_PORT}`,
+  });
+};
+
+export const minioSystemdUnit = (): string => `[Unit]
+Description=MinIO object store (Payment Gateway backup target)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=minio-user
+Group=minio-user
+EnvironmentFile=${MINIO_ENV_PATH}
+ExecStart=/usr/local/bin/minio server $MINIO_OPTS $MINIO_VOLUMES
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+`;
+
+const minioHealthWait = (config: DeployConfig, seconds = 60): string =>
+  `for i in $(seq 1 ${seconds}); do curl -fsS --max-time 3 ${shellQuote(`${s3Endpoint(config)}/minio/health/live`)} >/dev/null 2>&1 && exit 0; sleep 1; done; echo "MinIO did not become healthy at ${s3Endpoint(config)}" >&2; journalctl -u minio -n 30 --no-pager >&2 || true; exit 1`;
+
+/**
+ * Idempotent install of the MinIO server. MinIO no longer publishes binaries
+ * (dl.min.io answers 410), so the order is: an existing `minio` on the host,
+ * the operator-supplied BACKUP_MINIO_BINARY_URL (http(s):// or file://), then a
+ * source build with Go (`go install github.com/minio/minio@<version>`).
+ * Every step fails loudly; nothing is left half-installed at /usr/local/bin/minio.
+ */
+export const minioInstallScript = (config: DeployConfig): string => {
+  const url = config.BACKUP_MINIO_BINARY_URL.trim();
+  const version = config.BACKUP_MINIO_VERSION.trim() || "latest";
+  return `set -eu
+MINIO_BIN=/usr/local/bin/minio
+install_minio() {
+  if [ -x "$MINIO_BIN" ]; then return 0; fi
+  if command -v minio >/dev/null 2>&1; then ln -sf "$(command -v minio)" "$MINIO_BIN"; return 0; fi
+  ${url
+    ? `echo "installing MinIO from ${url.replace(/"/g, "")}" >&2
+  curl -fsSL ${shellQuote(url)} -o "$MINIO_BIN.tmp" || { echo "download of ${url.replace(/"/g, "")} failed" >&2; rm -f "$MINIO_BIN.tmp"; return 1; }
+  chmod +x "$MINIO_BIN.tmp" && mv "$MINIO_BIN.tmp" "$MINIO_BIN"
+  return 0`
+    : `if ! command -v go >/dev/null 2>&1; then
+    echo "MinIO is not installed and no longer ships binaries. Install Go on this host, or set BACKUP_MINIO_BINARY_URL to a MinIO binary you host." >&2
+    return 1
+  fi
+  echo "building MinIO ${version} from source with Go (several minutes)" >&2
+  GOBIN=/usr/local/bin GOPATH="$(mktemp -d)" GOFLAGS=-mod=mod go install github.com/minio/minio@${version} || { echo "go install github.com/minio/minio@${version} failed" >&2; return 1; }
+  return 0`}
+}
+install_minio
+[ -x "$MINIO_BIN" ] || { echo "MinIO binary missing after install" >&2; exit 1; }
+getent group minio-user >/dev/null 2>&1 || groupadd --system minio-user
+id -u minio-user >/dev/null 2>&1 || useradd --system --gid minio-user --home /var/lib/minio --shell /usr/sbin/nologin minio-user
+install -d -m 0750 -o minio-user -g minio-user ${shellQuote(config.BACKUP_MINIO_DATA_DIR)}`;
+};
+
+/** Creates the bucket (idempotent) with a SigV4-signed PUT; no mc needed. */
+export const minioBucketScript = (config: DeployConfig): string => {
+  const bucket = s3BucketName(config);
+  return `set -u
+CODE="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X PUT --aws-sigv4 'aws:amz:us-east-1:s3' --user ${shellQuote(`${config.BACKUP_PRIMARY_S3_ACCESS_KEY}:${config.BACKUP_PRIMARY_S3_SECRET_KEY}`)} ${shellQuote(`${s3Endpoint(config)}/${bucket}`)})"
+case "$CODE" in
+  200|409) echo "bucket ${bucket} ready (HTTP $CODE)" ;;
+  *) echo "creating bucket ${bucket} failed (HTTP $CODE)" >&2; exit 1 ;;
+esac`;
+};
+
+/**
+ * Ensures the managed MinIO is installed, configured and serving. Returns the
+ * list of commands it ran (empty for external stores). A healthy endpoint is
+ * left untouched.
+ */
+export const ensureObjectStore = (input: {
+  runner: ProvisionRunner;
+  config: DeployConfig;
+  ssh: SshTarget;
+  log?: (message: string) => void;
+}): string[] => {
+  const { runner, config, ssh } = input;
+  const commands: string[] = [];
+  const log = input.log ?? (() => undefined);
+  if (resolveBackupS3Mode(config) !== "managed-minio") {
+    log(`object store: external (${s3Endpoint(config)}), not managed by the deploy engine`);
+    return commands;
+  }
+  const health = `curl -fsS --max-time 5 ${shellQuote(`${s3Endpoint(config)}/minio/health/live`)} >/dev/null 2>&1`;
+  const alive = (): boolean => {
+    if (runner.dryRun) return false;
+    try {
+      runner.run(ssh, health, { sudo: false });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (alive()) {
+    log(`object store: MinIO already healthy at ${s3Endpoint(config)}; ensuring bucket ${s3BucketName(config)}`);
+  } else {
+    log(`object store: MinIO not reachable at ${s3Endpoint(config)}; installing and starting it on ${ssh.host}`);
+    const install = minioInstallScript(config);
+    commands.push(install);
+    runner.run(ssh, install, { sudo: true });
+    runner.writeRemoteFile({ target: ssh, path: MINIO_ENV_PATH, content: minioEnvFile(config), mode: 0o600, sudo: true });
+    runner.run(ssh, `chown root:minio-user ${MINIO_ENV_PATH} && chmod 0640 ${MINIO_ENV_PATH}`, { sudo: true });
+    runner.writeRemoteFile({ target: ssh, path: MINIO_UNIT_PATH, content: minioSystemdUnit(), mode: 0o644, sudo: true });
+    for (const command of ["systemctl daemon-reload", "systemctl enable minio", "systemctl restart minio"]) {
+      commands.push(command);
+      runner.run(ssh, command, { sudo: true });
+    }
+  }
+  const wait = minioHealthWait(config);
+  commands.push(wait);
+  runner.run(ssh, wait, { sudo: false });
+  const bucket = minioBucketScript(config);
+  commands.push(bucket);
+  runner.run(ssh, bucket, { sudo: true });
+  return commands;
+};
+
+/**
+ * Dry-run-safe command builders used to verify the primary S3 endpoint and the
  * secondary SSH vault before the backup daemon is enabled.
  */
-export const verifyBackupTargetCommands = (config: DeployConfig): string[] => [
-  `test -n ${JSON.stringify(config.BACKUP_PRIMARY_S3_BUCKET)}`,
-  `curl -fsS --max-time 10 ${JSON.stringify(config.BACKUP_PRIMARY_S3_ENDPOINT.replace(/\/$/, ""))}/minio/health/live >/dev/null`,
-  ...(config.BACKUP_SECONDARY_SSH_TARGET
-    ? [`timeout 5 bash -c '</dev/tcp/${config.BACKUP_SECONDARY_SSH_TARGET.split(":")[0]!.split("@").pop()}/22'`]
-    : []),
-  `test -n ${JSON.stringify(config.BACKUP_ENCRYPTION_KEY_HEX)}`,
-];
+export const verifyBackupTargetCommands = (config: DeployConfig): string[] => {
+  const endpoint = s3Endpoint(config);
+  const managed = resolveBackupS3Mode(config) === "managed-minio";
+  return [
+    `test -n ${JSON.stringify(config.BACKUP_PRIMARY_S3_BUCKET)}`,
+    // MinIO exposes a health route; other S3 services (R2/AWS) do not, so for
+    // them any HTTP response proves the endpoint is reachable.
+    managed
+      ? `curl -fsS --max-time 10 ${JSON.stringify(endpoint)}/minio/health/live >/dev/null`
+      : `curl -sS --max-time 10 -o /dev/null ${JSON.stringify(endpoint)} || { echo "S3 endpoint ${endpoint} is unreachable from the backup host; set BACKUP_S3_MODE=managed-minio to let the engine install MinIO there, or fix BACKUP_PRIMARY_S3_ENDPOINT" >&2; exit 1; }`,
+    ...(config.BACKUP_SECONDARY_SSH_TARGET
+      ? [`timeout 5 bash -c '</dev/tcp/${config.BACKUP_SECONDARY_SSH_TARGET.split(":")[0]!.split("@").pop()}/22'`]
+      : []),
+    `test -n ${JSON.stringify(config.BACKUP_ENCRYPTION_KEY_HEX)}`,
+  ];
+};
 
 export const verifyBackupTargetDryRun = (config: DeployConfig): string[] =>
   verifyBackupTargetCommands(config).map((command) => `echo ${JSON.stringify(`[dry-run] ${command}`)}`);
@@ -483,6 +643,8 @@ fi`,
     runner.run(ssh, `chown postgres:postgres ${config.BACKUP_PGPASSFILE} && chmod 0600 ${config.BACKUP_PGPASSFILE}`, { sudo: true });
     runner.writeRemoteFile({ target: ssh, path: "/etc/barman.conf", content: barmanConfig(config), mode: 0o644, sudo: true });
   }
+
+  commands.push(...ensureObjectStore({ runner, config, ssh }));
 
   for (const command of verifyBackupTargetCommands(config)) {
     commands.push(command);

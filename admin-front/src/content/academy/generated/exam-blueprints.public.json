@@ -1,0 +1,206 @@
+[
+  {
+    "id": "exam-foundation",
+    "track": "FOUNDATION",
+    "questionCount": 24,
+    "passPercent": 80,
+    "timeLimitMinutes": 60,
+    "cooldownMinutes": 30,
+    "composition": [
+      {
+        "module": "m0",
+        "count": 2
+      },
+      {
+        "module": "m1",
+        "count": 5
+      },
+      {
+        "module": "m2",
+        "count": 3
+      },
+      {
+        "module": "m3",
+        "count": 6
+      },
+      {
+        "module": "m7",
+        "count": 3
+      },
+      {
+        "module": "m9",
+        "count": 2
+      },
+      {
+        "module": "m10",
+        "count": 3
+      }
+    ]
+  },
+  {
+    "id": "exam-operator",
+    "track": "OPERATOR",
+    "questionCount": 28,
+    "passPercent": 80,
+    "timeLimitMinutes": 75,
+    "cooldownMinutes": 30,
+    "composition": [
+      {
+        "module": "m4",
+        "count": 5
+      },
+      {
+        "module": "m5",
+        "count": 11
+      },
+      {
+        "module": "m6",
+        "count": 2
+      },
+      {
+        "module": "m8",
+        "count": 3
+      },
+      {
+        "module": "m9",
+        "count": 7
+      }
+    ]
+  },
+  {
+    "id": "exam-support",
+    "track": "SUPPORT",
+    "questionCount": 18,
+    "passPercent": 80,
+    "timeLimitMinutes": 50,
+    "cooldownMinutes": 30,
+    "composition": [
+      {
+        "module": "m4",
+        "count": 4
+      },
+      {
+        "module": "m5",
+        "count": 11
+      },
+      {
+        "module": "m8",
+        "count": 3
+      }
+    ]
+  },
+  {
+    "id": "exam-finance",
+    "track": "FINANCE",
+    "questionCount": 28,
+    "passPercent": 80,
+    "timeLimitMinutes": 75,
+    "cooldownMinutes": 30,
+    "composition": [
+      {
+        "module": "m4",
+        "count": 2
+      },
+      {
+        "module": "m5",
+        "count": 5
+      },
+      {
+        "module": "m6",
+        "count": 16
+      },
+      {
+        "module": "m9",
+        "count": 5
+      }
+    ]
+  },
+  {
+    "id": "exam-compliance",
+    "track": "COMPLIANCE",
+    "questionCount": 28,
+    "passPercent": 80,
+    "timeLimitMinutes": 75,
+    "cooldownMinutes": 30,
+    "composition": [
+      {
+        "module": "m4",
+        "count": 9
+      },
+      {
+        "module": "m7",
+        "count": 19
+      }
+    ]
+  },
+  {
+    "id": "exam-mlro",
+    "track": "MLRO",
+    "questionCount": 24,
+    "passPercent": 80,
+    "timeLimitMinutes": 65,
+    "cooldownMinutes": 30,
+    "composition": [
+      {
+        "module": "m4",
+        "count": 3
+      },
+      {
+        "module": "m7",
+        "count": 21
+      }
+    ]
+  },
+  {
+    "id": "exam-gateway-admin",
+    "track": "GATEWAY_ADMIN",
+    "questionCount": 28,
+    "passPercent": 80,
+    "timeLimitMinutes": 75,
+    "cooldownMinutes": 30,
+    "composition": [
+      {
+        "module": "m5",
+        "count": 4
+      },
+      {
+        "module": "m8",
+        "count": 18
+      },
+      {
+        "module": "m9",
+        "count": 4
+      },
+      {
+        "module": "m10",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "id": "exam-security-admin",
+    "track": "SECURITY_ADMIN",
+    "questionCount": 24,
+    "passPercent": 80,
+    "timeLimitMinutes": 65,
+    "cooldownMinutes": 30,
+    "composition": [
+      {
+        "module": "m3",
+        "count": 4
+      },
+      {
+        "module": "m8",
+        "count": 7
+      },
+      {
+        "module": "m9",
+        "count": 4
+      },
+      {
+        "module": "m10",
+        "count": 9
+      }
+    ]
+  }
+]

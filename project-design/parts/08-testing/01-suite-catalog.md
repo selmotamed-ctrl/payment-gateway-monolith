@@ -140,7 +140,7 @@ Core files:
 
 Edge and fake-rails suites contribute:
 
-- `admin-back/test` — 159 declarations across 7 files (admin surface, backups, core contract, client, env isolation, mTLS, academy progress).
+- `admin-back/test` — 159 declarations across 7 files (admin surface, backups, core contract, client, env isolation, mTLS, academy progress/rate limit/team gate).
 - `merchant-back/test` — 84 declarations across 6 files (contracts, forwarding, KYB/external, mTLS, env isolation).
 - `checkout-back/test` — 77 declarations across 6 files, including a zero-trust matrix under `test/exhaustive/05-api-matrix`.
 - `fake-rails-back/test` — 53 declarations across 4 files, including the 30-test suite-05 file.
@@ -334,3 +334,10 @@ This catalog is derived by counting literal declarations and inspecting the suit
 ## 10. Change history
 
 - 2026-11-03: initial canonical part. Verified against `5a24f6f+working-tree`.
+
+### Employee Academy suites (2026-11-04)
+
+- `tests/unit/academy-content.test.ts` (extractor determinism, spec counts, references, blueprint pool depth, key-leak guard, corrupted-source failures), `academy-lab-scoring.test.ts` (all 18 published lab vectors + edge cases), `academy-progress-merge.test.ts`, `academy-next-step.test.ts`.
+- `core-back/test/academy-exam-engine.test.ts`, `academy-progress.test.ts`, `academy-team.test.ts`: DB-free, fake store with injected clock/ids (`bun test test/academy-`).
+- `admin-back/test/academy-progress.test.ts`: proxy validation, 429 and `SECURITY_ADMIN` gate (rate-limit tests use a mini app so they do not feed the shared per-IP admin limiter).
+- `tests/e2e/admin/academy-{learning,lab,exam,team,a11y}.spec.ts` (+ helper `academy-live.ts`): live-stack specs, skipped unless `E2E_LIVE=1` and `PG_PASSWORD`; written and listed, not yet run (no loginable account on the local stack).

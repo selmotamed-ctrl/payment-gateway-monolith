@@ -1,0 +1,174 @@
+[
+  {
+    "id": "m0",
+    "title": "Orientation and the rules of the house",
+    "minutes": 47,
+    "objective": "You understand how training works and can apply the Ten Golden Rules.",
+    "lessonIds": [
+      "l-m0-1",
+      "l-m0-2",
+      "l-m0-3"
+    ],
+    "labIds": []
+  },
+  {
+    "id": "m1",
+    "title": "How money moves",
+    "minutes": 90,
+    "objective": "You can explain payments, switches, gateways, Libyan money, how computers talk and how trust works.",
+    "lessonIds": [
+      "l-m1-1",
+      "l-m1-2",
+      "l-m1-3",
+      "l-m1-4",
+      "l-m1-5"
+    ],
+    "labIds": []
+  },
+  {
+    "id": "m2",
+    "title": "The platform map",
+    "minutes": 55,
+    "objective": "You know the platform's parts, the merchant-application-wallet-link chain, roles and confidentiality.",
+    "lessonIds": [
+      "l-m2-1",
+      "l-m2-2",
+      "l-m2-3"
+    ],
+    "labIds": [
+      "lab-flow-tracer"
+    ]
+  },
+  {
+    "id": "m3",
+    "title": "Governance: the two-person rule",
+    "minutes": 65,
+    "objective": "You can act as a safe maker or checker and write a real reason.",
+    "lessonIds": [
+      "l-m3-1",
+      "l-m3-2",
+      "l-m3-3",
+      "l-m3-4"
+    ],
+    "labIds": [
+      "lab-approval-desk"
+    ]
+  },
+  {
+    "id": "m4",
+    "title": "Merchants and onboarding",
+    "minutes": 80,
+    "objective": "You can review a join request, handle KYB and help merchants without leaking secrets.",
+    "lessonIds": [
+      "l-m4-1",
+      "l-m4-2",
+      "l-m4-3",
+      "l-m4-4"
+    ],
+    "labIds": [
+      "lab-kyb-desk"
+    ]
+  },
+  {
+    "id": "m5",
+    "title": "Payments in operation",
+    "minutes": 155,
+    "objective": "You can read any payment, handle UNKNOWN and answer customers correctly.",
+    "lessonIds": [
+      "l-m5-1",
+      "l-m5-2",
+      "l-m5-3",
+      "l-m5-4",
+      "l-m5-5",
+      "l-m5-6"
+    ],
+    "labIds": [
+      "lab-payment-reading",
+      "lab-incident-unknown",
+      "lab-customer-calls"
+    ]
+  },
+  {
+    "id": "m6",
+    "title": "Money and the ledger",
+    "minutes": 165,
+    "objective": "You can read and build journal entries and handle reconciliation, cash-outs, adjustments and disputes.",
+    "lessonIds": [
+      "l-m6-1",
+      "l-m6-2",
+      "l-m6-3",
+      "l-m6-4",
+      "l-m6-5",
+      "l-m6-6",
+      "l-m6-7"
+    ],
+    "labIds": [
+      "lab-ledger-balancing",
+      "lab-cashout-adjustments",
+      "lab-reconciliation-desk"
+    ]
+  },
+  {
+    "id": "m7",
+    "title": "AML and confidentiality",
+    "minutes": 125,
+    "objective": "You can explain AML, decide screening matches, handle cases and never tip off.",
+    "lessonIds": [
+      "l-m7-1",
+      "l-m7-2",
+      "l-m7-3",
+      "l-m7-4",
+      "l-m7-5"
+    ],
+    "labIds": [
+      "lab-compliance-desk"
+    ]
+  },
+  {
+    "id": "m8",
+    "title": "Gateways, rails and the engine",
+    "minutes": 165,
+    "objective": "You can configure and review a gateway safely.",
+    "lessonIds": [
+      "l-m8-1",
+      "l-m8-2",
+      "l-m8-3",
+      "l-m8-4",
+      "l-m8-5",
+      "l-m8-6"
+    ],
+    "labIds": [
+      "lab-build-a-rail",
+      "lab-rails-visibility",
+      "lab-gate-review"
+    ]
+  },
+  {
+    "id": "m9",
+    "title": "When things go wrong",
+    "minutes": 75,
+    "objective": "You can follow the runbooks, hand over and report mistakes.",
+    "lessonIds": [
+      "l-m9-1",
+      "l-m9-2",
+      "l-m9-3"
+    ],
+    "labIds": [
+      "lab-runbook-drill"
+    ]
+  },
+  {
+    "id": "m10",
+    "title": "Security and deployment",
+    "minutes": 70,
+    "objective": "You can resist social engineering, handle data and understand the deployment model.",
+    "lessonIds": [
+      "l-m10-1",
+      "l-m10-2",
+      "l-m10-3"
+    ],
+    "labIds": [
+      "lab-security-desk"
+    ]
+  }
+]

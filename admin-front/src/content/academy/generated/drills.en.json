@@ -1,0 +1,132 @@
+[
+  {
+    "id": "drill-wrong-otp",
+    "title": "Wrong code, then the right code",
+    "rail": "edfali",
+    "minutes": 15,
+    "refs": [
+      "b07-07",
+      "b06-08"
+    ],
+    "markdown": "### Setup\nStaging environment, Fake Rails running, rail `edfali` healthy (0% failure). A trainer sits with the learner. Use only test phone numbers.\n### Do\n1. Start a payment on a single-use link and choose the OTP rail.\n2. Enter the OTP `000000`.\n3. Enter the correct OTP shown in the Fake Rails dashboard.\n### Expect\n* After step 2 the checkout stays on the code screen and shows a retryable error. No new SMS is sent. The attempt returns to `AWAITING_CUSTOMER`.\n* After step 3 the attempt becomes `SUCCEEDED` and the ledger entry exists.\n### Debrief questions\nWhy did the wrong code not trip the circuit breaker? How many tries are allowed by default? What would a third wrong code do?",
+    "html": "<h3>Setup</h3>\n<p>Staging environment, Fake Rails running, rail <code>edfali</code> healthy (0% failure). A trainer sits with the learner. Use only test phone numbers.</p>\n<h3>Do</h3>\n<ol>\n<li>Start a payment on a single-use link and choose the OTP rail.</li>\n<li>Enter the OTP <code>000000</code>.</li>\n<li>Enter the correct OTP shown in the Fake Rails dashboard.</li>\n</ol>\n<h3>Expect</h3>\n<ul>\n<li>After step 2 the checkout stays on the code screen and shows a retryable error. No new SMS is sent. The attempt returns to <code>AWAITING_CUSTOMER</code>.</li>\n<li>After step 3 the attempt becomes <code>SUCCEEDED</code> and the ledger entry exists.</li>\n</ul>\n<h3>Debrief questions</h3>\n<p>Why did the wrong code not trip the circuit breaker? How many tries are allowed by default? What would a third wrong code do?</p>\n",
+    "plainText": "Setup Staging environment, Fake Rails running, rail edfali healthy (0% failure). A trainer sits with the learner. Use only test phone numbers. Do 1. Start a payment on a single-use link and choose the OTP rail. 2. Enter the OTP 000000. 3. Enter the correct OTP shown in the Fake Rails dashboard. Expect After step 2 the checkout stays on the code screen and shows a retryable error. No new SMS is sent. The attempt returns to AWAITINGCUSTOMER. After step 3 the attempt becomes SUCCEEDED and the ledger entry exists. Debrief questions Why did the wrong code not trip the circuit breaker? How many tries are allowed by default? What would a third wrong code do?"
+  },
+  {
+    "id": "drill-insufficient-funds",
+    "title": "Insufficient funds",
+    "rail": "edfali",
+    "minutes": 10,
+    "refs": [
+      "b06-08",
+      "b07-02"
+    ],
+    "markdown": "### Setup\nAs in the first drill.\n### Do\nStart a payment with a phone number ending `9901`, or use OTP `999999`.\n### Expect\nThe attempt ends `FAILED` with a customer message about funds. The link slot is released and the link can be tried again.\n### Debrief questions\nWhich error classification is this? Why is it not a gateway fault?",
+    "html": "<h3>Setup</h3>\n<p>As in the first drill.</p>\n<h3>Do</h3>\n<p>Start a payment with a phone number ending <code>9901</code>, or use OTP <code>999999</code>.</p>\n<h3>Expect</h3>\n<p>The attempt ends <code>FAILED</code> with a customer message about funds. The link slot is released and the link can be tried again.</p>\n<h3>Debrief questions</h3>\n<p>Which error classification is this? Why is it not a gateway fault?</p>\n",
+    "plainText": "Setup As in the first drill. Do Start a payment with a phone number ending 9901, or use OTP 999999. Expect The attempt ends FAILED with a customer message about funds. The link slot is released and the link can be tried again. Debrief questions Which error classification is this? Why is it not a gateway fault?"
+  },
+  {
+    "id": "drill-limit-exceeded",
+    "title": "Limit exceeded",
+    "rail": "sadad",
+    "minutes": 10,
+    "refs": [
+      "b06-08",
+      "b07-02"
+    ],
+    "markdown": "### Setup\nRail `sadad` healthy.\n### Do\nStart a payment with a phone number ending `9902`.\n### Expect\nThe attempt ends `FAILED` with a limit message. Nothing is posted.\n### Debrief questions\nDoes a customer limit count toward the circuit breaker?",
+    "html": "<h3>Setup</h3>\n<p>Rail <code>sadad</code> healthy.</p>\n<h3>Do</h3>\n<p>Start a payment with a phone number ending <code>9902</code>.</p>\n<h3>Expect</h3>\n<p>The attempt ends <code>FAILED</code> with a limit message. Nothing is posted.</p>\n<h3>Debrief questions</h3>\n<p>Does a customer limit count toward the circuit breaker?</p>\n",
+    "plainText": "Setup Rail sadad healthy. Do Start a payment with a phone number ending 9902. Expect The attempt ends FAILED with a limit message. Nothing is posted. Debrief questions Does a customer limit count toward the circuit breaker?"
+  },
+  {
+    "id": "drill-confirm-500",
+    "title": "Server error on the money step",
+    "rail": "sadad",
+    "minutes": 20,
+    "refs": [
+      "b07-03",
+      "b06-03"
+    ],
+    "markdown": "### Setup\nRail `sadad` healthy. Open Operator Cases in the Back Office on staging.\n### Do\nStart a payment with a phone number ending `9905` (or OTP `500500`) and confirm.\n### Expect\nThe attempt becomes `UNKNOWN` (not `FAILED`). The link slot stays reserved. An operator case of kind `UNKNOWN` appears. The step log shows the server error.\n### Debrief questions\nWhy is a server error on a money step not a failure? What do you do first? What must you not do?",
+    "html": "<h3>Setup</h3>\n<p>Rail <code>sadad</code> healthy. Open Operator Cases in the Back Office on staging.</p>\n<h3>Do</h3>\n<p>Start a payment with a phone number ending <code>9905</code> (or OTP <code>500500</code>) and confirm.</p>\n<h3>Expect</h3>\n<p>The attempt becomes <code>UNKNOWN</code> (not <code>FAILED</code>). The link slot stays reserved. An operator case of kind <code>UNKNOWN</code> appears. The step log shows the server error.</p>\n<h3>Debrief questions</h3>\n<p>Why is a server error on a money step not a failure? What do you do first? What must you not do?</p>\n",
+    "plainText": "Setup Rail sadad healthy. Open Operator Cases in the Back Office on staging. Do Start a payment with a phone number ending 9905 (or OTP 500500) and confirm. Expect The attempt becomes UNKNOWN (not FAILED). The link slot stays reserved. An operator case of kind UNKNOWN appears. The step log shows the server error. Debrief questions Why is a server error on a money step not a failure? What do you do first? What must you not do?"
+  },
+  {
+    "id": "drill-confirm-timeout",
+    "title": "Silence on the money step",
+    "rail": "sadad",
+    "minutes": 20,
+    "refs": [
+      "b07-03",
+      "b07-09"
+    ],
+    "markdown": "### Setup\nAs above.\n### Do\nStart a payment with a phone number ending `9906` (or OTP `408408`) and confirm. The partner hangs for 20 seconds.\n### Expect\nAfter the step's time limit the attempt becomes `UNKNOWN`. Press **Inquire**; practise reading the step log.\n### Debrief questions\nHow long did the step wait? What would a retry have risked?",
+    "html": "<h3>Setup</h3>\n<p>As above.</p>\n<h3>Do</h3>\n<p>Start a payment with a phone number ending <code>9906</code> (or OTP <code>408408</code>) and confirm. The partner hangs for 20 seconds.</p>\n<h3>Expect</h3>\n<p>After the step's time limit the attempt becomes <code>UNKNOWN</code>. Press <strong>Inquire</strong>; practise reading the step log.</p>\n<h3>Debrief questions</h3>\n<p>How long did the step wait? What would a retry have risked?</p>\n",
+    "plainText": "Setup As above. Do Start a payment with a phone number ending 9906 (or OTP 408408) and confirm. The partner hangs for 20 seconds. Expect After the step's time limit the attempt becomes UNKNOWN. Press Inquire; practise reading the step log. Debrief questions How long did the step wait? What would a retry have risked?"
+  },
+  {
+    "id": "drill-malformed-200",
+    "title": "An answer nobody understands",
+    "rail": "sadad",
+    "minutes": 15,
+    "refs": [
+      "b06-08",
+      "b07-03"
+    ],
+    "markdown": "### Setup\nAs above.\n### Do\nStart a payment with a phone number ending `9907`. The partner answers 200 with an unexpected body.\n### Expect\nNo status rule matches on the money step, so the attempt becomes `UNKNOWN`.\n### Debrief questions\nWhy is \"no rule matched\" treated as unknown rather than failed?",
+    "html": "<h3>Setup</h3>\n<p>As above.</p>\n<h3>Do</h3>\n<p>Start a payment with a phone number ending <code>9907</code>. The partner answers 200 with an unexpected body.</p>\n<h3>Expect</h3>\n<p>No status rule matches on the money step, so the attempt becomes <code>UNKNOWN</code>.</p>\n<h3>Debrief questions</h3>\n<p>Why is &quot;no rule matched&quot; treated as unknown rather than failed?</p>\n",
+    "plainText": "Setup As above. Do Start a payment with a phone number ending 9907. The partner answers 200 with an unexpected body. Expect No status rule matches on the money step, so the attempt becomes UNKNOWN. Debrief questions Why is \"no rule matched\" treated as unknown rather than failed?"
+  },
+  {
+    "id": "drill-webhook-replay",
+    "title": "Duplicate and forged webhooks",
+    "rail": "edfali",
+    "minutes": 20,
+    "refs": [
+      "b07-05",
+      "b06-06"
+    ],
+    "markdown": "### Setup\nComplete a successful payment. Open the transaction in the Fake Rails portal.\n### Do\n1. Use **Trigger Webhook Replay**.\n2. Use **Send Forged-Signature Webhook**.\n### Expect\nThe replay is absorbed: no second ledger entry and the attempt stays `SUCCEEDED`. The forged message is rejected and a signature-failure alert is raised.\n### Debrief questions\nWhy can a repeated webhook not double-credit? What would a spike of such failures mean in production?",
+    "html": "<h3>Setup</h3>\n<p>Complete a successful payment. Open the transaction in the Fake Rails portal.</p>\n<h3>Do</h3>\n<ol>\n<li>Use <strong>Trigger Webhook Replay</strong>.</li>\n<li>Use <strong>Send Forged-Signature Webhook</strong>.</li>\n</ol>\n<h3>Expect</h3>\n<p>The replay is absorbed: no second ledger entry and the attempt stays <code>SUCCEEDED</code>. The forged message is rejected and a signature-failure alert is raised.</p>\n<h3>Debrief questions</h3>\n<p>Why can a repeated webhook not double-credit? What would a spike of such failures mean in production?</p>\n",
+    "plainText": "Setup Complete a successful payment. Open the transaction in the Fake Rails portal. Do 1. Use Trigger Webhook Replay. 2. Use Send Forged-Signature Webhook. Expect The replay is absorbed: no second ledger entry and the attempt stays SUCCEEDED. The forged message is rejected and a signature-failure alert is raised. Debrief questions Why can a repeated webhook not double-credit? What would a spike of such failures mean in production?"
+  },
+  {
+    "id": "drill-breaker",
+    "title": "A partner outage and the circuit breaker",
+    "rail": "sadad",
+    "minutes": 25,
+    "refs": [
+      "b10-02",
+      "b06-11"
+    ],
+    "markdown": "### Setup\nRails `sadad` direct and an aggregator route both configured. Fake Rails: set the direct rail to **Full Outage 503**.\n### Do\nStart several payments. Watch the Dashboard Route health card entry **Open breaker** and the customer's choices.\n### Expect\nAfter repeated faults the direct route's health becomes `OPEN_BREAKER`, the customer stops seeing it, and new payments use the next healthy route. Some payments in flight may become `UNKNOWN`. When you restore the rail the breaker closes.\n### Debrief questions\nWhich runbook applies? What do you tell the Gateway Admin? What must you not do while the partner is failing?",
+    "html": "<h3>Setup</h3>\n<p>Rails <code>sadad</code> direct and an aggregator route both configured. Fake Rails: set the direct rail to <strong>Full Outage 503</strong>.</p>\n<h3>Do</h3>\n<p>Start several payments. Watch the Dashboard Route health card entry <strong>Open breaker</strong> and the customer's choices.</p>\n<h3>Expect</h3>\n<p>After repeated faults the direct route's health becomes <code>OPEN_BREAKER</code>, the customer stops seeing it, and new payments use the next healthy route. Some payments in flight may become <code>UNKNOWN</code>. When you restore the rail the breaker closes.</p>\n<h3>Debrief questions</h3>\n<p>Which runbook applies? What do you tell the Gateway Admin? What must you not do while the partner is failing?</p>\n",
+    "plainText": "Setup Rails sadad direct and an aggregator route both configured. Fake Rails: set the direct rail to Full Outage 503. Do Start several payments. Watch the Dashboard Route health card entry Open breaker and the customer's choices. Expect After repeated faults the direct route's health becomes OPENBREAKER, the customer stops seeing it, and new payments use the next healthy route. Some payments in flight may become UNKNOWN. When you restore the rail the breaker closes. Debrief questions Which runbook applies? What do you tell the Gateway Admin? What must you not do while the partner is failing?"
+  },
+  {
+    "id": "drill-statement-anomalies",
+    "title": "Statement anomalies",
+    "rail": "edfali",
+    "minutes": 30,
+    "refs": [
+      "b08-06",
+      "b10-05"
+    ],
+    "markdown": "### Setup\nMake several successful payments. In the Fake Rails portal open the Settlement Statement Generator.\n### Do\nGenerate a statement with: omit one transaction; add one unrecorded transaction; inject a fee variance. Load it on the Reconciliation screen.\n### Expect\nThe omitted payment shows `MISSING_AT_GATEWAY`; the extra shows `MISSING_LOCALLY`; the fee variance shows `AMOUNT_MISMATCH`.\n### Debrief questions\nWhich result is the most serious and why? What entry fixes the fee variance? Why must you never edit the file?",
+    "html": "<h3>Setup</h3>\n<p>Make several successful payments. In the Fake Rails portal open the Settlement Statement Generator.</p>\n<h3>Do</h3>\n<p>Generate a statement with: omit one transaction; add one unrecorded transaction; inject a fee variance. Load it on the Reconciliation screen.</p>\n<h3>Expect</h3>\n<p>The omitted payment shows <code>MISSING_AT_GATEWAY</code>; the extra shows <code>MISSING_LOCALLY</code>; the fee variance shows <code>AMOUNT_MISMATCH</code>.</p>\n<h3>Debrief questions</h3>\n<p>Which result is the most serious and why? What entry fixes the fee variance? Why must you never edit the file?</p>\n",
+    "plainText": "Setup Make several successful payments. In the Fake Rails portal open the Settlement Statement Generator. Do Generate a statement with: omit one transaction; add one unrecorded transaction; inject a fee variance. Load it on the Reconciliation screen. Expect The omitted payment shows MISSINGATGATEWAY; the extra shows MISSINGLOCALLY; the fee variance shows AMOUNTMISMATCH. Debrief questions Which result is the most serious and why? What entry fixes the fee variance? Why must you never edit the file?"
+  },
+  {
+    "id": "drill-dispute",
+    "title": "An upstream dispute",
+    "rail": "moamalat",
+    "minutes": 25,
+    "refs": [
+      "b08-09",
+      "b08-08"
+    ],
+    "markdown": "### Setup\nA successful card payment on staging.\n### Do\nIn the Fake Rails portal use **Open Upstream Chargeback/Dispute Webhook**. Open Disputes and Adjustments in the Back Office.\n### Expect\nA dispute opens, the payment becomes `DISPUTED`, and a chargeback adjustment is drafted by the system and waits for a human Finance checker. No money has moved yet.\n### Debrief questions\nWho may approve the drafted chargeback? What happens if the wallet is too small?",
+    "html": "<h3>Setup</h3>\n<p>A successful card payment on staging.</p>\n<h3>Do</h3>\n<p>In the Fake Rails portal use <strong>Open Upstream Chargeback/Dispute Webhook</strong>. Open Disputes and Adjustments in the Back Office.</p>\n<h3>Expect</h3>\n<p>A dispute opens, the payment becomes <code>DISPUTED</code>, and a chargeback adjustment is drafted by the system and waits for a human Finance checker. No money has moved yet.</p>\n<h3>Debrief questions</h3>\n<p>Who may approve the drafted chargeback? What happens if the wallet is too small?</p>\n",
+    "plainText": "Setup A successful card payment on staging. Do In the Fake Rails portal use Open Upstream Chargeback/Dispute Webhook. Open Disputes and Adjustments in the Back Office. Expect A dispute opens, the payment becomes DISPUTED, and a chargeback adjustment is drafted by the system and waits for a human Finance checker. No money has moved yet. Debrief questions Who may approve the drafted chargeback? What happens if the wallet is too small?"
+  }
+]

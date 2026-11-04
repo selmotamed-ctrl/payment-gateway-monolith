@@ -140,6 +140,11 @@
 | `deploy/deploy.env.example` | `BACKUP_ENGINE_MODE` |
 | `deploy/deploy.env.example` | `BACKUP_COMPRESSION` |
 | `deploy/deploy.env.example` | `BACKUP_ENCRYPTION_KEY_HEX` |
+| `deploy/deploy.env.example` | `BACKUP_S3_MODE` |
+| `deploy/deploy.env.example` | `BACKUP_MINIO_DATA_DIR` |
+| `deploy/deploy.env.example` | `BACKUP_MINIO_CONSOLE_PORT` |
+| `deploy/deploy.env.example` | `BACKUP_MINIO_BINARY_URL` |
+| `deploy/deploy.env.example` | `BACKUP_MINIO_VERSION` |
 | `deploy/deploy.env.example` | `BACKUP_PRIMARY_S3_ENDPOINT` |
 | `deploy/deploy.env.example` | `BACKUP_PRIMARY_S3_BUCKET` |
 | `deploy/deploy.env.example` | `BACKUP_PRIMARY_S3_ACCESS_KEY` |

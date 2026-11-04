@@ -43,6 +43,31 @@ export const findCompletedSeedRun = async (
   return setting ? asCompletedSeedRun(setting.valueJson) : null;
 };
 
+/**
+ * A completed history under a *different* seed key and the same namespace.
+ * The generated rows carry key-independent unique values (emails, names), so a
+ * second history cannot be layered on top: `skipDuplicates` silently drops the
+ * colliding parents and the dependent children then fail their foreign keys.
+ */
+export const findOtherCompletedSeedRun = async (
+  prisma: PrismaClient,
+  seedKey: string,
+  namespace: string,
+): Promise<CompletedSeedRun | null> => {
+  const settings = await prisma.platformSetting.findMany({
+    where: {
+      scope: SYNTHETIC_SEED_SCOPE,
+      key: { startsWith: "synthetic.seed.completed:", not: seedRunKey(seedKey) },
+    },
+    orderBy: { effectiveFrom: "desc" },
+  });
+  for (const setting of settings) {
+    const run = asCompletedSeedRun(setting.valueJson);
+    if (run && run.namespace === namespace) return run;
+  }
+  return null;
+};
+
 export const recordCompletedSeedRun = async (
   prisma: PrismaClient,
   config: SeederConfig,

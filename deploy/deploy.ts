@@ -2,7 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { effectiveDatabase, loadDeployConfig, withIpv6Loopback, parseNodeList, pgStorageConfigured, type DeployConfig, type DeployRole } from "./lib/configSchema";
+import { effectiveDatabase, loadDeployConfig, resolveBackupS3Mode, withIpv6Loopback, parseNodeList, pgStorageConfigured, type DeployConfig, type DeployRole } from "./lib/configSchema";
 import { findSshConflicts, planHosts, renderTopology, type DeployPlan, type HostPlan, type ServicePlan } from "./lib/hostPlanner";
 import { buildPki, certFilesForHost, readMaterial, verifyPki } from "./lib/pkiManager";
 import { effectiveTargetHome, effectiveTargetUser, SshRunner } from "./lib/sshRunner";
@@ -318,6 +318,29 @@ const renderNginx = (host: HostPlan, config: DeployConfig, runner: SshRunner, ro
   }
 };
 
+/**
+ * PM2 apps of this tier that follow the engine's naming (`<base>` or
+ * `<base>-<anything>`) but are not in the current plan are leftovers from an
+ * earlier topology (e.g. `pg-core-back-core-1` after moving to a single
+ * `pg-core-back`). They keep the tier's ports bound and run stale
+ * configuration, so the new instance dies with EADDRINUSE while health probes
+ * hit the stale one. Returns the shell command that retires them.
+ */
+export const retireOrphanedPm2Apps = (service: { name: string; nodeId?: string }, plannedNames: string[]): string => {
+  const base = service.nodeId && service.name.endsWith(`-${service.nodeId}`)
+    ? service.name.slice(0, -(service.nodeId.length + 1))
+    : service.name;
+  const keep = [...new Set([service.name, ...plannedNames])];
+  const script =
+    'const t=await Bun.stdin.text();const i=t.indexOf("[");if(i<0)process.exit(0);' +
+    `const base=${JSON.stringify(base)};const keep=new Set(${JSON.stringify(keep)});` +
+    'for(const p of JSON.parse(t.slice(i))){const n=p.name;if((n===base||n.startsWith(base+"-"))&&!keep.has(n))console.log(n)}';
+  return [
+    'PM2="$HOME/.bun/bin/pm2"',
+    `for app in $("$PM2" jlist 2>/dev/null | "$HOME/.bun/bin/bun" -e '${script}'); do echo "retiring orphaned PM2 app $app (not in the current plan)"; "$PM2" delete "$app" >/dev/null 2>&1 || true; done`,
+  ].join("; ");
+};
+
 const deployService = (input: {
   runner: SshRunner;
   host: HostPlan;
@@ -327,6 +350,8 @@ const deployService = (input: {
   releaseTimestamp: string;
   keepReleases: number;
   runMigrations?: boolean;
+  /** Every service name the plan has for this tier (all nodes, unfiltered). */
+  plannedServiceNames?: string[];
 }): string => {
   const { runner, host, service, config, pki, releaseTimestamp } = input;
   const remote = service.remoteDir;
@@ -421,6 +446,7 @@ const deployService = (input: {
   // 7. PM2.
   const ecosystem = `${remote}/shared/pm2/${service.name}.config.cjs`;
   runner.writeRemoteFile({ target: host.ssh, path: ecosystem, content: pm2Ecosystem(service, releaseDir), mode: 0o644, sudo: false });
+  runner.run(host.ssh, retireOrphanedPm2Apps(service, input.plannedServiceNames ?? []), { sudo: false });
   runner.run(
     host.ssh,
     `"$HOME/.bun/bin/pm2" delete ${service.name} >/dev/null 2>&1 || true; "$HOME/.bun/bin/pm2" start ${ecosystem} --update-env && "$HOME/.bun/bin/pm2" save`,
@@ -735,7 +761,7 @@ const main = async (): Promise<void> => {
   }
   if (config.BACKUP_ENABLED && shouldRunStorage(options, ["backup"])) {
     const report = provisionBackupEngine({ runner, config, dryRun: options.dryRun });
-    log(`  Backup engine (${config.BACKUP_ENGINE_MODE}) on: ${report.nodes.join(", ") || "none"}`);
+    log(`  Backup engine (${config.BACKUP_ENGINE_MODE}) on: ${report.nodes.join(", ") || "none"}; object store: ${resolveBackupS3Mode(config)}`);
     const backupHost = plan.hosts.find((host) => host.roles.includes("backup"));
     if (backupHost) {
       deployBackupDaemon({ runner, config, host: backupHost });
@@ -782,6 +808,7 @@ const main = async (): Promise<void> => {
       }
       throw new Error(`The plan has no ${target.role} host`);
     }
+    const allUnits = deploymentUnits(plan, target.role);
     const batchSize = options.rollingBatch ?? config.ROLLING_BATCH_SIZE;
     const batches = rollingBatches(units, batchSize);
     for (const [batchIndex, batch] of batches.entries()) {
@@ -796,6 +823,7 @@ const main = async (): Promise<void> => {
           releaseTimestamp,
           keepReleases: options.keepReleases ?? config.KEEP_RELEASES,
           runMigrations: target.role === "core" ? unit.service.nodeId === plan.nodes.core[0]?.nodeId : undefined,
+          plannedServiceNames: allUnits.map((candidate) => candidate.service.name),
         });
       }
       if (options.dryRun) continue;
@@ -841,7 +869,7 @@ const main = async (): Promise<void> => {
       const seeded = runner.run(coreSeedTarget, `${bun} run seed-synthetic-history`, { cwd: coreRemote, sudo: false, timeoutMs: 60 * 60_000 });
       const summary = seeded.stdout.trim().split("\n").slice(-4).join("\n");
       if (summary) log(summary.split("\n").map((line) => `  ${line}`).join("\n"));
-      if (seeded.stdout.includes("was already seeded successfully")) {
+      if (seeded.stdout.includes("was already seeded successfully") || seeded.stdout.includes("synthetic history already present under seed key")) {
         log(`  synthetic history already present for seed key '${config.SYNTHETIC_SEED_KEY}'; skipped`);
       } else {
         log(`  synthetic history seeded (${config.SYNTHETIC_SEED_PROFILE})`);

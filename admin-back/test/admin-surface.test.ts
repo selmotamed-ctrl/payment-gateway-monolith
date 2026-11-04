@@ -491,26 +491,19 @@ describe("portal guide routes", () => {
     expect(JSON.parse(forwarded?.body.toString("utf8") ?? "{}")).toEqual({ value });
   });
 
-  test("forwards the academy progress read, write and overview", async () => {
+  test("forwards the academy progress read and write", async () => {
     const read = await call("GET", "/api/v1/admin/academy/progress", { token: operator });
     expect(read.status).toBe(200);
     expect(core.requests.at(-1)?.url).toBe("/internal/admin/academy/progress");
 
-    const progress = {
-      progress: {
-        completedModules: ["m1"],
-        quizScores: { m1: 100 },
-        completedLabs: ["lab-1"],
-        badges: ["CERTIFIED_OPERATOR"],
-      },
+    const body = {
+      baseRev: 0,
+      patch: { lessons: { "l-m0-1": { at: "2026-11-04T10:00:00.000Z", v: "1.0.0", checkScore: 2 } } },
     };
-    const write = await call("PUT", "/api/v1/admin/academy/progress", { token: operator, body: progress });
+    const write = await call("PUT", "/api/v1/admin/academy/progress", { token: operator, body });
     expect(write.status).toBe(200);
-    expect(JSON.parse(core.requests.at(-1)?.body.toString("utf8") ?? "{}")).toEqual(progress);
-
-    const overview = await call("GET", "/api/v1/admin/academy/progress/overview", { token: operator });
-    expect(overview.status).toBe(200);
-    expect(core.requests.at(-1)?.url).toBe("/internal/admin/academy/progress/overview");
+    expect(core.requests.at(-1)?.url).toBe("/internal/admin/academy/progress");
+    expect(JSON.parse(core.requests.at(-1)?.body.toString("utf8") ?? "{}")).toEqual(body);
   });
 
   test("rejects an invalid checkout support body before contacting core", async () => {
@@ -1309,9 +1302,8 @@ describe("admin route surface", () => {
     { method: "GET", path: "/api/v1/admin/settings/checkout-support/history" },
     { method: "GET", path: "/api/v1/admin/settings/checkout-support/summary" },
     { method: "GET", path: "/api/v1/admin/settings/checkout-support/summary/export" },
-    { method: "GET", path: "/api/v1/admin/academy/progress/overview/summary" },
-    { method: "GET", path: "/api/v1/admin/academy/progress/overview/summary/export" },
-    { method: "GET", path: "/api/v1/admin/academy/progress/overview/export" },
+    { method: "GET", path: "/api/v1/admin/academy/exams/exam-foundation/eligibility" },
+    { method: "POST", path: "/api/v1/admin/academy/exams/exam-foundation/start", body: { integrityAccepted: true } },
     { method: "GET", path: "/api/v1/admin/settings/export" },
     { method: "POST", path: "/api/v1/admin/settings/restore-preview", body: { backup: { settings: [{ key: "checkout.support_config", valueJson: {} }] } } },
     { method: "POST", path: "/api/v1/admin/settings/restore-apply", body: { confirm: true, reason: "restore approved backup", backup: { settings: [{ key: "checkout.support_config", valueJson: {}, expectedCurrentVersion: 1 }] } } },

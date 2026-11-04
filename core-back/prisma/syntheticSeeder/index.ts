@@ -18,7 +18,7 @@ import { enrichKybDocuments } from "./sync/enrichKybDocuments";
 import { encryptPendingSecrets } from "./sync/encryptSecrets";
 import { writeReadModels } from "./sync/readModels";
 import { auditInMemory, postSeedAudit } from "./verify/postSeedAudit";
-import { findCompletedSeedRun, recordCompletedSeedRun } from "./seedRunRegistry";
+import { findCompletedSeedRun, findOtherCompletedSeedRun, recordCompletedSeedRun } from "./seedRunRegistry";
 
 /**
  * Multi-year synthetic operational data seeder.
@@ -40,6 +40,17 @@ export const runSyntheticSeeder = async (): Promise<void> => {
     console.log(
       `[synthetic-seeder] seed key '${config.seedKey}' was already seeded successfully at ${completedRun.completedAt}; skipping. ` +
         "Set SYNTHETIC_SEED_KEY to a new value to generate a fresh history.",
+    );
+    return;
+  }
+
+  const otherRun = await findOtherCompletedSeedRun(client, config.seedKey, config.namespace);
+  if (otherRun) {
+    console.log(
+      `[synthetic-seeder] synthetic history already present under seed key '${otherRun.seedKey}' ` +
+        `(profile ${otherRun.profile}, completed ${otherRun.completedAt}); skipping seed key '${config.seedKey}'. ` +
+        `A second history cannot be layered on the first. Set SYNTHETIC_SEED_KEY='${otherRun.seedKey}' to keep it, ` +
+        "or reset the database to generate a new one.",
     );
     return;
   }

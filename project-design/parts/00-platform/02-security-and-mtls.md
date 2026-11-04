@@ -170,7 +170,7 @@ Most admin internal routes call `requireAuthorities(request, [...])` per handler
 - `settings:read` / `settings:write`, `finance:read` / `finance:write`, `cashout:read` / `cashout:review`.
 - `case:read` / `case:write`, `operator:read` / `operator:write`.
 
-Not every authenticated admin route has a specific authority. `GET /stats/overview`, `POST /stats/export-audit`, `GET /options/:kind` and the current-user academy progress routes require only a valid admin session. See `01-core-back/01-api-surface.md`.
+Not every authenticated admin route has a specific authority. `GET /stats/overview`, `POST /stats/export-audit`, `GET /options/:kind` and the current-user academy progress/exam routes require only a valid back-office session (the team view requires the `SECURITY_ADMIN` role). See `01-core-back/01-api-surface.md`.
 
 The admin edge's `requireAuthorities` parses unverified JWT claims only to hide/deny screens early. It normalizes a small role-to-authority alias map for `COMPLIANCE`/`MLRO`. Core is the authority.
 
@@ -292,7 +292,7 @@ The inbox stores `content-type` and `content-length` in `redactedHeadersJson`, n
 
 - Public within channel: `GET /internal/admin/health`, `GET /internal/merchant/health`, `GET /internal/checkout/health`, admin/merchant auth login and MFA routes, merchant registration/verify/accept-invitation, checkout pay/return/inbound.
 - Authenticated: all other merchant routes and all admin routes after `router.use(requireAuthentication)`.
-- Authorities: most admin business routes call `requireAuthorities`; backups and approvals are the most sensitive. The documented authenticated-only exceptions are the dashboard overview/export-audit, options and current-user academy progress.
+- Authorities: most admin business routes call `requireAuthorities`; backups and approvals are the most sensitive. The documented authenticated-only exceptions are the dashboard overview/export-audit, options and current-user academy progress/exams (the academy team view requires the `SECURITY_ADMIN` role).
 - Maker-checker: `POST /internal/admin/approvals/:id/approve`, `/reject`, plus proposal routes.
 - Raw body: `/internal/checkout/inbound*`, `/internal/merchant/onboarding/kyb-documents`, `/internal/admin/reconciliation/upload`, `/internal/admin/join-requests/:id/kyb-documents`.
 

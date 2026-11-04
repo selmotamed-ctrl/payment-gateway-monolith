@@ -246,9 +246,24 @@ export const primaryBootstrapSql = (config: DeployConfig, replicas: Array<PgNode
       const slot = slotName(node, index);
       return `DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_replication_slots WHERE slot_name = '${slot}') THEN PERFORM pg_create_physical_replication_slot('${slot}'); END IF; END $$;`;
     }),
+    ...ownershipReconcileSql(config),
     `-- pg_hba sources: ${allowed.join(",")}`,
   ].join("\n") + "\n";
 };
+
+/**
+ * A database created by an earlier deploy under a different application role
+ * (e.g. `core_user` before the env moved to `gw_core_user`) leaves tables the
+ * configured role cannot read or migrate. Hand the database and every object
+ * owned by another non-superuser role in `public` over to the configured role.
+ * Idempotent; a no-op on a fresh or already-consistent database. Must be last
+ * (it \connects to the application database).
+ */
+export const ownershipReconcileSql = (config: DeployConfig): string[] => [
+  `ALTER DATABASE "${config.PG_DB_NAME}" OWNER TO "${config.PG_DB_USER}";`,
+  `\\connect "${config.PG_DB_NAME}"`,
+  `DO $$ DECLARE r record; BEGIN FOR r IN SELECT DISTINCT o.rolname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pg_roles o ON o.oid = c.relowner WHERE n.nspname = 'public' AND NOT o.rolsuper AND o.rolname <> '${config.PG_DB_USER}' LOOP EXECUTE format('REASSIGN OWNED BY %I TO %I', r.rolname, '${config.PG_DB_USER}'); END LOOP; END $$;`,
+];
 
 /** Slot creation + `pg_basebackup -R` for each replica (idempotent). */
 export const replicaCommands = (

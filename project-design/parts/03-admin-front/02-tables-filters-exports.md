@@ -209,7 +209,7 @@ Common export endpoints include `*/export` and `*/summary/export` routes in `adm
 - `v1/admin/approvals/export`, `v1/admin/approvals/summary/export`
 - `v1/admin/operator-cases/export`, `v1/admin/operator-cases/summary/export`
 - `v1/admin/settings/summary/export`, `v1/admin/settings/checkout-support/summary/export`
-- `v1/admin/academy/progress/overview/export`, `v1/admin/academy/progress/overview/summary/export`
+- The Academy team view has no server export; it exports the visible rows as CSV client-side (`TeamTable`, formula-injection guarded).
 
 ## 6. Operational usage
 

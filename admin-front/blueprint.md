@@ -345,7 +345,7 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 | 31 | `/rails` | `Rails` | `gateways.edit` | 3 / 3.2 | Rail catalog, collection modes and customer fields. |
 | 32 | `/routes` | `GatewayRoutes` | `gateways.edit` | 3 / 3.2 | Route priority, limits, credential policy and circuit-breaker health. |
 | 33 | `/guide` | `AdminGuide` | none (intentional) | 1 / 1.1 | Interactive admin system guide, glossary, simulators and checklists. |
-| 34 | `/academy` | `AdminAcademy` | none (intentional learning; overview API needs `user:read`) | 1 / 1.1 | Employee academy, labs, quizzes, tracks and certifications. |
+| 34 | `/academy` | `AdminAcademy` | none (intentional learning) | 1 / 1.1 | Employee Academy home: active track, Continue, badges. Sub-routes `AdminAcademyTracks`, `AdminAcademyTrack`, `AdminAcademyModule`, `AdminAcademyLesson`, `AdminAcademyLab`, `AdminAcademyExam`, `AdminAcademyCertificate`, `AdminAcademyHelp` (none gated) and `AdminAcademyTeam` (role `SECURITY_ADMIN`); see `03-guide-and-academy.md` §7. |
 | 35 | `/settings/platform` | `AdminPlatformSettings` | none (backend `settings:read`/`settings:write`) | none | Versioned platform settings, backup export and restore preview. |
 | 36 | `/settings/checkout-help` | `AdminCheckoutHelp` | none (backend `settings:read`/`settings:write`) | 4 / 4.2 | Checkout support config, preview, version history and diff. |
 | 37 | `/system/backups` | `SystemBackups` | `security:read` or `gateway:read` | none | WAL/daemon/target health, backup history, drills and policy. |
@@ -426,7 +426,7 @@ Public admin routes are `/login` (`Login`, visitor-only) and the catch-all `NotF
 | `AdminPlatformSettings` | No entry; any authenticated admin can open the page. | Settings reads require `settings:read`; writes require `settings:write`. | Privilege gap. |
 | `AdminCheckoutHelp` | No entry; any authenticated admin can open the page. | Checkout-support reads require `settings:read`; writes require `settings:write`. | Privilege gap. |
 | `AdminGuide` | No entry. | No business-data authority required. | Intentional learning surface. |
-| `AdminAcademy` | No entry. | Self progress needs only authentication; team overview/export needs `user:read`. | Intentional learning surface, with a backend-gated reporting surface. |
+| `AdminAcademy*` | No entry (only `AdminAcademyTeam` has a role gate: `SECURITY_ADMIN`). | Progress and exams need only a back-office session; the team view requires the `SECURITY_ADMIN` role in admin-back and core-back. | Intentional learning surface; exams are server-graded. |
 
 The merchant portal has a similar gap: `Statements` is shown in navigation only with `statements.read`/`statements.export`, but `routesAuthorities` has no `Statements` entry, so a direct URL is not redirected by the router. `Onboarding` intentionally has `[]` because every authenticated merchant must complete it.
 
@@ -691,7 +691,7 @@ Common export endpoints include `*/export` and `*/summary/export` routes in `adm
 - `v1/admin/approvals/export`, `v1/admin/approvals/summary/export`
 - `v1/admin/operator-cases/export`, `v1/admin/operator-cases/summary/export`
 - `v1/admin/settings/summary/export`, `v1/admin/settings/checkout-support/summary/export`
-- `v1/admin/academy/progress/overview/export`, `v1/admin/academy/progress/overview/summary/export`
+- The Academy team view has no server export; it exports the visible rows as CSV client-side (`TeamTable`, formula-injection guarded).
 
 ## 6. Operational usage
 
@@ -783,7 +783,7 @@ No database is required for the unit/static compliance checks; the Playwright ge
 This part owns two employee learning products in `admin-front`:
 
 - The Admin Interactive Guide at `/guide/**`: 14 books, 125 articles, glossary, safeguard cards, situation playbook, 140-case catalog, five simulators, reading paths, search palette, contextual help and read tracking.
-- The Employee Academy at `/academy`: lessons, labs, quizzes, mastery, badges, team reporting and XLSX exports.
+- The Employee Academy under `/academy/**`: eight tracks, lessons with practice checks, simulated labs, server-graded certification exams, 12-month badges, certificates and a `SECURITY_ADMIN` team view.
 
 It does not own the merchant guide or the checkout help center. The future-guide design is now implemented; its detailed implementation notes live in `06-guide-v2.md`.
 
@@ -849,17 +849,73 @@ Each tool has a Reset button, an explanation panel, bilingual labels and states 
 
 ## 6. Progress record
 
-Guide read tracking reuses the Academy progress JSON on the user row. `guideRead[articleId] = { v, at }` is merged into the existing Academy payload, so no migration is needed. The core and edge Zod schemas accept `guideRead`; the Academy page sends it back when persisting. The guide keeps a `pg.guide.read` `localStorage` mirror as an offline fallback and falls back to it if the progress API is unreachable.
+One JSON record per user in `users.academy_progress_json` (the column pre-dates the rebuild; no migration). It is shared by the Guide and the Academy.
 
-## 7. Academy
+```ts
+AcademyProgress { schema:1; rev; startedAt; updatedAt; contentVersion; activeTrack?; integrityAcceptedAt?;
+  guideRead: Record<articleId,{v,at}>; lessons: Record<lessonId,{at,v,checkScore:0|1|2}>;
+  labs: Record<labId,{bestScore,attempts,passedAt?,criticalErrors,v}>;
+  exams: Record<examId,{attempts[],open?,passedAt?,v}>; badges: {id,track,earnedAt,expiresAt,v}[] }
+```
 
-The Academy remains the zero-to-hero curriculum:
+- **Browser-writable keys** are only `guideRead`, `lessons`, `labs` and `activeTrack`, through `PUT /api/v1/admin/academy/progress` with `{ baseRev, patch }`. The server ignores `exams`, `badges`, `contentVersion`, `rev`, `schema`, `integrityAcceptedAt` and `_server` in a patch, and drops lesson/lab ids that are not in the catalog.
+- **Server-written keys** are `exams`, `badges`, `integrityAcceptedAt`, `rev`, `contentVersion`.
+- **Merge rules** (server `engine/academy/progress.ts` and client `components/academy/progressMerge.ts` agree): lessons keep the later `at`; labs keep the max `bestScore`/`attempts`, the earliest `passedAt`, and `criticalErrors`/`v` from the best entry; `guideRead` keeps the later `at`. Keys are never deleted: un-reading a Guide article writes a tombstone `{ v: "", at }`.
+- **Concurrency:** a stale `baseRev` returns `409 ACADEMY_REV_CONFLICT` with `details:{progress,rev}`; the client refetches, merges and retries once. `rev` also bumps on exam start/submit. The store compare-and-swaps on `User.updatedAt` (retry up to 4, then `ACADEMY_BUSY`).
+- **Server-only state** lives in the same JSON under the reserved key `_server` (open exam sessions with question ids and opaque option ids, previous attempt's question ids, attempt counters, last submitted session ids). `publicProgress()` is the only exit and strips it, including from `GET /users/:id`. Stored size limit 64 KB (`413 ACADEMY_PROGRESS_TOO_LARGE`).
+- **Legacy rows** (no `schema:1`, the pre-rebuild academy shape) are replaced by a fresh record that carries over only `guideRead`.
+- **Client:** `useAcademyProgress` keeps the last record and a queue of unsent patches in `localStorage["pg.academy.progress"]`; a failed save never blocks learning and shows a "not saved yet" indicator. `useGuideProgress` (the Guide's hook) is a thin layer over it and one-time migrates `pg.guide.read`.
 
-- 8 modules (M1–M8), 17 lessons, 8 labs with fatal options and 64 quiz questions (8 per module).
-- Six certification tracks including `MASTER_OPERATOR`.
-- Mastery requires all lessons, a passed lab and a 100% quiz.
-- Progress is stored on the user row; the team overview, summary and two XLSX exports require backend `user:read`.
-- Certification is a computed badge, not a server-issued certificate.
+## 7. Academy (rebuilt 2026-11-04)
+
+Specification: `design/07-guides-and-academy/academy_system_design_and_content.md` (Parts 0-II are the spec, Part III is the content; the file carries a dated repository note listing the reconciliations made during implementation).
+
+### 7.1 Content pipeline
+
+`admin-front/scripts/extract-academy-content.ts` (`bun scripts/extract-academy-content.ts`) parses only the `<!-- CONTENT:BEGIN -->` … `<!-- CONTENT:END -->` whole-line markers, validates every block and reference, deep-validates lab JSON, and writes deterministic output:
+
+| Output | Content | Audience |
+| :--- | :--- | :--- |
+| `admin-front/src/content/academy/generated/` | `meta`, `tracks`, `modules`, `lessons.en` (markdown `body`, rendered `html`, `plainText`), `checks.en` (98 practice questions WITH keys), `labs.en` (WITH keys), `drills.en`, `pages.en`, `lab-vectors`, `exam-blueprints.public` (no question ids) | browser |
+| `core-back/content/academy/exam-bank.json` | 218 exam-pool questions WITH keys + 8 blueprints | server only, never served |
+| `core-back/content/academy/catalog.json` | tracks → lesson/lab/exam ids, lesson/lab titles, badge ids; no questions | server (eligibility, team view) |
+
+Counts (asserted by `academy-content.test.ts`): 8 tracks, 11 modules, 49 lessons (20 Foundation + 29 role), 98 checks, 218 exam-pool questions (203 single, 13 number, 2 order; 40 critical), 15 labs / 86 tasks, 8 exams, 10 drills, 7 pages (+ `lab-vectors`). Generated output is ~75 KB gzipped (budget 600 KB). Exam-pool question ids never appear under `admin-front/src/content/academy/generated/`.
+
+### 7.2 Tracks, badges, routes
+
+`FOUNDATION` (everyone) plus one role track per back-office role (`OPERATOR`, `SUPPORT`, `FINANCE`, `COMPLIANCE`, `MLRO`, `GATEWAY_ADMIN`, `SECURITY_ADMIN`; the role enum and track ids coincide). A user's required tracks = Foundation + their role track. Badges last 12 months and show **Recertification required** when expired or when `meta.recertifyFrom` major is newer than the badge's `v`. Certification is evidence, not permission: nothing in the platform switches authorities on a badge.
+
+| Route name | Path | Notes |
+| :--- | :--- | :--- |
+| `AdminAcademy` | `/academy` | My learning: active track, **Continue**, rings, badges, Guide reading progress |
+| `AdminAcademyTracks` / `AdminAcademyTrack` | `/academy/tracks`, `/academy/track/:trackId` | modules, lesson/lab state, exam Locked (missing prerequisites in words) / Ready |
+| `AdminAcademyModule` / `AdminAcademyLesson` | `/academy/module/:moduleId`, `/academy/lesson/:lessonId` | lesson = body, Read now list, two checks, **Mark lesson complete** (needs both checks answered and every reading article opened or read) |
+| `AdminAcademyLab` | `/academy/lab/:labId` | lab runner |
+| `AdminAcademyExam` | `/academy/exam/:examId` | briefing → runner → result |
+| `AdminAcademyCertificate` | `/academy/certificate/:badgeId` | printable |
+| `AdminAcademyTeam` | `/academy/team` | `SECURITY_ADMIN` only (`routesRoles`, `admin-back`, `core-back`) |
+| `AdminAcademyHelp` | `/academy/help` | learner texts, trainer guide, optional live drills (staging only) |
+
+All ten route names are in the Guide context map's `Academy` screen. No route has an authority gate except Team.
+
+### 7.3 Labs (browser)
+
+`components/academy/labScoring.ts` is pure and unit-tested against the 18 published vectors. Six task kinds: choice, multi, ledger, order, checklist, numeric. Rules: hint costs 1 point (floor 0); multi `max(0,(right-wrong)/totalCorrect)`; ledger compares Decimal cells per expected line and penalises non-zero cells on unexpected accounts, with a live Balanced/NOT BALANCED badge; order partial credit rounded down to 1 decimal; any critical option/wrong id is a critical error. Lab score = round(100·earned/possible); pass = ≥ `passPercent` (80) and zero critical errors. Labs are deterministic (no shuffle, no timers), make no network calls except saving progress, and show a "TRAINING — nothing here is real" ribbon and a `SANDBOX` badge. `progress.labs` keeps best score, attempts, first pass and the critical-error count of the best attempt.
+
+### 7.4 Exams (server)
+
+Endpoints under `/api/v1/admin/academy/` (admin-back proxy → `core-back` `/internal/admin/academy/`): `GET progress`, `PUT progress`, `GET exams/:examId/eligibility`, `POST exams/:examId/start`, `POST exams/:examId/submit`, `GET team`. admin-back rate-limits 60 requests/minute per user (`429 ACADEMY_RATE_LIMITED`). Merchant principals get `403 ACADEMY_BACK_OFFICE_ONLY`.
+
+- **Eligibility:** role exams need a valid (not expired, not below `recertifyFrom`) Foundation badge; every lesson of the track completed; every lab of the track passed (`bestScore ≥ passPercent` and `criticalErrors == 0`, else `lab_critical`). Cooldown after a failed attempt (`cooldownMinutes`). After 3 consecutive failures each module below 70 % in the last attempt needs one of its lessons re-opened after that attempt. `missing[].text` names lessons and labs by title.
+- **Start** requires `{ integrityAccepted: true }` (records `integrityAcceptedAt`; `page-integrity` is shown in the briefing). One open session per user per exam; a live session is returned again (`resumed:true`) with the same questions and option ids. The set is built deterministically from `sha256(userId:examId:attemptNumber)` → mulberry32: per-module seeded shuffle preferring questions not in the previous attempt, a floor of `criticalPick` critical questions (swaps inside the same module), seeded order shuffles, opaque random option ids per session. Starting consumes the attempt number and remembers the set even if never submitted (an abandoned session cannot be replayed for free). The start payload has no `correct`, `critical`, explanation, notes or refs.
+- **Submit** grades 1 point per question (single/truefalse exact, multi all-or-nothing, order exact sequence, number `decimal.js` within tolerance, unanswered wrong). `scorePercent` rounds half up; pass = `scorePercent ≥ passPercent` and `criticalMissed == 0`. One submission per session (`422 ACADEMY_SESSION_USED`); a submit after expiry + 2 minutes is a failed attempt scored 0 (`expired:true`). A pass issues the track badge (`expiresAt` = +12 calendar months, replaces an older badge). Result items carry the answer, correct answer, `why`, option notes, refs and critical flag.
+- **Audit:** `ACADEMY_PROGRESS` (key counts), `ACADEMY_EXAM_STARTED`, `ACADEMY_EXAM_SUBMITTED` (score, pass, critical missed, attempt number only), `ACADEMY_BADGE_ISSUED`, `ACADEMY_TEAM_VIEWED`. Answers and question ids are never logged.
+- **Error codes:** 403 `ACADEMY_TEAM_FORBIDDEN`/`ACADEMY_BACK_OFFICE_ONLY`, 404 `ACADEMY_EXAM_NOT_FOUND`, 409 `ACADEMY_REV_CONFLICT`/`ACADEMY_BUSY`, 413 `ACADEMY_PROGRESS_TOO_LARGE`, 422 `ACADEMY_NOT_ELIGIBLE`/`ACADEMY_INTEGRITY_REQUIRED`/`ACADEMY_SESSION_EXPIRED`/`ACADEMY_SESSION_USED`.
+
+### 7.5 Team view
+
+`GET team` (`SECURITY_ADMIN` role, audited) returns one row per back-office user (`merchantId` null, status not `DISABLED`): name (email local part), role, maker/checker flags, required tracks, lessons/labs done vs required, badges with expiry, last activity and a status with precedence `RECERTIFICATION_REQUIRED` > `EXPIRING_SOON` (within 30 days) > `CERTIFIED` > `EXAM_READY` > `IN_PROGRESS` > `NOT_STARTED`. No question text, answers or per-question results. The page filters by role/status/search and exports the visible rows as CSV with a formula-injection guard.
 
 ## 8. Contracts and invariants
 
@@ -871,14 +927,18 @@ The Academy remains the zero-to-hero curriculum:
 6. Safeguards never replace existing confirmations or maker-checker rules.
 7. Opening contextual help must not reset the current form.
 8. The guide and Academy share one progress record; a save from either page preserves the other's fields.
+9. Exam keys, `critical` flags and explanations never reach the browser before submit; the browser cannot write `exams` or `badges`.
+10. The Academy never changes `is_maker`, `is_checker`, a role or an authority.
+11. Academy content is never retyped into TSX; labels are corrected only in the design file and logged in `academy_content_fixes.md`.
 
 ## 9. Verification
 
 ```bash
-cd admin-front && bun run content:guide && bun run type-check && bun run test:unit && bun run build
-cd ../tests && bun run test:unit
-cd ../tests && bunx playwright test --project=admin e2e/admin/guide-*.spec.ts
-cd ../admin-back && bun test test/academy-progress.test.ts test/admin-surface.test.ts
+cd admin-front && bun run content:guide && bun run content:academy && bun run type-check && bun run test:unit && bun run build
+cd ../tests && bunx vitest run unit/guide- unit/academy-
+cd ../core-back && bun run typecheck && bun test test/academy-
+cd ../admin-back && bun run typecheck && bun test test/academy-progress.test.ts test/admin-surface.test.ts
+cd ../tests && bunx playwright test --project=admin e2e/admin/guide-*.spec.ts e2e/admin/academy-*.spec.ts   # needs a deployed stack
 ```
 
 ## Contextual Help
@@ -972,7 +1032,7 @@ This part owns the admin operational pages that are neither the primary merchant
 - Backup management at `/system/backups`.
 - Platform settings versioning and restore at `/settings/platform`.
 - Checkout support configuration, history and diff at `/settings/checkout-help`.
-- Academy reporting and certification exports at `/academy`.
+- Academy team view at `/academy/team` (`SECURITY_ADMIN`).
 - Their shared export/checklist behavior and authority gating.
 
 It does not own the backup daemon, PostgreSQL WAL configuration or restore-drill engine. Those are in the deploy and storage parts. It documents the admin UI and the backend contracts that the UI calls.
@@ -1105,21 +1165,15 @@ The version history card lists all versions with effective/created timestamps. "
 
 ### 3.4 Academy reporting and certification
 
-The academy page is covered functionally in `03-guide-and-academy.md`. Its operational reporting surface uses:
+The Academy was rebuilt on 2026-11-04 and is specified in `03-guide-and-academy.md` (§6-7). Its operational surface is the `SECURITY_ADMIN` team view and the per-user progress calls:
 
 | Operation | Endpoint | Authority |
 | :--- | :--- | :--- |
-| Summary | `GET v1/admin/academy/progress/overview/summary` | `user:read` |
-| Summary export | `GET v1/admin/academy/progress/overview/summary/export` | `user:read` |
-| Team overview | `GET v1/admin/academy/progress/overview` | `user:read` |
-| Certification export | `GET v1/admin/academy/progress/overview/export` | `user:read` |
-| Own progress | `GET/PUT v1/admin/academy/progress` | authenticated user |
+| Own progress | `GET/PUT v1/admin/academy/progress` | authenticated back-office user |
+| Exam eligibility / start / submit | `GET .../exams/:examId/eligibility`, `POST .../start`, `POST .../submit` | authenticated back-office user (server-graded) |
+| Team view | `GET v1/admin/academy/team` | `SECURITY_ADMIN` role (admin-back + core-back; audited `ACADEMY_TEAM_VIEWED`) |
 
-The summary reports total users, users with progress, not started, completed modules/lessons/labs, earned badges, quiz scores, active last 7 days and counts by role. The team accordion loads on demand, searches by email/role, and shows completion percentage, module count, badges and last update.
-
-Both exports require the team export checklist (`TEAM_SCOPE_VERIFIED`, `PRIVACY_REVIEWED`, `PROGRESS_DATA_REVIEWED`, `EXPORT_APPROVAL_CONFIRMED`) when checklists are visible. The backend accepts only the known checklist keys and writes `ACADEMY_SUMMARY_EXPORTED` or `ACADEMY_CERTIFICATIONS_EXPORTED`.
-
-The route has no UI authority gate. The self-progress calls succeed for any authenticated admin; the team/report calls fail without `user:read`.
+The old summary/overview/export endpoints (`/progress/overview*`, `ACADEMY_SUMMARY_EXPORTED`, `ACADEMY_CERTIFICATIONS_EXPORTED`) and their export checklist were removed; the team page exports the visible rows as CSV client-side. Only `AdminAcademyTeam` is role-gated in the router; every other Academy route needs no authority.
 
 ### 3.5 Exports and checklist behavior
 
@@ -1140,7 +1194,7 @@ The deploy engine writes both build-time Vite values and `runtime-config.js`; ru
 | Backups | `security:read` or `gateway:read` | `security:read`/`gateway:read` | `security:write` |
 | Platform settings | none | `settings:read` | `settings:write` |
 | Checkout help | none | `settings:read` | `settings:write` |
-| Academy page | none | self: authenticated; team: `user:read` | self: authenticated |
+| Academy pages | none (Team: role `SECURITY_ADMIN`) | self: authenticated; team: `SECURITY_ADMIN` | self: authenticated |
 | Approvals | `approvals.approve`/`reject` | approval authority | `approval:check` and checker separation |
 
 The UI hides write controls where it knows the authority. The backend remains authoritative.
@@ -1154,7 +1208,7 @@ The UI hides write controls where it knows the authority. The backend remains au
 5. **Backup policy is maker-checker.** The maker submits; a different checker executes through approvals.
 6. **Backup trigger/drill are immediate writes under `security:write`.** They are not maker-checker approvals.
 7. **Checkout support save creates a new version and audit entries.** It is not a maker-checker execution.
-8. **Academy exports require `user:read` and write audit entries.**
+8. **The Academy team view requires the `SECURITY_ADMIN` role and writes an audit entry; exam grading is server-side.**
 9. **All spreadsheet exports use the shared XLSX pipeline.**
 10. **Runtime visibility flags override build-time flags.**
 
@@ -1165,7 +1219,7 @@ The UI hides write controls where it knows the authority. The backend remains au
 | Backup page | `admin-front/src/pages/system/backups/index.tsx` |
 | Platform settings page | `admin-front/src/pages/settings/platform/index.tsx` |
 | Checkout help page | `admin-front/src/pages/settings/checkout-help/index.tsx` |
-| Academy page | `admin-front/src/pages/academy/index.tsx` |
+| Academy pages | `admin-front/src/pages/academy/*.tsx` |
 | URL map | `admin-front/src/constants/urlsMap/index.ts` |
 | XLSX pipeline | `admin-front/src/utils/xlsx/**` |
 | Summary/checklist primitives | `admin-front/src/components/ui/SummaryExportCard.tsx`, `FormChecklist.tsx` |
@@ -1180,7 +1234,7 @@ The UI hides write controls where it knows the authority. The backend remains au
 - Change a platform setting: edit the JSON object, record the checklist, and save; verify the new version and effective date. Treat the form's maker-checker hint as advisory only.
 - Restore settings: preview, inspect invalid/missing/version conflicts, then apply with a real reason. Do not retry a version conflict without re-previewing.
 - Change checkout support: ensure contact channels and FAQ content are valid in both languages, preview the result, and save. This changes payer-visible help immediately for new fetches.
-- Export academy reports: complete the team export checklist first; confirm the backend authority before blaming the button.
+- Academy team view not visible: it needs the `SECURITY_ADMIN` role.
 
 ## 7. Status and deviations
 
@@ -1190,7 +1244,7 @@ The UI hides write controls where it knows the authority. The backend remains au
 - Backup policy maker-checker execution through the approvals queue.
 - Platform settings list, version history, diff, backup export, restore preview/apply, summary and summary export.
 - Checkout support config, live preview, version history, diff, summary and summary export.
-- Academy summary, team view, certification export and summary export.
+- Academy team view (CSV export of the visible rows).
 - Shared XLSX and checklist behavior.
 
 ### Partial
@@ -1198,8 +1252,8 @@ The UI hides write controls where it knows the authority. The backend remains au
 - The backup page does not hand the operator into the specific pending approval after a policy save.
 - `BACKUP_POLICY` is missing from the shared approvals subject-type filter options, even though the backend supports it.
 - Platform settings and checkout support are versioned/audited but not maker-checker.
-- The route-level UI gates for platform settings, checkout help and academy are absent.
-- Academy mastery is not server-validated; certification is a computed badge.
+- The route-level UI gates for platform settings and checkout help are absent (the Academy team route is role-gated).
+- Academy labs are browser-graded practice; certification is decided only by server-graded exams.
 
 ### Missing / deferred
 
@@ -1213,7 +1267,7 @@ The UI hides write controls where it knows the authority. The backend remains au
 - **Workflow gap:** a backup policy maker cannot continue directly to approval; the pending request must be found in the general approvals queue.
 - **Filter gap:** the approvals subject filter cannot select `BACKUP_POLICY`.
 - **Governance gap:** `sensitiveMakerChecker` hints on platform settings/checkout help fields do not produce a maker-checker approval.
-- **Authorization risk:** direct navigation to settings/checkout help/academy is not blocked by the router; the page loads and then fails backend calls for unauthorized users.
+- **Authorization risk:** direct navigation to settings/checkout help is not blocked by the router; the page loads and then fails backend calls for unauthorized users.
 - **Export scope risk:** table exports are current-page only; do not treat them as full-result exports.
 - **Documentation gap:** historical design claims about weekly drills/hourly Redis/ready-to-run backup certificates are superseded by the storage/backup parts.
 
@@ -1221,7 +1275,7 @@ The UI hides write controls where it knows the authority. The backend remains au
 
 - `tests/e2e/admin/backups.spec.ts` mocks the backup overview and verifies the rendered health/schedule/drill state and the trigger request payload.
 - `core-back/test/backup-admin/backup-admin-routes.test.ts` covers backup route authority, trigger/drill/policy behavior and audit entries.
-- `admin-front/src/content/__tests__/content-completeness.test.ts` covers the academy content counts used by the reporting page.
+- `tests/unit/academy-content.test.ts` covers the Academy content counts.
 - The XLSX pipeline has no dedicated unit test in this repository; coverage is through page-level usage and the shared UI compliance test.
 
 The backup E2E suite requires the live stack; the core backup test requires PostgreSQL/Redis.
@@ -1239,12 +1293,12 @@ The backup E2E suite requires the live stack; the core backup test requires Post
 - `admin-front/src/pages/system/backups/index.tsx`
 - `admin-front/src/pages/settings/platform/index.tsx`
 - `admin-front/src/pages/settings/checkout-help/index.tsx`
-- `admin-front/src/pages/academy/index.tsx`
+- `admin-front/src/pages/academy/*.tsx`
 - `admin-front/src/utils/xlsx/**`
 - `admin-front/src/components/ui/SummaryExportCard.tsx`
 - `admin-front/src/components/ui/FormChecklist.tsx`
 - `core-back/api/internal/backups.ts`
-- `core-back/api/internal/admin.ts` (settings and academy handlers)
+- `core-back/api/internal/admin.ts` (settings handlers), `core-back/api/internal/academy.ts`
 - `core-back/lib/approvalQueue.ts`
 
 ### Generated appendices

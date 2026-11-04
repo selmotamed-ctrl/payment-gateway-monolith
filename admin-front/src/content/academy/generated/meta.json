@@ -1,0 +1,22 @@
+{
+  "contentVersion": "1.0.0",
+  "recertifyFrom": "1.0.0",
+  "generatedAt": "1970-01-01T00:00:00.000Z",
+  "contentHash": "29d41f2d15cb7deb0e0993d7256538503983d89179f5be1f224382986981ee90",
+  "counts": {
+    "tracks": 8,
+    "modules": 11,
+    "lessons": 49,
+    "lessonChecks": 98,
+    "examPoolQuestions": 218,
+    "examPoolSingle": 203,
+    "examPoolNumber": 13,
+    "examPoolOrder": 2,
+    "criticalExamPoolQuestions": 40,
+    "labs": 15,
+    "labTasks": 86,
+    "exams": 8,
+    "drills": 10,
+    "pages": 7
+  }
+}

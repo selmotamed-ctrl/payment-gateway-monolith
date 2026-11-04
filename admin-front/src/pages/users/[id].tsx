@@ -67,13 +67,35 @@ type AuditRow = {
     approvalRequestId: string | null;
 };
 
-type AcademyProgress = {
-    completedLessonIds?: string[];
-    completedLabIds?: Record<string, unknown>;
-    earnedBadges?: string[];
-    quizScores?: Record<string, unknown>;
-    lastModuleId?: string;
+type AcademySummary = {
+    lessons: number;
+    labs: number;
+    exams: number;
+    badges: { id: string; track: string; expiresAt: string; expired: boolean }[];
     updatedAt?: string;
+};
+
+const isRec = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+/** Reads the new `AcademyProgress` (schema 1); null / legacy rows show zeros. */
+const summariseAcademy = (value: unknown): AcademySummary => {
+    if (!isRec(value) || value.schema !== 1) return { lessons: 0, labs: 0, exams: 0, badges: [] };
+    const labs = isRec(value.labs) ? Object.values(value.labs) : [];
+    const exams = isRec(value.exams) ? Object.values(value.exams) : [];
+    const badges = Array.isArray(value.badges) ? value.badges : [];
+    const now = Date.now();
+    return {
+        lessons: isRec(value.lessons) ? Object.keys(value.lessons).length : 0,
+        labs: labs.filter((lab) => isRec(lab) && Boolean(lab.passedAt)).length,
+        exams: exams.filter((exam) => isRec(exam) && Boolean(exam.passedAt)).length,
+        badges: badges.filter(isRec).map((badge) => ({
+            id: String(badge.id ?? ""),
+            track: String(badge.track ?? ""),
+            expiresAt: String(badge.expiresAt ?? ""),
+            expired: Date.parse(String(badge.expiresAt ?? "")) <= now,
+        })),
+        updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : undefined,
+    };
 };
 
 const formatDateTime = (value: string | null | undefined): string => {
@@ -159,10 +181,7 @@ const UserDetailPage = dc(() => {
     void load();
 
     const authorityList = computed(() => (user.value ? authorityKeys(user.value.authoritiesMap) : []));
-    const academy = computed<AcademyProgress>(() => {
-        const value = user.value?.academyProgressJson;
-        return value && typeof value === "object" && !Array.isArray(value) ? (value as AcademyProgress) : {};
-    });
+    const academy = computed<AcademySummary>(() => summariseAcademy(user.value?.academyProgressJson));
 
     const accountItems = computed<DescriptionItem[]>(() => {
         const entry = user.value;
@@ -196,7 +215,7 @@ const UserDetailPage = dc(() => {
         { key: "authorities", label: t("Authorities"), value: String(authorityList.value.length) },
         { key: "approvals", label: t("Approvals"), value: String(approvals.value.length) },
         { key: "audit", label: t("Audit events"), value: String(auditTrail.value.length) },
-        { key: "academy", label: t("Academy lessons"), value: String(academy.value.completedLessonIds?.length ?? 0) },
+        { key: "academy", label: t("Academy lessons"), value: String(academy.value.lessons) },
     ]);
 
     return () => (
@@ -278,15 +297,17 @@ const UserDetailPage = dc(() => {
                             <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Academy progress")}</ThemedText>
                                 <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                    <MetaPill size="x-small" variant="tonal" color="info">{academy.value.completedLessonIds?.length ?? 0} {t("lessons")}</MetaPill>
-                                    <MetaPill size="x-small" variant="tonal" color="success">{Object.keys(academy.value.completedLabIds ?? {}).length} {t("labs")}</MetaPill>
-                                    <MetaPill size="x-small" variant="tonal" color="primary">{academy.value.earnedBadges?.length ?? 0} {t("badges")}</MetaPill>
-                                    <MetaPill size="x-small" variant="tonal" color="warning">{Object.keys(academy.value.quizScores ?? {}).length} {t("quizzes")}</MetaPill>
+                                    <MetaPill size="x-small" variant="tonal" color="info">{academy.value.lessons} {t("lessons")}</MetaPill>
+                                    <MetaPill size="x-small" variant="tonal" color="success">{academy.value.labs} {t("labs passed")}</MetaPill>
+                                    <MetaPill size="x-small" variant="tonal" color="warning">{academy.value.exams} {t("exams passed")}</MetaPill>
+                                    <MetaPill size="x-small" variant="tonal" color="primary">{academy.value.badges.length} {t("badges")}</MetaPill>
                                 </ThemedView>
-                                {(academy.value.earnedBadges ?? []).length > 0 && (
+                                {academy.value.badges.length > 0 && (
                                     <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                        {(academy.value.earnedBadges ?? []).map((badge) => (
-                                            <MetaPill key={badge} size="x-small" variant="tonal" color="primary">{badge}</MetaPill>
+                                        {academy.value.badges.map((badge) => (
+                                            <MetaPill key={badge.id} size="x-small" variant="tonal" color={badge.expired ? "error" : "primary"}>
+                                                {badge.track} · {badge.expired ? `✕ ${t("expired")}` : t("valid until")} {formatDateTime(badge.expiresAt)}
+                                            </MetaPill>
                                         ))}
                                     </ThemedView>
                                 )}

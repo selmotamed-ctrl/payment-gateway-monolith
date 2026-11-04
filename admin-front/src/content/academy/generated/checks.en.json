@@ -1,0 +1,2942 @@
+[
+  {
+    "id": "c-l-m0-1-1",
+    "module": "m0",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m0-1",
+    "refs": [
+      "b00-02"
+    ],
+    "stem": "What is the Academy's relationship to the Guide?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "The Guide is the reference; the Academy teaches and tests.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "They are two separate systems with separate progress.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "The Academy replaces the Guide.",
+        "correct": false
+      }
+    ],
+    "why": "They share one progress record: the Guide is the reference, the Academy teaches and tests it."
+  },
+  {
+    "id": "c-l-m0-1-2",
+    "module": "m0",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m0-1",
+    "refs": [
+      "b00-04"
+    ],
+    "stem": "What happens if you miss one critical question in an exam?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "The exam fails, whatever your percentage.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Nothing, only the score drops.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "You lose one point.",
+        "correct": false
+      }
+    ],
+    "why": "Critical questions protect money or people, so missing any one fails the exam."
+  },
+  {
+    "id": "c-l-m0-2-1",
+    "module": "m0",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m0-2",
+    "refs": [
+      "b00-03"
+    ],
+    "stem": "Which three breaches does the guide call the most common serious ones?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Sharing credentials, guessing on UNKNOWN, tipping off.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Late reports, long reasons, slow approvals.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Using a laptop, using Arabic, using the menu.",
+        "correct": false
+      }
+    ],
+    "why": "Rules 1, 6 and 7 are the most common serious breaches."
+  },
+  {
+    "id": "c-l-m0-2-2",
+    "module": "m0",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m0-2",
+    "refs": [
+      "b00-03"
+    ],
+    "stem": "A customer sends a screenshot saying \"Payment successful\". What counts as proof?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "The payment's status in the platform, verified by our server.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "The screenshot, if it shows the reference.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "A phone call from the customer.",
+        "correct": false
+      }
+    ],
+    "why": "Only a payment our server has verified with the payment company counts."
+  },
+  {
+    "id": "c-l-m0-3-1",
+    "module": "m0",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m0-3",
+    "refs": [
+      "b03-06"
+    ],
+    "stem": "What do you check first on a payment screen?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "The SANDBOX or LIVE badge.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "The colour theme.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "The language.",
+        "correct": false
+      }
+    ],
+    "why": "Acting on live data believing it is practice, or the reverse, is a classic mistake."
+  },
+  {
+    "id": "c-l-m0-3-2",
+    "module": "m0",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m0-3",
+    "refs": [
+      "b03-06"
+    ],
+    "stem": "Why is working with two tabs open dangerous?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Most wrong-merchant and wrong-amount mistakes happen that way.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "The platform forbids it.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "It slows the browser.",
+        "correct": false
+      }
+    ],
+    "why": "One task at a time prevents mixing up merchants and amounts."
+  },
+  {
+    "id": "c-l-m1-1-1",
+    "module": "m1",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m1-1",
+    "refs": [
+      "b01-01"
+    ],
+    "stem": "Why must we verify an electronic payment ourselves?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "A record-keeper changed the numbers, so only that record-keeper's answer is real.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Because customers always lie.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Because cash is not allowed.",
+        "correct": false
+      }
+    ],
+    "why": "With electronic money the truth lives with the record-keeper, so we must ask it."
+  },
+  {
+    "id": "c-l-m1-1-2",
+    "module": "m1",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m1-1",
+    "refs": [
+      "b01-02"
+    ],
+    "stem": "Who tells the platform the amount of a payment?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "The payment link in our own database.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "The customer.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "The browser.",
+        "correct": false
+      }
+    ],
+    "why": "Amounts come only from the system."
+  },
+  {
+    "id": "c-l-m1-2-1",
+    "module": "m1",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m1-2",
+    "refs": [
+      "b01-03"
+    ],
+    "stem": "What is an aggregator?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "A company offering one door to many payment methods.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "A bank's vault.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "The customer's wallet app.",
+        "correct": false
+      }
+    ],
+    "why": "It adds one more company in the money path."
+  },
+  {
+    "id": "c-l-m1-2-2",
+    "module": "m1",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m1-2",
+    "refs": [
+      "b02-06"
+    ],
+    "stem": "What is a rail?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "What the customer sees and picks, such as Sadad.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "The technical door to a partner.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "A secret key.",
+        "correct": false
+      }
+    ],
+    "why": "A gateway is the technical door; a rail is the customer-facing method."
+  },
+  {
+    "id": "c-l-m1-3-1",
+    "module": "m1",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m1-3",
+    "refs": [
+      "b06-04"
+    ],
+    "stem": "How many dirhams are in one dinar?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "1000",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "100",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "10",
+        "correct": false
+      }
+    ],
+    "why": "The dinar has three decimals because it is 1000 dirhams."
+  },
+  {
+    "id": "c-l-m1-3-2",
+    "module": "m1",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m1-3",
+    "refs": [
+      "b06-04"
+    ],
+    "stem": "A customer says they were asked for 1000 times the amount. First action?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Stop, treat as P1 and tell the Gateway Admin and Security Admin.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Ask them to try again.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Wait to see if it repeats.",
+        "correct": false
+      }
+    ],
+    "why": "A wrong scale is silent and costly; do not retry."
+  },
+  {
+    "id": "c-l-m1-4-1",
+    "module": "m1",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m1-4",
+    "refs": [
+      "b01-06"
+    ],
+    "stem": "What is a webhook?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "A partner calling us to say something happened.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "A form the customer fills.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "A type of password.",
+        "correct": false
+      }
+    ],
+    "why": "We store it first, then check signature, sender and timestamp."
+  },
+  {
+    "id": "c-l-m1-4-2",
+    "module": "m1",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m1-4",
+    "refs": [
+      "b01-06"
+    ],
+    "stem": "A request to take money times out. What do we know?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Nothing: money may or may not have moved.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "It failed.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "It succeeded.",
+        "correct": false
+      }
+    ],
+    "why": "Silence on a money step means UNKNOWN."
+  },
+  {
+    "id": "c-l-m1-5-1",
+    "module": "m1",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m1-5",
+    "refs": [
+      "b01-07"
+    ],
+    "stem": "What does a signature prove?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "The message came from someone with the shared secret and was not changed.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "The message is polite.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "The message is encrypted.",
+        "correct": false
+      }
+    ],
+    "why": "One different character gives a completely different signature."
+  },
+  {
+    "id": "c-l-m1-5-2",
+    "module": "m1",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m1-5",
+    "refs": [
+      "b01-07"
+    ],
+    "stem": "Can an administrator read a stored secret?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "No. Secrets are write-only.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Yes, with MFA.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Yes, in the audit log.",
+        "correct": false
+      }
+    ],
+    "why": "Secrets can be replaced but never read back."
+  },
+  {
+    "id": "c-l-m2-1-1",
+    "module": "m2",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m2-1",
+    "refs": [
+      "b02-02"
+    ],
+    "stem": "Which part holds database credentials and the master key?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Only the core.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "The checkout.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "The merchant portal.",
+        "correct": false
+      }
+    ],
+    "why": "Public services hold none, so a break-in there does not open the database."
+  },
+  {
+    "id": "c-l-m2-1-2",
+    "module": "m2",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m2-1",
+    "refs": [
+      "b02-03"
+    ],
+    "stem": "When is the ledger entry written for a successful payment?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "In the same transaction as the success.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "The next morning.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "When the merchant asks.",
+        "correct": false
+      }
+    ],
+    "why": "Success and posting happen together or not at all."
+  },
+  {
+    "id": "c-l-m2-2-1",
+    "module": "m2",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m2-2",
+    "refs": [
+      "b05-06"
+    ],
+    "stem": "How many wallets does an application have?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Exactly one.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Any number.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "None until approved.",
+        "correct": false
+      }
+    ],
+    "why": "This makes it unambiguous where a payment's money goes."
+  },
+  {
+    "id": "c-l-m2-2-2",
+    "module": "m2",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m2-2",
+    "refs": [
+      "b05-07"
+    ],
+    "stem": "Can staff see a merchant's API token?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "No. It is shown once to the merchant.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Yes, masked.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Yes, on the Merchants screen.",
+        "correct": false
+      }
+    ],
+    "why": "We store only a fingerprint."
+  },
+  {
+    "id": "c-l-m2-3-1",
+    "module": "m2",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m2-3",
+    "refs": [
+      "b02-05"
+    ],
+    "stem": "What may SUPPORT see about a suspended merchant?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "That it is suspended, never why.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "The full reason.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "The screening result.",
+        "correct": false
+      }
+    ],
+    "why": "AML data is confidential."
+  },
+  {
+    "id": "c-l-m2-3-2",
+    "module": "m2",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m2-3",
+    "refs": [
+      "b02-05"
+    ],
+    "stem": "What does the Double-Check Rule mean?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "The core re-checks identity, role and rules even for requests from our own admin program.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Every click is made twice.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Two screens show the same data.",
+        "correct": false
+      }
+    ],
+    "why": "No service is trusted blindly."
+  },
+  {
+    "id": "c-l-m3-1-1",
+    "module": "m3",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m3-1",
+    "refs": [
+      "b04-01"
+    ],
+    "stem": "Who may approve a request you made?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "A different person.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "You, after waiting a day.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Anyone, including you.",
+        "correct": false
+      }
+    ],
+    "why": "The system blocks self-approval and asking a colleague to click blindly is the same offence."
+  },
+  {
+    "id": "c-l-m3-1-2",
+    "module": "m3",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m3-1",
+    "refs": [
+      "b04-01"
+    ],
+    "stem": "What does pressing Approve do?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Approves and executes the change.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Only records your opinion.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Sends the request back.",
+        "correct": false
+      }
+    ],
+    "why": "Approving also executes."
+  },
+  {
+    "id": "c-l-m3-2-1",
+    "module": "m3",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m3-2",
+    "refs": [
+      "b04-02"
+    ],
+    "stem": "Which is a sensitive field?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "A merchant's payout bank details.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "A display name.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "A logo.",
+        "correct": false
+      }
+    ],
+    "why": "Sensitive fields change money flow, compliance or attack surface."
+  },
+  {
+    "id": "c-l-m3-2-2",
+    "module": "m3",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m3-2",
+    "refs": [
+      "b04-03"
+    ],
+    "stem": "A request is out of date because the record changed. What now?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "The maker creates a new request from the current values.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "The checker approves it anyway.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "It is executed automatically.",
+        "correct": false
+      }
+    ],
+    "why": "Stale requests are never applied."
+  },
+  {
+    "id": "c-l-m3-3-1",
+    "module": "m3",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m3-3",
+    "refs": [
+      "b04-04"
+    ],
+    "stem": "Which action may be immediate and ratified afterwards?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Suspending a merchant.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Reinstating a merchant.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Paying a cash-out.",
+        "correct": false
+      }
+    ],
+    "why": "Risk-reducing actions may be immediate; risk-increasing ones need approval first."
+  },
+  {
+    "id": "c-l-m3-3-2",
+    "module": "m3",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m3-3",
+    "refs": [
+      "b04-04"
+    ],
+    "stem": "Nobody ratifies an emergency suspension in 24 hours. What happens?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "An alert fires and the suspension stays in force.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "It lifts automatically.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "The merchant is deleted.",
+        "correct": false
+      }
+    ],
+    "why": "The system fails safe."
+  },
+  {
+    "id": "c-l-m3-4-1",
+    "module": "m3",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m3-4",
+    "refs": [
+      "b04-06"
+    ],
+    "stem": "Which is a good reason?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Checked bank letter: holder matches legal name; approving.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "ok",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "As discussed.",
+        "correct": false
+      }
+    ],
+    "why": "A reason says what you checked and why you decided."
+  },
+  {
+    "id": "c-l-m3-4-2",
+    "module": "m3",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m3-4",
+    "refs": [
+      "b04-07"
+    ],
+    "stem": "Can an audit record be edited?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "No. It is append-only.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Yes, by managers.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Yes, within a day.",
+        "correct": false
+      }
+    ],
+    "why": "Everything you do is recorded and cannot be altered."
+  },
+  {
+    "id": "c-l-m4-1-1",
+    "module": "m4",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m4-1",
+    "refs": [
+      "b05-01"
+    ],
+    "stem": "Which merchant state blocks new payments but keeps the balance?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "SUSPENDED",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "ACTIVE",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "PENDING",
+        "correct": false
+      }
+    ],
+    "why": "A suspended merchant cannot take new payments or cash out; the balance is kept."
+  },
+  {
+    "id": "c-l-m4-1-2",
+    "module": "m4",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m4-1",
+    "refs": [
+      "b05-01"
+    ],
+    "stem": "Which is a valid suspension reason code?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "KYB_EXPIRED",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "BORED",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "SLOW",
+        "correct": false
+      }
+    ],
+    "why": "Reasons: AML, FRAUD, KYB_EXPIRED, COMMISSION_CEILING, MERCHANT_REQUEST, OTHER."
+  },
+  {
+    "id": "c-l-m4-2-1",
+    "module": "m4",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m4-2",
+    "refs": [
+      "b05-03"
+    ],
+    "stem": "How many checks does a join request review have?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Seven",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Three",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Twelve",
+        "correct": false
+      }
+    ],
+    "why": "All seven must be completed and recorded."
+  },
+  {
+    "id": "c-l-m4-2-2",
+    "module": "m4",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m4-2",
+    "refs": [
+      "b05-03"
+    ],
+    "stem": "When you request information from an applicant you must NOT mention",
+    "options": [
+      {
+        "id": "o1",
+        "text": "screening.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "the missing document.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "the deadline pause.",
+        "correct": false
+      }
+    ],
+    "why": "Never reveal screening to an applicant."
+  },
+  {
+    "id": "c-l-m4-3-1",
+    "module": "m4",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m4-3",
+    "refs": [
+      "b05-04"
+    ],
+    "stem": "The default beneficial-owner threshold is",
+    "options": [
+      {
+        "id": "o1",
+        "text": "25%",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "5%",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "75%",
+        "correct": false
+      }
+    ],
+    "why": "Anyone holding 25% or more, or who controls the business."
+  },
+  {
+    "id": "c-l-m4-3-2",
+    "module": "m4",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m4-3",
+    "refs": [
+      "b05-05"
+    ],
+    "stem": "Screening returns ERROR at onboarding. What happens?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "The request cannot be approved until screening succeeds.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "It is approved.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "It is rejected automatically.",
+        "correct": false
+      }
+    ],
+    "why": "Fail closed."
+  },
+  {
+    "id": "c-l-m4-4-1",
+    "module": "m4",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m4-4",
+    "refs": [
+      "b05-09"
+    ],
+    "stem": "A caller asks you to change a merchant's bank account. You say",
+    "options": [
+      {
+        "id": "o1",
+        "text": "it needs a written request in the portal and second-person approval.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "I will do it now.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Send it by chat.",
+        "correct": false
+      }
+    ],
+    "why": "Sensitive changes cannot be done by phone."
+  },
+  {
+    "id": "c-l-m4-4-2",
+    "module": "m4",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m4-4",
+    "refs": [
+      "b05-07"
+    ],
+    "stem": "A POS screen idle for how long is disconnected?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "15 minutes",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "1 minute",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "A week",
+        "correct": false
+      }
+    ],
+    "why": "The payment continues on the server."
+  },
+  {
+    "id": "c-l-m5-1-1",
+    "module": "m5",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m5-1",
+    "refs": [
+      "b07-01"
+    ],
+    "stem": "Which reference do you quote to a partner?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Our reference or the provider reference.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "The customer's name.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "The customer's phone.",
+        "correct": false
+      }
+    ],
+    "why": "References, never names."
+  },
+  {
+    "id": "c-l-m5-1-2",
+    "module": "m5",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m5-1",
+    "refs": [
+      "b07-01"
+    ],
+    "stem": "The pinned configuration of an attempt",
+    "options": [
+      {
+        "id": "o1",
+        "text": "never changes for that attempt.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "updates whenever a gateway is edited.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "is chosen by the customer.",
+        "correct": false
+      }
+    ],
+    "why": "It records the version, route, credentials and profile it started with."
+  },
+  {
+    "id": "c-l-m5-2-1",
+    "module": "m5",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m5-2",
+    "refs": [
+      "b07-02"
+    ],
+    "stem": "How many payment states are there?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "14",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "13",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "5",
+        "correct": false
+      }
+    ],
+    "why": "The code has 14."
+  },
+  {
+    "id": "c-l-m5-2-2",
+    "module": "m5",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m5-2",
+    "refs": [
+      "b07-02"
+    ],
+    "stem": "Which state keeps the link slot reserved?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "UNKNOWN",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "FAILED",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "CANCELLED",
+        "correct": false
+      }
+    ],
+    "why": "The first payment might have succeeded."
+  },
+  {
+    "id": "c-l-m5-3-1",
+    "module": "m5",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m5-3",
+    "refs": [
+      "b07-03"
+    ],
+    "stem": "First action on an UNKNOWN payment?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Press Inquire once and read the step log.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Mark it failed.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Ask the customer to pay again.",
+        "correct": false
+      }
+    ],
+    "why": "Inquire is read-only and cannot move money."
+  },
+  {
+    "id": "c-l-m5-3-2",
+    "module": "m5",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m5-3",
+    "refs": [
+      "b07-03"
+    ],
+    "stem": "You may resolve UNKNOWN by hand when",
+    "options": [
+      {
+        "id": "o1",
+        "text": "you have evidence from the partner and a second person.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "it is older than a day.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "the customer insists.",
+        "correct": false
+      }
+    ],
+    "why": "Evidence plus two people."
+  },
+  {
+    "id": "c-l-m5-4-1",
+    "module": "m5",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m5-4",
+    "refs": [
+      "b07-04"
+    ],
+    "stem": "Which case kind is priority 1 by definition?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "CONFLICT",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "MANUAL_REVIEW",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "UNMATCHED_STATEMENT",
+        "correct": false
+      }
+    ],
+    "why": "Two trusted sources disagree; nothing is posted."
+  },
+  {
+    "id": "c-l-m5-4-2",
+    "module": "m5",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m5-4",
+    "refs": [
+      "b07-09"
+    ],
+    "stem": "Bulk Inquiry should be limited to",
+    "options": [
+      {
+        "id": "o1",
+        "text": "the affected route and period.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "every route.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "the customer's choice.",
+        "correct": false
+      }
+    ],
+    "why": "It sends many calls to the partner."
+  },
+  {
+    "id": "c-l-m5-5-1",
+    "module": "m5",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m5-5",
+    "refs": [
+      "b07-07"
+    ],
+    "stem": "How many wrong OTP tries by default?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "3",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "1",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "10",
+        "correct": false
+      }
+    ],
+    "why": "The third wrong code fails the payment."
+  },
+  {
+    "id": "c-l-m5-5-2",
+    "module": "m5",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m5-5",
+    "refs": [
+      "b07-06"
+    ],
+    "stem": "A late confirmation arrives; the single-use link was already paid by another attempt. The money goes to",
+    "options": [
+      {
+        "id": "o1",
+        "text": "SUSPENSE, with a refund drafted.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "the merchant's wallet.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "TREASURY directly.",
+        "correct": false
+      }
+    ],
+    "why": "It does not belong to anyone yet."
+  },
+  {
+    "id": "c-l-m5-6-1",
+    "module": "m5",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m5-6",
+    "refs": [
+      "b07-12"
+    ],
+    "stem": "The status is FAILED but the customer says money was deducted. You",
+    "options": [
+      {
+        "id": "o1",
+        "text": "say no confirmed payment, ask them to keep the receipt, and open a case.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "refund immediately.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "ask them to pay again.",
+        "correct": false
+      }
+    ],
+    "why": "A late confirmation may still arrive; never refund on a call."
+  },
+  {
+    "id": "c-l-m5-6-2",
+    "module": "m5",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m5-6",
+    "refs": [
+      "b07-08"
+    ],
+    "stem": "A webhook says paid but the inquiry says failed. The payment",
+    "options": [
+      {
+        "id": "o1",
+        "text": "stays UNKNOWN with a P1 conflict case.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "becomes SUCCEEDED.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "becomes FAILED.",
+        "correct": false
+      }
+    ],
+    "why": "Neither trusted source wins."
+  },
+  {
+    "id": "c-l-m6-1-1",
+    "module": "m6",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m6-1",
+    "refs": [
+      "b08-01"
+    ],
+    "stem": "In every journal entry",
+    "options": [
+      {
+        "id": "o1",
+        "text": "total debits equal total credits.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "debits exceed credits.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "credits exceed debits.",
+        "correct": false
+      }
+    ],
+    "why": "Unbalanced entries are refused."
+  },
+  {
+    "id": "c-l-m6-1-2",
+    "module": "m6",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m6-1",
+    "refs": [
+      "b08-01"
+    ],
+    "stem": "How is a mistake in the ledger fixed?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "By a new approved entry that offsets it.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "By editing the number.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "By deleting the line.",
+        "correct": false
+      }
+    ],
+    "why": "The ledger is append-only."
+  },
+  {
+    "id": "c-l-m6-2-1",
+    "module": "m6",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m6-2",
+    "refs": [
+      "b08-02"
+    ],
+    "stem": "How many GL account kinds exist?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Eleven",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Ten",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Five",
+        "correct": false
+      }
+    ],
+    "why": "GATEWAY_FEE_EXPENSE is the eleventh."
+  },
+  {
+    "id": "c-l-m6-2-2",
+    "module": "m6",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m6-2",
+    "refs": [
+      "b08-05"
+    ],
+    "stem": "The ledger drift is expected to be",
+    "options": [
+      {
+        "id": "o1",
+        "text": "0.0000 LYD",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "small but positive",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "whatever it is",
+        "correct": false
+      }
+    ],
+    "why": "Any drift is a priority-1 incident."
+  },
+  {
+    "id": "c-l-m6-3-1",
+    "module": "m6",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m6-3",
+    "refs": [
+      "b08-03"
+    ],
+    "stem": "Commission is",
+    "options": [
+      {
+        "id": "o1",
+        "text": "what we charge the merchant.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "what the partner charges us.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "the customer's tip.",
+        "correct": false
+      }
+    ],
+    "why": "Gateway fee is our cost."
+  },
+  {
+    "id": "c-l-m6-3-2",
+    "module": "m6",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m6-3",
+    "refs": [
+      "b08-03"
+    ],
+    "stem": "Under PAYER_SURCHARGE on a 100 LYD link with 3 LYD commission, the customer pays",
+    "options": [
+      {
+        "id": "o1",
+        "text": "103",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "100",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "97",
+        "correct": false
+      }
+    ],
+    "why": "The merchant gets the full 100."
+  },
+  {
+    "id": "c-l-m6-4-1",
+    "module": "m6",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m6-4",
+    "refs": [
+      "b08-04"
+    ],
+    "stem": "A repeated webhook cannot double-credit because",
+    "options": [
+      {
+        "id": "o1",
+        "text": "each entry has a unique pair tying it to its payment.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "webhooks are never repeated.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "a human checks each.",
+        "correct": false
+      }
+    ],
+    "why": "The database refuses a second entry."
+  },
+  {
+    "id": "c-l-m6-4-2",
+    "module": "m6",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m6-4",
+    "refs": [
+      "b08-04"
+    ],
+    "stem": "An AML-held payment is posted to",
+    "options": [
+      {
+        "id": "o1",
+        "text": "AML_HOLD with no commission recognised.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "MERCHANT_WALLET.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "PLATFORM_INCOME.",
+        "correct": false
+      }
+    ],
+    "why": "Commission is recognised on release."
+  },
+  {
+    "id": "c-l-m6-5-1",
+    "module": "m6",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m6-5",
+    "refs": [
+      "b08-06"
+    ],
+    "stem": "Which reconciliation result is the most serious?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "MISSING_AT_GATEWAY",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "MATCHED",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "DUPLICATE",
+        "correct": false
+      }
+    ],
+    "why": "We may have credited money we did not receive."
+  },
+  {
+    "id": "c-l-m6-5-2",
+    "module": "m6",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m6-5",
+    "refs": [
+      "b08-06"
+    ],
+    "stem": "If a statement file does not match, you",
+    "options": [
+      {
+        "id": "o1",
+        "text": "find the cause; never edit the file.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "edit the file.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "ignore the lines.",
+        "correct": false
+      }
+    ],
+    "why": "Corrections are approved adjustments."
+  },
+  {
+    "id": "c-l-m6-6-1",
+    "module": "m6",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m6-6",
+    "refs": [
+      "b08-07"
+    ],
+    "stem": "Who approves the final subtraction of a cash-out?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "A different Finance user from the one who processed it.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "The same user.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "The merchant.",
+        "correct": false
+      }
+    ],
+    "why": "Two people."
+  },
+  {
+    "id": "c-l-m6-6-2",
+    "module": "m6",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m6-6",
+    "refs": [
+      "b08-08"
+    ],
+    "stem": "An executed adjustment was wrong. You",
+    "options": [
+      {
+        "id": "o1",
+        "text": "propose an offsetting adjustment.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "edit it.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "delete it.",
+        "correct": false
+      }
+    ],
+    "why": "Executed adjustments are never edited."
+  },
+  {
+    "id": "c-l-m6-7-1",
+    "module": "m6",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m6-7",
+    "refs": [
+      "b08-09"
+    ],
+    "stem": "Who approves a drafted chargeback?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "A human Finance checker.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "The system.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "The partner.",
+        "correct": false
+      }
+    ],
+    "why": "The system drafts but never approves."
+  },
+  {
+    "id": "c-l-m6-7-2",
+    "module": "m6",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m6-7",
+    "refs": [
+      "b08-13"
+    ],
+    "stem": "A chargeback would breach the merchant's negative-balance ceiling. What happens?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "It does not post and a P1 case opens.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "It posts anyway.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "It is dropped.",
+        "correct": false
+      }
+    ],
+    "why": "Finance chooses to collect, net or suspend."
+  },
+  {
+    "id": "c-l-m7-1-1",
+    "module": "m7",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m7-1",
+    "refs": [
+      "b09-01"
+    ],
+    "stem": "Which is a stage of money laundering?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Placement",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Promotion",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Reconciliation",
+        "correct": false
+      }
+    ],
+    "why": "Placement, layering, integration."
+  },
+  {
+    "id": "c-l-m7-1-2",
+    "module": "m7",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m7-1",
+    "refs": [
+      "b09-01"
+    ],
+    "stem": "Who is a sensor for suspicious activity?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Everyone.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Only the MLRO.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Only the system.",
+        "correct": false
+      }
+    ],
+    "why": "You report; Compliance investigates."
+  },
+  {
+    "id": "c-l-m7-2-1",
+    "module": "m7",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m7-2",
+    "refs": [
+      "b09-04"
+    ],
+    "stem": "Which rule type detects many payments just below a threshold?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "STRUCTURING",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "SINGLE_AMOUNT",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "RAIL",
+        "correct": false
+      }
+    ],
+    "why": "Splitting to avoid a threshold is structuring."
+  },
+  {
+    "id": "c-l-m7-2-2",
+    "module": "m7",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m7-2",
+    "refs": [
+      "b09-04"
+    ],
+    "stem": "Loosening an AML rule",
+    "options": [
+      {
+        "id": "o1",
+        "text": "never skips review.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "is immediate.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "needs no approval.",
+        "correct": false
+      }
+    ],
+    "why": "Only tightening may be immediate."
+  },
+  {
+    "id": "c-l-m7-3-1",
+    "module": "m7",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m7-3",
+    "refs": [
+      "b09-03"
+    ],
+    "stem": "Decide a possible match as a different person. Disposition?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "FALSE_POSITIVE, with a written rationale.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "TRUE_MATCH.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Ignore it.",
+        "correct": false
+      }
+    ],
+    "why": "Always record evidence."
+  },
+  {
+    "id": "c-l-m7-3-2",
+    "module": "m7",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m7-3",
+    "refs": [
+      "b09-05"
+    ],
+    "stem": "Who approves an AML case resolution?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "The MLRO.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "The analyst.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "The merchant.",
+        "correct": false
+      }
+    ],
+    "why": "Money moves only after approval."
+  },
+  {
+    "id": "c-l-m7-4-1",
+    "module": "m7",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m7-4",
+    "refs": [
+      "b09-07"
+    ],
+    "stem": "A PROVISIONAL reporting rule can",
+    "options": [
+      {
+        "id": "o1",
+        "text": "never produce a live filing.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "file after a day.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "file with approval.",
+        "correct": false
+      }
+    ],
+    "why": "The database refuses it."
+  },
+  {
+    "id": "c-l-m7-4-2",
+    "module": "m7",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m7-4",
+    "refs": [
+      "b09-06"
+    ],
+    "stem": "A confirmed sanctions match on an active merchant leads to",
+    "options": [
+      {
+        "id": "o1",
+        "text": "emergency suspension and frozen cash-out.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "a polite email.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "no action.",
+        "correct": false
+      }
+    ],
+    "why": "A suspicious-activity draft is created."
+  },
+  {
+    "id": "c-l-m7-5-1",
+    "module": "m7",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m7-5",
+    "refs": [
+      "b09-08"
+    ],
+    "stem": "A merchant asks if it is under investigation. You say",
+    "options": [
+      {
+        "id": "o1",
+        "text": "only the generic restriction sentence, and tell Compliance.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "yes.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "no.",
+        "correct": false
+      }
+    ],
+    "why": "Never confirm, deny or hint."
+  },
+  {
+    "id": "c-l-m7-5-2",
+    "module": "m7",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m7-5",
+    "refs": [
+      "b09-10"
+    ],
+    "stem": "You notice something suspicious. First step?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Write down the facts and tell Compliance the same day.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Warn the merchant.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Post it in chat.",
+        "correct": false
+      }
+    ],
+    "why": "Keep it confidential."
+  },
+  {
+    "id": "c-l-m8-1-1",
+    "module": "m8",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m8-1",
+    "refs": [
+      "b06-01"
+    ],
+    "stem": "Can a live gateway be edited in place?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "No. Editing creates a new draft version.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Yes, by Gateway Admins.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Yes, in the wizard.",
+        "correct": false
+      }
+    ],
+    "why": "Versions are immutable."
+  },
+  {
+    "id": "c-l-m8-1-2",
+    "module": "m8",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m8-1",
+    "refs": [
+      "b06-11"
+    ],
+    "stem": "A rail that was ever used is",
+    "options": [
+      {
+        "id": "o1",
+        "text": "blocked, never deleted.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "deleted.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "renamed.",
+        "correct": false
+      }
+    ],
+    "why": "History must remain."
+  },
+  {
+    "id": "c-l-m8-2-1",
+    "module": "m8",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m8-2",
+    "refs": [
+      "b06-07"
+    ],
+    "stem": "A return-URL says success. It is",
+    "options": [
+      {
+        "id": "o1",
+        "text": "a hint; we ask the partner.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "proof.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "ignored forever.",
+        "correct": false
+      }
+    ],
+    "why": "Hints make us ask."
+  },
+  {
+    "id": "c-l-m8-2-2",
+    "module": "m8",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m8-2",
+    "refs": [
+      "b06-07"
+    ],
+    "stem": "Weak channels are forced to",
+    "options": [
+      {
+        "id": "o1",
+        "text": "ask the partner before anything is believed.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "skip checks.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "pay faster.",
+        "correct": false
+      }
+    ],
+    "why": "must_inquire."
+  },
+  {
+    "id": "c-l-m8-3-1",
+    "module": "m8",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m8-3",
+    "refs": [
+      "b06-03"
+    ],
+    "stem": "A step that moves money must have retry policy",
+    "options": [
+      {
+        "id": "o1",
+        "text": "NEVER.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "SAFE.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "SAFE_WITH_COOLDOWN.",
+        "correct": false
+      }
+    ],
+    "why": "Retrying could pay twice."
+  },
+  {
+    "id": "c-l-m8-3-2",
+    "module": "m8",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m8-3",
+    "refs": [
+      "b06-08"
+    ],
+    "stem": "No status rule matches on a money step. Result?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "UNKNOWN.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "FAILED.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "SUCCEEDED.",
+        "correct": false
+      }
+    ],
+    "why": "When we do not understand we do not guess."
+  },
+  {
+    "id": "c-l-m8-4-1",
+    "module": "m8",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m8-4",
+    "refs": [
+      "b06-04"
+    ],
+    "stem": "A hex secret treated as text makes the signature",
+    "options": [
+      {
+        "id": "o1",
+        "text": "completely different.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "slightly different.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "the same.",
+        "correct": false
+      }
+    ],
+    "why": "Key encoding matters."
+  },
+  {
+    "id": "c-l-m8-4-2",
+    "module": "m8",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m8-4",
+    "refs": [
+      "b06-05"
+    ],
+    "stem": "A full card number is kept",
+    "options": [
+      {
+        "id": "o1",
+        "text": "in memory only for one call.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "in the database.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "in logs.",
+        "correct": false
+      }
+    ],
+    "why": "It needs a PCI scope review."
+  },
+  {
+    "id": "c-l-m8-5-1",
+    "module": "m8",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m8-5",
+    "refs": [
+      "b06-12"
+    ],
+    "stem": "How many conditions must hold for a rail to be visible?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Nine.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Two.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "One.",
+        "correct": false
+      }
+    ],
+    "why": "Walk down the table."
+  },
+  {
+    "id": "c-l-m8-5-2",
+    "module": "m8",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m8-5",
+    "refs": [
+      "b06-11"
+    ],
+    "stem": "What trips the circuit breaker?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Partner faults, not customer mistakes.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Wrong OTPs.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Large amounts.",
+        "correct": false
+      }
+    ],
+    "why": "Customer mistakes never count."
+  },
+  {
+    "id": "c-l-m8-6-1",
+    "module": "m8",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m8-6",
+    "refs": [
+      "b06-14"
+    ],
+    "stem": "May you paste a real secret into the AI assistant?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Never.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Yes if masked.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Yes if sandbox only.",
+        "correct": false
+      }
+    ],
+    "why": "Give only credential names."
+  },
+  {
+    "id": "c-l-m8-6-2",
+    "module": "m8",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m8-6",
+    "refs": [
+      "b06-16"
+    ],
+    "stem": "How many go-live gates are there?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Twelve.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Five.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Twenty.",
+        "correct": false
+      }
+    ],
+    "why": "All must pass."
+  },
+  {
+    "id": "c-l-m9-1-1",
+    "module": "m9",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m9-1",
+    "refs": [
+      "b10-01"
+    ],
+    "stem": "The first incident principle is",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Stop the harm first, understand later.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Find who to blame.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Wait.",
+        "correct": false
+      }
+    ],
+    "why": "Pausing is reversible; a wrong payment is not."
+  },
+  {
+    "id": "c-l-m9-1-2",
+    "module": "m9",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m9-1",
+    "refs": [
+      "b10-03"
+    ],
+    "stem": "Signature failures spike. You must NOT",
+    "options": [
+      {
+        "id": "o1",
+        "text": "accept unsigned messages to get things moving.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "tell the Gateway Admin.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "check the inbox.",
+        "correct": false
+      }
+    ],
+    "why": "That is what an attacker wants."
+  },
+  {
+    "id": "c-l-m9-2-1",
+    "module": "m9",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m9-2",
+    "refs": [
+      "b10-05"
+    ],
+    "stem": "Ledger drift stops",
+    "options": [
+      {
+        "id": "o1",
+        "text": "automatic payouts.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "logins.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "sandbox.",
+        "correct": false
+      }
+    ],
+    "why": "Resume only when the drift is zero."
+  },
+  {
+    "id": "c-l-m9-2-2",
+    "module": "m9",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m9-2",
+    "refs": [
+      "b10-06"
+    ],
+    "stem": "A credential set turns FAILING. The route is",
+    "options": [
+      {
+        "id": "o1",
+        "text": "removed from selection.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "promoted.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "deleted.",
+        "correct": false
+      }
+    ],
+    "why": "Replace the secret with two-person approval and run the credential check."
+  },
+  {
+    "id": "c-l-m9-3-1",
+    "module": "m9",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m9-3",
+    "refs": [
+      "b10-09"
+    ],
+    "stem": "You made a mistake. First step?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Stop and tell your manager.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Click more to hide it.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Wait.",
+        "correct": false
+      }
+    ],
+    "why": "Reporting quickly is never punished."
+  },
+  {
+    "id": "c-l-m9-3-2",
+    "module": "m9",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m9-3",
+    "refs": [
+      "b10-08"
+    ],
+    "stem": "What belongs in a handover note?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "What is open, what you tried, what you wait for, risks, promises.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Your password.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Nothing.",
+        "correct": false
+      }
+    ],
+    "why": "Never hand over a secret."
+  },
+  {
+    "id": "c-l-m10-1-1",
+    "module": "m10",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m10-1",
+    "refs": [
+      "b11-02"
+    ],
+    "stem": "Someone phones asking for your one-time code. You",
+    "options": [
+      {
+        "id": "o1",
+        "text": "refuse and report it.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "give it.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "give half.",
+        "correct": false
+      }
+    ],
+    "why": "Nobody legitimate asks."
+  },
+  {
+    "id": "c-l-m10-1-2",
+    "module": "m10",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m10-1",
+    "refs": [
+      "b11-03"
+    ],
+    "stem": "Where may you use the Back Office?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Office network or approved VPN.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Any café.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "A shared PC.",
+        "correct": false
+      }
+    ],
+    "why": "It is LAN-only by design."
+  },
+  {
+    "id": "c-l-m10-2-1",
+    "module": "m10",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m10-2",
+    "refs": [
+      "b11-04"
+    ],
+    "stem": "Which is safe to send in chat about a payment?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "The reference.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "The customer's phone number.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "A token.",
+        "correct": false
+      }
+    ],
+    "why": "Quote references, not personal data."
+  },
+  {
+    "id": "c-l-m10-2-2",
+    "module": "m10",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m10-2",
+    "refs": [
+      "b11-05"
+    ],
+    "stem": "A merchant offers a gift. You",
+    "options": [
+      {
+        "id": "o1",
+        "text": "refuse and report.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "accept.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "accept later.",
+        "correct": false
+      }
+    ],
+    "why": "Never accept gifts or favours."
+  },
+  {
+    "id": "c-l-m10-3-1",
+    "module": "m10",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m10-3",
+    "refs": [
+      "b12-03"
+    ],
+    "stem": "Where does the certificate authority's private key stay?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "On the deployment workstation.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "On every server.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "On the checkout host.",
+        "correct": false
+      }
+    ],
+    "why": "The core gets only the authority's public certificate."
+  },
+  {
+    "id": "c-l-m10-3-2",
+    "module": "m10",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m10-3",
+    "refs": [
+      "b12-06"
+    ],
+    "stem": "Fake Rails must",
+    "options": [
+      {
+        "id": "o1",
+        "text": "never run in production.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "run in production.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "hold live secrets.",
+        "correct": false
+      }
+    ],
+    "why": "It imitates payment companies for drills."
+  }
+]

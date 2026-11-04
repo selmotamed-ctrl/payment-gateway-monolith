@@ -251,8 +251,9 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | `GET /finance/profitability`, `/export`, `GET /finance/route-caps`, `GET /finance/liquidity`, `/export`, `GET /finance/invariant-check`, `/export` | `finance:read` |
 | `GET /settings/checkout-support`, `/history`, `/summary`, `/summary/export` | `settings:read` |
 | `PUT /settings/checkout-support` | `settings:write`; direct versioned write |
-| `GET /academy/progress`, `PUT /academy/progress` | authenticated; current user only |
-| `GET /academy/progress/overview`, `/summary`, `/export`, `/summary/export` | `user:read` |
+| `GET /academy/progress`, `PUT /academy/progress` | authenticated back-office user; current user only (`{ baseRev, patch }`, `rev`, 409 on stale) |
+| `GET /academy/exams/:examId/eligibility`, `POST /academy/exams/:examId/start`, `POST /academy/exams/:examId/submit` | authenticated back-office user; server-graded (see `03-admin-front/03-guide-and-academy.md` §7.4) |
+| `GET /academy/team` | role `SECURITY_ADMIN`; audited `ACADEMY_TEAM_VIEWED` |
 | `GET /audit-logs`, `/export`, `/summary`, `/summary/export`, `GET /audit-logs/:id` | `security:read` |
 | `GET /settings` | `settings:read` |
 | `POST /settings/restore-preview` | `settings:read` |

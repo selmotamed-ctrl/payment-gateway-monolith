@@ -6,6 +6,9 @@ import { client } from "../../prisma/client";
 import { invalidationBus } from "../../lib/invalidationBus";
 import { createReconciliationUploadHandler } from "./reconciliationUpload";
 import { backupInternalRouter } from "./backups";
+import { academyInternalRouter } from "./academy";
+import { publicProgress } from "../../engine/academy/progress";
+import { loadCatalog } from "../../engine/academy/catalog";
 import { getPlatformRuntime } from "../../engine/runtime";
 import { InvariantVerifier, naturalBalance } from "../../engine/ledger/InvariantVerifier";
 import { moneyToString } from "../../engine/db/money";
@@ -680,6 +683,7 @@ router.get("/auth/me", (_request: Request, response: Response) => {
 
 router.use(requireAuthentication);
 router.use("/system/backups", backupInternalRouter);
+router.use("/academy", academyInternalRouter);
 
 router.post("/search", async (request: Request, response: Response) => {
   response.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -1278,7 +1282,11 @@ router.get("/users/:id", async (request: Request, response: Response) => {
       },
     }),
   ]);
-  response.json({ user, approvalHistory, auditTrail });
+  response.json({
+    user: { ...user, academyProgressJson: publicProgress(user.academyProgressJson, loadCatalog(), new Date()) },
+    approvalHistory,
+    auditTrail,
+  });
 });
 
 router.post("/users", async (request: Request, response: Response) => {
@@ -15356,231 +15364,6 @@ router.put("/settings/checkout-support", async (request: Request, response: Resp
     },
   });
   response.json({ key: CHECKOUT_SUPPORT_KEY, value: body.value, version: nextVersion });
-});
-
-/**
- * The Employee Academy progress of the authenticated admin.
- *
- * It is deliberately stored on the user row: management can see whether a new
- * hire completed the curriculum before granting `is_maker` / `is_checker`.
- */
-const academyLabResultSchema = z.strictObject({
-  passed: z.boolean(),
-  attempts: z.number().int().min(0).max(10000),
-  mistakesMade: z.array(z.string().max(240)).max(100),
-  completedAt: z.string().max(60),
-});
-
-const academyQuizResultSchema = z.strictObject({
-  scorePercent: z.number().min(0).max(100),
-  passed: z.boolean(),
-  completedAt: z.string().max(60),
-  answers: z.record(z.string().max(80), z.number().int().min(0).max(20)).optional(),
-});
-
-const academyProgressSchema = z
-  .strictObject({
-    // Legacy shape kept so older admin-front builds keep working.
-    completedModules: z.array(z.string().max(40)).max(40).default([]),
-    completedLabs: z.array(z.string().max(60)).max(100).default([]),
-    badges: z.array(z.string().max(60)).max(20).default([]),
-    // Zero-to-Hero academy shape.
-    completedLessonIds: z.array(z.string().max(80)).max(400).default([]),
-    completedLabIds: z.record(z.string().max(80), academyLabResultSchema).default({}),
-    earnedBadges: z.array(z.string().max(60)).max(20).default([]),
-    quizScores: z
-      .record(z.string().max(80), z.union([z.number().min(0).max(100), academyQuizResultSchema]))
-      .default({}),
-    lastModuleId: z.string().max(40).optional(),
-    guideRead: z
-      .record(
-        z.string().max(120),
-        z.object({ v: z.string().max(20), at: z.string().max(60) }).strict(),
-      )
-      .default({}),
-    updatedAt: z.string().max(40).optional(),
-  });
-
-router.get("/academy/progress", async (request: Request, response: Response) => {
-  const actor = actorFromRequest(request);
-  const user = await client.user.findUnique({ where: { id: actor.userId } });
-  if (!user) {
-    throw new ApiError(404, "USER_NOT_FOUND", "The user does not exist");
-  }
-  response.json({
-    userId: user.id,
-    progress: (user.academyProgressJson ?? {
-      completedModules: [],
-      quizScores: {},
-      completedLabs: [],
-      badges: [],
-      guideRead: {},
-    }) as unknown,
-  });
-});
-
-router.put("/academy/progress", async (request: Request, response: Response) => {
-  const actor = actorFromRequest(request);
-  const body = parseOrThrow(z.strictObject({ progress: academyProgressSchema }).strict(), request.body ?? {});
-  await client.user.update({
-    where: { id: actor.userId },
-    data: { academyProgressJson: json({ ...body.progress, updatedAt: new Date().toISOString() }) },
-  });
-  response.json({ userId: actor.userId, progress: body.progress });
-});
-
-/** Management view: the academy progress of every admin user. */
-const buildAcademyOverviewSummary = async () => {
-  const users = await client.user.findMany({
-    where: { merchantId: null },
-    select: { role: true, academyProgressJson: true },
-  });
-  const since = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  const byRole: Record<string, number> = {};
-  let usersWithProgress = 0;
-  let completedModules = 0;
-  let completedLessons = 0;
-  let completedLabs = 0;
-  let earnedBadges = 0;
-  let quizScores = 0;
-  let activeLast7d = 0;
-  for (const user of users) {
-    const progress = user.academyProgressJson && typeof user.academyProgressJson === "object" && !Array.isArray(user.academyProgressJson)
-      ? user.academyProgressJson as Record<string, unknown>
-      : null;
-    if (!progress) continue;
-    const hasProgress = (Array.isArray(progress.completedModules) && progress.completedModules.length > 0)
-      || (Array.isArray(progress.completedLessonIds) && progress.completedLessonIds.length > 0)
-      || (progress.completedLabIds && typeof progress.completedLabIds === "object" && Object.keys(progress.completedLabIds as object).length > 0)
-      || (Array.isArray(progress.earnedBadges) && progress.earnedBadges.length > 0)
-      || (progress.quizScores && typeof progress.quizScores === "object" && Object.keys(progress.quizScores as object).length > 0)
-      || (progress.guideRead && typeof progress.guideRead === "object" && Object.keys(progress.guideRead as object).length > 0);
-    if (!hasProgress) continue;
-    usersWithProgress += 1;
-    byRole[user.role] = (byRole[user.role] ?? 0) + 1;
-    completedModules += Array.isArray(progress.completedModules) ? progress.completedModules.length : 0;
-    completedLessons += Array.isArray(progress.completedLessonIds) ? progress.completedLessonIds.length : 0;
-    completedLabs += progress.completedLabIds && typeof progress.completedLabIds === "object" ? Object.keys(progress.completedLabIds as object).length : 0;
-    earnedBadges += Array.isArray(progress.earnedBadges) ? progress.earnedBadges.length : 0;
-    quizScores += progress.quizScores && typeof progress.quizScores === "object" ? Object.keys(progress.quizScores as object).length : 0;
-    const updatedAt = typeof progress.updatedAt === "string" ? new Date(progress.updatedAt).getTime() : NaN;
-    if (Number.isFinite(updatedAt) && updatedAt >= since) activeLast7d += 1;
-  }
-  return {
-    summary: {
-      totalUsers: users.length,
-      usersWithProgress,
-      notStarted: users.length - usersWithProgress,
-      completedModules,
-      completedLessons,
-      completedLabs,
-      earnedBadges,
-      quizScores,
-      activeLast7d,
-      byRole,
-    },
-  };
-};
-
-router.get("/academy/progress/overview/summary", async (request: Request, response: Response) => {
-  requireAuthorities(request, ["user:read"]);
-  response.json(await buildAcademyOverviewSummary());
-});
-
-router.get("/academy/progress/overview/summary/export", async (request: Request, response: Response) => {
-  requireAuthorities(request, ["user:read"]);
-  const snapshot = await buildAcademyOverviewSummary();
-  const actor = actorFromRequest(request);
-  const allowedChecklist = new Set([
-    "TEAM_SCOPE_VERIFIED",
-    "PRIVACY_REVIEWED",
-    "PROGRESS_DATA_REVIEWED",
-    "EXPORT_APPROVAL_CONFIRMED",
-  ]);
-  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
-    .map((entry) => entry.trim())
-    .filter((entry) => allowedChecklist.has(entry));
-  await writeAudit(client, {
-    data: {
-      actorId: actor.userId,
-      role: actor.role ?? "UNKNOWN",
-      action: "ACADEMY_SUMMARY_EXPORTED",
-      entityType: "USER",
-      entityId: "academy-summary",
-      beforeJson: {},
-      afterJson: {
-        totalUsers: snapshot.summary.totalUsers,
-        usersWithProgress: snapshot.summary.usersWithProgress,
-        completedModules: snapshot.summary.completedModules,
-        earnedBadges: snapshot.summary.earnedBadges,
-        activeLast7d: snapshot.summary.activeLast7d,
-        checklist,
-      },
-    },
-  });
-  response.json({ ...snapshot, exportedAt: new Date().toISOString() });
-});
-
-router.get("/academy/progress/overview", async (request: Request, response: Response) => {
-  requireAuthorities(request, ["user:read"]);
-  const users = await client.user.findMany({
-    where: { merchantId: null },
-    select: { id: true, email: true, role: true, academyProgressJson: true, isMaker: true, isChecker: true },
-    orderBy: { email: "asc" },
-  });
-  response.json({
-    users: users.map((user) => ({
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      isMaker: user.isMaker,
-      isChecker: user.isChecker,
-      progress: user.academyProgressJson ?? null,
-    })),
-  });
-});
-
-router.get("/academy/progress/overview/export", async (request: Request, response: Response) => {
-  requireAuthorities(request, ["user:read"]);
-  const users = await client.user.findMany({
-    where: { merchantId: null },
-    select: { id: true, email: true, role: true, academyProgressJson: true, isMaker: true, isChecker: true },
-    orderBy: { email: "asc" },
-    take: 5000,
-  });
-  const actor = actorFromRequest(request);
-  const allowedChecklist = new Set([
-    "TEAM_SCOPE_VERIFIED",
-    "PRIVACY_REVIEWED",
-    "PROGRESS_DATA_REVIEWED",
-    "EXPORT_APPROVAL_CONFIRMED",
-  ]);
-  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
-    .map((entry) => entry.trim())
-    .filter((entry) => allowedChecklist.has(entry));
-  await writeAudit(client, {
-    data: {
-      actorId: actor.userId,
-      role: actor.role ?? "UNKNOWN",
-      action: "ACADEMY_CERTIFICATIONS_EXPORTED",
-      entityType: "USER",
-      entityId: "academy-export",
-      beforeJson: {},
-      afterJson: { exported: users.length, checklist },
-    },
-  });
-  response.json({
-    users: users.map((user) => ({
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      isMaker: user.isMaker,
-      isChecker: user.isChecker,
-      progress: user.academyProgressJson ?? null,
-    })),
-    total: users.length,
-    exported: users.length,
-  });
 });
 
 const auditStoreParamsFromRequest = (

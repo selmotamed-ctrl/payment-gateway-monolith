@@ -194,7 +194,7 @@ Unlike the base generators, this enrichment uses the real Vault.
 - key `synthetic.seed.completed:<seedKey>`;
 - value includes seed key, namespace, profile, years span, completion time and optional attempt/journal/drift counts.
 
-`runSyntheticSeeder` checks `findCompletedSeedRun` before the safety gate. A completed key is skipped with a message. A failed or interrupted run never writes the marker. `recordCompletedSeedRun` upserts version 1.
+`runSyntheticSeeder` checks `findCompletedSeedRun` before the safety gate. A completed key is skipped with a message. `findOtherCompletedSeedRun` (2026-11-04) also skips, with an explanatory message, when a completed run exists under a *different* key in the same namespace: generated rows carry key-independent unique values (emails), so a second history cannot be layered (`skipDuplicates` drops the colliding parents and children then fail their FKs, e.g. `user_identities_user_id_fkey`). Keep the existing key or reset the database to reseed. A failed or interrupted run never writes the marker. `recordCompletedSeedRun` upserts version 1.
 
 ### 3.11 Post-seed audit
 

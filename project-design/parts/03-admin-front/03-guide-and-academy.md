@@ -7,32 +7,52 @@ last_verified: 2026-11-04
 verified_against: working-tree
 code:
   - admin-front/scripts/extract-guide-content.ts
+  - admin-front/scripts/extract-academy-content.ts
   - admin-front/src/content/guide/**
   - admin-front/src/components/guide/**
   - admin-front/src/pages/guide/**
   - admin-front/src/content/academy/**
+  - admin-front/src/components/academy/**
   - admin-front/src/pages/academy/**
+  - admin-front/src/constants/i18nAcademy/**
   - admin-back/api/protected/academy.ts
-  - core-back/api/internal/admin.ts
+  - core-back/api/internal/academy.ts
+  - core-back/engine/academy/**
+  - core-back/content/academy/**
 design_sources:
   - design/07-guides-and-academy/guide_system_design_and_content.md
   - design/07-guides-and-academy/academy_system_design_and_content.md
+  - design/07-guides-and-academy/academy_content_fixes.md
+  - design/07-guides-and-academy/academy_content_questions.md
   - design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md
 tests:
   - tests/unit/guide-content.test.ts
   - tests/unit/guide-search.test.ts
   - tests/unit/guide-widgets.test.ts
+  - tests/unit/academy-content.test.ts
+  - tests/unit/academy-lab-scoring.test.ts
+  - tests/unit/academy-progress-merge.test.ts
+  - tests/unit/academy-next-step.test.ts
   - tests/e2e/admin/guide-reader.spec.ts
   - tests/e2e/admin/guide-palette.spec.ts
   - tests/e2e/admin/guide-context.spec.ts
   - tests/e2e/admin/guide-safeguard.spec.ts
+  - tests/e2e/admin/academy-learning.spec.ts
+  - tests/e2e/admin/academy-lab.spec.ts
+  - tests/e2e/admin/academy-exam.spec.ts
+  - tests/e2e/admin/academy-team.spec.ts
+  - tests/e2e/admin/academy-a11y.spec.ts
   - admin-front/src/content/__tests__/content-completeness.test.ts
+  - core-back/test/academy-exam-engine.test.ts
+  - core-back/test/academy-progress.test.ts
+  - core-back/test/academy-team.test.ts
   - admin-back/test/academy-progress.test.ts
 gaps:
-  - The Arabic article set (`articles.ar.json`) is not supplied; the loader falls back to English and the reader shows an "Arabic version pending" chip.
-  - Academy mastery and certification are computed in the browser; the backend accepts the posted progress JSON and does not independently grade quizzes or labs.
-  - There is no server-issued certificate or immutable certification registry beyond the progress JSON and export audit.
-  - Current label mismatches and two safeguard cards with no matching UI action are recorded in `design/07-guides-and-academy/guide_content_fixes.md` and `design/07-guides-and-academy/guide_content_questions.md`.
+  - The five Academy Playwright specs (`tests/e2e/admin/academy-*.spec.ts`) have been written and listed but not yet run against a live stack: they need a back-office account with a known password and MFA off (seeded accounts are `INVITED`, MFA required). The Prisma-backed academy store (compare-and-swap on `users.updated_at`) is exercised only through fake-store tests.
+  - The Arabic article set (`articles.ar.json`) is not supplied; the loader falls back to English and the reader shows an "Arabic version pending" chip. Academy lesson/lab/exam CONTENT is English only (spec I-2); the Academy UI chrome is bilingual.
+  - Labs are practice and are graded in the browser by design; their results are recorded but are not independently verified by the server. Only exams are server-graded.
+  - Academy content labels that do not match the built UI and behaviour doubts are recorded in `design/07-guides-and-academy/academy_content_fixes.md` and `academy_content_questions.md` (for example the unbuilt **Reverse** adjustment action and the Fake Rails drill labels, which follow the older Fake Rails design).
+  - Guide content label mismatches and two safeguard cards with no matching UI action are recorded in `guide_content_fixes.md` and `guide_content_questions.md`.
 ---
 
 # Admin Guide and Academy
@@ -42,7 +62,7 @@ gaps:
 This part owns two employee learning products in `admin-front`:
 
 - The Admin Interactive Guide at `/guide/**`: 14 books, 125 articles, glossary, safeguard cards, situation playbook, 140-case catalog, five simulators, reading paths, search palette, contextual help and read tracking.
-- The Employee Academy at `/academy`: lessons, labs, quizzes, mastery, badges, team reporting and XLSX exports.
+- The Employee Academy under `/academy/**`: eight tracks, lessons with practice checks, simulated labs, server-graded certification exams, 12-month badges, certificates and a `SECURITY_ADMIN` team view.
 
 It does not own the merchant guide or the checkout help center. The future-guide design is now implemented; its detailed implementation notes live in `06-guide-v2.md`.
 
@@ -108,17 +128,73 @@ Each tool has a Reset button, an explanation panel, bilingual labels and states 
 
 ## 6. Progress record
 
-Guide read tracking reuses the Academy progress JSON on the user row. `guideRead[articleId] = { v, at }` is merged into the existing Academy payload, so no migration is needed. The core and edge Zod schemas accept `guideRead`; the Academy page sends it back when persisting. The guide keeps a `pg.guide.read` `localStorage` mirror as an offline fallback and falls back to it if the progress API is unreachable.
+One JSON record per user in `users.academy_progress_json` (the column pre-dates the rebuild; no migration). It is shared by the Guide and the Academy.
 
-## 7. Academy
+```ts
+AcademyProgress { schema:1; rev; startedAt; updatedAt; contentVersion; activeTrack?; integrityAcceptedAt?;
+  guideRead: Record<articleId,{v,at}>; lessons: Record<lessonId,{at,v,checkScore:0|1|2}>;
+  labs: Record<labId,{bestScore,attempts,passedAt?,criticalErrors,v}>;
+  exams: Record<examId,{attempts[],open?,passedAt?,v}>; badges: {id,track,earnedAt,expiresAt,v}[] }
+```
 
-The Academy remains the zero-to-hero curriculum:
+- **Browser-writable keys** are only `guideRead`, `lessons`, `labs` and `activeTrack`, through `PUT /api/v1/admin/academy/progress` with `{ baseRev, patch }`. The server ignores `exams`, `badges`, `contentVersion`, `rev`, `schema`, `integrityAcceptedAt` and `_server` in a patch, and drops lesson/lab ids that are not in the catalog.
+- **Server-written keys** are `exams`, `badges`, `integrityAcceptedAt`, `rev`, `contentVersion`.
+- **Merge rules** (server `engine/academy/progress.ts` and client `components/academy/progressMerge.ts` agree): lessons keep the later `at`; labs keep the max `bestScore`/`attempts`, the earliest `passedAt`, and `criticalErrors`/`v` from the best entry; `guideRead` keeps the later `at`. Keys are never deleted: un-reading a Guide article writes a tombstone `{ v: "", at }`.
+- **Concurrency:** a stale `baseRev` returns `409 ACADEMY_REV_CONFLICT` with `details:{progress,rev}`; the client refetches, merges and retries once. `rev` also bumps on exam start/submit. The store compare-and-swaps on `User.updatedAt` (retry up to 4, then `ACADEMY_BUSY`).
+- **Server-only state** lives in the same JSON under the reserved key `_server` (open exam sessions with question ids and opaque option ids, previous attempt's question ids, attempt counters, last submitted session ids). `publicProgress()` is the only exit and strips it, including from `GET /users/:id`. Stored size limit 64 KB (`413 ACADEMY_PROGRESS_TOO_LARGE`).
+- **Legacy rows** (no `schema:1`, the pre-rebuild academy shape) are replaced by a fresh record that carries over only `guideRead`.
+- **Client:** `useAcademyProgress` keeps the last record and a queue of unsent patches in `localStorage["pg.academy.progress"]`; a failed save never blocks learning and shows a "not saved yet" indicator. `useGuideProgress` (the Guide's hook) is a thin layer over it and one-time migrates `pg.guide.read`.
 
-- 8 modules (M1–M8), 17 lessons, 8 labs with fatal options and 64 quiz questions (8 per module).
-- Six certification tracks including `MASTER_OPERATOR`.
-- Mastery requires all lessons, a passed lab and a 100% quiz.
-- Progress is stored on the user row; the team overview, summary and two XLSX exports require backend `user:read`.
-- Certification is a computed badge, not a server-issued certificate.
+## 7. Academy (rebuilt 2026-11-04)
+
+Specification: `design/07-guides-and-academy/academy_system_design_and_content.md` (Parts 0-II are the spec, Part III is the content; the file carries a dated repository note listing the reconciliations made during implementation).
+
+### 7.1 Content pipeline
+
+`admin-front/scripts/extract-academy-content.ts` (`bun scripts/extract-academy-content.ts`) parses only the `<!-- CONTENT:BEGIN -->` … `<!-- CONTENT:END -->` whole-line markers, validates every block and reference, deep-validates lab JSON, and writes deterministic output:
+
+| Output | Content | Audience |
+| :--- | :--- | :--- |
+| `admin-front/src/content/academy/generated/` | `meta`, `tracks`, `modules`, `lessons.en` (markdown `body`, rendered `html`, `plainText`), `checks.en` (98 practice questions WITH keys), `labs.en` (WITH keys), `drills.en`, `pages.en`, `lab-vectors`, `exam-blueprints.public` (no question ids) | browser |
+| `core-back/content/academy/exam-bank.json` | 218 exam-pool questions WITH keys + 8 blueprints | server only, never served |
+| `core-back/content/academy/catalog.json` | tracks → lesson/lab/exam ids, lesson/lab titles, badge ids; no questions | server (eligibility, team view) |
+
+Counts (asserted by `academy-content.test.ts`): 8 tracks, 11 modules, 49 lessons (20 Foundation + 29 role), 98 checks, 218 exam-pool questions (203 single, 13 number, 2 order; 40 critical), 15 labs / 86 tasks, 8 exams, 10 drills, 7 pages (+ `lab-vectors`). Generated output is ~75 KB gzipped (budget 600 KB). Exam-pool question ids never appear under `admin-front/src/content/academy/generated/`.
+
+### 7.2 Tracks, badges, routes
+
+`FOUNDATION` (everyone) plus one role track per back-office role (`OPERATOR`, `SUPPORT`, `FINANCE`, `COMPLIANCE`, `MLRO`, `GATEWAY_ADMIN`, `SECURITY_ADMIN`; the role enum and track ids coincide). A user's required tracks = Foundation + their role track. Badges last 12 months and show **Recertification required** when expired or when `meta.recertifyFrom` major is newer than the badge's `v`. Certification is evidence, not permission: nothing in the platform switches authorities on a badge.
+
+| Route name | Path | Notes |
+| :--- | :--- | :--- |
+| `AdminAcademy` | `/academy` | My learning: active track, **Continue**, rings, badges, Guide reading progress |
+| `AdminAcademyTracks` / `AdminAcademyTrack` | `/academy/tracks`, `/academy/track/:trackId` | modules, lesson/lab state, exam Locked (missing prerequisites in words) / Ready |
+| `AdminAcademyModule` / `AdminAcademyLesson` | `/academy/module/:moduleId`, `/academy/lesson/:lessonId` | lesson = body, Read now list, two checks, **Mark lesson complete** (needs both checks answered and every reading article opened or read) |
+| `AdminAcademyLab` | `/academy/lab/:labId` | lab runner |
+| `AdminAcademyExam` | `/academy/exam/:examId` | briefing → runner → result |
+| `AdminAcademyCertificate` | `/academy/certificate/:badgeId` | printable |
+| `AdminAcademyTeam` | `/academy/team` | `SECURITY_ADMIN` only (`routesRoles`, `admin-back`, `core-back`) |
+| `AdminAcademyHelp` | `/academy/help` | learner texts, trainer guide, optional live drills (staging only) |
+
+All ten route names are in the Guide context map's `Academy` screen. No route has an authority gate except Team.
+
+### 7.3 Labs (browser)
+
+`components/academy/labScoring.ts` is pure and unit-tested against the 18 published vectors. Six task kinds: choice, multi, ledger, order, checklist, numeric. Rules: hint costs 1 point (floor 0); multi `max(0,(right-wrong)/totalCorrect)`; ledger compares Decimal cells per expected line and penalises non-zero cells on unexpected accounts, with a live Balanced/NOT BALANCED badge; order partial credit rounded down to 1 decimal; any critical option/wrong id is a critical error. Lab score = round(100·earned/possible); pass = ≥ `passPercent` (80) and zero critical errors. Labs are deterministic (no shuffle, no timers), make no network calls except saving progress, and show a "TRAINING — nothing here is real" ribbon and a `SANDBOX` badge. `progress.labs` keeps best score, attempts, first pass and the critical-error count of the best attempt.
+
+### 7.4 Exams (server)
+
+Endpoints under `/api/v1/admin/academy/` (admin-back proxy → `core-back` `/internal/admin/academy/`): `GET progress`, `PUT progress`, `GET exams/:examId/eligibility`, `POST exams/:examId/start`, `POST exams/:examId/submit`, `GET team`. admin-back rate-limits 60 requests/minute per user (`429 ACADEMY_RATE_LIMITED`). Merchant principals get `403 ACADEMY_BACK_OFFICE_ONLY`.
+
+- **Eligibility:** role exams need a valid (not expired, not below `recertifyFrom`) Foundation badge; every lesson of the track completed; every lab of the track passed (`bestScore ≥ passPercent` and `criticalErrors == 0`, else `lab_critical`). Cooldown after a failed attempt (`cooldownMinutes`). After 3 consecutive failures each module below 70 % in the last attempt needs one of its lessons re-opened after that attempt. `missing[].text` names lessons and labs by title.
+- **Start** requires `{ integrityAccepted: true }` (records `integrityAcceptedAt`; `page-integrity` is shown in the briefing). One open session per user per exam; a live session is returned again (`resumed:true`) with the same questions and option ids. The set is built deterministically from `sha256(userId:examId:attemptNumber)` → mulberry32: per-module seeded shuffle preferring questions not in the previous attempt, a floor of `criticalPick` critical questions (swaps inside the same module), seeded order shuffles, opaque random option ids per session. Starting consumes the attempt number and remembers the set even if never submitted (an abandoned session cannot be replayed for free). The start payload has no `correct`, `critical`, explanation, notes or refs.
+- **Submit** grades 1 point per question (single/truefalse exact, multi all-or-nothing, order exact sequence, number `decimal.js` within tolerance, unanswered wrong). `scorePercent` rounds half up; pass = `scorePercent ≥ passPercent` and `criticalMissed == 0`. One submission per session (`422 ACADEMY_SESSION_USED`); a submit after expiry + 2 minutes is a failed attempt scored 0 (`expired:true`). A pass issues the track badge (`expiresAt` = +12 calendar months, replaces an older badge). Result items carry the answer, correct answer, `why`, option notes, refs and critical flag.
+- **Audit:** `ACADEMY_PROGRESS` (key counts), `ACADEMY_EXAM_STARTED`, `ACADEMY_EXAM_SUBMITTED` (score, pass, critical missed, attempt number only), `ACADEMY_BADGE_ISSUED`, `ACADEMY_TEAM_VIEWED`. Answers and question ids are never logged.
+- **Error codes:** 403 `ACADEMY_TEAM_FORBIDDEN`/`ACADEMY_BACK_OFFICE_ONLY`, 404 `ACADEMY_EXAM_NOT_FOUND`, 409 `ACADEMY_REV_CONFLICT`/`ACADEMY_BUSY`, 413 `ACADEMY_PROGRESS_TOO_LARGE`, 422 `ACADEMY_NOT_ELIGIBLE`/`ACADEMY_INTEGRITY_REQUIRED`/`ACADEMY_SESSION_EXPIRED`/`ACADEMY_SESSION_USED`.
+
+### 7.5 Team view
+
+`GET team` (`SECURITY_ADMIN` role, audited) returns one row per back-office user (`merchantId` null, status not `DISABLED`): name (email local part), role, maker/checker flags, required tracks, lessons/labs done vs required, badges with expiry, last activity and a status with precedence `RECERTIFICATION_REQUIRED` > `EXPIRING_SOON` (within 30 days) > `CERTIFIED` > `EXAM_READY` > `IN_PROGRESS` > `NOT_STARTED`. No question text, answers or per-question results. The page filters by role/status/search and exports the visible rows as CSV with a formula-injection guard.
 
 ## 8. Contracts and invariants
 
@@ -130,12 +206,16 @@ The Academy remains the zero-to-hero curriculum:
 6. Safeguards never replace existing confirmations or maker-checker rules.
 7. Opening contextual help must not reset the current form.
 8. The guide and Academy share one progress record; a save from either page preserves the other's fields.
+9. Exam keys, `critical` flags and explanations never reach the browser before submit; the browser cannot write `exams` or `badges`.
+10. The Academy never changes `is_maker`, `is_checker`, a role or an authority.
+11. Academy content is never retyped into TSX; labels are corrected only in the design file and logged in `academy_content_fixes.md`.
 
 ## 9. Verification
 
 ```bash
-cd admin-front && bun run content:guide && bun run type-check && bun run test:unit && bun run build
-cd ../tests && bun run test:unit
-cd ../tests && bunx playwright test --project=admin e2e/admin/guide-*.spec.ts
-cd ../admin-back && bun test test/academy-progress.test.ts test/admin-surface.test.ts
+cd admin-front && bun run content:guide && bun run content:academy && bun run type-check && bun run test:unit && bun run build
+cd ../tests && bunx vitest run unit/guide- unit/academy-
+cd ../core-back && bun run typecheck && bun test test/academy-
+cd ../admin-back && bun run typecheck && bun test test/academy-progress.test.ts test/admin-surface.test.ts
+cd ../tests && bunx playwright test --project=admin e2e/admin/guide-*.spec.ts e2e/admin/academy-*.spec.ts   # needs a deployed stack
 ```

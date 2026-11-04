@@ -1,0 +1,278 @@
+[
+  {
+    "id": "FOUNDATION",
+    "title": "Foundation (everyone)",
+    "badge": "FOUNDATION_CERTIFIED",
+    "hours": "9-12",
+    "requires": [],
+    "description": "What the platform is, how money moves, who may do what, the two-person rule, confidentiality, security habits. Everyone completes this before a role track.",
+    "moduleIds": [
+      "m0",
+      "m1",
+      "m2",
+      "m3",
+      "m7",
+      "m9",
+      "m10"
+    ],
+    "lessonIds": [
+      "l-m0-1",
+      "l-m0-2",
+      "l-m0-3",
+      "l-m1-1",
+      "l-m1-2",
+      "l-m1-3",
+      "l-m1-4",
+      "l-m1-5",
+      "l-m2-1",
+      "l-m2-2",
+      "l-m2-3",
+      "l-m3-1",
+      "l-m3-2",
+      "l-m3-3",
+      "l-m3-4",
+      "l-m7-1",
+      "l-m7-5",
+      "l-m9-3",
+      "l-m10-1",
+      "l-m10-2"
+    ],
+    "labIds": [
+      "lab-flow-tracer",
+      "lab-approval-desk",
+      "lab-security-desk"
+    ],
+    "examId": "exam-foundation"
+  },
+  {
+    "id": "OPERATOR",
+    "title": "Operator",
+    "badge": "CERTIFIED_OPERATOR",
+    "hours": "11-15",
+    "requires": [
+      "FOUNDATION"
+    ],
+    "description": "Join requests, KYB, payments in operation, UNKNOWN, cases, incidents.",
+    "moduleIds": [
+      "m4",
+      "m5",
+      "m6",
+      "m8",
+      "m9"
+    ],
+    "lessonIds": [
+      "l-m4-1",
+      "l-m4-2",
+      "l-m4-3",
+      "l-m4-4",
+      "l-m5-1",
+      "l-m5-2",
+      "l-m5-3",
+      "l-m5-4",
+      "l-m5-5",
+      "l-m5-6",
+      "l-m6-1",
+      "l-m6-2",
+      "l-m8-1",
+      "l-m8-2",
+      "l-m8-5",
+      "l-m9-1",
+      "l-m9-2"
+    ],
+    "labIds": [
+      "lab-kyb-desk",
+      "lab-payment-reading",
+      "lab-incident-unknown",
+      "lab-runbook-drill",
+      "lab-rails-visibility"
+    ],
+    "examId": "exam-operator"
+  },
+  {
+    "id": "SUPPORT",
+    "title": "Support agent",
+    "badge": "CERTIFIED_SUPPORT",
+    "hours": "6-7",
+    "requires": [
+      "FOUNDATION"
+    ],
+    "description": "Reading payments, answering customers and merchants safely, never revealing confidential reasons.",
+    "moduleIds": [
+      "m4",
+      "m5",
+      "m8"
+    ],
+    "lessonIds": [
+      "l-m4-1",
+      "l-m4-4",
+      "l-m5-1",
+      "l-m5-2",
+      "l-m5-3",
+      "l-m5-6",
+      "l-m8-5"
+    ],
+    "labIds": [
+      "lab-payment-reading",
+      "lab-customer-calls",
+      "lab-rails-visibility"
+    ],
+    "examId": "exam-support"
+  },
+  {
+    "id": "FINANCE",
+    "title": "Finance officer",
+    "badge": "CERTIFIED_FINANCE",
+    "hours": "10-13",
+    "requires": [
+      "FOUNDATION"
+    ],
+    "description": "The ledger, commission, reconciliation, cash-outs, adjustments, disputes, drift.",
+    "moduleIds": [
+      "m4",
+      "m5",
+      "m6",
+      "m9"
+    ],
+    "lessonIds": [
+      "l-m4-1",
+      "l-m5-1",
+      "l-m5-2",
+      "l-m5-3",
+      "l-m5-4",
+      "l-m5-6",
+      "l-m6-1",
+      "l-m6-2",
+      "l-m6-3",
+      "l-m6-4",
+      "l-m6-5",
+      "l-m6-6",
+      "l-m6-7",
+      "l-m9-2"
+    ],
+    "labIds": [
+      "lab-incident-unknown",
+      "lab-ledger-balancing",
+      "lab-cashout-adjustments",
+      "lab-reconciliation-desk"
+    ],
+    "examId": "exam-finance"
+  },
+  {
+    "id": "COMPLIANCE",
+    "title": "Compliance analyst",
+    "badge": "CERTIFIED_COMPLIANCE",
+    "hours": "5-7",
+    "requires": [
+      "FOUNDATION"
+    ],
+    "description": "KYB review, screening, rules, cases, restrictions, reporting, confidentiality.",
+    "moduleIds": [
+      "m4",
+      "m5",
+      "m7"
+    ],
+    "lessonIds": [
+      "l-m4-2",
+      "l-m4-3",
+      "l-m5-1",
+      "l-m7-2",
+      "l-m7-3",
+      "l-m7-4"
+    ],
+    "labIds": [
+      "lab-kyb-desk",
+      "lab-compliance-desk"
+    ],
+    "examId": "exam-compliance"
+  },
+  {
+    "id": "MLRO",
+    "title": "Money Laundering Reporting Officer",
+    "badge": "CERTIFIED_MLRO",
+    "hours": "5-6",
+    "requires": [
+      "FOUNDATION"
+    ],
+    "description": "Case approvals, emergency ratification, rule approval, regulatory reporting.",
+    "moduleIds": [
+      "m4",
+      "m7"
+    ],
+    "lessonIds": [
+      "l-m4-2",
+      "l-m7-2",
+      "l-m7-3",
+      "l-m7-4"
+    ],
+    "labIds": [
+      "lab-kyb-desk",
+      "lab-compliance-desk"
+    ],
+    "examId": "exam-mlro"
+  },
+  {
+    "id": "GATEWAY_ADMIN",
+    "title": "Gateway administrator",
+    "badge": "CERTIFIED_GATEWAY_ARCHITECT",
+    "hours": "10-13",
+    "requires": [
+      "FOUNDATION"
+    ],
+    "description": "Gateways, rails, routes, engine, signatures, amounts, wizard, AI import, gates, runbooks.",
+    "moduleIds": [
+      "m5",
+      "m8",
+      "m9",
+      "m10"
+    ],
+    "lessonIds": [
+      "l-m5-1",
+      "l-m5-3",
+      "l-m5-5",
+      "l-m8-1",
+      "l-m8-2",
+      "l-m8-3",
+      "l-m8-4",
+      "l-m8-5",
+      "l-m8-6",
+      "l-m9-1",
+      "l-m9-2",
+      "l-m10-3"
+    ],
+    "labIds": [
+      "lab-runbook-drill",
+      "lab-build-a-rail",
+      "lab-rails-visibility",
+      "lab-gate-review"
+    ],
+    "examId": "exam-gateway-admin"
+  },
+  {
+    "id": "SECURITY_ADMIN",
+    "title": "Security administrator",
+    "badge": "CERTIFIED_SECURITY_ADMIN",
+    "hours": "6-7",
+    "requires": [
+      "FOUNDATION"
+    ],
+    "description": "Approvals of gateway changes, deployment, certificates and secrets, incidents.",
+    "moduleIds": [
+      "m8",
+      "m9",
+      "m10"
+    ],
+    "lessonIds": [
+      "l-m8-1",
+      "l-m8-3",
+      "l-m8-6",
+      "l-m9-1",
+      "l-m9-2",
+      "l-m10-3"
+    ],
+    "labIds": [
+      "lab-runbook-drill",
+      "lab-gate-review"
+    ],
+    "examId": "exam-security-admin"
+  }
+]

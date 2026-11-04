@@ -6,6 +6,7 @@ import { auditInMemory } from "../prisma/syntheticSeeder/verify/postSeedAudit";
 import { postLedger } from "../prisma/syntheticSeeder/builders";
 import {
   findCompletedSeedRun,
+  findOtherCompletedSeedRun,
   recordCompletedSeedRun,
   seedRunKey,
   SYNTHETIC_SEED_SCOPE,
@@ -161,5 +162,16 @@ describe("synthetic seed run registry", () => {
     expect(found?.journalLines).toBe(351534);
     expect(found?.ledgerDrift).toBe("0.0000");
     expect(found?.completedAt).toBeString();
+  });
+
+  test("a completed run under another key (same namespace) is detected, other namespaces are not", async () => {
+    const rows = [
+      { valueJson: { seedKey: "other", namespace: "legacy", profile: "COMPACT", completedAt: "2026-11-01" } },
+      { valueJson: { seedKey: "libya-pg-2023-2026", namespace: "synthv1", profile: "COMPACT", completedAt: "2026-11-03" } },
+    ];
+    const prisma = { platformSetting: { findMany: async () => rows } } as never;
+    const found = await findOtherCompletedSeedRun(prisma, "pg-dev-new", "synthv1");
+    expect(found?.seedKey).toBe("libya-pg-2023-2026");
+    await expect(findOtherCompletedSeedRun({ platformSetting: { findMany: async () => [] } } as never, "x", "synthv1")).resolves.toBeNull();
   });
 });

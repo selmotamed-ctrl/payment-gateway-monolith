@@ -1,0 +1,547 @@
+{
+  "vectors": [
+    {
+      "id": "LV1",
+      "name": "choice correct",
+      "task": {
+        "kind": "choice",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "correct": true
+          },
+          {
+            "id": "b",
+            "correct": false
+          }
+        ]
+      },
+      "answer": {
+        "selected": "a"
+      },
+      "expectedScore": "10",
+      "criticalError": false
+    },
+    {
+      "id": "LV2",
+      "name": "choice wrong",
+      "task": {
+        "kind": "choice",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "correct": true
+          },
+          {
+            "id": "b",
+            "correct": false
+          }
+        ]
+      },
+      "answer": {
+        "selected": "b"
+      },
+      "expectedScore": "0",
+      "criticalError": false
+    },
+    {
+      "id": "LV3",
+      "name": "choice critical option",
+      "task": {
+        "kind": "choice",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "correct": true
+          },
+          {
+            "id": "b",
+            "correct": false,
+            "critical": true
+          }
+        ]
+      },
+      "answer": {
+        "selected": "b"
+      },
+      "expectedScore": "0",
+      "criticalError": true
+    },
+    {
+      "id": "LV4",
+      "name": "multi 3 right 1 wrong of 5",
+      "task": {
+        "kind": "multi",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "correct": true
+          },
+          {
+            "id": "b",
+            "correct": true
+          },
+          {
+            "id": "c",
+            "correct": true
+          },
+          {
+            "id": "d",
+            "correct": true
+          },
+          {
+            "id": "e",
+            "correct": true
+          },
+          {
+            "id": "f",
+            "correct": false
+          }
+        ]
+      },
+      "answer": {
+        "selected": [
+          "a",
+          "b",
+          "c",
+          "f"
+        ]
+      },
+      "expectedScore": "4",
+      "criticalError": false
+    },
+    {
+      "id": "LV5",
+      "name": "multi never below zero",
+      "task": {
+        "kind": "multi",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "correct": true
+          },
+          {
+            "id": "b",
+            "correct": true
+          },
+          {
+            "id": "c",
+            "correct": false
+          },
+          {
+            "id": "d",
+            "correct": false
+          }
+        ]
+      },
+      "answer": {
+        "selected": [
+          "c",
+          "d"
+        ]
+      },
+      "expectedScore": "0",
+      "criticalError": false
+    },
+    {
+      "id": "LV6",
+      "name": "multi critical wrong",
+      "task": {
+        "kind": "multi",
+        "points": 10,
+        "criticalWrong": [
+          "d"
+        ],
+        "options": [
+          {
+            "id": "a",
+            "correct": true
+          },
+          {
+            "id": "b",
+            "correct": true
+          },
+          {
+            "id": "c",
+            "correct": false
+          },
+          {
+            "id": "d",
+            "correct": false
+          }
+        ]
+      },
+      "answer": {
+        "selected": [
+          "a",
+          "b",
+          "d"
+        ]
+      },
+      "expectedScore": "5",
+      "criticalError": true
+    },
+    {
+      "id": "LV7",
+      "name": "ledger 4 of 5 lines right and 1 extra cell",
+      "task": {
+        "kind": "ledger",
+        "points": 15,
+        "accounts": [
+          "GATEWAY_CLEARING",
+          "GATEWAY_FEE_EXPENSE",
+          "MERCHANT_WALLET",
+          "PLATFORM_INCOME",
+          "GATEWAY_FEE_ACCRUAL",
+          "TREASURY"
+        ],
+        "expected": [
+          {
+            "account": "GATEWAY_CLEARING",
+            "side": "DR",
+            "amount": "103.0000"
+          },
+          {
+            "account": "GATEWAY_FEE_EXPENSE",
+            "side": "DR",
+            "amount": "0.8000"
+          },
+          {
+            "account": "MERCHANT_WALLET",
+            "side": "CR",
+            "amount": "100.0000"
+          },
+          {
+            "account": "PLATFORM_INCOME",
+            "side": "CR",
+            "amount": "3.0000"
+          },
+          {
+            "account": "GATEWAY_FEE_ACCRUAL",
+            "side": "CR",
+            "amount": "0.8000"
+          }
+        ]
+      },
+      "answer": {
+        "cells": {
+          "GATEWAY_CLEARING": {
+            "DR": "103"
+          },
+          "GATEWAY_FEE_EXPENSE": {
+            "DR": "0.8"
+          },
+          "MERCHANT_WALLET": {
+            "CR": "100"
+          },
+          "PLATFORM_INCOME": {
+            "CR": "3"
+          },
+          "GATEWAY_FEE_ACCRUAL": {
+            "CR": "0.9"
+          },
+          "TREASURY": {
+            "DR": "5"
+          }
+        }
+      },
+      "expectedScore": "9",
+      "criticalError": false,
+      "note": "Matched lines: 4 (the accrual 0.9 is wrong). Extra non-zero cells: 1 (TREASURY). (4-1)/5 x 15 = 9."
+    },
+    {
+      "id": "LV8",
+      "name": "ledger perfect, balanced",
+      "task": {
+        "kind": "ledger",
+        "points": 15,
+        "accounts": [
+          "TREASURY",
+          "GATEWAY_FEE_ACCRUAL",
+          "GATEWAY_CLEARING"
+        ],
+        "expected": [
+          {
+            "account": "TREASURY",
+            "side": "DR",
+            "amount": "99.2000"
+          },
+          {
+            "account": "GATEWAY_FEE_ACCRUAL",
+            "side": "DR",
+            "amount": "0.8000"
+          },
+          {
+            "account": "GATEWAY_CLEARING",
+            "side": "CR",
+            "amount": "100.0000"
+          }
+        ]
+      },
+      "answer": {
+        "cells": {
+          "TREASURY": {
+            "DR": "99.20"
+          },
+          "GATEWAY_FEE_ACCRUAL": {
+            "DR": "0.80"
+          },
+          "GATEWAY_CLEARING": {
+            "CR": "100"
+          }
+        }
+      },
+      "expectedScore": "15",
+      "criticalError": false
+    },
+    {
+      "id": "LV9",
+      "name": "order 4 of 6 positions right",
+      "task": {
+        "kind": "order",
+        "points": 12,
+        "correctOrder": [
+          "a",
+          "b",
+          "c",
+          "d",
+          "e",
+          "f"
+        ]
+      },
+      "answer": {
+        "order": [
+          "a",
+          "b",
+          "c",
+          "d",
+          "f",
+          "e"
+        ]
+      },
+      "expectedScore": "8.0",
+      "criticalError": false,
+      "note": "Positions 1-4 are right; 5 and 6 are swapped: 4/6 x 12 = 8.0."
+    },
+    {
+      "id": "LV10",
+      "name": "order exact",
+      "task": {
+        "kind": "order",
+        "points": 12,
+        "correctOrder": [
+          "a",
+          "b",
+          "c"
+        ]
+      },
+      "answer": {
+        "order": [
+          "a",
+          "b",
+          "c"
+        ]
+      },
+      "expectedScore": "12",
+      "criticalError": false
+    },
+    {
+      "id": "LV11",
+      "name": "checklist 5 of 6 items right",
+      "task": {
+        "kind": "checklist",
+        "points": 10,
+        "items": [
+          {
+            "id": "1",
+            "shouldTick": true
+          },
+          {
+            "id": "2",
+            "shouldTick": true
+          },
+          {
+            "id": "3",
+            "shouldTick": true
+          },
+          {
+            "id": "4",
+            "shouldTick": true
+          },
+          {
+            "id": "5",
+            "shouldTick": false
+          },
+          {
+            "id": "6",
+            "shouldTick": true
+          }
+        ]
+      },
+      "answer": {
+        "ticked": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6"
+        ]
+      },
+      "expectedScore": "8.3333",
+      "criticalError": false
+    },
+    {
+      "id": "LV12",
+      "name": "checklist critical item ticked",
+      "task": {
+        "kind": "checklist",
+        "points": 10,
+        "criticalWrong": [
+          "5"
+        ],
+        "items": [
+          {
+            "id": "1",
+            "shouldTick": true
+          },
+          {
+            "id": "5",
+            "shouldTick": false
+          }
+        ]
+      },
+      "answer": {
+        "ticked": [
+          "1",
+          "5"
+        ]
+      },
+      "expectedScore": "5",
+      "criticalError": true
+    },
+    {
+      "id": "LV13",
+      "name": "numeric exact",
+      "task": {
+        "kind": "numeric",
+        "points": 10,
+        "answer": "-57.0000",
+        "tolerance": "0"
+      },
+      "answer": {
+        "value": "-57"
+      },
+      "expectedScore": "10",
+      "criticalError": false
+    },
+    {
+      "id": "LV14",
+      "name": "numeric wrong",
+      "task": {
+        "kind": "numeric",
+        "points": 10,
+        "answer": "10500",
+        "tolerance": "0"
+      },
+      "answer": {
+        "value": "10.5"
+      },
+      "expectedScore": "0",
+      "criticalError": false
+    },
+    {
+      "id": "LV15",
+      "name": "hint costs one point",
+      "task": {
+        "kind": "choice",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "correct": true
+          }
+        ]
+      },
+      "answer": {
+        "selected": "a",
+        "hintUsed": true
+      },
+      "expectedScore": "9",
+      "criticalError": false
+    },
+    {
+      "id": "LV16",
+      "name": "lab pass needs 80 and no critical error",
+      "labTasks": [
+        {
+          "points": 10,
+          "score": "10"
+        },
+        {
+          "points": 10,
+          "score": "10"
+        },
+        {
+          "points": 10,
+          "score": "10"
+        },
+        {
+          "points": 10,
+          "score": "10"
+        },
+        {
+          "points": 10,
+          "score": "0"
+        }
+      ],
+      "criticalErrors": 0,
+      "expectedLabScore": 80,
+      "expectedPassed": true
+    },
+    {
+      "id": "LV17",
+      "name": "high score but a critical error fails",
+      "labTasks": [
+        {
+          "points": 10,
+          "score": "10"
+        },
+        {
+          "points": 10,
+          "score": "10"
+        }
+      ],
+      "criticalErrors": 1,
+      "expectedLabScore": 100,
+      "expectedPassed": false
+    },
+    {
+      "id": "LV18",
+      "name": "lab score rounds half up",
+      "labTasks": [
+        {
+          "points": 12,
+          "score": "10"
+        },
+        {
+          "points": 12,
+          "score": "10"
+        },
+        {
+          "points": 12,
+          "score": "10"
+        }
+      ],
+      "criticalErrors": 0,
+      "expectedLabScore": 83,
+      "expectedPassed": true,
+      "note": "30/36 = 83.33 rounds to 83."
+    }
+  ]
+}

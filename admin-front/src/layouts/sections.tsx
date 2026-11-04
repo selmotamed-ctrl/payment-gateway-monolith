@@ -59,6 +59,7 @@ export const routesRoles: {
     AmlScreenings: ["COMPLIANCE", "MLRO"],
     AmlRules: ["COMPLIANCE", "MLRO"],
     AmlReports: ["COMPLIANCE", "MLRO"],
+    AdminAcademyTeam: ["SECURITY_ADMIN"],
 };
 
 export const useSections = () => {

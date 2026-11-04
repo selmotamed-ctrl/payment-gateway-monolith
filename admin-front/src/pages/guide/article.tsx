@@ -7,6 +7,7 @@ import { ArticleToc } from "@/components/guide/ArticleToc";
 import { ReadToggle } from "@/components/guide/ReadToggle";
 import { UiStatusBanner } from "@/components/guide/UiStatusBanner";
 import { useGuideProgress } from "@/components/guide/useGuideProgress";
+import { markArticleOpened } from "@/components/academy/readingOpened";
 import { useGuideLocale } from "@/components/guide/widgets/useGuideLocale";
 import { TransformSandbox } from "@/components/guide/widgets/TransformSandbox";
 import { CryptoLab } from "@/components/guide/widgets/CryptoLab";
@@ -63,6 +64,7 @@ export const AdminGuideArticlePage = defineComponent({
         };
 
         onMounted(() => {
+            markArticleOpened(String(route.params.articleId ?? ""));
             void load();
             window.addEventListener("scroll", onScroll, { passive: true });
         });
@@ -102,6 +104,7 @@ export const AdminGuideArticlePage = defineComponent({
         watch(
             () => route.params.articleId,
             async () => {
+                markArticleOpened(articleId.value);
                 await load();
                 window.scrollTo({ top: 0, behavior: "auto" });
             },

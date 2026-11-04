@@ -4920,7 +4920,16 @@ Tell the Gateway Admin; the reference format contract test (gate 4) is the place
   {
    "screenId": "Academy",
    "routeNames": [
-    "AdminAcademy"
+    "AdminAcademy",
+    "AdminAcademyTracks",
+    "AdminAcademyTrack",
+    "AdminAcademyModule",
+    "AdminAcademyLesson",
+    "AdminAcademyLab",
+    "AdminAcademyExam",
+    "AdminAcademyCertificate",
+    "AdminAcademyTeam",
+    "AdminAcademyHelp"
    ],
    "pageDir": "pages/academy",
    "summary": "The Employee Academy: lessons, labs and exams for your track.",

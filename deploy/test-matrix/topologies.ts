@@ -118,6 +118,8 @@ export const renderTopologyEnv = ({ config, topology, secrets, intensity, sudoPa
     BACKUP_ENGINE_MODE: topology.backupMode,
     BACKUP_COMPRESSION: "zstd",
     BACKUP_ENCRYPTION_KEY_HEX: secrets.backupEncryptionKeyHex,
+    // The lab provisions its own object store; the engine must not install one.
+    BACKUP_S3_MODE: "external",
     BACKUP_PRIMARY_S3_ENDPOINT: objectStore && objectStoreMachine ? `http://${machinePrivateIp(objectStoreMachine)}:${objectStore.port}` : "",
     BACKUP_PRIMARY_S3_BUCKET: objectStore ? `s3://${objectStore.bucket}` : "",
     BACKUP_PRIMARY_S3_ACCESS_KEY: secrets.objectStoreAccessKey,

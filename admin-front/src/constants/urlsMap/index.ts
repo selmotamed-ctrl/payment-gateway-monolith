@@ -230,10 +230,10 @@ export const urlsMap = {
     currenciesList: "v1/admin/reference/currencies",
 
     academyProgress: "v1/admin/academy/progress",
-    academyProgressOverview: "v1/admin/academy/progress/overview",
-    academyProgressSummary: "v1/admin/academy/progress/overview/summary",
-    academyProgressSummaryExport: "v1/admin/academy/progress/overview/summary/export",
-    academyOverviewExport: "v1/admin/academy/progress/overview/export",
+    academyTeam: "v1/admin/academy/team",
+    academyExamEligibility: (examId: string) => `v1/admin/academy/exams/${encodeURIComponent(examId)}/eligibility`,
+    academyExamStart: (examId: string) => `v1/admin/academy/exams/${encodeURIComponent(examId)}/start`,
+    academyExamSubmit: (examId: string) => `v1/admin/academy/exams/${encodeURIComponent(examId)}/submit`,
 } as const;
 
 export type UrlsMap = typeof urlsMap;

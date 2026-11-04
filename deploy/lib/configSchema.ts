@@ -408,6 +408,17 @@ const base = z.strictObject({
     .or(z.literal(""))
     .default(""),
   BACKUP_PRIMARY_S3_ENDPOINT: z.string().trim().max(500).default(""),
+  // Who runs the S3 object store: "external" (R2/AWS/an existing MinIO, never
+  // touched), "managed-minio" (the engine installs/configures MinIO on the
+  // backup host when missing) or "auto" (managed when the endpoint resolves to
+  // the backup host / loopback, external otherwise).
+  BACKUP_S3_MODE: z.enum(["auto", "external", "managed-minio"]).default("auto"),
+  BACKUP_MINIO_DATA_DIR: z.string().trim().min(1).max(300).default("/var/lib/minio/data"),
+  BACKUP_MINIO_CONSOLE_PORT: port.default(9001),
+  // MinIO no longer publishes binaries. Optional http(s):// or file:// URL of a
+  // MinIO binary you host; otherwise the engine builds it with Go (needs `go`).
+  BACKUP_MINIO_BINARY_URL: z.string().trim().max(500).default(""),
+  BACKUP_MINIO_VERSION: z.string().trim().max(64).default("latest"),
   BACKUP_PRIMARY_S3_BUCKET: z.string().trim().max(500).default(""),
   BACKUP_PRIMARY_S3_ACCESS_KEY: z.string().max(500).default(""),
   BACKUP_PRIMARY_S3_SECRET_KEY: z.string().max(500).default(""),
@@ -463,6 +474,45 @@ export const auditDbConfigured = (config: DeployConfig): boolean =>
 
 export const logDbConfigured = (config: DeployConfig): boolean =>
   config.LOG_DB_MANAGE_VIA_SSH || config.LOG_DB_NODE.trim().length > 0;
+
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+
+const safeParseNodes = (value: string): NodeSpec[] => {
+  try {
+    return parseNodeList(value);
+  } catch {
+    return [];
+  }
+};
+
+/**
+ * `BACKUP_ENGINE_MODE=auto` picks WAL-G when the backup node shares the PG
+ * primary's private IP (WAL-G reads the local data dir) and Barman when the
+ * backup node is a different host. Explicit values are untouched.
+ */
+export const resolveBackupEngineMode = (env: Record<string, string>): "wal-g" | "barman" | undefined => {
+  const raw = (env.BACKUP_ENGINE_MODE ?? "").trim();
+  if (raw !== "auto") return undefined;
+  const backupIp = safeParseNodes(env.BACKUP_NODE ?? "")[0]?.privateIp;
+  const primaryIp = safeParseNodes(env.PG_PRIMARY_NODE ?? "")[0]?.privateIp;
+  return backupIp && primaryIp && backupIp !== primaryIp ? "barman" : "wal-g";
+};
+
+/** Effective S3 mode after resolving "auto" against the endpoint host. */
+export const resolveBackupS3Mode = (config: DeployConfig): "external" | "managed-minio" => {
+  if (config.BACKUP_S3_MODE !== "auto") return config.BACKUP_S3_MODE;
+  let host = "";
+  try {
+    host = new URL(config.BACKUP_PRIMARY_S3_ENDPOINT).hostname.toLowerCase();
+  } catch {
+    return "external";
+  }
+  const backup = safeParseNodes(config.BACKUP_NODE)[0];
+  if (!backup) return "external";
+  return LOOPBACK_HOSTS.has(host) || host === backup.privateIp || host === backup.sshHost
+    ? "managed-minio"
+    : "external";
+};
 
 export const backupStorageConfigured = (config: DeployConfig): boolean =>
   config.BACKUP_ENABLED || config.BACKUP_NODE.trim().length > 0;
@@ -678,6 +728,25 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
     })();
     if (!endpointIsHttpUrl) {
       problems.push("BACKUP_PRIMARY_S3_ENDPOINT must be an absolute http(s) URL when BACKUP_ENABLED=true");
+    }
+    if (resolveBackupS3Mode(config) === "managed-minio") {
+      if (!config.BACKUP_PRIMARY_S3_ACCESS_KEY) problems.push("BACKUP_PRIMARY_S3_ACCESS_KEY is required for a managed MinIO (it becomes the MinIO root user)");
+      if (config.BACKUP_PRIMARY_S3_ACCESS_KEY && config.BACKUP_PRIMARY_S3_ACCESS_KEY.length < 3) problems.push("BACKUP_PRIMARY_S3_ACCESS_KEY must be at least 3 characters for a managed MinIO");
+      if (config.BACKUP_PRIMARY_S3_SECRET_KEY.length < 8) problems.push("BACKUP_PRIMARY_S3_SECRET_KEY must be at least 8 characters for a managed MinIO");
+      if (!/^s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\/|$)/.test(config.BACKUP_PRIMARY_S3_BUCKET)) {
+        problems.push("BACKUP_PRIMARY_S3_BUCKET must look like s3://bucket[/prefix] (lowercase DNS-style bucket) for a managed MinIO");
+      }
+      try {
+        const endpoint = new URL(config.BACKUP_PRIMARY_S3_ENDPOINT);
+        if (endpoint.protocol === "http:" && !config.BACKUP_ALLOW_INSECURE_HTTP) {
+          problems.push("a managed MinIO on an http:// endpoint requires BACKUP_ALLOW_INSECURE_HTTP=true");
+        }
+        if (endpoint.protocol === "https:") {
+          problems.push("a managed MinIO is installed without TLS; use an http:// endpoint (with BACKUP_ALLOW_INSECURE_HTTP=true) or BACKUP_S3_MODE=external");
+        }
+      } catch {
+        /* already reported above */
+      }
     }
     const backupNodes = (() => {
       try {
@@ -921,6 +990,8 @@ export interface ConfigLoadResult {
 /** Parses and validates a `deploy.env` source. */
 export const loadDeployConfig = (source: string): ConfigLoadResult => {
   const env = parseDeployEnv(source);
+  const resolvedEngine = resolveBackupEngineMode(env);
+  if (resolvedEngine) env.BACKUP_ENGINE_MODE = resolvedEngine;
   const parsed = base.safeParse(env);
   if (!parsed.success) {
     return {

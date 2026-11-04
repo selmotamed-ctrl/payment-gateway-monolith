@@ -1,0 +1,750 @@
+{
+  "contentVersion": "1.0.0",
+  "recertifyFrom": "1.0.0",
+  "contentHash": "29d41f2d15cb7deb0e0993d7256538503983d89179f5be1f224382986981ee90",
+  "tracks": [
+    {
+      "id": "FOUNDATION",
+      "badge": "FOUNDATION_CERTIFIED",
+      "requires": [],
+      "moduleIds": [
+        "m0",
+        "m1",
+        "m2",
+        "m3",
+        "m7",
+        "m9",
+        "m10"
+      ],
+      "lessonIds": [
+        "l-m0-1",
+        "l-m0-2",
+        "l-m0-3",
+        "l-m1-1",
+        "l-m1-2",
+        "l-m1-3",
+        "l-m1-4",
+        "l-m1-5",
+        "l-m2-1",
+        "l-m2-2",
+        "l-m2-3",
+        "l-m3-1",
+        "l-m3-2",
+        "l-m3-3",
+        "l-m3-4",
+        "l-m7-1",
+        "l-m7-5",
+        "l-m9-3",
+        "l-m10-1",
+        "l-m10-2"
+      ],
+      "labIds": [
+        "lab-flow-tracer",
+        "lab-approval-desk",
+        "lab-security-desk"
+      ],
+      "examId": "exam-foundation"
+    },
+    {
+      "id": "OPERATOR",
+      "badge": "CERTIFIED_OPERATOR",
+      "requires": [
+        "FOUNDATION"
+      ],
+      "moduleIds": [
+        "m4",
+        "m5",
+        "m6",
+        "m8",
+        "m9"
+      ],
+      "lessonIds": [
+        "l-m4-1",
+        "l-m4-2",
+        "l-m4-3",
+        "l-m4-4",
+        "l-m5-1",
+        "l-m5-2",
+        "l-m5-3",
+        "l-m5-4",
+        "l-m5-5",
+        "l-m5-6",
+        "l-m6-1",
+        "l-m6-2",
+        "l-m8-1",
+        "l-m8-2",
+        "l-m8-5",
+        "l-m9-1",
+        "l-m9-2"
+      ],
+      "labIds": [
+        "lab-kyb-desk",
+        "lab-payment-reading",
+        "lab-incident-unknown",
+        "lab-runbook-drill",
+        "lab-rails-visibility"
+      ],
+      "examId": "exam-operator"
+    },
+    {
+      "id": "SUPPORT",
+      "badge": "CERTIFIED_SUPPORT",
+      "requires": [
+        "FOUNDATION"
+      ],
+      "moduleIds": [
+        "m4",
+        "m5",
+        "m8"
+      ],
+      "lessonIds": [
+        "l-m4-1",
+        "l-m4-4",
+        "l-m5-1",
+        "l-m5-2",
+        "l-m5-3",
+        "l-m5-6",
+        "l-m8-5"
+      ],
+      "labIds": [
+        "lab-payment-reading",
+        "lab-customer-calls",
+        "lab-rails-visibility"
+      ],
+      "examId": "exam-support"
+    },
+    {
+      "id": "FINANCE",
+      "badge": "CERTIFIED_FINANCE",
+      "requires": [
+        "FOUNDATION"
+      ],
+      "moduleIds": [
+        "m4",
+        "m5",
+        "m6",
+        "m9"
+      ],
+      "lessonIds": [
+        "l-m4-1",
+        "l-m5-1",
+        "l-m5-2",
+        "l-m5-3",
+        "l-m5-4",
+        "l-m5-6",
+        "l-m6-1",
+        "l-m6-2",
+        "l-m6-3",
+        "l-m6-4",
+        "l-m6-5",
+        "l-m6-6",
+        "l-m6-7",
+        "l-m9-2"
+      ],
+      "labIds": [
+        "lab-incident-unknown",
+        "lab-ledger-balancing",
+        "lab-cashout-adjustments",
+        "lab-reconciliation-desk"
+      ],
+      "examId": "exam-finance"
+    },
+    {
+      "id": "COMPLIANCE",
+      "badge": "CERTIFIED_COMPLIANCE",
+      "requires": [
+        "FOUNDATION"
+      ],
+      "moduleIds": [
+        "m4",
+        "m5",
+        "m7"
+      ],
+      "lessonIds": [
+        "l-m4-2",
+        "l-m4-3",
+        "l-m5-1",
+        "l-m7-2",
+        "l-m7-3",
+        "l-m7-4"
+      ],
+      "labIds": [
+        "lab-kyb-desk",
+        "lab-compliance-desk"
+      ],
+      "examId": "exam-compliance"
+    },
+    {
+      "id": "MLRO",
+      "badge": "CERTIFIED_MLRO",
+      "requires": [
+        "FOUNDATION"
+      ],
+      "moduleIds": [
+        "m4",
+        "m7"
+      ],
+      "lessonIds": [
+        "l-m4-2",
+        "l-m7-2",
+        "l-m7-3",
+        "l-m7-4"
+      ],
+      "labIds": [
+        "lab-kyb-desk",
+        "lab-compliance-desk"
+      ],
+      "examId": "exam-mlro"
+    },
+    {
+      "id": "GATEWAY_ADMIN",
+      "badge": "CERTIFIED_GATEWAY_ARCHITECT",
+      "requires": [
+        "FOUNDATION"
+      ],
+      "moduleIds": [
+        "m5",
+        "m8",
+        "m9",
+        "m10"
+      ],
+      "lessonIds": [
+        "l-m5-1",
+        "l-m5-3",
+        "l-m5-5",
+        "l-m8-1",
+        "l-m8-2",
+        "l-m8-3",
+        "l-m8-4",
+        "l-m8-5",
+        "l-m8-6",
+        "l-m9-1",
+        "l-m9-2",
+        "l-m10-3"
+      ],
+      "labIds": [
+        "lab-runbook-drill",
+        "lab-build-a-rail",
+        "lab-rails-visibility",
+        "lab-gate-review"
+      ],
+      "examId": "exam-gateway-admin"
+    },
+    {
+      "id": "SECURITY_ADMIN",
+      "badge": "CERTIFIED_SECURITY_ADMIN",
+      "requires": [
+        "FOUNDATION"
+      ],
+      "moduleIds": [
+        "m8",
+        "m9",
+        "m10"
+      ],
+      "lessonIds": [
+        "l-m8-1",
+        "l-m8-3",
+        "l-m8-6",
+        "l-m9-1",
+        "l-m9-2",
+        "l-m10-3"
+      ],
+      "labIds": [
+        "lab-runbook-drill",
+        "lab-gate-review"
+      ],
+      "examId": "exam-security-admin"
+    }
+  ],
+  "modules": [
+    {
+      "id": "m0",
+      "title": "Orientation and the rules of the house",
+      "lessonIds": [
+        "l-m0-1",
+        "l-m0-2",
+        "l-m0-3"
+      ],
+      "labIds": []
+    },
+    {
+      "id": "m1",
+      "title": "How money moves",
+      "lessonIds": [
+        "l-m1-1",
+        "l-m1-2",
+        "l-m1-3",
+        "l-m1-4",
+        "l-m1-5"
+      ],
+      "labIds": []
+    },
+    {
+      "id": "m2",
+      "title": "The platform map",
+      "lessonIds": [
+        "l-m2-1",
+        "l-m2-2",
+        "l-m2-3"
+      ],
+      "labIds": [
+        "lab-flow-tracer"
+      ]
+    },
+    {
+      "id": "m3",
+      "title": "Governance: the two-person rule",
+      "lessonIds": [
+        "l-m3-1",
+        "l-m3-2",
+        "l-m3-3",
+        "l-m3-4"
+      ],
+      "labIds": [
+        "lab-approval-desk"
+      ]
+    },
+    {
+      "id": "m4",
+      "title": "Merchants and onboarding",
+      "lessonIds": [
+        "l-m4-1",
+        "l-m4-2",
+        "l-m4-3",
+        "l-m4-4"
+      ],
+      "labIds": [
+        "lab-kyb-desk"
+      ]
+    },
+    {
+      "id": "m5",
+      "title": "Payments in operation",
+      "lessonIds": [
+        "l-m5-1",
+        "l-m5-2",
+        "l-m5-3",
+        "l-m5-4",
+        "l-m5-5",
+        "l-m5-6"
+      ],
+      "labIds": [
+        "lab-payment-reading",
+        "lab-incident-unknown",
+        "lab-customer-calls"
+      ]
+    },
+    {
+      "id": "m6",
+      "title": "Money and the ledger",
+      "lessonIds": [
+        "l-m6-1",
+        "l-m6-2",
+        "l-m6-3",
+        "l-m6-4",
+        "l-m6-5",
+        "l-m6-6",
+        "l-m6-7"
+      ],
+      "labIds": [
+        "lab-ledger-balancing",
+        "lab-cashout-adjustments",
+        "lab-reconciliation-desk"
+      ]
+    },
+    {
+      "id": "m7",
+      "title": "AML and confidentiality",
+      "lessonIds": [
+        "l-m7-1",
+        "l-m7-2",
+        "l-m7-3",
+        "l-m7-4",
+        "l-m7-5"
+      ],
+      "labIds": [
+        "lab-compliance-desk"
+      ]
+    },
+    {
+      "id": "m8",
+      "title": "Gateways, rails and the engine",
+      "lessonIds": [
+        "l-m8-1",
+        "l-m8-2",
+        "l-m8-3",
+        "l-m8-4",
+        "l-m8-5",
+        "l-m8-6"
+      ],
+      "labIds": [
+        "lab-build-a-rail",
+        "lab-rails-visibility",
+        "lab-gate-review"
+      ]
+    },
+    {
+      "id": "m9",
+      "title": "When things go wrong",
+      "lessonIds": [
+        "l-m9-1",
+        "l-m9-2",
+        "l-m9-3"
+      ],
+      "labIds": [
+        "lab-runbook-drill"
+      ]
+    },
+    {
+      "id": "m10",
+      "title": "Security and deployment",
+      "lessonIds": [
+        "l-m10-1",
+        "l-m10-2",
+        "l-m10-3"
+      ],
+      "labIds": [
+        "lab-security-desk"
+      ]
+    }
+  ],
+  "lessons": [
+    {
+      "id": "l-m0-1",
+      "module": "m0",
+      "title": "Welcome: how the Academy works and what is expected of you"
+    },
+    {
+      "id": "l-m0-2",
+      "module": "m0",
+      "title": "The Ten Golden Rules"
+    },
+    {
+      "id": "l-m0-3",
+      "module": "m0",
+      "title": "Reading a screen safely"
+    },
+    {
+      "id": "l-m1-1",
+      "module": "m1",
+      "title": "From cash to electronic money"
+    },
+    {
+      "id": "l-m1-2",
+      "module": "m1",
+      "title": "Who is involved: switches, gateways and aggregators"
+    },
+    {
+      "id": "l-m1-3",
+      "module": "m1",
+      "title": "Libyan money and the 1000-times danger"
+    },
+    {
+      "id": "l-m1-4",
+      "module": "m1",
+      "title": "How computers talk"
+    },
+    {
+      "id": "l-m1-5",
+      "module": "m1",
+      "title": "Trust and secrets"
+    },
+    {
+      "id": "l-m2-1",
+      "module": "m2",
+      "title": "The platform's parts"
+    },
+    {
+      "id": "l-m2-2",
+      "module": "m2",
+      "title": "Merchants, applications, wallets and links"
+    },
+    {
+      "id": "l-m2-3",
+      "module": "m2",
+      "title": "Roles, confidentiality zones and the double-check"
+    },
+    {
+      "id": "l-m3-1",
+      "module": "m3",
+      "title": "The maker and checker rule"
+    },
+    {
+      "id": "l-m3-2",
+      "module": "m3",
+      "title": "Descriptive versus sensitive, and the life of an approval"
+    },
+    {
+      "id": "l-m3-3",
+      "module": "m3",
+      "title": "Emergency actions and the asymmetry principle"
+    },
+    {
+      "id": "l-m3-4",
+      "module": "m3",
+      "title": "Reasons and safeguard checklists"
+    },
+    {
+      "id": "l-m4-1",
+      "module": "m4",
+      "title": "Merchant states and risk tiers"
+    },
+    {
+      "id": "l-m4-2",
+      "module": "m4",
+      "title": "Reviewing a join request"
+    },
+    {
+      "id": "l-m4-3",
+      "module": "m4",
+      "title": "KYB documents and beneficial owners"
+    },
+    {
+      "id": "l-m4-4",
+      "module": "m4",
+      "title": "Merchant tools and helping merchants safely"
+    },
+    {
+      "id": "l-m5-1",
+      "module": "m5",
+      "title": "Reading a payment"
+    },
+    {
+      "id": "l-m5-2",
+      "module": "m5",
+      "title": "The fourteen payment states"
+    },
+    {
+      "id": "l-m5-3",
+      "module": "m5",
+      "title": "UNKNOWN: exactly what to do"
+    },
+    {
+      "id": "l-m5-4",
+      "module": "m5",
+      "title": "Operator cases and inquiry"
+    },
+    {
+      "id": "l-m5-5",
+      "module": "m5",
+      "title": "Webhooks, expiry, slots and OTP"
+    },
+    {
+      "id": "l-m5-6",
+      "module": "m5",
+      "title": "Late success, conflicts, mismatches and the deducted-money call"
+    },
+    {
+      "id": "l-m6-1",
+      "module": "m6",
+      "title": "Double-entry bookkeeping from zero"
+    },
+    {
+      "id": "l-m6-2",
+      "module": "m6",
+      "title": "The eleven accounts and the equation"
+    },
+    {
+      "id": "l-m6-3",
+      "module": "m6",
+      "title": "Commission, fee bearers and rounding"
+    },
+    {
+      "id": "l-m6-4",
+      "module": "m6",
+      "title": "How each payment is posted"
+    },
+    {
+      "id": "l-m6-5",
+      "module": "m6",
+      "title": "Settlement and reconciliation"
+    },
+    {
+      "id": "l-m6-6",
+      "module": "m6",
+      "title": "Cash-outs and adjustments"
+    },
+    {
+      "id": "l-m6-7",
+      "module": "m6",
+      "title": "Disputes, chargebacks and negative balances"
+    },
+    {
+      "id": "l-m7-1",
+      "module": "m7",
+      "title": "Anti-money-laundering from zero"
+    },
+    {
+      "id": "l-m7-2",
+      "module": "m7",
+      "title": "The seven layers and the rules"
+    },
+    {
+      "id": "l-m7-3",
+      "module": "m7",
+      "title": "Screening and cases"
+    },
+    {
+      "id": "l-m7-4",
+      "module": "m7",
+      "title": "Restricting merchants and regulatory reporting"
+    },
+    {
+      "id": "l-m7-5",
+      "module": "m7",
+      "title": "Confidentiality, tipping-off and reporting suspicion"
+    },
+    {
+      "id": "l-m8-1",
+      "module": "m8",
+      "title": "Gateways, rails, routes and versions"
+    },
+    {
+      "id": "l-m8-2",
+      "module": "m8",
+      "title": "Collection modes and confirmation channels"
+    },
+    {
+      "id": "l-m8-3",
+      "module": "m8",
+      "title": "The engine: phases, steps and the retry boundary"
+    },
+    {
+      "id": "l-m8-4",
+      "module": "m8",
+      "title": "Amounts, forms and signatures in practice"
+    },
+    {
+      "id": "l-m8-5",
+      "module": "m8",
+      "title": "Why a payment method is visible or hidden"
+    },
+    {
+      "id": "l-m8-6",
+      "module": "m8",
+      "title": "The wizard, AI import and the twelve gates"
+    },
+    {
+      "id": "l-m9-1",
+      "module": "m9",
+      "title": "Incident principles and the first three runbooks"
+    },
+    {
+      "id": "l-m9-2",
+      "module": "m9",
+      "title": "Ledger drift and credential failures"
+    },
+    {
+      "id": "l-m9-3",
+      "module": "m9",
+      "title": "Handover, mistakes and leaks"
+    },
+    {
+      "id": "l-m10-1",
+      "module": "m10",
+      "title": "How attackers think, and phishing"
+    },
+    {
+      "id": "l-m10-2",
+      "module": "m10",
+      "title": "Handling data and conduct"
+    },
+    {
+      "id": "l-m10-3",
+      "module": "m10",
+      "title": "Deployment, environments and secrets"
+    }
+  ],
+  "labs": [
+    {
+      "id": "lab-flow-tracer",
+      "module": "m2",
+      "title": "Flow Tracer: follow one payment from link to ledger",
+      "passPercent": 80
+    },
+    {
+      "id": "lab-approval-desk",
+      "module": "m3",
+      "title": "Approval Desk: be the checker",
+      "passPercent": 80
+    },
+    {
+      "id": "lab-security-desk",
+      "module": "m10",
+      "title": "Security Desk: spot the trick",
+      "passPercent": 80
+    },
+    {
+      "id": "lab-kyb-desk",
+      "module": "m4",
+      "title": "KYB Desk: review five join requests",
+      "passPercent": 80
+    },
+    {
+      "id": "lab-payment-reading",
+      "module": "m5",
+      "title": "Reading a Payment: six attempts",
+      "passPercent": 80
+    },
+    {
+      "id": "lab-incident-unknown",
+      "module": "m5",
+      "title": "Incident Simulator: a switch timeout",
+      "passPercent": 80
+    },
+    {
+      "id": "lab-customer-calls",
+      "module": "m5",
+      "title": "Customer Calls: say the right thing",
+      "passPercent": 80
+    },
+    {
+      "id": "lab-runbook-drill",
+      "module": "m9",
+      "title": "Runbook Drill: symptom to action",
+      "passPercent": 80
+    },
+    {
+      "id": "lab-ledger-balancing",
+      "module": "m6",
+      "title": "Ledger Balancing Lab",
+      "passPercent": 80
+    },
+    {
+      "id": "lab-cashout-adjustments",
+      "module": "m6",
+      "title": "Cash-outs and Adjustments Desk",
+      "passPercent": 80
+    },
+    {
+      "id": "lab-reconciliation-desk",
+      "module": "m6",
+      "title": "Reconciliation Desk",
+      "passPercent": 80
+    },
+    {
+      "id": "lab-compliance-desk",
+      "module": "m7",
+      "title": "Compliance Desk",
+      "passPercent": 80
+    },
+    {
+      "id": "lab-build-a-rail",
+      "module": "m8",
+      "title": "Build-a-Rail Lab: configure a two-step OTP rail",
+      "passPercent": 80
+    },
+    {
+      "id": "lab-rails-visibility",
+      "module": "m8",
+      "title": "Why Is the Payment Method Missing?",
+      "passPercent": 80
+    },
+    {
+      "id": "lab-gate-review",
+      "module": "m8",
+      "title": "Go-Live Gate Review: be the approver",
+      "passPercent": 80
+    }
+  ]
+}

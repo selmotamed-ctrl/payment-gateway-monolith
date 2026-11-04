@@ -119,7 +119,8 @@ The router has 37 protected children under `/`, a visitor-only `/login`, and a c
 | `/rails` | `Rails` | `gateways.edit` | Rail catalog, collection modes and customer fields. |
 | `/routes` | `GatewayRoutes` | `gateways.edit` | Route priority, limits, credential policy and circuit-breaker health. |
 | `/guide` | `AdminGuide` | none (intentional learning surface) | Interactive admin guide, glossary, simulators and checklists. |
-| `/academy` | `AdminAcademy` | none (intentional learning surface) | Employee academy, labs, quizzes, tracks and certifications. |
+| `/academy`, `/academy/tracks`, `/academy/track/:trackId`, `/academy/module/:moduleId`, `/academy/lesson/:lessonId`, `/academy/lab/:labId`, `/academy/exam/:examId`, `/academy/certificate/:badgeId`, `/academy/help` | `AdminAcademy*` | none (intentional learning surface) | Employee Academy: tracks, lessons, labs, server-graded exams, certificates. |
+| `/academy/team` | `AdminAcademyTeam` | role `SECURITY_ADMIN` | Team certification view with CSV export. |
 | `/settings/platform` | `AdminPlatformSettings` | none (backend `settings:read`/`settings:write`) | Versioned platform settings, backup export and restore. |
 | `/settings/checkout-help` | `AdminCheckoutHelp` | none (backend `settings:read`/`settings:write`) | Checkout support config, preview, history and diff. |
 | `/system/backups` | `SystemBackups` | `security:read` or `gateway:read` | WAL/daemon/target health, history, drills and policy. |
@@ -129,7 +130,7 @@ Public routes are `/login` (`Login`, visitor-only) and `/:pathMatch(.*)*` (`NotF
 ### Authority-gating gaps
 
 - `AdminUsers`, `AdminUserDetail`, `PricingControls`, `GatewayAiImport`, `AdminPlatformSettings` and `AdminCheckoutHelp` have no effective router authority array. Direct navigation loads the page; backend calls still fail without the required authority.
-- `AdminGuide` and `AdminAcademy` are intentionally open to authenticated admins. Academy self-progress needs only authentication, while team overview and exports require `user:read`.
+- `AdminGuide` and `AdminAcademy` are intentionally open to authenticated admins. Academy self-progress and exams need only authentication; the team view requires the `SECURITY_ADMIN` role.
 - Hiding a navigation item does not protect its route. Test both the hidden-navigation case and the direct-URL case.
 - AML routes add a role check (`COMPLIANCE` or `MLRO`) after the authority check.
 
@@ -171,9 +172,9 @@ Public routes are `/login` (`Login`, visitor-only) and `/:pathMatch(.*)*` (`NotF
 
 - `/guide` is the Admin Interactive Guide v1.0: 14 books, 125 articles, 151 glossary terms, 22 safeguard cards, 29 situations, 8 reading paths, 58 quick answers, 19 error codes and a 140-case edge-case catalogue, extracted deterministically from `design/07-guides-and-academy/guide_system_design_and_content.md` into `src/content/guide/generated/` (`bun run content:guide`). Eight routes (home, book, article, glossary, tools, playbook, cards, edge cases), a MiniSearch command palette, five client-only simulators and per-article read tracking stored in the shared Academy progress JSON. Canonical part: [Admin Guide v2](../project-design/parts/03-admin-front/06-guide-v2.md).
 - Guide search is MiniSearch over articles, glossary, cards, situations, FAQ and error codes with Arabic-aware normalisation; `Ctrl+K` also searches platform records and admin pages.
-- `/academy` has 8 modules, 17 lessons, 8 labs with fatal options and 64 quiz questions, grouped into six certification tracks.
+- `/academy` is the Employee Academy: 8 tracks (Foundation plus one per role), 11 modules, 49 lessons with 98 practice checks, 15 labs (86 tasks), 218 exam-pool questions (40 critical) and 8 server-graded exams. Content is extracted from the design file (`bun scripts/extract-academy-content.ts`); exam answer keys live only in `core-back`.
 - Mastery is computed client-side: all lessons complete, the lab passed and a 100% quiz. Badges are derived, not manually granted. The backend stores progress JSON but does not independently validate answers, labs or mastery.
-- Academy self-progress is available to any authenticated admin. Team overview, summary and both XLSX exports require `user:read`; the page itself has no router gate, so unauthorized users see the page load and the reporting calls fail.
+- Academy self-progress and exams are available to any authenticated back-office user. The team view is gated to the `SECURITY_ADMIN` role in the router, `admin-back` and `core-back`.
 - Gaps: Arabic article bodies are not supplied (the reader falls back to English with an "Arabic version pending" chip), and two safeguard cards have no separate current UI action (see `design/07-guides-and-academy/guide_content_questions.md`).
 
 ### Contextual help
@@ -221,7 +222,7 @@ The compliance test (`src/components/ui/__tests__/ui-abstraction-compliance.test
 - Locales are Arabic (`ar`) and English (`en`). Arabic is the default: the stored `locale-name` is treated as English only when it is exactly `en`; otherwise the app starts in Arabic.
 - The selected locale is stored in `localStorage`, applied to `<html lang>`/`dir` (`rtl` for Arabic, `ltr` for English) and passed to Vuetify's locale adapter.
 - User-facing text comes from `src/constants/i18nCatalogue.ts` as `[English, Arabic]` pairs, plus Vuetify locale messages. Keep both catalogues in sync.
-- Guide and academy content carries per-item English/Arabic fields. Coverage is content-dependent; not every guide chapter or academy string is fully bilingual. Contextual-help mapping titles are English-only.
+- Guide and academy content carries per-item English/Arabic fields. Coverage is content-dependent; the Academy UI chrome is bilingual but lesson, lab and exam content is English only. Contextual-help mapping titles are English-only.
 - Route authorities use OR semantics: any listed authority passes. Role lists are additional, currently only on AML routes. Missing/empty authority arrays mean "no UI gate".
 - Backend authorization remains authoritative. A page can render and then fail its API calls when authority is missing.
 
@@ -259,7 +260,7 @@ Relevant browser suites (from `tests/`): admin shell, table/padding geometry, ac
 | Checklist controls disappear | Runtime `showChecklists` is false (or build/Vite fallback is false). Actions still execute; only the checklist UI is hidden. |
 | Backup policy changed but not applied | A policy save creates a pending approval. Find it in `/approvals`; the backup page does not continue into the approval. |
 | Settings save did not require a checker | Platform settings and checkout support are versioned/audited but not maker-checker. Only backup policy currently goes through the approval queue. |
-| Academy team report returns 403 | The page opens for any authenticated admin, but overview/summary/exports require `user:read`. |
+| Academy team view returns 403 or is missing | It requires the `SECURITY_ADMIN` role. |
 | Arabic help still shows English text | Mapping titles are English-only; chapter bodies are content-dependent. |
 
 ## 11. References

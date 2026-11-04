@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { absoluteEnv, frontendRuntimeConfig, parseArgs, pm2Ecosystem, renderEnvFile, renderNginxTemplate } from "../deploy";
+import { retireOrphanedPm2Apps, absoluteEnv, frontendRuntimeConfig, parseArgs, pm2Ecosystem, renderEnvFile, renderNginxTemplate } from "../deploy";
 
 const TEMPLATES = join(import.meta.dirname, "..", "templates");
 const template = (name: string): string => readFileSync(join(TEMPLATES, name), "utf8");
@@ -223,5 +223,21 @@ describe("nginx templates", () => {
     expect(rendered).toContain("proxy_buffering off;");
     expect(rendered).toContain("Content-Security-Policy");
     expect(rendered).toContain("proxy_pass http://127.0.0.1:4103;");
+  });
+});
+
+describe("orphaned PM2 apps", () => {
+  const pm2List = JSON.stringify(
+    ["pg-core-back", "pg-core-back-core-1", "pg-core-back-core-2", "pg-core-back-core-3", "pg-admin-back", "pg-core-backup"].map((name) => ({ name })),
+  );
+  const retired = (service: { name: string; nodeId?: string }, planned: string[]): string[] => {
+    const command = retireOrphanedPm2Apps(service, planned);
+    const js = /-e '([\s\S]*?)'\); do/.exec(command)![1]!;
+    const run = Bun.spawnSync(["bun", "-e", js], { stdin: new TextEncoder().encode(`warn noise\n${pm2List}`) });
+    return run.stdout.toString().split("\n").filter(Boolean);
+  };
+  test("retires same-tier apps that are not in the plan, keeps planned nodes and other tiers", () => {
+    expect(retired({ name: "pg-core-back" }, ["pg-core-back"])).toEqual(["pg-core-back-core-1", "pg-core-back-core-2", "pg-core-back-core-3"]);
+    expect(retired({ name: "pg-core-back-core-1", nodeId: "core-1" }, ["pg-core-back-core-1", "pg-core-back-core-2"])).toEqual(["pg-core-back", "pg-core-back-core-3"]);
   });
 });

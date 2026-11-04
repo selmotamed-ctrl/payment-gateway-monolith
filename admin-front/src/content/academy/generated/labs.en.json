@@ -1,0 +1,4318 @@
+[
+  {
+    "id": "lab-flow-tracer",
+    "module": "m2",
+    "title": "Flow Tracer: follow one payment from link to ledger",
+    "minutes": 20,
+    "tracks": [
+      "FOUNDATION"
+    ],
+    "refs": [
+      "b02-03",
+      "b01-02",
+      "b00-03"
+    ],
+    "briefing": "You are watching one payment travel through the platform. Nothing here is real. Your job: put the steps in order, and spot where the platform refuses to trust the browser.",
+    "passPercent": 80,
+    "tasks": [
+      {
+        "id": "t1",
+        "kind": "order",
+        "title": "Order the life of a payment",
+        "panels": [
+          {
+            "title": "Payment link",
+            "rows": [
+              [
+                "Link",
+                "PL-48213"
+              ],
+              [
+                "Amount",
+                "100.000 LYD"
+              ],
+              [
+                "Fee bearer",
+                "MERCHANT_ABSORBS"
+              ],
+              [
+                "Use",
+                "Single-use"
+              ]
+            ]
+          }
+        ],
+        "prompt": "Put these steps in the order they happen.",
+        "points": 12,
+        "items": [
+          {
+            "id": "a",
+            "label": "The platform guards check the merchant, limits and rules"
+          },
+          {
+            "id": "b",
+            "label": "A slot is reserved on the link"
+          },
+          {
+            "id": "c",
+            "label": "The engine starts the payment with the partner"
+          },
+          {
+            "id": "d",
+            "label": "The customer completes the payment with the partner"
+          },
+          {
+            "id": "e",
+            "label": "Our server verifies the result with the partner"
+          },
+          {
+            "id": "f",
+            "label": "Success and the ledger entry are written in one transaction"
+          }
+        ],
+        "correctOrder": [
+          "a",
+          "b",
+          "c",
+          "d",
+          "e",
+          "f"
+        ],
+        "feedback": "Guards run first, the slot is reserved before any attempt, and success and posting are one transaction."
+      },
+      {
+        "id": "t2",
+        "kind": "choice",
+        "title": "A tampered amount",
+        "panels": [
+          {
+            "title": "What the browser sent",
+            "rows": [
+              [
+                "Link",
+                "PL-48213"
+              ],
+              [
+                "amount (in the web address)",
+                "1.000"
+              ]
+            ]
+          },
+          {
+            "title": "What the database holds",
+            "rows": [
+              [
+                "Link amount",
+                "100.000 LYD"
+              ]
+            ]
+          }
+        ],
+        "prompt": "The web address shows an amount of 1.000. What does the platform do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Charges 1.000 because the customer asked for it",
+            "correct": false,
+            "feedback": "The amount never comes from the browser.",
+            "critical": true
+          },
+          {
+            "id": "b",
+            "label": "Ignores it and uses the link's amount from its own database",
+            "correct": true,
+            "feedback": "Correct. Amounts come only from the system."
+          },
+          {
+            "id": "c",
+            "label": "Asks the merchant to confirm 1.000",
+            "correct": false,
+            "feedback": "There is nothing to confirm; the browser is not a source of amounts."
+          }
+        ]
+      },
+      {
+        "id": "t3",
+        "kind": "choice",
+        "title": "A tampered return address",
+        "panels": [
+          {
+            "title": "The customer's browser comes back from the partner's page",
+            "rows": [
+              [
+                "Return address",
+                "…/return?status=success"
+              ],
+              [
+                "Our server's own check with the partner",
+                "not yet done"
+              ]
+            ]
+          }
+        ],
+        "prompt": "The return address says success. What do we do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Mark the payment SUCCEEDED",
+            "correct": false,
+            "feedback": "A return address is only a hint and can be changed by anyone.",
+            "critical": true
+          },
+          {
+            "id": "b",
+            "label": "Ask the partner what really happened, and wait for its answer",
+            "correct": true,
+            "feedback": "Correct. Hints make us ask; only verified answers count."
+          },
+          {
+            "id": "c",
+            "label": "Mark it FAILED because it is unverified",
+            "correct": false,
+            "feedback": "Unverified is not failed. We ask."
+          }
+        ]
+      },
+      {
+        "id": "t4",
+        "kind": "choice",
+        "title": "Which proof counts?",
+        "panels": [
+          {
+            "title": "Four pieces of evidence",
+            "table": {
+              "columns": [
+                "Evidence",
+                "Source"
+              ],
+              "rows": [
+                [
+                  "A screenshot of a Paid screen",
+                  "Customer"
+                ],
+                [
+                  "A signed webhook that passes all checks and matches reference, amount, currency, environment",
+                  "Partner"
+                ],
+                [
+                  "A phone call from the customer",
+                  "Customer"
+                ],
+                [
+                  "A return address with status=success",
+                  "Browser"
+                ]
+              ]
+            }
+          }
+        ],
+        "prompt": "Which one can make the payment SUCCEEDED?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "The screenshot",
+            "correct": false,
+            "feedback": "Screens can be faked."
+          },
+          {
+            "id": "b",
+            "label": "The verified signed webhook",
+            "correct": true,
+            "feedback": "Correct, if the five facts match."
+          },
+          {
+            "id": "c",
+            "label": "The phone call",
+            "correct": false,
+            "feedback": "Never from a call."
+          },
+          {
+            "id": "d",
+            "label": "The return address",
+            "correct": false,
+            "feedback": "Only a hint."
+          }
+        ]
+      },
+      {
+        "id": "t5",
+        "kind": "choice",
+        "title": "Where does the money get written?",
+        "panels": [
+          {
+            "title": "The payment just succeeded",
+            "rows": [
+              [
+                "Amount",
+                "100.000 LYD"
+              ],
+              [
+                "Commission",
+                "3.000 LYD"
+              ],
+              [
+                "Merchant credited",
+                "97.000 LYD"
+              ]
+            ]
+          }
+        ],
+        "prompt": "When is the ledger entry written?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "In the same database transaction as the success",
+            "correct": true,
+            "feedback": "Correct. There is no state where a payment is SUCCEEDED without its entry."
+          },
+          {
+            "id": "b",
+            "label": "Tomorrow morning in a batch",
+            "correct": false,
+            "feedback": "Success and posting are one transaction."
+          },
+          {
+            "id": "c",
+            "label": "When Finance clicks a button",
+            "correct": false,
+            "feedback": "Finance does not post ordinary payments."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "lab-approval-desk",
+    "module": "m3",
+    "title": "Approval Desk: be the checker",
+    "minutes": 30,
+    "tracks": [
+      "FOUNDATION"
+    ],
+    "refs": [
+      "b04-01",
+      "b04-02",
+      "b04-03",
+      "b04-06",
+      "b00-03"
+    ],
+    "briefing": "You are the checker. Four requests are waiting. For each, decide whether to **Approve** or **Reject** and choose the reason that would survive an audit. You are the second pair of eyes: if you do not understand a request, you do not approve it.",
+    "passPercent": 80,
+    "tasks": [
+      {
+        "id": "a1",
+        "kind": "choice",
+        "title": "Payout bank change",
+        "panels": [
+          {
+            "title": "Request",
+            "rows": [
+              [
+                "Maker",
+                "Layla (OPERATOR)"
+              ],
+              [
+                "You",
+                "Omar (checker)"
+              ],
+              [
+                "Merchant",
+                "Al-Nour Bakery"
+              ],
+              [
+                "Field",
+                "Payout bank account"
+              ],
+              [
+                "Old",
+                "Bank A ···4417 (holder: Al-Nour Bakery LLC)"
+              ],
+              [
+                "New",
+                "Bank B ···9921 (holder: Al-Nour Bakery LLC)"
+              ],
+              [
+                "Maker's reason",
+                "Merchant request in portal; bank letter attached; old account closed. Letter checked: holder matches legal name."
+              ],
+              [
+                "Environment",
+                "LIVE"
+              ]
+            ]
+          }
+        ],
+        "prompt": "What do you do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "**Approve**: the reason is specific and the holder matches",
+            "correct": true,
+            "feedback": "Correct. The reason says what was checked and the holder matches the legal name."
+          },
+          {
+            "id": "b",
+            "label": "**Reject**: bank changes are always rejected",
+            "correct": false,
+            "feedback": "Legitimate changes exist; reject only when you cannot support the change."
+          },
+          {
+            "id": "c",
+            "label": "**Approve** without opening **Review**",
+            "correct": false,
+            "feedback": "You must read the old and new value yourself.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "a2",
+        "kind": "choice",
+        "title": "Your own request",
+        "panels": [
+          {
+            "title": "Request",
+            "rows": [
+              [
+                "Maker",
+                "Omar (you)"
+              ],
+              [
+                "Merchant",
+                "City Pharmacy"
+              ],
+              [
+                "Field",
+                "Risk tier: HIGH → LOW"
+              ],
+              [
+                "Maker's reason",
+                "Lower risk after review"
+              ],
+              [
+                "Status",
+                "PENDING_REVIEW"
+              ]
+            ]
+          },
+          {
+            "title": "A colleague says",
+            "text": "\"Just click Approve for me, I am busy and it is obviously fine.\""
+          }
+        ],
+        "prompt": "What do you do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Approve it to help",
+            "correct": false,
+            "feedback": "You made it. Approving your own work, or asking someone else to, defeats the control.",
+            "critical": true
+          },
+          {
+            "id": "b",
+            "label": "Refuse: the system will not let you, and a second person must review it properly",
+            "correct": true,
+            "feedback": "Correct. Ask a different checker to read it."
+          },
+          {
+            "id": "c",
+            "label": "Ask the colleague to click Approve from your account",
+            "correct": false,
+            "feedback": "Sharing your account is a serious breach.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "a3",
+        "kind": "choice",
+        "title": "A request that went stale",
+        "panels": [
+          {
+            "title": "Request",
+            "rows": [
+              [
+                "Maker",
+                "Layla"
+              ],
+              [
+                "Merchant",
+                "Fresh Market"
+              ],
+              [
+                "Field",
+                "Legal name"
+              ],
+              [
+                "Base version",
+                "12"
+              ],
+              [
+                "Current version of the record",
+                "14"
+              ],
+              [
+                "Notice",
+                "This record changed after the request was made"
+              ]
+            ]
+          }
+        ],
+        "prompt": "What do you do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "**Reject** with a reason: the record changed; ask the maker to create a new request from the current values",
+            "correct": true,
+            "feedback": "Correct. Stale requests are never applied."
+          },
+          {
+            "id": "b",
+            "label": "**Approve** because the new value looks fine",
+            "correct": false,
+            "feedback": "The request may overwrite changes it never saw."
+          },
+          {
+            "id": "c",
+            "label": "Edit the request yourself",
+            "correct": false,
+            "feedback": "Checkers do not edit requests."
+          }
+        ]
+      },
+      {
+        "id": "a4",
+        "kind": "choice",
+        "title": "Choosing the reason",
+        "panels": [
+          {
+            "title": "You decided to reject the request in the last task.",
+            "text": "Choose the reason you will type in **Decision reason**."
+          }
+        ],
+        "prompt": "Which reason is best?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "\"no\"",
+            "correct": false,
+            "feedback": "A reason must say what you checked and why."
+          },
+          {
+            "id": "b",
+            "label": "\"Record changed since request (v12 vs v14). Maker to re-submit from current values.\"",
+            "correct": true,
+            "feedback": "Correct: specific, checkable, helpful."
+          },
+          {
+            "id": "c",
+            "label": "\"compliance flagged this merchant\"",
+            "correct": false,
+            "feedback": "Never reveal AML or compliance matters in a reason a merchant might read.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "a5",
+        "kind": "checklist",
+        "title": "The safeguard checklist",
+        "panels": [
+          {
+            "title": "You are about to approve a 250.000 LYD refund.",
+            "rows": [
+              [
+                "Merchant",
+                "Olive House"
+              ],
+              [
+                "Original payment",
+                "250.000 LYD, SUCCEEDED, LIVE"
+              ],
+              [
+                "Refund requested",
+                "250.000 LYD"
+              ],
+              [
+                "Maker's reason",
+                "Duplicate charge; customer paid twice; first payment verified in the step log"
+              ],
+              [
+                "Maker",
+                "Layla (a different person)"
+              ],
+              [
+                "Dispute on this payment",
+                "none"
+              ]
+            ]
+          }
+        ],
+        "prompt": "Tick only the statements you have really verified from this record.",
+        "points": 10,
+        "items": [
+          {
+            "id": "c1",
+            "label": "I read the old and new value in **Review**",
+            "shouldTick": true,
+            "why": "You have this record in front of you."
+          },
+          {
+            "id": "c2",
+            "label": "The amount and currency match the original payment",
+            "shouldTick": true,
+            "why": "250.000 LYD both."
+          },
+          {
+            "id": "c3",
+            "label": "The maker's reason makes sense",
+            "shouldTick": true,
+            "why": "It names the duplicate and the evidence."
+          },
+          {
+            "id": "c4",
+            "label": "The environment badge is LIVE",
+            "shouldTick": true,
+            "why": "It is."
+          },
+          {
+            "id": "c5",
+            "label": "I confirmed the customer's identity by phone",
+            "shouldTick": false,
+            "why": "Nothing in the record supports this; do not tick what you did not do."
+          },
+          {
+            "id": "c6",
+            "label": "The maker is a different person from me",
+            "shouldTick": true,
+            "why": "Stated in the request (you are the checker)."
+          }
+        ],
+        "criticalWrong": [
+          "c5"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "lab-security-desk",
+    "module": "m10",
+    "title": "Security Desk: spot the trick",
+    "minutes": 25,
+    "tracks": [
+      "FOUNDATION"
+    ],
+    "refs": [
+      "b11-02",
+      "b11-03",
+      "b11-04",
+      "b10-07",
+      "b09-10"
+    ],
+    "briefing": "Six messages arrive during your shift. For each, choose the safe response.",
+    "passPercent": 80,
+    "tasks": [
+      {
+        "id": "s1",
+        "kind": "choice",
+        "title": "The helpful caller",
+        "panels": [
+          {
+            "title": "Phone call",
+            "text": "\"Hi, this is Karim from IT. We are fixing a login fault. Please read me the code on your phone so I can finish the repair.\""
+          }
+        ],
+        "prompt": "What do you do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Read the code; he is from IT",
+            "correct": false,
+            "feedback": "Nobody legitimate ever asks for a code.",
+            "critical": true
+          },
+          {
+            "id": "b",
+            "label": "Refuse, end the call, and report it to the Security Admin",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "c",
+            "label": "Read half the code",
+            "correct": false,
+            "feedback": "Never share any part of it.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "s2",
+        "kind": "choice",
+        "title": "The urgent email",
+        "panels": [
+          {
+            "title": "Email",
+            "text": "\"URGENT from the CEO: process this payout today and do not discuss it with anyone. Details in the link below.\""
+          }
+        ],
+        "prompt": "What do you do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Click the link and process it",
+            "correct": false,
+            "feedback": "Urgency plus secrecy is a classic trick."
+          },
+          {
+            "id": "b",
+            "label": "Do not click; use the normal screens and verify through a number you already know; report it",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "c",
+            "label": "Forward it to the team",
+            "correct": false,
+            "feedback": "Do not spread it; report it to Security."
+          }
+        ]
+      },
+      {
+        "id": "s3",
+        "kind": "choice",
+        "title": "The leaked token",
+        "panels": [
+          {
+            "title": "Team chat",
+            "text": "A colleague posts a screenshot of a merchant's API token by mistake and asks if anyone saw it."
+          }
+        ],
+        "prompt": "What do you do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Say nothing",
+            "correct": false,
+            "feedback": "A leaked secret is usable until replaced."
+          },
+          {
+            "id": "b",
+            "label": "Tell the Security Admin immediately; the merchant revokes and replaces the token",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "c",
+            "label": "Delete the message and hope",
+            "correct": false,
+            "feedback": "Deleting does not unleak a secret."
+          }
+        ]
+      },
+      {
+        "id": "s4",
+        "kind": "choice",
+        "title": "The favour",
+        "panels": [
+          {
+            "title": "A merchant's owner says",
+            "text": "\"If you approve my cash-out today I will send you a nice gift.\""
+          }
+        ],
+        "prompt": "What do you do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Accept and approve",
+            "correct": false,
+            "feedback": "Never accept gifts or favours.",
+            "critical": true
+          },
+          {
+            "id": "b",
+            "label": "Decline, process nothing outside the normal checks, and report the offer",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "c",
+            "label": "Accept and wait until after approval",
+            "correct": false,
+            "feedback": "Same offence."
+          }
+        ]
+      },
+      {
+        "id": "s5",
+        "kind": "checklist",
+        "title": "What is safe to put in team chat?",
+        "panels": [
+          {
+            "title": "You need help from a colleague on one payment."
+          }
+        ],
+        "prompt": "Tick only what you may safely send.",
+        "points": 10,
+        "items": [
+          {
+            "id": "k1",
+            "label": "The payment reference",
+            "shouldTick": true,
+            "why": "References are safe."
+          },
+          {
+            "id": "k2",
+            "label": "The customer's full phone number",
+            "shouldTick": false,
+            "why": "Do not share personal data in chat."
+          },
+          {
+            "id": "k3",
+            "label": "The merchant's API token",
+            "shouldTick": false,
+            "why": "Never."
+          },
+          {
+            "id": "k4",
+            "label": "A screenshot that shows a one-time code",
+            "shouldTick": false,
+            "why": "Never."
+          },
+          {
+            "id": "k5",
+            "label": "The status you read in the platform",
+            "shouldTick": true,
+            "why": "Safe."
+          }
+        ],
+        "criticalWrong": [
+          "k3",
+          "k4"
+        ]
+      },
+      {
+        "id": "s6",
+        "kind": "choice",
+        "title": "The suspicious merchant",
+        "panels": [
+          {
+            "title": "What you noticed",
+            "text": "Two merchants share the same owner phone number and uploaded the same registry certificate, and one of them asks you what amount triggers a review."
+          }
+        ],
+        "prompt": "What do you do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Tell them the threshold",
+            "correct": false,
+            "feedback": "That reveals how to avoid detection and may tip them off.",
+            "critical": true
+          },
+          {
+            "id": "b",
+            "label": "Give no information, write down the facts, and tell Compliance the same day",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "c",
+            "label": "Warn both merchants",
+            "correct": false,
+            "feedback": "Do not confront or warn.",
+            "critical": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "lab-kyb-desk",
+    "module": "m4",
+    "title": "KYB Desk: review five join requests",
+    "minutes": 35,
+    "tracks": [
+      "OPERATOR",
+      "COMPLIANCE",
+      "MLRO"
+    ],
+    "refs": [
+      "b05-03",
+      "b05-04",
+      "b05-05",
+      "b05-10"
+    ],
+    "briefing": "You review join requests. For each, choose the right action. Remember: never tell an applicant about screening, and a second reviewer is required in the cases the policy lists.",
+    "passPercent": 80,
+    "tasks": [
+      {
+        "id": "k1",
+        "kind": "choice",
+        "title": "The clean request",
+        "panels": [
+          {
+            "title": "Join request JR-1001",
+            "rows": [
+              [
+                "Business",
+                "Salma Stationery LLC"
+              ],
+              [
+                "Identity verified",
+                "Yes"
+              ],
+              [
+                "Registry and tax certificates",
+                "Names and numbers agree"
+              ],
+              [
+                "Owners",
+                "2 declared, both with ID; articles confirm 60/40"
+              ],
+              [
+                "Screening",
+                "CLEAR"
+              ],
+              [
+                "Category / volume",
+                "Stationery shop / modest"
+              ],
+              [
+                "Payout account",
+                "Holder: Salma Stationery LLC"
+              ],
+              [
+                "Proposed risk",
+                "LOW"
+              ],
+              [
+                "Four-eyes policy",
+                "RISK_BASED, no trigger fired"
+              ]
+            ]
+          }
+        ],
+        "prompt": "What do you do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "**Approve**",
+            "correct": true,
+            "feedback": "All seven checks pass and no second-person trigger fired."
+          },
+          {
+            "id": "b",
+            "label": "**Reject** for safety",
+            "correct": false,
+            "feedback": "There is no reason to reject."
+          },
+          {
+            "id": "c",
+            "label": "Request information about screening",
+            "correct": false,
+            "feedback": "Never mention screening.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "k2",
+        "kind": "choice",
+        "title": "The bank letter",
+        "panels": [
+          {
+            "title": "Join request JR-1002",
+            "rows": [
+              [
+                "Business",
+                "Noor Electronics LLC"
+              ],
+              [
+                "Bank letter holder",
+                "Noor Trading FZE"
+              ],
+              [
+                "All other checks",
+                "Pass"
+              ],
+              [
+                "Screening",
+                "CLEAR"
+              ]
+            ]
+          }
+        ],
+        "prompt": "What is the right action?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "**Request information**: ask for a bank letter in the merchant's legal name",
+            "correct": true,
+            "feedback": "A mismatched payout account fails check 6 and forces a second reviewer; ask for the right letter."
+          },
+          {
+            "id": "b",
+            "label": "Approve; the names are similar",
+            "correct": false,
+            "feedback": "A payout account must belong to the business (or a documented related party)."
+          },
+          {
+            "id": "c",
+            "label": "Reject and say screening found an issue",
+            "correct": false,
+            "feedback": "False and forbidden: never mention screening.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "k3",
+        "kind": "choice",
+        "title": "The duplicate document",
+        "panels": [
+          {
+            "title": "Join request JR-1003",
+            "rows": [
+              [
+                "Business",
+                "Green Valley Trading"
+              ],
+              [
+                "Registry certificate fingerprint",
+                "Identical to a file uploaded by Bright Star LLC"
+              ],
+              [
+                "Same owner phone",
+                "No"
+              ],
+              [
+                "Screening",
+                "CLEAR"
+              ]
+            ]
+          }
+        ],
+        "prompt": "What do you do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Accuse the applicant of fraud",
+            "correct": false,
+            "feedback": "A duplicate does not reject automatically and you do not accuse.",
+            "critical": true
+          },
+          {
+            "id": "b",
+            "label": "Note the finding, review the related records, require a second reviewer and escalate to Compliance",
+            "correct": true,
+            "feedback": "Correct. The duplicate flag adds review and raises the proposed tier."
+          },
+          {
+            "id": "c",
+            "label": "Approve; documents are just files",
+            "correct": false,
+            "feedback": "A duplicate is a serious warning sign."
+          }
+        ]
+      },
+      {
+        "id": "k4",
+        "kind": "choice",
+        "title": "A possible match",
+        "panels": [
+          {
+            "title": "Join request JR-1004",
+            "rows": [
+              [
+                "Business",
+                "Alamal Logistics"
+              ],
+              [
+                "Screening",
+                "POTENTIAL_MATCH (owner)"
+              ],
+              [
+                "Other checks",
+                "Pass"
+              ]
+            ]
+          }
+        ],
+        "prompt": "You are an operator. What do you do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Do not approve and do not discuss it; note it is waiting for Compliance and let the second-reviewer rule work",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "Approve because it is probably a false positive",
+            "correct": false,
+            "feedback": "Only Compliance decides matches.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Tell the applicant to explain the match",
+            "correct": false,
+            "feedback": "Never discuss screening with the applicant.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "k5",
+        "kind": "multi",
+        "title": "Which findings force a second reviewer? (risk-based policy)",
+        "panels": [
+          {
+            "title": "Candidates"
+          }
+        ],
+        "prompt": "Select all that force a second reviewer.",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Proposed risk is HIGH",
+            "correct": true,
+            "feedback": "Yes."
+          },
+          {
+            "id": "b",
+            "label": "The payout account does not match",
+            "correct": true,
+            "feedback": "Yes, always."
+          },
+          {
+            "id": "c",
+            "label": "The business sells stationery",
+            "correct": false,
+            "feedback": "No."
+          },
+          {
+            "id": "d",
+            "label": "Screening is not CLEAR",
+            "correct": true,
+            "feedback": "Yes."
+          },
+          {
+            "id": "e",
+            "label": "An owner is a politically exposed person",
+            "correct": true,
+            "feedback": "Yes."
+          },
+          {
+            "id": "f",
+            "label": "The applicant was rejected before",
+            "correct": true,
+            "feedback": "Yes."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "lab-payment-reading",
+    "module": "m5",
+    "title": "Reading a Payment: six attempts",
+    "minutes": 30,
+    "tracks": [
+      "OPERATOR",
+      "SUPPORT"
+    ],
+    "refs": [
+      "b07-01",
+      "b07-02",
+      "b07-03",
+      "b07-12"
+    ],
+    "briefing": "Six payments are on your screen. For each, choose what you do or say. You never see passwords or codes here and nothing is real.",
+    "passPercent": 80,
+    "tasks": [
+      {
+        "id": "p1",
+        "kind": "choice",
+        "title": "SUCCEEDED",
+        "panels": [
+          {
+            "title": "Attempt A-2001",
+            "rows": [
+              [
+                "Environment",
+                "LIVE"
+              ],
+              [
+                "Status",
+                "SUCCEEDED"
+              ],
+              [
+                "Amount",
+                "50.000 LYD"
+              ],
+              [
+                "Ledger entry",
+                "posted"
+              ]
+            ]
+          }
+        ],
+        "prompt": "A merchant asks if it was paid. You say:",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "\"We confirm the payment; your wallet is credited.\"",
+            "correct": true,
+            "feedback": "Correct: read from the status."
+          },
+          {
+            "id": "b",
+            "label": "\"Probably paid.\"",
+            "correct": false,
+            "feedback": "Do not guess."
+          },
+          {
+            "id": "c",
+            "label": "\"Ask the customer.\"",
+            "correct": false,
+            "feedback": "The status answers it."
+          }
+        ]
+      },
+      {
+        "id": "p2",
+        "kind": "choice",
+        "title": "FAILED but the customer insists",
+        "panels": [
+          {
+            "title": "Attempt A-2002",
+            "rows": [
+              [
+                "Environment",
+                "LIVE"
+              ],
+              [
+                "Status",
+                "FAILED"
+              ],
+              [
+                "Reason",
+                "Insufficient funds"
+              ],
+              [
+                "Customer says",
+                "Money was deducted from my phone"
+              ]
+            ]
+          }
+        ],
+        "prompt": "You:",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Say we have no confirmed payment, ask them to keep the receipt, and open a case with the reference and time",
+            "correct": true,
+            "feedback": "Correct: a late confirmation may still arrive."
+          },
+          {
+            "id": "b",
+            "label": "Refund them now",
+            "correct": false,
+            "feedback": "Never refund on a call.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Ask them to pay again",
+            "correct": false,
+            "feedback": "They may be charged twice.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "p3",
+        "kind": "choice",
+        "title": "UNKNOWN",
+        "panels": [
+          {
+            "title": "Attempt A-2003",
+            "rows": [
+              [
+                "Environment",
+                "LIVE"
+              ],
+              [
+                "Status",
+                "UNKNOWN"
+              ],
+              [
+                "Last step",
+                "Confirm: timeout after 15 seconds"
+              ],
+              [
+                "Age",
+                "40 minutes"
+              ],
+              [
+                "Link",
+                "single-use, slot reserved"
+              ]
+            ]
+          }
+        ],
+        "prompt": "What is the first thing you do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Open the case, read the step log, press **Inquire** once",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "Mark it failed because it is 40 minutes old",
+            "correct": false,
+            "feedback": "Age is not evidence.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Re-send the OTP",
+            "correct": false,
+            "feedback": "That may start a second payment.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "p4",
+        "kind": "choice",
+        "title": "UNKNOWN on a rail that cannot be asked",
+        "panels": [
+          {
+            "title": "Attempt A-2004",
+            "rows": [
+              [
+                "Status",
+                "UNKNOWN"
+              ],
+              [
+                "Rail",
+                "a wallet whose partner offers no status question"
+              ],
+              [
+                "Inquire",
+                "Not possible on this rail"
+              ]
+            ]
+          }
+        ],
+        "prompt": "Best action?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Note our reference and the provider reference; wait for the statement or contact the partner's support",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "Keep pressing Inquire",
+            "correct": false,
+            "feedback": "It will not work."
+          },
+          {
+            "id": "c",
+            "label": "Tell the customer to pay again",
+            "correct": false,
+            "feedback": "Forbidden.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "p5",
+        "kind": "choice",
+        "title": "BLOCKED",
+        "panels": [
+          {
+            "title": "Attempt A-2005",
+            "rows": [
+              [
+                "Status",
+                "BLOCKED"
+              ],
+              [
+                "Customer asks",
+                "Why can't I pay?"
+              ]
+            ]
+          }
+        ],
+        "prompt": "You say:",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "\"We cannot process this payment.\"",
+            "correct": true,
+            "feedback": "Correct: nothing more."
+          },
+          {
+            "id": "b",
+            "label": "\"A compliance rule stopped it.\"",
+            "correct": false,
+            "feedback": "Never reveal the reason.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "\"Your phone is on a watch-list.\"",
+            "correct": false,
+            "feedback": "Never.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "p6",
+        "kind": "choice",
+        "title": "A screenshot",
+        "panels": [
+          {
+            "title": "A cashier says",
+            "text": "\"The customer shows Paid on her phone. Should I release the goods?\""
+          },
+          {
+            "title": "Attempt A-2006",
+            "rows": [
+              [
+                "Status",
+                "VERIFYING"
+              ]
+            ]
+          }
+        ],
+        "prompt": "You tell the cashier:",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Wait until the status shows SUCCEEDED",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "Release; the phone says Paid",
+            "correct": false,
+            "feedback": "A page saying Paid proves nothing.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Ask the customer to pay cash too",
+            "correct": false,
+            "feedback": "Not needed; wait."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "lab-incident-unknown",
+    "module": "m5",
+    "title": "Incident Simulator: a switch timeout",
+    "minutes": 40,
+    "tracks": [
+      "OPERATOR",
+      "FINANCE"
+    ],
+    "refs": [
+      "b07-03",
+      "b07-04",
+      "b07-08",
+      "b10-02",
+      "b10-04"
+    ],
+    "briefing": "A national switch had a timeout. Three payments are UNKNOWN and one webhook disagrees with an inquiry. Resolve each safely without double-crediting.",
+    "passPercent": 80,
+    "tasks": [
+      {
+        "id": "i1",
+        "kind": "choice",
+        "title": "Where do you start?",
+        "panels": [
+          {
+            "title": "Dashboard",
+            "rows": [
+              [
+                "Open Circuit Breakers",
+                "1"
+              ],
+              [
+                "Unknown Backlog",
+                "3"
+              ],
+              [
+                "Oldest",
+                "20 min"
+              ]
+            ]
+          }
+        ],
+        "prompt": "First step?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Confirm the breaker and tell the Gateway Admin and your manager",
+            "correct": true,
+            "feedback": "Correct (RB-01)."
+          },
+          {
+            "id": "b",
+            "label": "Re-enable the route",
+            "correct": false,
+            "feedback": "Never while the partner is failing.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Mark all three failed",
+            "correct": false,
+            "feedback": "Never guess.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "i2",
+        "kind": "choice",
+        "title": "Attempt U1",
+        "panels": [
+          {
+            "title": "U1",
+            "rows": [
+              [
+                "Status",
+                "UNKNOWN"
+              ],
+              [
+                "Partner",
+                "supports status question"
+              ]
+            ]
+          }
+        ],
+        "prompt": "Action?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Press **Inquire** once and read the step log",
+            "correct": true,
+            "feedback": "Correct; the platform resolves it if the partner answers clearly."
+          },
+          {
+            "id": "b",
+            "label": "Press Inquire ten times",
+            "correct": false,
+            "feedback": "Repeating does not help."
+          },
+          {
+            "id": "c",
+            "label": "Resolve by hand as succeeded",
+            "correct": false,
+            "feedback": "You have no evidence.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "i3",
+        "kind": "choice",
+        "title": "Attempt U2",
+        "panels": [
+          {
+            "title": "U2",
+            "rows": [
+              [
+                "Status",
+                "UNKNOWN"
+              ],
+              [
+                "Partner",
+                "no status question"
+              ],
+              [
+                "Statement",
+                "arrives tomorrow"
+              ]
+            ]
+          }
+        ],
+        "prompt": "Action?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Leave the case open, note references, wait for the statement or evidence from the partner",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "Resolve as failed",
+            "correct": false,
+            "feedback": "Forbidden without evidence.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Ask the customer to pay again",
+            "correct": false,
+            "feedback": "Forbidden.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "i4",
+        "kind": "choice",
+        "title": "Attempt U3 with evidence",
+        "panels": [
+          {
+            "title": "U3",
+            "rows": [
+              [
+                "Status",
+                "UNKNOWN"
+              ],
+              [
+                "Evidence",
+                "Partner support replied in writing: payment completed, provider reference matches ours, amount and currency match"
+              ]
+            ]
+          }
+        ],
+        "prompt": "You may now:",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Use **Resolve as succeeded** with a reason naming the evidence, with a second person approving",
+            "correct": true,
+            "feedback": "Correct, using the checklist."
+          },
+          {
+            "id": "b",
+            "label": "Mark succeeded alone and quietly",
+            "correct": false,
+            "feedback": "A second person is required.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Ignore the evidence",
+            "correct": false,
+            "feedback": "The evidence supports resolution."
+          }
+        ]
+      },
+      {
+        "id": "i5",
+        "kind": "choice",
+        "title": "The conflict",
+        "panels": [
+          {
+            "title": "Case C1 (P1 CONFLICT)",
+            "rows": [
+              [
+                "Verified webhook",
+                "paid"
+              ],
+              [
+                "Our inquiry",
+                "failed"
+              ],
+              [
+                "Posted to ledger",
+                "nothing"
+              ]
+            ]
+          }
+        ],
+        "prompt": "You:",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Escalate to a senior operator and the Gateway Admin; resolution needs partner evidence",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "Resolve as succeeded because the webhook is signed",
+            "correct": false,
+            "feedback": "Both sources are trusted; neither wins.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Resolve as failed",
+            "correct": false,
+            "feedback": "Same reason.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "i6",
+        "kind": "order",
+        "title": "After the breaker closes",
+        "panels": [
+          {
+            "title": "Recovery"
+          }
+        ],
+        "prompt": "Order the follow-up.",
+        "points": 10,
+        "items": [
+          {
+            "id": "a",
+            "label": "Check the Unknown Backlog tile"
+          },
+          {
+            "id": "b",
+            "label": "Run Bulk Inquiry on the affected route and period using the checklist"
+          },
+          {
+            "id": "c",
+            "label": "Resolve remaining cases only with evidence and a second person"
+          },
+          {
+            "id": "d",
+            "label": "Write a handover note"
+          }
+        ],
+        "correctOrder": [
+          "a",
+          "b",
+          "c",
+          "d"
+        ],
+        "feedback": "Backlog first, then targeted inquiry, then evidence-based resolution, then hand over."
+      }
+    ]
+  },
+  {
+    "id": "lab-customer-calls",
+    "module": "m5",
+    "title": "Customer Calls: say the right thing",
+    "minutes": 30,
+    "tracks": [
+      "SUPPORT"
+    ],
+    "refs": [
+      "b05-09",
+      "b07-12",
+      "b09-08",
+      "b07-10"
+    ],
+    "briefing": "Six callers. For each, choose the safest helpful answer. Support is read-only: you never move money and you never reveal why.",
+    "passPercent": 80,
+    "tasks": [
+      {
+        "id": "c1",
+        "kind": "choice",
+        "title": "Merchant: why am I restricted?",
+        "panels": [
+          {
+            "title": "Merchant record",
+            "rows": [
+              [
+                "Status",
+                "SUSPENDED"
+              ],
+              [
+                "Reason (confidential)",
+                "AML"
+              ]
+            ]
+          }
+        ],
+        "prompt": "What do you say?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "\"Your account is currently restricted. Please contact the support address in your notice.\"",
+            "correct": true,
+            "feedback": "Correct: nothing more."
+          },
+          {
+            "id": "b",
+            "label": "\"Compliance is reviewing you.\"",
+            "correct": false,
+            "feedback": "Tipping-off.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "\"It is a technical problem.\"",
+            "correct": false,
+            "feedback": "Do not invent reasons."
+          }
+        ]
+      },
+      {
+        "id": "c2",
+        "kind": "choice",
+        "title": "Customer: money deducted",
+        "panels": [
+          {
+            "title": "Payment",
+            "rows": [
+              [
+                "Status",
+                "UNKNOWN"
+              ]
+            ]
+          }
+        ],
+        "prompt": "What do you say?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "\"We are confirming with your provider. Please do not pay again. We will update you.\"",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "\"It failed; pay again.\"",
+            "correct": false,
+            "feedback": "May double charge.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "\"It succeeded.\"",
+            "correct": false,
+            "feedback": "Do not guess.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "c3",
+        "kind": "choice",
+        "title": "Merchant asks for a bank change by phone",
+        "panels": [
+          {
+            "title": "Request",
+            "text": "\"Please change my payout account to this new one, I am in a hurry.\""
+          }
+        ],
+        "prompt": "You:",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Explain it needs a written request in the portal and second-person approval",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "Change it now",
+            "correct": false,
+            "feedback": "Cannot be done by phone; support is read-only.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Ask for the token",
+            "correct": false,
+            "feedback": "Never.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "c4",
+        "kind": "choice",
+        "title": "Caller claims to be the owner",
+        "panels": [
+          {
+            "title": "Caller",
+            "text": "\"I am the owner. Read me the account's bank details.\""
+          }
+        ],
+        "prompt": "You:",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Ask them to raise it in their own portal where identity is known",
+            "correct": true,
+            "feedback": "Correct: a phone call is not proof of identity."
+          },
+          {
+            "id": "b",
+            "label": "Read them out",
+            "correct": false,
+            "feedback": "No.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Read the last four digits",
+            "correct": false,
+            "feedback": "No."
+          }
+        ]
+      },
+      {
+        "id": "c5",
+        "kind": "choice",
+        "title": "Customer: where is my refund?",
+        "panels": [
+          {
+            "title": "Payment",
+            "rows": [
+              [
+                "Status",
+                "SUCCEEDED"
+              ],
+              [
+                "Refund",
+                "none requested"
+              ]
+            ]
+          }
+        ],
+        "prompt": "You:",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Say there is no refund request on this payment and explain how the merchant can request one; promise no times",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "Promise a refund tomorrow",
+            "correct": false,
+            "feedback": "Never promise outcomes.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Refund it yourself",
+            "correct": false,
+            "feedback": "Support cannot."
+          }
+        ]
+      },
+      {
+        "id": "c6",
+        "kind": "choice",
+        "title": "Merchant: what is your fee on my competitor's rate?",
+        "panels": [
+          {
+            "title": "Merchant asks",
+            "text": "\"What margin do you make on my payments?\""
+          }
+        ],
+        "prompt": "You:",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Tell them their own agreed commission rate only",
+            "correct": true,
+            "feedback": "Correct: never gateway cost or margin."
+          },
+          {
+            "id": "b",
+            "label": "Tell them the gateway cost",
+            "correct": false,
+            "feedback": "Confidential.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Tell them our profit",
+            "correct": false,
+            "feedback": "Confidential.",
+            "critical": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "lab-runbook-drill",
+    "module": "m9",
+    "title": "Runbook Drill: symptom to action",
+    "minutes": 30,
+    "tracks": [
+      "OPERATOR",
+      "GATEWAY_ADMIN",
+      "SECURITY_ADMIN"
+    ],
+    "refs": [
+      "b10-01",
+      "b10-02",
+      "b10-03",
+      "b10-04",
+      "b10-05",
+      "b10-06",
+      "b10-08"
+    ],
+    "briefing": "Match symptoms to runbooks, order the steps, and write a good handover.",
+    "passPercent": 80,
+    "tasks": [
+      {
+        "id": "r1",
+        "kind": "choice",
+        "title": "Pick the runbook",
+        "panels": [
+          {
+            "title": "Symptom",
+            "text": "Alerts show a spike of signature failures from one partner. Payments stay in VERIFYING."
+          }
+        ],
+        "prompt": "Which runbook?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "RB-02: partner changed its signature or sender address",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "RB-04: ledger drift",
+            "correct": false,
+            "feedback": "Not related."
+          },
+          {
+            "id": "c",
+            "label": "RB-05: credentials expired",
+            "correct": false,
+            "feedback": "Different symptom."
+          }
+        ]
+      },
+      {
+        "id": "r2",
+        "kind": "choice",
+        "title": "Pick the runbook",
+        "panels": [
+          {
+            "title": "Symptom",
+            "text": "The invariant screen shows drift of 12.5000 and automatic payouts have stopped."
+          }
+        ],
+        "prompt": "Which runbook?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "RB-04",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "RB-01",
+            "correct": false,
+            "feedback": "That is the outage runbook."
+          },
+          {
+            "id": "c",
+            "label": "RB-03",
+            "correct": false,
+            "feedback": "That is the UNKNOWN backlog."
+          }
+        ]
+      },
+      {
+        "id": "r3",
+        "kind": "order",
+        "title": "Order RB-02",
+        "panels": [
+          {
+            "title": "Signature failures"
+          }
+        ],
+        "prompt": "Put the steps in order.",
+        "points": 12,
+        "items": [
+          {
+            "id": "a",
+            "label": "Do not accept unsigned messages"
+          },
+          {
+            "id": "b",
+            "label": "Gateway Admin confirms the change with the partner in writing"
+          },
+          {
+            "id": "c",
+            "label": "Add the new secret version or address with overlap (two people)"
+          },
+          {
+            "id": "d",
+            "label": "Replay the stored messages"
+          },
+          {
+            "id": "e",
+            "label": "Record the change and the evidence"
+          }
+        ],
+        "correctOrder": [
+          "a",
+          "b",
+          "c",
+          "d",
+          "e"
+        ],
+        "feedback": "Never accept unsigned messages; confirm; add with overlap; replay; record."
+      },
+      {
+        "id": "r4",
+        "kind": "choice",
+        "title": "A credential set is FAILING",
+        "panels": [
+          {
+            "title": "Route",
+            "rows": [
+              [
+                "Route health",
+                "removed from selection"
+              ],
+              [
+                "Credential set",
+                "FAILING"
+              ]
+            ]
+          }
+        ],
+        "prompt": "Right action?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Replace the secret through two-person approval and run the credential check",
+            "correct": true,
+            "feedback": "Correct (RB-05)."
+          },
+          {
+            "id": "b",
+            "label": "Force the route back on",
+            "correct": false,
+            "feedback": "It would fail again."
+          },
+          {
+            "id": "c",
+            "label": "Edit the gateway",
+            "correct": false,
+            "feedback": "Not the cause."
+          }
+        ]
+      },
+      {
+        "id": "r5",
+        "kind": "multi",
+        "title": "A good handover note",
+        "panels": [
+          {
+            "title": "Shift end"
+          }
+        ],
+        "prompt": "Which items belong in a handover note?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "What is open and why (case numbers)",
+            "correct": true,
+            "feedback": "Yes."
+          },
+          {
+            "id": "b",
+            "label": "What you already tried",
+            "correct": true,
+            "feedback": "Yes."
+          },
+          {
+            "id": "c",
+            "label": "What you are waiting for and from whom",
+            "correct": true,
+            "feedback": "Yes."
+          },
+          {
+            "id": "d",
+            "label": "Your password so they can continue",
+            "correct": false,
+            "feedback": "Never."
+          },
+          {
+            "id": "e",
+            "label": "Anything risky or half-reviewed",
+            "correct": true,
+            "feedback": "Yes."
+          },
+          {
+            "id": "f",
+            "label": "Anything you promised to a merchant",
+            "correct": true,
+            "feedback": "Yes."
+          }
+        ],
+        "criticalWrong": [
+          "d"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "lab-ledger-balancing",
+    "module": "m6",
+    "title": "Ledger Balancing Lab",
+    "minutes": 45,
+    "tracks": [
+      "FINANCE"
+    ],
+    "refs": [
+      "b08-01",
+      "b08-03",
+      "b08-04",
+      "b08-12"
+    ],
+    "briefing": "Build the journal lines yourself. Enter debit or credit amounts (four decimals not needed) for the accounts that move; leave the others empty. Every entry must balance. Use 100.000 LYD links, 3% commission, and the fees given.",
+    "passPercent": 80,
+    "tasks": [
+      {
+        "id": "g1",
+        "kind": "ledger",
+        "title": "Entry 5: payer surcharge",
+        "panels": [
+          {
+            "title": "Event",
+            "rows": [
+              [
+                "Link amount",
+                "100.000 LYD"
+              ],
+              [
+                "Fee bearer",
+                "PAYER_SURCHARGE"
+              ],
+              [
+                "Commission",
+                "3.000 (3%)"
+              ],
+              [
+                "Gateway fee accrued",
+                "0.800"
+              ],
+              [
+                "Settlement",
+                "Platform clearing"
+              ]
+            ]
+          }
+        ],
+        "prompt": "Post the confirmation. The customer pays link plus commission; the merchant is credited the full link amount.",
+        "points": 15,
+        "accounts": [
+          "TREASURY",
+          "GATEWAY_CLEARING",
+          "COMMISSION_RECEIVABLE",
+          "MERCHANT_WALLET",
+          "PLATFORM_INCOME",
+          "GATEWAY_FEE_ACCRUAL",
+          "GATEWAY_FEE_EXPENSE",
+          "PROVIDER_FEE_EXPENSE",
+          "AML_HOLD",
+          "CHARGEBACK_RESERVE",
+          "SUSPENSE"
+        ],
+        "expected": [
+          {
+            "account": "GATEWAY_CLEARING",
+            "side": "DR",
+            "amount": "103.0000"
+          },
+          {
+            "account": "GATEWAY_FEE_EXPENSE",
+            "side": "DR",
+            "amount": "0.8000"
+          },
+          {
+            "account": "MERCHANT_WALLET",
+            "side": "CR",
+            "amount": "100.0000"
+          },
+          {
+            "account": "PLATFORM_INCOME",
+            "side": "CR",
+            "amount": "3.0000"
+          },
+          {
+            "account": "GATEWAY_FEE_ACCRUAL",
+            "side": "CR",
+            "amount": "0.8000"
+          }
+        ],
+        "feedback": "Clearing 103.0000 and fee expense 0.8000 on the debit side; wallet 100.0000, income 3.0000 and fee accrual 0.8000 on the credit side. Both sides total 103.8000."
+      },
+      {
+        "id": "g2",
+        "kind": "ledger",
+        "title": "Entry 3: the T+1 settlement sweep",
+        "panels": [
+          {
+            "title": "Event",
+            "rows": [
+              [
+                "Original payment",
+                "100.000 LYD, MERCHANT_ABSORBS (Entry 2)"
+              ],
+              [
+                "Accrued fee",
+                "0.800"
+              ],
+              [
+                "Statement shows",
+                "99.200 net settled"
+              ]
+            ]
+          }
+        ],
+        "prompt": "Post the sweep.",
+        "points": 15,
+        "accounts": [
+          "TREASURY",
+          "GATEWAY_CLEARING",
+          "COMMISSION_RECEIVABLE",
+          "MERCHANT_WALLET",
+          "PLATFORM_INCOME",
+          "GATEWAY_FEE_ACCRUAL",
+          "GATEWAY_FEE_EXPENSE",
+          "PROVIDER_FEE_EXPENSE",
+          "AML_HOLD",
+          "CHARGEBACK_RESERVE",
+          "SUSPENSE"
+        ],
+        "expected": [
+          {
+            "account": "TREASURY",
+            "side": "DR",
+            "amount": "99.2000"
+          },
+          {
+            "account": "GATEWAY_FEE_ACCRUAL",
+            "side": "DR",
+            "amount": "0.8000"
+          },
+          {
+            "account": "GATEWAY_CLEARING",
+            "side": "CR",
+            "amount": "100.0000"
+          }
+        ],
+        "feedback": "The partner paid 99.2000 to treasury; the accrued fee clears; the clearing claim of 100.0000 is closed."
+      },
+      {
+        "id": "g3",
+        "kind": "ledger",
+        "title": "Entry 4: fee true-up",
+        "panels": [
+          {
+            "title": "Event",
+            "rows": [
+              [
+                "Accrued fee",
+                "0.800"
+              ],
+              [
+                "Actual fee on the statement",
+                "0.900"
+              ]
+            ]
+          }
+        ],
+        "prompt": "Post the variance.",
+        "points": 15,
+        "accounts": [
+          "TREASURY",
+          "GATEWAY_CLEARING",
+          "COMMISSION_RECEIVABLE",
+          "MERCHANT_WALLET",
+          "PLATFORM_INCOME",
+          "GATEWAY_FEE_ACCRUAL",
+          "GATEWAY_FEE_EXPENSE",
+          "PROVIDER_FEE_EXPENSE",
+          "AML_HOLD",
+          "CHARGEBACK_RESERVE",
+          "SUSPENSE"
+        ],
+        "expected": [
+          {
+            "account": "GATEWAY_FEE_EXPENSE",
+            "side": "DR",
+            "amount": "0.1000"
+          },
+          {
+            "account": "GATEWAY_FEE_ACCRUAL",
+            "side": "CR",
+            "amount": "0.1000"
+          }
+        ],
+        "feedback": "The extra 0.1000 is a cost and a liability."
+      },
+      {
+        "id": "g4",
+        "kind": "ledger",
+        "title": "Entry 9: a full refund with commission reversed",
+        "panels": [
+          {
+            "title": "Event",
+            "rows": [
+              [
+                "Original payment",
+                "100.000 LYD, commission 3.000"
+              ],
+              [
+                "Refund",
+                "Full, commission reversed"
+              ],
+              [
+                "Paid from",
+                "Treasury"
+              ]
+            ]
+          }
+        ],
+        "prompt": "Post the refund.",
+        "points": 15,
+        "accounts": [
+          "TREASURY",
+          "GATEWAY_CLEARING",
+          "COMMISSION_RECEIVABLE",
+          "MERCHANT_WALLET",
+          "PLATFORM_INCOME",
+          "GATEWAY_FEE_ACCRUAL",
+          "GATEWAY_FEE_EXPENSE",
+          "PROVIDER_FEE_EXPENSE",
+          "AML_HOLD",
+          "CHARGEBACK_RESERVE",
+          "SUSPENSE"
+        ],
+        "expected": [
+          {
+            "account": "MERCHANT_WALLET",
+            "side": "DR",
+            "amount": "97.0000"
+          },
+          {
+            "account": "PLATFORM_INCOME",
+            "side": "DR",
+            "amount": "3.0000"
+          },
+          {
+            "account": "TREASURY",
+            "side": "CR",
+            "amount": "100.0000"
+          }
+        ],
+        "feedback": "The merchant's share and our commission are reversed; 100.0000 leaves treasury."
+      },
+      {
+        "id": "g5",
+        "kind": "numeric",
+        "title": "Wallet after a chargeback",
+        "panels": [
+          {
+            "title": "Event",
+            "rows": [
+              [
+                "Wallet balance before",
+                "40.000"
+              ],
+              [
+                "Chargeback",
+                "100.000 LYD payment, commission 3.000"
+              ],
+              [
+                "Merchant share reversed",
+                "97.000"
+              ]
+            ]
+          }
+        ],
+        "prompt": "What is the wallet balance after the chargeback posts (allowed because the ceiling permits)?",
+        "points": 10,
+        "answer": "-57.0000",
+        "tolerance": "0",
+        "feedback": "40 − 97 = −57. The ledger equation still holds; the merchant now owes us 57.",
+        "unit": "LYD"
+      },
+      {
+        "id": "g6",
+        "kind": "choice",
+        "title": "The equation",
+        "panels": [
+          {
+            "title": "Drift screen",
+            "rows": [
+              [
+                "Drift",
+                "12.5000 LYD"
+              ],
+              [
+                "Payouts",
+                "stopped automatically"
+              ]
+            ]
+          }
+        ],
+        "prompt": "What do you do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Treat as P1, tell your manager and Finance, never edit a number",
+            "correct": true,
+            "feedback": "Correct (RB-04)."
+          },
+          {
+            "id": "b",
+            "label": "Edit PLATFORM_INCOME by 12.5 to balance",
+            "correct": false,
+            "feedback": "Never.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Resume payouts",
+            "correct": false,
+            "feedback": "Only when zero.",
+            "critical": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "lab-cashout-adjustments",
+    "module": "m6",
+    "title": "Cash-outs and Adjustments Desk",
+    "minutes": 40,
+    "tracks": [
+      "FINANCE"
+    ],
+    "refs": [
+      "b08-07",
+      "b08-08",
+      "b08-09",
+      "b08-13"
+    ],
+    "briefing": "You are Finance. Work the queue: decide, tick the checklist truthfully, and fix mistakes the correct way.",
+    "passPercent": 80,
+    "tasks": [
+      {
+        "id": "h1",
+        "kind": "checklist",
+        "title": "Process a cash-out",
+        "panels": [
+          {
+            "title": "Cash-out CO-77",
+            "rows": [
+              [
+                "Merchant",
+                "Olive House (ACTIVE)"
+              ],
+              [
+                "Amount",
+                "500.000 LYD"
+              ],
+              [
+                "Wallet balance",
+                "620.000 LYD"
+              ],
+              [
+                "Bank snapshot",
+                "Olive House LLC, Bank A ···2210"
+              ],
+              [
+                "Merchant's verified bank (current)",
+                "Olive House LLC, Bank A ···2210"
+              ],
+              [
+                "Ledger drift",
+                "0.0000"
+              ],
+              [
+                "Open holds",
+                "none"
+              ],
+              [
+                "You processed it?",
+                "not yet"
+              ]
+            ]
+          }
+        ],
+        "prompt": "Tick only what you can verify from this record.",
+        "points": 10,
+        "items": [
+          {
+            "id": "a",
+            "label": "Destination is the merchant's verified account in its legal name",
+            "shouldTick": true,
+            "why": "Snapshot and verified account agree."
+          },
+          {
+            "id": "b",
+            "label": "The merchant is ACTIVE",
+            "shouldTick": true,
+            "why": "Yes."
+          },
+          {
+            "id": "c",
+            "label": "The amount does not exceed the balance",
+            "shouldTick": true,
+            "why": "500 ≤ 620."
+          },
+          {
+            "id": "d",
+            "label": "The ledger drift is zero and payouts are not halted",
+            "shouldTick": true,
+            "why": "Yes."
+          },
+          {
+            "id": "e",
+            "label": "The merchant phoned and said it is urgent",
+            "shouldTick": false,
+            "why": "Urgency is not a check."
+          },
+          {
+            "id": "f",
+            "label": "I may also approve the final subtraction myself",
+            "shouldTick": false,
+            "why": "A different Finance user must."
+          }
+        ],
+        "criticalWrong": [
+          "f"
+        ]
+      },
+      {
+        "id": "h2",
+        "kind": "choice",
+        "title": "Bank details changed",
+        "panels": [
+          {
+            "title": "Cash-out CO-78",
+            "rows": [
+              [
+                "Snapshot bank",
+                "Bank A ···1111"
+              ],
+              [
+                "Merchant's bank today",
+                "Bank B ···9999 (changed yesterday)"
+              ]
+            ]
+          }
+        ],
+        "prompt": "Which account does this cash-out pay?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "The snapshot from request time",
+            "correct": true,
+            "feedback": "Cash-outs keep the details they started with."
+          },
+          {
+            "id": "b",
+            "label": "The new account",
+            "correct": false,
+            "feedback": "Not without a new request."
+          },
+          {
+            "id": "c",
+            "label": "Whichever the merchant prefers",
+            "correct": false,
+            "feedback": "No."
+          }
+        ]
+      },
+      {
+        "id": "h3",
+        "kind": "choice",
+        "title": "Refund too large",
+        "panels": [
+          {
+            "title": "Refund request",
+            "rows": [
+              [
+                "Original payment",
+                "250.000 LYD"
+              ],
+              [
+                "Requested refund",
+                "300.000 LYD"
+              ]
+            ]
+          }
+        ],
+        "prompt": "What do you do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Reject or ask the maker to correct it; a refund can never exceed the original",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "Approve 300",
+            "correct": false,
+            "feedback": "Impossible.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Split it into 250 + 50",
+            "correct": false,
+            "feedback": "Splitting does not make it valid.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "h4",
+        "kind": "choice",
+        "title": "A wrong executed adjustment",
+        "panels": [
+          {
+            "title": "Adjustment ADJ-9",
+            "rows": [
+              [
+                "Status",
+                "EXECUTED"
+              ],
+              [
+                "Amount",
+                "150.000 LYD"
+              ],
+              [
+                "Problem",
+                "Should have been 105.000"
+              ]
+            ]
+          }
+        ],
+        "prompt": "How do you correct it?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Propose an offsetting adjustment with **Reverse** and a reason; a different Finance user approves",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "Edit ADJ-9",
+            "correct": false,
+            "feedback": "Never edited.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Delete ADJ-9",
+            "correct": false,
+            "feedback": "Never deleted.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "h5",
+        "kind": "choice",
+        "title": "Chargeback larger than the balance",
+        "panels": [
+          {
+            "title": "Dispute DSP-5",
+            "rows": [
+              [
+                "Chargeback",
+                "100.000 LYD"
+              ],
+              [
+                "Wallet",
+                "40.000"
+              ],
+              [
+                "Negative-balance ceiling",
+                "0"
+              ]
+            ]
+          }
+        ],
+        "prompt": "What happens and what do you do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "It will not post; a P1 case opens; choose collect, net or suspend",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "Post it and let the wallet go negative",
+            "correct": false,
+            "feedback": "The ceiling forbids it.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Ignore it",
+            "correct": false,
+            "feedback": "Evidence deadlines matter."
+          }
+        ]
+      },
+      {
+        "id": "h6",
+        "kind": "choice",
+        "title": "Who approves a drafted chargeback?",
+        "panels": [
+          {
+            "title": "Draft",
+            "rows": [
+              [
+                "Created by",
+                "SYSTEM_AUTOMATION"
+              ],
+              [
+                "Status",
+                "PENDING_REVIEW"
+              ]
+            ]
+          }
+        ],
+        "prompt": "Who may approve?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "A human FINANCE checker",
+            "correct": true,
+            "feedback": "The system can never approve or execute."
+          },
+          {
+            "id": "b",
+            "label": "The system after 24 hours",
+            "correct": false,
+            "feedback": "No.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "The merchant",
+            "correct": false,
+            "feedback": "No."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "lab-reconciliation-desk",
+    "module": "m6",
+    "title": "Reconciliation Desk",
+    "minutes": 35,
+    "tracks": [
+      "FINANCE"
+    ],
+    "refs": [
+      "b08-06",
+      "b10-05",
+      "b08-10"
+    ],
+    "briefing": "A statement has just loaded. Classify each line and choose what to do. Never edit a file to make it match.",
+    "passPercent": 80,
+    "tasks": [
+      {
+        "id": "e1",
+        "kind": "choice",
+        "title": "Line 1",
+        "panels": [
+          {
+            "title": "Ours vs statement",
+            "table": {
+              "columns": [
+                "",
+                "Ours",
+                "Statement"
+              ],
+              "rows": [
+                [
+                  "Reference",
+                  "P-500",
+                  "P-500"
+                ],
+                [
+                  "Amount",
+                  "100.000",
+                  "100.000"
+                ],
+                [
+                  "Fee",
+                  "0.800",
+                  "0.800"
+                ]
+              ]
+            }
+          }
+        ],
+        "prompt": "Result?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "MATCHED",
+            "correct": true,
+            "feedback": "Everything agrees."
+          },
+          {
+            "id": "b",
+            "label": "AMOUNT_MISMATCH",
+            "correct": false,
+            "feedback": "Amounts agree."
+          },
+          {
+            "id": "c",
+            "label": "MISSING_AT_GATEWAY",
+            "correct": false,
+            "feedback": "It is present."
+          }
+        ]
+      },
+      {
+        "id": "e2",
+        "kind": "choice",
+        "title": "Line 2",
+        "panels": [
+          {
+            "title": "Ours vs statement",
+            "table": {
+              "columns": [
+                "",
+                "Ours",
+                "Statement"
+              ],
+              "rows": [
+                [
+                  "Reference",
+                  "P-501",
+                  "(no line)"
+                ],
+                [
+                  "Status",
+                  "SUCCEEDED, 100.000",
+                  "—"
+                ]
+              ]
+            }
+          }
+        ],
+        "prompt": "Result and urgency?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "MISSING_AT_GATEWAY, the most serious: escalate before any payout",
+            "correct": true,
+            "feedback": "We may have credited money we did not receive."
+          },
+          {
+            "id": "b",
+            "label": "MISSING_LOCALLY",
+            "correct": false,
+            "feedback": "We have it; they do not."
+          },
+          {
+            "id": "c",
+            "label": "MATCHED",
+            "correct": false,
+            "feedback": "No line."
+          }
+        ]
+      },
+      {
+        "id": "e3",
+        "kind": "choice",
+        "title": "Line 3",
+        "panels": [
+          {
+            "title": "Ours vs statement",
+            "table": {
+              "columns": [
+                "",
+                "Ours",
+                "Statement"
+              ],
+              "rows": [
+                [
+                  "Reference",
+                  "(none)",
+                  "P-777"
+                ],
+                [
+                  "Amount",
+                  "—",
+                  "50.000"
+                ]
+              ]
+            }
+          }
+        ],
+        "prompt": "Result?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "MISSING_LOCALLY",
+            "correct": true,
+            "feedback": "Check for a late success or an UNKNOWN attempt we can now resolve."
+          },
+          {
+            "id": "b",
+            "label": "DUPLICATE",
+            "correct": false,
+            "feedback": "Not a duplicate."
+          },
+          {
+            "id": "c",
+            "label": "MATCHED",
+            "correct": false,
+            "feedback": "We have no record."
+          }
+        ]
+      },
+      {
+        "id": "e4",
+        "kind": "choice",
+        "title": "Line 4",
+        "panels": [
+          {
+            "title": "Ours vs statement",
+            "table": {
+              "columns": [
+                "",
+                "Ours",
+                "Statement"
+              ],
+              "rows": [
+                [
+                  "Reference",
+                  "P-502",
+                  "P-502"
+                ],
+                [
+                  "Fee accrued",
+                  "0.800",
+                  "0.950"
+                ]
+              ]
+            }
+          }
+        ],
+        "prompt": "What do you do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Post a fee variance true-up for 0.150 (Entry 4) through the normal route",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "Edit the statement to 0.800",
+            "correct": false,
+            "feedback": "Never.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Ignore it",
+            "correct": false,
+            "feedback": "Costs would drift."
+          }
+        ]
+      },
+      {
+        "id": "e5",
+        "kind": "choice",
+        "title": "Dates look off by a day",
+        "panels": [
+          {
+            "title": "Note",
+            "text": "The partner's file uses Libya time and the platform stores UTC."
+          }
+        ],
+        "prompt": "What do you do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Check the source's time zone setting before concluding there is a mismatch",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "Edit all dates",
+            "correct": false,
+            "feedback": "Never edit.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Reject the file",
+            "correct": false,
+            "feedback": "Check the setting first."
+          }
+        ]
+      },
+      {
+        "id": "e6",
+        "kind": "choice",
+        "title": "The same file again",
+        "panels": [
+          {
+            "title": "Upload",
+            "text": "You uploaded the same statement file earlier today."
+          }
+        ],
+        "prompt": "What happens?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "It is refused: the file fingerprint is unique",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "It doubles the matches",
+            "correct": false,
+            "feedback": "No."
+          },
+          {
+            "id": "c",
+            "label": "It overwrites",
+            "correct": false,
+            "feedback": "No."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "lab-compliance-desk",
+    "module": "m7",
+    "title": "Compliance Desk",
+    "minutes": 45,
+    "tracks": [
+      "COMPLIANCE",
+      "MLRO"
+    ],
+    "refs": [
+      "b09-03",
+      "b09-05",
+      "b09-06",
+      "b09-07",
+      "b09-08"
+    ],
+    "briefing": "You are Compliance. Decide with evidence, propose with a rationale, and keep everything confidential.",
+    "passPercent": 80,
+    "tasks": [
+      {
+        "id": "m1",
+        "kind": "choice",
+        "title": "An Arabic name match",
+        "panels": [
+          {
+            "title": "Candidate",
+            "rows": [
+              [
+                "Subject",
+                "Owner of Alamal Logistics"
+              ],
+              [
+                "Name (Arabic)",
+                "محمد علي الأحمد"
+              ],
+              [
+                "Listed person",
+                "Same name, born 1961, nationality X"
+              ],
+              [
+                "Owner",
+                "Born 1989, nationality Libyan, ID verified"
+              ],
+              [
+                "Score",
+                "0.83"
+              ]
+            ]
+          }
+        ],
+        "prompt": "What do you do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "**Disposition** FALSE_POSITIVE with the compared attributes as the rationale; suppression with an expiry date",
+            "correct": true,
+            "feedback": "Correct. Date of birth and nationality differ."
+          },
+          {
+            "id": "b",
+            "label": "TRUE_MATCH because the score is high",
+            "correct": false,
+            "feedback": "A score is not a decision."
+          },
+          {
+            "id": "c",
+            "label": "Ignore it",
+            "correct": false,
+            "feedback": "Every match must be decided.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "m2",
+        "kind": "choice",
+        "title": "A true PEP hit",
+        "panels": [
+          {
+            "title": "Candidate",
+            "rows": [
+              [
+                "Subject",
+                "Beneficial owner"
+              ],
+              [
+                "Listed",
+                "PEP: same name, same date of birth, same ID prefix"
+              ],
+              [
+                "Merchant",
+                "Al-Reef Trading"
+              ]
+            ]
+          }
+        ],
+        "prompt": "What do you do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Mark TRUE_MATCH and escalate to the MLRO; raise the severity at least HIGH",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "Mark FALSE_POSITIVE to keep the merchant happy",
+            "correct": false,
+            "feedback": "Never because of importance.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Phone the merchant to ask about it",
+            "correct": false,
+            "feedback": "Tipping-off.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "m3",
+        "kind": "choice",
+        "title": "What do you tell the merchant?",
+        "panels": [
+          {
+            "title": "Merchant calls",
+            "text": "\"Is this about compliance? My cash-out is frozen.\""
+          }
+        ],
+        "prompt": "You say:",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "\"Your account is currently restricted. Please contact the support address in your notice.\"",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "\"It is a sanctions check.\"",
+            "correct": false,
+            "feedback": "Tipping-off.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "\"No, it is not compliance.\"",
+            "correct": false,
+            "feedback": "A false denial is also wrong."
+          }
+        ]
+      },
+      {
+        "id": "m4",
+        "kind": "multi",
+        "title": "What raises case severity?",
+        "panels": [
+          {
+            "title": "Case"
+          }
+        ],
+        "prompt": "Select all the inputs that raise severity.",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "A velocity FLAG and an AML rule hit on the same payment",
+            "correct": true,
+            "feedback": "Correlated signals: CRITICAL."
+          },
+          {
+            "id": "b",
+            "label": "A PEP possible match",
+            "correct": true,
+            "feedback": "At least HIGH."
+          },
+          {
+            "id": "c",
+            "label": "Merchant risk tier HIGH",
+            "correct": true,
+            "feedback": "One level up."
+          },
+          {
+            "id": "d",
+            "label": "The merchant's logo colour",
+            "correct": false,
+            "feedback": "Irrelevant."
+          },
+          {
+            "id": "e",
+            "label": "The same subject already has an open case",
+            "correct": true,
+            "feedback": "One level up."
+          }
+        ]
+      },
+      {
+        "id": "m5",
+        "kind": "choice",
+        "title": "Proposing a resolution",
+        "panels": [
+          {
+            "title": "Case",
+            "rows": [
+              [
+                "Severity",
+                "MEDIUM"
+              ],
+              [
+                "Held",
+                "100.000 LYD"
+              ],
+              [
+                "Investigation",
+                "Payments consistent with declared business; customer confirmed in writing"
+              ]
+            ]
+          }
+        ],
+        "prompt": "What do you propose?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "**Propose resolution** release with a written rationale; the MLRO approves; money moves only after approval",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "Release it yourself",
+            "correct": false,
+            "feedback": "Maker cannot approve.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Tell the merchant it is released",
+            "correct": false,
+            "feedback": "Do not discuss the case.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "m6",
+        "kind": "choice",
+        "title": "A provisional reporting rule",
+        "panels": [
+          {
+            "title": "Report",
+            "rows": [
+              [
+                "Rule",
+                "PROVISIONAL"
+              ],
+              [
+                "Status",
+                "DRAFT"
+              ]
+            ]
+          }
+        ],
+        "prompt": "Can this be filed live?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "No. A provisional rule can never produce a live filing",
+            "correct": true,
+            "feedback": "The database refuses it."
+          },
+          {
+            "id": "b",
+            "label": "Yes after the MLRO approves",
+            "correct": false,
+            "feedback": "Still refused.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Yes if urgent",
+            "correct": false,
+            "feedback": "No."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "lab-build-a-rail",
+    "module": "m8",
+    "title": "Build-a-Rail Lab: configure a two-step OTP rail",
+    "minutes": 45,
+    "tracks": [
+      "GATEWAY_ADMIN"
+    ],
+    "refs": [
+      "b06-03",
+      "b06-04",
+      "b06-07",
+      "b06-08",
+      "b06-13",
+      "b06-14"
+    ],
+    "briefing": "You are configuring a simulated two-step OTP rail (Edfali/Sadad style). Make safe choices. Nothing here is real.",
+    "passPercent": 80,
+    "tasks": [
+      {
+        "id": "b1",
+        "kind": "numeric",
+        "title": "Amount scale",
+        "panels": [
+          {
+            "title": "Partner docs",
+            "rows": [
+              [
+                "Amount format",
+                "Integer of dirhams"
+              ],
+              [
+                "Our amount",
+                "10.500 LYD"
+              ]
+            ]
+          }
+        ],
+        "prompt": "What must the wire amount be (digits only)?",
+        "points": 10,
+        "answer": "10500",
+        "tolerance": "0",
+        "feedback": "10.500 LYD is 10500 dirhams. Sending 10.50 would charge ten dirhams; sending 10500 to a dinar gateway would charge 10500 dinars.",
+        "unit": "dirhams"
+      },
+      {
+        "id": "b2",
+        "kind": "choice",
+        "title": "Retry policy on the confirm step",
+        "panels": [
+          {
+            "title": "Step",
+            "rows": [
+              [
+                "Phase",
+                "SUBMIT"
+              ],
+              [
+                "side_effect",
+                "MOVES_MONEY"
+              ],
+              [
+                "Idempotency",
+                "not proven"
+              ]
+            ]
+          }
+        ],
+        "prompt": "Which retry policy?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "NEVER",
+            "correct": true,
+            "feedback": "Correct; a lost reply and a lost request look identical."
+          },
+          {
+            "id": "b",
+            "label": "SAFE",
+            "correct": false,
+            "feedback": "Could pay twice.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "SAFE_WITH_COOLDOWN",
+            "correct": false,
+            "feedback": "Still repeats the money step.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "b3",
+        "kind": "choice",
+        "title": "Channel strength",
+        "panels": [
+          {
+            "title": "Partner",
+            "rows": [
+              [
+                "Webhook",
+                "unsigned, shared token in the address"
+              ],
+              [
+                "Status question",
+                "available"
+              ]
+            ]
+          }
+        ],
+        "prompt": "How do you set the channel?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Mark it weak and turn on must_inquire so we ask the partner before believing",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "Trust the webhook alone",
+            "correct": false,
+            "feedback": "A shared token is weak.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Disable all channels",
+            "correct": false,
+            "feedback": "Then nothing confirms."
+          }
+        ]
+      },
+      {
+        "id": "b4",
+        "kind": "order",
+        "title": "Status rules order",
+        "panels": [
+          {
+            "title": "Rules"
+          }
+        ],
+        "prompt": "Order the rules the way they must be evaluated: first match wins.",
+        "points": 10,
+        "items": [
+          {
+            "id": "a",
+            "label": "Explicit success code → SUCCEEDED"
+          },
+          {
+            "id": "b",
+            "label": "Explicit decline codes → FAILED"
+          },
+          {
+            "id": "c",
+            "label": "Pending codes → VERIFYING"
+          },
+          {
+            "id": "d",
+            "label": "Anything else on a money step → UNKNOWN"
+          }
+        ],
+        "correctOrder": [
+          "a",
+          "b",
+          "c",
+          "d"
+        ],
+        "feedback": "Specific rules first; the catch-all on a money step is UNKNOWN, never FAILED."
+      },
+      {
+        "id": "b5",
+        "kind": "multi",
+        "title": "Find the mistakes",
+        "panels": [
+          {
+            "title": "Draft recipe summary",
+            "table": {
+              "columns": [
+                "Setting",
+                "Value"
+              ],
+              "rows": [
+                [
+                  "Money step retry",
+                  "SAFE"
+                ],
+                [
+                  "First step uses a value from an earlier answer",
+                  "yes"
+                ],
+                [
+                  "Weak channel must_inquire",
+                  "off"
+                ],
+                [
+                  "Amount format",
+                  "dirham integer, scale 1000"
+                ],
+                [
+                  "Request host",
+                  "an allowed https host"
+                ]
+              ]
+            }
+          }
+        ],
+        "prompt": "Select all settings that the wizard would REFUSE to save.",
+        "points": 12,
+        "options": [
+          {
+            "id": "a",
+            "label": "Money step retry SAFE",
+            "correct": true,
+            "feedback": "Money steps must be NEVER."
+          },
+          {
+            "id": "b",
+            "label": "Value from an earlier answer on the first step",
+            "correct": true,
+            "feedback": "There is no earlier answer."
+          },
+          {
+            "id": "c",
+            "label": "Weak channel with must_inquire off",
+            "correct": true,
+            "feedback": "Must ask the partner."
+          },
+          {
+            "id": "d",
+            "label": "Amount format dirham integer with scale 1000",
+            "correct": false,
+            "feedback": "Fine for a dirham gateway."
+          },
+          {
+            "id": "e",
+            "label": "Request host an allowed https host",
+            "correct": false,
+            "feedback": "Fine."
+          }
+        ]
+      },
+      {
+        "id": "b6",
+        "kind": "choice",
+        "title": "AI import",
+        "panels": [
+          {
+            "title": "Situation",
+            "text": "The AI returned a spec. It passed layers 1–3. Layer 4 says the gateway code already exists."
+          }
+        ],
+        "prompt": "What do you do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Choose New Version (draft); the draft still needs the credential check, gates and a second person",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "Publish it live",
+            "correct": false,
+            "feedback": "Passed checks are not approval.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Paste the live secret into the AI to fix it",
+            "correct": false,
+            "feedback": "Never.",
+            "critical": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "lab-rails-visibility",
+    "module": "m8",
+    "title": "Why Is the Payment Method Missing?",
+    "minutes": 30,
+    "tracks": [
+      "OPERATOR",
+      "SUPPORT",
+      "GATEWAY_ADMIN"
+    ],
+    "refs": [
+      "b06-12",
+      "b06-11"
+    ],
+    "briefing": "For each report, find the FIRST visible-rails condition that fails. Conditions: 1 application list, 2 link list, 3 commission profile, 4 route active, 5 route healthy, 6 limits and daily cap, 7 maintenance or scope, 8 credential verified, 9 currency and blocked.",
+    "passPercent": 80,
+    "tasks": [
+      {
+        "id": "v1",
+        "kind": "choice",
+        "title": "Edfali at 100 LYD",
+        "panels": [
+          {
+            "title": "Facts",
+            "rows": [
+              [
+                "Link amount",
+                "100 LYD"
+              ],
+              [
+                "Edfali direct route",
+                "ACTIVE, HEALTHY, max 1000, daily cap 20000, already 19950 today"
+              ],
+              [
+                "Edfali aggregator route",
+                "OPEN_BREAKER"
+              ],
+              [
+                "Application list",
+                "all"
+              ],
+              [
+                "Commission profile",
+                "live"
+              ]
+            ]
+          }
+        ],
+        "prompt": "Why is Edfali hidden?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Condition 6: the daily cap would be exceeded",
+            "correct": true,
+            "feedback": "19950 + 100 > 20000."
+          },
+          {
+            "id": "b",
+            "label": "Condition 9: currency",
+            "correct": false,
+            "feedback": "Currency matches."
+          },
+          {
+            "id": "c",
+            "label": "Condition 2: link list",
+            "correct": false,
+            "feedback": "No list."
+          }
+        ]
+      },
+      {
+        "id": "v2",
+        "kind": "choice",
+        "title": "Sadad at 02:30",
+        "panels": [
+          {
+            "title": "Facts",
+            "rows": [
+              [
+                "Sadad direct route",
+                "ACTIVE, HEALTHY, within limits, maintenance 02:00–03:00"
+              ],
+              [
+                "Time",
+                "02:30"
+              ]
+            ]
+          }
+        ],
+        "prompt": "Why is Sadad hidden?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Condition 7: maintenance window",
+            "correct": true,
+            "feedback": "Outside 02:00–03:00 it returns."
+          },
+          {
+            "id": "b",
+            "label": "Condition 5: unhealthy",
+            "correct": false,
+            "feedback": "It is healthy."
+          },
+          {
+            "id": "c",
+            "label": "Condition 8: credentials",
+            "correct": false,
+            "feedback": "Verified."
+          }
+        ]
+      },
+      {
+        "id": "v3",
+        "kind": "choice",
+        "title": "Sadad for 3000 LYD",
+        "panels": [
+          {
+            "title": "Facts",
+            "rows": [
+              [
+                "Link amount",
+                "3000 LYD"
+              ],
+              [
+                "Sadad route maximum",
+                "2000"
+              ]
+            ]
+          }
+        ],
+        "prompt": "Which condition fails?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Condition 6",
+            "correct": true,
+            "feedback": "Amount above the maximum."
+          },
+          {
+            "id": "b",
+            "label": "Condition 3",
+            "correct": false,
+            "feedback": "Profile exists."
+          },
+          {
+            "id": "c",
+            "label": "Condition 1",
+            "correct": false,
+            "feedback": "No list."
+          }
+        ]
+      },
+      {
+        "id": "v4",
+        "kind": "choice",
+        "title": "Application whitelist",
+        "panels": [
+          {
+            "title": "Facts",
+            "rows": [
+              [
+                "Application whitelist",
+                "Sadad only"
+              ],
+              [
+                "Customer looks for",
+                "Moamalat Card"
+              ]
+            ]
+          }
+        ],
+        "prompt": "Condition?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Condition 1",
+            "correct": true,
+            "feedback": "The application does not allow it."
+          },
+          {
+            "id": "b",
+            "label": "Condition 6",
+            "correct": false,
+            "feedback": "Limits fine."
+          },
+          {
+            "id": "c",
+            "label": "Condition 9",
+            "correct": false,
+            "feedback": "Currency fine."
+          }
+        ]
+      },
+      {
+        "id": "v5",
+        "kind": "choice",
+        "title": "NeomPay is not shown",
+        "panels": [
+          {
+            "title": "Facts",
+            "rows": [
+              [
+                "NeomPay route",
+                "ACTIVE, HEALTHY, verified"
+              ],
+              [
+                "Live commission profile",
+                "none"
+              ]
+            ]
+          }
+        ],
+        "prompt": "Condition?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Condition 3",
+            "correct": true,
+            "feedback": "No commission profile covers it."
+          },
+          {
+            "id": "b",
+            "label": "Condition 5",
+            "correct": false,
+            "feedback": "Healthy."
+          },
+          {
+            "id": "c",
+            "label": "Condition 8",
+            "correct": false,
+            "feedback": "Verified."
+          }
+        ]
+      },
+      {
+        "id": "v6",
+        "kind": "choice",
+        "title": "Visa/Mastercard on a LYD link",
+        "panels": [
+          {
+            "title": "Facts",
+            "rows": [
+              [
+                "Rail currency",
+                "USD"
+              ],
+              [
+                "Link currency",
+                "LYD"
+              ],
+              [
+                "Everything else",
+                "fine"
+              ]
+            ]
+          }
+        ],
+        "prompt": "Condition?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Condition 9",
+            "correct": true,
+            "feedback": "Currency differs."
+          },
+          {
+            "id": "b",
+            "label": "Condition 4",
+            "correct": false,
+            "feedback": "Active."
+          },
+          {
+            "id": "c",
+            "label": "Condition 7",
+            "correct": false,
+            "feedback": "Fine."
+          }
+        ]
+      },
+      {
+        "id": "v7",
+        "kind": "choice",
+        "title": "What would you NOT do?",
+        "panels": [
+          {
+            "title": "A merchant is annoyed"
+          }
+        ],
+        "prompt": "Which action is wrong?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Raise the route's maximum to make a test pass",
+            "correct": true,
+            "feedback": "Limits are money rules; never change them to pass a test."
+          },
+          {
+            "id": "b",
+            "label": "Walk down the table to find the first failing condition",
+            "correct": false,
+            "feedback": "Right approach."
+          },
+          {
+            "id": "c",
+            "label": "Tell the Gateway Admin about a breaker",
+            "correct": false,
+            "feedback": "Right."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "lab-gate-review",
+    "module": "m8",
+    "title": "Go-Live Gate Review: be the approver",
+    "minutes": 40,
+    "tracks": [
+      "GATEWAY_ADMIN",
+      "SECURITY_ADMIN"
+    ],
+    "refs": [
+      "b06-16",
+      "b06-13",
+      "b06-14",
+      "b06-10"
+    ],
+    "briefing": "A gateway version has been submitted. You are the Security Admin. Read the evidence and decide.",
+    "passPercent": 80,
+    "tasks": [
+      {
+        "id": "q1",
+        "kind": "multi",
+        "title": "Read the gate results",
+        "panels": [
+          {
+            "title": "Submission GV-31",
+            "table": {
+              "columns": [
+                "Gate",
+                "Result"
+              ],
+              "rows": [
+                [
+                  "1 Two-person approval",
+                  "pending your approval"
+                ],
+                [
+                  "2 15-scenario suite",
+                  "green"
+                ],
+                [
+                  "3 Amount contract test",
+                  "FAILED: 10.50 LYD produced \"10.50\" for a dirham-integer gateway"
+                ],
+                [
+                  "4 Reference format",
+                  "green"
+                ],
+                [
+                  "5 Signature contract test",
+                  "green"
+                ],
+                [
+                  "6 Channel strength",
+                  "green"
+                ],
+                [
+                  "7 Rollback version",
+                  "named GV-29"
+                ],
+                [
+                  "9 Evidence level",
+                  "UNVERIFIED, no risk acceptance"
+                ],
+                [
+                  "11 Canary plan",
+                  "missing"
+                ]
+              ]
+            }
+          }
+        ],
+        "prompt": "Select every problem that should stop approval.",
+        "points": 12,
+        "options": [
+          {
+            "id": "a",
+            "label": "Amount contract test failed",
+            "correct": true,
+            "feedback": "Gate 3."
+          },
+          {
+            "id": "b",
+            "label": "Evidence level UNVERIFIED with no acceptance",
+            "correct": true,
+            "feedback": "Gate 9."
+          },
+          {
+            "id": "c",
+            "label": "Canary plan missing",
+            "correct": true,
+            "feedback": "Gate 11."
+          },
+          {
+            "id": "d",
+            "label": "15-scenario suite green",
+            "correct": false,
+            "feedback": "Good."
+          },
+          {
+            "id": "e",
+            "label": "Rollback version named",
+            "correct": false,
+            "feedback": "Good."
+          }
+        ]
+      },
+      {
+        "id": "q2",
+        "kind": "choice",
+        "title": "Decision",
+        "panels": [
+          {
+            "title": "Your decision"
+          }
+        ],
+        "prompt": "What do you do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Reject with a reason listing the failed gates",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "Approve; the maker is senior",
+            "correct": false,
+            "feedback": "Never approve what fails a gate.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Approve and fix later",
+            "correct": false,
+            "feedback": "Never.",
+            "critical": true
+          }
+        ]
+      },
+      {
+        "id": "q3",
+        "kind": "choice",
+        "title": "An imported draft",
+        "panels": [
+          {
+            "title": "Draft",
+            "rows": [
+              [
+                "Source",
+                "AI import"
+              ],
+              [
+                "Route",
+                "PAUSED"
+              ],
+              [
+                "Credential set",
+                "UNTESTED"
+              ]
+            ]
+          }
+        ],
+        "prompt": "What is still required?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "The live credential check, the twelve gates and a second person",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "Nothing; it is imported",
+            "correct": false,
+            "feedback": "It is only a draft.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Only the preview",
+            "correct": false,
+            "feedback": "Not enough."
+          }
+        ]
+      },
+      {
+        "id": "q4",
+        "kind": "choice",
+        "title": "A running payment during promotion",
+        "panels": [
+          {
+            "title": "Facts",
+            "text": "You approve the new version at noon. A payment started at 11:59."
+          }
+        ],
+        "prompt": "Which version does that payment finish on?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "The old version",
+            "correct": true,
+            "feedback": "Each attempt is pinned."
+          },
+          {
+            "id": "b",
+            "label": "The new version",
+            "correct": false,
+            "feedback": "No."
+          },
+          {
+            "id": "c",
+            "label": "It restarts",
+            "correct": false,
+            "feedback": "No."
+          }
+        ]
+      },
+      {
+        "id": "q5",
+        "kind": "choice",
+        "title": "Rollback",
+        "panels": [
+          {
+            "title": "Facts",
+            "text": "The new version misbehaves after promotion."
+          }
+        ],
+        "prompt": "What do you do?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Pause the route if needed and roll back to the named version through the normal review",
+            "correct": true,
+            "feedback": "Correct."
+          },
+          {
+            "id": "b",
+            "label": "Edit the live version",
+            "correct": false,
+            "feedback": "Not possible.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Delete the gateway",
+            "correct": false,
+            "feedback": "No.",
+            "critical": true
+          }
+        ]
+      }
+    ]
+  }
+]

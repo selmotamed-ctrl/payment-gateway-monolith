@@ -1,187 +1,224 @@
-import { ACADEMY_MODULES_TRACK_A } from "./modulesTrackA";
-import { ACADEMY_MODULES_TRACK_B } from "./modulesTrackB";
-import type {
-    AcademyBadge,
-    AcademyModule,
-    AcademyTrack,
-    AcademyTrackDefinition,
-    EmployeeAcademyProgress,
-} from "./types";
+/**
+ * Employee Academy content: typed, lazy loaders over the committed extractor output in
+ * `./generated/` (see `scripts/extract-academy-content.ts`). Nothing here is hand-written
+ * content; exam-pool questions are never in the browser (they live in `core-back`).
+ */
 
-export * from "./types";
-export { ACADEMY_MODULES_TRACK_A, ACADEMY_MODULES_TRACK_B };
+export type TrackId =
+    | "FOUNDATION"
+    | "OPERATOR"
+    | "SUPPORT"
+    | "FINANCE"
+    | "COMPLIANCE"
+    | "MLRO"
+    | "GATEWAY_ADMIN"
+    | "SECURITY_ADMIN";
 
-export const ACADEMY_MODULES: AcademyModule[] = [...ACADEMY_MODULES_TRACK_A, ...ACADEMY_MODULES_TRACK_B];
-
-export const ACADEMY_TRACKS: AcademyTrackDefinition[] = [
-    {
-        id: "SUPPORT",
-        badge: "CERTIFIED_SUPPORT_SPECIALIST",
-        titleEn: "Support Specialist",
-        titleAr: "أخصائي دعم",
-        moduleIds: ["M1", "M2", "M6"],
-    },
-    {
-        id: "OPERATIONS",
-        badge: "CERTIFIED_OPERATIONS_OFFICER",
-        titleEn: "Operations Officer",
-        titleAr: "ضابط عمليات",
-        moduleIds: ["M1", "M2", "M3", "M6"],
-    },
-    {
-        id: "COMPLIANCE",
-        badge: "CERTIFIED_COMPLIANCE_ANALYST",
-        titleEn: "Compliance Analyst",
-        titleAr: "محلل امتثال",
-        moduleIds: ["M1", "M2", "M3", "M7"],
-    },
-    {
-        id: "FINANCE",
-        badge: "CERTIFIED_FINANCE_CONTROLLER",
-        titleEn: "Finance Controller",
-        titleAr: "مراقب مالي",
-        moduleIds: ["M1", "M2", "M4", "M8"],
-    },
-    {
-        id: "GATEWAY_ARCHITECT",
-        badge: "CERTIFIED_GATEWAY_ARCHITECT",
-        titleEn: "Gateway Architect",
-        titleAr: "مهندس بوابات",
-        moduleIds: ["M1", "M2", "M5", "M6", "M8"],
-    },
-    {
-        id: "MASTER_OPERATOR",
-        badge: "CERTIFIED_MASTER_OPERATOR",
-        titleEn: "Master Operator",
-        titleAr: "مشغّل رئيسي",
-        moduleIds: ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8"],
-        requiresAllLabs: true,
-        requiresPerfectQuiz: true,
-    },
+export const TRACK_ORDER: readonly TrackId[] = [
+    "FOUNDATION",
+    "OPERATOR",
+    "SUPPORT",
+    "FINANCE",
+    "COMPLIANCE",
+    "MLRO",
+    "GATEWAY_ADMIN",
+    "SECURITY_ADMIN",
 ];
 
-export const findAcademyModule = (id: string): AcademyModule | undefined =>
-    ACADEMY_MODULES.find((module) => module.id === id);
+export interface AcademyMeta {
+    contentVersion: string;
+    recertifyFrom: string;
+    generatedAt: string;
+    contentHash: string;
+    counts: Record<string, number>;
+}
 
-export const emptyAcademyProgress = (): EmployeeAcademyProgress => ({
-    completedLessonIds: [],
-    completedLabIds: {},
-    quizScores: {},
-    earnedBadges: [],
-    guideRead: {},
-});
+export interface Track {
+    id: TrackId;
+    title: string;
+    badge: string;
+    hours: string;
+    requires: TrackId[];
+    description: string;
+    moduleIds: string[];
+    lessonIds: string[];
+    labIds: string[];
+    examId: string;
+}
 
-export const moduleLessonIds = (module: AcademyModule): string[] => module.lessons.map((lesson) => lesson.id);
+export interface Module {
+    id: string;
+    title: string;
+    minutes: number;
+    objective: string;
+    lessonIds: string[];
+    labIds: string[];
+}
 
-export const moduleQuizId = (module: AcademyModule): string => `QUIZ-${module.id}`;
+export interface Lesson {
+    id: string;
+    module: string;
+    order: number;
+    title: string;
+    minutes: number;
+    tracks: string[];
+    reading: string[];
+    /** Markdown source (rendered with the Guide's MarkdownView so links/callouts match the Guide). */
+    body: string;
+    html: string;
+    plainText: string;
+    checkIds: string[];
+}
 
-export const moduleLessonsComplete = (progress: EmployeeAcademyProgress, module: AcademyModule): boolean =>
-    moduleLessonIds(module).every((id) => progress.completedLessonIds.includes(id));
+export type QType = "single" | "multi" | "order" | "number" | "truefalse";
 
-export const moduleLabPassed = (progress: EmployeeAcademyProgress, module: AcademyModule): boolean =>
-    progress.completedLabIds[module.lab.id]?.passed === true;
+/** `correct` is present only in practice content (lesson checks); never for exam questions. */
+export interface QOption {
+    id: string;
+    text: string;
+    correct?: boolean;
+    note?: string;
+}
 
-export const moduleQuizPerfect = (progress: EmployeeAcademyProgress, module: AcademyModule): boolean =>
-    progress.quizScores[moduleQuizId(module)]?.scorePercent === 100;
+export interface Question {
+    id: string;
+    module: string;
+    type: QType;
+    difficulty: 1 | 2 | 3;
+    critical: boolean;
+    lesson?: string;
+    refs: string[];
+    stem: string;
+    options: QOption[];
+    answer?: string;
+    tolerance?: string;
+    why?: string;
+}
 
-export const moduleMastered = (progress: EmployeeAcademyProgress, module: AcademyModule): boolean =>
-    moduleLessonsComplete(progress, module) && moduleLabPassed(progress, module) && moduleQuizPerfect(progress, module);
+export interface ExamBlueprintPublic {
+    id: string;
+    track: TrackId;
+    questionCount: number;
+    passPercent: number;
+    timeLimitMinutes: number;
+    cooldownMinutes: number;
+    composition: { module: string; count: number }[];
+}
 
-export const earnedBadges = (progress: EmployeeAcademyProgress): AcademyBadge[] => {
-    const result = new Set<AcademyBadge>(progress.earnedBadges);
-    for (const track of ACADEMY_TRACKS) {
-        const modules = track.moduleIds
-            .map((id) => findAcademyModule(id))
-            .filter((module): module is AcademyModule => Boolean(module));
-        const allMastered = modules.every((module) => moduleMastered(progress, module));
-        if (!allMastered) {
-            continue;
-        }
-        if (track.requiresAllLabs && !ACADEMY_MODULES.every((module) => moduleLabPassed(progress, module))) {
-            continue;
-        }
-        if (track.requiresPerfectQuiz && !ACADEMY_MODULES.every((module) => moduleQuizPerfect(progress, module))) {
-            continue;
-        }
-        result.add(track.badge);
+export type Panel = { title: string } & (
+    | { rows: [string, string][] }
+    | { table: { columns: string[]; rows: string[][] } }
+    | { timeline: { t: string; text: string; flag?: "warn" | "ok" | "bad" }[] }
+    | { text: string }
+    | Record<string, never>
+);
+
+interface TaskBase {
+    id: string;
+    title: string;
+    panels: Panel[];
+    prompt: string;
+    points: number;
+    hint?: string;
+    refs?: string[];
+}
+export interface ChoiceTask extends TaskBase {
+    kind: "choice";
+    options: { id: string; label: string; correct: boolean; critical?: boolean; feedback: string }[];
+}
+export interface MultiTask extends TaskBase {
+    kind: "multi";
+    options: { id: string; label: string; correct: boolean; feedback: string }[];
+    criticalWrong?: string[];
+}
+export interface LedgerTask extends TaskBase {
+    kind: "ledger";
+    accounts: string[];
+    expected: { account: string; side: "DR" | "CR"; amount: string }[];
+    feedback: string;
+}
+export interface OrderTask extends TaskBase {
+    kind: "order";
+    items: { id: string; label: string }[];
+    correctOrder: string[];
+    feedback: string;
+}
+export interface ChecklistTask extends TaskBase {
+    kind: "checklist";
+    items: { id: string; label: string; shouldTick: boolean; why: string }[];
+    criticalWrong?: string[];
+}
+export interface NumericTask extends TaskBase {
+    kind: "numeric";
+    answer: string;
+    tolerance: string;
+    unit?: string;
+    feedback: string;
+}
+export type LabTask = ChoiceTask | MultiTask | LedgerTask | OrderTask | ChecklistTask | NumericTask;
+
+export interface Lab {
+    id: string;
+    module: string;
+    title: string;
+    minutes: number;
+    tracks: string[];
+    refs: string[];
+    briefing: string;
+    passPercent: number;
+    tasks: LabTask[];
+}
+
+export interface Drill {
+    id: string;
+    title: string;
+    rail: string;
+    minutes: number;
+    refs: string[];
+    markdown: string;
+    html: string;
+    plainText: string;
+}
+
+export interface AcademyPage {
+    id: string;
+    title: string;
+    markdown: string;
+    html: string;
+    plainText: string;
+}
+
+const cache = new Map<string, Promise<unknown>>();
+const once = <T,>(key: string, load: () => Promise<{ default: T }>): Promise<T> => {
+    let hit = cache.get(key) as Promise<T> | undefined;
+    if (!hit) {
+        hit = load().then((module) => module.default);
+        cache.set(key, hit);
     }
-    return [...result];
+    return hit;
 };
 
-export const trackProgressPercent = (progress: EmployeeAcademyProgress, track: AcademyTrackDefinition): number => {
-    const modules = track.moduleIds
-        .map((id) => findAcademyModule(id))
-        .filter((module): module is AcademyModule => Boolean(module));
-    if (modules.length === 0) {
-        return 0;
-    }
-    const completed = modules.filter((module) => moduleMastered(progress, module)).length;
-    return Math.round((completed / modules.length) * 100);
+export const loadMeta = (): Promise<AcademyMeta> => once("meta", () => import("./generated/meta.json"));
+export const loadTracks = (): Promise<Track[]> => once("tracks", () => import("./generated/tracks.json")) as Promise<Track[]>;
+export const loadModules = (): Promise<Module[]> => once("modules", () => import("./generated/modules.json")) as Promise<Module[]>;
+export const loadLessons = (): Promise<Lesson[]> => once("lessons", () => import("./generated/lessons.en.json")) as Promise<Lesson[]>;
+export const loadChecks = (): Promise<Question[]> => once("checks", () => import("./generated/checks.en.json")) as Promise<Question[]>;
+export const loadLabs = (): Promise<Lab[]> => once("labs", () => import("./generated/labs.en.json")) as unknown as Promise<Lab[]>;
+export const loadDrills = (): Promise<Drill[]> => once("drills", () => import("./generated/drills.en.json")) as Promise<Drill[]>;
+export const loadPages = (): Promise<AcademyPage[]> => once("pages", () => import("./generated/pages.en.json")) as Promise<AcademyPage[]>;
+export const loadExamBlueprints = (): Promise<ExamBlueprintPublic[]> =>
+    once("blueprints", () => import("./generated/exam-blueprints.public.json")) as Promise<ExamBlueprintPublic[]>;
+
+/** Everything the catalogue pages need in one call (small: tracks + modules + meta + blueprints). */
+export const loadCatalog = async () => {
+    const [meta, tracks, modules, blueprints] = await Promise.all([loadMeta(), loadTracks(), loadModules(), loadExamBlueprints()]);
+    return { meta, tracks, modules, blueprints };
 };
 
-export const normalizeAcademyProgress = (input: unknown): EmployeeAcademyProgress => {
-    const source = input !== null && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
-    const completedLessonIds = Array.isArray(source.completedLessonIds)
-        ? source.completedLessonIds.filter((entry): entry is string => typeof entry === "string")
-        : [];
-    const completedLabIds: EmployeeAcademyProgress["completedLabIds"] = {};
-    if (source.completedLabIds !== null && typeof source.completedLabIds === "object" && !Array.isArray(source.completedLabIds)) {
-        for (const [key, value] of Object.entries(source.completedLabIds as Record<string, unknown>)) {
-            if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-                const row = value as Record<string, unknown>;
-                completedLabIds[key] = {
-                    passed: row.passed === true,
-                    attempts: typeof row.attempts === "number" ? row.attempts : 0,
-                    mistakesMade: Array.isArray(row.mistakesMade)
-                        ? row.mistakesMade.filter((entry): entry is string => typeof entry === "string")
-                        : [],
-                    completedAt: typeof row.completedAt === "string" ? row.completedAt : "",
-                };
-            }
-        }
-    }
-    const quizScores: EmployeeAcademyProgress["quizScores"] = {};
-    if (source.quizScores !== null && typeof source.quizScores === "object" && !Array.isArray(source.quizScores)) {
-        for (const [key, value] of Object.entries(source.quizScores as Record<string, unknown>)) {
-            if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-                const row = value as Record<string, unknown>;
-                quizScores[key] = {
-                    scorePercent: typeof row.scorePercent === "number" ? Math.max(0, Math.min(100, row.scorePercent)) : 0,
-                    passed: row.passed === true,
-                    completedAt: typeof row.completedAt === "string" ? row.completedAt : "",
-                    answers:
-                        row.answers !== null && typeof row.answers === "object" && !Array.isArray(row.answers)
-                            ? (row.answers as Record<string, number>)
-                            : undefined,
-                };
-            }
-        }
-    }
-    const earned = Array.isArray(source.earnedBadges)
-        ? source.earnedBadges.filter((entry): entry is AcademyBadge => typeof entry === "string")
-        : [];
-    const guideRead: NonNullable<EmployeeAcademyProgress["guideRead"]> = {};
-    if (source.guideRead !== null && typeof source.guideRead === "object" && !Array.isArray(source.guideRead)) {
-        for (const [articleId, value] of Object.entries(source.guideRead as Record<string, unknown>)) {
-            if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-                const row = value as Record<string, unknown>;
-                if (typeof row.v !== "string") continue;
-                guideRead[articleId] = {
-                    v: row.v,
-                    at: typeof row.at === "string" ? row.at : "",
-                };
-            }
-        }
-    }
-    return {
-        completedLessonIds,
-        completedLabIds,
-        quizScores,
-        earnedBadges: earned,
-        guideRead,
-        lastModuleId: typeof source.lastModuleId === "string" ? source.lastModuleId : undefined,
-        updatedAt: typeof source.updatedAt === "string" ? source.updatedAt : undefined,
-    };
-};
+export const findTrack = (tracks: Track[], id: string): Track | undefined => tracks.find((track) => track.id === id);
 
-export const academyTracksForModule = (module: AcademyModule): AcademyTrack[] => module.tracks;
+/** Role → its role track (the Foundation track applies to everyone). */
+export const roleTrackFor = (role: string | undefined | null): TrackId | null => {
+    const value = String(role ?? "");
+    return (TRACK_ORDER as readonly string[]).includes(value) && value !== "FOUNDATION" ? (value as TrackId) : null;
+};

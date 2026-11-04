@@ -1,945 +1,158 @@
-import { dc } from "kt-dc";
-import { computed, ref } from "vue";
+import { computed, defineComponent, onMounted, ref } from "vue";
+import { RouterLink } from "vue-router";
 import { useLocale } from "vuetify";
-import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VCheckbox, VExpansionPanel, VExpansionPanelText, VExpansionPanelTitle, VExpansionPanels, VProgressLinear, VRadio, VRadioGroup, VTextField } from "vuetify/components";
-import ScreenContainer from "@/components/ScreenContainer";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
-import { StateView } from "@/components/StateView";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { DescriptionList } from "@/components/ui/DescriptionList";
-import { MonoRef } from "@/components/ui/MonoRef";
-import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
-import { GuideMarkdown } from "@/components/guide/GuideMarkdown";
-import {
-    ACADEMY_MODULES,
-    ACADEMY_TRACKS,
-    earnedBadges,
-    emptyAcademyProgress,
-    findAcademyModule,
-    moduleLabPassed,
-    moduleLessonsComplete,
-    moduleMastered,
-    moduleQuizPerfect,
-    moduleQuizId,
-    normalizeAcademyProgress,
-    trackProgressPercent,
-    type AcademyBadge,
-    type AcademyModule,
-    type AcademyTrack,
-    type EmployeeAcademyProgress,
-} from "@/content/academy";
-import { api } from "@/state/api";
-import { urlsMap } from "@/constants/urlsMap";
-import { xlsxUIPipeline } from "@/utils/xlsx";
-import { extractApiErrorMessage } from "@/utils/errors/extractor";
-import { showSnackBar } from "@/utils/snackBar";
+import { AcademyShell, Skeleton, fmt, useAcademyData, userRole } from "@/components/academy/AcademyShell";
+import { BadgeChip } from "@/components/academy/BadgeChip";
+import { ProgressRing } from "@/components/academy/ProgressRing";
+import { nextStep, pickActiveTrack, trackStats } from "@/components/academy/nextStep";
+import { useAcademyProgress } from "@/components/academy/useAcademyProgress";
+import { useEligibility } from "@/components/academy/useEligibility";
+import { roleTrackFor, type TrackId } from "@/content/academy";
 
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
-import { MetaPill } from "@/components/ui/MetaPill";
-type SubmittedQuiz = {
-    correct: number;
-    total: number;
-    pct: number;
-    passed: boolean;
-};
+export const AdminAcademyPage = defineComponent({
+    name: "AdminAcademyPage",
+    setup() {
+        const { t } = useLocale();
+        const academy = useAcademyProgress();
+        const data = useAcademyData();
+        const roleTrack = roleTrackFor(userRole());
+        const examId = ref("");
 
-type Incident = {
-    moduleId: string;
-    scenarioId: string;
-    message: string;
-};
-
-type AcademyStep = "lessons" | "lab" | "quiz";
-
-const BADGE_LABELS: Record<AcademyBadge, string> = {
-    CERTIFIED_SUPPORT_SPECIALIST: "Certified Support Specialist",
-    CERTIFIED_OPERATIONS_OFFICER: "Certified Operations Officer",
-    CERTIFIED_COMPLIANCE_ANALYST: "Certified Compliance Analyst",
-    CERTIFIED_FINANCE_CONTROLLER: "Certified Finance Controller",
-    CERTIFIED_GATEWAY_ARCHITECT: "Certified Gateway Architect",
-    CERTIFIED_MASTER_OPERATOR: "Certified Master Operator",
-};
-
-const BADGE_LABELS_AR: Record<AcademyBadge, string> = {
-    CERTIFIED_SUPPORT_SPECIALIST: "أخصائي دعم معتمد",
-    CERTIFIED_OPERATIONS_OFFICER: "ضابط عمليات معتمد",
-    CERTIFIED_COMPLIANCE_ANALYST: "محلل امتثال معتمد",
-    CERTIFIED_FINANCE_CONTROLLER: "مراقب مالي معتمد",
-    CERTIFIED_GATEWAY_ARCHITECT: "مهندس بوابات معتمد",
-    CERTIFIED_MASTER_OPERATOR: "مشغّل رئيسي معتمد",
-};
-
-const TRACK_LABELS_AR: Record<AcademyTrack, string> = {
-    SUPPORT: "الدعم",
-    OPERATIONS: "العمليات",
-    COMPLIANCE: "الامتثال",
-    FINANCE: "المالية",
-    GATEWAY_ARCHITECT: "هندسة البوابات",
-    MASTER_OPERATOR: "المشغّل الرئيسي",
-};
-
-const asLegacyProgress = (input: unknown): EmployeeAcademyProgress | null => {
-    if (input === null || typeof input !== "object" || Array.isArray(input)) return null;
-    const source = input as Record<string, unknown>;
-    if (Array.isArray(source.completedLessonIds) || source.completedLabIds !== undefined) return null;
-    const legacyModules = Array.isArray(source.completedModules)
-        ? source.completedModules.filter((entry): entry is string => typeof entry === "string")
-        : [];
-    if (legacyModules.length === 0) return null;
-    const progress = emptyAcademyProgress();
-    for (const moduleId of legacyModules) {
-        const normalized = moduleId.startsWith("M") ? moduleId : `M${moduleId}`;
-        const module = findAcademyModule(normalized);
-        if (!module) continue;
-        progress.completedLessonIds.push(...module.lessons.map((lesson) => lesson.id));
-        progress.completedLabIds[module.lab.id] = {
-            passed: true,
-            attempts: 1,
-            mistakesMade: [],
-            completedAt: new Date().toISOString(),
-        };
-        progress.quizScores[moduleQuizId(module)] = {
-            scorePercent: 100,
-            passed: true,
-            completedAt: new Date().toISOString(),
-        };
-    }
-    return progress;
-};
-
-const TEAM_EXPORT_CHECKS = [
-    { en: "Team scope verified", ar: "تم التحقق من نطاق الفريق", key: "TEAM_SCOPE_VERIFIED" },
-    { en: "Privacy impact reviewed", ar: "تمت مراجعة أثر الخصوصية", key: "PRIVACY_REVIEWED" },
-    { en: "Progress data reviewed", ar: "تمت مراجعة بيانات التقدم", key: "PROGRESS_DATA_REVIEWED" },
-    { en: "Export approval confirmed", ar: "تم تأكيد الموافقة على التصدير", key: "EXPORT_APPROVAL_CONFIRMED" },
-] as const;
-
-type AcademyOverviewSummary = {
-    totalUsers: number;
-    usersWithProgress: number;
-    notStarted: number;
-    completedModules: number;
-    completedLessons: number;
-    completedLabs: number;
-    earnedBadges: number;
-    quizScores: number;
-    activeLast7d: number;
-    byRole: Record<string, number>;
-};
-
-const AcademyPage = dc(() => {
-    const { t, current } = useLocale();
-    const showChecklists = areChecklistsVisible();
-    const isArabic = computed(() => current.value === "ar");
-
-    const progress = ref<EmployeeAcademyProgress>(emptyAcademyProgress());
-    const loading = ref(true);
-    const loadError = ref<string | null>(null);
-    const persistWarning = ref<string | null>(null);
-    const saving = ref(false);
-    const exportLoading = ref(false);
-    const summary = ref<AcademyOverviewSummary | null>(null);
-    const summaryExportLoading = ref(false);
-    const teamExportChecklist = ref<Record<string, boolean>>({});
-    const teamOpen = ref<string | null>(null);
-    const teamUsers = ref<Array<{ id: string; email: string; role: string; isMaker: boolean; isChecker: boolean; progress: unknown }>>([]);
-    const teamLoading = ref(false);
-    const teamLoaded = ref(false);
-    const teamError = ref<string | null>(null);
-    const teamSearch = ref("");
-    const selectedTrack = ref<AcademyTrack>("SUPPORT");
-    const selectedModuleId = ref<string>("M1");
-    const answers = ref<Record<string, Record<number, number | undefined>>>({});
-    const submitted = ref<Record<string, SubmittedQuiz>>({});
-    const incident = ref<Incident | null>(null);
-    const labFeedback = ref<string | null>(null);
-    const labScenarioIndex = ref(0);
-    const labMistakes = ref<string[]>([]);
-    const labAttempts = ref(0);
-    const activeStep = ref<AcademyStep>("lessons");
-
-    const selectedModule = computed<AcademyModule>(() => findAcademyModule(selectedModuleId.value) ?? ACADEMY_MODULES[0]!);
-    const trackModules = computed(() =>
-        ACADEMY_MODULES.filter((module) => module.tracks.includes(selectedTrack.value) || selectedTrack.value === "MASTER_OPERATOR"),
-    );
-    const trackTabs = computed(() =>
-        ACADEMY_TRACKS.map((track) => ({
-            value: track.id,
-            label: `${isArabic.value ? TRACK_LABELS_AR[track.id] : track.titleEn} · ${trackProgressPercent(progress.value, track)}%`,
-        })),
-    );
-    const stepTabs = computed(() => [
-        { value: "lessons", label: isArabic.value ? "الخطوة 1 — الدروس" : "Step 1 — Lessons" },
-        { value: "lab", label: isArabic.value ? "الخطوة 2 — المختبر التفاعلي" : "Step 2 — Interactive lab" },
-        { value: "quiz", label: isArabic.value ? "الخطوة 3 — الاختبار" : "Step 3 — Verification quiz" },
-    ]);
-
-    const moduleTitle = (module: AcademyModule): string => (isArabic.value ? module.titleAr : module.titleEn);
-    const moduleSummary = (module: AcademyModule): string => (isArabic.value && module.summaryAr ? module.summaryAr : module.summaryEn);
-    const trackTitle = (trackId: AcademyTrack): string => {
-        const track = ACADEMY_TRACKS.find((candidate) => candidate.id === trackId);
-        return isArabic.value ? (track ? TRACK_LABELS_AR[track.id] : trackId) : track?.titleEn ?? trackId;
-    };
-
-    const completedModules = computed(() => ACADEMY_MODULES.filter((module) => moduleMastered(progress.value, module)).length);
-    const overallPercent = computed(() => Math.round((completedModules.value / ACADEMY_MODULES.length) * 100));
-    const selectedLessonsComplete = computed(() => moduleLessonsComplete(progress.value, selectedModule.value));
-    const selectedLabPassed = computed(() => moduleLabPassed(progress.value, selectedModule.value));
-    const selectedMastered = computed(() => moduleMastered(progress.value, selectedModule.value));
-
-    const selectedLab = computed(() => selectedModule.value.lab);
-    const currentScenario = computed(() => selectedLab.value.scenarios[labScenarioIndex.value]);
-
-    const refreshBadges = () => {
-        progress.value.earnedBadges = earnedBadges(progress.value);
-    };
-
-    const loadProgress = async () => {
-        loading.value = true;
-        loadError.value = null;
-        try {
-            const response = await api.get(urlsMap.academyProgress);
-            const payload = response.data?.data ?? response.data ?? {};
-            const source = payload?.progress ?? payload;
-            const legacy = asLegacyProgress(source);
-            progress.value = legacy ?? normalizeAcademyProgress(source);
-            refreshBadges();
-            if (progress.value.lastModuleId && findAcademyModule(progress.value.lastModuleId)) {
-                selectedModuleId.value = progress.value.lastModuleId;
+        const activeId = computed<TrackId>(() =>
+            pickActiveTrack(academy.progress.value, roleTrack, (id) => academy.badgeState(id, data.meta.value?.recertifyFrom ?? "0.0")),
+        );
+        const track = computed(() => data.tracks.value.find((entry) => entry.id === activeId.value));
+        const eligibility = useEligibility(examId);
+        const readingIds = computed(() => {
+            const ids = new Set<string>();
+            for (const lesson of data.lessons.value) {
+                if (track.value?.lessonIds.includes(lesson.id)) lesson.reading.forEach((id) => ids.add(id));
             }
-        } catch (error) {
-            loadError.value = extractApiErrorMessage(error);
-            persistWarning.value = t("Progress could not be loaded. The academy still works, but progress will not persist until the API is reachable.");
-        } finally {
-            loading.value = false;
-        }
-    };
-
-    const persist = async () => {
-        saving.value = true;
-        try {
-            await api.put(urlsMap.academyProgress, {
-                progress: {
-                    completedLessonIds: progress.value.completedLessonIds,
-                    completedLabIds: progress.value.completedLabIds,
-                    quizScores: progress.value.quizScores,
-                    earnedBadges: progress.value.earnedBadges,
-                    guideRead: progress.value.guideRead ?? {},
-                    lastModuleId: progress.value.lastModuleId,
-                },
-            });
-            persistWarning.value = null;
-        } catch (error) {
-            const message = extractApiErrorMessage(error);
-            persistWarning.value = `${t("Progress will not persist")}: ${message}`;
-            showSnackBar({ type: "error", message });
-        } finally {
-            saving.value = false;
-        }
-    };
-
-    void loadProgress();
-
-    const loadSummary = async () => {
-        try {
-            const response = await api.get(urlsMap.academyProgressSummary);
-            const payload = response.data?.data ?? response.data ?? {};
-            summary.value = (payload.summary ?? payload) as AcademyOverviewSummary;
-        } catch {
-            summary.value = null;
-        }
-    };
-
-    const exportSummary = async () => {
-        if (summaryExportLoading.value) return;
-        if (!teamExportChecklistComplete.value) {
-            showSnackBar({ type: "warning", message: isArabic.value ? "أكمل قائمة التحقق قبل التصدير" : "Complete the export checklist before exporting" });
-            return;
-        }
-        summaryExportLoading.value = true;
-        try {
-            const response = await api.get(urlsMap.academyProgressSummaryExport, {
-                params: { checklist: TEAM_EXPORT_CHECKS.filter((check) => teamExportChecklist.value[check.key]).map((check) => check.key).join(",") },
-            });
-            const payload = response.data?.data ?? response.data ?? {};
-            const snapshot = (payload.summary ?? payload) as AcademyOverviewSummary;
-            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
-            const rows: Array<[string, unknown]> = [
-                ["total_users", snapshot.totalUsers],
-                ["users_with_progress", snapshot.usersWithProgress],
-                ["not_started", snapshot.notStarted],
-                ["completed_modules", snapshot.completedModules],
-                ["completed_lessons", snapshot.completedLessons],
-                ["completed_labs", snapshot.completedLabs],
-                ["earned_badges", snapshot.earnedBadges],
-                ["quiz_scores", snapshot.quizScores],
-                ["active_last_7d", snapshot.activeLast7d],
-            ];
-            for (const [role, count] of Object.entries(snapshot.byRole ?? {})) rows.push([`role.${role}.count`, count]);
-            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
-            await xlsxUIPipeline.downloadXlsxFromCsvLines({
-                title: `academy-summary-${new Date().toISOString().slice(0, 10)}.xlsx`,
-                lines,
-            });
-            showSnackBar({ type: "success", message: isArabic.value ? "تم تصدير ملخص الأكاديمية" : "Academy summary exported" });
-        } catch (error) {
-            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
-        } finally {
-            summaryExportLoading.value = false;
-        }
-    };
-
-    void loadSummary();
-
-    const selectModule = (moduleId: string) => {
-        selectedModuleId.value = moduleId;
-        progress.value.lastModuleId = moduleId;
-        activeStep.value = "lessons";
-        incident.value = null;
-        labFeedback.value = null;
-        labScenarioIndex.value = 0;
-        labMistakes.value = [];
-        labAttempts.value = 0;
-        void persist();
-    };
-
-    const markLessonRead = (lessonId: string) => {
-        if (!progress.value.completedLessonIds.includes(lessonId)) {
-            progress.value.completedLessonIds = [...progress.value.completedLessonIds, lessonId];
-            refreshBadges();
-            void persist();
-        }
-    };
-
-    const resetLab = () => {
-        incident.value = null;
-        labFeedback.value = null;
-        labScenarioIndex.value = 0;
-        labMistakes.value = [];
-        labAttempts.value = 0;
-    };
-
-    const chooseLabOption = (optionId: string) => {
-        const scenario = currentScenario.value;
-        if (!scenario) return;
-        const option = scenario.options.find((candidate) => candidate.id === optionId);
-        if (!option) return;
-        labAttempts.value += 1;
-        if (option.fatal) {
-            labMistakes.value = [...labMistakes.value, `${scenario.id}:${option.id}`];
-            incident.value = {
-                moduleId: selectedModule.value.id,
-                scenarioId: scenario.id,
-                message: isArabic.value && option.feedbackAr ? option.feedbackAr : option.feedbackEn,
-            };
-            return;
-        }
-        incident.value = null;
-        labFeedback.value = isArabic.value && option.feedbackAr ? option.feedbackAr : option.feedbackEn;
-        if (labScenarioIndex.value < selectedLab.value.scenarios.length - 1) {
-            labScenarioIndex.value += 1;
-            return;
-        }
-        const now = new Date().toISOString();
-        progress.value.completedLabIds[selectedLab.value.id] = {
-            passed: true,
-            attempts: Math.max(1, labAttempts.value),
-            mistakesMade: labMistakes.value,
-            completedAt: now,
-        };
-        refreshBadges();
-        showSnackBar({ type: "success", message: t("Lab passed") });
-        void persist();
-    };
-
-    const setAnswer = (moduleId: string, questionIndex: number, value: number | null) => {
-        const existing = answers.value[moduleId] ?? {};
-        answers.value = {
-            ...answers.value,
-            [moduleId]: { ...existing, [questionIndex]: value ?? undefined },
-        };
-    };
-
-    const allAnswered = (module: AcademyModule): boolean =>
-        module.quiz.every((_, index) => answers.value[module.id]?.[index] !== undefined);
-
-    const submitQuiz = async (module: AcademyModule) => {
-        if (!moduleLessonsComplete(progress.value, module) || !moduleLabPassed(progress.value, module)) {
-            showSnackBar({ type: "warning", message: t("Complete the lessons and the lab before the quiz") });
-            return;
-        }
-        const moduleAnswers = answers.value[module.id] ?? {};
-        let correct = 0;
-        module.quiz.forEach((question, index) => {
-            const chosen = moduleAnswers[index];
-            if (chosen !== undefined && question.options[chosen]?.correct) {
-                correct += 1;
-            }
+            return [...ids];
         });
-        const total = module.quiz.length;
-        const pct = total > 0 ? Math.round((correct / total) * 100) : 0;
-        const passed = total > 0 && correct === total;
-        const quizId = moduleQuizId(module);
-        progress.value.quizScores[quizId] = {
-            scorePercent: pct,
-            passed,
-            completedAt: new Date().toISOString(),
-            answers: moduleAnswers as Record<string, number>,
-        };
-        submitted.value = { ...submitted.value, [module.id]: { correct, total, pct, passed } };
-        refreshBadges();
-        showSnackBar({
-            type: passed ? "success" : "warning",
-            message: passed ? t("Quiz passed") : t("Quiz needs 100% to pass"),
+        const readCount = computed(() => readingIds.value.filter((id) => academy.guideRead(id)).length);
+        const step = computed(() =>
+            track.value
+                ? nextStep({
+                      track: track.value,
+                      modules: data.modules.value,
+                      lessons: data.lessons.value,
+                      labs: data.labs.value,
+                      progress: academy.progress.value,
+                      eligibility: eligibility.eligibility.value,
+                  })
+                : null,
+        );
+        const stats = computed(() => (track.value ? trackStats(track.value, academy.progress.value) : null));
+
+        onMounted(async () => {
+            await data.loadCore();
+            await academy.load();
+            examId.value = track.value?.examId ?? "";
         });
-        await persist();
-    };
 
-    const retryQuiz = (moduleId: string) => {
-        answers.value = { ...answers.value, [moduleId]: {} };
-        const next = { ...submitted.value };
-        delete next[moduleId];
-        submitted.value = next;
-    };
+        const switchTrack = (id: TrackId) => {
+            academy.setActiveTrack(id);
+            examId.value = data.tracks.value.find((entry) => entry.id === id)?.examId ?? "";
+        };
 
-    const loadTeam = async () => {
-        if (teamLoaded.value || teamLoading.value) return;
-        teamLoading.value = true;
-        teamError.value = null;
-        try {
-            const response = await api.get(urlsMap.academyProgressOverview);
-            const payload = response.data?.data ?? response.data ?? {};
-            teamUsers.value = (payload.users ?? []) as typeof teamUsers.value;
-            teamLoaded.value = true;
-        } catch (e) {
-            teamError.value = extractApiErrorMessage(e);
-        } finally {
-            teamLoading.value = false;
-        }
-    };
+        const label = (kind: string, title: string): string =>
+            kind === "lesson" ? fmt(t("Continue: lesson {title}"), { title }) : kind === "lab" ? fmt(t("Continue: lab {title}"), { title }) : kind === "exam" ? t("Go to the exam") : t("Track complete");
 
-    const teamRows = computed(() => {
-        const query = teamSearch.value.trim().toLowerCase();
-        return teamUsers.value
-            .map((row) => {
-                const normalized = normalizeAcademyProgress(row.progress);
-                const completed = ACADEMY_MODULES.filter((module) => moduleMastered(normalized, module)).length;
-                return {
-                    ...row,
-                    completed,
-                    percent: Math.round((completed / ACADEMY_MODULES.length) * 100),
-                    badges: earnedBadges(normalized),
-                    updatedAt: normalized.updatedAt ?? null,
-                };
-            })
-            .filter((row) => !query || row.email.toLowerCase().includes(query) || row.role.toLowerCase().includes(query))
-            .sort((left, right) => right.percent - left.percent || left.email.localeCompare(right.email));
-    });
-
-    const teamExportChecklistComplete = computed(() => !showChecklists || TEAM_EXPORT_CHECKS.every((check) => teamExportChecklist.value[check.key] === true));
-
-    const exportCertifications = async () => {
-        if (exportLoading.value) return;
-        if (!teamExportChecklistComplete.value) {
-            showSnackBar({ type: "warning", message: isArabic.value ? "أكمل قائمة التحقق قبل التصدير" : "Complete the export checklist before exporting" });
-            return;
-        }
-        exportLoading.value = true;
-        try {
-            const response = await api.get(urlsMap.academyOverviewExport, {
-                params: { checklist: TEAM_EXPORT_CHECKS.filter((check) => teamExportChecklist.value[check.key]).map((check) => check.key).join(",") },
-            });
-            const payload = response.data?.data ?? response.data ?? {};
-            const users = (payload.users ?? []) as Array<{
-                id: string;
-                email: string;
-                role: string;
-                isMaker: boolean;
-                isChecker: boolean;
-                progress: unknown;
-            }>;
-            if (users.length === 0) {
-                showSnackBar({ type: "warning", message: t("No academy progress to export.") });
-                return;
-            }
-            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
-            const columns = ["userId", "email", "role", "isMaker", "isChecker", "completedModules", "totalModules", "completionPercent", "badges", "lastUpdated"];
-            const lines = [
-                columns.map(escape).join(","),
-                ...users.map((row) => {
-                    const normalized = normalizeAcademyProgress(row.progress);
-                    const completed = ACADEMY_MODULES.filter((module) => moduleMastered(normalized, module)).length;
-                    const percent = Math.round((completed / ACADEMY_MODULES.length) * 100);
-                    return [
-                        row.id,
-                        row.email,
-                        row.role,
-                        row.isMaker,
-                        row.isChecker,
-                        completed,
-                        ACADEMY_MODULES.length,
-                        percent,
-                        earnedBadges(normalized).join(";"),
-                        normalized.updatedAt ?? "",
-                    ]
-                        .map(escape)
-                        .join(",");
-                }),
-            ];
-            await xlsxUIPipeline.downloadXlsxFromCsvLines({
-                title: `academy-certifications-${new Date().toISOString().slice(0, 10)}.xlsx`,
-                lines,
-            });
-            showSnackBar({ type: "success", message: `${t("Exported")} ${users.length}` });
-        } catch (error) {
-            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
-        } finally {
-            exportLoading.value = false;
-        }
-    };
-
-    const badgeEarned = (badge: AcademyBadge): boolean => progress.value.earnedBadges.includes(badge);
-
-    return () => (
-        <ScreenContainer>
-            <ThemedView style={{ gap: "16px" }}>
-                <PageHeader
-                    title={isArabic.value ? "أكاديمية الموظفين" : "Employee Academy"}
-                    subtitle={t("Structured learning paths for operators and compliance staff.")}
-                    end={() => (
-                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                            <StatusBadge status="MODULES" label={`${completedModules.value} / ${ACADEMY_MODULES.length} ${isArabic.value ? "وحدات" : "modules"}`} toneOverride="info" showDot={false} />
-                            <StatusBadge status="PROGRESS" label={`${overallPercent.value}%`} toneOverride={overallPercent.value === 100 ? "success" : "info"} showDot={false} />
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} disabled={!teamExportChecklistComplete.value} onClick={() => void exportCertifications()}>
-                                {isArabic.value ? "تصدير الشهادات" : "Export certifications"}
-                            </VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} disabled={!teamExportChecklistComplete.value} onClick={() => void exportSummary()}>
-                                {isArabic.value ? "تصدير الملخص" : "Export summary"}
-                            </VBtn>
-                        </ThemedView>
-                    )}
-                />
-
-                {showChecklists && (
-                    <SurfaceCard variant="tonal">
-                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                            <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{isArabic.value ? "قائمة التحقق من تصدير الفريق" : "Team export checklist"}</ThemedText>
-                            {TEAM_EXPORT_CHECKS.map((check) => (
-                                <VCheckbox
-                                    key={check.key}
-                                    modelValue={teamExportChecklist.value[check.key] === true}
-                                    onUpdate:modelValue={(value: unknown) => (teamExportChecklist.value = { ...teamExportChecklist.value, [check.key]: Boolean(value) })}
-                                    label={isArabic.value ? check.ar : check.en}
-                                    density="compact"
-                                    hideDetails
-                                />
-                            ))}
-                            {!teamExportChecklistComplete.value && (
-                                <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>{isArabic.value ? "أكمل قائمة التحقق قبل التصدير" : "Complete the export checklist before exporting"}</ThemedText>
-                            )}
-                        </SurfaceCardText>
-                    </SurfaceCard>
-                )}
-
-                {summary.value && (
-                    <SurfaceCard title={isArabic.value ? "صحة الأكاديمية" : "Academy health"}>
-                        <DescriptionList
-                            columns={2}
-                            items={[
-                                { label: isArabic.value ? "المستخدمون" : "Users", value: `${summary.value.usersWithProgress}/${summary.value.totalUsers}` },
-                                { label: isArabic.value ? "لم يبدأ" : "Not started", value: String(summary.value.notStarted) },
-                                { label: isArabic.value ? "الوحدات" : "Modules", value: String(summary.value.completedModules) },
-                                { label: isArabic.value ? "الدروس" : "Lessons", value: String(summary.value.completedLessons) },
-                                { label: isArabic.value ? "المختبرات" : "Labs", value: String(summary.value.completedLabs) },
-                                { label: isArabic.value ? "الشارات" : "Badges", value: String(summary.value.earnedBadges) },
-                                { label: isArabic.value ? "نشط 7 أيام" : "Active 7d", value: String(summary.value.activeLast7d) },
-                            ]}
-                        />
-                    </SurfaceCard>
-                )}
-
-                <VExpansionPanels
-                    modelValue={teamOpen.value}
-                    onUpdate:modelValue={(value: unknown) => {
-                        teamOpen.value = Array.isArray(value) ? String(value[0] ?? "") : value ? String(value) : null;
-                        if (teamOpen.value === "team") void loadTeam();
-                    }}
-                    variant="accordion"
-                >
-                    <VExpansionPanel value="team">
-                        <VExpansionPanelTitle>
-                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                <ThemedText type="defaultSemiBold">{isArabic.value ? "شهادات الفريق" : "Team certifications"}</ThemedText>
-                                <StatusBadge status="USERS" label={`${teamUsers.value.length} ${isArabic.value ? "مستخدم" : "users"}`} toneOverride="info" showDot={false} />
-                            </ThemedView>
-                        </VExpansionPanelTitle>
-                        <VExpansionPanelText>
-                            <ThemedView style={{ gap: "10px" }}>
-                                <VTextField
-                                    label={isArabic.value ? "بحث بالبريد أو الدور" : "Search by email or role"}
-                                    modelValue={teamSearch.value}
-                                    onUpdate:modelValue={(value: string) => (teamSearch.value = value)}
-                                    prependInnerIcon="mdi-magnify"
-                                    clearable
-                                    hideDetails
-                                />
-                                {teamLoading.value && <StateView loading={true} minHeight="120px" />}
-                                {teamError.value && <VAlert type="error" variant="tonal" density="compact">{teamError.value}</VAlert>}
-                                {!teamLoading.value && teamLoaded.value && teamRows.value.length === 0 && (
-                                    <EmptyState
-                                        title={isArabic.value ? "لا توجد نتائج." : "No results."}
-                                        description={isArabic.value ? "جرّب بريداً أو دوراً آخر." : "Try another email or role."}
-                                        icon="mdi-account-search"
-                                    />
-                                )}
-                                {teamRows.value.map((row) => (
-                                    <SurfaceCard key={row.id} variant="tonal">
-                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                                <MonoRef value={row.email} />
-                                                <StatusBadge status={row.role} label={row.role.replaceAll("_", " ")} showDot={false} />
-                                                {row.isMaker && <MetaPill size="x-small" variant="tonal" color="primary">{isArabic.value ? "صانع" : "Maker"}</MetaPill>}
-                                                {row.isChecker && <MetaPill size="x-small" variant="tonal" color="secondary">{isArabic.value ? "مدقق" : "Checker"}</MetaPill>}
-                                                <div style={{ flex: 1 }} />
-                                                <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{row.percent}%</ThemedText>
-                                            </ThemedView>
-                                            <VProgressLinear modelValue={row.percent} color={row.percent === 100 ? "success" : "primary"} height="6px" rounded />
-                                            <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                                <StatusBadge status="MODULES" label={`${row.completed}/${ACADEMY_MODULES.length} ${isArabic.value ? "وحدات" : "modules"}`} showDot={false} />
-                                                {row.badges.map((badge) => (
-                                                    <MetaPill key={badge} size="x-small" variant="tonal" color="success">{badge}</MetaPill>
-                                                ))}
-                                                {row.updatedAt && (
-                                                    <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>
-                                                        {isArabic.value ? "آخر تحديث" : "Updated"}: {new Date(row.updatedAt).toLocaleString()}
-                                                    </ThemedText>
-                                                )}
-                                            </ThemedView>
-                                        </SurfaceCardText>
-                                    </SurfaceCard>
-                                ))}
-                            </ThemedView>
-                        </VExpansionPanelText>
-                    </VExpansionPanel>
-                </VExpansionPanels>
-
-                <SurfaceCard>
-                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <ThemedView style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
-                            <ThemedText type="defaultSemiBold">{isArabic.value ? "التقدم الكلي" : "Overall progress"}</ThemedText>
-                            <ThemedText type="defaultSemiBold">{`${overallPercent.value}%`}</ThemedText>
-                        </ThemedView>
-                        <VProgressLinear modelValue={overallPercent.value} color="success" height="10px" rounded />
-                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                            <ThemedText style={{ fontSize: "12px", color: "var(--pg-ink-muted)" }}>{isArabic.value ? "مسار الدور" : "Role track"}</ThemedText>
-                            <SegmentedTabs
-                                modelValue={selectedTrack.value}
-                                tabs={trackTabs.value}
-                                onUpdate:modelValue={(value: string) => (selectedTrack.value = value as AcademyTrack)}
-                            />
-                        </ThemedView>
-                        <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                            {ACADEMY_TRACKS.map((track) => {
-                                const earned = badgeEarned(track.badge);
-                                return (
-                                    <MetaPill
-                                        key={track.badge}
-                                        color={earned ? "success" : undefined}
-                                        variant={earned ? "flat" : "outlined"}
-                                        prependIcon={earned ? "mdi-certificate" : "mdi-lock-outline"}
-                                        size="small"
-                                        onClick={() => (selectedTrack.value = track.id)}
-                                        style={{ cursor: "pointer" }}
-                                    >
-                                        {`${isArabic.value ? BADGE_LABELS_AR[track.badge] : BADGE_LABELS[track.badge]} · ${trackProgressPercent(progress.value, track)}%`}
-                                    </MetaPill>
-                                );
-                            })}
-                        </ThemedView>
-                        {saving.value ? <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{t("Saving progress")}</ThemedText> : null}
-                    </SurfaceCardText>
-                </SurfaceCard>
-
-                {persistWarning.value ? (
-                    <VAlert type="warning" variant="tonal" density="compact">
-                        <ThemedView style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
-                            <ThemedText style={{ fontSize: "13px" }}>{persistWarning.value}</ThemedText>
-                            <VBtn size="small" variant="text" onClick={() => void loadProgress()}>{t("Retry")}</VBtn>
-                        </ThemedView>
-                    </VAlert>
-                ) : null}
-
-                {loading.value ? (
-                    <StateView loading />
-                ) : (
+        return () => {
+            const meta = data.meta.value;
+            const body = () => {
+                if (data.failed.value) return <p class="ac-card">{t("The Academy content could not be loaded. Reload the page.")}</p>;
+                if (!data.ready.value || !track.value || !step.value || !stats.value) return <Skeleton rows={3} />;
+                const s = step.value;
+                const title =
+                    s.kind === "lesson"
+                        ? (data.lessons.value.find((l) => l.id === s.id)?.title ?? s.id)
+                        : s.kind === "lab"
+                          ? (data.labs.value.find((l) => l.id === s.id)?.title ?? s.id)
+                          : "";
+                const badge = academy.badgeFor(track.value.id);
+                const state = academy.badgeState(track.value.id, meta?.recertifyFrom ?? "0.0");
+                const required: TrackId[] = roleTrack ? ["FOUNDATION", roleTrack] : ["FOUNDATION"];
+                const others = data.tracks.value.filter((entry) => entry.id !== track.value!.id);
+                return (
                     <>
-                        {loadError.value ? (
-                            <VAlert type="warning" variant="tonal" density="compact">
-                                <ThemedText style={{ fontSize: "13px" }}>{`${t("Progress could not be loaded")}: ${loadError.value}`}</ThemedText>
-                            </VAlert>
-                        ) : null}
+                        <section class="ac-card ac-card--active" aria-labelledby="ac-active-h">
+                            <div class="ac-between">
+                                <h2 id="ac-active-h" class="ac-h2">{track.value.title}</h2>
+                                <BadgeChip track={track.value.id} state={state} expiresAt={badge?.expiresAt} />
+                            </div>
+                            {(state === "expired" || state === "recertify") && (
+                                <p class="ac-chip ac-chip--danger" role="status">
+                                    ⟳ {t("Recertification required")}: {t("repeat the exam to renew this badge.")}
+                                </p>
+                            )}
+                            <div class="ac-rings">
+                                <ProgressRing value={stats.value.lessonsDone} max={stats.value.lessonsTotal} label={t("Lessons")} />
+                                <ProgressRing value={stats.value.labsPassed} max={stats.value.labsTotal} label={t("Labs")} />
+                                <ProgressRing value={stats.value.examPassed ? 1 : 0} max={1} label={t("Exam")} />
+                            </div>
+                            <div class="ac-actions">
+                                <RouterLink class="ac-btn ac-btn--big" to={{ name: s.route.name, params: s.route.params }}>
+                                    {label(s.kind, title)} →
+                                </RouterLink>
+                                {s.kind === "exam" && s.locked && (
+                                    <span class="ac-muted">{t("The exam is locked: see what is missing on the track page.")}</span>
+                                )}
+                            </div>
+                        </section>
 
-                        <ThemedView style={{ flexDirection: "row", flexWrap: "wrap", gap: "16px", alignItems: "flex-start" }}>
-                            <ThemedView style={{ flex: "1 1 300px", gap: "10px", maxWidth: "380px" }}>
-                                {trackModules.value.map((module) => {
-                                    const active = module.id === selectedModule.value.id;
-                                    const mastered = moduleMastered(progress.value, module);
+                        <section class="ac-card" aria-labelledby="ac-tracks-h">
+                            <h2 id="ac-tracks-h" class="ac-h2">{t("Your tracks")}</h2>
+                            <ul class="ac-list">
+                                {[track.value, ...others.filter((o) => required.includes(o.id))].map((entry) => {
+                                    const entryBadge = academy.badgeFor(entry.id);
                                     return (
-                                        <SurfaceCard
-                                            key={module.id}
-                                            onClick={() => selectModule(module.id)}
-                                            style={{
-                                                cursor: "pointer",
-                                                borderColor: active ? "var(--pg-border-focus)" : "var(--pg-border-subtle)",
-                                                boxShadow: active ? "inset 0 0 0 1px var(--pg-border-focus)" : undefined,
-                                            }}
-                                        >
-                                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                                                <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                                    <StatusBadge status={module.id} label={module.letter || module.id} toneOverride={active ? "info" : "neutral"} showDot={false} />
-                                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "14px", flex: "1 1 180px" }}>
-                                                        {moduleTitle(module)}
-                                                    </ThemedText>
-                                                    {mastered ? <StatusBadge status="MASTERED" label={t("Mastered")} toneOverride="success" showDot={false} /> : null}
-                                                </ThemedView>
-                                                <ThemedText style={{ fontSize: "12px", opacity: 0.7 }}>{moduleSummary(module)}</ThemedText>
-                                                <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                                    <StatusBadge
-                                                        status="LESSONS"
-                                                        label={`${module.lessons.filter((lesson) => progress.value.completedLessonIds.includes(lesson.id)).length}/${module.lessons.length} lessons`}
-                                                        toneOverride={moduleLessonsComplete(progress.value, module) ? "success" : "neutral"}
-                                                        showDot={false}
-                                                    />
-                                                    <StatusBadge status="LAB" label={moduleLabPassed(progress.value, module) ? "Lab passed" : "Lab locked"} toneOverride={moduleLabPassed(progress.value, module) ? "success" : "neutral"} showDot={false} />
-                                                    <StatusBadge status="QUIZ" label={moduleQuizPerfect(progress.value, module) ? "Quiz 100%" : "Quiz locked"} toneOverride={moduleQuizPerfect(progress.value, module) ? "success" : "neutral"} showDot={false} />
-                                                </ThemedView>
-                                            </SurfaceCardText>
-                                        </SurfaceCard>
+                                        <li key={entry.id} class="ac-row">
+                                            <RouterLink to={{ name: "AdminAcademyTrack", params: { trackId: entry.id } }}>{entry.title}</RouterLink>
+                                            <BadgeChip
+                                                track={entry.id}
+                                                state={academy.badgeState(entry.id, meta?.recertifyFrom ?? "0.0")}
+                                                expiresAt={entryBadge?.expiresAt}
+                                            />
+                                            {entry.id !== track.value!.id && (
+                                                <button type="button" class="ac-btn ac-btn--secondary ac-grow-end" onClick={() => switchTrack(entry.id)}>
+                                                    {t("Make active")}
+                                                </button>
+                                            )}
+                                        </li>
                                     );
                                 })}
-                            </ThemedView>
+                            </ul>
+                        </section>
 
-                            <ThemedView style={{ flex: "3 1 620px", minWidth: "320px", gap: "14px" }}>
-                                <SurfaceCard>
-                                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                            <StatusBadge status={selectedModule.value.id} label={selectedModule.value.id} toneOverride="info" showDot={false} />
-                                            <ThemedText type="defaultSemiBold" style={{ fontSize: "20px" }}>{moduleTitle(selectedModule.value)}</ThemedText>
-                                            {selectedMastered.value ? <StatusBadge status="MASTERED" label={t("Mastered")} toneOverride="success" showDot={false} /> : null}
-                                        </ThemedView>
-                                        <ThemedText style={{ fontSize: "13px", opacity: 0.8 }}>{moduleSummary(selectedModule.value)}</ThemedText>
-                                        <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                                            {selectedModule.value.tracks.map((track) => (
-                                                <MetaPill key={`${selectedModule.value.id}-${track}`} size="x-small" variant="tonal">{trackTitle(track)}</MetaPill>
-                                            ))}
-                                        </ThemedView>
-                                    </SurfaceCardText>
-                                </SurfaceCard>
+                        <section class="ac-card" aria-labelledby="ac-guide-h">
+                            <h2 id="ac-guide-h" class="ac-h2">{t("Guide reading")}</h2>
+                            <p aria-live="polite">
+                                {fmt(t("Articles read: {x} of {y} recommended for your track"), { x: readCount.value, y: readingIds.value.length })}
+                            </p>
+                            <p class="ac-muted">
+                                <RouterLink to={{ name: "AdminGuide" }}>{t("Open the Guide")}</RouterLink>
+                            </p>
+                        </section>
 
-                                <SegmentedTabs
-                                    modelValue={activeStep.value}
-                                    tabs={stepTabs.value}
-                                    onUpdate:modelValue={(value: string) => (activeStep.value = value as AcademyStep)}
-                                />
-
-                                {activeStep.value === "lessons" ? (
-                                <SurfaceCard>
-                                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                                        <ThemedText type="defaultSemiBold">{isArabic.value ? "الخطوة 1 — الدروس" : "Step 1 — Lessons"}</ThemedText>
-                                        <VExpansionPanels multiple>
-                                            {selectedModule.value.lessons.map((lesson) => {
-                                                const read = progress.value.completedLessonIds.includes(lesson.id);
-                                                return (
-                                                    <VExpansionPanel key={lesson.id} value={lesson.id}>
-                                                        <VExpansionPanelTitle>
-                                                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                                                <StatusBadge status={lesson.id} label={lesson.id} toneOverride={read ? "success" : "neutral"} showDot={false} />
-                                                                <span>{isArabic.value && lesson.titleAr ? lesson.titleAr : lesson.titleEn}</span>
-                                                            </ThemedView>
-                                                        </VExpansionPanelTitle>
-                                                        <VExpansionPanelText>
-                                                            <ThemedView style={{ gap: "10px", paddingTop: "4px" }}>
-                                                                <GuideMarkdown source={isArabic.value && lesson.bodyAr ? lesson.bodyAr : lesson.bodyEn} compact />
-                                                                <VBtn size="small" color={read ? "success" : "primary"} variant={read ? "tonal" : "flat"} onClick={() => markLessonRead(lesson.id)}>
-                                                                    {read ? (isArabic.value ? "مقروء" : "Read") : (isArabic.value ? "تحديد كمقروء" : "Mark as read")}
-                                                                </VBtn>
-                                                            </ThemedView>
-                                                        </VExpansionPanelText>
-                                                    </VExpansionPanel>
-                                                );
-                                            })}
-                                        </VExpansionPanels>
-                                    </SurfaceCardText>
-                                </SurfaceCard>
-                                ) : null}
-
-                                {activeStep.value === "lab" ? (
-                                <SurfaceCard>
-                                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                                        <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                            <ThemedText type="defaultSemiBold">{isArabic.value ? "الخطوة 2 — المختبر التفاعلي" : "Step 2 — Interactive lab"}</ThemedText>
-                                            <StatusBadge status={selectedLab.value.id} label={selectedLab.value.id} toneOverride="info" showDot={false} />
-                                            {selectedLabPassed.value ? <StatusBadge status="PASSED" label={t("Passed")} toneOverride="success" showDot={false} /> : null}
-                                        </ThemedView>
-                                        <GuideMarkdown source={selectedLab.value.descriptionEn} compact />
-                                        {!selectedLessonsComplete.value ? (
-                                            <VAlert type="info" variant="tonal" density="compact">
-                                                {isArabic.value ? "أكمل قراءة كل الدروس أولاً لفتح المختبر." : "Complete every lesson first to unlock the lab."}
-                                            </VAlert>
-                                        ) : (
-                                            <>
-                                                {incident.value ? (
-                                                    <VAlert type="error" variant="flat" border="start">
-                                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "14px", marginBottom: "4px" }}>
-                                                            {isArabic.value ? "حادث إنتاج محاكى!" : "Simulated Production Incident!"}
-                                                        </ThemedText>
-                                                        <ThemedText style={{ fontSize: "13px", lineHeight: 1.65 }}>{incident.value.message}</ThemedText>
-                                                        <VBtn size="small" variant="text" onClick={() => { incident.value = null; labFeedback.value = null; }}>
-                                                            {isArabic.value ? "إعادة المحاولة" : "Retry scenario"}
-                                                        </VBtn>
-                                                    </VAlert>
-                                                ) : null}
-                                                {currentScenario.value ? (
-                                                    <SurfaceCard variant="outlined">
-                                                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                                                            <ThemedView style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
-                                                                <ThemedText type="defaultSemiBold" style={{ fontSize: "14px" }}>
-                                                                    {isArabic.value && currentScenario.value.titleAr ? currentScenario.value.titleAr : currentScenario.value.titleEn}
-                                                                </ThemedText>
-                                                                <StatusBadge
-                                                                    status="SCENARIO"
-                                                                    label={`${labScenarioIndex.value + 1} / ${selectedLab.value.scenarios.length}`}
-                                                                    showDot={false}
-                                                                />
-                                                            </ThemedView>
-                                                            <ThemedText style={{ fontSize: "13px", lineHeight: 1.65 }}>
-                                                                {isArabic.value && currentScenario.value.promptAr ? currentScenario.value.promptAr : currentScenario.value.promptEn}
-                                                            </ThemedText>
-                                                            <ThemedView style={{ gap: "6px" }}>
-                                                                {currentScenario.value.options.map((option) => (
-                                                                    <VBtn
-                                                                        key={option.id}
-                                                                        variant="tonal"
-                                                                        color={option.fatal ? "error" : "primary"}
-                                                                        style={{ justifyContent: "flex-start", textAlign: "start", whiteSpace: "normal", height: "auto", padding: "10px 12px" }}
-                                                                        onClick={() => chooseLabOption(option.id)}
-                                                                    >
-                                                                        {isArabic.value && option.labelAr ? option.labelAr : option.labelEn}
-                                                                    </VBtn>
-                                                                ))}
-                                                            </ThemedView>
-                                                            {labFeedback.value ? (
-                                                                <VAlert type="success" variant="tonal" density="compact">
-                                                                    <ThemedText style={{ fontSize: "13px" }}>{labFeedback.value}</ThemedText>
-                                                                </VAlert>
-                                                            ) : null}
-                                                        </SurfaceCardText>
-                                                    </SurfaceCard>
-                                                ) : (
-                                                    <VAlert type="success" variant="tonal" density="compact">
-                                                        {isArabic.value ? "اكتمل المختبر بنجاح." : "Lab completed successfully."}
-                                                    </VAlert>
-                                                )}
-                                                <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                                                    <VBtn size="small" variant="text" onClick={resetLab}>{isArabic.value ? "إعادة المختبر" : "Restart lab"}</VBtn>
-                                                    {labMistakes.value.length > 0 ? (
-                                                        <StatusBadge status="MISTAKES" label={`${labMistakes.value.length} mistakes`} toneOverride="danger" showDot={false} />
-                                                    ) : null}
-                                                </ThemedView>
-                                            </>
-                                        )}
-                                    </SurfaceCardText>
-                                </SurfaceCard>
-                                ) : null}
-
-                                {activeStep.value === "quiz" ? (
-                                <SurfaceCard>
-                                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                                        <ThemedView style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
-                                            <ThemedView style={{ flexDirection: "row", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                                <ThemedText type="defaultSemiBold">{isArabic.value ? "الخطوة 3 — الاختبار" : "Step 3 — Verification quiz"}</ThemedText>
-                                                <StatusBadge status={moduleQuizId(selectedModule.value)} label={moduleQuizId(selectedModule.value)} toneOverride="info" showDot={false} />
-                                            </ThemedView>
-                                            <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
-                                                {isArabic.value ? "100% مطلوب للنجاح (8 من 8)" : "100% required to pass (8 of 8)"}
-                                            </ThemedText>
-                                        </ThemedView>
-                                        {!selectedLabPassed.value ? (
-                                            <VAlert type="info" variant="tonal" density="compact">
-                                                {isArabic.value ? "اجتز المختبر أولاً لفتح الاختبار." : "Pass the lab first to unlock the quiz."}
-                                            </VAlert>
-                                        ) : null}
-                                        {selectedModule.value.quiz.map((question, index) => {
-                                            const result = submitted.value[selectedModule.value.id];
-                                            const chosen = answers.value[selectedModule.value.id]?.[index];
-                                            return (
-                                                <ThemedView key={question.id} style={{ gap: "6px" }}>
-                                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "14px" }}>
-                                                        {`${index + 1}. ${isArabic.value && question.questionAr ? question.questionAr : question.questionEn}`}
-                                                    </ThemedText>
-                                                    <VRadioGroup
-                                                        modelValue={chosen}
-                                                        onUpdate:modelValue={(value: number | null) => setAnswer(selectedModule.value.id, index, value)}
-                                                        disabled={!selectedLabPassed.value}
-                                                    >
-                                                        {question.options.map((option, optionIndex) => (
-                                                            <VRadio
-                                                                key={`${question.id}-${optionIndex}`}
-                                                                value={optionIndex}
-                                                                label={option.text}
-                                                                color={
-                                                                    result
-                                                                        ? option.correct
-                                                                            ? "success"
-                                                                            : optionIndex === chosen
-                                                                              ? "error"
-                                                                              : undefined
-                                                                        : undefined
-                                                                }
-                                                            />
-                                                        ))}
-                                                    </VRadioGroup>
-                                                    {result ? (
-                                                        <ThemedText style={{ fontSize: "12px", opacity: 0.72, lineHeight: 1.6 }}>
-                                                            {question.explanation}
-                                                        </ThemedText>
-                                                    ) : null}
-                                                </ThemedView>
-                                            );
-                                        })}
-                                        {submitted.value[selectedModule.value.id] ? (
-                                            <VAlert type={submitted.value[selectedModule.value.id]?.passed ? "success" : "warning"} variant="tonal" density="compact">
-                                                <ThemedText style={{ fontSize: "13px" }}>
-                                                    {`${submitted.value[selectedModule.value.id]?.correct ?? 0} / ${submitted.value[selectedModule.value.id]?.total ?? 0} · ${submitted.value[selectedModule.value.id]?.pct ?? 0}% ${submitted.value[selectedModule.value.id]?.passed ? `— ${t("passed")}` : `— ${t("needs 8/8 to pass")}`}`}
-                                                </ThemedText>
-                                            </VAlert>
-                                        ) : null}
-                                        <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
-                                            <VBtn
-                                                disabled={!selectedLabPassed.value || !allAnswered(selectedModule.value)}
-                                                loading={saving.value}
-                                                onClick={() => void submitQuiz(selectedModule.value)}
-                                            >
-                                                {t("Submit quiz")}
-                                            </VBtn>
-                                            <VBtn variant="tonal" disabled={!submitted.value[selectedModule.value.id]} onClick={() => retryQuiz(selectedModule.value.id)}>
-                                                {t("Retry")}
-                                            </VBtn>
-                                        </ThemedView>
-                                    </SurfaceCardText>
-                                </SurfaceCard>
-                                ) : null}
-                            </ThemedView>
-                        </ThemedView>
+                        <nav class="ac-actions" aria-label={t("Academy links")}>
+                            <RouterLink class="ac-btn ac-btn--secondary" to={{ name: "AdminAcademyTracks" }}>{t("All tracks")}</RouterLink>
+                            <RouterLink class="ac-btn ac-btn--secondary" to={{ name: "AdminAcademyHelp" }}>{t("How the Academy works")}</RouterLink>
+                            {userRole() === "SECURITY_ADMIN" && (
+                                <RouterLink class="ac-btn ac-btn--secondary" to={{ name: "AdminAcademyTeam" }}>{t("Team")}</RouterLink>
+                            )}
+                        </nav>
                     </>
-                )}
-            </ThemedView>
-        </ScreenContainer>
-    );
+                );
+            };
+            return (
+                <AcademyShell title={t("My learning")} subtitle={t("Learn, check, do, prove: one next step at a time.")}>
+                    {body()}
+                </AcademyShell>
+            );
+        };
+    },
 });
 
-export default AcademyPage;
+export default AdminAcademyPage;

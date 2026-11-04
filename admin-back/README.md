@@ -63,7 +63,7 @@ All routes below are under `/api/v1/admin` unless noted. `GET /health` is at the
 | Health | `GET /health` (process root) |
 | Auth | `POST /auth/login`, `GET /auth/me`, `POST /auth/mfa` |
 | Search | `POST /search` |
-| Academy | `GET /academy/progress`, `PUT /academy/progress`, `GET /academy/progress/overview`, `GET /academy/progress/overview/export`, `GET /academy/progress/overview/summary`, `GET /academy/progress/overview/summary/export` |
+| Academy | `GET /academy/progress`, `PUT /academy/progress`, `GET /academy/exams/:examId/eligibility`, `POST /academy/exams/:examId/start`, `POST /academy/exams/:examId/submit`, `GET /academy/team` (`SECURITY_ADMIN`; 60 requests/minute per user) |
 | Users | `GET /users`, `GET /users/export`, `GET /users/summary`, `GET /users/summary/export`, `GET /users/:id`, `POST /users`, `PATCH /users` (bulk), `PATCH /users/:id` |
 | Join requests | `GET /join-requests`, `GET /join-requests/export`, `GET /join-requests/summary`, `GET /join-requests/summary/export`, `GET /join-requests/:id`, `POST /join-requests/admin-assisted`, `PATCH /join-requests/:id/profile`, `POST /join-requests/:id/beneficial-owners`, `PATCH /join-requests/:id/beneficial-owners/:ownerId`, `DELETE /join-requests/:id/beneficial-owners/:ownerId`, `POST /join-requests/:id/kyb-documents` (multipart), `DELETE /join-requests/:id/kyb-documents/:docId`, `POST /join-requests/:id/submit`, `POST /join-requests/:id/withdraw`, `PATCH /join-requests/:id/checklist`, `POST /join-requests/:id/screening/retry`, `POST /join-requests/:id/assign`, `POST /join-requests/:id/request-info`, `POST /join-requests/:id/decide` |
 | KYB documents | `GET /kyb-documents`, `GET /kyb-documents/export`, `GET /kyb-documents/summary`, `GET /kyb-documents/summary/export`, `GET /kyb-documents/:id`, `GET /kyb-documents/:id/content`, `POST /kyb-documents/:id/review`, `POST /kyb-documents/:id/request-replacement`, `POST /kyb-documents/:id/request-revalidation` |
@@ -203,7 +203,7 @@ Key suites:
 - `test/core-internal-client.test.ts`: pool, retry, headers and LSN behavior.
 - `test/mtls-client.test.ts`: channel confinement and transport error mapping.
 - `test/backups.test.ts`: backup proxy schema and authority behavior.
-- `test/academy-progress.test.ts`: academy route forwarding.
+- `test/academy-progress.test.ts`: academy proxy validation, per-user rate limit and team-view role gate.
 - `test/env-isolation.test.ts`: no database/KMS secrets in the edge environment.
 
 These suites use local stubs and do not require PostgreSQL or Redis. A live mTLS check requires the deployed core and certificates.

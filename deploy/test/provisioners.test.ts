@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { loadDeployConfig } from "../lib/configSchema";
+import { loadDeployConfig, resolveBackupS3Mode, type DeployConfig } from "../lib/configSchema";
 import type { SshTarget } from "../lib/hostPlanner";
 import type { ProvisionRunner } from "../provisioners/postgres18Provisioner";
 import {
@@ -8,6 +8,7 @@ import {
   postgresConfigPath,
   postgresConfigSnippet,
   postgresMainConfigPath,
+  primaryBootstrapSql,
   provisionPostgres18,
   replicaCommands,
 } from "../provisioners/postgres18Provisioner";
@@ -31,6 +32,7 @@ import {
   backupDaemonTriggerScript,
   journalLinePartitionCronLine,
   provisionBackupEngine,
+  ensureObjectStore,
   verifyBackupTargetCommands,
   walGEnvironment,
 } from "../provisioners/backupEngineProvisioner";
@@ -321,7 +323,9 @@ describe("Backup engine provisioner", () => {
     expect(unit).toContain("ReadWritePaths=/var/lib/pg-backup /var/log/pg-backup");
     expect(backupCronEntries(cfg)).toEqual([]);
     expect(backupCronFile(cfg)).toContain("scheduler");
-    expect(verifyBackupTargetCommands(cfg).join("\n")).toContain("/minio/health/live");
+    // external endpoint (s3.example.invalid): generic reachability, no MinIO route
+    expect(verifyBackupTargetCommands(cfg).join("\n")).not.toContain("/minio/health/live");
+    expect(verifyBackupTargetCommands(cfg).join("\n")).toContain("unreachable from the backup host");
     expect(verifyBackupTargetCommands(cfg).join("\n")).toContain("/dev/tcp/");
   });
 
@@ -408,9 +412,80 @@ BACKUP_REDIS_CLI_BIN="/opt/bin/redis-cli"
       ),
     ).toBe(true);
     expect(runner.writes.some((write) => write.content.includes("wal-g-audit.env") || write.content.includes("pg_audit_db"))).toBe(true);
-    expect(runner.runs.some((run) => run.command.includes("/minio/health/live"))).toBe(true);
+    expect(runner.runs.some((run) => run.command.includes("unreachable from the backup host"))).toBe(true);
+    expect(runner.runs.some((run) => run.command.includes("systemctl restart minio"))).toBe(false);
     expect(backupDaemonTriggerScript(config())).toContain("/v1/backups/trigger");
     expect(backupDaemonTriggerScript(config())).toContain("--cert");
     expect(journalLinePartitionCronLine(config())).toContain("ensure_journal_line_partitions(18)");
+  });
+});
+
+describe("Postgres ownership reconcile", () => {
+  test("bootstrap hands a legacy-owned database to the configured role, connecting last", () => {
+    const sql = primaryBootstrapSql(config(), []);
+    expect(sql).toContain('ALTER DATABASE "payment_gateway_prod" OWNER TO');
+    expect(sql).toContain("REASSIGN OWNED BY %I TO %I");
+    expect(sql.indexOf("\\connect")).toBeGreaterThan(sql.indexOf("CREATE DATABASE"));
+    expect(sql.indexOf("\\connect")).toBeGreaterThan(sql.indexOf("pg_create_physical_replication_slot") === -1 ? 0 : sql.indexOf("pg_create_physical_replication_slot"));
+  });
+});
+
+describe("Backup object store (managed MinIO) and engine auto-selection", () => {
+  const local = (extra = "") =>
+    loadDeployConfig(
+      `${SOURCE}
+BACKUP_ENGINE_MODE="wal-g"
+BACKUP_PRIMARY_S3_ENDPOINT="http://127.0.0.1:9000"
+BACKUP_PRIMARY_S3_BUCKET="s3://payment-gateway-backups/dev"
+BACKUP_PRIMARY_S3_ACCESS_KEY="minio-admin"
+BACKUP_PRIMARY_S3_SECRET_KEY="minio-secret-123"
+BACKUP_ALLOW_INSECURE_HTTP="true"
+${extra}`.replace(/BACKUP_NODE="[^"]*"/, 'BACKUP_NODE="backup-1@10.10.10.10:22:10.10.10.10:4090"'),
+    );
+
+  test("auto mode manages MinIO when the endpoint is the backup host/loopback", () => {
+    const result = local();
+    expect(result.problems.filter((p) => p.includes("MinIO"))).toEqual([]);
+    expect(resolveBackupS3Mode(result.config ?? ({ ...config(), BACKUP_PRIMARY_S3_ENDPOINT: "http://127.0.0.1:9000" } as DeployConfig))).toBe("managed-minio");
+  });
+
+  test("external endpoints are never managed", () => {
+    expect(resolveBackupS3Mode(config())).toBe("external");
+    const runner = new FakeRunner();
+    expect(ensureObjectStore({ runner, config: config(), ssh: { host: "h", port: 22, user: "u", keyPath: "", sudoPassword: "" } })).toEqual([]);
+    expect(runner.runs).toEqual([]);
+  });
+
+  test("installs, configures, starts MinIO and creates the bucket", () => {
+    const cfg = { ...config(), BACKUP_PRIMARY_S3_ENDPOINT: "http://127.0.0.1:9000", BACKUP_S3_MODE: "managed-minio" as const,
+      BACKUP_PRIMARY_S3_ACCESS_KEY: "minio-admin", BACKUP_PRIMARY_S3_SECRET_KEY: "minio-secret-123", BACKUP_PRIMARY_S3_BUCKET: "s3://pg-bkp/dev" };
+    const runner = new FakeRunner();
+    ensureObjectStore({ runner, config: cfg, ssh: { host: "h", port: 22, user: "u", keyPath: "", sudoPassword: "" } });
+    const all = runner.runs.map((r) => r.command).join("\n");
+    expect(all).toContain("/usr/local/bin/minio");
+    expect(all).toContain("systemctl restart minio");
+    expect(all).toContain("go install github.com/minio/minio@latest");
+    expect(all).toContain("--aws-sigv4");
+    expect(all).toContain("/pg-bkp'");
+    expect(all).not.toContain("dl.min.io");
+    const env = runner.writes.find((w) => w.path === "/etc/default/minio");
+    expect(env?.content).toContain("MINIO_ROOT_USER=minio-admin");
+    expect(env?.content).toContain("--address 127.0.0.1:9000");
+    expect(env?.mode).toBe(0o600);
+    expect(runner.writes.some((w) => w.path === "/etc/systemd/system/minio.service")).toBe(true);
+  });
+
+  test("validates managed MinIO credentials", () => {
+    const bad = local('BACKUP_PRIMARY_S3_SECRET_KEY="short"');
+    expect(bad.ok).toBe(false);
+    expect(bad.problems.join(" ")).toContain("at least 8 characters");
+  });
+
+  test("BACKUP_ENGINE_MODE=auto picks wal-g when co-located and barman otherwise", () => {
+    const pg = SOURCE.match(/PG_PRIMARY_NODE="[^@"]*@[^:"]*:\d+:([^:"]*):/)?.[1] ?? "";
+    const same = loadDeployConfig(SOURCE.replace('BACKUP_ENGINE_MODE="barman"', 'BACKUP_ENGINE_MODE="auto"').replace(/BACKUP_NODE="[^"]*"/, `BACKUP_NODE="backup-1@${pg}:22:${pg}:4090"`));
+    expect(same.config?.BACKUP_ENGINE_MODE).toBe("wal-g");
+    const diff = loadDeployConfig(SOURCE.replace('BACKUP_ENGINE_MODE="barman"', 'BACKUP_ENGINE_MODE="auto"'));
+    expect(diff.config?.BACKUP_ENGINE_MODE).toBe("barman");
   });
 });

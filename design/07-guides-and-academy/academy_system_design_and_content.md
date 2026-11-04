@@ -6,6 +6,17 @@
 **Companion file:** `design/07-guides-and-academy/guide_system_design_and_content.md` (the Interactive Guide). The Academy **teaches and tests**; the Guide is the **reference**. Every lesson points to Guide articles by id. The two share one progress record (defined here, §A-3).
 **Supersedes:** `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` §11 (the old 8-module Academy). The Merchant Guide and the Checkout Help Center are **out of scope** and must not be touched.
 
+> **2026-11-04 repository note (corrections made while implementing; PART III content untouched).** The Academy v1.0 rebuild is implemented per this spec with the reconciliations below. Where this spec and the code differ, `project-design/parts/03-admin-front/03-guide-and-academy.md` is canonical.
+> * **Paths.** This repository has no `src/` under `core-back`/`admin-back`: use `core-back/engine/academy/*`, `core-back/api/internal/academy.ts`, `core-back/content/academy/{exam-bank,catalog}.json` and `admin-back/api/protected/academy.ts` (§II-1 updated).
+> * **No migration.** `users.academy_progress_json` already exists (it held the *old* academy shape). Reading a row without `schema:1` starts a fresh record that keeps only `guideRead`; the old fields are dropped (§II-5, §II-7).
+> * **Labs: 15, not 14** (§II-13 A-3). **Panels** may be title-only scenario statements (§II-2.6).
+> * **Server-only exam state** (open session question ids, option mapping, last attempt's questions) is stored in the same JSON column under a reserved `_server` key that no endpoint ever returns; the single-column rule of §II-7 therefore still holds (§II-5, §II-9).
+> * **`guideRead` un-reading** uses a tombstone entry `{ v: "", at }` because merges never delete keys (§II-5).
+> * **Integrity statement.** `POST /exams/:examId/start` requires `{ integrityAccepted: true }` and records `integrityAcceptedAt` (§II-6).
+> * **Server catalog.** The extractor also emits `core-back/content/academy/catalog.json` (track → lessons/labs/exam, lesson and lab titles; no questions) so eligibility and the team view can be computed server-side (§II-2.4).
+> * **Authority.** `GET /team` and the team route require the `SECURITY_ADMIN` *role* (enforced in the router via `routesRoles`, in `admin-back` and again in `core-back`).
+> * **Fix logs** live in `design/07-guides-and-academy/academy_content_fixes.md` and `academy_content_questions.md` (not directly under `design/`).
+
 **Implementation order across both files:** Academy **A-1** (progress record) → Guide **G-0 … G-4** → Academy **A-0, A-2 … A-6** → Guide **G-5, G-6**. (A-1 only needs the backend and the progress hook, so the Guide's read-tracking can be built on it.)
 
 ---
@@ -26,9 +37,9 @@ You are implementing the training programme that decides whether a person is all
 
 1. **PART III is the single source of truth. Copy it. Never rewrite, shorten, translate, re-order or "improve" it.** You do not decide what a lesson says, what a question asks, which answer is right, how a lab is scored or what an exam contains. If you think something is wrong or missing, follow rule 5.
 2. **Content is extracted by a script, not retyped.** Write `admin-front/scripts/extract-academy-content.ts` (§II-2) which reads this file from `design/` and emits JSON. No lesson, question or lab text may be pasted into `.ts`/`.tsx`.
-3. **Answer keys never reach the browser.** The extractor writes **two** outputs: (a) learner content *without* exam answer keys to `admin-front/src/content/academy/generated/`, and (b) the exam bank *with* keys to `core-back/src/content/academy/exam-bank.json`. Exams are started, graded and recorded **only by `core-back`**. Lesson checks and labs are *practice* and are graded in the browser (their keys are in the learner content on purpose).
+3. **Answer keys never reach the browser.** The extractor writes **two** outputs: (a) learner content *without* exam answer keys to `admin-front/src/content/academy/generated/`, and (b) the exam bank *with* keys to `core-back/content/academy/exam-bank.json`. Exams are started, graded and recorded **only by `core-back`**. Lesson checks and labs are *practice* and are graded in the browser (their keys are in the learner content on purpose).
 4. **The Academy does not grant authority.** It records progress and badges. It must never change `is_maker`, `is_checker`, a role or an authority. Management uses the team view (§II-8) to decide.
-5. **Verification procedure for content mismatches.** When you implement a lab or a lesson that names a button, screen or menu item in **bold**, compare the label with the real `t("...")` string in `admin-front`. For each mismatch: (a) change **only the label text** in this design file, (b) append `itemId | old label | new label | file:line` to `design/academy_content_fixes.md`, (c) never change any explanation, option correctness or score. If a statement of *behaviour* looks wrong, do **not** edit it: append it to `design/academy_content_questions.md` and continue. Never block on a content question.
+5. **Verification procedure for content mismatches.** When you implement a lab or a lesson that names a button, screen or menu item in **bold**, compare the label with the real `t("...")` string in `admin-front`. For each mismatch: (a) change **only the label text** in this design file, (b) append `itemId | old label | new label | file:line` to `design/07-guides-and-academy/academy_content_fixes.md`, (c) never change any explanation, option correctness or score. If a statement of *behaviour* looks wrong, do **not** edit it: append it to `design/07-guides-and-academy/academy_content_questions.md` and continue. Never block on a content question.
 6. **Counts must match.** After extraction the generated `meta.json.counts` must equal §II-2.5 exactly; the content test fails the build otherwise.
 7. **Money math uses `decimal.js` only. No `eval`, no `new Function`, no `vm`.** Labs are pure client-side code with **no network calls** (except progress saving, §A-3). Labs must work with the Fake Rails service switched off.
 8. **Do not touch** `merchant-front`, `checkout-front`, `merchant-back`, `checkout-back`, or ledger/engine code. Backend changes are limited to §II-6 and §II-7.
@@ -100,7 +111,7 @@ There is one **Foundation** track that **everyone** completes, then **one role t
 | `AdminAcademyTeam` | `/academy/team` | Manager view (`SECURITY_ADMIN` only). |
 | `AdminAcademyHelp` | `/academy/help` | How the Academy works, scoring, integrity statement, trainer guide link (III-H). |
 
-None of these routes needs an authority except `AdminAcademyTeam` (role `SECURITY_ADMIN`). Every route name above must be **added to the `routeNames` list of the `Academy` screen entry in the Guide's `context-map`** (`design/07-guides-and-academy/guide_system_design_and_content.md` §III-F.3), and logged in `design/academy_content_fixes.md`.
+None of these routes needs an authority except `AdminAcademyTeam` (role `SECURITY_ADMIN`). Every route name above must be **added to the `routeNames` list of the `Academy` screen entry in the Guide's `context-map`** (`design/07-guides-and-academy/guide_system_design_and_content.md` §III-F.3), and logged in `design/07-guides-and-academy/academy_content_fixes.md`.
 
 ---
 
@@ -125,14 +136,15 @@ admin-front/
   src/router/index.ts                                CHANGE  add the routes of §I-5
   src/layouts/sections.tsx                           CHANGE  "Learning" keeps AdminGuide & AdminAcademy
 core-back/
-  src/content/academy/exam-bank.json                 NEW  (generated, committed; WITH keys; never served)
-  src/engine/academy/{progress.ts, examEngine.ts, grading.ts}   NEW
-  src/api/internal/academy.ts                        NEW  (route registration following the existing pattern)
-  prisma/schema.prisma (+ migration)                 CHANGE  users.academy_progress_json (§A-3)
+  content/academy/exam-bank.json                     NEW  (generated, committed; WITH keys; never served)
+  content/academy/catalog.json                       NEW  (generated, committed; track/lesson/lab ids and titles, no questions)
+  engine/academy/{types,catalog,progress,examEngine,grading,team}.ts   NEW
+  api/internal/academy.ts                            NEW  (router mounted by api/internal/admin.ts)
+  prisma/schema.prisma                               UNCHANGED  (users.academy_progress_json already exists; new shape only)
 admin-back/
-  src/api/academy.ts                                 NEW  proxy to core-back over the existing mTLS channel
+  api/protected/academy.ts                           CHANGE  proxy to core-back over the existing mTLS channel
 tests/unit/academy-*.test.ts   tests/e2e/admin/academy-*.spec.ts     NEW
-design/academy_content_fixes.md, academy_content_questions.md        NEW (empty headers)
+design/07-guides-and-academy/academy_content_fixes.md, academy_content_questions.md        NEW (empty headers)
 ```
 
 Follow the existing patterns for admin routes, authentication, the Double-Check Rule and Prisma migrations: locate a small existing admin endpoint (for example the settings endpoints) and mirror its structure exactly. Do not invent new infrastructure.
@@ -179,7 +191,7 @@ Why: The explanation of the right answer (mandatory), in plain words.
 1. Read `design/07-guides-and-academy/academy_system_design_and_content.md` and `design/07-guides-and-academy/guide_system_design_and_content.md` (only to resolve article ids).
 2. Parse all blocks. Fail with a clear message on: unknown block kind, missing `@@end`, duplicate id, unresolved reference (article id, module, lesson, question, lab, track), a lesson missing a fixed section, a `single` question without exactly one correct option, a `multi` question with fewer than two, a question without `Why:`, an `order` question with fewer than 3 items, a `number` question without `Answer:`, invalid JSON in a `@@lab` or `@@exam` block.
 3. Emit to `admin-front/src/content/academy/generated/`: `meta.json`, `tracks.json`, `modules.json`, `lessons.en.json` (each with `html` rendered by `markdown-it` and `plainText`), `checks.en.json` (lesson-check questions **with** keys), `labs.en.json` (**with** keys), `drills.en.json`, `pages.en.json`. The `@@page` with id `lab-vectors` is also emitted verbatim as `lab-vectors.json` (its fenced JSON) for the scoring tests.
-4. Emit to `core-back/src/content/academy/exam-bank.json` the exam-pool questions (`exam=true`) **with** keys and the exam blueprints. Emit to `admin-front` a `exam-blueprints.public.json` with only: exam id, track, question count, pass mark, time limit, module composition — **never** question ids.
+4. Emit to `core-back/content/academy/exam-bank.json` the exam-pool questions (`exam=true`) **with** keys and the exam blueprints, and to `core-back/content/academy/catalog.json` the track/module/lesson/lab ids, titles and exam ids (no question content). Emit to `admin-front` a `exam-blueprints.public.json` with only: exam id, track, question count, pass mark, time limit, module composition — **never** question ids.
 5. `meta.json` contains `contentVersion` (`1.0.0`), `recertifyFrom` (`1.0.0`), `counts`, `generatedAt` and a content hash.
 6. Deterministic output: stable ordering; running twice gives identical files.
 
@@ -212,7 +224,7 @@ export type QType = "single"|"multi"|"order"|"number"|"truefalse";
 export interface QOption { id:string; text:string; correct?:boolean; note?:string }   // `correct` present only in practice content
 export interface Question { id:string; module:string; type:QType; difficulty:1|2|3; critical:boolean; refs:string[]; stem:string; options:QOption[]; answer?:string; tolerance?:string; why?:string }
 export interface ExamBlueprint { id:string; track:TrackId; questionCount:number; passPercent:number; timeLimitMinutes:number; composition:{module:string; count:number}[]; criticalPick:number; cooldownMinutes:number }
-export type Panel = { title:string } & ( {rows:[string,string][]} | {table:{columns:string[]; rows:string[][]}} | {timeline:{t:string; text:string; flag?:"warn"|"ok"|"bad"}[]} | {text:string} );
+export type Panel = { title:string } & ( {rows:[string,string][]} | {table:{columns:string[]; rows:string[][]}} | {timeline:{t:string; text:string; flag?:"warn"|"ok"|"bad"}[]} | {text:string} | {} );   // a title-only panel is a plain scenario statement
 export type LabTask = ChoiceTask|MultiTask|LedgerTask|OrderTask|ChecklistTask|NumericTask;   // §II-10
 export interface Lab { id:string; module:string; title:string; minutes:number; tracks:string[]; refs:string[]; briefing:string; passPercent:number; tasks:LabTask[] }
 ```
@@ -247,13 +259,18 @@ export interface AcademyProgress {
   labs:      Record<string,{ bestScore:number; attempts:number; passedAt?:string; criticalErrors:number; v:string }>;
   exams:     Record<string,{ attempts:ExamAttemptSummary[]; open?:OpenExamSession; passedAt?:string; v:string }>;
   badges:    { id:string; track:TrackId; earnedAt:string; expiresAt:string; v:string }[];
+  integrityAcceptedAt?: string;                 // server-written when the learner accepts the integrity statement
 }
 export interface ExamAttemptSummary { at:string; scorePercent:number; passed:boolean; criticalMissed:number; moduleScores:Record<string,number>; durationSeconds:number }
 export interface OpenExamSession { sessionId:string; startedAt:string; expiresAt:string }  // question ids live only on the server
 ```
 
 Rules:
-* **Size limit** 64 KB (server rejects larger).
+* **Size limit** 64 KB (server rejects larger; the limit covers the whole stored JSON including the reserved `_server` key).
+* **Server-only state** (`_server`: open exam sessions with question ids and opaque option ids, the previous attempt's question ids, failure counters) is kept in the same JSON column and is never returned by any endpoint or written by a client patch.
+* **Old rows:** a stored value without `schema:1` is the old academy's shape; it is replaced by a fresh record that carries over only `guideRead`.
+* **Un-reading a Guide article** is a tombstone `guideRead[id] = { v:"", at }` (merges never delete keys; the later `at` wins). `v === ""` means "not read".
+* **Lab entries** merge per id: `bestScore` max, `attempts` max, `passedAt` earliest, and `criticalErrors`/`v` from the entry with the higher `bestScore` (tie: fewer critical errors).
 * The browser may write **only** `guideRead`, `lessons`, `labs` and `activeTrack`, through `PUT /api/v1/admin/academy/progress` with `{ baseRev, patch }`. `patch` is a partial object merged by key (never deleting keys) and the server **ignores** any `exams`, `badges` or `contentVersion` content in a client patch.
 * `exams` and `badges` are written **only** by the server as a result of exam start/submit (§II-6).
 * **Concurrency:** if `baseRev` differs from the stored `rev` the server answers `409` with the current record; `progressMerge.ts` merges (union of keys; for the same key keep the entry with the later `at`; for `bestScore` keep the maximum; for `attempts` keep the maximum) and retries once.
@@ -269,7 +286,7 @@ All routes are under `/api/v1/admin/academy/` in `admin-back`, require a signed-
 | `GET  /progress` | Returns `{ progress, rev }` for the caller (creates an empty record on first read). |
 | `PUT  /progress` | `{ baseRev, patch }` as above; returns the new record. |
 | `GET  /exams/:examId/eligibility` | Returns `{ eligible, missing:[{kind,id,text}], cooldownUntil?, reviewRequired?:moduleId[] }`. |
-| `POST /exams/:examId/start` | Checks eligibility, builds the question set (§II-9), stores the open session server-side, returns `{ sessionId, expiresAt, questions:[{qid, type, stem, options:[{oid,text}]}] }` **without keys and without `critical`**. Option ids are opaque and re-generated per session. |
+| `POST /exams/:examId/start` | Body `{ integrityAccepted:true }` (required). Checks eligibility, builds the question set (§II-9), stores the open session server-side, returns `{ sessionId, expiresAt, questions:[{qid, type, stem, options:[{oid,text}]}] }` **without keys and without `critical`**. Option ids are opaque and re-generated per session. |
 | `POST /exams/:examId/submit` | `{ sessionId, answers }`. Grades on the server, records the attempt, issues a badge if passed, returns the full result with explanations (§II-9). One submission per session. |
 | `GET  /team` | `SECURITY_ADMIN` only: the team table of §II-8. |
 
@@ -277,7 +294,7 @@ Errors: `403` (not allowed), `404`, `409` (progress revision), `422` (exam not e
 
 ## II-7. Database change
 
-One migration: add `academy_progress_json JSON NULL` to `users`. No other tables. Rollback = drop the column.
+**No migration is needed in this repository:** `users.academy_progress_json JSON NULL` already exists. The Academy changes only the *shape* stored in it (and adds the reserved `_server` key). No other tables.
 
 ## II-8. Team view (`AdminAcademyTeam`, `SECURITY_ADMIN` only)
 
@@ -362,10 +379,10 @@ interface NumericTask extends TaskBase { kind:"numeric"; answer:string; toleranc
 
 ## II-13. Phased task list for OpenCode (tick only after verification)
 
-* [ ] **A-1 Progress record and endpoints.** Migration, `core-back` progress service, `admin-back` proxy for `GET/PUT /progress`, `useAcademyProgress`, `progressMerge`. *Verify:* `bun run test:unit -- academy-progress`.
+* [ ] **A-1 Progress record and endpoints.** No migration (column exists); `core-back` progress service, `admin-back` proxy for `GET/PUT /progress`, `useAcademyProgress`, `progressMerge`. *Verify:* `bun run test:unit -- academy-progress`.
 * [ ] **A-0 Content pipeline.** `extract-academy-content.ts`, `content:academy`, generated JSON, both outputs, `academy-content.test.ts`. *Verify:* `cd admin-front && bun run content:academy && cd ../tests && bun run test:unit -- academy-content`.
 * [ ] **A-2 Learner experience.** Router entries, My learning, tracks, track, module, lesson pages, checks, reading integration with the Guide progress, `AcademyShell`, badges display. *Verify:* build + `academy-learning.spec.ts`.
-* [ ] **A-3 Lab engine and labs.** `labScoring.ts`, six task components, runner, results, the 14 labs. *Verify:* `academy-lab-scoring` + `academy-lab.spec.ts`.
+* [ ] **A-3 Lab engine and labs.** `labScoring.ts`, six task components, runner, results, the 15 labs. *Verify:* `academy-lab-scoring` + `academy-lab.spec.ts`.
 * [ ] **A-4 Exams.** `core-back` exam engine, eligibility, start/submit, grading, badge issuance; exam runner and results UI; certificate page. *Verify:* `academy-exam-engine` + `academy-exam.spec.ts`.
 * [ ] **A-5 Team view and help.** `GET /team`, team table, CSV, help page with III-H texts, optional live-drill pages (III-F). *Verify:* `academy-team.spec.ts`.
 * [ ] **A-6 Audit.** Run the verification procedure of Part 0 rule 5 over every lab and lesson; fill `academy_content_fixes.md` / `academy_content_questions.md`; add Academy route names to the Guide's context map; full test run; add a short note to `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` §17: "Academy v1.0 replaced by design/07-guides-and-academy/academy_system_design_and_content.md".
@@ -771,7 +788,7 @@ Questions: c-l-m3-1-1, c-l-m3-1-2
 A merchant's payout bank account is being changed. The diff shows the old account and the new one in a different person's name. The checker rejects it with a reason.
 
 ### Common mistakes
-- Approving without opening **Details**.
+- Approving without opening **Review**.
 - Believing a pending request already changed the data.
 
 ### Read now
@@ -1055,11 +1072,11 @@ Questions: c-l-m5-3-1, c-l-m5-3-2
 - Priority `P1` is the most urgent. Work highest priority and nearest deadline first.
 - Assign a case to yourself before working it. Write what you did in the notes.
 - An inquiry is read-only and cannot move money. Many partners need a minimum age on a payment first.
-- **Bulk Inquiry** sends many calls. Use it only for the affected route and period, never while the partner is down.
+- **Inquire selected** sends many calls. Use it only for the affected route and period, never while the partner is down.
 - If evidence is missing, leave the case open and escalate. Leaving it open is safe.
 
 ### A worked example
-After an outage you run **Bulk Inquiry** for one route and a two-hour window, not for all routes.
+After an outage you run **Inquire selected** for one route and a two-hour window, not for all routes.
 
 ### Common mistakes
 - Bulk-inquiring everything "just in case".
@@ -5489,7 +5506,7 @@ Why: It imitates payment companies for drills.
     },
     {
      "id": "c",
-     "label": "**Approve** without opening **Details**",
+     "label": "**Approve** without opening **Review**",
      "correct": false,
      "feedback": "You must read the old and new value yourself.",
      "critical": true
@@ -5621,7 +5638,7 @@ Why: It imitates payment companies for drills.
    "panels": [
     {
      "title": "You decided to reject the request in the last task.",
-     "text": "Choose the reason you will type in **Decision Reason**."
+     "text": "Choose the reason you will type in **Decision reason**."
     }
    ],
    "prompt": "Which reason is best?",
@@ -5688,7 +5705,7 @@ Why: It imitates payment companies for drills.
    "items": [
     {
      "id": "c1",
-     "label": "I read the old and new value in **Details**",
+     "label": "I read the old and new value in **Review**",
      "shouldTick": true,
      "why": "You have this record in front of you."
     },
@@ -6773,7 +6790,7 @@ Why: It imitates payment companies for drills.
    "options": [
     {
      "id": "a",
-     "label": "Use **Mark succeeded** with a reason naming the evidence, with a second person approving",
+     "label": "Use **Resolve as succeeded** with a reason naming the evidence, with a second person approving",
      "correct": true,
      "feedback": "Correct, using the checklist."
     },
@@ -8568,7 +8585,7 @@ Why: It imitates payment companies for drills.
    "options": [
     {
      "id": "a",
-     "label": "**Propose** release with a written rationale; the MLRO approves; money moves only after approval",
+     "label": "**Propose resolution** release with a written rationale; the MLRO approves; money moves only after approval",
      "correct": true,
      "feedback": "Correct."
     },
@@ -9597,7 +9614,7 @@ Why can a repeated webhook not double-credit? What would a spike of such failure
 ### Setup
 Rails `sadad` direct and an aggregator route both configured. Fake Rails: set the direct rail to **Full Outage 503**.
 ### Do
-Start several payments. Watch the Dashboard tile **Open Circuit Breakers** and the customer's choices.
+Start several payments. Watch the Dashboard Route health card entry **Open breaker** and the customer's choices.
 ### Expect
 After repeated faults the direct route's health becomes `OPEN_BREAKER`, the customer stops seeing it, and new payments use the next healthy route. Some payments in flight may become `UNKNOWN`. When you restore the rail the breaker closes.
 ### Debrief questions

@@ -40,7 +40,7 @@ This part owns the admin operational pages that are neither the primary merchant
 - Backup management at `/system/backups`.
 - Platform settings versioning and restore at `/settings/platform`.
 - Checkout support configuration, history and diff at `/settings/checkout-help`.
-- Academy reporting and certification exports at `/academy`.
+- Academy team view at `/academy/team` (`SECURITY_ADMIN`).
 - Their shared export/checklist behavior and authority gating.
 
 It does not own the backup daemon, PostgreSQL WAL configuration or restore-drill engine. Those are in the deploy and storage parts. It documents the admin UI and the backend contracts that the UI calls.
@@ -173,21 +173,15 @@ The version history card lists all versions with effective/created timestamps. "
 
 ### 3.4 Academy reporting and certification
 
-The academy page is covered functionally in `03-guide-and-academy.md`. Its operational reporting surface uses:
+The Academy was rebuilt on 2026-11-04 and is specified in `03-guide-and-academy.md` (§6-7). Its operational surface is the `SECURITY_ADMIN` team view and the per-user progress calls:
 
 | Operation | Endpoint | Authority |
 | :--- | :--- | :--- |
-| Summary | `GET v1/admin/academy/progress/overview/summary` | `user:read` |
-| Summary export | `GET v1/admin/academy/progress/overview/summary/export` | `user:read` |
-| Team overview | `GET v1/admin/academy/progress/overview` | `user:read` |
-| Certification export | `GET v1/admin/academy/progress/overview/export` | `user:read` |
-| Own progress | `GET/PUT v1/admin/academy/progress` | authenticated user |
+| Own progress | `GET/PUT v1/admin/academy/progress` | authenticated back-office user |
+| Exam eligibility / start / submit | `GET .../exams/:examId/eligibility`, `POST .../start`, `POST .../submit` | authenticated back-office user (server-graded) |
+| Team view | `GET v1/admin/academy/team` | `SECURITY_ADMIN` role (admin-back + core-back; audited `ACADEMY_TEAM_VIEWED`) |
 
-The summary reports total users, users with progress, not started, completed modules/lessons/labs, earned badges, quiz scores, active last 7 days and counts by role. The team accordion loads on demand, searches by email/role, and shows completion percentage, module count, badges and last update.
-
-Both exports require the team export checklist (`TEAM_SCOPE_VERIFIED`, `PRIVACY_REVIEWED`, `PROGRESS_DATA_REVIEWED`, `EXPORT_APPROVAL_CONFIRMED`) when checklists are visible. The backend accepts only the known checklist keys and writes `ACADEMY_SUMMARY_EXPORTED` or `ACADEMY_CERTIFICATIONS_EXPORTED`.
-
-The route has no UI authority gate. The self-progress calls succeed for any authenticated admin; the team/report calls fail without `user:read`.
+The old summary/overview/export endpoints (`/progress/overview*`, `ACADEMY_SUMMARY_EXPORTED`, `ACADEMY_CERTIFICATIONS_EXPORTED`) and their export checklist were removed; the team page exports the visible rows as CSV client-side. Only `AdminAcademyTeam` is role-gated in the router; every other Academy route needs no authority.
 
 ### 3.5 Exports and checklist behavior
 
@@ -208,7 +202,7 @@ The deploy engine writes both build-time Vite values and `runtime-config.js`; ru
 | Backups | `security:read` or `gateway:read` | `security:read`/`gateway:read` | `security:write` |
 | Platform settings | none | `settings:read` | `settings:write` |
 | Checkout help | none | `settings:read` | `settings:write` |
-| Academy page | none | self: authenticated; team: `user:read` | self: authenticated |
+| Academy pages | none (Team: role `SECURITY_ADMIN`) | self: authenticated; team: `SECURITY_ADMIN` | self: authenticated |
 | Approvals | `approvals.approve`/`reject` | approval authority | `approval:check` and checker separation |
 
 The UI hides write controls where it knows the authority. The backend remains authoritative.
@@ -222,7 +216,7 @@ The UI hides write controls where it knows the authority. The backend remains au
 5. **Backup policy is maker-checker.** The maker submits; a different checker executes through approvals.
 6. **Backup trigger/drill are immediate writes under `security:write`.** They are not maker-checker approvals.
 7. **Checkout support save creates a new version and audit entries.** It is not a maker-checker execution.
-8. **Academy exports require `user:read` and write audit entries.**
+8. **The Academy team view requires the `SECURITY_ADMIN` role and writes an audit entry; exam grading is server-side.**
 9. **All spreadsheet exports use the shared XLSX pipeline.**
 10. **Runtime visibility flags override build-time flags.**
 
@@ -233,7 +227,7 @@ The UI hides write controls where it knows the authority. The backend remains au
 | Backup page | `admin-front/src/pages/system/backups/index.tsx` |
 | Platform settings page | `admin-front/src/pages/settings/platform/index.tsx` |
 | Checkout help page | `admin-front/src/pages/settings/checkout-help/index.tsx` |
-| Academy page | `admin-front/src/pages/academy/index.tsx` |
+| Academy pages | `admin-front/src/pages/academy/*.tsx` |
 | URL map | `admin-front/src/constants/urlsMap/index.ts` |
 | XLSX pipeline | `admin-front/src/utils/xlsx/**` |
 | Summary/checklist primitives | `admin-front/src/components/ui/SummaryExportCard.tsx`, `FormChecklist.tsx` |
@@ -248,7 +242,7 @@ The UI hides write controls where it knows the authority. The backend remains au
 - Change a platform setting: edit the JSON object, record the checklist, and save; verify the new version and effective date. Treat the form's maker-checker hint as advisory only.
 - Restore settings: preview, inspect invalid/missing/version conflicts, then apply with a real reason. Do not retry a version conflict without re-previewing.
 - Change checkout support: ensure contact channels and FAQ content are valid in both languages, preview the result, and save. This changes payer-visible help immediately for new fetches.
-- Export academy reports: complete the team export checklist first; confirm the backend authority before blaming the button.
+- Academy team view not visible: it needs the `SECURITY_ADMIN` role.
 
 ## 7. Status and deviations
 
@@ -258,7 +252,7 @@ The UI hides write controls where it knows the authority. The backend remains au
 - Backup policy maker-checker execution through the approvals queue.
 - Platform settings list, version history, diff, backup export, restore preview/apply, summary and summary export.
 - Checkout support config, live preview, version history, diff, summary and summary export.
-- Academy summary, team view, certification export and summary export.
+- Academy team view (CSV export of the visible rows).
 - Shared XLSX and checklist behavior.
 
 ### Partial
@@ -266,8 +260,8 @@ The UI hides write controls where it knows the authority. The backend remains au
 - The backup page does not hand the operator into the specific pending approval after a policy save.
 - `BACKUP_POLICY` is missing from the shared approvals subject-type filter options, even though the backend supports it.
 - Platform settings and checkout support are versioned/audited but not maker-checker.
-- The route-level UI gates for platform settings, checkout help and academy are absent.
-- Academy mastery is not server-validated; certification is a computed badge.
+- The route-level UI gates for platform settings and checkout help are absent (the Academy team route is role-gated).
+- Academy labs are browser-graded practice; certification is decided only by server-graded exams.
 
 ### Missing / deferred
 
@@ -281,7 +275,7 @@ The UI hides write controls where it knows the authority. The backend remains au
 - **Workflow gap:** a backup policy maker cannot continue directly to approval; the pending request must be found in the general approvals queue.
 - **Filter gap:** the approvals subject filter cannot select `BACKUP_POLICY`.
 - **Governance gap:** `sensitiveMakerChecker` hints on platform settings/checkout help fields do not produce a maker-checker approval.
-- **Authorization risk:** direct navigation to settings/checkout help/academy is not blocked by the router; the page loads and then fails backend calls for unauthorized users.
+- **Authorization risk:** direct navigation to settings/checkout help is not blocked by the router; the page loads and then fails backend calls for unauthorized users.
 - **Export scope risk:** table exports are current-page only; do not treat them as full-result exports.
 - **Documentation gap:** historical design claims about weekly drills/hourly Redis/ready-to-run backup certificates are superseded by the storage/backup parts.
 
@@ -289,7 +283,7 @@ The UI hides write controls where it knows the authority. The backend remains au
 
 - `tests/e2e/admin/backups.spec.ts` mocks the backup overview and verifies the rendered health/schedule/drill state and the trigger request payload.
 - `core-back/test/backup-admin/backup-admin-routes.test.ts` covers backup route authority, trigger/drill/policy behavior and audit entries.
-- `admin-front/src/content/__tests__/content-completeness.test.ts` covers the academy content counts used by the reporting page.
+- `tests/unit/academy-content.test.ts` covers the Academy content counts.
 - The XLSX pipeline has no dedicated unit test in this repository; coverage is through page-level usage and the shared UI compliance test.
 
 The backup E2E suite requires the live stack; the core backup test requires PostgreSQL/Redis.
@@ -307,12 +301,12 @@ The backup E2E suite requires the live stack; the core backup test requires Post
 - `admin-front/src/pages/system/backups/index.tsx`
 - `admin-front/src/pages/settings/platform/index.tsx`
 - `admin-front/src/pages/settings/checkout-help/index.tsx`
-- `admin-front/src/pages/academy/index.tsx`
+- `admin-front/src/pages/academy/*.tsx`
 - `admin-front/src/utils/xlsx/**`
 - `admin-front/src/components/ui/SummaryExportCard.tsx`
 - `admin-front/src/components/ui/FormChecklist.tsx`
 - `core-back/api/internal/backups.ts`
-- `core-back/api/internal/admin.ts` (settings and academy handlers)
+- `core-back/api/internal/admin.ts` (settings handlers), `core-back/api/internal/academy.ts`
 - `core-back/lib/approvalQueue.ts`
 
 ### Generated appendices

@@ -539,8 +539,9 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | `GET /finance/profitability`, `/export`, `GET /finance/route-caps`, `GET /finance/liquidity`, `/export`, `GET /finance/invariant-check`, `/export` | `finance:read` |
 | `GET /settings/checkout-support`, `/history`, `/summary`, `/summary/export` | `settings:read` |
 | `PUT /settings/checkout-support` | `settings:write`; direct versioned write |
-| `GET /academy/progress`, `PUT /academy/progress` | authenticated; current user only |
-| `GET /academy/progress/overview`, `/summary`, `/export`, `/summary/export` | `user:read` |
+| `GET /academy/progress`, `PUT /academy/progress` | authenticated back-office user; current user only (`{ baseRev, patch }`, `rev`, 409 on stale) |
+| `GET /academy/exams/:examId/eligibility`, `POST /academy/exams/:examId/start`, `POST /academy/exams/:examId/submit` | authenticated back-office user; server-graded (see `03-admin-front/03-guide-and-academy.md` §7.4) |
+| `GET /academy/team` | role `SECURITY_ADMIN`; audited `ACADEMY_TEAM_VIEWED` |
 | `GET /audit-logs`, `/export`, `/summary`, `/summary/export`, `GET /audit-logs/:id` | `security:read` |
 | `GET /settings` | `settings:read` |
 | `POST /settings/restore-preview` | `settings:read` |
@@ -4370,7 +4371,7 @@ Unlike the base generators, this enrichment uses the real Vault.
 - key `synthetic.seed.completed:<seedKey>`;
 - value includes seed key, namespace, profile, years span, completion time and optional attempt/journal/drift counts.
 
-`runSyntheticSeeder` checks `findCompletedSeedRun` before the safety gate. A completed key is skipped with a message. A failed or interrupted run never writes the marker. `recordCompletedSeedRun` upserts version 1.
+`runSyntheticSeeder` checks `findCompletedSeedRun` before the safety gate. A completed key is skipped with a message. `findOtherCompletedSeedRun` (2026-11-04) also skips, with an explanatory message, when a completed run exists under a *different* key in the same namespace: generated rows carry key-independent unique values (emails), so a second history cannot be layered (`skipDuplicates` drops the colliding parents and children then fail their FKs, e.g. `user_identities_user_id_fkey`). Keep the existing key or reset the database to reseed. A failed or interrupted run never writes the marker. `recordCompletedSeedRun` upserts version 1.
 
 ### 3.11 Post-seed audit
 
