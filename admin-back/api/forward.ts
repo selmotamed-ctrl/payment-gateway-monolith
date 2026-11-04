@@ -74,6 +74,7 @@ export const coreForward =
         clientIp: resolveClientIp(req, parseCidrList(env.TRUSTED_PROXY_CIDRS)),
         userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
         authorization,
+        minLsn: req.header("x-pg-min-lsn") ?? undefined,
       });
 
     if (options.splitBodyFrom) {
@@ -88,5 +89,9 @@ export const coreForward =
 
     const body = options.bodyFrom ? options.bodyFrom(req, publicBody) : publicBody;
     const response = await call(options.path({ params, body, query: query ?? {} }), body);
+    for (const header of ["x-pg-served-by", "x-pg-min-lsn"]) {
+      const value = response.headers[header];
+      if (typeof value === "string" && value.length > 0) res.setHeader(header, value);
+    }
     res.status(options.relayStatus === true ? response.status : options.status ?? 200).json(response.body);
   };

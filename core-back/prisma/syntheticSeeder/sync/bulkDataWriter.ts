@@ -24,10 +24,13 @@ const STEPS: Step[] = [
   { model: "merchant", key: "merchants" },
   { model: "user", key: "users" },
   { model: "userIdentity", key: "userIdentities" },
+  // Join requests carry screeningId, so screenings must be inserted first.
+  { model: "amlScreening", key: "amlScreenings" },
   { model: "joinRequest", key: "joinRequests" },
   { model: "kybDocument", key: "kybDocuments" },
   { model: "beneficialOwner", key: "beneficialOwners" },
   { model: "glAccount", key: "glAccounts" },
+  { model: "glAccountShard", key: "glAccountShards" },
   { model: "wallet", key: "wallets" },
   { model: "application", key: "applications" },
   { model: "accessToken", key: "accessTokens" },
@@ -58,7 +61,6 @@ const STEPS: Step[] = [
   { model: "dispute", key: "disputes", transform: (rows) => rows.map(({ adjustmentId: _adjustmentId, ...rest }) => ({ ...rest, adjustmentId: null })) },
   { model: "adjustment", key: "adjustments", transform: (rows) => rows.map(({ disputeId: _disputeId, ...rest }) => ({ ...rest, disputeId: null })) },
   { model: "cashoutRequest", key: "cashoutRequests" },
-  { model: "amlScreening", key: "amlScreenings" },
   { model: "amlScreeningMatch", key: "amlScreeningMatches" },
   { model: "amlCase", key: "amlCases" },
   { model: "regulatoryReport", key: "regulatoryReports" },
@@ -104,7 +106,20 @@ export const bulkDataWriter = async (
     const source = ctx.dataset[step.key] as any[];
     if (!source || source.length === 0) continue;
     const rows = step.transform ? step.transform(source) : source;
-    const written = await insertChunked(prisma, step.model, rows);
+    let written: number;
+    if (step.model === "glAccountShard") {
+      written = 0;
+      for (const row of rows) {
+        await prisma.glAccountShard.upsert({
+          where: { glAccountId_shardId: { glAccountId: row.glAccountId, shardId: row.shardId } },
+          update: { currentBalance: row.currentBalance, updatedAt: row.updatedAt },
+          create: row,
+        });
+        written += 1;
+      }
+    } else {
+      written = await insertChunked(prisma, step.model, rows);
+    }
     report.push({ model: step.model, rows: written });
     if (process.env.SYNTHETIC_SEED_VERBOSE === "true") {
       console.log(`  ${step.model}: ${written}`);

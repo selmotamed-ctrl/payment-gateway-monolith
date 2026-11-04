@@ -70,6 +70,7 @@ export const backupDaemonEnvSchema = z
     PG_PRIMARY_PASSWORD: z.string().default(""),
     PG_PRIMARY_DB_NAME: nonEmpty.default("payment_gateway_prod"),
     PG_AUDIT_DB_NAME: nonEmpty.default("pg_audit_db"),
+    PG_AUDIT_PORT: port.default(5434),
     PG_REPLICA_NODES: z.string().default(""),
     PG_DATA_DIR: nonEmpty.default("/var/lib/postgresql/18/main"),
     PG_AUDIT_DATA_DIR: optionalNonEmpty,

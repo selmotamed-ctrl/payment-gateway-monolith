@@ -23,3 +23,9 @@ Architecture and documentation decisions are recorded here. Add a dated ADR entr
 - **Status:** accepted
 - **Decision:** Storage/backup/search/seeder design parts must distinguish implemented behavior from partial/missing features. Read models, replica routing, keyset pagination, audit/log retention and backup drill behavior are documented as they exist, not as the blueprint originally proposed.
 - **Consequences:** P0/P1 gaps stay visible in `TRACKER.md` until the code changes.
+
+## 2026-11-03 — Two-machine lab is disposable and marker-gated
+
+- **Decision:** `deploy/test-matrix/**` owns the T1-T8 lab. Bootstrap writes `/etc/pg-lab-matrix`; teardown only drops PostgreSQL clusters when that marker exists.
+- **Why:** the lab intentionally creates and destroys `main`, `replica_*`, `audit` and `log` clusters on both hosts. Without a marker, a teardown could destroy a non-lab database.
+- **Consequence:** live certification requires HOST_B reachable and the marker present. Config generation and unit tests do not need HOST_B.

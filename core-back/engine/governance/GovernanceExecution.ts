@@ -1451,6 +1451,7 @@ const finalizeAmlAttempt = async (
       attemptId: String(attempt.id),
       status: input.status,
       substatus: input.action === "RELEASE" ? "AML_RELEASED" : "AML_VOID",
+      merchantId: attempt.merchantId ? String(attempt.merchantId) : undefined,
     });
   }
   return true;
@@ -2939,6 +2940,7 @@ export async function executeOperatorCaseResolution(
         attemptId: String(attempt.id),
         status: "SUCCEEDED",
         substatus: finalSubstatus,
+        merchantId: attempt.merchantId ? String(attempt.merchantId) : undefined,
       });
     }
     return resolveOperatorCaseRow(ctx, tx, {
@@ -3019,6 +3021,7 @@ export async function executeOperatorCaseResolution(
       attemptId: String(attempt.id),
       status: "FAILED",
       substatus: "OPERATOR_RESOLVED_FAILED",
+      merchantId: attempt.merchantId ? String(attempt.merchantId) : undefined,
     });
   }
   return resolveOperatorCaseRow(ctx, tx, {

@@ -1,4 +1,4 @@
-import { edgeCoreUrls, type DeployConfig } from "./configSchema";
+import { edgeCoreUrls, parseNodeList, type DeployConfig } from "./configSchema";
 import type { DeployPlan, HostPlan, NodePlan, StorageNodePlan } from "./hostPlanner";
 import type { SshRunner } from "./sshRunner";
 
@@ -18,6 +18,10 @@ export interface ProbeResult {
   ok: boolean;
   detail: string;
 }
+
+const sleepSync = (ms: number): void => {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+};
 
 const certsDir = (host: HostPlan, config: DeployConfig): string => {
   const remoteDir = host.roles.includes("core")
@@ -93,26 +97,37 @@ export const probeCoreService = (
     url: `https://127.0.0.1:${service.port}/health`,
     expect: "OK",
   });
-  try {
-    const body = runner.capture(host.ssh, command);
-    return { host: host.ssh.host, check: `${service.name} /health (mTLS)`, ok: /"msg"\s*:\s*"OK"/.test(body) || body.includes("OK"), detail: body.slice(0, 200) };
-  } catch (error) {
-    return { host: host.ssh.host, check: `${service.name} /health (mTLS)`, ok: false, detail: (error as Error).message };
+  let lastError = "";
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      const body = runner.capture(host.ssh, command);
+      return { host: host.ssh.host, check: `${service.name} /health (mTLS)`, ok: /"msg"\s*:\s*"OK"/.test(body) || body.includes("OK"), detail: body.slice(0, 200) };
+    } catch (error) {
+      lastError = (error as Error).message;
+      sleepSync(1_000);
+    }
   }
+  return { host: host.ssh.host, check: `${service.name} /health (mTLS)`, ok: false, detail: lastError };
 };
 
 /** Probes one edge service (used by rolling batches). */
 export const probeEdgeService = (
   runner: SshRunner,
   host: HostPlan,
-  service: { name: string; port: number },
+  service: { name: string; port: number; privateIp?: string },
 ): ProbeResult => {
-  try {
-    const body = runner.capture(host.ssh, `curl -fsS --max-time 10 http://127.0.0.1:${service.port}/health`);
-    return { host: host.ssh.host, check: `${service.name} /health`, ok: /"status"\s*:\s*"ok"/.test(body) || body.includes("ok"), detail: body.slice(0, 200) };
-  } catch (error) {
-    return { host: host.ssh.host, check: `${service.name} /health`, ok: false, detail: (error as Error).message };
+  const address = service.privateIp ?? "127.0.0.1";
+  let lastError = "";
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      const body = runner.capture(host.ssh, `curl -fsS --max-time 10 http://${address}:${service.port}/health`);
+      return { host: host.ssh.host, check: `${service.name} /health`, ok: /"status"\s*:\s*"ok"/.test(body) || body.includes("ok"), detail: body.slice(0, 200) };
+    } catch (error) {
+      lastError = (error as Error).message;
+      sleepSync(1_000);
+    }
   }
+  return { host: host.ssh.host, check: `${service.name} /health`, ok: false, detail: lastError };
 };
 
 /** Probes every horizontally scaled core node (loopback, mTLS). */
@@ -169,7 +184,7 @@ export const probeEdgeBackend = (
   for (const service of host.services) {
     if (service.role === "core") continue;
     try {
-      const body = runner.capture(host.ssh, `curl -fsS --max-time 10 http://127.0.0.1:${service.port}/health`);
+      const body = runner.capture(host.ssh, `curl -fsS --max-time 10 http://${service.privateIp ?? "127.0.0.1"}:${service.port}/health`);
       results.push({
         host: host.ssh.host,
         check: `${service.name} /health`,
@@ -326,7 +341,7 @@ export const probeBackupDaemon = (runner: SshRunner, plan: DeployPlan, config: D
     expect: "OK",
   });
   try {
-    const body = runner.capture(node.ssh, command);
+    const body = runner.capture(node.ssh, command, { sudo: true });
     return [result(node, "backup-daemon /health (mTLS)", /"status"\s*:\s*"ok"/.test(body) || body.includes("ok"), body.slice(0, 200))];
   } catch (error) {
     return [result(node, "backup-daemon /health (mTLS)", false, (error as Error).message)];
@@ -350,8 +365,9 @@ export const probeFakeRails = (
   config: DeployConfig,
 ): ProbeResult[] => {
   const results: ProbeResult[] = [];
+  const fakeRailsPort = parseNodeList(config.FAKE_RAILS_NODE)[0]?.servicePort ?? config.FAKE_RAILS_BACK_PORT;
   try {
-    const body = runner.capture(host.ssh, `curl -fsS --max-time 10 http://127.0.0.1:${config.FAKE_RAILS_BACK_PORT}/health`);
+    const body = runner.capture(host.ssh, `curl -fsS --max-time 10 http://127.0.0.1:${fakeRailsPort}/health`);
     results.push({
       host: host.ssh.host,
       check: "fake-rails-back /health",

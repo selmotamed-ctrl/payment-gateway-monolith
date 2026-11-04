@@ -6,6 +6,7 @@ confidence: high
 last_verified: 2026-11-03
 verified_against: 5a24f6f+working-tree
 code:
+  - deploy/test/testMatrix.test.ts
   - deploy/provisioners/postgres18Provisioner.ts
   - deploy/provisioners/redisProvisioner.ts
   - deploy/provisioners/auditAndLogDbProvisioner.ts
@@ -18,18 +19,18 @@ design_sources:
   - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#63-individual-storage-solution-provisioners-in-deployprovisioners
   - design/payment_gateway_deployment_and_guides_architecture.md#6-ordered-14-step-multi-host-deployment-pipeline
 tests:
+  - deploy/test/testMatrix.test.ts
   - deploy/test/provisioners.test.ts
   - deploy/test/exhaustive-deploy-matrix.test.ts
   - deploy/test/healthVerifierScale.test.ts
   - deploy/test/configScale.test.ts
 gaps:
-  - PgBouncer is provisioned without a [databases] mapping, so a core connection to port 6432 has no configured route to the PostgreSQL database.
+  - The audit/log provisioner assumes the Debian cluster names `audit` and `log`; a custom name is not configurable.
   - Storage mTLS is generated but not consumed; PostgreSQL, PgBouncer, Redis, audit and log databases do not request client certificates.
   - PostgreSQL SSL material is not configured by the provisioner; hostssl rules rely on the distribution's default TLS setup.
   - Redis has no TLS listener.
-  - PgBouncer uses server TLS with require-only verification and no client certificate.
+  - PgBouncer uses `server_tls_sslmode = prefer` and no client certificate because the deploy does not install PostgreSQL TLS material.
   - The WAL-G download uses a GitHub "latest" Ubuntu 20.04 binary URL and is not pinned or checksum-verified.
-  - Backup target verification uses rclone against a possibly unconfigured S3 remote.
 ---
 
 # Storage Provisioners
@@ -67,11 +68,11 @@ The code implements most of the topology, authentication and scheduling. The TLS
 
 ### 3.1 PostgreSQL 18
 
-`bootstrapCommands()` installs `postgresql-${PG_VERSION}`, `postgresql-contrib-${PG_VERSION}` and `pgbouncer` with `apt-get`, enables PostgreSQL and PgBouncer (on the primary and on replicas that also run PgBouncer), and creates the data directory with owner `postgres`.
+`bootstrapCommands()` installs `postgresql-${PG_VERSION}`, `postgresql-contrib-${PG_VERSION}` and `pgbouncer` with `apt-get`, ensures the Debian cluster (`main` on 5432, or a named cluster on another port) exists, starts it, enables `postgresql@18-<cluster>` and PgBouncer where applicable, and creates the data directory with owner `postgres`.
 
 The version comes from `PG_VERSION` (default `18`). The schema allows any one- or two-digit major version; there is no runtime assertion that it is exactly 18.
 
-`postgresConfigSnippet()` writes `/etc/postgresql/<version>/main/conf.d/zz-pg-switch.conf` with `listen_addresses='*'`, 300 connections, 8 GB shared buffers, 24 GB effective cache, 32 MB work memory, 1 GB maintenance memory, `io_method='io_uring'`, `synchronous_commit=on`, `wal_level=replica`, 16 WAL senders/slots, 16 GB max WAL, `pg_stat_statements` and `track_io_timing=on`.
+`postgresConfigSnippet()` writes `/etc/postgresql/<version>/<cluster>/conf.d/zz-pg-switch.conf` (where `<cluster>` is `main`, `replica_<nodeId>`, `audit` or `log`) with `listen_addresses='*'`, 300 connections, 8 GB shared buffers, 24 GB effective cache, 32 MB work memory, 1 GB maintenance memory, `io_method='io_uring'`, `synchronous_commit=on`, `wal_level=replica`, 16 WAL senders/slots, 16 GB max WAL, `pg_stat_statements` and `track_io_timing=on`.
 
 The file contains no `ssl`, `ssl_cert_file`, `ssl_key_file`, `ssl_ca_file` or `ssl_crl_file` settings. The database listens on all interfaces and relies on UFW plus `pg_hba`.
 
@@ -100,7 +101,7 @@ The function `ensure_journal_line_partitions` must already exist from the core m
 For each replica, `replicaCommands()`:
 
 - creates `/var/lib/postgresql` and writes `/var/lib/postgresql/.pgpass` with the replication credentials;
-- runs `pg_basebackup -h <primary> -p <port> -U <replicationUser> -D <dataDir> -Fp -Xs -P -R -S <slot>` only when the data directory has no `PG_VERSION`;
+- stops the empty cluster, replaces its data directory with `pg_basebackup -h <primary> -p <port> -U <replicationUser> -D <dataDir> -Fp -Xs -P -R -S <slot>`, writes the slot into `postgresql.auto.conf`, starts the cluster and enables its systemd unit;
 - ensures `primary_slot_name` in `postgresql.auto.conf`;
 - enables and starts PostgreSQL.
 
@@ -176,11 +177,11 @@ The same archive configuration is applied to the audit database when `AUDIT_DB_M
 
 The provisioner also runs `verifyBackupTargetCommands()`:
 
-- `rclone lsd <BACKUP_PRIMARY_S3_BUCKET> --max-depth 1`;
+- `curl -fsS <BACKUP_PRIMARY_S3_ENDPOINT>/minio/health/live`;
 - an SSH `true` to the secondary target when configured;
 - a non-empty encryption key check.
 
-The `rclone` check assumes the bucket string is a configured rclone remote or a path rclone understands; an S3 URL with no rclone configuration fails the deploy.
+The MinIO health check verifies the local S3-compatible endpoint without requiring an rclone remote configuration.
 
 The systemd unit runs `bun run src/index.ts` as `pgbackup` with `EnvironmentFile=/etc/pg-backup/backup.env`, `ProtectSystem=strict`, `NoNewPrivileges=true`, and `ReadWritePaths` for the backup, log, catalog, cert, scratch and pgpass directories.
 
@@ -212,7 +213,7 @@ The systemd unit runs `bun run src/index.ts` as `pgbackup` with `EnvironmentFile
 
 ### Generated files
 
-- `/etc/postgresql/<version>/main/conf.d/zz-pg-switch.conf`
+- `/etc/postgresql/<version>/<cluster>/conf.d/zz-pg-switch.conf`
 - `/etc/postgresql/<version>/main/pg_hba.conf`
 - `/etc/pgbouncer/pgbouncer.ini`, `/etc/pgbouncer/userlist.txt`
 - `/etc/redis/redis.conf`, `/etc/redis/redis.conf.d/zz-pg-switch.conf`
@@ -270,7 +271,7 @@ If PgBouncer is enabled, add a `[databases]` section to `pgbouncer.ini` and rest
 
 - TLS is required for remote PostgreSQL connections by `hostssl`, but the provisioner does not configure the server certificate or a client-certificate requirement.
 - PgBouncer is installed but has no `[databases]` mapping.
-- Backup target verification depends on external rclone/SSH configuration.
+- Backup target verification depends on the MinIO endpoint and the secondary SSH target being reachable.
 - WAL-G installation is unpinned.
 
 ### Missing / deferred
@@ -315,7 +316,7 @@ Not covered:
 - a real PgBouncer connection with the generated config;
 - TLS/mTLS database connections;
 - a live WAL-G/Barman backup or restore;
-- rclone/secondary-target reachability.
+- MinIO health and secondary-target reachability.
 
 ## 9. Source references
 
@@ -344,3 +345,17 @@ Not covered:
 ## 10. Change history
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
+
+## 11. Multi-cluster and audit-trigger additions (2026-11-03)
+
+- `pgClusterFor()` maps port 5432 to the Debian `main` cluster and every other role to an independent cluster (`replica_<nodeId>`, `audit`, `log`) with its own data directory, config directory, HBA and `postgresql@18-<cluster>` unit.
+- Replica initialization creates the cluster first, stops it, replaces the empty data directory with `pg_basebackup -R`, then starts the cluster.
+- PgBouncer is provisioned once per host and now has a `[databases]` mapping to the local PostgreSQL port.
+- The audit DDL installs `pgcrypto`, the `compute_audit_chain_hash_trg` BEFORE INSERT trigger with `pg_advisory_xact_lock(994001)`, and `verify_audit_chain()` for the two-machine gate.
+- `backupDaemonEnv()` derives `PG_DATA_DIR` and `PG_AUDIT_DATA_DIR` from the real cluster names.
+
+## 12. Cluster-aware cron and port fixes (2026-11-03)
+
+- Journal partition cron uses the primary cluster port (`psql -p <port>`), not the default 5432.
+- Log partition cron uses the log cluster port (`psql -p <port>`), so a log cluster on 5435 is maintained instead of accidentally touching the main cluster.
+- Backup target verification checks the MinIO health endpoint instead of an unconfigured rclone remote.

@@ -96,14 +96,15 @@ const parsePort = (value: string, label: string): number => {
 };
 
 /**
- * Parses a comma separated horizontal node list and rejects malformed entries,
- * duplicate node ids and duplicate private IPs *within the same list*.
+ * Parses a comma separated horizontal node list and rejects malformed entries
+ * and duplicate node ids. Multiple nodes of the same tier may share a private
+ * IP when they run on one machine with distinct service ports.
  */
 export const parseNodeList = (value: string | undefined | null): NodeSpec[] => {
   if (!value || value.trim().length === 0) return [];
   const nodes: NodeSpec[] = [];
   const ids = new Set<string>();
-  const ips = new Set<string>();
+  const endpoints = new Set<string>();
   for (const rawEntry of value.split(",")) {
     const entry = rawEntry.trim();
     if (entry.length === 0) continue;
@@ -125,9 +126,10 @@ export const parseNodeList = (value: string | undefined | null): NodeSpec[] => {
     const sshPort = parsePort(sshPortRaw.trim(), `node '${nodeId}' sshPort`);
     const servicePort = parsePort(servicePortRaw.trim(), `node '${nodeId}' servicePort`);
     if (ids.has(nodeId)) throw new Error(`duplicate node id '${nodeId}'`);
-    if (ips.has(privateIp)) throw new Error(`duplicate private IP '${privateIp}' in node list`);
+    const endpoint = `${privateIp}:${servicePort}`;
+    if (endpoints.has(endpoint)) throw new Error(`duplicate endpoint '${endpoint}' in node list`);
     ids.add(nodeId);
-    ips.add(privateIp);
+    endpoints.add(endpoint);
     nodes.push({ nodeId, sshHost, sshPort, privateIp, servicePort });
   }
   return nodes;
@@ -244,9 +246,14 @@ const base = z.strictObject({
   CHECKOUT_SSL_CERT_PATH: z.string().trim().max(300).optional(),
   CHECKOUT_SSL_KEY_PATH: z.string().trim().max(300).optional(),
   CHECKOUT_REMOTE_DIR: z.string().trim().min(1).max(200).default("/var/www/pg-checkout"),
+  PAY_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1_000_000).default(120),
 
   // 6. Core-only secrets
   KMS_MASTER_KEY: z.string().min(16).max(512),
+  KMS_MASTER_KEY_ID: z.string().trim().max(64).default("v1"),
+  KMS_MASTER_KEY_HEX: z.string().trim().regex(/^[0-9a-fA-F]{64}$/).or(z.literal("")).default(""),
+  STORAGE_SHARD_COUNT: z.coerce.number().int().min(1).max(32).default(16),
+  READ_REPLICA_MAX_LAG_MS: z.coerce.number().int().min(0).max(600_000).default(2_000),
   BASE_CURRENCY: z.string().trim().length(3).default("LYD"),
   GATEWAY_TIMEZONE: z.string().trim().min(1).max(64).default("Africa/Tripoli"),
   REDIS_URL: z.string().trim().max(500).optional(),
@@ -255,6 +262,7 @@ const base = z.strictObject({
   IS_TEST_SERVER: booleanish.default(false),
   FAKE_RAILS_ENABLED: booleanish.default(false),
   FAKE_RAILS_ALLOW_IN_PRODUCTION: booleanish.default(false),
+  FAKE_RAILS_NODE: nodeList,
   FAKE_RAILS_SSH_HOST: ipv4.optional(),
   FAKE_RAILS_SSH_PORT: port.default(22),
   FAKE_RAILS_SSH_USER: z.string().trim().min(1).max(64).default("ubuntu"),
@@ -697,14 +705,14 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
   }
   for (const id of duplicateIds) problems.push(`node id '${id}' is used more than once across the node lists`);
 
-  const pgIps = [...primaryNodes, ...replicaNodes].map((node) => node.privateIp);
-  const duplicatePgIps = new Set<string>();
-  const seenPgIps = new Set<string>();
-  for (const ip of pgIps) {
-    if (seenPgIps.has(ip)) duplicatePgIps.add(ip);
-    seenPgIps.add(ip);
+  const pgEndpoints = [...primaryNodes, ...replicaNodes].map((node) => `${node.privateIp}:${node.servicePort}`);
+  const duplicatePgEndpoints = new Set<string>();
+  const seenPgEndpoints = new Set<string>();
+  for (const endpoint of pgEndpoints) {
+    if (seenPgEndpoints.has(endpoint)) duplicatePgEndpoints.add(endpoint);
+    seenPgEndpoints.add(endpoint);
   }
-  for (const ip of duplicatePgIps) problems.push(`PostgreSQL primary/replica private IP '${ip}' is used more than once`);
+  for (const endpoint of duplicatePgEndpoints) problems.push(`PostgreSQL primary/replica endpoint '${endpoint}' is used more than once`);
 
   // The same SSH endpoint cannot host two compute roles on the same port.
   const endpointPorts = new Map<string, Map<number, string>>();
@@ -803,9 +811,18 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
 
   // --- Fake Rails tier -----------------------------------------------------
   if (config.FAKE_RAILS_ENABLED) {
-    if (!config.FAKE_RAILS_SSH_HOST) problems.push("FAKE_RAILS_SSH_HOST is required when FAKE_RAILS_ENABLED=true");
+    const fakeRailsNodes = (() => {
+      try {
+        return parseNodeList(config.FAKE_RAILS_NODE);
+      } catch (error) {
+        problems.push(`FAKE_RAILS_NODE: ${(error as Error).message}`);
+        return [];
+      }
+    })();
+    if (fakeRailsNodes.length > 1) problems.push("FAKE_RAILS_NODE must describe exactly one node");
+    if (fakeRailsNodes.length === 0 && !config.FAKE_RAILS_SSH_HOST) problems.push("FAKE_RAILS_SSH_HOST or FAKE_RAILS_NODE is required when FAKE_RAILS_ENABLED=true");
     if (!config.FAKE_RAILS_SSH_KEY_PATH) problems.push("FAKE_RAILS_SSH_KEY_PATH is required when FAKE_RAILS_ENABLED=true");
-    if (!config.FAKE_RAILS_PRIVATE_IP) problems.push("FAKE_RAILS_PRIVATE_IP is required when FAKE_RAILS_ENABLED=true");
+    if (fakeRailsNodes.length === 0 && !config.FAKE_RAILS_PRIVATE_IP) problems.push("FAKE_RAILS_PRIVATE_IP or FAKE_RAILS_NODE is required when FAKE_RAILS_ENABLED=true");
     if (!config.FAKE_RAILS_ADMIN_USER) problems.push("FAKE_RAILS_ADMIN_USER is required when FAKE_RAILS_ENABLED=true");
     if (!config.FAKE_RAILS_ADMIN_PASSWORD) problems.push("FAKE_RAILS_ADMIN_PASSWORD is required when FAKE_RAILS_ENABLED=true");
     if (!config.FAKE_RAILS_JWT_SECRET) problems.push("FAKE_RAILS_JWT_SECRET is required when FAKE_RAILS_ENABLED=true");

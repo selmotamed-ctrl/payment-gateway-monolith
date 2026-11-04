@@ -6,6 +6,7 @@ confidence: high
 last_verified: 2026-11-03
 verified_against: 5a24f6f+working-tree
 code:
+  - deploy/test-matrix/**
   - core-back/test/setup.ts
   - core-back/test/exhaustive/_harness.ts
   - core-back/test/exhaustive/_dbFactory.ts
@@ -16,11 +17,13 @@ design_sources:
   - design/master_exhaustive_test_plan_for_opencode.md#1-master-test-volume-coverage-matrix-38500-assertions
   - design/master_exhaustive_test_plan_for_opencode.md#13-opencode-phased-execution-tracker-master-runner-script
 tests:
+  - deploy/test/testMatrix.test.ts
   - core-back/test/exhaustive/**
   - core-back/test/storage-engine/**
   - tests/e2e/**
   - tests/e2e-live/**
 gaps:
+  - The eight live topologies and 11 gates are not certified because HOST_B was unreachable during implementation.
   - The claimed 38,500 assertions are not present; the working tree has about 1,807 literal test declarations.
   - Suite 09 has no exhaustive directory.
   - Most UI tests mock every API response and verify geometry rather than behaviour.
@@ -279,3 +282,16 @@ This part is verified by inspecting the runner, configs and suite files. It has 
 ## 10. Change history
 
 - 2026-11-03: initial canonical part. Verified against `5a24f6f+working-tree`.
+
+## 11. Two-machine matrix (2026-11-03)
+
+`deploy/test-matrix/**` is the executable realization of `design/two-machine-test/two_machine_multi_topology_deployment_and_stress_test_plan.md`:
+
+- `bootstrapTwoMachineLab.ts` discovers HOST_A, installs bidirectional SSH keys, MinIO and vault directories;
+- `generateTopologyConfigs.ts` writes T1-T8 configs;
+- `teardownTopology.ts` removes lab-owned PM2 apps, vhosts, releases and marked PostgreSQL clusters;
+- `gates.ts` implements the 11 verification gates;
+- `stressWorkload.ts` drives checkout bursts and hot-link contention;
+- `runAllTopologiesAndHeal.ts` deploys, gates, captures diagnostics, retries and writes `TOPOLOGY_CERTIFICATION_REPORT.md`.
+
+See `testing.two-machine-matrix` for the as-built details and gaps.

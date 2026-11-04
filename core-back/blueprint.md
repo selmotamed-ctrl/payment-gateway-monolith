@@ -2549,6 +2549,12 @@ Database-backed suites require PostgreSQL 18; Redis-backed invalidation tests re
 
 - 2026-11-03 — Baseline verification against `5a24f6f+working-tree`: documented the worker inventory, synchronous inbound path, polling SSE, outbox/audit shipping, retention exceptions, leases/backoff, startup guard, health payload, and the actual partial status of each worker.
 
+## 11. Multi-node audit shipping (2026-11-03)
+
+- The dedicated audit database computes the hash chain in a BEFORE INSERT trigger under `pg_advisory_xact_lock(994001)`.
+- `AuditShipperWorker` inserts without `prev_hash`/`row_hash` and reads the trigger-computed values from `RETURNING`, so concurrent shippers on HOST_A and HOST_B cannot fork the chain.
+- `verify_audit_chain()` is available for live gate verification and backup drill checks.
+
 ## Storage Engine
 
 > Status: `partial` · Last verified: 2026-11-03
@@ -2700,7 +2706,7 @@ On any Redis error, `incrWindowCounter` falls back to the in-memory adapter (`re
 `DedicatedAuditDatabaseDriver` (`auditAndLogAdapters.ts:99-331`) appends with `pg` directly:
 
 - It opens a transaction and takes `pg_advisory_xact_lock(hashtext(tableName:hash-chain))` to serialize chain appends.
-- It reads the last `row_hash`, starts from `"0" * 64`, skips ids already present, computes a SHA-256 hash over previous hash, id, timestamp, actor, action, entity type/id and stable before/after JSON, then inserts.
+- It skips ids already present, inserts the audit fields without `prev_hash`/`row_hash`, and reads the values computed by the audit database BEFORE INSERT trigger (`pg_advisory_xact_lock(994001)` serializes all core nodes).
 - It queries with SQL filters, cursor and offset support, caps `limit` at 5,000 and orders by `created_at DESC, id DESC`.
 - It exposes `verifyHashChainIntegrity(limit?)`, recomputing each row and returning the first broken id.
 
@@ -2749,7 +2755,7 @@ The public `GET /health` in `core-back/index.ts:76-115` does not call `StorageEn
 - The reported `commitLsn` is the post-commit `pg_current_wal_flush_lsn()` when readable; callers can treat an `atLeastLsn` replica as having replayed the commit.
 - GL shard locks are taken in `(gl_account_id, shard_id)` order. Callers must pass all targets before making balance-dependent decisions.
 - Audit ids are UUIDv7 generated in the UoW; the audit chain is append-only and idempotent by id.
-- The audit hash chain uses stable JSON key ordering. Any change to the hashed field list or canonicalization invalidates historical verification.
+- The audit hash chain canonicalizes JSONB with PostgreSQL `before_json::text`/`after_json::text`; verification reads the same text form. Any change to the trigger field list or canonicalization invalidates historical verification.
 - Outbox handlers must be idempotent: a claimed batch is retried after a crash because `processed_at` is updated only after the handler completes.
 - The outbox relay processes rows in ascending id order and never deletes them.
 - Read consistency is one of `primary`, `replica` or `{ atLeastLsn, maxWaitMs? }`. A replica query failure falls back to the primary; callers must not assume a replica served the read.
@@ -2942,6 +2948,14 @@ There is no benchmark in this part that proves the blueprint's 1,000+ TPS sustai
 ## 10. Change history
 
 - 2026-11-03 — Initial canonical extraction. Records the actual UoW/outbox/audit behavior, replica adoption, Redis fallback, shard arithmetic, read-model no-op handlers, missing retention, missing keyset pagination, missing `gateway_wire_logs`, missing disk spool and zero DB log metrics. See `project-design/TRACKER.md`.
+
+## 11. Two-machine routing and realtime additions (2026-11-03)
+
+- `readThroughReplica` and `readThroughReplicaOrPrimary` record the serving store in an `AsyncLocalStorage` context. The core middleware emits `x-pg-served-by` (and the requested `x-pg-min-lsn` watermark) on the response. Checkout initiate/confirm also emit `x-pg-lsn` with the post-commit flush LSN.
+- The admin merchant list now uses the replica-aware helper, so the T1/T3/T4/T5/T6/T7/T8 routing gate can prove list reads hit a replica and T2 falls back to primary.
+- `AuditShipperWorker` no longer computes `prev_hash`/`row_hash` in Node. Inserts omit both columns and the audit database trigger computes them under `pg_advisory_xact_lock(994001)`; `RETURNING` supplies the actual hashes.
+- `verifyHashChainIntegrity` reads `before_json::text`/`after_json::text` so it verifies the trigger canonical form.
+- Attempt transitions are bridged to `realtime:attempt` on the existing Redis-backed invalidation bus; checkout SSE and merchant POS streams subscribe to it while retaining the database poll fallback.
 
 ## Data Schema and Migrations
 

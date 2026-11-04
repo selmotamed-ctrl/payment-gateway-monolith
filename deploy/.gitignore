@@ -2,3 +2,4 @@ node_modules/
 .certs/
 deploy.env
 *.log
+test-matrix/configs/

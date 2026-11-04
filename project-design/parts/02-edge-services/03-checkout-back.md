@@ -6,6 +6,7 @@ confidence: high
 last_verified: 2026-11-03
 verified_against: 5a24f6f+working-tree
 code:
+  - core-back/lib/realtimeBus.ts
   - checkout-back/index.ts
   - checkout-back/api/**
   - checkout-back/lib/env/index.ts
@@ -19,6 +20,7 @@ design_sources:
   - design/payment_gateway_final_design-v5.md#161-checkout-back-public-api-apiv1pay--apiv1inbound---forwards-to-core-back-internalcheckout
   - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#62-edge-to-core-mtls-upstream-load-balancer--health-failover-admin-back-merchant-back-checkout-back
 tests:
+  - core-back/test/storage-engine/telemetry-and-realtime.test.ts
   - checkout-back/test/checkout-zero-trust.test.ts
   - checkout-back/test/core-internal-client.test.ts
   - checkout-back/test/mtls-client.test.ts
@@ -26,6 +28,7 @@ tests:
   - checkout-back/test/env-isolation.test.ts
   - checkout-back/test/exhaustive/05-api-matrix/checkout-zero-trust-matrix.test.ts
 gaps:
+  - An established SSE stream still has no replay/resume; the realtime bridge reduces cross-node latency but does not make a broken stream resumable.
   - Inbound webhooks are verified synchronously inside the request before the gateway ack; the design's fast queue-and-ack path is not implemented.
   - The edge applies a 10-second inbound forwarding timeout; a slower core verification returns an edge timeout even though core may finish storing/processing.
   - An established SSE stream has no resume or polling fallback; a core restart ends the browser stream.
@@ -259,3 +262,9 @@ The suites are local and do not require PostgreSQL/Redis. A live gateway webhook
 ## 10. Change history
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
+
+## 11. Cross-node SSE bridge (2026-11-03)
+
+- `core-back` republishes every `attempt:transition` event on the Redis-backed `realtime:attempt` topic.
+- The checkout status stream subscribes to that topic and emits `event: status` immediately; the existing 2-second database poll remains as a fallback.
+- The merchant POS stream subscribes to `realtime:attempt` and `realtime:pos`, filtering by merchant id, so a screen on one host receives an update processed by a core node on the other host.

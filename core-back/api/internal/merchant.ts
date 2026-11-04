@@ -38,6 +38,7 @@ import { publishWatchlist } from "../../engine/guards/ScreeningProvider";
 import { asStringArray, resolveVisibleRails } from "../../engine/flow/VisibleRailsCatalog";
 import { json, jsonOptional } from "./json";
 import { requireAuthentication, requireMerchantScope, principalOf } from "../middleware/authDoubleCheck";
+import { publishRealtimePos, subscribeRealtimeAttempt, subscribeRealtimePos } from "../../lib/realtimeBus";
 import { writeAudit } from "../../lib/audit/writeAudit";
 
 const router = express.Router();
@@ -1676,6 +1677,12 @@ router.post("/links", async (request: Request, response: Response) => {
   const merchantId = merchantIdOf(request);
   const body = parseOrThrow(linkCreateSchema, request.body);
   const { link, visible } = await createLink(merchantId, body);
+  await publishRealtimePos({
+    merchantId,
+    applicationId: link.applicationId,
+    linkId: link.id,
+    linkKey: link.key,
+  });
   response.status(201).json({
     id: link.id,
     key: link.key,
@@ -2404,6 +2411,27 @@ router.get("/pos/screens/:screenCode/stream", async (request: Request, response:
   response.setHeader("x-accel-buffering", "no");
   response.flushHeaders?.();
   const deadline = Date.now() + 15 * 60 * 1000;
+  const sendAttempts = (attempts: unknown[]): void => {
+    if (!response.writableEnded) {
+      response.write(`event: attempts\ndata: ${JSON.stringify(attempts)}\n\n`);
+    }
+  };
+  const unsubscribeAttempt = subscribeRealtimeAttempt((event) => {
+    if (response.writableEnded || event.merchantId !== merchantId) {
+      return;
+    }
+    sendAttempts([{
+      id: event.attemptId,
+      status: event.status,
+      substatus: event.substatus ?? null,
+    }]);
+  });
+  const unsubscribePos = subscribeRealtimePos((event) => {
+    if (response.writableEnded || event.merchantId !== merchantId) {
+      return;
+    }
+    sendAttempts([]);
+  });
   const poll = async (): Promise<void> => {
     if (response.writableEnded || Date.now() > deadline) {
       response.end();
@@ -2415,12 +2443,16 @@ router.get("/pos/screens/:screenCode/stream", async (request: Request, response:
       orderBy: { createdAt: "desc" },
       take: 10,
     });
-    response.write(`event: attempts\ndata: ${JSON.stringify(attempts)}\n\n`);
+    sendAttempts(attempts);
     setTimeout(() => {
       void poll();
     }, 3000);
   };
-  request.on("close", () => response.end());
+  request.on("close", () => {
+    unsubscribeAttempt();
+    unsubscribePos();
+    response.end();
+  });
   await poll();
 });
 
@@ -2546,6 +2578,12 @@ router.post("/external/links", async (request: Request, response: Response) => {
   }
   const body = parseOrThrow(linkCreateSchema, request.body);
   const { link, visible } = await createLink(principal.merchantId as string, body);
+  await publishRealtimePos({
+    merchantId: principal.merchantId as string,
+    applicationId: link.applicationId,
+    linkId: link.id,
+    linkKey: link.key,
+  });
   response.status(201).json({
     key: link.key,
     amount: decimal(link.amount).toFixed(4),

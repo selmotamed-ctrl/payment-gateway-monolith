@@ -143,6 +143,18 @@ describe("nginx templates", () => {
     }
   });
 
+  test("renders a least_conn upstream for multi-node edge backends", () => {
+    const rendered = render("nginx.checkout.ssl.conf.tpl", {
+      upstreamName: "pg_checkout_backend",
+      upstreamServers: ["10.10.4.11:4103", "10.10.4.12:4103"],
+    });
+    expect(rendered).toContain("upstream pg_checkout_backend {");
+    expect(rendered).toContain("least_conn;");
+    expect(rendered).toContain("server 10.10.4.11:4103 max_fails=2 fail_timeout=3s;");
+    expect(rendered).toContain("server 10.10.4.12:4103 max_fails=2 fail_timeout=3s;");
+    expect(rendered).toContain("proxy_pass http://pg_checkout_backend;");
+  });
+
   test("the admin vhost is LAN-only and terminates TLS 1.3", () => {
     const rendered = render("nginx.admin.lan.conf.tpl", {
       serverName: "admin.internal",

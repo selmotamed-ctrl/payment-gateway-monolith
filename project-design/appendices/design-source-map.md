@@ -19,6 +19,7 @@ Every historical design file must map to a canonical part or be explicitly marke
 | `design/ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md` | UI v2 design source | `parts/03-admin-front/00-ui-system.md`, `02-tables-filters-exports.md` |
 | `design/ui/portal_ui_implementation_plan.md` | As-built UI execution record | `parts/03-admin-front/**`, `TRACKER.md` |
 | `design/master_exhaustive_test_plan_for_opencode.md` | Test strategy source; correct counts and missing suites | `parts/08-testing/**` |
+| `design/two-machine-test/two_machine_multi_topology_deployment_and_stress_test_plan.md` | Executable lab plan; implementation and live-execution gaps recorded | `parts/08-testing/04-two-machine-matrix.md`, `parts/07-deploy/**` |
 | `design/Voucher-Provider-Management-System-Technical-Design.md` | Not implemented | `parts/09-future-and-unimplemented/00-voucher-provider-system.md` |
 | `design/voucher-system-raw-design.md` | Not implemented raw source | `parts/09-future-and-unimplemented/00-voucher-provider-system.md` |
 | `design/smart_ai_rail_and_voucher_onboarding_plan.md` | Gateway half implemented; voucher half missing | `parts/01-core-back/02-engine.md`, `parts/09-future-and-unimplemented/02-smart-ai-voucher-half.md` |

@@ -71,11 +71,7 @@ describe("WAL-G command builders", () => {
     expect(buildWalGListBackupsCommand(auditConfig, "audit_db").env?.WALG_S3_PREFIX).toBe(
       "s3://libya-pg-backups-primary/prod/audit_db",
     );
-    expect(buildWalGVerifyBucketCommand(auditConfig, "audit_db").args).toEqual([
-      "st",
-      "ls",
-      "s3://libya-pg-backups-primary/prod/audit_db",
-    ]);
+    expect(buildWalGVerifyBucketCommand(auditConfig, "audit_db").args).toEqual(["st", "ls"]);
     expect(buildWalGMirrorCommand({ ...auditConfig, BACKUP_SECONDARY_SSH_TARGET: "vault@host:/mnt/vault" }, "audit_db")?.args).toEqual([
       "sync",
       "s3://libya-pg-backups-primary/prod/audit_db",
@@ -120,7 +116,7 @@ describe("WAL-G command builders", () => {
   test("verifies the primary bucket through wal-g storage", () => {
     expect(buildWalGVerifyBucketCommand(config)).toMatchObject({
       command: "wal-g",
-      args: ["st", "ls", "s3://libya-pg-backups-primary/prod/postgres_core"],
+      args: ["st", "ls"],
     });
   });
 
@@ -254,7 +250,7 @@ describe("target-aware engine routing", () => {
     expect(push?.args).toEqual(["backup-push", "/var/lib/postgresql/18/audit"]);
     expect(push?.options?.env?.WALG_S3_PREFIX).toBe("s3://libya-pg-backups-primary/prod/audit_db");
     const verify = runner.calls.find((call) => call.args[0] === "st");
-    expect(verify?.args).toEqual(["st", "ls", "s3://libya-pg-backups-primary/prod/audit_db"]);
+    expect(verify?.args).toEqual(["st", "ls"]);
 
     runner.calls.length = 0;
     await engine.recover({

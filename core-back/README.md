@@ -562,3 +562,10 @@ Generated artifacts:
 - [`../project-design/appendices/test-inventory.md`](../project-design/appendices/test-inventory.md) — test file inventory.
 
 Historical design material lives under [`../design/`](../design/). It is reference only; the canonical behavior is the parts plus the code.
+
+## 13. Multi-node runtime additions
+
+- `x-pg-served-by` reports the store that served a replica-aware read; `x-pg-min-lsn` echoes the requested watermark.
+- Attempt transitions are republished on the Redis-backed `realtime:attempt` topic. Checkout SSE and merchant POS streams subscribe to it and keep their database poll as a fallback.
+- The dedicated audit database computes `prev_hash`/`row_hash` in a BEFORE INSERT trigger under `pg_advisory_xact_lock(994001)`. `AuditShipperWorker` inserts without hashes and reads them from `RETURNING`.
+- `verify_audit_chain()` is installed by the deploy audit-DB provisioner and is used by the two-machine backup/audit gates.

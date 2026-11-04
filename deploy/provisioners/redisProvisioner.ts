@@ -25,7 +25,9 @@ save 3600 1
 maxmemory ${config.REDIS_MAXMEMORY}
 maxmemory-policy allkeys-lru
 appendonly no
-daemonize yes
+daemonize no
+supervised systemd
+dir /var/lib/pg-redis
 `;
 
 export const redisFirewallCommands = (config: DeployConfig, port = 6379): string[] => {
@@ -35,7 +37,7 @@ export const redisFirewallCommands = (config: DeployConfig, port = 6379): string
     ...(parseNodeList(config.BACKUP_NODE)[0]?.privateIp ? [parseNodeList(config.BACKUP_NODE)[0]!.privateIp] : []),
   ];
   return [...new Set(sources)].map((source) =>
-    `ufw allow from ${source} to any port ${port} proto tcp comment 'Redis from core/backup'`,
+    `command -v ufw >/dev/null 2>&1 && ufw allow from ${source} to any port ${port} proto tcp comment 'Redis from core/backup' || true`,
   );
 };
 
@@ -47,9 +49,14 @@ export const provisionRedis = (input: RedisProvisionInput): ProvisionReport => {
     const ssh = nodeSsh(config, spec);
     nodes.push(spec.privateIp);
     for (const command of [
-      "apt-get update",
-      "DEBIAN_FRONTEND=noninteractive apt-get install -y redis-server",
-      "systemctl enable --now redis-server",
+      `if command -v apt-get >/dev/null 2>&1; then
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y redis-server
+elif command -v pacman >/dev/null 2>&1; then
+  pacman -Sy --noconfirm valkey
+fi
+install -d -m 0750 /var/lib/pg-redis && (chown redis:redis /var/lib/pg-redis 2>/dev/null || chown valkey:valkey /var/lib/pg-redis 2>/dev/null || true)
+systemctl enable --now redis-server 2>/dev/null || systemctl enable --now valkey 2>/dev/null || true`,
     ]) {
       commands.push(command);
       runner.run(ssh, command, { sudo: true });
@@ -71,11 +78,20 @@ export const provisionRedis = (input: RedisProvisionInput): ProvisionReport => {
       mode: 0o640,
       sudo: true,
     });
+    // Arch's valkey package reads /etc/valkey/valkey.conf.
+    runner.writeRemoteFile({
+      target: ssh,
+      path: "/etc/valkey/valkey.conf",
+      content: snippet,
+      mode: 0o640,
+      sudo: true,
+    });
     for (const command of redisFirewallCommands(config, spec.servicePort)) {
       commands.push(command);
       runner.run(ssh, command, { sudo: true });
     }
-    const restart = "systemctl restart redis-server && redis-cli PING";
+    runner.run(ssh, "chown root:redis /etc/redis/redis.conf 2>/dev/null || chown root:valkey /etc/redis/redis.conf 2>/dev/null || true; chown root:redis /etc/valkey/valkey.conf 2>/dev/null || chown root:valkey /etc/valkey/valkey.conf 2>/dev/null || true", { sudo: true });
+    const restart = "systemctl restart redis-server 2>/dev/null || systemctl restart redis 2>/dev/null || systemctl restart valkey 2>/dev/null || true; sleep 1; redis-cli PING";
     commands.push(restart);
     runner.run(ssh, restart, { sudo: true });
   }

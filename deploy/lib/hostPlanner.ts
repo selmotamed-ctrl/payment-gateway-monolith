@@ -38,6 +38,11 @@ export interface ServicePlan {
   env: Record<string, string>;
   nodeId?: string;
   privateIp?: string;
+  /** Per-node env file; multi-node hosts never share one `.env`. */
+  envFileName?: string;
+  /** Per-node release/current suffixes keep two instances from overwriting each other. */
+  releaseSuffix?: string;
+  currentLink?: string;
 }
 
 export interface NginxPlan {
@@ -53,6 +58,9 @@ export interface NginxPlan {
   certPath?: string;
   keyPath?: string;
   staticRoot: string;
+  /** All local and remote backend nodes for this site, used for least_conn. */
+  upstreamName?: string;
+  upstreamServers?: string[];
 }
 
 export interface FirewallRulePlan {
@@ -237,10 +245,12 @@ const storageEnv = (config: DeployConfig): Record<string, string> => {
   const primary = parseNodeList(config.PG_PRIMARY_NODE)[0];
   const replicas = parseNodeList(config.PG_REPLICA_NODES);
   const database = effectiveDatabase(config);
-  const replicaUrls = replicas.map((node) => {
-    const port = config.PGBOUNCER_ENABLED ? config.PGBOUNCER_PORT : node.servicePort;
-    return `postgresql://${encodeURIComponent(database.user)}:${encodeURIComponent(database.password)}@${node.privateIp}:${port}/${database.name}`;
-  });
+  // Replicas are read directly on their own PostgreSQL port. Routing them
+  // through a single PgBouncer port would point every co-located replica back
+  // at the primary and silently defeat read scaling.
+  const replicaUrls = replicas.map((node) =>
+    `postgresql://${encodeURIComponent(database.user)}:${encodeURIComponent(database.password)}@${node.privateIp}:${node.servicePort}/${database.name}`,
+  );
   return {
     ...(primary ? {
       PG_PRIMARY_HOST: primary.privateIp,
@@ -251,7 +261,7 @@ const storageEnv = (config: DeployConfig): Record<string, string> => {
       PG_REPLICATION_USER: config.PG_REPLICATION_USER,
       PG_REPLICATION_PASSWORD: config.PG_REPLICATION_PASSWORD,
     } : {}),
-    PG_REPLICA_HOSTS: replicas.map((node) => `${node.privateIp}:${config.PGBOUNCER_ENABLED ? config.PGBOUNCER_PORT : node.servicePort}`).join(","),
+    PG_REPLICA_HOSTS: replicas.map((node) => `${node.privateIp}:${node.servicePort}`).join(","),
     PG_REPLICA_NODES: config.PG_REPLICA_NODES,
     PGBOUNCER_ENABLED: config.PGBOUNCER_ENABLED ? "true" : "false",
     PGBOUNCER_PORT: String(config.PGBOUNCER_PORT),
@@ -287,6 +297,8 @@ const coreEnv = (config: DeployConfig, node?: NodePlan): Record<string, string> 
     MTLS_SERVER_CERT_PATH: "shared/certs/core-back.crt",
     MTLS_SERVER_KEY_PATH: "shared/certs/core-back.key",
     KMS_MASTER_KEY: config.KMS_MASTER_KEY,
+    STORAGE_SHARD_COUNT: String(config.STORAGE_SHARD_COUNT),
+    READ_REPLICA_MAX_LAG_MS: String(config.READ_REPLICA_MAX_LAG_MS),
     TRUST_PROXY: "false",
     LOG_LEVEL: "info",
     WORKER_ENABLED: "true",
@@ -316,10 +328,13 @@ const coreEnv = (config: DeployConfig, node?: NodePlan): Record<string, string> 
   };
 };
 
+const fakeRailsNodeSpec = (config: DeployConfig): NodeSpec | null =>
+  parseNodeList(config.FAKE_RAILS_NODE)[0] ?? null;
+
 const fakeRailsAllowedHosts = (config: DeployConfig): string[] =>
   [...new Set([
     config.FAKE_RAILS_DOMAIN,
-    config.FAKE_RAILS_PRIVATE_IP ?? "",
+    fakeRailsNodeSpec(config)?.privateIp ?? config.FAKE_RAILS_PRIVATE_IP ?? "",
     "127.0.0.1",
     "localhost",
     ...config.FAKE_RAILS_ALLOWED_HOSTS.split(",").map((entry) => entry.trim()),
@@ -327,8 +342,8 @@ const fakeRailsAllowedHosts = (config: DeployConfig): string[] =>
 
 const fakeRailsEnv = (config: DeployConfig): Record<string, string> => ({
   NODE_ENV: "production",
-  HOST: "127.0.0.1",
-  PORT: String(config.FAKE_RAILS_BACK_PORT),
+  HOST: "0.0.0.0",
+  PORT: String(fakeRailsNodeSpec(config)?.servicePort ?? config.FAKE_RAILS_BACK_PORT),
   LOG_LEVEL: "info",
   FAKE_RAILS_ENABLED: "true",
   FAKE_RAILS_ALLOW_IN_PRODUCTION: config.FAKE_RAILS_ALLOW_IN_PRODUCTION ? "true" : "false",
@@ -368,23 +383,24 @@ const edgeEnv = (
       return {
         ...base,
         PORT: String(node?.port ?? config.ADMIN_BACK_PORT),
-        ADMIN_BIND_HOST: "127.0.0.1",
+        ADMIN_BIND_HOST: node?.privateIp ?? "127.0.0.1",
         ADMIN_LAN_CIDRS: config.LAN_ALLOWED_CIDRS,
       };
     case "merchant":
       return {
         ...base,
         PORT: String(node?.port ?? config.MERCHANT_BACK_PORT),
-        BIND_HOST: "127.0.0.1",
+        BIND_HOST: node?.privateIp ?? "127.0.0.1",
         PG_LIVE_TOKEN_PREFIX: "pg_live_",
       };
     case "checkout":
       return {
         ...base,
         PORT: String(node?.port ?? config.CHECKOUT_BACK_PORT),
-        BIND_HOST: "127.0.0.1",
+        BIND_HOST: node?.privateIp ?? "127.0.0.1",
         CHECKOUT_FRONT_BASE_URL: `https://${config.CHECKOUT_DOMAIN}`,
         CHECKOUT_FRONT_STATUS_PATH: "/pay/status",
+        PAY_RATE_LIMIT_MAX: String(config.PAY_RATE_LIMIT_MAX),
       };
     default:
       return base;
@@ -425,7 +441,10 @@ const buildComputeNodes = (config: DeployConfig): Record<ComputeNodeRole, NodePl
       const keyPath = tier.legacyKey ?? "";
       const nodeId = spec?.nodeId ?? `${tier.role}-1`;
       const port = spec?.servicePort ?? tier.servicePort;
-      const serviceName = index === 0 ? tier.serviceName : `${tier.serviceName}-${slug(nodeId)}`;
+      // A multi-node tier gets a nodeId-suffixed PM2 name for every node,
+      // including the first. A single legacy/single-node tier keeps the
+      // historical unsuffixed name so existing process tooling still works.
+      const serviceName = specs.length > 1 ? `${tier.serviceName}-${slug(nodeId)}` : tier.serviceName;
       const ssh: SshTarget = { host: sshHost, port: sshPort, user: tier.legacyUser, keyPath, sudoPassword: tier.legacySudo };
       const node: NodePlan = { nodeId, id: nodeId, role: tier.role, ssh, host: sshHost, privateIp, port, servicePort: port, serviceName, hostKey: sshKey(ssh) };
       result[tier.role].push(node);
@@ -434,113 +453,155 @@ const buildComputeNodes = (config: DeployConfig): Record<ComputeNodeRole, NodePl
   return result;
 };
 
-const buildService = (config: DeployConfig, node: NodePlan, tier: TierDefinition): ServicePlan => ({
-  name: node.serviceName,
-  role: tier.role,
-  sourceDir: tier.sourceDir,
-  remoteDir: tier.remoteDir,
-  port: node.port,
-  env: tier.role === "core" ? coreEnv(config, node) : edgeEnv(config, tier.role as Exclude<DeployRole, "db" | "core">, node),
-  nodeId: node.nodeId,
-  privateIp: node.privateIp,
-});
+const buildService = (config: DeployConfig, node: NodePlan, tier: TierDefinition): ServicePlan => {
+  const sharedName = node.serviceName === tier.serviceName;
+  return {
+    name: node.serviceName,
+    role: tier.role,
+    sourceDir: tier.sourceDir,
+    remoteDir: tier.remoteDir,
+    port: node.port,
+    env: tier.role === "core" ? coreEnv(config, node) : edgeEnv(config, tier.role as Exclude<DeployRole, "db" | "core">, node),
+    nodeId: node.nodeId,
+    privateIp: node.privateIp,
+    envFileName: sharedName ? ".env" : `.env.${node.nodeId}`,
+    releaseSuffix: sharedName ? "" : `-${node.nodeId}`,
+    currentLink: sharedName ? `${tier.remoteDir}/current` : `${tier.remoteDir}/current-${node.nodeId}`,
+  };
+};
 
 const buildFakeRailsService = (config: DeployConfig): ServicePlan => ({
   name: "pg-fake-rails-back",
   role: "fake-rails",
   sourceDir: "fake-rails-back",
   remoteDir: config.FAKE_RAILS_REMOTE_DIR,
-  port: config.FAKE_RAILS_BACK_PORT,
+  port: fakeRailsNodeSpec(config)?.servicePort ?? config.FAKE_RAILS_BACK_PORT,
   env: fakeRailsEnv(config),
+  envFileName: ".env",
+  releaseSuffix: "",
+  currentLink: `${config.FAKE_RAILS_REMOTE_DIR}/current`,
 });
 
-const buildNginx = (config: DeployConfig, privateIp?: string): NginxPlan[] => [
-  {
-    site: "admin-lan",
-    role: "admin",
-    template: "nginx.admin.lan.conf.tpl",
-    listenPort: config.ADMIN_NGINX_LAN_PORT,
-    httpPort: config.ADMIN_NGINX_LAN_PORT,
-    httpsPort: config.ADMIN_NGINX_LAN_PORT,
-    ssl: config.ADMIN_SSL,
-    serverName: config.ADMIN_DOMAIN,
-    sslMode: "lan",
-    staticRoot: `${config.ADMIN_REMOTE_DIR}/current/admin-front/dist`,
-  },
-  {
-    site: "merchant-public",
-    role: "merchant",
-    template: "nginx.merchant.ssl.conf.tpl",
-    listenPort: config.MERCHANT_SSL ? config.MERCHANT_HTTPS_PORT : config.MERCHANT_HTTP_PORT,
-    httpPort: config.MERCHANT_HTTP_PORT,
-    httpsPort: config.MERCHANT_HTTPS_PORT,
-    ssl: config.MERCHANT_SSL,
-    serverName: config.MERCHANT_DOMAIN,
-    sslMode: config.MERCHANT_SSL_MODE,
-    certPath: config.MERCHANT_SSL_CERT_PATH ?? `/etc/letsencrypt/live/${config.MERCHANT_DOMAIN}/fullchain.pem`,
-    keyPath: config.MERCHANT_SSL_KEY_PATH ?? `/etc/letsencrypt/live/${config.MERCHANT_DOMAIN}/privkey.pem`,
-    staticRoot: `${config.MERCHANT_REMOTE_DIR}/current/merchant-front/dist`,
-  },
-  {
-    site: "checkout-public",
-    role: "checkout",
-    template: "nginx.checkout.ssl.conf.tpl",
-    listenPort: config.CHECKOUT_SSL ? config.CHECKOUT_HTTPS_PORT : config.CHECKOUT_HTTP_PORT,
-    httpPort: config.CHECKOUT_HTTP_PORT,
-    httpsPort: config.CHECKOUT_HTTPS_PORT,
-    ssl: config.CHECKOUT_SSL,
-    serverName: config.CHECKOUT_DOMAIN,
-    sslMode: config.CHECKOUT_SSL_MODE,
-    certPath: config.CHECKOUT_SSL_CERT_PATH ?? `/etc/letsencrypt/live/${config.CHECKOUT_DOMAIN}/fullchain.pem`,
-    keyPath: config.CHECKOUT_SSL_KEY_PATH ?? `/etc/letsencrypt/live/${config.CHECKOUT_DOMAIN}/privkey.pem`,
-    staticRoot: `${config.CHECKOUT_REMOTE_DIR}/current/checkout-front/dist`,
-  },
-  ...(config.MERCHANT_LAN_PORT > 0
-    ? [{
-        site: "merchant-lan" as const,
-        role: "merchant" as const,
-        template: "nginx.merchant.lan.conf.tpl",
-        listenPort: config.MERCHANT_LAN_PORT,
-        httpPort: config.MERCHANT_LAN_PORT,
-        httpsPort: config.MERCHANT_LAN_PORT,
-        ssl: config.MERCHANT_LAN_SSL,
-        serverName: privateIp ?? config.MERCHANT_PRIVATE_IP ?? "_",
-        sslMode: "self_signed" as const,
-        staticRoot: `${config.MERCHANT_REMOTE_DIR}/current/merchant-front/dist`,
-      }]
-    : []),
-  ...(config.CHECKOUT_LAN_PORT > 0
-    ? [{
-        site: "checkout-lan" as const,
-        role: "checkout" as const,
-        template: "nginx.checkout.lan.conf.tpl",
-        listenPort: config.CHECKOUT_LAN_PORT,
-        httpPort: config.CHECKOUT_LAN_PORT,
-        httpsPort: config.CHECKOUT_LAN_PORT,
-        ssl: config.CHECKOUT_LAN_SSL,
-        serverName: privateIp ?? config.CHECKOUT_PRIVATE_IP ?? "_",
-        sslMode: "self_signed" as const,
-        staticRoot: `${config.CHECKOUT_REMOTE_DIR}/current/checkout-front/dist`,
-      }]
-    : []),
-  ...(config.FAKE_RAILS_ENABLED
-    ? [{
-        site: "fake-rails" as const,
-        role: "fake-rails" as const,
-        template: "nginx.fakerails.conf.tpl",
-        listenPort: config.FAKE_RAILS_NGINX_PORT,
-        httpPort: config.FAKE_RAILS_NGINX_PORT,
-        httpsPort: config.FAKE_RAILS_NGINX_PORT,
-        ssl: config.FAKE_RAILS_SSL,
-        serverName: config.FAKE_RAILS_DOMAIN,
-        sslMode: config.FAKE_RAILS_SSL_MODE,
-        certPath: `${config.FAKE_RAILS_REMOTE_DIR}/shared/certs/fake-rails.crt`,
-        keyPath: `${config.FAKE_RAILS_REMOTE_DIR}/shared/certs/fake-rails.key`,
-        staticRoot: `${config.FAKE_RAILS_REMOTE_DIR}/current/fake-rails-front/dist`,
-      }]
-    : []),
-];
+type ComputeNodeMap = Partial<Record<ComputeNodeRole, NodePlan[]>>;
 
+const currentDirFor = (remoteDir: string, localNodes?: NodePlan[], allNodes?: NodePlan[]): string => {
+  if (!localNodes || localNodes.length === 0) return `${remoteDir}/current`;
+  return (allNodes?.length ?? 0) > 1 ? `${remoteDir}/current-${localNodes[0]!.nodeId}` : `${remoteDir}/current`;
+};
+
+const upstreamFor = (role: string, nodes: NodePlan[] | undefined, fallbackIp: string, fallbackPort: number): {
+  upstreamName: string;
+  upstreamServers: string[];
+} => ({
+  upstreamName: `pg_${role}_backend`,
+  upstreamServers: nodes && nodes.length > 0
+    ? nodes.map((node) => `${node.privateIp}:${node.port}`)
+    : [`${fallbackIp}:${fallbackPort}`],
+});
+
+const buildNginx = (config: DeployConfig, privateIp?: string, nodes: ComputeNodeMap = {}, fakeRails?: NodeSpec | null): NginxPlan[] => {
+  const fakeRailsPort = fakeRails?.servicePort ?? config.FAKE_RAILS_BACK_PORT;
+  const local = (list?: NodePlan[]): NodePlan[] | undefined => {
+    const matching = list?.filter((node) => !privateIp || node.privateIp === privateIp);
+    return matching && matching.length > 0 ? matching : list;
+  };
+  const adminUpstream = upstreamFor("admin", nodes.admin, "127.0.0.1", config.ADMIN_BACK_PORT);
+  const merchantUpstream = upstreamFor("merchant", nodes.merchant, "127.0.0.1", config.MERCHANT_BACK_PORT);
+  const checkoutUpstream = upstreamFor("checkout", nodes.checkout, "127.0.0.1", config.CHECKOUT_BACK_PORT);
+  return [
+    {
+      site: "admin-lan",
+      role: "admin",
+      template: "nginx.admin.lan.conf.tpl",
+      listenPort: config.ADMIN_NGINX_LAN_PORT,
+      httpPort: config.ADMIN_NGINX_LAN_PORT,
+      httpsPort: config.ADMIN_NGINX_LAN_PORT,
+      ssl: config.ADMIN_SSL,
+      serverName: config.ADMIN_DOMAIN,
+      sslMode: "lan",
+      staticRoot: `${currentDirFor(config.ADMIN_REMOTE_DIR, local(nodes.admin), nodes.admin)}/admin-front/dist`,
+      ...adminUpstream,
+    },
+    {
+      site: "merchant-public",
+      role: "merchant",
+      template: "nginx.merchant.ssl.conf.tpl",
+      listenPort: config.MERCHANT_SSL ? config.MERCHANT_HTTPS_PORT : config.MERCHANT_HTTP_PORT,
+      httpPort: config.MERCHANT_HTTP_PORT,
+      httpsPort: config.MERCHANT_HTTPS_PORT,
+      ssl: config.MERCHANT_SSL,
+      serverName: config.MERCHANT_DOMAIN,
+      sslMode: config.MERCHANT_SSL_MODE,
+      certPath: config.MERCHANT_SSL_CERT_PATH ?? `/etc/letsencrypt/live/${config.MERCHANT_DOMAIN}/fullchain.pem`,
+      keyPath: config.MERCHANT_SSL_KEY_PATH ?? `/etc/letsencrypt/live/${config.MERCHANT_DOMAIN}/privkey.pem`,
+      staticRoot: `${currentDirFor(config.MERCHANT_REMOTE_DIR, local(nodes.merchant), nodes.merchant)}/merchant-front/dist`,
+      ...merchantUpstream,
+    },
+    {
+      site: "checkout-public",
+      role: "checkout",
+      template: "nginx.checkout.ssl.conf.tpl",
+      listenPort: config.CHECKOUT_SSL ? config.CHECKOUT_HTTPS_PORT : config.CHECKOUT_HTTP_PORT,
+      httpPort: config.CHECKOUT_HTTP_PORT,
+      httpsPort: config.CHECKOUT_HTTPS_PORT,
+      ssl: config.CHECKOUT_SSL,
+      serverName: config.CHECKOUT_DOMAIN,
+      sslMode: config.CHECKOUT_SSL_MODE,
+      certPath: config.CHECKOUT_SSL_CERT_PATH ?? `/etc/letsencrypt/live/${config.CHECKOUT_DOMAIN}/fullchain.pem`,
+      keyPath: config.CHECKOUT_SSL_KEY_PATH ?? `/etc/letsencrypt/live/${config.CHECKOUT_DOMAIN}/privkey.pem`,
+      staticRoot: `${currentDirFor(config.CHECKOUT_REMOTE_DIR, local(nodes.checkout), nodes.checkout)}/checkout-front/dist`,
+      ...checkoutUpstream,
+    },
+    ...(config.MERCHANT_LAN_PORT > 0
+      ? [{
+          site: "merchant-lan" as const,
+          role: "merchant" as const,
+          template: "nginx.merchant.lan.conf.tpl",
+          listenPort: config.MERCHANT_LAN_PORT,
+          httpPort: config.MERCHANT_LAN_PORT,
+          httpsPort: config.MERCHANT_LAN_PORT,
+          ssl: config.MERCHANT_LAN_SSL,
+          serverName: privateIp ?? config.MERCHANT_PRIVATE_IP ?? "_",
+          sslMode: "self_signed" as const,
+          staticRoot: `${currentDirFor(config.MERCHANT_REMOTE_DIR, local(nodes.merchant), nodes.merchant)}/merchant-front/dist`,
+          ...merchantUpstream,
+        }]
+      : []),
+    ...(config.CHECKOUT_LAN_PORT > 0
+      ? [{
+          site: "checkout-lan" as const,
+          role: "checkout" as const,
+          template: "nginx.checkout.lan.conf.tpl",
+          listenPort: config.CHECKOUT_LAN_PORT,
+          httpPort: config.CHECKOUT_LAN_PORT,
+          httpsPort: config.CHECKOUT_LAN_PORT,
+          ssl: config.CHECKOUT_LAN_SSL,
+          serverName: privateIp ?? config.CHECKOUT_PRIVATE_IP ?? "_",
+          sslMode: "self_signed" as const,
+          staticRoot: `${currentDirFor(config.CHECKOUT_REMOTE_DIR, local(nodes.checkout), nodes.checkout)}/checkout-front/dist`,
+          ...checkoutUpstream,
+        }]
+      : []),
+    ...(config.FAKE_RAILS_ENABLED
+      ? [{
+          site: "fake-rails" as const,
+          role: "fake-rails" as const,
+          template: "nginx.fakerails.conf.tpl",
+          listenPort: config.FAKE_RAILS_NGINX_PORT,
+          httpPort: config.FAKE_RAILS_NGINX_PORT,
+          httpsPort: config.FAKE_RAILS_NGINX_PORT,
+          ssl: config.FAKE_RAILS_SSL,
+          serverName: config.FAKE_RAILS_DOMAIN,
+          sslMode: config.FAKE_RAILS_SSL_MODE,
+          certPath: `${config.FAKE_RAILS_REMOTE_DIR}/shared/certs/fake-rails.crt`,
+          keyPath: `${config.FAKE_RAILS_REMOTE_DIR}/shared/certs/fake-rails.key`,
+          staticRoot: `${config.FAKE_RAILS_REMOTE_DIR}/current/fake-rails-front/dist`,
+          upstreamName: "pg_fake_rails_backend",
+          upstreamServers: [`127.0.0.1:${fakeRailsPort}`],
+        }]
+      : []),
+  ];
+};
 const buildCertBundles = (role: HostRole, config?: DeployConfig): CertBundle[] => {
   const storageCerts: CertBundle[] = config && storageEnabled(config) ? ["pg-client", "redis-client", "audit-db-client", "log-db-client"] : [];
   switch (role) {
@@ -671,10 +732,17 @@ const buildComputeFirewall = (config: DeployConfig, role: HostRole, context: { s
           fromCidrs: config.LAN_ALLOWED_CIDRS.split(",").map((entry) => entry.trim()),
           comment: "LAN-only admin portal",
         },
+        {
+          port: context.servicePort ?? config.ADMIN_BACK_PORT,
+          proto: "tcp",
+          fromCidrs: config.LAN_ALLOWED_CIDRS.split(",").map((entry) => entry.trim()),
+          comment: "admin-back from local/remote Nginx upstreams",
+        },
       ];
     case "merchant":
       return [
         { port: context.sshPort, proto: "tcp", comment: "SSH" },
+        { port: context.servicePort ?? config.MERCHANT_BACK_PORT, proto: "tcp", fromCidrs: config.LAN_ALLOWED_CIDRS.split(",").map((entry) => entry.trim()), comment: "merchant-back from local/remote Nginx upstreams" },
         { port: config.MERCHANT_HTTP_PORT, proto: "tcp", comment: "public HTTP" },
         ...(config.MERCHANT_SSL
           ? [{ port: config.MERCHANT_HTTPS_PORT, proto: "tcp" as const, comment: "public HTTPS" }]
@@ -705,6 +773,7 @@ const buildComputeFirewall = (config: DeployConfig, role: HostRole, context: { s
     case "checkout":
       return [
         { port: context.sshPort, proto: "tcp", comment: "SSH" },
+        { port: context.servicePort ?? config.CHECKOUT_BACK_PORT, proto: "tcp", fromCidrs: config.LAN_ALLOWED_CIDRS.split(",").map((entry) => entry.trim()), comment: "checkout-back from local/remote Nginx upstreams" },
         { port: config.CHECKOUT_HTTP_PORT, proto: "tcp", comment: "public HTTP" },
         ...(config.CHECKOUT_SSL
           ? [{ port: config.CHECKOUT_HTTPS_PORT, proto: "tcp" as const, comment: "public HTTPS" }]
@@ -789,13 +858,20 @@ const legacyRoleTargets = (config: DeployConfig): RoleTarget[] => {
     const ssh: SshTarget = { host: config.DB_SSH_HOST, port: config.DB_SSH_PORT, user: config.DB_SSH_USER, keyPath: config.DB_SSH_KEY_PATH, sudoPassword: config.DB_SUDO_PASSWORD };
     targets.push({ role: "db", ssh, firewall: buildComputeFirewall(config, "db", { sshPort: ssh.port }), certs: [] });
   }
-  if (config.FAKE_RAILS_ENABLED && config.FAKE_RAILS_SSH_HOST && config.FAKE_RAILS_SSH_KEY_PATH) {
-    const ssh: SshTarget = { host: config.FAKE_RAILS_SSH_HOST, port: config.FAKE_RAILS_SSH_PORT, user: config.FAKE_RAILS_SSH_USER, keyPath: config.FAKE_RAILS_SSH_KEY_PATH, sudoPassword: config.FAKE_RAILS_SUDO_PASSWORD };
+  const fakeRailsSpec = fakeRailsNodeSpec(config);
+  if (config.FAKE_RAILS_ENABLED && (fakeRailsSpec || (config.FAKE_RAILS_SSH_HOST && config.FAKE_RAILS_SSH_KEY_PATH))) {
+    const ssh: SshTarget = {
+      host: fakeRailsSpec?.sshHost ?? config.FAKE_RAILS_SSH_HOST!,
+      port: fakeRailsSpec?.sshPort ?? config.FAKE_RAILS_SSH_PORT,
+      user: config.FAKE_RAILS_SSH_USER,
+      keyPath: config.FAKE_RAILS_SSH_KEY_PATH ?? "",
+      sudoPassword: config.FAKE_RAILS_SUDO_PASSWORD,
+    };
     targets.push({
       role: "fake-rails",
       ssh,
       service: buildFakeRailsService(config),
-      nginx: buildNginx(config).filter((site) => site.role === "fake-rails"),
+      nginx: buildNginx(config, undefined, {}, fakeRailsSpec).filter((site) => site.role === "fake-rails"),
       firewall: buildComputeFirewall(config, "fake-rails", { sshPort: ssh.port }),
       certs: buildCertBundles("fake-rails", config),
     });
@@ -842,7 +918,7 @@ const allTargets = (config: DeployConfig): RoleTarget[] => {
         role: tier.role,
         ssh: node.ssh,
         service: buildService(config, node, tier),
-        nginx: buildNginx(config, node.privateIp).filter((site) => site.role === tier.role),
+        nginx: buildNginx(config, node.privateIp, nodes, fakeRailsNodeSpec(config)).filter((site) => site.role === tier.role),
         firewall: buildComputeFirewall(config, tier.role, { sshPort: node.ssh.port, servicePort: node.port, privateIp: node.privateIp }),
         certs: buildCertBundles(tier.role, config),
         nodeId: node.nodeId,

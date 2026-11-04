@@ -33,7 +33,7 @@ server {
     index index.html;
 
     location /api/ {
-        proxy_pass http://127.0.0.1:{{BACKEND_PORT}};
+        proxy_pass http://{{UPSTREAM_NAME}};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -46,7 +46,7 @@ server {
 
     # POS realtime room: unbuffered SSE, long read timeout.
     location ~ ^/api/v1/merchant/pos/screens/[^/]+/stream$ {
-        proxy_pass http://127.0.0.1:{{BACKEND_PORT}};
+        proxy_pass http://{{UPSTREAM_NAME}};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

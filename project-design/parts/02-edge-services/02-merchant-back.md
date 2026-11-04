@@ -6,6 +6,7 @@ confidence: high
 last_verified: 2026-11-03
 verified_against: 5a24f6f+working-tree
 code:
+  - core-back/lib/realtimeBus.ts
   - merchant-back/index.ts
   - merchant-back/api/**
   - merchant-back/lib/env/index.ts
@@ -18,6 +19,7 @@ design_sources:
   - design/payment_gateway_final_design-v5.md#162-merchant-back-public-api-apiv1merchant--apiv1external---forwards-to-core-back-internalmerchant
   - design/payment_gateway_deployment_and_guides_architecture.md#5-host-aware-ufw-firewall--network-isolation-provisioning
 tests:
+  - core-back/test/storage-engine/telemetry-and-realtime.test.ts
   - merchant-back/test/core-forwarding.test.ts
   - merchant-back/test/core-contract.test.ts
   - merchant-back/test/core-internal-client.test.ts
@@ -300,3 +302,7 @@ These suites do not require PostgreSQL or Redis. The Google route is expected to
 ## 10. Change history
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
+
+## 11. Cross-node POS updates (2026-11-03)
+
+The core POS SSE stream now subscribes to the Redis-backed `realtime:attempt` and `realtime:pos` topics. A cashier request processed by a merchant-back/core pair on one host reaches a paired screen whose stream is held by a merchant-back node on the other host. The existing 3-second database poll remains as a fallback.

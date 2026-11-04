@@ -143,7 +143,7 @@ export class SshRunner {
     sudo?: boolean;
   }): void {
     const sshCommand = `ssh -i ${expandHome(input.target.keyPath)} -p ${input.target.port} -o BatchMode=yes -o StrictHostKeyChecking=accept-new`;
-    const args = ["-az", "--info=progress2", "--partial"];
+    const args = ["-az", "--info=progress2", "--partial", "--no-owner", "--no-group"];
     if (input.delete) {
       args.push("--delete");
     }

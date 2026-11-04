@@ -229,7 +229,7 @@ ssh <host>
 ls -1dt /var/www/pg-<role>/releases/*/
 ```
 
-2. Choose the previous timestamp and confirm its `shared` environment is compatible. The release-specific app directory has an `.env` symlink to `<remote>/shared/.env`; the shared env is current, not historical. If the env changed, the old code may not match it.
+2. Choose the previous timestamp and confirm its `shared` environment is compatible. The release-specific app directory has an `.env` symlink to `<remote>/shared/.env` (or `shared/.env.<nodeId>` on a multi-node tier); the shared env is current, not historical. If the env changed, the old code may not match it.
 
 3. Stop and restart the service from the target release, not with `pm2 restart`:
 

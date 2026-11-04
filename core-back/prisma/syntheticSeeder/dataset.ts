@@ -15,6 +15,7 @@ export interface SyntheticDataset {
   beneficialOwners: any[];
   wallets: any[];
   glAccounts: any[];
+  glAccountShards: any[];
   applications: any[];
   accessTokens: any[];
   accessTokenIps: any[];
@@ -73,6 +74,7 @@ export const emptyDataset = (): SyntheticDataset => ({
   beneficialOwners: [],
   wallets: [],
   glAccounts: [],
+  glAccountShards: [],
   applications: [],
   accessTokens: [],
   accessTokenIps: [],

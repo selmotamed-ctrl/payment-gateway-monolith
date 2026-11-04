@@ -231,6 +231,7 @@ export interface AttemptTransitionEvent {
   attemptId: string;
   status: AdapterAttemptStatus;
   substatus?: string;
+  merchantId?: string;
 }
 
 export interface TrustedSuccessFacts {
@@ -423,6 +424,7 @@ export class DynamicRailEngine {
       await this.transitionBus.publish(ATTEMPT_TRANSITION_TOPIC, {
         attemptId: current.id,
         status: "AUTHORIZING",
+        merchantId: current.merchantId,
       } satisfies AttemptTransitionEvent);
     } else {
       if (current.status === "UNKNOWN" && current.pointOfNoReturn) {
@@ -691,6 +693,7 @@ export class DynamicRailEngine {
       attemptId: attempt.id,
       status: nextStatus,
       substatus: patch.substatus,
+      merchantId: attempt.merchantId,
     } satisfies AttemptTransitionEvent);
     return updated;
   }
@@ -1094,6 +1097,7 @@ export class DynamicRailEngine {
       attemptId: attempt.id,
       status: "SUCCEEDED",
       substatus: attempt.substatus,
+      merchantId: attempt.merchantId,
     } satisfies AttemptTransitionEvent);
     const context = await this.readContext(attempt);
     context.trustedSuccessObserved = true;

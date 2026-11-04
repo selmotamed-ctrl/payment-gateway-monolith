@@ -19,6 +19,7 @@ import type {
 import { PostgresReplicaReadStore, type ReplicaNodeHandle } from "./readStoreAdapter";
 import { MemoryCacheAdapter, RedisCacheAdapter } from "./redisCacheAndVelocityAdapter";
 import { PostgresUnitOfWorkAdapter } from "./uowAdapter";
+import { recordReadSource } from "./telemetry";
 
 export interface StorageEngineOptions {
   primaryUrl?: string;
@@ -235,8 +236,10 @@ export const readThroughReplica = async <T>(
     : ("replica" as const);
   try {
     const result = await engine.readStore.execute(consistency, fn, { timeoutMs });
+    recordReadSource(result.servedBy, minLsnHeader);
     return result.data;
   } catch {
+    recordReadSource("primary", minLsnHeader);
     return fn(engine.primary);
   }
 };
@@ -261,8 +264,10 @@ export const readThroughReplicaOrPrimary = async <T>(
     : ("replica" as const);
   try {
     const result = await engine.readStore.execute(consistency, fn, { timeoutMs });
+    recordReadSource(result.servedBy, minLsnHeader);
     return result.data;
   } catch {
+    recordReadSource("primary", minLsnHeader);
     return fn(primary);
   }
 };
@@ -279,6 +284,7 @@ export const shutdownStorageEngine = async (): Promise<void> => {
 
 export * from "./ports";
 export * from "./lsn";
+export { storageTelemetry, recordReadSource } from "./telemetry";
 export * from "./shardBalances";
 export * from "./uuid";
 export { PostgresUnitOfWorkAdapter } from "./uowAdapter";
@@ -288,5 +294,6 @@ export {
   DedicatedAuditDatabaseDriver,
   DedicatedPostgresLogSink,
   computeAuditRowHash,
+  computeAuditRowHashFromText,
 } from "./auditAndLogAdapters";
 export { OutboxRelayWorker, AuditShipperWorker } from "./outboxWorkers";

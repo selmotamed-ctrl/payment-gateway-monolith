@@ -6,6 +6,7 @@ confidence: high
 last_verified: 2026-11-03
 verified_against: 5a24f6f+working-tree
 code:
+  - deploy/test-matrix/topologies.ts
   - deploy/deploy.ts
   - deploy/deploy.sh
   - deploy/lib/configSchema.ts
@@ -17,6 +18,7 @@ design_sources:
   - design/payment_gateway_deployment_and_guides_architecture.md#3-multi-host-configuration-architecture-deployenv--zod-4-validator
   - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#6-segment-5--horizontal-node-scaling--multi-host-storage-orchestration-in-deploydeployenv--deploydeployts
 tests:
+  - deploy/test/testMatrix.test.ts
   - deploy/test/configScale.test.ts
   - deploy/test/hostPlanner.test.ts
   - deploy/test/hostPlannerScale.test.ts
@@ -24,6 +26,7 @@ tests:
   - deploy/test/fakeRails.test.ts
   - deploy/test/pipeline.test.ts
 gaps:
+  - Two-machine configs require HOST_B reachable; live T1-T8 validation is pending.
   - DEPLOY_MODE=auto does not detect a missing remote directory; it behaves like update unless --fresh is passed.
   - DEPLOY_MODE=rolling_update is accepted by the enum but has no distinct behavior.
   - The deployment guide says legacy DB_* credentials win when both blocks are present; the code makes PG_* authoritative when any PG field is configured.
@@ -72,7 +75,7 @@ The parsed record is validated with `z.strictObject`. Unknown keys are rejected 
 
 ### 3.2 Node grammar
 
-Every `*_NODES` list, `PG_PRIMARY_NODE`, `PG_REPLICA_NODES`, `REDIS_NODES`, `AUDIT_DB_NODE`, `LOG_DB_NODE` and `BACKUP_NODE` uses:
+Every `*_NODES` list, `FAKE_RAILS_NODE`, `PG_PRIMARY_NODE`, `PG_REPLICA_NODES`, `REDIS_NODES`, `AUDIT_DB_NODE`, `LOG_DB_NODE` and `BACKUP_NODE` uses:
 
 ```text
 nodeId@sshHost:sshPort:privateIp:servicePort
@@ -82,8 +85,8 @@ nodeId@sshHost:sshPort:privateIp:servicePort
 - `sshHost` and `privateIp` must be IPv4 addresses. DNS names are not accepted for nodes.
 - `sshPort` and `servicePort` must be integers from 1 to 65535.
 - Node ids must be unique across every node list.
-- A node list rejects duplicate private IPs within that list.
-- PostgreSQL primary/replica private IPs must also be globally unique.
+- A node list rejects duplicate node ids and duplicate `privateIp:servicePort` endpoints. Two nodes may share a private IP when their service ports differ.
+- PostgreSQL primary/replica endpoints (`privateIp:servicePort`) must be globally unique.
 
 The node spec carries only host, SSH port, private IP and service port. SSH user, key path and sudo password still come from the tier's legacy fields (`CORE_SSH_USER`, `CORE_SSH_KEY_PATH`, `CORE_SUDO_PASSWORD`, and so on). Two roles on one SSH endpoint must use the same user, key and sudo password.
 
@@ -98,13 +101,13 @@ The node spec carries only host, SSH port, private IP and service port. SSH user
 | Admin | `ADMIN_SSH_*`, `ADMIN_SUDO_PASSWORD`, `ADMIN_PRIVATE_IP`, `ADMIN_BACK_PORT`, `ADMIN_NGINX_LAN_PORT`, `ADMIN_SSL`, `ADMIN_DOMAIN`, `ADMIN_REMOTE_DIR`, `ADMIN_SHOW_CHECKLISTS`, `ADMIN_SHOW_SNAPSHOT_EXPORT_CHECKLIST`, `ADMIN_SHOW_HELP_PANELS` | Admin host, LAN vhost and runtime UI flags. |
 | Merchant | `MERCHANT_SSH_*`, `MERCHANT_SUDO_PASSWORD`, `MERCHANT_PRIVATE_IP`, `MERCHANT_BACK_PORT`, `MERCHANT_HTTP_PORT`, `MERCHANT_HTTPS_PORT`, `MERCHANT_SSL`, `MERCHANT_LAN_PORT`, `MERCHANT_LAN_SSL`, `MERCHANT_DOMAIN`, `MERCHANT_SSL_MODE`, `MERCHANT_SSL_CERT_PATH`, `MERCHANT_SSL_KEY_PATH`, `MERCHANT_REMOTE_DIR` | Merchant host and public/LAN vhosts. |
 | Checkout | `CHECKOUT_SSH_*`, `CHECKOUT_SUDO_PASSWORD`, `CHECKOUT_PRIVATE_IP`, `CHECKOUT_BACK_PORT`, `CHECKOUT_HTTP_PORT`, `CHECKOUT_HTTPS_PORT`, `CHECKOUT_SSL`, `CHECKOUT_LAN_PORT`, `CHECKOUT_LAN_SSL`, `CHECKOUT_DOMAIN`, `CHECKOUT_SSL_MODE`, `CHECKOUT_SSL_CERT_PATH`, `CHECKOUT_SSL_KEY_PATH`, `CHECKOUT_REMOTE_DIR` | Checkout host and public/LAN vhosts. |
-| Core secrets | `KMS_MASTER_KEY`, `BASE_CURRENCY`, `GATEWAY_TIMEZONE`, `REDIS_URL` | Delivered only to core; `REDIS_URL` may point at an external Redis. |
+| Core secrets | `KMS_MASTER_KEY`, `KMS_MASTER_KEY_ID`, `KMS_MASTER_KEY_HEX`, `STORAGE_SHARD_COUNT`, `BASE_CURRENCY`, `GATEWAY_TIMEZONE`, `REDIS_URL` | Delivered only to core; `STORAGE_SHARD_COUNT` selects the 16/32-way GL shard layout. |
 | PostgreSQL 18 | `PG_MANAGE_VIA_SSH`, `PG_VERSION`, `PG_PRIMARY_NODE`, `PG_REPLICA_NODES`, `PG_SSH_USER`, `PG_SSH_PORT`, `PG_SSH_KEY_PATH`, `PG_SUDO_PASSWORD`, `PG_DB_NAME`, `PG_DB_USER`, `PG_DB_PASSWORD`, `PG_REPLICATION_USER`, `PG_REPLICATION_PASSWORD`, `PGBOUNCER_ENABLED`, `PGBOUNCER_PORT`, `PGBOUNCER_DEFAULT_POOL_SIZE`, `PGBOUNCER_MAX_CLIENT_CONN`, `PGBOUNCER_MAX_PREPARED_STATEMENTS`, `PG_DATA_DIR`, `PG_AUDIT_DATA_DIR` | Primary/replica cluster, credentials, pooler and data directories. |
 | Redis | `REDIS_MANAGE_VIA_SSH`, `REDIS_NODES`, `REDIS_SSH_USER`, `REDIS_SSH_PORT`, `REDIS_SSH_KEY_PATH`, `REDIS_SUDO_PASSWORD`, `REDIS_PASSWORD`, `REDIS_MAXMEMORY` | Cache/velocity nodes. |
 | Audit database | `AUDIT_DB_MANAGE_VIA_SSH`, `AUDIT_DB_NODE`, `AUDIT_DB_SSH_USER`, `AUDIT_DB_SSH_PORT`, `AUDIT_DB_SSH_KEY_PATH`, `AUDIT_DB_SUDO_PASSWORD`, `AUDIT_DB_NAME`, `AUDIT_DB_USER`, `AUDIT_DB_PASSWORD` | Append-only audit database. |
 | Log database | `LOG_DB_MANAGE_VIA_SSH`, `LOG_DB_NODE`, `LOG_DB_SSH_USER`, `LOG_DB_SSH_PORT`, `LOG_DB_SSH_KEY_PATH`, `LOG_DB_SUDO_PASSWORD`, `LOG_DB_NAME`, `LOG_DB_USER`, `LOG_DB_PASSWORD`, `LOG_RETENTION_MONTHS` | Partitioned operational log database. |
 | Backup | `BACKUP_ENABLED`, `BACKUP_NODE`, `BACKUP_SSH_USER`, `BACKUP_SSH_PORT`, `BACKUP_SSH_KEY_PATH`, `BACKUP_SUDO_PASSWORD`, `BACKUP_ENGINE_MODE`, `BACKUP_COMPRESSION`, `BACKUP_ENCRYPTION_KEY_HEX`, `BACKUP_PRIMARY_S3_*`, `BACKUP_CORE_S3_PREFIX`, `BACKUP_AUDIT_S3_PREFIX`, `BACKUP_SECONDARY_SSH_TARGET`, cron/retention/alert keys, `BACKUP_DAEMON_*`, `BACKUP_CATALOG_PATH`, `BACKUP_PGPASSFILE`, `BACKUP_SCRATCH_*`, `BACKUP_COMMAND_TIMEOUT_MS`, `BACKUP_ALLOW_INSECURE_HTTP`, binary paths, `BARMAN_AUDIT_SERVER` | WAL-G/Barman, daemon listener, catalog, drills and schedule. |
-| Fake Rails | `FAKE_RAILS_ENABLED`, `FAKE_RAILS_ALLOW_IN_PRODUCTION`, `FAKE_RAILS_SSH_*`, `FAKE_RAILS_PRIVATE_IP`, `FAKE_RAILS_BACK_PORT`, `FAKE_RAILS_NGINX_PORT`, `FAKE_RAILS_SSL*`, `FAKE_RAILS_DOMAIN`, `FAKE_RAILS_PUBLIC_BASE_URL`, `FAKE_RAILS_REMOTE_DIR`, `FAKE_RAILS_ALLOWED_CIDRS`, `FAKE_RAILS_ALLOWED_HOSTS`, `FAKE_RAILS_ADMIN_*`, `FAKE_RAILS_JWT_SECRET`, `FAKE_RAILS_SEEDER_TOKEN`, `SEED_FAKE_RAILS_BLUEPRINTS` | Optional emulator and tester portal. |
+| Fake Rails | `FAKE_RAILS_ENABLED`, `FAKE_RAILS_ALLOW_IN_PRODUCTION`, `FAKE_RAILS_NODE`, `FAKE_RAILS_SSH_*`, `FAKE_RAILS_PRIVATE_IP`, `FAKE_RAILS_BACK_PORT`, `FAKE_RAILS_NGINX_PORT`, `FAKE_RAILS_SSL*`, `FAKE_RAILS_DOMAIN`, `FAKE_RAILS_PUBLIC_BASE_URL`, `FAKE_RAILS_REMOTE_DIR`, `FAKE_RAILS_ALLOWED_CIDRS`, `FAKE_RAILS_ALLOWED_HOSTS`, `FAKE_RAILS_ADMIN_*`, `FAKE_RAILS_JWT_SECRET`, `FAKE_RAILS_SEEDER_TOKEN`, `SEED_FAKE_RAILS_BLUEPRINTS` | Optional emulator and tester portal. |
 | Synthetic seeder | `RUN_SYNTHETIC_HISTORY_SEED`, `SYNTHETIC_SEED_PROFILE`, `SYNTHETIC_SEED_KEY`, `SYNTHETIC_YEARS_SPAN` | Test-server-only historical data. |
 | Test marker | `IS_TEST_SERVER` | Required for the synthetic seed and used as a test-installation declaration. |
 
@@ -303,3 +306,11 @@ These tests run without PostgreSQL/Redis or remote hosts. A real deploy requires
 ## 10. Change history
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
+
+## 11. Two-machine lab additions (2026-11-03)
+
+- Node lists now allow multiple nodes on one private IP when their `servicePort` differs. Duplicate node ids and duplicate `privateIp:servicePort` endpoints are still rejected.
+- PostgreSQL duplicate-IP validation now compares `privateIp:servicePort`, so a co-located primary/replica pair is valid.
+- New keys: `FAKE_RAILS_NODE` (one node spec, overrides the legacy Fake Rails host/port/private IP), `STORAGE_SHARD_COUNT` (1-32), `KMS_MASTER_KEY_ID` and `KMS_MASTER_KEY_HEX`.
+- `FAKE_RAILS_NODE` is accepted by the real deploy schema and feeds the Fake Rails service, Nginx upstream, firewall and core allowlist.
+- `deploy/test-matrix/topologies.ts` generates T1-T8 and `deploy/test/testMatrix.test.ts` validates every generated file through `loadDeployConfig`.

@@ -610,3 +610,21 @@ Other operator docs:
 - [`backup-daemon/README.md`](backup-daemon/README.md) - backup/PITR control-plane manual.
 - [`deploy.env.example`](deploy.env.example) - every deploy key and topology example.
 - [`project-design/appendices/env-and-config-matrix.md`](../project-design/appendices/env-and-config-matrix.md) - generated env catalog.
+
+## 17. Two-machine topology lab
+
+`deploy/test-matrix/` implements the T1-T8 two-machine plan.
+
+```bash
+cd deploy
+bun run test-matrix:bootstrap          # SSH keys, MinIO on HOST_B, vault directories
+bun run test-matrix --dry-run          # write configs/deploy.T1.env ... T8
+bun run test-matrix --topologies=T1,T2 # deploy, run 11 gates, retry on failure
+```
+
+- `topologies.ts` generates all eight configs from `HOST_A_LAN_IP` and `salem@10.209.250.205`.
+- `teardownTopology.ts` only drops PostgreSQL clusters when `/etc/pg-lab-matrix` exists.
+- `gates.ts` implements provisioning/mTLS/UFW, replica routing/RYOW, seeder invariants, stress, SSE, workers, audit chain, log outage, search, backup/PITR and chaos gates.
+- `runAllTopologiesAndHeal.ts` writes `test-matrix/TOPOLOGY_CERTIFICATION_REPORT.md`.
+
+The live run requires `HOST_B` reachable and passwordless sudo on both hosts. Without it, only config generation and unit tests run.

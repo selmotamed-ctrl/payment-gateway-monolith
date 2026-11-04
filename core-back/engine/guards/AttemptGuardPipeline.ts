@@ -1382,6 +1382,8 @@ export class AttemptGuardPipeline {
       feeBearer: "MERCHANT_ABSORBS",
       customerFieldsMasked: {},
       contextCiphertext: "",
+      expiresAt: input.request.expiresAt ?? new Date(input.now.getTime() + 20 * 60 * 1000),
+      graceExpiresAt: new Date((input.request.expiresAt ?? input.now).getTime() + 24 * 60 * 60 * 1000),
       terminalAt: input.now,
     });
     if (input.request.requestedByUserId) {

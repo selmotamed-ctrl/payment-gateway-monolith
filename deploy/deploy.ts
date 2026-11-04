@@ -232,6 +232,8 @@ export const renderNginxTemplate = (input: {
   staticRoot: string;
   backendPort: number;
   lanAllowedCidrs: string;
+  upstreamName?: string;
+  upstreamServers?: string[];
 }): string => {
   const lanRules = input.lanAllowedCidrs.split(",")
     .map((cidr) => cidr.trim())
@@ -247,7 +249,10 @@ export const renderNginxTemplate = (input: {
     .replace(/\{\{\^(\w+)\}\}([\s\S]*?)\{\{\/\1\}\}/g, (_match, name: string, body: string) =>
       name === "SSL" && !input.ssl ? body : "",
     );
-  return withConditionals
+  const upstreamBlock = input.upstreamName && input.upstreamServers && input.upstreamServers.length > 0
+    ? `upstream ${input.upstreamName} {\n    least_conn;\n${input.upstreamServers.map((server) => `    server ${server} max_fails=2 fail_timeout=3s;`).join("\n")}\n}\n\n`
+    : "";
+  return upstreamBlock + withConditionals
     .replaceAll("{{LAN_ALLOW_RULES}}", `${lanRules}\n    deny all;`)
     .replaceAll("{{SERVER_NAME}}", input.serverName)
     .replaceAll("{{LISTEN_PORT}}", String(input.listenPort))
@@ -257,6 +262,7 @@ export const renderNginxTemplate = (input: {
     .replaceAll("{{SSL_KEY_PATH}}", input.sslKeyPath)
     .replaceAll("{{STATIC_ROOT}}", input.staticRoot)
     .replaceAll("{{BACKEND_PORT}}", String(input.backendPort))
+    .replaceAll("{{UPSTREAM_NAME}}", input.upstreamName ?? `127.0.0.1:${input.backendPort}`)
     .replaceAll("{{LAN_ALLOWED_CIDRS}}", input.lanAllowedCidrs);
 };
 
@@ -300,6 +306,8 @@ const renderNginx = (host: HostPlan, config: DeployConfig, runner: SshRunner, ro
             ? config.FAKE_RAILS_BACK_PORT
             : config.CHECKOUT_BACK_PORT,
       lanAllowedCidrs: config.LAN_ALLOWED_CIDRS,
+      upstreamName: site.upstreamName,
+      upstreamServers: site.upstreamServers,
     });
     const available = `/etc/nginx/sites-available/pg-${site.site}.conf`;
     runner.writeRemoteFile({ target: host.ssh, path: available, content: rendered, mode: 0o644, sudo: true });
@@ -318,10 +326,12 @@ const deployService = (input: {
   pki: ReturnType<typeof buildPki>;
   releaseTimestamp: string;
   keepReleases: number;
+  runMigrations?: boolean;
 }): string => {
   const { runner, host, service, config, pki, releaseTimestamp } = input;
   const remote = service.remoteDir;
-  const releaseDir = `${remote}/releases/${releaseTimestamp}`;
+  const releaseRoot = service.nodeId ? `${remote}/releases/${service.nodeId}` : `${remote}/releases`;
+  const releaseDir = `${releaseRoot}/${releaseTimestamp}`;
   const frontend = service.role === "core" || service.role === "db" ? null : FRONTENDS[service.role];
   const appDir = `${releaseDir}/${service.sourceDir}`;
   const owner = `${host.ssh.user}:${host.ssh.user}`;
@@ -385,22 +395,27 @@ const deployService = (input: {
   // 4. The environment. It lives in `shared/` and is symlinked into the release
   //    so a release always reads the current configuration.
   const env = absoluteEnv(service.env, remote);
-  runner.writeRemoteFile({ target: host.ssh, path: `${remote}/shared/.env`, content: renderEnvFile(env), mode: 0o600, sudo: false });
-  runner.run(host.ssh, `ln -sfn ${remote}/shared/.env ${appDir}/.env`, { sudo: false });
+  const envPath = `${remote}/shared/${service.envFileName ?? ".env"}`;
+  runner.writeRemoteFile({ target: host.ssh, path: envPath, content: renderEnvFile(env), mode: 0o600, sudo: false });
+  runner.run(host.ssh, `ln -sfn ${envPath} ${appDir}/.env`, { sudo: false });
 
   // 5. Dependencies and, for the core, the schema.
   const bun = 'PATH="$HOME/.bun/bin:/usr/local/bin:$PATH" bun';
   runner.run(host.ssh, `${bun} install --frozen-lockfile`, { cwd: appDir, sudo: false });
   if (service.role === "core") {
     runner.run(host.ssh, `${bun}x prisma generate`, { cwd: appDir, sudo: false });
-    runner.run(host.ssh, `${bun} run migrate-deploy`, { cwd: appDir, sudo: false });
+    if (input.runMigrations !== false) {
+      runner.run(host.ssh, `${bun} run migrate-deploy`, { cwd: appDir, sudo: false });
+    }
     if (config.RUN_PRISMA_SEED) {
       runner.run(host.ssh, `${bun} run db-seed`, { cwd: appDir, sudo: false });
     }
   }
 
-  // 6. Atomic symlink switch.
-  runner.run(host.ssh, `ln -sfn ${releaseDir} ${remote}/current`, { sudo: false });
+  // 6. Atomic symlink switch. Multi-node hosts use a per-node link so two
+  //    instances of the same tier never overwrite each other.
+  const currentLink = service.currentLink ?? `${remote}/current`;
+  runner.run(host.ssh, `ln -sfn ${releaseDir} ${currentLink}`, { sudo: false });
 
   // 7. PM2.
   const ecosystem = `${remote}/shared/pm2/${service.name}.config.cjs`;
@@ -417,7 +432,7 @@ const deployService = (input: {
   // 9. Prune.
   runner.run(
     host.ssh,
-    `ls -1dt ${remote}/releases/*/ 2>/dev/null | tail -n +${input.keepReleases + 1} | xargs -r rm -rf`,
+    `ls -1dt ${releaseRoot}/*/ 2>/dev/null | tail -n +${input.keepReleases + 1} | xargs -r rm -rf`,
     { sudo: false },
   );
 
@@ -436,7 +451,7 @@ const deployBackupDaemon = (input: {
   const sourceDir = join(REPO_ROOT, "deploy", "backup-daemon");
   runner.run(
     host.ssh,
-    `install -d -m 0755 -o ${host.ssh.user} -g ${host.ssh.user} ${installDir}`,
+    `install -d -m 0755 -o ${host.ssh.user} -g ${host.ssh.user} ${installDir} && chown -R ${host.ssh.user}:${host.ssh.user} ${installDir}`,
     { sudo: true },
   );
   runner.sync({
@@ -446,10 +461,10 @@ const deployBackupDaemon = (input: {
     delete: true,
     excludes: ["node_modules", ".git", "dist", "test", "*.log", ".env"],
   });
-  runner.run(host.ssh, `chown -R pgbackup:pgbackup ${installDir}`, { sudo: true });
+  runner.run(host.ssh, `chown -R postgres:postgres ${installDir}`, { sudo: true });
   runner.run(host.ssh, 'command -v /usr/local/bin/bun >/dev/null 2>&1 || (command -v bun >/dev/null 2>&1 || curl -fsSL https://bun.sh/install | bash)', { sudo: false });
   runner.run(host.ssh, `test -x /usr/local/bin/bun || ln -sfn /home/${host.ssh.user}/.bun/bin/bun /usr/local/bin/bun`, { sudo: true });
-  runner.run(host.ssh, "/usr/local/bin/bun install --frozen-lockfile", { cwd: installDir, sudo: true, sudoUser: "pgbackup" });
+  runner.run(host.ssh, "/usr/local/bin/bun install --frozen-lockfile", { cwd: installDir, sudo: true, sudoUser: "postgres" });
   runner.run(
     host.ssh,
     "systemctl daemon-reload && systemctl enable pg-backup-daemon && systemctl restart pg-backup-daemon",
@@ -761,6 +776,7 @@ const main = async (): Promise<void> => {
           pki,
           releaseTimestamp,
           keepReleases: options.keepReleases ?? config.KEEP_RELEASES,
+          runMigrations: target.role === "core" ? fresh && unit.service.nodeId === plan.nodes.core[0]?.nodeId : undefined,
         });
       }
       if (options.dryRun) continue;
@@ -788,17 +804,20 @@ const main = async (): Promise<void> => {
   } else if (!config.FAKE_RAILS_ENABLED) {
     log("  skipped (FAKE_RAILS_ENABLED=false)");
   } else if (shouldRun(options, "core")) {
-    const coreRemote = `${config.CORE_REMOTE_DIR}/current/core-back`;
+    const firstCore = plan.nodes.core[0];
+    const coreCurrent = firstCore ? `${config.CORE_REMOTE_DIR}/current-${firstCore.nodeId}` : `${config.CORE_REMOTE_DIR}/current`;
+    const coreRemote = `${coreCurrent}/core-back`;
+    const coreSeedTarget = firstCore?.ssh ?? coreHost.ssh;
     const bun = 'PATH="$HOME/.bun/bin:/usr/local/bin:$PATH" bun';
     if (config.SEED_FAKE_RAILS_BLUEPRINTS) {
-      runner.run(coreHost.ssh, `${bun} run seed-fake-rails`, { cwd: coreRemote, sudo: false, timeoutMs: 30 * 60_000 });
+      runner.run(coreSeedTarget, `${bun} run seed-fake-rails`, { cwd: coreRemote, sudo: false, timeoutMs: 30 * 60_000 });
       log("  fake rails blueprints seeded in core-back");
     }
     if (config.RUN_SYNTHETIC_HISTORY_SEED) {
       // The STANDARD profile generates/writes ~280k rows and syncs 120k
       // transactions to Fake Rails; on a single box this exceeds the default
       // 15-minute command timeout, so give it a generous ceiling.
-      const seeded = runner.run(coreHost.ssh, `${bun} run seed-synthetic-history`, { cwd: coreRemote, sudo: false, timeoutMs: 60 * 60_000 });
+      const seeded = runner.run(coreSeedTarget, `${bun} run seed-synthetic-history`, { cwd: coreRemote, sudo: false, timeoutMs: 60 * 60_000 });
       const summary = seeded.stdout.trim().split("\n").slice(-4).join("\n");
       if (summary) log(summary.split("\n").map((line) => `  ${line}`).join("\n"));
       if (seeded.stdout.includes("was already seeded successfully")) {

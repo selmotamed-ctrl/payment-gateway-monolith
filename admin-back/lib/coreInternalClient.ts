@@ -563,6 +563,7 @@ export const parseJsonBuffer = (buffer: Buffer): unknown => {
 export interface CoreResponsePayload<T = unknown> {
   status: number;
   body: T;
+  headers: IncomingHttpHeaders;
 }
 
 /**
@@ -578,7 +579,7 @@ export const callCoreResponse = async <T = unknown>(
   if (response.statusCode >= 400) {
     throw mapCoreHttpError(response.statusCode, payload);
   }
-  return { status: response.statusCode, body: payload as T };
+  return { status: response.statusCode, body: payload as T, headers: response.headers };
 };
 
 export const callCore = async <T = unknown>(options: CoreCallOptions): Promise<T> => {

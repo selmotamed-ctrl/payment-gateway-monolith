@@ -6,7 +6,9 @@
   "scripts": {
     "deploy": "bun run deploy.ts",
     "typecheck": "bunx --bun tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "test-matrix:bootstrap": "bun run test-matrix/bootstrapTwoMachineLab.ts",
+    "test-matrix": "bun run test-matrix/runAllTopologiesAndHeal.ts"
   },
   "dependencies": {
     "zod": "^4.5.4"

@@ -204,7 +204,7 @@ CHECKOUT_PRIVATE_IP="127.0.0.1"
 
     // The edge opens SSH + 80/443 publicly and the LAN-only portals to the LAN.
     const merchant = plan.hosts.find((host) => host.roles.includes("merchant"));
-    expect(merchant?.firewall.map((rule) => rule.port).sort((left, right) => left - right)).toEqual([22, 80, 443, 8081]);
+    expect(merchant?.firewall.map((rule) => rule.port).sort((left, right) => left - right)).toEqual([22, 80, 443, 4102, 8081]);
     const lanRule = merchant?.firewall.find((rule) => rule.port === 8081);
     expect(lanRule?.fromCidrs).toContain("192.168.0.0/16");
     expect(merchant?.firewall.filter((rule) => rule.port === 443).every((rule) => rule.fromCidrs === undefined)).toBe(true);

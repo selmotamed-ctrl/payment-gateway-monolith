@@ -54,6 +54,33 @@ export const computeAuditRowHash = (prevHash: string, row: AuditHashInput): stri
   return createHash("sha256").update(canonical, "utf8").digest("hex");
 };
 
+/**
+ * The PostgreSQL trigger canonicalizes JSONB with `before_json::text`, so
+ * verification must use the database's own text form rather than the
+ * application's stableJson form. This keeps the trigger-generated chain
+ * verifiable without giving up deterministic app-side hashing for callers
+ * that do not use the database trigger.
+ */
+export const computeAuditRowHashFromText = (
+  prevHash: string,
+  row: Omit<AuditHashInput, "beforeJson" | "afterJson">,
+  beforeJsonText: string,
+  afterJsonText: string,
+): string => {
+  const canonical = [
+    prevHash,
+    row.id,
+    row.createdAt.toISOString(),
+    row.actorId,
+    row.action,
+    row.entityType,
+    row.entityId,
+    beforeJsonText,
+    afterJsonText,
+  ].join("|");
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
+};
+
 interface AuditDbRow {
   seq_no: string | number;
   id: string;
@@ -71,6 +98,8 @@ interface AuditDbRow {
   user_agent: string | null;
   before_json: unknown;
   after_json: unknown;
+  before_json_text?: string;
+  after_json_text?: string;
   prev_hash: string;
   row_hash: string;
 }
@@ -109,13 +138,6 @@ export class DedicatedAuditDatabaseDriver implements AuditStorePort {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
-        `${this.tableName}:hash-chain`,
-      ]);
-      const last = await client.query<{ row_hash: string }>(
-        `SELECT row_hash FROM ${this.tableName} ORDER BY seq_no DESC LIMIT 1`,
-      );
-      let prevHash = last.rows[0]?.row_hash ?? "0".repeat(64);
       const inserted: AuditRecordRow[] = [];
       const requestedIds = entries
         .map((entry) => entry.id)
@@ -137,28 +159,23 @@ export class DedicatedAuditDatabaseDriver implements AuditStorePort {
           continue;
         }
         const createdAt = entry.createdAt ?? new Date();
-        const rowHash = computeAuditRowHash(prevHash, {
-          id,
-          createdAt,
-          actorId: entry.actorId,
-          action: entry.action,
-          entityType: entry.entityType,
-          entityId: entry.entityId,
-          beforeJson: entry.beforeJson,
-          afterJson: entry.afterJson,
-        });
-        const result = await client.query<{ seq_no: string | number }>(
+        // The BEFORE INSERT trigger computes prev_hash/row_hash under
+        // pg_advisory_xact_lock(994001). Do not compute them here: the
+        // database is the single serialization point for every core node.
+        const result = await client.query<{
+          seq_no: string | number;
+          prev_hash: string;
+          row_hash: string;
+        }>(
           `INSERT INTO ${this.tableName} (
              id, created_at, actor_id, actor_email, role, action,
              entity_type, entity_id, merchant_id, approval_request_id,
-             request_id, client_ip, user_agent, before_json, after_json,
-             prev_hash, row_hash
+             request_id, client_ip, user_agent, before_json, after_json
            ) VALUES (
              $1::uuid, $2::timestamptz, $3::uuid, $4, $5, $6,
              $7, $8, $9::uuid, $10::uuid,
-             $11, $12, $13, $14::jsonb, $15::jsonb,
-             $16, $17
-           ) RETURNING seq_no`,
+             $11, $12, $13, $14::jsonb, $15::jsonb
+           ) RETURNING seq_no, prev_hash, row_hash`,
           [
             id,
             createdAt,
@@ -175,20 +192,18 @@ export class DedicatedAuditDatabaseDriver implements AuditStorePort {
             entry.userAgent ?? null,
             JSON.stringify(entry.beforeJson),
             JSON.stringify(entry.afterJson),
-            prevHash,
-            rowHash,
           ],
         );
+        const row = result.rows[0];
         const record: AuditRecordRow = {
           ...entry,
           id,
           createdAt,
-          prevHash,
-          rowHash,
-          seqNo: Number(result.rows[0]?.seq_no ?? 0),
+          prevHash: row?.prev_hash ?? "",
+          rowHash: row?.row_hash ?? "",
+          seqNo: Number(row?.seq_no ?? 0),
         };
         inserted.push(record);
-        prevHash = rowHash;
       }
 
       await client.query("COMMIT");
@@ -301,22 +316,28 @@ export class DedicatedAuditDatabaseDriver implements AuditStorePort {
     firstBrokenId?: string;
   }> {
     const result = await this.pool.query<AuditDbRow>(
-      `SELECT * FROM ${this.tableName} ORDER BY seq_no ASC${
+      `SELECT *, before_json::text AS before_json_text, after_json::text AS after_json_text
+       FROM ${this.tableName} ORDER BY seq_no ASC${
         limit && limit > 0 ? ` LIMIT ${Math.max(1, Math.floor(limit))}` : ""
       }`,
     );
     let previous = "0".repeat(64);
     for (const row of result.rows) {
-      const computed = computeAuditRowHash(previous, {
+      const base = {
         id: row.id,
         createdAt: new Date(row.created_at),
         actorId: row.actor_id,
         action: row.action,
         entityType: row.entity_type,
         entityId: row.entity_id,
-        beforeJson: row.before_json,
-        afterJson: row.after_json,
-      });
+      };
+      const computed = row.before_json_text !== undefined && row.after_json_text !== undefined
+        ? computeAuditRowHashFromText(previous, base, row.before_json_text, row.after_json_text)
+        : computeAuditRowHash(previous, {
+            ...base,
+            beforeJson: row.before_json,
+            afterJson: row.after_json,
+          });
       if (row.prev_hash !== previous || row.row_hash !== computed) {
         return {
           verifiedCount: result.rows.indexOf(row),

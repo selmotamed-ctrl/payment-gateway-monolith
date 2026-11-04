@@ -18,6 +18,7 @@ import { client } from "./prisma/client";
 import { getStorageEngine, shutdownStorageEngine } from "./lib/storageEngine";
 import { setPlatformStorage } from "./engine/runtime";
 import { invalidationBus } from "./lib/invalidationBus";
+import { storageTelemetry } from "./lib/storageEngine";
 
 declare global {
   namespace Express {
@@ -66,6 +67,9 @@ export const createApp = (options: CreateAppOptions = {}) => {
   app.disable("x-powered-by");
   app.set("trust proxy", env.TRUST_PROXY);
   app.use(requestIdMiddleware);
+  app.use((_request, response, next) => {
+    storageTelemetry.run({ response }, next);
+  });
   app.use(requestLoggerMiddleware);
   app.use(rawBodyMiddleware);
   app.use(express.json({ limit: "1mb" }));

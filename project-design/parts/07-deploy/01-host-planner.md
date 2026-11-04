@@ -6,6 +6,7 @@ confidence: high
 last_verified: 2026-11-03
 verified_against: 5a24f6f+working-tree
 code:
+  - deploy/test-matrix/gates.ts
   - deploy/lib/hostPlanner.ts
   - deploy/lib/configSchema.ts
   - deploy/deploy.ts
@@ -15,12 +16,14 @@ design_sources:
   - design/payment_gateway_deployment_and_guides_architecture.md#2-complete-deploy-directory-structure
   - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#6-segment-5--horizontal-node-scaling--multi-host-storage-orchestration-in-deploydeployenv--deploydeployts
 tests:
+  - deploy/test/testMatrix.test.ts
   - deploy/test/hostPlanner.test.ts
   - deploy/test/hostPlannerScale.test.ts
   - deploy/test/configScale.test.ts
   - deploy/test/exhaustive-deploy-matrix.test.ts
   - deploy/test/rollingDeploy.test.ts
 gaps:
+  - Remote Nginx upstreams assume every edge backend binds its private IP and the LAN firewall allows the backend port.
   - Storage nodes are listed in the rendered topology even when their management flag is disabled, so the map can imply a managed role that the run will not touch.
   - The planner trusts config validation for port collisions; calling it directly with an invalid config can still produce a plan.
   - PgBouncer roles are cloned from PostgreSQL nodes and can appear as duplicate storage entries with the same node id/private IP.
@@ -45,7 +48,7 @@ It owns grouping and unioning only. It does not validate the raw environment (th
 
 The design requires "smart host deduplication": if two roles share an SSH endpoint, they are one machine. The planner must bootstrap that machine once, merge PM2 services, Nginx vhosts, certificate material and UFW rules, and still keep each horizontal node as its own service identity.
 
-Storage roles are independently scalable. A PostgreSQL primary, replicas, PgBouncer, Redis, audit DB, log DB and backup daemon may be dedicated or co-located. The plan must preserve the intended network policy: the database only accepts core/replica/backup sources, the core only accepts edge sources, and the edge backends bind to loopback.
+Storage roles are independently scalable. A PostgreSQL primary, replicas, PgBouncer, Redis, audit DB, log DB and backup daemon may be dedicated or co-located. The plan must preserve the intended network policy: the database only accepts core/replica/backup sources, the core only accepts edge sources, and edge backends bind their private IP with a LAN-scoped firewall rule so local or remote Nginx upstreams can reach them.
 
 The rendered topology is intended to be the operator's first confirmation that deduplication and node arrays mean what they intended.
 
@@ -62,7 +65,7 @@ The rendered topology is intended to be the operator's first confirmation that d
 3. Fake Rails (only when enabled and configured);
 4. managed storage nodes from `storageTargets()`.
 
-A compute node is built from the node array when present, otherwise from the legacy single-host fields. The service name is the tier base (`pg-core-back`, `pg-admin-back`, `pg-merchant-back`, `pg-checkout-back`, `pg-fake-rails-back`) for the first node; later nodes get `-<slug(nodeId)>` appended. A node's `servicePort` becomes the service port.
+A compute node is built from the node array when present, otherwise from the legacy single-host fields. A single-node tier keeps the base service name (`pg-core-back`, `pg-admin-back`, `pg-merchant-back`, `pg-checkout-back`, `pg-fake-rails-back`). A multi-node tier appends `-<slug(nodeId)>` to every node, including the first, so two instances can never share a PM2 name. A node's `servicePort` becomes the service port.
 
 ### 3.2 SSH endpoint grouping
 
@@ -77,11 +80,11 @@ The grouping key is `sshHost:sshPort` only. Hostnames, private IPs and role name
 
 `buildService()` combines the tier's `sourceDir` and `remoteDir` with the node's port and environment:
 
-- core receives `coreEnv()`: database URL, mTLS server material, KMS key, Redis URL, storage environment, Fake Rails and seed flags;
+- core receives `coreEnv()`: database URL, mTLS server material, KMS key, Redis URL, storage environment, `STORAGE_SHARD_COUNT`, Fake Rails and seed flags;
 - edge roles receive `edgeEnv()`: core URL list, own client certificate paths, LAN CIDRs for admin, PG-live prefix for merchant, checkout front URL for checkout;
 - Fake Rails receives `fakeRailsEnv()`.
 
-Edge environments are built from a base that deliberately excludes `DATABASE_URL`, `KMS_MASTER_KEY` and storage credentials. `NODE_ENV` is forced to `production`.
+Edge environments are built from a base that deliberately excludes `DATABASE_URL`, `KMS_MASTER_KEY` and storage credentials. `NODE_ENV` is forced to `production`. Multi-node services also carry `envFileName`, `releaseSuffix` and `currentLink` so the pipeline can isolate them on disk.
 
 ### 3.4 Nginx plans
 
@@ -94,7 +97,7 @@ Edge environments are built from a base that deliberately excludes `DATABASE_URL
 - optional `checkout-lan` when `CHECKOUT_LAN_PORT > 0`;
 - optional `fake-rails` when enabled.
 
-Nginx plans are filtered per role and attached to the matching compute host(s). The public merchant/checkout vhosts use the configured domains; the LAN vhosts use the node private IP or `_`. The admin vhost is not attached to a non-admin host.
+Nginx plans are filtered per role and attached to the matching compute host(s). The public merchant/checkout vhosts use the configured domains; the LAN vhosts use the node private IP or `_`. The admin vhost is not attached to a non-admin host. Every site carries an `upstreamName` and all local/remote node addresses; the renderer emits a `least_conn` upstream with `max_fails=2 fail_timeout=3s`.
 
 ### 3.5 Certificate bundles
 
@@ -291,3 +294,11 @@ The suites cover five-host, two-host and single-host scenarios; firewall source 
 ## 10. Change history
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
+
+## 11. Multi-instance isolation (2026-11-03)
+
+- A multi-node tier names every PM2 process with the node id (`pg-core-back-core-1`, `pg-core-back-core-2`); a single-node tier keeps the historical unsuffixed name.
+- Every service carries `envFileName`, `releaseSuffix` and `currentLink`. The pipeline writes `shared/.env.<nodeId>`, `releases/<nodeId>/<timestamp>` and `current-<nodeId>`.
+- `NginxPlan` carries `upstreamName` and `upstreamServers`. The renderer emits `upstream` blocks with `least_conn` and `max_fails=2 fail_timeout=3s` over all local and remote nodes.
+- Edge backends bind the node private IP instead of loopback. The planner adds a LAN-scoped firewall rule for each edge backend port so a remote Nginx upstream can reach it.
+- Replica read URLs use the replica's own PostgreSQL port, not a single PgBouncer port that would point a co-located replica back at the primary.

@@ -586,19 +586,31 @@ export class PrismaRepositories implements Repositories {
       }));
     },
     listRouteInquirySupport: async (tx) => {
-      const result = await model(tx, "railRoute").findMany({
-        select: { id: true, gatewayVersionId: true },
-      });
-      const routes = rows<Any>(result);
-      const settings = rows<Any>(await model(tx, "gatewaySetting").findMany({ select: { gatewayVersionId: true, supportsStatusCheck: true } }));
-      const byVersion = new Map<string, boolean>();
-      for (const setting of settings) {
-        byVersion.set(String(setting.gatewayVersionId), Boolean(setting.supportsStatusCheck));
-      }
-      return routes.map((route) => ({
-        routeId: String(route.id),
-        supportsStatusCheck: byVersion.get(String(route.gatewayVersionId)) ?? false,
+      const routes = rows<Any>(await model(tx, "railRoute").findMany({
+        select: { id: true, gatewayId: true },
       }));
+      const versions = rows<Any>(await model(tx, "gatewayVersion").findMany({
+        where: { state: "LIVE" },
+        select: { id: true, gatewayId: true, versionNumber: true },
+        orderBy: { versionNumber: "desc" },
+      }));
+      const settings = rows<Any>(await model(tx, "gatewaySetting").findMany({ select: { gatewayVersionId: true, supportsStatusCheck: true } }));
+      const settingByVersion = new Map<string, boolean>();
+      for (const setting of settings) {
+        settingByVersion.set(String(setting.gatewayVersionId), Boolean(setting.supportsStatusCheck));
+      }
+      const versionByGateway = new Map<string, string>();
+      for (const version of versions) {
+        const gatewayId = String(version.gatewayId);
+        if (!versionByGateway.has(gatewayId)) versionByGateway.set(gatewayId, String(version.id));
+      }
+      return routes.map((route) => {
+        const versionId = versionByGateway.get(String(route.gatewayId));
+        return {
+          routeId: String(route.id),
+          supportsStatusCheck: versionId ? (settingByVersion.get(versionId) ?? false) : false,
+        };
+      });
     },
   };
 

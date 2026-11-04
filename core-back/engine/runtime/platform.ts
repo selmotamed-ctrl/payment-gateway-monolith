@@ -99,6 +99,10 @@ export const createPlatformRuntime = (
 
   const stepExecutor = new StepExecutor({
     vault,
+    // The per-attempt ApiConsumer carries the gateway's own allowed_hosts;
+    // this executor-level list is only the scoped Fake Rails relaxation used
+    // by assertUrlAllowed before the consumer is resolved.
+    allowedHosts: env.FAKE_RAILS_ALLOWED_HOSTS.split(",").map((entry) => entry.trim()).filter(Boolean),
     computeRegistry: createComputeRegistry({ db, vault, crypto }),
     apiConsumerResolver: async (context) => {
       const attempt = context.attempt as

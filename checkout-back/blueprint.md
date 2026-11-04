@@ -489,3 +489,9 @@ The suites are local and do not require PostgreSQL/Redis. A live gateway webhook
 ## 10. Change history
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
+
+## 11. Cross-node SSE bridge (2026-11-03)
+
+- `core-back` republishes every `attempt:transition` event on the Redis-backed `realtime:attempt` topic.
+- The checkout status stream subscribes to that topic and emits `event: status` immediately; the existing 2-second database poll remains as a fallback.
+- The merchant POS stream subscribes to `realtime:attempt` and `realtime:pos`, filtering by merchant id, so a screen on one host receives an update processed by a core node on the other host.

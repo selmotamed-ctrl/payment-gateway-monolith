@@ -95,6 +95,17 @@ export class InvalidationBus {
     if (this.publisher) {
       await this.publisher.publish(this.channel(topic), JSON.stringify(event));
     }
+    // The checkout/POS SSE streams subscribe to the dedicated realtime topic.
+    // Bridging here keeps every existing transition publisher (engine,
+    // governance, operator cases) on the same cross-node fan-out path.
+    if (topic === "attempt:transition") {
+      try {
+        await this.publish("realtime:attempt", payload);
+      } catch {
+        // Realtime fan-out is best-effort. The payment transition is already
+        // committed and the SSE streams retain their database poll fallback.
+      }
+    }
     return event;
   }
 

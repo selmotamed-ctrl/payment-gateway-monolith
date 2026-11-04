@@ -126,9 +126,18 @@ export const walGEnvironment = (
   target: BackupTarget = "postgres_core",
 ): Record<string, string> => {
   const env: Record<string, string> = {
+    PGHOST: "/run/postgresql",
+    PGPORT: String(target === "audit_db" ? config.PG_AUDIT_PORT : config.PG_PRIMARY_PORT),
+    PGUSER: "postgres",
+    ...(target === "audit_db"
+      ? (config.PG_AUDIT_DATA_DIR ? { PGDATA: config.PG_AUDIT_DATA_DIR } : {})
+      : (config.PG_DATA_DIR ? { PGDATA: config.PG_DATA_DIR } : {})),
     WALG_S3_PREFIX: walGS3Prefix(config, target),
+    AWS_ENDPOINT: config.BACKUP_PRIMARY_S3_ENDPOINT,
     AWS_ENDPOINT_URL: config.BACKUP_PRIMARY_S3_ENDPOINT,
     AWS_ENDPOINT_URL_S3: config.BACKUP_PRIMARY_S3_ENDPOINT,
+    AWS_S3_FORCE_PATH_STYLE: "true",
+    AWS_REGION: "us-east-1",
     WALG_COMPRESSION_METHOD: config.BACKUP_COMPRESSION,
     WALG_LIBSODIUM_KEY: config.BACKUP_ENCRYPTION_KEY_HEX,
   };
@@ -214,7 +223,7 @@ export const buildWalGVerifyBucketCommand = (
   target: BackupTarget = "postgres_core",
 ): BuiltCommand => ({
   command: config.WALG_BIN,
-  args: ["st", "ls", walGS3Prefix(config, target)],
+  args: ["st", "ls"],
   env: walGEnvironment(config, target),
   timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
 });
@@ -395,11 +404,26 @@ export const buildBarmanCloudBackupCommand = (
   timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
 });
 
-export const buildRedisSnapshotCommand = (config: BackupDaemonConfig): BuiltCommand | null => {
+const redisCliConnection = (config: BackupDaemonConfig): { args: string[]; env: Record<string, string> } | null => {
   if (!config.REDIS_URL) return null;
+  try {
+    const url = new URL(config.REDIS_URL);
+    return {
+      args: ["-h", url.hostname, "-p", url.port || "6379"],
+      env: url.password ? { REDISCLI_AUTH: decodeURIComponent(url.password) } : {},
+    };
+  } catch {
+    return null;
+  }
+};
+
+export const buildRedisSnapshotCommand = (config: BackupDaemonConfig): BuiltCommand | null => {
+  const connection = redisCliConnection(config);
+  if (!connection) return null;
   return {
     command: config.REDIS_CLI_BIN,
-    args: ["-u", config.REDIS_URL, "BGSAVE"],
+    args: [...connection.args, "BGSAVE"],
+    env: connection.env,
     timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
   };
 };
@@ -408,10 +432,12 @@ export const buildRedisRdbCommand = (
   config: BackupDaemonConfig,
   path: string,
 ): BuiltCommand | null => {
-  if (!config.REDIS_URL) return null;
+  const connection = redisCliConnection(config);
+  if (!connection) return null;
   return {
     command: config.REDIS_CLI_BIN,
-    args: ["-u", config.REDIS_URL, "--rdb", path],
+    args: [...connection.args, "--rdb", path],
+    env: connection.env,
     timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
   };
 };
@@ -427,10 +453,12 @@ export const buildRedisUploadCommand = (
 });
 
 export const buildRedisPingCommand = (config: BackupDaemonConfig): BuiltCommand | null => {
-  if (!config.REDIS_URL) return null;
+  const connection = redisCliConnection(config);
+  if (!connection) return null;
   return {
     command: config.REDIS_CLI_BIN,
-    args: ["-u", config.REDIS_URL, "PING"],
+    args: [...connection.args, "PING"],
+    env: connection.env,
     timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
   };
 };
@@ -694,8 +722,14 @@ const triggerWalGTarget = async (
   const storageTargets = ["primary-s3"];
   const mirror = buildWalGMirrorCommand(config, target);
   if (mirror) {
-    await runChecked(runner, mirror, target, kind);
-    storageTargets.push("secondary-ssh");
+    try {
+      await runChecked(runner, mirror, target, kind);
+      storageTargets.push("secondary-ssh");
+    } catch {
+      // The secondary vault is optional. A primary WAL-G backup that already
+      // succeeded must not be reported as failed because the off-site mirror
+      // is misconfigured or temporarily unavailable.
+    }
   }
 
   const startLsn = parseFieldRow(result.stdout)[0];

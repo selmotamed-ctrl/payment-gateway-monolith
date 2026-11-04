@@ -6,6 +6,7 @@ confidence: high
 last_verified: 2026-11-03
 verified_against: 5a24f6f+working-tree
 code:
+  - deploy/provisioners/auditAndLogDbProvisioner.ts
   - core-back/engine/workers/workerRuntime.ts
   - core-back/engine/workers/productionRuntime.ts
   - core-back/engine/workers/ExpirySweeperWorker.ts
@@ -33,6 +34,7 @@ design_sources:
   - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#32
   - design/fixes/_0001_operator_cases.md
 tests:
+  - deploy/test/testMatrix.test.ts
   - core-back/test/engine/guards-and-workers.test.ts
   - core-back/test/expiry-sweeper-aml.test.ts
   - core-back/test/gateway-inquiry-schedules.test.ts
@@ -46,6 +48,7 @@ tests:
   - core-back/test/storage-engine/write-path.integration.test.ts
   - core-back/test/exhaustive/06-concurrency/confirm-webhook-return-race.test.ts
 gaps:
+  - The trigger is installed by the deploy provisioner, not by a Prisma migration, so an externally managed audit database must run the provisioner DDL.
   - "The inbound webhook route verifies and processes synchronously; `InboundInboxWorker` is wired but has no producer, so it is effectively idle."
   - "Checkout and POS SSE streams poll the database every 2-3 seconds instead of subscribing to the transition bus."
   - "`RetentionWorker` is disabled by default, does not purge AML/KYB/reporting evidence, and does not purge the ledger by design."
@@ -397,3 +400,9 @@ Database-backed suites require PostgreSQL 18; Redis-backed invalidation tests re
 ## 10. Change history
 
 - 2026-11-03 — Baseline verification against `5a24f6f+working-tree`: documented the worker inventory, synchronous inbound path, polling SSE, outbox/audit shipping, retention exceptions, leases/backoff, startup guard, health payload, and the actual partial status of each worker.
+
+## 11. Multi-node audit shipping (2026-11-03)
+
+- The dedicated audit database computes the hash chain in a BEFORE INSERT trigger under `pg_advisory_xact_lock(994001)`.
+- `AuditShipperWorker` inserts without `prev_hash`/`row_hash` and reads the trigger-computed values from `RETURNING`, so concurrent shippers on HOST_A and HOST_B cannot fork the chain.
+- `verify_audit_chain()` is available for live gate verification and backup drill checks.

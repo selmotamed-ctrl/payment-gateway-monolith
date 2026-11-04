@@ -1,5 +1,6 @@
 import type { SeederContext } from "../context";
 import { addDays, ensureSystemAccounts, postLedger } from "../builders";
+import { shardIdForAttempt } from "../../../lib/storageEngine/shardBalances";
 
 /**
  * Posts every financial event through balanced double-entry templates and
@@ -89,6 +90,37 @@ export const generateLedgerAndCheckpoints = (ctx: SeederContext): void => {
         ],
       });
     }
+  }
+
+  // ---- shard balances ------------------------------------------------------
+  const accountTypeById = new Map<string, string>();
+  for (const account of [...ctx.dataset.glAccounts, ...ctx.refs.glAccounts]) {
+    accountTypeById.set(String(account.id), String(account.accountType));
+  }
+  const refIdByEntry = new Map<string, string>();
+  for (const entry of ctx.dataset.journalEntries) {
+    refIdByEntry.set(String(entry.id), String(entry.refId));
+  }
+  const shardTotals = new Map<string, { glAccountId: string; shardId: number; balance: number }>();
+  for (const line of ctx.dataset.journalLines) {
+    const glAccountId = String(line.glAccountId);
+    const accountType = accountTypeById.get(glAccountId);
+    if (!accountType) continue;
+    const refId = refIdByEntry.get(String(line.entryId)) ?? String(line.entryId);
+    const shardId = shardIdForAttempt(refId, accountType);
+    const key = `${glAccountId}:${shardId}`;
+    const current = shardTotals.get(key) ?? { glAccountId, shardId, balance: 0 };
+    const amount = Number(line.amount);
+    current.balance += line.direction === "DEBIT" ? amount : -amount;
+    shardTotals.set(key, current);
+  }
+  for (const shard of shardTotals.values()) {
+    ctx.dataset.glAccountShards.push({
+      glAccountId: shard.glAccountId,
+      shardId: shard.shardId,
+      currentBalance: shard.balance.toFixed(4),
+      updatedAt: ctx.timeline.end,
+    });
   }
 
   // ---- monthly checkpoints -------------------------------------------------

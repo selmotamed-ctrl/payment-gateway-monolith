@@ -65,9 +65,10 @@ describe("horizontal node list parsing", () => {
     }
   });
 
-  test("rejects duplicate ids and duplicate private IPs in one list", () => {
+  test("rejects duplicate ids and duplicate endpoints, but allows two nodes on one private IP", () => {
     expect(() => parseNodeList("core-1@10.0.0.11:22:10.1.0.11:4000,core-1@10.0.0.12:22:10.1.0.12:4000")).toThrow(/duplicate node id/);
-    expect(() => parseNodeList("core-1@10.0.0.11:22:10.1.0.11:4000,core-2@10.0.0.12:22:10.1.0.11:4000")).toThrow(/duplicate private IP/);
+    expect(() => parseNodeList("core-1@10.0.0.11:22:10.1.0.11:4000,core-2@10.0.0.12:22:10.1.0.11:4000")).toThrow(/duplicate endpoint/);
+    expect(parseNodeList("core-1@10.0.0.11:22:10.1.0.11:4000,core-2@10.0.0.12:22:10.1.0.11:4001")).toHaveLength(2);
   });
 });
 

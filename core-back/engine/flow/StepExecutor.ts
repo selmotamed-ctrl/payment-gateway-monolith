@@ -788,13 +788,20 @@ export class StepExecutor {
       headers["content-type"] = headers["content-type"] ?? "application/json";
     }
 
-    let fakeRailsTarget = false;
-    try {
-      fakeRailsTarget = isFakeRailsHostAllowed(new URL(step.url_template).hostname, this.options.allowedHosts);
-    } catch {
-      // The template may still contain unresolved placeholders; the URL
-      // validation below reports the real problem.
-    }
+    // Compile once without the HTTPS guard so placeholders are resolved, then
+    // decide whether the resolved host is a scoped Fake Rails target before
+    // the final validation. The old code inspected the unresolved template,
+    // so a placeholder base URL was always treated as non-Fake-Rails.
+    const resolvedForAllowlist = compileUrl(step.url_template, query, {
+      allowedHosts: this.options.allowedHosts,
+      requireHttps: false,
+      parameters: pathParameters,
+      destination: "URL",
+    });
+    const fakeRailsTarget = isFakeRailsHostAllowed(
+      new URL(resolvedForAllowlist).hostname,
+      this.options.allowedHosts,
+    );
     const url = compileUrl(step.url_template, query, {
       allowedHosts: this.options.allowedHosts,
       requireHttps: !fakeRailsTarget,

@@ -19,7 +19,7 @@
 | `core-back/test/engine/attempt-state-machine.test.ts` | 400 | 17 |
 | `core-back/test/engine/engine-hardening.test.ts` | 548 | 24 |
 | `core-back/test/engine/attempt-guard-pipeline.test.ts` | 333 | 14 |
-| `core-back/test/engine/operator-cases-and-broadcast.test.ts` | 207 | 4 |
+| `core-back/test/engine/operator-cases-and-broadcast.test.ts` | 208 | 4 |
 | `core-back/test/engine/pre-initiate.test.ts` | 149 | 4 |
 | `core-back/test/engine/suspense-settlement.test.ts` | 554 | 9 |
 | `core-back/test/engine/step-executor.test.ts` | 325 | 19 |
@@ -109,7 +109,7 @@
 | `core-back/test/storage-engine/audit-chain.test.ts` | 237 | 6 |
 | `core-back/test/storage-engine/cache-velocity.test.ts` | 274 | 10 |
 | `core-back/test/storage-engine/engine-factory.test.ts` | 107 | 3 |
-| `core-back/test/storage-engine/helpers/db.ts` | 469 | 0 |
+| `core-back/test/storage-engine/helpers/db.ts` | 506 | 0 |
 | `core-back/test/storage-engine/ledger-shards.test.ts` | 243 | 3 |
 | `core-back/test/storage-engine/log-sink.test.ts` | 233 | 8 |
 | `core-back/test/storage-engine/outbox-workers.test.ts` | 349 | 6 |
@@ -119,6 +119,7 @@
 | `core-back/test/storage-engine/read-store.test.ts` | 281 | 14 |
 | `core-back/test/storage-engine/uow.test.ts` | 363 | 10 |
 | `core-back/test/storage-engine/write-path.integration.test.ts` | 134 | 3 |
+| `core-back/test/storage-engine/telemetry-and-realtime.test.ts` | 38 | 2 |
 | `admin-back/test/helpers/session.ts` | 85 | 0 |
 | `admin-back/test/helpers/core-schema.ts` | 891 | 0 |
 | `admin-back/test/helpers/core.ts` | 242 | 6 |
@@ -153,14 +154,15 @@
 | `deploy/test/fakeRails.test.ts` | 106 | 7 |
 | `deploy/test/exhaustive-deploy-matrix.test.ts` | 309 | 20 |
 | `deploy/test/hostPlanner.test.ts` | 311 | 23 |
-| `deploy/test/templates.test.ts` | 216 | 15 |
-| `deploy/test/configScale.test.ts` | 178 | 13 |
+| `deploy/test/templates.test.ts` | 228 | 16 |
+| `deploy/test/configScale.test.ts` | 179 | 13 |
 | `deploy/test/healthVerifierScale.test.ts` | 130 | 3 |
 | `deploy/test/hostPlannerScale.test.ts` | 157 | 6 |
 | `deploy/test/pkiScale.test.ts` | 112 | 5 |
 | `deploy/test/provisioners.test.ts` | 392 | 18 |
 | `deploy/test/rollingDeploy.test.ts` | 52 | 5 |
 | `deploy/test/pipeline.test.ts` | 90 | 4 |
+| `deploy/test/testMatrix.test.ts` | 103 | 6 |
 | `deploy/backup-daemon/test/backupEngine.test.ts` | 354 | 18 |
 | `deploy/backup-daemon/test/catalogStore.test.ts` | 133 | 6 |
 | `deploy/backup-daemon/test/commandRunner.test.ts` | 61 | 3 |
@@ -197,5 +199,5 @@
 | `tests/unit/checkout-redirect.test.ts` | 24 | 4 |
 | `tests/unit/global-search.test.ts` | 199 | 9 |
 
-- Total files: **192**
-- Total literal test declarations: **1808**
+- Total files: **194**
+- Total literal test declarations: **1817**

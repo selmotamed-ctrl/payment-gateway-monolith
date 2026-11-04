@@ -172,6 +172,9 @@
 | `deploy/deploy.env.example` | `BACKUP_REDIS_CLI_BIN` |
 | `deploy/deploy.env.example` | `BARMAN_AUDIT_SERVER` |
 | `deploy/deploy.env.example` | `KMS_MASTER_KEY` |
+| `deploy/deploy.env.example` | `KMS_MASTER_KEY_ID` |
+| `deploy/deploy.env.example` | `KMS_MASTER_KEY_HEX` |
+| `deploy/deploy.env.example` | `STORAGE_SHARD_COUNT` |
 | `deploy/deploy.env.example` | `BASE_CURRENCY` |
 | `deploy/deploy.env.example` | `GATEWAY_TIMEZONE` |
 | `deploy/deploy.env.example` | `REDIS_URL` |

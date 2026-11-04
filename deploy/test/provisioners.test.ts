@@ -7,6 +7,7 @@ import {
   pgbouncerIni,
   postgresConfigPath,
   postgresConfigSnippet,
+  postgresMainConfigPath,
   provisionPostgres18,
   replicaCommands,
 } from "../provisioners/postgres18Provisioner";
@@ -156,7 +157,7 @@ describe("PostgreSQL 18 provisioner", () => {
     expect(ini).toContain("listen_addr = 0.0.0.0");
     expect(ini).toContain("listen_port = 6432");
     expect(ini).toContain("pool_mode = transaction");
-    expect(ini).toContain("server_tls_sslmode = require");
+    expect(ini).toContain("server_tls_sslmode = prefer");
     expect(ini).toContain("max_client_conn = 2000");
     expect(ini).toContain("default_pool_size = 50");
     expect(ini).toContain("reserve_pool_size = 10");
@@ -169,7 +170,7 @@ describe("PostgreSQL 18 provisioner", () => {
     const runner = new FakeRunner();
     const report = provisionPostgres18({ runner, config: config(), dryRun: true });
     expect(report.nodes).toEqual(["10.10.10.10", "10.10.10.11"]);
-    expect(runner.writes.some((write) => write.path === postgresConfigPath(config()))).toBe(true);
+    expect(runner.writes.some((write) => write.path.endsWith("/postgresql.conf"))).toBe(true);
     expect(runner.writes.some((write) => write.path.endsWith("pg_hba.conf") && write.content.includes("hostssl"))).toBe(true);
     expect(runner.writes.some((write) => write.path.endsWith("pg_hba.conf") && write.content.includes("10.10.13.10"))).toBe(true);
     const sql = runner.writes.find((write) => write.content.includes("CREATE DATABASE"));
@@ -292,12 +293,12 @@ describe("Backup engine provisioner", () => {
     expect(unit).toContain("WorkingDirectory=/opt/pg-backup-daemon");
     expect(unit).toContain("ExecStart=/usr/local/bin/bun run src/index.ts");
     expect(unit).toContain("EnvironmentFile=/etc/pg-backup/backup.env");
-    expect(unit).toContain("User=pgbackup");
+    expect(unit).toContain("User=postgres");
     expect(unit).toContain("ReadWritePaths=/var/lib/pg-backup /var/log/pg-backup");
     expect(backupCronEntries(cfg)).toEqual([]);
     expect(backupCronFile(cfg)).toContain("scheduler");
-    expect(verifyBackupTargetCommands(cfg).join("\n")).toContain("rclone lsd");
-    expect(verifyBackupTargetCommands(cfg).join("\n")).toContain("ssh ");
+    expect(verifyBackupTargetCommands(cfg).join("\n")).toContain("/minio/health/live");
+    expect(verifyBackupTargetCommands(cfg).join("\n")).toContain("/dev/tcp/");
   });
 
   test("generates every daemon path, port, timeout and scheduler setting from deploy.env", () => {
@@ -383,7 +384,7 @@ BACKUP_REDIS_CLI_BIN="/opt/bin/redis-cli"
       ),
     ).toBe(true);
     expect(runner.writes.some((write) => write.content.includes("wal-g-audit.env") || write.content.includes("pg_audit_db"))).toBe(true);
-    expect(runner.runs.some((run) => run.command.includes("rclone lsd"))).toBe(true);
+    expect(runner.runs.some((run) => run.command.includes("/minio/health/live"))).toBe(true);
     expect(backupDaemonTriggerScript(config())).toContain("/v1/backups/trigger");
     expect(backupDaemonTriggerScript(config())).toContain("--cert");
     expect(journalLinePartitionCronLine(config())).toContain("ensure_journal_line_partitions(18)");

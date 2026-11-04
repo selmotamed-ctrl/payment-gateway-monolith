@@ -4283,16 +4283,23 @@ router.get("/merchants", async (request: Request, response: Response) => {
     and.push({ id: { in: cases.map((row) => row.subjectId) } });
   }
   const where = { AND: and };
-  const [merchants, total] = await Promise.all([
-    client.merchant.findMany({
-      where: where as never,
-      orderBy: built.orderBy as never,
-      skip: built.skip,
-      take: built.take,
-      select: merchantListSelect,
-    }),
-    client.merchant.count({ where: where as never }),
-  ]);
+  const { merchants, total } = await readThroughReplicaOrPrimary(
+    client as never,
+    request.header("x-pg-min-lsn") ?? undefined,
+    async (reader) => {
+      const [rows, count] = await Promise.all([
+        reader.merchant.findMany({
+          where: where as never,
+          orderBy: built.orderBy as never,
+          skip: built.skip,
+          take: built.take,
+          select: merchantListSelect,
+        }),
+        reader.merchant.count({ where: where as never }),
+      ]);
+      return { merchants: rows, total: count };
+    },
+  );
   const ids = merchants.map((merchant) => merchant.id);
   const pendingApprovals = ids.length === 0
     ? []

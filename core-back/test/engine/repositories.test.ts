@@ -63,6 +63,7 @@ const createRecordingClient = () => {
     "kybDocument",
     "beneficialOwner",
     "railRoute",
+    "gatewayVersion",
     "pollPolicy",
     "gatewaySetting",
     "detailChangeLog",
@@ -152,12 +153,16 @@ describe("PrismaRepositories field mapping", () => {
     expect(call).toBeDefined();
   });
 
-  test("uses the camelCase select clause for gateway inquiry support", async () => {
+  test("uses the real RailRoute columns and maps inquiry support through the live gateway version", async () => {
     const { client, calls } = createRecordingClient();
     const repositories = new PrismaRepositories(client as never);
     await repositories.payments.listRouteInquirySupport(client as never);
-    const call = calls.find((entry) => entry.method === "gatewaySetting.findMany");
-    expect(call?.args.select).toEqual({ gatewayVersionId: true, supportsStatusCheck: true });
+    const routeCall = calls.find((entry) => entry.method === "railRoute.findMany");
+    expect(routeCall?.args.select).toEqual({ id: true, gatewayId: true });
+    const settingCall = calls.find((entry) => entry.method === "gatewaySetting.findMany");
+    expect(settingCall?.args.select).toEqual({ gatewayVersionId: true, supportsStatusCheck: true });
+    const versionCall = calls.find((entry) => entry.method === "gatewayVersion.findMany");
+    expect(versionCall?.args.select).toEqual({ id: true, gatewayId: true, versionNumber: true });
   });
 
   test("lists screenings with the camelCase orderBy clause", async () => {

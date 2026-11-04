@@ -45,7 +45,7 @@ server {
     }
 
     location /api/ {
-        proxy_pass http://127.0.0.1:{{BACKEND_PORT}};
+        proxy_pass http://{{UPSTREAM_NAME}};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

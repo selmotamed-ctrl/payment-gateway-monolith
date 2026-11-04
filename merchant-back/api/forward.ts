@@ -114,6 +114,10 @@ export const coreForward =
       userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
       authorization,
     });
+    for (const header of ["x-pg-served-by", "x-pg-min-lsn"]) {
+      const value = response.headers[header];
+      if (typeof value === "string" && value.length > 0) res.setHeader(header, value);
+    }
     res.status(options.relayStatus === true ? response.status : options.status ?? 200).json(response.body);
   };
 

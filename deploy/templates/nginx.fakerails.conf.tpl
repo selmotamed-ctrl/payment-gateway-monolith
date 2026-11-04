@@ -32,7 +32,7 @@ server {
     index index.html;
 
     location /rails/ {
-        proxy_pass http://127.0.0.1:{{BACKEND_PORT}};
+        proxy_pass http://{{UPSTREAM_NAME}};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -42,7 +42,7 @@ server {
     }
 
     location /sdk/ {
-        proxy_pass http://127.0.0.1:{{BACKEND_PORT}};
+        proxy_pass http://{{UPSTREAM_NAME}};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -51,7 +51,7 @@ server {
     }
 
     location /portal-api/ {
-        proxy_pass http://127.0.0.1:{{BACKEND_PORT}};
+        proxy_pass http://{{UPSTREAM_NAME}};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -62,7 +62,7 @@ server {
 
     # Tester SSE stream: unbuffered, long read timeout.
     location /portal-api/transactions/stream {
-        proxy_pass http://127.0.0.1:{{BACKEND_PORT}};
+        proxy_pass http://{{UPSTREAM_NAME}};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -74,7 +74,7 @@ server {
     }
 
     location /health {
-        proxy_pass http://127.0.0.1:{{BACKEND_PORT}}/health;
+        proxy_pass http://{{UPSTREAM_NAME}}/health;
         proxy_set_header Host $host;
     }
 

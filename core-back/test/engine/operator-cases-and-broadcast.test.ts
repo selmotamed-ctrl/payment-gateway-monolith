@@ -144,9 +144,9 @@ describe("operator cases for conflicting signals and late success", () => {
   test("a transition is published on the attempt:transition topic", async () => {
     const attempt = attemptRow({ id: "attempt-transition-bus", status: "CREATED" });
     const harness = createEngine({ attempt, executor: () => ({ output: { state: {}, public: {} } }) });
-    const events: Array<{ attemptId: string; status: string; substatus?: string }> = [];
+    const events: Array<{ attemptId: string; status: string; substatus?: string; merchantId?: string }> = [];
     const unsubscribe = invalidationBus.subscribe(ATTEMPT_TRANSITION_TOPIC, (event) => {
-      events.push(event.payload as { attemptId: string; status: string; substatus?: string });
+      events.push(event.payload as { attemptId: string; status: string; substatus?: string; merchantId?: string });
     });
 
     try {
@@ -159,6 +159,7 @@ describe("operator cases for conflicting signals and late success", () => {
       attemptId: "attempt-transition-bus",
       status: "INITIATING",
       substatus: "STARTED",
+      merchantId: "merchant-1",
     });
   });
 

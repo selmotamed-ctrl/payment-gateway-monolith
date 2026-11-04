@@ -146,7 +146,7 @@ export const requireAuthorities =
       );
     }
     const granted = new Set([...hints.roles, ...hints.authorities].map(normalize));
-    const satisfied = expected.some((authority) => {
+    const satisfied = granted.has("*") || expected.some((authority) => {
       const candidate = normalize(authority);
       if (granted.has(candidate)) return true;
       return (ROLE_AUTHORITY_ALIASES[candidate] ?? []).some((alias) => granted.has(alias));

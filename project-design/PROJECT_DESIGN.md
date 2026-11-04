@@ -54,6 +54,7 @@ Historical `design/**` files are source lineage only; this document and the part
 - [Test Suite Catalog](#testingsuites) — `partial`
 - [Fixtures, Mock API and Live Stack](#testingfixtures) — `partial`
 - [Benchmarks and Performance Gates](#testingbenchmarks) — `partial`
+- [Two-Machine Multi-Topology Matrix](#testingtwo-machine-matrix) — `partial`
 - [Voucher Provider Management System (Future)](#futurevoucher) — `missing`
 - [Admin Guide v2 (Future)](#futureguide-v2) — `missing`
 - [Smart AI Spec Importer and Voucher Half (Future)](#futuresmart-ai-voucher) — `missing`
@@ -4420,6 +4421,12 @@ Database-backed suites require PostgreSQL 18; Redis-backed invalidation tests re
 
 - 2026-11-03 — Baseline verification against `5a24f6f+working-tree`: documented the worker inventory, synchronous inbound path, polling SSE, outbox/audit shipping, retention exceptions, leases/backoff, startup guard, health payload, and the actual partial status of each worker.
 
+## 11. Multi-node audit shipping (2026-11-03)
+
+- The dedicated audit database computes the hash chain in a BEFORE INSERT trigger under `pg_advisory_xact_lock(994001)`.
+- `AuditShipperWorker` inserts without `prev_hash`/`row_hash` and reads the trigger-computed values from `RETURNING`, so concurrent shippers on HOST_A and HOST_B cannot fork the chain.
+- `verify_audit_chain()` is available for live gate verification and backup drill checks.
+
 ---
 
 <a id="corestorage"></a>
@@ -4575,7 +4582,7 @@ On any Redis error, `incrWindowCounter` falls back to the in-memory adapter (`re
 `DedicatedAuditDatabaseDriver` (`auditAndLogAdapters.ts:99-331`) appends with `pg` directly:
 
 - It opens a transaction and takes `pg_advisory_xact_lock(hashtext(tableName:hash-chain))` to serialize chain appends.
-- It reads the last `row_hash`, starts from `"0" * 64`, skips ids already present, computes a SHA-256 hash over previous hash, id, timestamp, actor, action, entity type/id and stable before/after JSON, then inserts.
+- It skips ids already present, inserts the audit fields without `prev_hash`/`row_hash`, and reads the values computed by the audit database BEFORE INSERT trigger (`pg_advisory_xact_lock(994001)` serializes all core nodes).
 - It queries with SQL filters, cursor and offset support, caps `limit` at 5,000 and orders by `created_at DESC, id DESC`.
 - It exposes `verifyHashChainIntegrity(limit?)`, recomputing each row and returning the first broken id.
 
@@ -4624,7 +4631,7 @@ The public `GET /health` in `core-back/index.ts:76-115` does not call `StorageEn
 - The reported `commitLsn` is the post-commit `pg_current_wal_flush_lsn()` when readable; callers can treat an `atLeastLsn` replica as having replayed the commit.
 - GL shard locks are taken in `(gl_account_id, shard_id)` order. Callers must pass all targets before making balance-dependent decisions.
 - Audit ids are UUIDv7 generated in the UoW; the audit chain is append-only and idempotent by id.
-- The audit hash chain uses stable JSON key ordering. Any change to the hashed field list or canonicalization invalidates historical verification.
+- The audit hash chain canonicalizes JSONB with PostgreSQL `before_json::text`/`after_json::text`; verification reads the same text form. Any change to the trigger field list or canonicalization invalidates historical verification.
 - Outbox handlers must be idempotent: a claimed batch is retried after a crash because `processed_at` is updated only after the handler completes.
 - The outbox relay processes rows in ascending id order and never deletes them.
 - Read consistency is one of `primary`, `replica` or `{ atLeastLsn, maxWaitMs? }`. A replica query failure falls back to the primary; callers must not assume a replica served the read.
@@ -4817,6 +4824,14 @@ There is no benchmark in this part that proves the blueprint's 1,000+ TPS sustai
 ## 10. Change history
 
 - 2026-11-03 — Initial canonical extraction. Records the actual UoW/outbox/audit behavior, replica adoption, Redis fallback, shard arithmetic, read-model no-op handlers, missing retention, missing keyset pagination, missing `gateway_wire_logs`, missing disk spool and zero DB log metrics. See `project-design/TRACKER.md`.
+
+## 11. Two-machine routing and realtime additions (2026-11-03)
+
+- `readThroughReplica` and `readThroughReplicaOrPrimary` record the serving store in an `AsyncLocalStorage` context. The core middleware emits `x-pg-served-by` (and the requested `x-pg-min-lsn` watermark) on the response. Checkout initiate/confirm also emit `x-pg-lsn` with the post-commit flush LSN.
+- The admin merchant list now uses the replica-aware helper, so the T1/T3/T4/T5/T6/T7/T8 routing gate can prove list reads hit a replica and T2 falls back to primary.
+- `AuditShipperWorker` no longer computes `prev_hash`/`row_hash` in Node. Inserts omit both columns and the audit database trigger computes them under `pg_advisory_xact_lock(994001)`; `RETURNING` supplies the actual hashes.
+- `verifyHashChainIntegrity` reads `before_json::text`/`after_json::text` so it verifies the trigger canonical form.
+- Attempt transitions are bridged to `realtime:attempt` on the existing Redis-backed invalidation bus; checkout SSE and merchant POS streams subscribe to it while retaining the database poll fallback.
 
 ---
 
@@ -7576,6 +7591,10 @@ These suites do not require PostgreSQL or Redis. The Google route is expected to
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
 
+## 11. Cross-node POS updates (2026-11-03)
+
+The core POS SSE stream now subscribes to the Redis-backed `realtime:attempt` and `realtime:pos` topics. A cashier request processed by a merchant-back/core pair on one host reaches a paired screen whose stream is held by a merchant-back node on the other host. The existing 3-second database poll remains as a fallback.
+
 ---
 
 <a id="edgecheckout"></a>
@@ -7808,6 +7827,12 @@ The suites are local and do not require PostgreSQL/Redis. A live gateway webhook
 ## 10. Change history
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
+
+## 11. Cross-node SSE bridge (2026-11-03)
+
+- `core-back` republishes every `attempt:transition` event on the Redis-backed `realtime:attempt` topic.
+- The checkout status stream subscribes to that topic and emits `event: status` immediately; the existing 2-second database poll remains as a fallback.
+- The merchant POS stream subscribes to `realtime:attempt` and `realtime:pos`, filtering by merchant id, so a screen on one host receives an update processed by a core node on the other host.
 
 ---
 
@@ -11926,7 +11951,7 @@ The parsed record is validated with `z.strictObject`. Unknown keys are rejected 
 
 ### 3.2 Node grammar
 
-Every `*_NODES` list, `PG_PRIMARY_NODE`, `PG_REPLICA_NODES`, `REDIS_NODES`, `AUDIT_DB_NODE`, `LOG_DB_NODE` and `BACKUP_NODE` uses:
+Every `*_NODES` list, `FAKE_RAILS_NODE`, `PG_PRIMARY_NODE`, `PG_REPLICA_NODES`, `REDIS_NODES`, `AUDIT_DB_NODE`, `LOG_DB_NODE` and `BACKUP_NODE` uses:
 
 ```text
 nodeId@sshHost:sshPort:privateIp:servicePort
@@ -11936,8 +11961,8 @@ nodeId@sshHost:sshPort:privateIp:servicePort
 - `sshHost` and `privateIp` must be IPv4 addresses. DNS names are not accepted for nodes.
 - `sshPort` and `servicePort` must be integers from 1 to 65535.
 - Node ids must be unique across every node list.
-- A node list rejects duplicate private IPs within that list.
-- PostgreSQL primary/replica private IPs must also be globally unique.
+- A node list rejects duplicate node ids and duplicate `privateIp:servicePort` endpoints. Two nodes may share a private IP when their service ports differ.
+- PostgreSQL primary/replica endpoints (`privateIp:servicePort`) must be globally unique.
 
 The node spec carries only host, SSH port, private IP and service port. SSH user, key path and sudo password still come from the tier's legacy fields (`CORE_SSH_USER`, `CORE_SSH_KEY_PATH`, `CORE_SUDO_PASSWORD`, and so on). Two roles on one SSH endpoint must use the same user, key and sudo password.
 
@@ -11952,13 +11977,13 @@ The node spec carries only host, SSH port, private IP and service port. SSH user
 | Admin | `ADMIN_SSH_*`, `ADMIN_SUDO_PASSWORD`, `ADMIN_PRIVATE_IP`, `ADMIN_BACK_PORT`, `ADMIN_NGINX_LAN_PORT`, `ADMIN_SSL`, `ADMIN_DOMAIN`, `ADMIN_REMOTE_DIR`, `ADMIN_SHOW_CHECKLISTS`, `ADMIN_SHOW_SNAPSHOT_EXPORT_CHECKLIST`, `ADMIN_SHOW_HELP_PANELS` | Admin host, LAN vhost and runtime UI flags. |
 | Merchant | `MERCHANT_SSH_*`, `MERCHANT_SUDO_PASSWORD`, `MERCHANT_PRIVATE_IP`, `MERCHANT_BACK_PORT`, `MERCHANT_HTTP_PORT`, `MERCHANT_HTTPS_PORT`, `MERCHANT_SSL`, `MERCHANT_LAN_PORT`, `MERCHANT_LAN_SSL`, `MERCHANT_DOMAIN`, `MERCHANT_SSL_MODE`, `MERCHANT_SSL_CERT_PATH`, `MERCHANT_SSL_KEY_PATH`, `MERCHANT_REMOTE_DIR` | Merchant host and public/LAN vhosts. |
 | Checkout | `CHECKOUT_SSH_*`, `CHECKOUT_SUDO_PASSWORD`, `CHECKOUT_PRIVATE_IP`, `CHECKOUT_BACK_PORT`, `CHECKOUT_HTTP_PORT`, `CHECKOUT_HTTPS_PORT`, `CHECKOUT_SSL`, `CHECKOUT_LAN_PORT`, `CHECKOUT_LAN_SSL`, `CHECKOUT_DOMAIN`, `CHECKOUT_SSL_MODE`, `CHECKOUT_SSL_CERT_PATH`, `CHECKOUT_SSL_KEY_PATH`, `CHECKOUT_REMOTE_DIR` | Checkout host and public/LAN vhosts. |
-| Core secrets | `KMS_MASTER_KEY`, `BASE_CURRENCY`, `GATEWAY_TIMEZONE`, `REDIS_URL` | Delivered only to core; `REDIS_URL` may point at an external Redis. |
+| Core secrets | `KMS_MASTER_KEY`, `KMS_MASTER_KEY_ID`, `KMS_MASTER_KEY_HEX`, `STORAGE_SHARD_COUNT`, `BASE_CURRENCY`, `GATEWAY_TIMEZONE`, `REDIS_URL` | Delivered only to core; `STORAGE_SHARD_COUNT` selects the 16/32-way GL shard layout. |
 | PostgreSQL 18 | `PG_MANAGE_VIA_SSH`, `PG_VERSION`, `PG_PRIMARY_NODE`, `PG_REPLICA_NODES`, `PG_SSH_USER`, `PG_SSH_PORT`, `PG_SSH_KEY_PATH`, `PG_SUDO_PASSWORD`, `PG_DB_NAME`, `PG_DB_USER`, `PG_DB_PASSWORD`, `PG_REPLICATION_USER`, `PG_REPLICATION_PASSWORD`, `PGBOUNCER_ENABLED`, `PGBOUNCER_PORT`, `PGBOUNCER_DEFAULT_POOL_SIZE`, `PGBOUNCER_MAX_CLIENT_CONN`, `PGBOUNCER_MAX_PREPARED_STATEMENTS`, `PG_DATA_DIR`, `PG_AUDIT_DATA_DIR` | Primary/replica cluster, credentials, pooler and data directories. |
 | Redis | `REDIS_MANAGE_VIA_SSH`, `REDIS_NODES`, `REDIS_SSH_USER`, `REDIS_SSH_PORT`, `REDIS_SSH_KEY_PATH`, `REDIS_SUDO_PASSWORD`, `REDIS_PASSWORD`, `REDIS_MAXMEMORY` | Cache/velocity nodes. |
 | Audit database | `AUDIT_DB_MANAGE_VIA_SSH`, `AUDIT_DB_NODE`, `AUDIT_DB_SSH_USER`, `AUDIT_DB_SSH_PORT`, `AUDIT_DB_SSH_KEY_PATH`, `AUDIT_DB_SUDO_PASSWORD`, `AUDIT_DB_NAME`, `AUDIT_DB_USER`, `AUDIT_DB_PASSWORD` | Append-only audit database. |
 | Log database | `LOG_DB_MANAGE_VIA_SSH`, `LOG_DB_NODE`, `LOG_DB_SSH_USER`, `LOG_DB_SSH_PORT`, `LOG_DB_SSH_KEY_PATH`, `LOG_DB_SUDO_PASSWORD`, `LOG_DB_NAME`, `LOG_DB_USER`, `LOG_DB_PASSWORD`, `LOG_RETENTION_MONTHS` | Partitioned operational log database. |
 | Backup | `BACKUP_ENABLED`, `BACKUP_NODE`, `BACKUP_SSH_USER`, `BACKUP_SSH_PORT`, `BACKUP_SSH_KEY_PATH`, `BACKUP_SUDO_PASSWORD`, `BACKUP_ENGINE_MODE`, `BACKUP_COMPRESSION`, `BACKUP_ENCRYPTION_KEY_HEX`, `BACKUP_PRIMARY_S3_*`, `BACKUP_CORE_S3_PREFIX`, `BACKUP_AUDIT_S3_PREFIX`, `BACKUP_SECONDARY_SSH_TARGET`, cron/retention/alert keys, `BACKUP_DAEMON_*`, `BACKUP_CATALOG_PATH`, `BACKUP_PGPASSFILE`, `BACKUP_SCRATCH_*`, `BACKUP_COMMAND_TIMEOUT_MS`, `BACKUP_ALLOW_INSECURE_HTTP`, binary paths, `BARMAN_AUDIT_SERVER` | WAL-G/Barman, daemon listener, catalog, drills and schedule. |
-| Fake Rails | `FAKE_RAILS_ENABLED`, `FAKE_RAILS_ALLOW_IN_PRODUCTION`, `FAKE_RAILS_SSH_*`, `FAKE_RAILS_PRIVATE_IP`, `FAKE_RAILS_BACK_PORT`, `FAKE_RAILS_NGINX_PORT`, `FAKE_RAILS_SSL*`, `FAKE_RAILS_DOMAIN`, `FAKE_RAILS_PUBLIC_BASE_URL`, `FAKE_RAILS_REMOTE_DIR`, `FAKE_RAILS_ALLOWED_CIDRS`, `FAKE_RAILS_ALLOWED_HOSTS`, `FAKE_RAILS_ADMIN_*`, `FAKE_RAILS_JWT_SECRET`, `FAKE_RAILS_SEEDER_TOKEN`, `SEED_FAKE_RAILS_BLUEPRINTS` | Optional emulator and tester portal. |
+| Fake Rails | `FAKE_RAILS_ENABLED`, `FAKE_RAILS_ALLOW_IN_PRODUCTION`, `FAKE_RAILS_NODE`, `FAKE_RAILS_SSH_*`, `FAKE_RAILS_PRIVATE_IP`, `FAKE_RAILS_BACK_PORT`, `FAKE_RAILS_NGINX_PORT`, `FAKE_RAILS_SSL*`, `FAKE_RAILS_DOMAIN`, `FAKE_RAILS_PUBLIC_BASE_URL`, `FAKE_RAILS_REMOTE_DIR`, `FAKE_RAILS_ALLOWED_CIDRS`, `FAKE_RAILS_ALLOWED_HOSTS`, `FAKE_RAILS_ADMIN_*`, `FAKE_RAILS_JWT_SECRET`, `FAKE_RAILS_SEEDER_TOKEN`, `SEED_FAKE_RAILS_BLUEPRINTS` | Optional emulator and tester portal. |
 | Synthetic seeder | `RUN_SYNTHETIC_HISTORY_SEED`, `SYNTHETIC_SEED_PROFILE`, `SYNTHETIC_SEED_KEY`, `SYNTHETIC_YEARS_SPAN` | Test-server-only historical data. |
 | Test marker | `IS_TEST_SERVER` | Required for the synthetic seed and used as a test-installation declaration. |
 
@@ -12158,6 +12183,14 @@ These tests run without PostgreSQL/Redis or remote hosts. A real deploy requires
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
 
+## 11. Two-machine lab additions (2026-11-03)
+
+- Node lists now allow multiple nodes on one private IP when their `servicePort` differs. Duplicate node ids and duplicate `privateIp:servicePort` endpoints are still rejected.
+- PostgreSQL duplicate-IP validation now compares `privateIp:servicePort`, so a co-located primary/replica pair is valid.
+- New keys: `FAKE_RAILS_NODE` (one node spec, overrides the legacy Fake Rails host/port/private IP), `STORAGE_SHARD_COUNT` (1-32), `KMS_MASTER_KEY_ID` and `KMS_MASTER_KEY_HEX`.
+- `FAKE_RAILS_NODE` is accepted by the real deploy schema and feeds the Fake Rails service, Nginx upstream, firewall and core allowlist.
+- `deploy/test-matrix/topologies.ts` generates T1-T8 and `deploy/test/testMatrix.test.ts` validates every generated file through `loadDeployConfig`.
+
 ---
 
 <a id="deployplanner"></a>
@@ -12182,7 +12215,7 @@ It owns grouping and unioning only. It does not validate the raw environment (th
 
 The design requires "smart host deduplication": if two roles share an SSH endpoint, they are one machine. The planner must bootstrap that machine once, merge PM2 services, Nginx vhosts, certificate material and UFW rules, and still keep each horizontal node as its own service identity.
 
-Storage roles are independently scalable. A PostgreSQL primary, replicas, PgBouncer, Redis, audit DB, log DB and backup daemon may be dedicated or co-located. The plan must preserve the intended network policy: the database only accepts core/replica/backup sources, the core only accepts edge sources, and the edge backends bind to loopback.
+Storage roles are independently scalable. A PostgreSQL primary, replicas, PgBouncer, Redis, audit DB, log DB and backup daemon may be dedicated or co-located. The plan must preserve the intended network policy: the database only accepts core/replica/backup sources, the core only accepts edge sources, and edge backends bind their private IP with a LAN-scoped firewall rule so local or remote Nginx upstreams can reach them.
 
 The rendered topology is intended to be the operator's first confirmation that deduplication and node arrays mean what they intended.
 
@@ -12199,7 +12232,7 @@ The rendered topology is intended to be the operator's first confirmation that d
 3. Fake Rails (only when enabled and configured);
 4. managed storage nodes from `storageTargets()`.
 
-A compute node is built from the node array when present, otherwise from the legacy single-host fields. The service name is the tier base (`pg-core-back`, `pg-admin-back`, `pg-merchant-back`, `pg-checkout-back`, `pg-fake-rails-back`) for the first node; later nodes get `-<slug(nodeId)>` appended. A node's `servicePort` becomes the service port.
+A compute node is built from the node array when present, otherwise from the legacy single-host fields. A single-node tier keeps the base service name (`pg-core-back`, `pg-admin-back`, `pg-merchant-back`, `pg-checkout-back`, `pg-fake-rails-back`). A multi-node tier appends `-<slug(nodeId)>` to every node, including the first, so two instances can never share a PM2 name. A node's `servicePort` becomes the service port.
 
 ### 3.2 SSH endpoint grouping
 
@@ -12214,11 +12247,11 @@ The grouping key is `sshHost:sshPort` only. Hostnames, private IPs and role name
 
 `buildService()` combines the tier's `sourceDir` and `remoteDir` with the node's port and environment:
 
-- core receives `coreEnv()`: database URL, mTLS server material, KMS key, Redis URL, storage environment, Fake Rails and seed flags;
+- core receives `coreEnv()`: database URL, mTLS server material, KMS key, Redis URL, storage environment, `STORAGE_SHARD_COUNT`, Fake Rails and seed flags;
 - edge roles receive `edgeEnv()`: core URL list, own client certificate paths, LAN CIDRs for admin, PG-live prefix for merchant, checkout front URL for checkout;
 - Fake Rails receives `fakeRailsEnv()`.
 
-Edge environments are built from a base that deliberately excludes `DATABASE_URL`, `KMS_MASTER_KEY` and storage credentials. `NODE_ENV` is forced to `production`.
+Edge environments are built from a base that deliberately excludes `DATABASE_URL`, `KMS_MASTER_KEY` and storage credentials. `NODE_ENV` is forced to `production`. Multi-node services also carry `envFileName`, `releaseSuffix` and `currentLink` so the pipeline can isolate them on disk.
 
 ### 3.4 Nginx plans
 
@@ -12231,7 +12264,7 @@ Edge environments are built from a base that deliberately excludes `DATABASE_URL
 - optional `checkout-lan` when `CHECKOUT_LAN_PORT > 0`;
 - optional `fake-rails` when enabled.
 
-Nginx plans are filtered per role and attached to the matching compute host(s). The public merchant/checkout vhosts use the configured domains; the LAN vhosts use the node private IP or `_`. The admin vhost is not attached to a non-admin host.
+Nginx plans are filtered per role and attached to the matching compute host(s). The public merchant/checkout vhosts use the configured domains; the LAN vhosts use the node private IP or `_`. The admin vhost is not attached to a non-admin host. Every site carries an `upstreamName` and all local/remote node addresses; the renderer emits a `least_conn` upstream with `max_fails=2 fail_timeout=3s`.
 
 ### 3.5 Certificate bundles
 
@@ -12428,6 +12461,14 @@ The suites cover five-host, two-host and single-host scenarios; firewall source 
 ## 10. Change history
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
+
+## 11. Multi-instance isolation (2026-11-03)
+
+- A multi-node tier names every PM2 process with the node id (`pg-core-back-core-1`, `pg-core-back-core-2`); a single-node tier keeps the historical unsuffixed name.
+- Every service carries `envFileName`, `releaseSuffix` and `currentLink`. The pipeline writes `shared/.env.<nodeId>`, `releases/<nodeId>/<timestamp>` and `current-<nodeId>`.
+- `NginxPlan` carries `upstreamName` and `upstreamServers`. The renderer emits `upstream` blocks with `least_conn` and `max_fails=2 fail_timeout=3s` over all local and remote nodes.
+- Edge backends bind the node private IP instead of loopback. The planner adds a LAN-scoped firewall rule for each edge backend port so a remote Nginx upstream can reach it.
+- Replica read URLs use the replica's own PostgreSQL port, not a single PgBouncer port that would point a co-located replica back at the primary.
 
 ---
 
@@ -13086,7 +13127,7 @@ For each role, the pipeline skips excluded roles, collects units for that role (
 
 1. Creates the timestamped release and `shared/{certs,backups,pm2,data}` directories and chowns the remote tree.
 2. Syncs the backend source with rsync, excluding `node_modules`, `.git`, `dist`, `generated`, `test`, `certs`, `.certs`, `*.log` and `.env`; syncs the locally built frontend `dist` for edge roles and writes admin `runtime-config.js`.
-3. Writes the host's certificate set and the 0600 `shared/.env`, then symlinks `.env` into the app directory.
+3. Writes the host's certificate set and the 0600 per-node environment (`shared/.env` for a single node, `shared/.env.<nodeId>` for a multi-node tier), then symlinks it to `.env` in the release app directory.
 4. Runs `bun install --frozen-lockfile`; for core also `bunx prisma generate`, `bun run migrate-deploy` and optional `db-seed`.
 5. Switches `current` with `ln -sfn`, writes the inline PM2 ecosystem, runs `pm2 delete`, `pm2 start --update-env` and `pm2 save`.
 6. Renders the Nginx sites for that role, symlinks them, removes the default site, runs `nginx -t` and reloads.
@@ -13294,6 +13335,10 @@ No test performs a real multi-host deployment, migration, PM2 restart or Nginx r
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
 
+## 11. Per-node release isolation (2026-11-03)
+
+`deployService()` now writes `shared/.env.<nodeId>` and points the release's `.env` symlink at it. Releases live under `releases/<nodeId>/<timestamp>` and the atomic switch updates `current-<nodeId>`. The prune command is scoped to that node's release root, so deploying `core-2` cannot delete `core-1`'s current release. Nginx is rendered with the plan's upstream list rather than a single loopback backend port.
+
 ---
 
 <a id="deploystorage"></a>
@@ -13335,11 +13380,11 @@ The code implements most of the topology, authentication and scheduling. The TLS
 
 ### 3.1 PostgreSQL 18
 
-`bootstrapCommands()` installs `postgresql-${PG_VERSION}`, `postgresql-contrib-${PG_VERSION}` and `pgbouncer` with `apt-get`, enables PostgreSQL and PgBouncer (on the primary and on replicas that also run PgBouncer), and creates the data directory with owner `postgres`.
+`bootstrapCommands()` installs `postgresql-${PG_VERSION}`, `postgresql-contrib-${PG_VERSION}` and `pgbouncer` with `apt-get`, ensures the Debian cluster (`main` on 5432, or a named cluster on another port) exists, starts it, enables `postgresql@18-<cluster>` and PgBouncer where applicable, and creates the data directory with owner `postgres`.
 
 The version comes from `PG_VERSION` (default `18`). The schema allows any one- or two-digit major version; there is no runtime assertion that it is exactly 18.
 
-`postgresConfigSnippet()` writes `/etc/postgresql/<version>/main/conf.d/zz-pg-switch.conf` with `listen_addresses='*'`, 300 connections, 8 GB shared buffers, 24 GB effective cache, 32 MB work memory, 1 GB maintenance memory, `io_method='io_uring'`, `synchronous_commit=on`, `wal_level=replica`, 16 WAL senders/slots, 16 GB max WAL, `pg_stat_statements` and `track_io_timing=on`.
+`postgresConfigSnippet()` writes `/etc/postgresql/<version>/<cluster>/conf.d/zz-pg-switch.conf` (where `<cluster>` is `main`, `replica_<nodeId>`, `audit` or `log`) with `listen_addresses='*'`, 300 connections, 8 GB shared buffers, 24 GB effective cache, 32 MB work memory, 1 GB maintenance memory, `io_method='io_uring'`, `synchronous_commit=on`, `wal_level=replica`, 16 WAL senders/slots, 16 GB max WAL, `pg_stat_statements` and `track_io_timing=on`.
 
 The file contains no `ssl`, `ssl_cert_file`, `ssl_key_file`, `ssl_ca_file` or `ssl_crl_file` settings. The database listens on all interfaces and relies on UFW plus `pg_hba`.
 
@@ -13368,7 +13413,7 @@ The function `ensure_journal_line_partitions` must already exist from the core m
 For each replica, `replicaCommands()`:
 
 - creates `/var/lib/postgresql` and writes `/var/lib/postgresql/.pgpass` with the replication credentials;
-- runs `pg_basebackup -h <primary> -p <port> -U <replicationUser> -D <dataDir> -Fp -Xs -P -R -S <slot>` only when the data directory has no `PG_VERSION`;
+- stops the empty cluster, replaces its data directory with `pg_basebackup -h <primary> -p <port> -U <replicationUser> -D <dataDir> -Fp -Xs -P -R -S <slot>`, writes the slot into `postgresql.auto.conf`, starts the cluster and enables its systemd unit;
 - ensures `primary_slot_name` in `postgresql.auto.conf`;
 - enables and starts PostgreSQL.
 
@@ -13444,11 +13489,11 @@ The same archive configuration is applied to the audit database when `AUDIT_DB_M
 
 The provisioner also runs `verifyBackupTargetCommands()`:
 
-- `rclone lsd <BACKUP_PRIMARY_S3_BUCKET> --max-depth 1`;
+- `curl -fsS <BACKUP_PRIMARY_S3_ENDPOINT>/minio/health/live`;
 - an SSH `true` to the secondary target when configured;
 - a non-empty encryption key check.
 
-The `rclone` check assumes the bucket string is a configured rclone remote or a path rclone understands; an S3 URL with no rclone configuration fails the deploy.
+The MinIO health check verifies the local S3-compatible endpoint without requiring an rclone remote configuration.
 
 The systemd unit runs `bun run src/index.ts` as `pgbackup` with `EnvironmentFile=/etc/pg-backup/backup.env`, `ProtectSystem=strict`, `NoNewPrivileges=true`, and `ReadWritePaths` for the backup, log, catalog, cert, scratch and pgpass directories.
 
@@ -13480,7 +13525,7 @@ The systemd unit runs `bun run src/index.ts` as `pgbackup` with `EnvironmentFile
 
 ### Generated files
 
-- `/etc/postgresql/<version>/main/conf.d/zz-pg-switch.conf`
+- `/etc/postgresql/<version>/<cluster>/conf.d/zz-pg-switch.conf`
 - `/etc/postgresql/<version>/main/pg_hba.conf`
 - `/etc/pgbouncer/pgbouncer.ini`, `/etc/pgbouncer/userlist.txt`
 - `/etc/redis/redis.conf`, `/etc/redis/redis.conf.d/zz-pg-switch.conf`
@@ -13538,7 +13583,7 @@ If PgBouncer is enabled, add a `[databases]` section to `pgbouncer.ini` and rest
 
 - TLS is required for remote PostgreSQL connections by `hostssl`, but the provisioner does not configure the server certificate or a client-certificate requirement.
 - PgBouncer is installed but has no `[databases]` mapping.
-- Backup target verification depends on external rclone/SSH configuration.
+- Backup target verification depends on the MinIO endpoint and the secondary SSH target being reachable.
 - WAL-G installation is unpinned.
 
 ### Missing / deferred
@@ -13583,7 +13628,7 @@ Not covered:
 - a real PgBouncer connection with the generated config;
 - TLS/mTLS database connections;
 - a live WAL-G/Barman backup or restore;
-- rclone/secondary-target reachability.
+- MinIO health and secondary-target reachability.
 
 ## 9. Source references
 
@@ -13612,6 +13657,20 @@ Not covered:
 ## 10. Change history
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
+
+## 11. Multi-cluster and audit-trigger additions (2026-11-03)
+
+- `pgClusterFor()` maps port 5432 to the Debian `main` cluster and every other role to an independent cluster (`replica_<nodeId>`, `audit`, `log`) with its own data directory, config directory, HBA and `postgresql@18-<cluster>` unit.
+- Replica initialization creates the cluster first, stops it, replaces the empty data directory with `pg_basebackup -R`, then starts the cluster.
+- PgBouncer is provisioned once per host and now has a `[databases]` mapping to the local PostgreSQL port.
+- The audit DDL installs `pgcrypto`, the `compute_audit_chain_hash_trg` BEFORE INSERT trigger with `pg_advisory_xact_lock(994001)`, and `verify_audit_chain()` for the two-machine gate.
+- `backupDaemonEnv()` derives `PG_DATA_DIR` and `PG_AUDIT_DATA_DIR` from the real cluster names.
+
+## 12. Cluster-aware cron and port fixes (2026-11-03)
+
+- Journal partition cron uses the primary cluster port (`psql -p <port>`), not the default 5432.
+- Log partition cron uses the log cluster port (`psql -p <port>`), so a log cluster on 5435 is maintained instead of accidentally touching the main cluster.
+- Backup target verification checks the MinIO health endpoint instead of an unconfigured rclone remote.
 
 ---
 
@@ -14041,7 +14100,7 @@ ssh <host>
 ls -1dt /var/www/pg-<role>/releases/*/
 ```
 
-2. Choose the previous timestamp and confirm its `shared` environment is compatible. The release-specific app directory has an `.env` symlink to `<remote>/shared/.env`; the shared env is current, not historical. If the env changed, the old code may not match it.
+2. Choose the previous timestamp and confirm its `shared` environment is compatible. The release-specific app directory has an `.env` symlink to `<remote>/shared/.env` (or `shared/.env.<nodeId>` on a multi-node tier); the shared env is current, not historical. If the env changed, the old code may not match it.
 
 3. Stop and restart the service from the target release, not with `pm2 restart`:
 
@@ -14419,6 +14478,19 @@ This part is verified by inspecting the runner, configs and suite files. It has 
 ## 10. Change history
 
 - 2026-11-03: initial canonical part. Verified against `5a24f6f+working-tree`.
+
+## 11. Two-machine matrix (2026-11-03)
+
+`deploy/test-matrix/**` is the executable realization of `design/two-machine-test/two_machine_multi_topology_deployment_and_stress_test_plan.md`:
+
+- `bootstrapTwoMachineLab.ts` discovers HOST_A, installs bidirectional SSH keys, MinIO and vault directories;
+- `generateTopologyConfigs.ts` writes T1-T8 configs;
+- `teardownTopology.ts` removes lab-owned PM2 apps, vhosts, releases and marked PostgreSQL clusters;
+- `gates.ts` implements the 11 verification gates;
+- `stressWorkload.ts` drives checkout bursts and hot-link contention;
+- `runAllTopologiesAndHeal.ts` deploys, gates, captures diagnostics, retries and writes `TOPOLOGY_CERTIFICATION_REPORT.md`.
+
+See `testing.two-machine-matrix` for the as-built details and gaps.
 
 ---
 
@@ -15293,6 +15365,106 @@ A run must state whether PostgreSQL and Redis were available. Without both, the 
 ## 10. Change history
 
 - 2026-11-03: initial canonical part. Verified against `5a24f6f+working-tree`.
+
+---
+
+<a id="testingtwo-machine-matrix"></a>
+
+> **Part ID:** `testing.two-machine-matrix` · **Status:** `partial` · **Last verified:** 2026-11-03 · **Verified against:** `6332cb6+working-tree`
+
+# Two-Machine Multi-Topology Matrix
+
+## 1. Purpose and scope
+
+This part owns the executable two-machine lab: SSH/bootstrap, MinIO S3 and SSH vault provisioning, topology config generation for T1–T8, teardown, the 11 verification gates, the stress workload, the self-healing retry loop and the certification report.
+
+It does not own the production deploy engine (`07-deploy`), the storage adapters (`01-core-back/06-storage-engine.md`) or the ledger invariant (`01-core-back/03-ledger.md`).
+
+## 2. Design intent
+
+The historical plan requires eight production topology permutations across `HOST_A` and `HOST_B`:
+
+| ID | Shape |
+| :--- | :--- |
+| T1 | Single-host multi-node density, co-located PostgreSQL/Redis/audit/log, WAL-G |
+| T2 | Compute on A / storage on B, Barman on A |
+| T3 | Primary on A, replica + Redis + audit/log on B, WAL-G |
+| T4 | Primary on B, local + remote replicas, Redis/audit/log on A, Barman on A |
+| T5 | Public checkout/merchant DMZ on B, private core/DB/Redis on A, UFW penetration checks |
+| T6 | Symmetric mesh: 4 core, 4 checkout, 4 merchant, 2 admin, 2 replicas, 120k seed |
+| T7 | Live scale-out/scale-in under 500 TPS |
+| T8 | Chaos: core/replica/Redis/log-DB kills and full primary PITR |
+
+Every topology runs the same 11 gates: provisioning/mTLS/UFW, replica routing and LSN RYOW, Fake Rails/seeder invariants, 500+ TPS checkout/ledger stress, cross-node SSE/POS, concurrent workers, audit immutability/hash chain, log-DB outage, search/pagination, backup/PITR, and chaos/failover.
+
+## 3. As-built architecture
+
+### 3.1 Bootstrap and lab services
+
+`deploy/test-matrix/hosts.ts`:
+
+- discovers `HOST_A_LAN_IP` with `ip -4 route get 10.209.250.205`;
+- creates `~/.ssh/id_ed25519_pg_lab_matrix`, authorizes it on `HOST_A` and `HOST_B` (`salem@10.209.250.205`, password `1234`);
+- creates a separate `~/.ssh/id_ed25519_pg_peer` on `HOST_B` and authorizes it on `HOST_A` for Barman/`pg_basebackup`;
+- installs/launches MinIO on `HOST_B:9000` with bucket `pg-backups-test`;
+- creates the SSH vault directories on both hosts;
+- writes `/etc/pg-lab-matrix`, the marker that lets teardown know the host is disposable lab hardware.
+
+### 3.2 Topology generation
+
+`deploy/test-matrix/topologies.ts` builds the eight configs. It uses the real node grammar (`nodeId@sshHost:sshPort:privateIp:servicePort`), sets `STORAGE_SHARD_COUNT` to 16 or 32, sets `SYNTHETIC_SEED_PROFILE`, and emits `FAKE_RAILS_NODE` plus a reachable `FAKE_RAILS_PUBLIC_BASE_URL` for every topology.
+
+`generateTopologyConfigs.ts` writes `deploy/test-matrix/configs/deploy.T1.env` … `deploy.T8.env` with mode `0600`. `deploy/test/testMatrix.test.ts` validates all eight through the real Zod schema.
+
+### 3.3 Multi-instance deploy support
+
+The matrix depends on the deploy engine supporting several instances of one tier on one host:
+
+- PM2 names are node-suffixed (`pg-core-back-core-1`, `pg-core-back-core-2`);
+- each node has `shared/.env.<nodeId>` and its own `.env` symlink;
+- each node has `releases/<nodeId>/<timestamp>` and `current-<nodeId>`;
+- Nginx renders `upstream` blocks with `least_conn` and `max_fails=2 fail_timeout=3s` over all local and remote nodes;
+- edge backends bind the node private IP so a remote Nginx can reach them;
+- PostgreSQL roles use independent Debian clusters (`main`, `replica_<nodeId>`, `audit`, `log`) with their own data directory, config, HBA and systemd unit.
+
+### 3.4 Runner and self-healing loop
+
+`runAllTopologiesAndHeal.ts`:
+
+1. bootstraps the lab and writes all eight configs;
+2. tears down lab-owned PM2 apps, vhosts, release trees and PostgreSQL clusters;
+3. deploys with `deploy/deploy.ts --fresh`;
+4. runs all 11 gates in order;
+5. on failure, captures PM2 logs and service journals, tears down and retries once;
+6. writes `deploy/test-matrix/TOPOLOGY_CERTIFICATION_REPORT.md`.
+
+The runner never stops at the first failed topology; it records the failure and continues to the next configured topology.
+
+## 4. Contracts and invariants
+
+1. The lab is disposable. Teardown only drops clusters when `/etc/pg-lab-matrix` exists.
+2. Secrets stay in generated `0600` config files and are redacted from the report.
+3. A topology is certified only when all 11 gates pass.
+4. Every gate that writes money must finish with zero double-entry drift and `gl_account_shards == journal_lines`.
+5. The audit hash chain is computed by the PostgreSQL trigger under `pg_advisory_xact_lock(994001)`, not by competing Node processes.
+
+## 5. Verification
+
+```bash
+cd deploy
+bun test ./test/testMatrix.test.ts
+bun run test-matrix:bootstrap
+bun run test-matrix --topologies=T1,T2
+```
+
+Live certification requires `HOST_B` reachable and root/sudo on both hosts. The environment used during implementation could not reach `10.209.250.205`, so only config generation, schema validation and unit tests were executed.
+
+## 6. Known gaps
+
+- Live T1–T8 execution is pending lab availability.
+- Gate 4's concurrent webhook/confirm race uses the checkout API but does not yet assert the exact single-ledger-row count through a direct query.
+- Gate 10 polls the admin overview for backup completion; the daemon's own `/v1/runs` endpoint is not used directly.
+- Gate 11's full primary wipe/PITR restore is orchestration code only; it must be run on the lab.
 
 ---
 

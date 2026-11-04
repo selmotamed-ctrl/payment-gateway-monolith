@@ -122,13 +122,13 @@ CREATE INDEX "journal_lines_created_brin_idx"
 CREATE OR REPLACE FUNCTION ensure_journal_line_partitions(months_ahead INT DEFAULT 6)
 RETURNS void AS $$
 DECLARE
-  offset INT;
+  v_offset INT;
   start_date DATE;
   end_date DATE;
   suffix TEXT;
 BEGIN
-  FOR offset IN 0..months_ahead - 1 LOOP
-    start_date := (date_trunc('month', now())::date + (offset || ' months')::interval)::date;
+  FOR v_offset IN 0..months_ahead - 1 LOOP
+    start_date := (date_trunc('month', now())::date + (v_offset || ' months')::interval)::date;
     end_date := (start_date + interval '1 month')::date;
     suffix := to_char(start_date, 'YYYY_MM');
     EXECUTE format(

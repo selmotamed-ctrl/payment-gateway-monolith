@@ -134,7 +134,7 @@ For each role, the pipeline skips excluded roles, collects units for that role (
 
 1. Creates the timestamped release and `shared/{certs,backups,pm2,data}` directories and chowns the remote tree.
 2. Syncs the backend source with rsync, excluding `node_modules`, `.git`, `dist`, `generated`, `test`, `certs`, `.certs`, `*.log` and `.env`; syncs the locally built frontend `dist` for edge roles and writes admin `runtime-config.js`.
-3. Writes the host's certificate set and the 0600 `shared/.env`, then symlinks `.env` into the app directory.
+3. Writes the host's certificate set and the 0600 per-node environment (`shared/.env` for a single node, `shared/.env.<nodeId>` for a multi-node tier), then symlinks it to `.env` in the release app directory.
 4. Runs `bun install --frozen-lockfile`; for core also `bunx prisma generate`, `bun run migrate-deploy` and optional `db-seed`.
 5. Switches `current` with `ln -sfn`, writes the inline PM2 ecosystem, runs `pm2 delete`, `pm2 start --update-env` and `pm2 save`.
 6. Renders the Nginx sites for that role, symlinks them, removes the default site, runs `nginx -t` and reloads.
@@ -341,3 +341,7 @@ No test performs a real multi-host deployment, migration, PM2 restart or Nginx r
 ## 10. Change history
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
+
+## 11. Per-node release isolation (2026-11-03)
+
+`deployService()` now writes `shared/.env.<nodeId>` and points the release's `.env` symlink at it. Releases live under `releases/<nodeId>/<timestamp>` and the atomic switch updates `current-<nodeId>`. The prune command is scoped to that node's release root, so deploying `core-2` cannot delete `core-1`'s current release. Nginx is rendered with the plan's upstream list rather than a single loopback backend port.

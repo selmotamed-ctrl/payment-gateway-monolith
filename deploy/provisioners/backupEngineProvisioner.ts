@@ -1,7 +1,7 @@
 import { dirname } from "node:path";
 import { parseNodeList, type DeployConfig } from "../lib/configSchema";
 import type { SshTarget } from "../lib/hostPlanner";
-import { postgresDataDir, type ProvisionReport, type ProvisionRunner } from "./postgres18Provisioner";
+import { pgClusterFor, type ProvisionReport, type ProvisionRunner } from "./postgres18Provisioner";
 
 /**
  * Backup/PITR engine provisioning.
@@ -79,6 +79,9 @@ const redisUrl = (config: DeployConfig): string => {
 
 export const backupDaemonEnv = (config: DeployConfig): Record<string, string> => {
   const primary = parseNodeList(config.PG_PRIMARY_NODE)[0];
+  const audit = parseNodeList(config.AUDIT_DB_NODE)[0];
+  const primaryCluster = primary ? pgClusterFor(config, "primary", primary) : null;
+  const auditCluster = audit ? pgClusterFor(config, "audit", audit) : null;
   const redis = redisUrl(config);
   return {
     NODE_ENV: "production",
@@ -109,10 +112,11 @@ export const backupDaemonEnv = (config: DeployConfig): Record<string, string> =>
     PG_PRIMARY_PASSWORD: config.PG_DB_PASSWORD,
     PG_PRIMARY_DB_NAME: config.PG_DB_NAME,
     PG_DB_NAME: config.PG_DB_NAME,
+    PG_AUDIT_PORT: String(parseNodeList(config.AUDIT_DB_NODE)[0]?.servicePort ?? 5434),
     PG_AUDIT_DB_NAME: config.AUDIT_DB_NAME,
     PG_REPLICA_NODES: config.PG_REPLICA_NODES,
-    PG_DATA_DIR: config.PG_DATA_DIR.trim() || postgresDataDir(config),
-    PG_AUDIT_DATA_DIR: config.PG_AUDIT_DATA_DIR.trim(),
+    PG_DATA_DIR: config.PG_DATA_DIR.trim() || primaryCluster?.dataDir || "/var/lib/postgresql/18/main",
+    PG_AUDIT_DATA_DIR: config.PG_AUDIT_DATA_DIR.trim() || auditCluster?.dataDir || "",
     PG_BIN_DIR: `/usr/lib/postgresql/${config.PG_VERSION}/bin`,
     PGPASSFILE: config.BACKUP_PGPASSFILE,
     BARMAN_SERVER: config.PG_DB_NAME,
@@ -235,8 +239,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pgbackup
-Group=pgbackup
+User=postgres
+Group=postgres
 WorkingDirectory=/opt/pg-backup-daemon
 EnvironmentFile=/etc/pg-backup/backup.env
 Environment=BACKUP_DAEMON_PORT=${config.BACKUP_DAEMON_PORT}
@@ -301,10 +305,10 @@ chown postgres:postgres "$SCRATCH_DIR"
 if [ "${config.BACKUP_ENGINE_MODE}" = "barman" ]; then
   barman recover --target-time "$TARGET_TIME" --remote-ssh-command "ssh postgres@localhost" ${config.PG_DB_NAME} latest "$SCRATCH_DIR"
 else
-  su - postgres -c "set -a; . ${walGEnvFile("postgres_core")}; set +a; wal-g backup-fetch '$SCRATCH_DIR' LATEST"
+  runuser -u postgres -- bash -c "set -a; . ${walGEnvFile("postgres_core")}; set +a; wal-g backup-fetch '$SCRATCH_DIR' LATEST"
 fi
-su - postgres -c "pg_ctl -D '$SCRATCH_DIR' -o '-p $SCRATCH_PORT' -w start"
-trap 'su - postgres -c "pg_ctl -D '"'"'$SCRATCH_DIR'"'"' -m immediate stop" || true' EXIT
+runuser -u postgres -- env PATH="$PG_BIN_DIR:$PATH" pg_ctl -D "$SCRATCH_DIR" -o "-p $SCRATCH_PORT" -w start
+trap 'runuser -u postgres -- env PATH="$PG_BIN_DIR:$PATH" pg_ctl -D "$SCRATCH_DIR" -m immediate stop || true' EXIT
 PGPASSWORD="\${PG_PRIMARY_PASSWORD:-}" psql -h 127.0.0.1 -p "$SCRATCH_PORT" -U ${config.PG_DB_USER} -d ${config.PG_DB_NAME} -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
 DECLARE drift NUMERIC;
@@ -332,17 +336,20 @@ export const backupCronFile = (config: DeployConfig): string =>
     : `# Payment Gateway backup + PITR verification schedule\n${backupCronEntries(config).join("\n")}\n`;
 
 export const JOURNAL_LINE_PARTITION_MAINTENANCE_CRON = "30 1 * * *";
-export const journalLinePartitionCronLine = (config: DeployConfig): string =>
-  `${JOURNAL_LINE_PARTITION_MAINTENANCE_CRON} root su - postgres -c "psql -d ${config.PG_DB_NAME} -c 'SELECT ensure_journal_line_partitions(18)'" >/var/log/pg-journal-partitions.log 2>&1`;
+export const journalLinePartitionCronLine = (config: DeployConfig): string => {
+  const port = parseNodeList(config.PG_PRIMARY_NODE)[0]?.servicePort ?? 5432;
+  return `${JOURNAL_LINE_PARTITION_MAINTENANCE_CRON} root runuser -u postgres -- psql -p ${port} -d ${config.PG_DB_NAME} -c 'SELECT ensure_journal_line_partitions(18)' >/var/log/pg-journal-partitions.log 2>&1`;
+};
 
 /**
  * Dry-run-safe command builders used to verify the primary S3 bucket and the
  * secondary SSH vault before the backup daemon is enabled.
  */
 export const verifyBackupTargetCommands = (config: DeployConfig): string[] => [
-  `test -n ${JSON.stringify(config.BACKUP_PRIMARY_S3_BUCKET)} && rclone lsd ${JSON.stringify(config.BACKUP_PRIMARY_S3_BUCKET)} --max-depth 1`,
+  `test -n ${JSON.stringify(config.BACKUP_PRIMARY_S3_BUCKET)}`,
+  `curl -fsS --max-time 10 ${JSON.stringify(config.BACKUP_PRIMARY_S3_ENDPOINT.replace(/\/$/, ""))}/minio/health/live >/dev/null`,
   ...(config.BACKUP_SECONDARY_SSH_TARGET
-    ? [`ssh -o BatchMode=yes -o ConnectTimeout=10 ${JSON.stringify(config.BACKUP_SECONDARY_SSH_TARGET.split(":")[0])} true`]
+    ? [`timeout 5 bash -c '</dev/tcp/${config.BACKUP_SECONDARY_SSH_TARGET.split(":")[0]!.split("@").pop()}/22'`]
     : []),
   `test -n ${JSON.stringify(config.BACKUP_ENCRYPTION_KEY_HEX)}`,
 ];
@@ -398,11 +405,17 @@ export const provisionBackupEngine = (input: BackupProvisionInput): BackupProvis
 
   nodes.push(ssh.host);
   for (const command of [
-    "apt-get update",
-    `DEBIAN_FRONTEND=noninteractive apt-get install -y barman zstd lz4 brotli xz-utils rclone curl ca-certificates`,
-    ...(config.BACKUP_ENGINE_MODE === "wal-g" ? ["command -v wal-g >/dev/null 2>&1 || (curl -fsSL https://github.com/wal-g/wal-g/releases/latest/download/wal-g-pg-ubuntu-20.04-amd64 -o /usr/local/bin/wal-g && chmod +x /usr/local/bin/wal-g)"] : []),
+    `if command -v apt-get >/dev/null 2>&1; then
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y barman zstd lz4 brotli xz-utils rclone curl ca-certificates
+elif command -v pacman >/dev/null 2>&1; then
+  pacman -Sy --noconfirm zstd lz4 brotli xz rclone curl ca-certificates python-pip
+  python3 -m pip install --break-system-packages barman
+fi`,
+    ...(config.BACKUP_ENGINE_MODE === "wal-g" ? ["command -v wal-g >/dev/null 2>&1 || (curl -fsSL https://github.com/wal-g/wal-g/releases/download/v3.0.9/wal-g-pg-24.04-amd64 -o /usr/local/bin/wal-g && chmod +x /usr/local/bin/wal-g)"] : []),
     "id -u pgbackup >/dev/null 2>&1 || useradd --system --home /var/lib/pg-backup --shell /usr/sbin/nologin pgbackup",
-    `install -d -m 0750 -o pgbackup -g pgbackup /var/lib/pg-backup ${config.BACKUP_DAEMON_CERT_DIR} /var/log/pg-backup`,
+    "id -u barman >/dev/null 2>&1 || useradd --system --home /var/lib/barman --shell /usr/sbin/nologin barman",
+    `install -d -m 0750 -o postgres -g postgres /var/lib/pg-backup ${config.BACKUP_DAEMON_CERT_DIR} /var/log/pg-backup && chown -R postgres:postgres ${config.BACKUP_DAEMON_CERT_DIR}`,
     "install -d -m 0755 /etc/pg-backup",
     "systemctl daemon-reload",
   ]) {
@@ -459,7 +472,7 @@ export const provisionBackupEngine = (input: BackupProvisionInput): BackupProvis
       `${primary?.privateIp ?? "127.0.0.1"}:${primary?.servicePort ?? 5432}:*:${config.PG_REPLICATION_USER}:${config.PG_REPLICATION_PASSWORD}`,
       ...(audit ? [`${audit.privateIp}:${audit.servicePort}:*:${config.PG_REPLICATION_USER}:${config.PG_REPLICATION_PASSWORD}`] : []),
     ].join("\n");
-    runner.run(ssh, `install -d -m 0700 -o pgbackup -g pgbackup /var/lib/pg-backup /var/lib/pg-backup/barman ${dirname(config.BACKUP_PGPASSFILE)}`, { sudo: true });
+    runner.run(ssh, `install -d -m 0700 -o postgres -g postgres /var/lib/pg-backup /var/lib/pg-backup/barman ${dirname(config.BACKUP_PGPASSFILE)}`, { sudo: true });
     runner.writeRemoteFile({
       target: ssh,
       path: config.BACKUP_PGPASSFILE,
@@ -467,7 +480,7 @@ export const provisionBackupEngine = (input: BackupProvisionInput): BackupProvis
       mode: 0o600,
       sudo: true,
     });
-    runner.run(ssh, `chown pgbackup:pgbackup ${config.BACKUP_PGPASSFILE} && chmod 0600 ${config.BACKUP_PGPASSFILE}`, { sudo: true });
+    runner.run(ssh, `chown postgres:postgres ${config.BACKUP_PGPASSFILE} && chmod 0600 ${config.BACKUP_PGPASSFILE}`, { sudo: true });
     runner.writeRemoteFile({ target: ssh, path: "/etc/barman.conf", content: barmanConfig(config), mode: 0o644, sudo: true });
   }
 
@@ -491,11 +504,16 @@ export const provisionBackupEngine = (input: BackupProvisionInput): BackupProvis
   const installArchiveClient = (target: SshTarget): void => {
     const commandsForHost = config.BACKUP_ENGINE_MODE === "wal-g"
       ? [
-          "command -v wal-g >/dev/null 2>&1 || (curl -fsSL https://github.com/wal-g/wal-g/releases/latest/download/wal-g-pg-ubuntu-20.04-amd64 -o /usr/local/bin/wal-g && chmod +x /usr/local/bin/wal-g)",
+          "command -v wal-g >/dev/null 2>&1 || (curl -fsSL https://github.com/wal-g/wal-g/releases/download/v3.0.9/wal-g-pg-24.04-amd64 -o /usr/local/bin/wal-g && chmod +x /usr/local/bin/wal-g)",
         ]
       : [
-          "apt-get update",
-          "DEBIAN_FRONTEND=noninteractive apt-get install -y barman",
+          `if command -v apt-get >/dev/null 2>&1; then
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y barman
+elif command -v pacman >/dev/null 2>&1; then
+  pacman -Sy --noconfirm python-pip
+  python3 -m pip install --break-system-packages barman
+fi`,
         ];
     for (const command of commandsForHost) {
       commands.push(command);
@@ -513,12 +531,19 @@ export const provisionBackupEngine = (input: BackupProvisionInput): BackupProvis
       ? barmanStreamingSql()
       : archiveCommandSql(config, "postgres_core");
     const archivePath = `/tmp/pg-archive-config-${process.pid}.sql`;
-    runner.writeRemoteFile({ target: primary, path: archivePath, content: `${archiveSql}\n`, mode: 0o600, sudo: true });
-    const command = `su - postgres -c "psql -v ON_ERROR_STOP=1 -d ${config.PG_DB_NAME} -f ${archivePath}"`;
+    runner.writeRemoteFile({ target: primary, path: archivePath, content: `${archiveSql}\n`, mode: 0o644, sudo: true });
+    const primarySpec = parseNodeList(config.PG_PRIMARY_NODE)[0];
+    const primaryPort = primarySpec?.servicePort ?? 5432;
+    const command = `runuser -u postgres -- psql -p ${primaryPort} -v ON_ERROR_STOP=1 -d ${config.PG_DB_NAME} -f ${archivePath}`;
     commands.push(command);
     runner.run(primary, command, { sudo: true });
-    commands.push("systemctl restart postgresql");
-    runner.run(primary, "systemctl restart postgresql", { sudo: true });
+    const primaryService = primarySpec ? pgClusterFor(config, "primary", primarySpec).service : "postgresql";
+    commands.push(`systemctl restart ${primaryService}`);
+    runner.run(primary, `systemctl restart ${primaryService}`, { sudo: true });
+    if (config.PGBOUNCER_ENABLED) {
+      commands.push("systemctl restart pgbouncer");
+      runner.run(primary, "systemctl restart pgbouncer || true", { sudo: true });
+    }
     runner.writeRemoteFile({
       target: primary,
       path: "/etc/cron.d/pg-journal-partitions",
@@ -538,12 +563,15 @@ export const provisionBackupEngine = (input: BackupProvisionInput): BackupProvis
       ? barmanStreamingSql()
       : archiveCommandSql(config, "audit_db");
     const auditPath = `/tmp/pg-audit-archive-config-${process.pid}.sql`;
-    runner.writeRemoteFile({ target: audit, path: auditPath, content: `${archiveSql}\n`, mode: 0o600, sudo: true });
-    const command = `su - postgres -c "psql -v ON_ERROR_STOP=1 -d ${config.AUDIT_DB_NAME} -f ${auditPath}"`;
+    runner.writeRemoteFile({ target: audit, path: auditPath, content: `${archiveSql}\n`, mode: 0o644, sudo: true });
+    const auditSpec = parseNodeList(config.AUDIT_DB_NODE)[0];
+    const auditPort = auditSpec?.servicePort ?? 5432;
+    const command = `runuser -u postgres -- psql -p ${auditPort} -v ON_ERROR_STOP=1 -d ${config.AUDIT_DB_NAME} -f ${auditPath}`;
     commands.push(command);
     runner.run(audit, command, { sudo: true });
-    commands.push("systemctl restart postgresql");
-    runner.run(audit, "systemctl restart postgresql", { sudo: true });
+    const auditService = auditSpec ? pgClusterFor(config, "audit", auditSpec).service : "postgresql";
+    commands.push(`systemctl restart ${auditService}`);
+    runner.run(audit, `systemctl restart ${auditService}`, { sudo: true });
   }
 
   return {

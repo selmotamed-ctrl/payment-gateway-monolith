@@ -11,6 +11,7 @@ import { decimal } from "../../engine/ledger/LedgerPoster";
 import { getPlatformRuntime } from "../../engine/runtime";
 import type { DynamicAttempt } from "../../engine/flow/DynamicRailEngine";
 import { fingerprint, principalOf } from "../middleware/authDoubleCheck";
+import { subscribeRealtimeAttempt } from "../../lib/realtimeBus";
 import { json } from "./json";
 import { postgresPlaceholders } from "../../engine/db/rawRows";
 
@@ -1164,6 +1165,7 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
   );
   const decision = transaction.data;
   response.setHeader("x-pg-min-lsn", transaction.commitLsn);
+  response.setHeader("x-pg-lsn", transaction.commitLsn);
 
   if (decision.outcome === "BLOCK") {
     // The customer sees a generic message: the reason of the refusal stays
@@ -1295,7 +1297,7 @@ route.get("/pay/:linkKey/logs/:attemptId", async (request: Request, response: Re
 
 route.get("/pay/:linkKey/logs/:attemptId/status", async (request: Request, response: Response) => {
   const { linkKey, attemptId } = parseOrThrow(attemptParamsSchema, request.params);
-  await loadAttempt(linkKey, attemptId);
+  const initialAttempt = await loadAttempt(linkKey, attemptId);
   response.setHeader("content-type", "text/event-stream");
   response.setHeader("cache-control", "no-cache, no-transform");
   response.setHeader("connection", "keep-alive");
@@ -1305,6 +1307,34 @@ route.get("/pay/:linkKey/logs/:attemptId/status", async (request: Request, respo
   const terminal = new Set(["SUCCEEDED", "FAILED", "EXPIRED", "CANCELLED", "BLOCKED", "REFUNDED"]);
   let lastStatus = "";
   const deadline = Date.now() + 10 * 60 * 1000;
+
+  const emitStatus = (attempt: { id: string; reference: string; status: string; substatus: string | null }): void => {
+    if (response.writableEnded || attempt.status === lastStatus) {
+      return;
+    }
+    lastStatus = attempt.status;
+    response.write(`event: status\ndata: ${JSON.stringify({
+      attemptId: attempt.id,
+      reference: attempt.reference,
+      status: attempt.status,
+      substatus: attempt.substatus,
+    })}\n\n`);
+  };
+
+  const unsubscribe = subscribeRealtimeAttempt((event) => {
+    if (event.attemptId !== attemptId || response.writableEnded) {
+      return;
+    }
+    emitStatus({
+      id: event.attemptId,
+      reference: initialAttempt.attempt.reference,
+      status: event.status,
+      substatus: event.substatus ?? null,
+    });
+    if (terminal.has(event.status)) {
+      response.end();
+    }
+  });
 
   const poll = async (): Promise<void> => {
     if (response.writableEnded || Date.now() > deadline) {
@@ -1316,15 +1346,7 @@ route.get("/pay/:linkKey/logs/:attemptId/status", async (request: Request, respo
       response.end();
       return;
     }
-    if (attempt.status !== lastStatus) {
-      lastStatus = attempt.status;
-      response.write(`event: status\ndata: ${JSON.stringify({
-        attemptId: attempt.id,
-        reference: attempt.reference,
-        status: attempt.status,
-        substatus: attempt.substatus,
-      })}\n\n`);
-    }
+    emitStatus(attempt);
     if (terminal.has(attempt.status)) {
       response.end();
       return;
@@ -1335,6 +1357,7 @@ route.get("/pay/:linkKey/logs/:attemptId/status", async (request: Request, respo
   };
 
   request.on("close", () => {
+    unsubscribe();
     response.end();
   });
   await poll();
@@ -1371,6 +1394,7 @@ route.post("/pay/:linkKey/logs/:attemptId/confirm", async (request: Request, res
   const commitLsn = platform.consumeCommitLsn(attempt.id);
   if (commitLsn) {
     response.setHeader("x-pg-min-lsn", commitLsn);
+    response.setHeader("x-pg-lsn", commitLsn);
   }
 
   response.json({

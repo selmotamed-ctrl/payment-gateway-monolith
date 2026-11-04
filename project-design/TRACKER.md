@@ -12,6 +12,7 @@ The generated status matrix is in `project-design/STATUS.md`. Part-level status 
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | 2026-11-03 | all | Canonical project-design system created; plan checkpoint at `design/blueprint-management.md`. | `project-design/**`, `scripts/project-design/**`, agent instruction files | `project-design/parts/**` | `bun scripts/project-design/build.ts --check` |
 | 2026-11-03 | all | Completed generated design, status, appendices, per-workspace blueprints and READMEs; removed stale frontend `SCALING_FEATURE.md`/`notes.md`; corrected admin UI system gap text; added project-design gate to exhaustive suite. | `project-design/**`, `scripts/project-design/**`, `*/README.md`, `*/blueprint.md`, `scripts/run-exhaustive-suite.sh` | `project-design/parts/**`, `design/blueprint-management.md` | `bun scripts/project-design/build.ts --check`, `bun scripts/project-design/check.ts`, `git diff --check`, workspace typechecks/tests/builds |
+| 2026-11-03 | deploy, testing, core.storage, core.workers, edge.checkout, edge.merchant | Implemented the two-machine T1-T8 lab: multi-instance PM2/env/release isolation, Nginx least_conn upstreams, Debian multi-cluster PostgreSQL, PgBouncer database mapping, audit hash trigger, LSN telemetry header, Redis realtime SSE bridge, topology generator/bootstrap/teardown/11-gate runner/report. | `deploy/test-matrix/**`, `deploy/lib/**`, `deploy/provisioners/**`, `deploy/deploy.ts`, `core-back/lib/storageEngine/**`, `core-back/lib/realtimeBus.ts`, `core-back/api/internal/{checkout,merchant,admin}.ts`, `core-back/index.ts`, `core-back/engine/{flow,governance}` | `project-design/parts/08-testing/04-two-machine-matrix.md`, affected deploy/core/edge parts | `deploy` typecheck/tests, `core-back` typecheck/tests, generated docs check |
 
 ## 3. Open gaps
 
@@ -46,3 +47,6 @@ See `project-design/DECISIONS.md`.
 | 2026-11-03 | merchant-back | `bun run typecheck && bun test` | 83 pass, 0 fail | none |
 | 2026-11-03 | checkout-back | `bun run typecheck && bun test` | 248 pass, 0 fail | none |
 | 2026-11-03 | admin-front / merchant-front / checkout-front | `bun run build` | pass (chunk-size warnings only) | none |
+| 2026-11-03 | deploy | `bun run typecheck && bun test` | 207 pass, 0 fail | none |
+| 2026-11-03 | core-back | `bun run typecheck && bun test` | 19,127 pass, 3,297 skip, 0 fail | no local PostgreSQL/Redis; DB-backed suites skip |
+| 2026-11-03 | two-machine live matrix | `bun run test-matrix:bootstrap` | not executed | HOST_B 10.209.250.205 unreachable (no route/ping) |
