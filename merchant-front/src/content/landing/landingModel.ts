@@ -202,3 +202,26 @@ export const LANDING_SNIPPET_RESPONSE = `{
   "visibleRails": ["…"],
   "excludedRails": []
 }`;
+
+/* -------------------------------------------------------------------------- */
+/* Ledger ticker arithmetic (BigInt; no floating point touches a money value) */
+/* -------------------------------------------------------------------------- */
+const SCALE = 10_000n;
+/** Opening value of the decorative ledger ticker: 1,284,903.4210 (count of 1/10,000). */
+export const LEDGER_START = 12_849_034_210n;
+
+/** Formats a count of 1/10,000 as `1,284,903.4210` (LTR digits, grouped). */
+export const formatScaled = (value: bigint): string => {
+    const negative = value < 0n;
+    const abs = negative ? -value : value;
+    const whole = (abs / SCALE).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    const fraction = (abs % SCALE).toString().padStart(4, "0");
+    return `${negative ? "-" : ""}${whole}.${fraction}`;
+};
+
+/** Deterministic next amount (120.0000 – 9,800.0000) from a tiny LCG. */
+export const nextAmount = (seed: number): { amount: bigint; seed: number } => {
+    const nextSeed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    const amount = 1_200_000n + BigInt(nextSeed % 96_800_000);
+    return { amount, seed: nextSeed };
+};

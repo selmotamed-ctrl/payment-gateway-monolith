@@ -19,7 +19,18 @@ import { setLocale } from "@/plugins/localization";
 import { toggleTheme } from "@/state/app";
 import { HeroDemo } from "./HeroDemo";
 import { FeePreview } from "./FeePreview";
-import { animateProgress, useInView, useReducedMotion, useReveal, withViewTransition } from "./motion";
+import { LedgerTicker } from "./LedgerTicker";
+import {
+    animateProgress,
+    splitWords,
+    useActiveSection,
+    useInView,
+    useReducedMotion,
+    useReveal,
+    useSpotlight,
+    useTilt,
+    withViewTransition,
+} from "./motion";
 
 /* -------------------------------------------------------------------------- */
 /* Static content (catalogue keys; every string is translated via t())        */
@@ -38,6 +49,21 @@ const FLOW = [
     { icon: "mdi-shield-check-outline", title: "Trusted confirmation", text: "Success is accepted only on verified provider evidence, never on a browser return.", chip: "SUCCEEDED" },
     { icon: "mdi-book-open-variant", title: "Double-entry ledger", text: "Every attempt posts a balanced journal: commission, fees and your net, to four decimal places.", chip: "Σ Dr = Σ Cr" },
     { icon: "mdi-bank-transfer-out", title: "Wallet & cash-out", text: "Your balance is derived from the ledger. Request a cash-out to your verified bank account.", chip: "IBAN" },
+];
+
+const MARQUEE = [
+    { icon: "mdi-link-variant", label: "Payment links & QR" },
+    { icon: "mdi-form-textbox-password", label: "One-time code" },
+    { icon: "mdi-qrcode-scan", label: "Scan QR" },
+    { icon: "mdi-cellphone-check", label: "Approve in app" },
+    { icon: "mdi-bank-transfer", label: "Bank redirect" },
+    { icon: "mdi-credit-card-outline", label: "Card form" },
+    { icon: "mdi-point-of-sale", label: "Live POS screens" },
+    { icon: "mdi-percent-outline", label: "Fees you can see" },
+    { icon: "mdi-wallet-outline", label: "Wallets & sealed statements" },
+    { icon: "mdi-account-multiple-check-outline", label: "Four-eyes changes" },
+    { icon: "mdi-timer-sand", label: "Disputes with deadlines" },
+    { icon: "mdi-bank-outline", label: "Bring your own gateway" },
 ];
 
 const STATS = [
@@ -156,6 +182,11 @@ const LandingPage = defineComponent({
         const year = new Date().getFullYear();
 
         const developer = useLazySection(() => import("./DeveloperSection"), () => reveal.refresh());
+        const heroStage = ref<HTMLElement | null>(null);
+        const marqueePaused = ref(false);
+        const activeSection = useActiveSection(NAV.map((item) => item.id));
+        useSpotlight(root, reduced);
+        useTilt(heroStage, reduced);
 
         const onScroll = () => {
             scrolled.value = window.scrollY > 8;
@@ -219,11 +250,60 @@ const LandingPage = defineComponent({
             </span>
         );
 
+        /** The headline, one box per word so the entrance can stagger them. */
+        const headline = () => {
+            const first = splitWords(t("Collect on any rail."));
+            const second = splitWords(t("Reconcile every dinar."));
+            let order = 0;
+            return (
+                <h1 id="pgl-hero-title" class="pgl-h1">
+                    <span class="pgl-h1__line">
+                        {first.map((word) => [
+                            <span key={`a-${order}`} class="pgl-word" style={{ "--w": order++ }}>
+                                {word}
+                            </span>,
+                            " ",
+                        ])}
+                    </span>
+                    <span class="pgl-h1__line pgl-h1__line--accent">
+                        {second.map((word, index) =>
+                            index === second.length - 1 ? (
+                                <span key="em" class="pgl-h1__em">
+                                    <span class="pgl-word" style={{ "--w": order++, "--k": index }}>
+                                        {word}
+                                    </span>
+                                    <svg class="pgl-underline" viewBox="0 0 200 12" preserveAspectRatio="none" aria-hidden="true">
+                                        <defs>
+                                            <linearGradient id="pgl-underline-grad" x1="0" x2="1" y1="0" y2="0">
+                                                <stop offset="0" stop-color="#3a63ff" />
+                                                <stop offset="0.55" stop-color="#7a55ff" />
+                                                <stop offset="1" stop-color="#0fb5a3" />
+                                            </linearGradient>
+                                        </defs>
+                                        <path d="M3 8 C 40 2, 90 12, 130 6 S 185 4, 197 7" pathLength="300" />
+                                    </svg>
+                                </span>
+                            ) : (
+                                [
+                                    <span key={`b-${index}`} class="pgl-word" style={{ "--w": order++, "--k": index }}>
+                                        {word}
+                                    </span>,
+                                    " ",
+                                ]
+                            ),
+                        )}
+                    </span>
+                </h1>
+            );
+        };
+
         return () => (
             <div ref={root} class="pgl-root" data-motion={reveal.active.value ? "on" : "off"}>
                 <a class="pgl-skip" href="#pgl-main" onClick={(e: MouseEvent) => jumpTo(e, "pgl-main")}>
                     {t("Skip to main content")}
                 </a>
+
+                <span class="pgl-progress" aria-hidden="true" />
 
                 {/* ------------------------------------------------ Header */}
                 <header class="pgl-header" data-scrolled={scrolled.value ? "" : undefined}>
@@ -233,7 +313,12 @@ const LandingPage = defineComponent({
                         </a>
                         <nav class="pgl-nav" aria-label={t("Sections")}>
                             {NAV.map((item) => (
-                                <a key={item.id} href={`#${item.id}`} onClick={(e: MouseEvent) => jumpTo(e, item.id)}>
+                                <a
+                                    key={item.id}
+                                    href={`#${item.id}`}
+                                    aria-current={activeSection.value === item.id ? "true" : undefined}
+                                    onClick={(e: MouseEvent) => jumpTo(e, item.id)}
+                                >
                                     {t(item.label)}
                                 </a>
                             ))}
@@ -281,17 +366,20 @@ const LandingPage = defineComponent({
                 <main id="pgl-main" tabindex={-1} class="pgl-main">
                     {/* ------------------------------------------------ Hero */}
                     <section class="pgl-hero" aria-labelledby="pgl-hero-title">
-                        <div class="pgl-hero__bg" aria-hidden="true" />
+                        <div class="pgl-hero__bg" aria-hidden="true">
+                            <span class="pgl-aurora pgl-aurora--a" />
+                            <span class="pgl-aurora pgl-aurora--b" />
+                            <span class="pgl-aurora pgl-aurora--c" />
+                            <span class="pgl-grid-bg" />
+                            <span class="pgl-grain" />
+                        </div>
                         <div class="pgl-container pgl-hero__grid">
                             <div class="pgl-hero__copy">
                                 <p class="pgl-eyebrow pgl-eyebrow--pill">
                                     <span class="pgl-pulse" aria-hidden="true" />
                                     {t("Built for Libyan businesses")}
                                 </p>
-                                <h1 id="pgl-hero-title" class="pgl-h1">
-                                    <span>{t("Collect on any rail.")}</span>{" "}
-                                    <span class="pgl-h1__muted">{t("Reconcile every dinar.")}</span>
-                                </h1>
+                                {headline()}
                                 <p class="pgl-lede pgl-lede--hero">
                                     {t(
                                         "Payment links, in-store POS screens and a server API — one KYB-verified merchant account, a bilingual hosted checkout, and a double-entry ledger behind every balance.",
@@ -314,11 +402,50 @@ const LandingPage = defineComponent({
                                     ))}
                                 </ul>
                             </div>
-                            <div class="pgl-hero__demo">
+                            <div ref={heroStage} class="pgl-hero__demo">
+                                <span class="pgl-stage-glow" aria-hidden="true" />
+                                <span class="pgl-float pgl-float--a" aria-hidden="true">
+                                    <VIcon icon="mdi-shield-check-outline" size={16} />
+                                    {t("Trusted confirmation")}
+                                </span>
+                                <span class="pgl-float pgl-float--b" aria-hidden="true">
+                                    <VIcon icon="mdi-scale-balance" size={16} />
+                                    {/* dir on an inner span: `dir` on the positioned element would flip its own inset-inline-end. */}
+                                    <span class="pgl-mono" dir="ltr">
+                                        Σ Dr = Σ Cr
+                                    </span>
+                                </span>
                                 <HeroDemo />
                             </div>
                         </div>
                     </section>
+
+                    {/* ------------------------------------------------ Rail ticker */}
+                    <div class="pgl-marquee-wrap">
+                        <section class="pgl-marquee" aria-label={t("Capabilities")} data-paused={marqueePaused.value ? "" : undefined}>
+                            <div class="pgl-marquee__track">
+                                {[0, 1].map((copy) => (
+                                    <ul key={copy} class="pgl-marquee__group" aria-hidden={copy === 1 ? "true" : undefined}>
+                                        {MARQUEE.map((item) => (
+                                            <li key={item.label} class="pgl-marquee__item">
+                                                <VIcon icon={item.icon} size={18} aria-hidden="true" />
+                                                {t(item.label)}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                ))}
+                            </div>
+                        </section>
+                        <button
+                            type="button"
+                            class="pgl-icon-btn pgl-marquee__toggle"
+                            aria-pressed={marqueePaused.value ? "true" : "false"}
+                            aria-label={marqueePaused.value ? t("Play ticker") : t("Pause ticker")}
+                            onClick={() => (marqueePaused.value = !marqueePaused.value)}
+                        >
+                            <VIcon icon={marqueePaused.value ? "mdi-play" : "mdi-pause"} size={16} aria-hidden="true" />
+                        </button>
+                    </div>
 
                     {/* ------------------------------------------------ Flow */}
                     <section id="pgl-flow" class="pgl-section" tabindex={-1} aria-labelledby="pgl-flow-title">
@@ -362,7 +489,7 @@ const LandingPage = defineComponent({
                             )}
                             <div class="pgl-bento">
                                 {/* Links */}
-                                <article class="pgl-cell pgl-cell--links" data-reveal style={{ "--pgl-i": 0 }}>
+                                <article data-spot="" class="pgl-cell pgl-cell--links" data-reveal style={{ "--pgl-i": 0 }}>
                                     <div class="pgl-cell__text">
                                         <h3 class="pgl-h3">{t("Payment links & QR")}</h3>
                                         <p>{t("Single-use or multi-use links with expiry, a rail whitelist and a QR code. Share them anywhere; the amount is locked on the server.")}</p>
@@ -392,7 +519,7 @@ const LandingPage = defineComponent({
                                 </article>
 
                                 {/* POS */}
-                                <article class="pgl-cell pgl-cell--pos" data-reveal style={{ "--pgl-i": 1 }}>
+                                <article data-spot="" class="pgl-cell pgl-cell--pos" data-reveal style={{ "--pgl-i": 1 }}>
                                     <h3 class="pgl-h3">{t("Live POS screens")}</h3>
                                     <p>{t("Pair a cashier terminal with a customer-facing screen that updates in real time.")}</p>
                                     <div class="pgl-pos" aria-hidden="true">
@@ -411,14 +538,14 @@ const LandingPage = defineComponent({
                                 </article>
 
                                 {/* Fees */}
-                                <article class="pgl-cell pgl-cell--fees" data-reveal style={{ "--pgl-i": 2 }}>
+                                <article data-spot="" class="pgl-cell pgl-cell--fees" data-reveal style={{ "--pgl-i": 2 }}>
                                     <h3 class="pgl-h3">{t("Fees you can see")}</h3>
                                     <p>{t("Absorb the fee, pass it to the payer, or split it. Try it:")}</p>
                                     <FeePreview />
                                 </article>
 
                                 {/* Wallets */}
-                                <article class="pgl-cell pgl-cell--wallet" data-reveal style={{ "--pgl-i": 3 }}>
+                                <article data-spot="" class="pgl-cell pgl-cell--wallet" data-reveal style={{ "--pgl-i": 3 }}>
                                     <h3 class="pgl-h3">{t("Wallets & sealed statements")}</h3>
                                     <p>{t("Balances come from the ledger, not an editable number. Monthly statements carry a snapshot hash and export to Excel.")}</p>
                                     <dl class="pgl-statement" aria-hidden="true">
@@ -446,7 +573,7 @@ const LandingPage = defineComponent({
                                 </article>
 
                                 {/* Maker-checker */}
-                                <article class="pgl-cell pgl-cell--small" data-reveal style={{ "--pgl-i": 4 }}>
+                                <article data-spot="" class="pgl-cell pgl-cell--small" data-reveal style={{ "--pgl-i": 4 }}>
                                     <div class="pgl-mc" aria-hidden="true">
                                         <span class="pgl-mc__avatar">M</span>
                                         <span class="pgl-mc__line" />
@@ -457,7 +584,7 @@ const LandingPage = defineComponent({
                                 </article>
 
                                 {/* Disputes */}
-                                <article class="pgl-cell pgl-cell--small" data-reveal style={{ "--pgl-i": 5 }}>
+                                <article data-spot="" class="pgl-cell pgl-cell--small" data-reveal style={{ "--pgl-i": 5 }}>
                                     <span class="pgl-icon-tile" aria-hidden="true">
                                         <VIcon icon="mdi-timer-sand" size={18} />
                                     </span>
@@ -466,7 +593,7 @@ const LandingPage = defineComponent({
                                 </article>
 
                                 {/* Team */}
-                                <article class="pgl-cell pgl-cell--small" data-reveal style={{ "--pgl-i": 6 }}>
+                                <article data-spot="" class="pgl-cell pgl-cell--small" data-reveal style={{ "--pgl-i": 6 }}>
                                     <span class="pgl-icon-tile" aria-hidden="true">
                                         <VIcon icon="mdi-account-group-outline" size={18} />
                                     </span>
@@ -475,7 +602,7 @@ const LandingPage = defineComponent({
                                 </article>
 
                                 {/* Merchant direct */}
-                                <article class="pgl-cell pgl-cell--small" data-reveal style={{ "--pgl-i": 7 }}>
+                                <article data-spot="" class="pgl-cell pgl-cell--small" data-reveal style={{ "--pgl-i": 7 }}>
                                     <span class="pgl-icon-tile" aria-hidden="true">
                                         <VIcon icon="mdi-bank-outline" size={18} />
                                     </span>
@@ -533,24 +660,7 @@ const LandingPage = defineComponent({
                                         </li>
                                     ))}
                                 </ul>
-                                <div class="pgl-invariant" data-reveal aria-hidden="true" dir="ltr">
-                                    <div class="pgl-invariant__head">
-                                        <span class="pgl-pulse" />
-                                        ledger.invariant
-                                    </div>
-                                    <div class="pgl-invariant__row">
-                                        <span>Σ debits</span>
-                                        <b>1,284,903.4210</b>
-                                    </div>
-                                    <div class="pgl-invariant__row">
-                                        <span>Σ credits</span>
-                                        <b>1,284,903.4210</b>
-                                    </div>
-                                    <div class="pgl-invariant__row pgl-invariant__ok">
-                                        <span>difference</span>
-                                        <b>0.0000 ✓</b>
-                                    </div>
-                                </div>
+                                <LedgerTicker />
                             </div>
                         </div>
                     </section>
@@ -611,6 +721,14 @@ const LandingPage = defineComponent({
                                     {t("Sign in to the portal")}
                                 </VBtn>
                             </div>
+                            <ul class="pgl-final__proof">
+                                {["Bilingual hosted checkout", "KYB-verified before live money", "Ledger-derived balances"].map((item) => (
+                                    <li key={item}>
+                                        <VIcon icon="mdi-check-circle" size={16} aria-hidden="true" />
+                                        {t(item)}
+                                    </li>
+                                ))}
+                            </ul>
                         </div>
                     </section>
                 </main>

@@ -154,3 +154,145 @@ export const animateProgress = (durationMs: number, onFrame: (progress: number) 
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
 };
+
+/* -------------------------------------------------------------------------- */
+/* Pointer-driven effects (spotlight glow, stage tilt) and section tracking.   */
+/* -------------------------------------------------------------------------- */
+
+/** True on devices with a real hovering pointer (never on touch-only screens). */
+export const canHover = (): boolean =>
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+
+/** Clamps `value` into `[min, max]`. */
+export const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+
+/**
+ * Maps a pointer position inside `rect` to tilt angles. The pointer at the
+ * centre gives `{0, 0}`; the edges give `±maxDeg`. `rtl` mirrors the Y axis so
+ * the stage leans towards the cursor in both reading directions.
+ */
+export const tiltFromPoint = (
+    clientX: number,
+    clientY: number,
+    rect: { left: number; top: number; width: number; height: number },
+    maxDeg = 7,
+): { rx: number; ry: number } => {
+    if (rect.width <= 0 || rect.height <= 0) return { rx: 0, ry: 0 };
+    const nx = clamp((clientX - rect.left) / rect.width - 0.5, -0.5, 0.5) * 2;
+    const ny = clamp((clientY - rect.top) / rect.height - 0.5, -0.5, 0.5) * 2;
+    // `|| 0` turns -0 (centre of the box) into 0 so CSS never receives `-0deg`.
+    return { rx: Math.round(-ny * maxDeg * 100) / 100 || 0, ry: Math.round(nx * maxDeg * 100) / 100 || 0 };
+};
+
+/**
+ * Cursor-following glow: writes `--mx`/`--my` (px, relative to the card) onto the
+ * closest `[data-spot]` element under the pointer. One delegated listener, rAF
+ * throttled; does nothing on touch devices or with reduced motion.
+ */
+export const useSpotlight = (root: Ref<HTMLElement | null>, reduced: Ref<boolean>) => {
+    let frame = 0;
+    let pending: { el: HTMLElement; x: number; y: number } | null = null;
+    let host: HTMLElement | null = null;
+
+    const flush = () => {
+        frame = 0;
+        if (!pending) return;
+        pending.el.style.setProperty("--mx", `${pending.x}px`);
+        pending.el.style.setProperty("--my", `${pending.y}px`);
+        pending = null;
+    };
+
+    const onMove = (event: PointerEvent) => {
+        const el = (event.target as Element | null)?.closest<HTMLElement>("[data-spot]");
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        pending = { el, x: Math.round(event.clientX - rect.left), y: Math.round(event.clientY - rect.top) };
+        if (!frame) frame = requestAnimationFrame(flush);
+    };
+
+    onMounted(() => {
+        host = root.value;
+        if (!host || reduced.value || !canHover()) return;
+        host.addEventListener("pointermove", onMove, { passive: true });
+    });
+
+    onBeforeUnmount(() => {
+        host?.removeEventListener("pointermove", onMove);
+        if (frame) cancelAnimationFrame(frame);
+    });
+};
+
+/**
+ * Leans the element towards the cursor by writing `--rx`/`--ry` (deg). Resets
+ * smoothly when the pointer leaves. Hover-capable devices only; no-op for
+ * reduced motion.
+ */
+export const useTilt = (target: Ref<HTMLElement | null>, reduced: Ref<boolean>, maxDeg = 6) => {
+    let frame = 0;
+    let el: HTMLElement | null = null;
+    let next: { rx: number; ry: number } | null = null;
+
+    const apply = () => {
+        frame = 0;
+        if (!el || !next) return;
+        el.style.setProperty("--rx", `${next.rx}deg`);
+        el.style.setProperty("--ry", `${next.ry}deg`);
+    };
+
+    const schedule = (value: { rx: number; ry: number }) => {
+        next = value;
+        if (!frame) frame = requestAnimationFrame(apply);
+    };
+
+    const onMove = (event: PointerEvent) => {
+        if (!el) return;
+        schedule(tiltFromPoint(event.clientX, event.clientY, el.getBoundingClientRect(), maxDeg));
+    };
+
+    const onLeave = () => schedule({ rx: 0, ry: 0 });
+
+    onMounted(() => {
+        el = target.value;
+        if (!el || reduced.value || !canHover()) return;
+        el.addEventListener("pointermove", onMove, { passive: true });
+        el.addEventListener("pointerleave", onLeave, { passive: true });
+    });
+
+    onBeforeUnmount(() => {
+        el?.removeEventListener("pointermove", onMove);
+        el?.removeEventListener("pointerleave", onLeave);
+        if (frame) cancelAnimationFrame(frame);
+    });
+};
+
+/**
+ * Tracks which section is under the reading line, for the nav highlight.
+ * Returns the id of the active section (or "" above the first one).
+ */
+export const useActiveSection = (ids: readonly string[]) => {
+    const active = ref("");
+    let observer: IntersectionObserver | null = null;
+    onMounted(() => {
+        if (typeof IntersectionObserver === "undefined") return;
+        observer = new IntersectionObserver(
+            (entries) => {
+                for (const entry of entries) {
+                    if (entry.isIntersecting) active.value = entry.target.id;
+                    else if (active.value === entry.target.id) active.value = "";
+                }
+            },
+            { rootMargin: "-42% 0px -52% 0px" },
+        );
+        for (const id of ids) {
+            const node = document.getElementById(id);
+            if (node) observer.observe(node);
+        }
+    });
+    onBeforeUnmount(() => observer?.disconnect());
+    return active;
+};
+
+/** Splits a sentence into words, preserving the original order and punctuation. */
+export const splitWords = (text: string): string[] => text.trim().split(/\s+/).filter(Boolean);

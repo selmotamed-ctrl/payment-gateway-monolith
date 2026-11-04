@@ -172,3 +172,70 @@ describe("landing routes", () => {
         for (const name of names) expect(router).toContain(`name: "${name}"`);
     });
 });
+
+/* -------------------------------------------------------------------------- */
+/* Visual-system helpers: ledger ticker arithmetic and pointer/tilt maths       */
+/* -------------------------------------------------------------------------- */
+import { LEDGER_START, formatScaled, nextAmount } from "../landing/landingModel";
+import { clamp, splitWords, tiltFromPoint } from "../../pages/public/landing/motion";
+
+describe("ledger ticker arithmetic", () => {
+    test("formats 1/10,000 counts with grouping and exactly four decimals", () => {
+        expect(formatScaled(LEDGER_START)).toBe("1,284,903.4210");
+        expect(formatScaled(0n)).toBe("0.0000");
+        expect(formatScaled(5n)).toBe("0.0005");
+        expect(formatScaled(10_000n)).toBe("1.0000");
+        expect(formatScaled(123_456_789_000n)).toBe("12,345,678.9000");
+        expect(formatScaled(-15_000n)).toBe("-1.5000");
+    });
+
+    test("debits and credits stay equal after any number of ticks (difference is exactly 0.0000)", () => {
+        let debits = LEDGER_START;
+        let credits = LEDGER_START;
+        let seed = 7;
+        for (let tick = 0; tick < 5000; tick += 1) {
+            const next = nextAmount(seed);
+            seed = next.seed;
+            expect(next.amount >= 1_200_000n && next.amount < 98_000_000n).toBe(true);
+            debits += next.amount;
+            credits += next.amount;
+        }
+        expect(formatScaled(debits - credits)).toBe("0.0000");
+        expect(debits).toBe(credits);
+    });
+
+    test("is deterministic for a given seed and never uses floating point", () => {
+        expect(nextAmount(7)).toEqual(nextAmount(7));
+        expect(typeof nextAmount(7).amount).toBe("bigint");
+        expect(nextAmount(7).seed).not.toBe(7);
+    });
+});
+
+describe("pointer and headline helpers", () => {
+    const rect = { left: 100, top: 200, width: 400, height: 300 };
+
+    test("clamp bounds a value", () => {
+        expect(clamp(5, 0, 3)).toBe(3);
+        expect(clamp(-1, 0, 3)).toBe(0);
+        expect(clamp(2, 0, 3)).toBe(2);
+    });
+
+    test("tilt is zero at the centre and ±max at the corners, leaning towards the cursor", () => {
+        expect(tiltFromPoint(300, 350, rect, 6)).toEqual({ rx: 0, ry: 0 });
+        expect(tiltFromPoint(500, 200, rect, 6)).toEqual({ rx: 6, ry: 6 }); // top-right corner
+        expect(tiltFromPoint(100, 500, rect, 6)).toEqual({ rx: -6, ry: -6 }); // bottom-left corner
+    });
+
+    test("tilt never exceeds the maximum for pointers outside the box and tolerates empty boxes", () => {
+        const far = tiltFromPoint(9999, -9999, rect, 7);
+        expect(Math.abs(far.rx)).toBeLessThanOrEqual(7);
+        expect(Math.abs(far.ry)).toBeLessThanOrEqual(7);
+        expect(tiltFromPoint(10, 10, { left: 0, top: 0, width: 0, height: 0 })).toEqual({ rx: 0, ry: 0 });
+    });
+
+    test("splitWords keeps order and punctuation, for English and Arabic", () => {
+        expect(splitWords("Reconcile every dinar.")).toEqual(["Reconcile", "every", "dinar."]);
+        expect(splitWords("  وطابِق   كل دينار. ")).toEqual(["وطابِق", "كل", "دينار."]);
+        expect(splitWords("")).toEqual([]);
+    });
+});

@@ -314,6 +314,11 @@ export const landingCatalogue: Record<string, [string, string]> = {
         "يمكنك التسجيل وتجهيز بيانات التهيئة فورًا. يبدأ التحصيل الفعلي بعد اعتماد التحقق التجاري، ويمكنك سؤال فريق المنصة عن بيانات اعتماد تجريبية لتكاملك.",
     ],
 
+    // Ticker
+    "Capabilities": ["Capabilities", "القدرات"],
+    "Pause ticker": ["Pause ticker", "إيقاف الشريط مؤقتًا"],
+    "Play ticker": ["Play ticker", "تشغيل الشريط"],
+
     // Final CTA
     "Start collecting with confidence.": ["Start collecting with confidence.", "ابدأ التحصيل بثقة."],
     "Create your account now and finish onboarding at your own pace.": [

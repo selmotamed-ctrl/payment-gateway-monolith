@@ -1,0 +1,452 @@
+/* ============================================================================
+ * Landing — part 4: motion.
+ *
+ * Rules: (1) nothing is hidden unless JS switched `data-motion="on"`; (2) every
+ * looping effect is decorative and pauses on hover/off-screen where it matters;
+ * (3) `prefers-reduced-motion: reduce` removes ALL animation and transition
+ * (see the hard stop at the bottom); (4) scroll-driven effects are progressive
+ * enhancement behind @supports — Firefox falls back to the static layout.
+ * ========================================================================== */
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  /* ------------------------------------------------------ Reveal on scroll */
+  .pgl-root[data-motion="on"] [data-reveal] {
+    opacity: 0;
+    transform: translateY(26px);
+    filter: blur(6px);
+    transition:
+      opacity var(--pgl-dur-3) var(--pgl-ease),
+      transform 900ms var(--pgl-ease),
+      filter var(--pgl-dur-3) var(--pgl-ease);
+    transition-delay: calc(var(--pgl-i, 0) * 80ms);
+  }
+
+  .pgl-root[data-motion="on"] [data-reveal][data-revealed] {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+
+  /* Cards own a transform transition for hover; keep both working after reveal. */
+  .pgl-root[data-motion="on"] .pgl-cell[data-reveal][data-revealed] {
+    transition:
+      opacity var(--pgl-dur-3) var(--pgl-ease),
+      transform var(--pgl-dur-3) var(--pgl-ease),
+      filter var(--pgl-dur-3) var(--pgl-ease),
+      box-shadow var(--pgl-dur-3) var(--pgl-ease),
+      border-color var(--pgl-dur-3);
+    transition-delay: 0ms;
+  }
+
+  /* ----------------------------------------------------------- Hero entrance */
+  .pgl-hero__copy > .pgl-eyebrow--pill,
+  .pgl-hero__copy > .pgl-lede,
+  .pgl-hero__copy > .pgl-cta-row,
+  .pgl-hero__copy > .pgl-hero__proof {
+    animation: pgl-rise 900ms var(--pgl-ease) both;
+  }
+
+  .pgl-hero__copy > .pgl-eyebrow--pill { animation-delay: 60ms; }
+  .pgl-hero__copy > .pgl-lede { animation-delay: 760ms; }
+  .pgl-hero__copy > .pgl-cta-row { animation-delay: 900ms; }
+  .pgl-hero__copy > .pgl-hero__proof { animation-delay: 1040ms; }
+
+  .pgl-word {
+    animation: pgl-word-in 1000ms var(--pgl-ease) both;
+    animation-delay: calc(160ms + var(--w, 0) * 85ms);
+  }
+
+  .pgl-underline path {
+    stroke-dashoffset: 300;
+    animation: pgl-draw-line 1100ms var(--pgl-ease) 1250ms forwards;
+  }
+
+  .pgl-hero__demo {
+    animation: pgl-stage-in 1300ms var(--pgl-ease) 280ms both;
+  }
+
+  @keyframes pgl-rise {
+    from { opacity: 0; transform: translateY(18px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  @keyframes pgl-word-in {
+    from { opacity: 0; transform: translateY(0.55em) rotateX(-35deg); filter: blur(14px); }
+    to { opacity: 1; transform: none; filter: blur(0); }
+  }
+
+  @keyframes pgl-draw-line {
+    to { stroke-dashoffset: 0; }
+  }
+
+  @keyframes pgl-stage-in {
+    from { opacity: 0; transform: translateY(40px) scale(0.96); filter: blur(10px); }
+    to { opacity: 1; transform: none; filter: none; }
+  }
+
+  /* ------------------------------------------------------ Ambient: aurora */
+  .pgl-aurora--a { animation: pgl-drift-a 26s var(--pgl-ease-in-out) infinite alternate; }
+  .pgl-aurora--b { animation: pgl-drift-b 32s var(--pgl-ease-in-out) infinite alternate; }
+  .pgl-aurora--c { animation: pgl-drift-c 38s var(--pgl-ease-in-out) infinite alternate; }
+
+  @keyframes pgl-drift-a {
+    from { transform: translate3d(0, 0, 0) scale(1); }
+    to { transform: translate3d(calc(var(--pgl-dir) * 9%), 8%, 0) scale(1.12); }
+  }
+
+  @keyframes pgl-drift-b {
+    from { transform: translate3d(0, 0, 0) scale(1.05); }
+    to { transform: translate3d(calc(var(--pgl-dir) * -10%), 12%, 0) scale(0.95); }
+  }
+
+  @keyframes pgl-drift-c {
+    from { transform: translate3d(0, 0, 0) scale(1); }
+    to { transform: translate3d(calc(var(--pgl-dir) * 12%), -9%, 0) scale(1.15); }
+  }
+
+  /* Satellites around the stage. */
+  .pgl-float--a { animation: pgl-bob 6.5s var(--pgl-ease-in-out) infinite alternate; }
+  .pgl-float--b { animation: pgl-bob 7.5s var(--pgl-ease-in-out) -2.4s infinite alternate; }
+
+  @keyframes pgl-bob {
+    from { translate: 0 -7px; }
+    to { translate: 0 8px; }
+  }
+
+  /* ----------------------------------------------------------- Rail ticker */
+  .pgl-marquee__track {
+    animation: pgl-marquee 56s linear infinite;
+  }
+
+  html[dir="rtl"] .pgl-marquee__track {
+    animation-name: pgl-marquee-rtl;
+  }
+
+  .pgl-marquee:hover .pgl-marquee__track,
+  .pgl-marquee:focus-within .pgl-marquee__track,
+  .pgl-marquee[data-paused] .pgl-marquee__track {
+    animation-play-state: paused;
+  }
+
+  @keyframes pgl-marquee {
+    to { transform: translateX(-50%); }
+  }
+
+  @keyframes pgl-marquee-rtl {
+    to { transform: translateX(50%); }
+  }
+
+  /* ------------------------------------------------------------ Live pulse */
+  /* Limited iterations, so nothing blinks forever (WCAG 2.2.2). */
+  .pgl-pulse::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: inherit;
+    animation: pgl-ping 1.7s var(--pgl-ease) 6;
+  }
+
+  @keyframes pgl-ping {
+    0% { transform: scale(1); opacity: 0.7; }
+    80%, 100% { transform: scale(2.8); opacity: 0; }
+  }
+
+  /* ------------------------------------------------------ Demo transitions */
+  .pgl-demo__action > * {
+    animation: pgl-swap var(--pgl-dur-2) var(--pgl-ease) both;
+  }
+
+  @keyframes pgl-swap {
+    from { opacity: 0; transform: translateY(8px) scale(0.97); }
+    to { opacity: 1; transform: none; }
+  }
+
+  .pgl-otp-digit {
+    display: inline-block;
+    animation: pgl-type 260ms var(--pgl-ease) both;
+    animation-delay: calc(200ms + var(--pgl-i, 0) * 260ms);
+  }
+
+  .pgl-otp-box {
+    animation: pgl-box-glow 520ms var(--pgl-ease) both;
+    animation-delay: calc(160ms + var(--pgl-i, 0) * 260ms);
+  }
+
+  @keyframes pgl-type {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  @keyframes pgl-box-glow {
+    0% { border-color: var(--pgl-line-strong); }
+    40% { border-color: var(--pgl-blue); box-shadow: 0 0 0 4px color-mix(in srgb, var(--pgl-blue) 24%, transparent); }
+    100% { border-color: var(--pgl-line-strong); }
+  }
+
+  .pgl-qr__scan {
+    animation: pgl-scan 1.1s var(--pgl-ease-in-out) 3 alternate;
+  }
+
+  @keyframes pgl-scan {
+    0% { top: 6px; opacity: 1; }
+    100% { top: calc(100% - 8px); opacity: 1; }
+  }
+
+  .pgl-mini-link__qr::after {
+    animation: pgl-scan-box 2.6s var(--pgl-ease-in-out) infinite alternate;
+  }
+
+  @keyframes pgl-scan-box {
+    from { top: 4px; }
+    to { top: calc(100% - 6px); }
+  }
+
+  .pgl-push-card {
+    animation: pgl-drop 560ms var(--pgl-ease-spring) both;
+  }
+
+  .pgl-push-card__btn {
+    animation: pgl-tap 420ms var(--pgl-ease) 1.2s both;
+  }
+
+  @keyframes pgl-drop {
+    from { opacity: 0; transform: translateY(-22px) scale(0.96); }
+    to { opacity: 1; transform: none; }
+  }
+
+  @keyframes pgl-tap {
+    50% { transform: scale(0.88); }
+  }
+
+  .pgl-bar__fill {
+    width: var(--pgl-sweep);
+    animation: pgl-sweep 2s var(--pgl-ease-in-out) both;
+  }
+
+  @keyframes pgl-sweep {
+    from { --pgl-sweep: 0%; }
+    to { --pgl-sweep: 100%; }
+  }
+
+  .pgl-spinner {
+    animation: pgl-spin 0.8s linear infinite;
+  }
+
+  @keyframes pgl-spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .pgl-check__tick {
+    stroke-dashoffset: 40;
+    animation: pgl-draw 520ms var(--pgl-ease) 160ms forwards;
+  }
+
+  .pgl-check__circle {
+    animation: pgl-pop 520ms var(--pgl-ease-spring) both;
+    transform-origin: center;
+  }
+
+  .pgl-demo__success::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(40% 70% at 50% 50%, color-mix(in srgb, var(--pgl-green) 24%, transparent), transparent 70%);
+    animation: pgl-burst 1400ms var(--pgl-ease) both;
+    pointer-events: none;
+  }
+
+  @keyframes pgl-draw {
+    to { stroke-dashoffset: 0; }
+  }
+
+  @keyframes pgl-pop {
+    from { transform: scale(0.5); opacity: 0; }
+    to { transform: none; opacity: 1; }
+  }
+
+  @keyframes pgl-burst {
+    0% { opacity: 0; transform: scale(0.4); }
+    35% { opacity: 1; }
+    100% { opacity: 0.35; transform: scale(1.25); }
+  }
+
+  .pgl-demo__ledger[data-active] .pgl-demo__lines li {
+    animation: pgl-post 460ms var(--pgl-ease) both;
+    animation-delay: calc(var(--pgl-i, 0) * 150ms);
+  }
+
+  @keyframes pgl-post {
+    from { opacity: 0.2; transform: translateX(calc(var(--pgl-dir) * -12px)); }
+    to { opacity: 1; transform: none; }
+  }
+
+  .pgl-demo__ledger[data-active] {
+    animation: pgl-glow 1100ms var(--pgl-ease) both;
+  }
+
+  @keyframes pgl-glow {
+    0% { box-shadow: 0 30px 50px -22px rgba(7, 11, 24, 0.85), 0 0 0 0 color-mix(in srgb, var(--pgl-teal) 55%, transparent); }
+    45% { box-shadow: 0 30px 50px -22px rgba(7, 11, 24, 0.85), 0 0 0 9px transparent; }
+    100% { box-shadow: 0 30px 50px -22px rgba(7, 11, 24, 0.85), 0 0 40px -8px color-mix(in srgb, var(--pgl-teal) 50%, transparent); }
+  }
+
+  /* ------------------------------------------------------- Section effects */
+  .pgl-flow__runner {
+    transition: transform 1.6s var(--pgl-ease-in-out) 200ms;
+  }
+
+  .pgl-flow__icon {
+    transition-delay: calc(300ms + var(--pgl-i, 0) * 280ms);
+  }
+
+  .pgl-flow[data-revealed] .pgl-flow__icon {
+    animation: pgl-node-pop 700ms var(--pgl-ease-spring) both;
+    animation-delay: calc(300ms + var(--pgl-i, 0) * 280ms);
+  }
+
+  @keyframes pgl-node-pop {
+    0% { transform: scale(0.82); }
+    60% { transform: scale(1.08); }
+    100% { transform: none; }
+  }
+
+  .pgl-cell--pos[data-revealed] .pgl-pos__s1 {
+    animation: pgl-pos-wait 3.4s var(--pgl-ease) 500ms both;
+  }
+
+  .pgl-cell--pos[data-revealed] .pgl-pos__s2 {
+    animation: pgl-pos-paid 3.4s var(--pgl-ease) 500ms both;
+  }
+
+  /* Exclusive cross-fade: the waiting label is gone before "Paid" appears. */
+  @keyframes pgl-pos-wait {
+    0%, 52% { opacity: 1; transform: none; }
+    60%, 100% { opacity: 0; transform: translateY(-4px); }
+  }
+
+  @keyframes pgl-pos-paid {
+    0%, 64% { opacity: 0; transform: translateY(5px); }
+    74%, 100% { opacity: 1; transform: none; }
+  }
+
+  .pgl-steps[data-revealed] .pgl-steps__num {
+    animation: pgl-step-on 560ms var(--pgl-ease-spring) both;
+    animation-delay: calc(250ms + var(--pgl-i, 0) * 200ms);
+  }
+
+  @keyframes pgl-step-on {
+    0% { transform: scale(0.8); }
+    60% { transform: scale(1.12); }
+    100% { transform: none; }
+  }
+
+  .pgl-code::before {
+    animation: pgl-orbit 7s linear infinite;
+  }
+
+  @keyframes pgl-orbit {
+    to { --pgl-angle: 360deg; }
+  }
+
+  .pgl-lazy__placeholder {
+    animation: pgl-skeleton 1.6s linear infinite;
+  }
+
+  @keyframes pgl-skeleton {
+    to { background-position: -220% 0; }
+  }
+
+  .pgl-invariant__head .pgl-pulse::after {
+    animation-iteration-count: infinite;
+  }
+
+  .pgl-cursor {
+    animation: pgl-blink 1.1s steps(2, start) infinite;
+  }
+
+  @keyframes pgl-blink {
+    to { visibility: hidden; }
+  }
+
+  /* ------------------------------------- Progressive: scroll-driven effects */
+  @supports (animation-timeline: scroll()) {
+    .pgl-progress {
+      display: block;
+      animation: pgl-progress linear both;
+      animation-timeline: scroll(root block);
+    }
+
+    @keyframes pgl-progress {
+      to { transform: scaleX(1); }
+    }
+
+    .pgl-hero__bg {
+      animation: pgl-parallax linear both;
+      animation-timeline: scroll(root block);
+      animation-range: 0 90vh;
+    }
+
+    @keyframes pgl-parallax {
+      to { transform: translateY(14vh); opacity: 0.35; }
+    }
+  }
+
+  /* Theme / language switches cross-fade instead of flashing. */
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 320ms;
+    animation-timing-function: var(--pgl-ease, ease);
+  }
+}
+
+/* Hard stop: reduced motion disables every animation and transition on the
+   page (including Vuetify internals inside it) and shows final states. */
+@media (prefers-reduced-motion: reduce) {
+  .pgl-root *,
+  .pgl-root *::before,
+  .pgl-root *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+
+  .pgl-demo {
+    transform: none;
+  }
+
+  .pgl-mini-link {
+    transform: none;
+  }
+
+  .pgl-pos__s1 {
+    opacity: 0;
+  }
+
+  .pgl-pos__s2 {
+    opacity: 1;
+  }
+
+  .pgl-flow__runner {
+    transform: none;
+  }
+
+  .pgl-marquee__track {
+    flex-wrap: wrap;
+    width: auto;
+    justify-content: center;
+  }
+
+  .pgl-marquee__group[aria-hidden="true"] {
+    display: none;
+  }
+
+  .pgl-marquee {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+}

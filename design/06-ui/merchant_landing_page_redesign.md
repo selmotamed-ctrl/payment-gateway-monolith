@@ -106,3 +106,51 @@ Not claimed on purpose: named partner gateways as "supported", outbound signed m
 - Hero is static HTML + small SVG; no images except the existing logo.
 - `landing.css` and the page JS live in the landing route chunk; `DeveloperSection` is a separate chunk loaded when the section is within 600 px of the viewport, with a reserved-height placeholder to avoid layout shift.
 - No new runtime dependency; decimal.js was already in the bundle.
+
+---
+
+## 9. Visual system v2 — "Aurora Ledger" (2026-11-04, second pass)
+
+The first pass delivered the structure and the simulator but the page read as plain: a flat canvas, hairline boxes and, above all, **cramped type**. This pass keeps every section, claim, string and test and rebuilds the visual layer.
+
+### 9.1 What was wrong (measured, not guessed)
+
+| Finding | Evidence | Fix |
+| :--- | :--- | :--- |
+| Word spacing collapsed ("Paymentlinks", "Getstarted") everywhere | Plus Jakarta Sans has a **0.17 em** word space (Inter 0.28, Geist 0.25, Readex 0.28), read from the font tables with fontkit and confirmed in the browser (`a b` vs `ab` width) | The landing uses Inter (body) + Geist (display) + Readex Pro (Arabic); all four portals get `word-spacing: 0.07em` on the shell font (≈0.24 em) |
+| Dark mode painted only the first screen | `.pgl-root` is a flex child of Vuetify's app wrapper; `overflow-x: clip` makes its automatic minimum height 0, so it shrank to 900 px | `flex: none` on the root, plus `html/body:has(.pgl-root)` canvas colours for overscroll |
+| Tiled backgrounds (grid, grain) drew once | The app-wide reset sets `background-repeat: no-repeat` on every element | Explicit `background-repeat: repeat` on each tiled layer |
+| Grain showed as a single square | SVG-filter noise under `mix-blend-mode` rasterised one tile | A 128 px pre-rendered PNG alpha tile (`assets/images/noise-128.png`), no blend mode |
+| Floating chip landed on the wrong side in RTL | `dir="ltr"` on the positioned element flips *its own* `inset-inline-end` | `dir` moved to an inner span |
+| Light-theme helper text 3.8–4.15:1 | axe-core `color-contrast` | `--pgl-ink-3` darkened to `#5a6580` (≥4.8:1 on every surface) |
+| Lazy developer section never mounted | `content-visibility: auto` hides skipped subtrees from IntersectionObserver | Removed |
+
+### 9.2 Research that shaped it (2026-11-04)
+
+- Fintech hero patterns (designrevision.com, saasframe.io): show the real product with realistic numbers (Mercury, Revolut), put a working tool in the hero (Wise), keep one primary CTA, lead with a trust signal, then a dedicated security section before the final CTA.
+- Typography (muz.li 2026 pairings, madegooddesigns): grotesque display + Inter body is the dominant SaaS pairing; a high-contrast serif accent on one word is the 2026 trend. Chosen: **Geist** display, **Inter** body, **Instrument Serif italic** accent ("dinar"), **Readex Pro** for Arabic (Latin and Arabic metrics are matched by design).
+- Depth (cruip, 21st.dev, frankx): 2–4 blurred colour blobs + a masked grid + fine grain; spotlight cards driven by `--mx/--my` custom properties; animated conic-gradient borders via `@property`; all hover effects guarded by `@media (hover: hover)`.
+- Motion (buildmvpfast, MDN): scroll-driven animation (`animation-timeline`) ships in Chrome/Edge and Safari 26 but not in Firefox by default, so it is strictly progressive enhancement behind `@supports`; reduced motion must *remove* motion, not shorten it.
+
+### 9.3 System
+
+| Layer | Decision |
+| :--- | :--- |
+| Palette | Light: cool paper `#f5f6fb`, ink `#0a1020`; dark: deep navy `#05070f`. Accent trio blue `#2f5bff` → violet `#7a55ff` → teal `#0fb5a3` (money/"verified"). Brand gradient buttons are white-on-`#3a63ff→#6b4dff` (≥4.7:1). |
+| Backdrop | Three blurred aurora blobs (slow `transform` drift), a 64 px masked grid, grain tile. A scroll-timeline parallax moves the backdrop where supported. |
+| Header | Floating glass pill (appears on scroll), active-section highlight from IntersectionObserver, 3 px scroll-progress bar via `scroll()` timeline. |
+| Hero | Word-by-word blur-rise headline; the last word is a serif-italic gradient with a drawn SVG underline; stage tilts toward the pointer (`--rx/--ry`, ±6°, hover devices only); ledger journal is a dark "terminal" that overlaps only reserved padding (it can no longer cover content); success turns the window border green. |
+| Rail ticker | Endless pill marquee of real capabilities, pauses on hover/focus and has a visible pause button (WCAG 2.2.2). |
+| Bento | Glass cards with a tint per cell, cursor spotlight + gradient hairline, lift on hover. |
+| Stats | Dark band with gradient numerals and count-up. |
+| Developer window | Conic hairline that orbits (`@property --pgl-angle`), always-dark code surface. |
+| Security | The invariant card is a live ticker: Σ debits and Σ credits advance together every 2.2 s using BigInt counts of 1/10,000, so the difference is always exactly `0.0000`. No floating point touches a money-looking value. |
+| FAQ | `::details-content` height/opacity transition where supported. |
+| Final CTA | Gradient card with aurora, grid and a proof row. |
+
+### 9.4 Verification
+
+- axe-core (wcag2a/aa, wcag21aa, best-practice) on light/dark × EN/AR × 1440/390 px: **0 violations** in all six; the two items axe left "incomplete" (scrollable `<pre>`) now carry `role="region"`.
+- Playwright merchant suite (landing, a11y, shell, auth): 17/17. No horizontal overflow at 360/390/820/1440/1920 px; no console errors; reduced motion shows the completed state with nothing hidden.
+- Unit: 23 Bun tests, including BigInt ticker invariants (5,000 ticks, difference always `0.0000`), tilt maths and headline word splitting.
+- Fonts are self-hosted under `assets/fonts/landing/` with their SIL OFL licences; total ≈ 160 KB, and only the script actually shown is downloaded (`unicode-range`).

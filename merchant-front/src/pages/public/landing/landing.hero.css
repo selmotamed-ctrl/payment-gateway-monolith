@@ -1,0 +1,1043 @@
+/* ============================================================================
+ * Landing — part 2: header, hero, product stage (the interactive payment demo).
+ * ========================================================================== */
+
+/* ------------------------------------------------------------------ Header */
+.pgl-progress {
+  position: fixed;
+  inset-block-start: 0;
+  inset-inline: 0;
+  z-index: 70;
+  height: 3px;
+  background: linear-gradient(90deg, var(--pgl-blue), var(--pgl-violet), var(--pgl-teal));
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  pointer-events: none;
+  display: none;
+}
+
+html[dir="rtl"] .pgl-progress {
+  transform-origin: 100% 50%;
+}
+
+.pgl-header {
+  position: fixed;
+  inset-block-start: 0;
+  inset-inline: 0;
+  z-index: 60;
+  padding: 12px var(--pgl-gutter) 0;
+  pointer-events: none;
+}
+
+.pgl-header__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: var(--pgl-max);
+  height: 60px;
+  margin-inline: auto;
+  padding-inline: 12px 10px;
+  border: 1px solid transparent;
+  border-radius: 20px;
+  background: transparent;
+  pointer-events: auto;
+  transition: background-color var(--pgl-dur-3) var(--pgl-ease), border-color var(--pgl-dur-3) var(--pgl-ease),
+    box-shadow var(--pgl-dur-3) var(--pgl-ease), backdrop-filter var(--pgl-dur-3);
+}
+
+.pgl-header[data-scrolled] .pgl-header__inner {
+  background: var(--pgl-glass);
+  border-color: var(--pgl-line);
+  box-shadow: var(--pgl-shadow-md);
+  -webkit-backdrop-filter: blur(18px) saturate(1.6);
+  backdrop-filter: blur(18px) saturate(1.6);
+}
+
+.pgl-brand-link {
+  display: inline-flex;
+  color: inherit;
+  text-decoration: none;
+  border-radius: 12px;
+}
+
+.pgl-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.pgl-brand__mark {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: linear-gradient(150deg, var(--pgl-surface), var(--pgl-surface-2));
+  border: 1px solid var(--pgl-line);
+  box-shadow: var(--pgl-shadow-sm);
+}
+
+.pgl-brand__text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.pgl-brand__name {
+  font-family: var(--pgl-font-display);
+  font-size: 0.98rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  color: var(--pgl-ink);
+}
+
+.pgl-brand__sub {
+  font-size: 0.7rem;
+  color: var(--pgl-ink-3);
+}
+
+html[dir="rtl"] .pgl-brand__name {
+  letter-spacing: 0;
+}
+
+.pgl-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 14px;
+}
+
+.pgl-nav a {
+  position: relative;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-weight: 540;
+  color: var(--pgl-ink-2);
+  text-decoration: none;
+  transition: color var(--pgl-dur-1), background-color var(--pgl-dur-2);
+}
+
+.pgl-nav a:hover {
+  color: var(--pgl-ink);
+  background: color-mix(in srgb, var(--pgl-ink) 5%, transparent);
+}
+
+.pgl-nav a[aria-current="true"] {
+  color: var(--pgl-ink);
+  background: color-mix(in srgb, var(--pgl-blue) 12%, transparent);
+}
+
+.pgl-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pgl-lang {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--pgl-line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--pgl-surface) 60%, transparent);
+}
+
+.pgl-lang button {
+  min-width: 34px;
+  height: 30px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--pgl-ink-3);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: color var(--pgl-dur-1), background-color var(--pgl-dur-2);
+}
+
+.pgl-lang button:hover {
+  color: var(--pgl-ink);
+}
+
+.pgl-lang button[aria-pressed="true"] {
+  color: var(--pgl-ink);
+  background: var(--pgl-card-solid);
+  box-shadow: var(--pgl-shadow-sm);
+}
+
+.pgl-root .pgl-header__login.v-btn {
+  height: 38px;
+  padding-inline: 14px;
+  border-radius: 12px;
+  color: var(--pgl-ink);
+  font-weight: 580;
+}
+
+.pgl-root .pgl-header__cta.v-btn {
+  height: 38px;
+  padding-inline: 18px;
+  border-radius: 12px;
+  background: var(--pgl-ink) !important;
+  color: var(--pgl-canvas) !important;
+  font-weight: 620;
+  box-shadow: var(--pgl-shadow-sm);
+  transition: transform var(--pgl-dur-2) var(--pgl-ease), box-shadow var(--pgl-dur-2) var(--pgl-ease);
+}
+
+.pgl-root .pgl-header__cta.v-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--pgl-shadow-md);
+}
+
+.pgl-root .pgl-header__cta .v-btn__overlay,
+.pgl-root .pgl-header__login .v-btn__overlay {
+  display: none;
+}
+
+@media (max-width: 1020px) {
+  .pgl-nav {
+    display: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .pgl-header__inner {
+    height: 56px;
+    gap: 8px;
+    padding-inline: 8px;
+  }
+
+  .pgl-brand__sub,
+  .pgl-root .pgl-header__login.v-btn {
+    display: none;
+  }
+
+  .pgl-root .pgl-header__cta.v-btn {
+    padding-inline: 13px;
+  }
+
+  .pgl-header__actions {
+    gap: 4px;
+  }
+}
+
+/* Brand name yields to the controls on narrow phones so nothing is clipped. */
+@media (max-width: 500px) {
+  .pgl-brand__text {
+    display: none;
+  }
+}
+
+/* -------------------------------------------------------------------- Hero */
+.pgl-hero {
+  position: relative;
+  isolation: isolate;
+  padding-block: calc(var(--pgl-header-h) + clamp(44px, 8vw, 110px)) clamp(64px, 8vw, 112px);
+  overflow: clip;
+}
+
+.pgl-hero__bg {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.pgl-aurora {
+  position: absolute;
+  width: min(62vmax, 980px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  filter: blur(76px);
+  opacity: 0.8;
+  will-change: transform;
+}
+
+.pgl-aurora--a {
+  inset-block-start: -34%;
+  inset-inline-start: -14%;
+  background: radial-gradient(circle at 40% 40%, var(--pgl-glow-a), transparent 64%);
+}
+
+.pgl-aurora--b {
+  inset-block-start: -26%;
+  inset-inline-end: -18%;
+  background: radial-gradient(circle at 55% 45%, var(--pgl-glow-b), transparent 62%);
+}
+
+.pgl-aurora--c {
+  inset-block-end: -52%;
+  inset-inline-start: 22%;
+  background: radial-gradient(circle at 50% 50%, var(--pgl-glow-c), transparent 62%);
+}
+
+.pgl-grid-bg {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--pgl-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--pgl-grid) 1px, transparent 1px);
+  background-size: 64px 64px;
+  background-repeat: repeat;
+  background-position: center top;
+  -webkit-mask-image: radial-gradient(ellipse 78% 68% at 50% 24%, #000 18%, transparent 78%);
+  mask-image: radial-gradient(ellipse 78% 68% at 50% 24%, #000 18%, transparent 78%);
+}
+
+/* Film grain: a 128px pre-rendered noise tile (alpha only) — no blend mode, so it
+   tiles reliably in every engine and keeps gradients from banding. */
+.pgl-grain {
+  position: absolute;
+  inset: 0;
+  opacity: calc(var(--pgl-grain-opacity) * 9);
+  background-image: url("@/assets/images/noise-128.png");
+  background-size: 128px 128px;
+  background-repeat: repeat;
+}
+
+.pgl-hero__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(36px, 5.4vw, 84px);
+}
+
+.pgl-hero__copy {
+  min-width: 0;
+}
+
+.pgl-eyebrow--pill {
+  gap: 9px;
+  margin-bottom: clamp(18px, 2.4vw, 26px);
+  padding: 7px 15px 7px 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background:
+    linear-gradient(var(--pgl-glass), var(--pgl-glass)) padding-box,
+    linear-gradient(110deg, color-mix(in srgb, var(--pgl-blue) 60%, transparent), color-mix(in srgb, var(--pgl-violet) 50%, transparent), color-mix(in srgb, var(--pgl-teal) 55%, transparent)) border-box;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--pgl-shadow-sm);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  color: var(--pgl-ink-2);
+}
+
+html[dir="rtl"] .pgl-eyebrow--pill {
+  padding: 7px 12px 7px 15px;
+}
+
+/* Headline: each word is its own box so it can be revealed in sequence. */
+.pgl-h1 {
+  display: block;
+}
+
+.pgl-h1__line {
+  display: block;
+}
+
+.pgl-word {
+  display: inline-block;
+  padding-inline-end: 0.06em;
+}
+
+.pgl-h1__line--accent .pgl-word {
+  background: linear-gradient(100deg, var(--pgl-blue) 0%, var(--pgl-violet) 55%, var(--pgl-teal) 120%);
+  background-size: 260% 100%;
+  background-position: calc(var(--k, 0) * 38%) 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+.pgl-h1__em {
+  position: relative;
+  display: inline-block;
+}
+
+html:not([dir="rtl"]) .pgl-h1__line--accent .pgl-h1__em .pgl-word {
+  font-family: var(--pgl-font-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 1.1em;
+  letter-spacing: -0.015em;
+  line-height: 0.92;
+  background-position: 100% 0;
+}
+
+.pgl-underline {
+  position: absolute;
+  inset-inline: -2%;
+  inset-block-end: -0.16em;
+  width: 104%;
+  height: 0.26em;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.pgl-underline path {
+  fill: none;
+  stroke: url(#pgl-underline-grad);
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-dasharray: 300;
+  stroke-dashoffset: 0;
+}
+
+.pgl-hero__proof {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  margin-top: clamp(26px, 3.4vw, 38px);
+}
+
+.pgl-hero__proof li {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  font-weight: 540;
+  color: var(--pgl-ink-2);
+}
+
+.pgl-hero__proof .v-icon {
+  color: var(--pgl-green);
+}
+
+/* ------------------------------------------------------- Product stage */
+.pgl-hero__demo {
+  --rx: 0deg;
+  --ry: 0deg;
+  position: relative;
+  min-width: 0;
+  perspective: 1500px;
+}
+
+.pgl-stage-glow {
+  position: absolute;
+  inset: 6% -6% -4%;
+  z-index: -1;
+  border-radius: 40%;
+  background:
+    radial-gradient(60% 50% at 30% 30%, var(--pgl-glow-a), transparent 70%),
+    radial-gradient(50% 50% at 75% 70%, var(--pgl-glow-b), transparent 70%);
+  filter: blur(50px);
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+.pgl-demo {
+  position: relative;
+  transform-style: preserve-3d;
+  transform: rotateX(var(--rx)) rotateY(var(--ry));
+  transition: transform 500ms var(--pgl-ease);
+  will-change: transform;
+}
+
+.pgl-demo__window {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--pgl-line);
+  border-radius: 26px;
+  background: var(--pgl-card);
+  -webkit-backdrop-filter: blur(22px) saturate(1.5);
+  backdrop-filter: blur(22px) saturate(1.5);
+  box-shadow: var(--pgl-shadow-lg);
+  transition: box-shadow 700ms var(--pgl-ease), border-color 700ms var(--pgl-ease);
+}
+
+/* Top sheen, like light catching glass. */
+.pgl-demo__window::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 46%;
+  background: linear-gradient(180deg, color-mix(in srgb, #fff 55%, transparent), transparent);
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.v-theme--dark .pgl-demo__window::before {
+  opacity: 0.07;
+}
+
+.pgl-demo[data-step="3"] .pgl-demo__window,
+.pgl-demo[data-step="4"] .pgl-demo__window {
+  border-color: color-mix(in srgb, var(--pgl-green) 55%, var(--pgl-line));
+  box-shadow: var(--pgl-shadow-lg), 0 0 0 4px color-mix(in srgb, var(--pgl-green) 14%, transparent), 0 0 70px -10px color-mix(in srgb, var(--pgl-green) 45%, transparent);
+}
+
+.pgl-demo__chrome {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--pgl-line);
+  background: color-mix(in srgb, var(--pgl-surface-2) 55%, transparent);
+}
+
+.pgl-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--pgl-line-strong);
+}
+
+.pgl-dot:nth-child(1) { background: #ff6159; }
+.pgl-dot:nth-child(2) { background: #ffbd2e; }
+.pgl-dot:nth-child(3) { background: #28c940; }
+
+.pgl-demo__url {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin-inline-start: 10px;
+  padding: 4px 12px;
+  border: 1px solid var(--pgl-line);
+  border-radius: 999px;
+  background: var(--pgl-card-solid);
+  font-size: 0.72rem;
+  color: var(--pgl-ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pgl-demo__body {
+  position: relative;
+  display: grid;
+  gap: 16px;
+  padding: clamp(18px, 2.4vw, 26px) clamp(18px, 2.4vw, 26px) clamp(54px, 6vw, 64px);
+}
+
+.pgl-demo__merchant {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pgl-demo__avatar {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex: none;
+  border-radius: 13px;
+  background: linear-gradient(145deg, #1b2547, #0a1020);
+  color: #fff;
+  font-family: var(--pgl-font-display);
+  font-size: 1.05rem;
+  font-weight: 700;
+  box-shadow: 0 8px 18px -8px rgba(10, 16, 32, 0.6);
+}
+
+.pgl-demo__merchant-name {
+  font-weight: 640;
+  line-height: 1.25;
+  color: var(--pgl-ink);
+}
+
+.pgl-demo__merchant-sub {
+  font-size: 0.8rem;
+  color: var(--pgl-ink-3);
+}
+
+.pgl-demo__lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-inline-start: auto;
+  padding: 5px 11px;
+  border: 1px solid color-mix(in srgb, var(--pgl-blue) 30%, var(--pgl-line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--pgl-blue) 9%, transparent);
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--pgl-blue);
+  white-space: nowrap;
+}
+
+.pgl-demo__amount {
+  font-family: var(--pgl-font-display);
+  font-size: clamp(2.3rem, 1.4rem + 2.8vw, 3.4rem);
+  font-weight: 650;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  color: var(--pgl-ink);
+  text-align: start;
+}
+
+html[dir="rtl"] .pgl-demo__amount {
+  text-align: end;
+}
+
+.pgl-demo__ccy {
+  margin-inline-start: 10px;
+  font-size: 0.36em;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  color: var(--pgl-ink-3);
+}
+
+.pgl-demo__rails {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pgl-rail {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 13px;
+  border: 1px solid var(--pgl-line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--pgl-surface) 70%, transparent);
+  color: var(--pgl-ink-2);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--pgl-dur-1), background-color var(--pgl-dur-2), color var(--pgl-dur-1), box-shadow var(--pgl-dur-2), transform var(--pgl-dur-2) var(--pgl-ease);
+}
+
+.pgl-rail:hover {
+  transform: translateY(-1px);
+  border-color: var(--pgl-line-strong);
+  color: var(--pgl-ink);
+}
+
+.pgl-rail[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--pgl-blue) 70%, transparent);
+  background: color-mix(in srgb, var(--pgl-blue) 12%, var(--pgl-card-solid));
+  color: var(--pgl-ink);
+  box-shadow: 0 6px 16px -8px color-mix(in srgb, var(--pgl-blue) 70%, transparent), 0 0 0 1px color-mix(in srgb, var(--pgl-blue) 60%, transparent) inset;
+}
+
+.pgl-demo__action {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 124px;
+  padding: 16px;
+  border: 1px solid var(--pgl-line);
+  border-radius: 18px;
+  background:
+    radial-gradient(120% 140% at 50% -20%, color-mix(in srgb, var(--pgl-blue) 11%, transparent), transparent 60%),
+    color-mix(in srgb, var(--pgl-surface-2) 70%, transparent);
+  color: var(--pgl-ink-2);
+  font-size: 0.9rem;
+  text-align: center;
+  overflow: hidden;
+}
+
+.pgl-demo__hint,
+.pgl-demo__verifying,
+.pgl-demo__redirect {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 540;
+}
+
+.pgl-demo__redirect {
+  flex-direction: column;
+  width: min(280px, 100%);
+}
+
+.pgl-bar {
+  display: block;
+  width: 100%;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--pgl-line);
+  overflow: hidden;
+}
+
+.pgl-bar__fill {
+  display: block;
+  height: 100%;
+  width: 70%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--pgl-blue), var(--pgl-violet));
+}
+
+.pgl-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--pgl-line-strong);
+  border-top-color: var(--pgl-blue);
+  border-radius: 50%;
+}
+
+.pgl-demo__otp {
+  display: flex;
+  gap: 8px;
+}
+
+.pgl-otp-box {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 52px;
+  border: 1px solid var(--pgl-line-strong);
+  border-radius: 12px;
+  background: var(--pgl-card-solid);
+  font-family: var(--pgl-font-mono);
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--pgl-ink);
+  box-shadow: var(--pgl-shadow-sm);
+}
+
+.pgl-demo__qr {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  padding: 7px;
+  border-radius: 14px;
+  background: #fff;
+  color: #0a1020;
+  box-shadow: var(--pgl-shadow-md);
+}
+
+.pgl-qr {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.pgl-qr__scan {
+  position: absolute;
+  inset-inline: 4px;
+  top: 6px;
+  height: 3px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, transparent, var(--pgl-blue), transparent);
+  box-shadow: 0 0 14px 3px color-mix(in srgb, var(--pgl-blue) 65%, transparent);
+}
+
+.pgl-push-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px 10px 14px;
+  border: 1px solid var(--pgl-line);
+  border-radius: 16px;
+  background: var(--pgl-card-solid);
+  box-shadow: var(--pgl-shadow-md);
+  font-size: 0.85rem;
+}
+
+html[dir="rtl"] .pgl-push-card {
+  padding: 10px 14px 10px 12px;
+}
+
+.pgl-push-card__btn {
+  padding: 5px 13px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #3a63ff, #6b4dff);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.pgl-demo__card {
+  display: grid;
+  gap: 8px;
+  width: min(250px, 100%);
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #1b2547, #0a1020 70%);
+  color: #e8edff;
+  text-align: start;
+  box-shadow: var(--pgl-shadow-md);
+}
+
+.pgl-demo__success {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.pgl-check {
+  width: 54px;
+  height: 54px;
+  flex: none;
+}
+
+.pgl-check__circle {
+  fill: color-mix(in srgb, var(--pgl-green) 14%, transparent);
+  stroke: var(--pgl-green);
+  stroke-width: 2.5;
+}
+
+.pgl-check__tick {
+  fill: none;
+  stroke: var(--pgl-green);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 40;
+}
+
+.pgl-demo__success-title {
+  font-weight: 650;
+  color: var(--pgl-ink);
+}
+
+.pgl-demo__ref {
+  color: var(--pgl-ink-3);
+  font-size: 0.78rem;
+}
+
+.pgl-demo__status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.pgl-demo__progress {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pgl-demo__progress li {
+  width: 30px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--pgl-line-strong);
+  transition: background-color var(--pgl-dur-3) var(--pgl-ease), box-shadow var(--pgl-dur-3);
+}
+
+.pgl-demo__progress li[data-done] {
+  background: linear-gradient(90deg, var(--pgl-blue), var(--pgl-violet));
+  box-shadow: 0 0 10px -1px color-mix(in srgb, var(--pgl-blue) 70%, transparent);
+}
+
+.pgl-demo[data-step="3"] .pgl-demo__progress li[data-done],
+.pgl-demo[data-step="4"] .pgl-demo__progress li[data-done] {
+  background: linear-gradient(90deg, var(--pgl-green), var(--pgl-teal));
+  box-shadow: 0 0 10px -1px color-mix(in srgb, var(--pgl-green) 70%, transparent);
+}
+
+/* The ledger journal: always a dark "terminal" so it pops in both themes. It
+   overlaps only the padding reserved at the bottom of the window — never content. */
+.pgl-demo__ledger {
+  position: relative;
+  z-index: 2;
+  margin-block-start: -44px;
+  margin-inline: clamp(14px, 4%, 30px) clamp(-10px, -2%, 0px);
+  padding: 15px 18px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  background: linear-gradient(160deg, #101936, #070b18 75%);
+  color: #cdd6f4;
+  box-shadow: 0 30px 50px -22px rgba(7, 11, 24, 0.85), 0 0 0 1px rgba(0, 0, 0, 0.2);
+  transition: border-color 700ms var(--pgl-ease), box-shadow 700ms var(--pgl-ease);
+}
+
+.pgl-demo__ledger[data-active] {
+  border-color: color-mix(in srgb, var(--pgl-teal) 55%, transparent);
+  box-shadow: 0 30px 50px -22px rgba(7, 11, 24, 0.85), 0 0 40px -8px color-mix(in srgb, var(--pgl-teal) 50%, transparent);
+}
+
+.pgl-demo__ledger-head,
+.pgl-demo__ledger-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.74rem;
+}
+
+.pgl-demo__ledger-head {
+  padding-bottom: 10px;
+  color: #8793b8;
+  letter-spacing: 0.04em;
+}
+
+.pgl-demo__ledger-head .pgl-mono {
+  color: #aab5da;
+}
+
+.pgl-demo__lines {
+  display: grid;
+  gap: 7px;
+  padding-block: 10px;
+  border-block: 1px dashed rgba(255, 255, 255, 0.12);
+}
+
+.pgl-demo__lines li {
+  display: grid;
+  grid-template-columns: 30px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.84rem;
+}
+
+.pgl-demo__acct {
+  color: #d5dcf5;
+}
+
+.pgl-side {
+  display: inline-grid;
+  place-items: center;
+  height: 20px;
+  border-radius: 6px;
+  font-family: var(--pgl-font-mono);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.pgl-side--dr {
+  background: rgba(107, 147, 255, 0.18);
+  color: #9db8ff;
+}
+
+.pgl-side--cr {
+  background: rgba(45, 212, 191, 0.16);
+  color: #6fe7d6;
+}
+
+.pgl-demo__ledger-foot {
+  padding-top: 11px;
+}
+
+.pgl-balanced {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+  color: #5eead4;
+}
+
+.pgl-demo__wallet {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  color: #8793b8;
+}
+
+.pgl-demo__wallet b {
+  font-size: 0.95rem;
+  color: #6ee7b7;
+}
+
+.pgl-demo__controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.pgl-demo__caption {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  margin-inline-start: 6px;
+  font-size: 0.86rem;
+  color: var(--pgl-ink-2);
+}
+
+.pgl-demo__step {
+  padding: 2px 8px;
+  border-radius: 7px;
+  background: var(--pgl-surface-2);
+  font-size: 0.74rem;
+  font-weight: 650;
+  color: var(--pgl-ink-3);
+}
+
+.pgl-demo__note {
+  margin-top: 10px;
+  font-size: 0.74rem;
+  color: var(--pgl-ink-3);
+}
+
+/* Floating satellites around the stage (decorative). */
+.pgl-float {
+  position: absolute;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 13px;
+  border: 1px solid var(--pgl-line);
+  border-radius: 14px;
+  background: var(--pgl-glass);
+  -webkit-backdrop-filter: blur(14px) saturate(1.5);
+  backdrop-filter: blur(14px) saturate(1.5);
+  box-shadow: var(--pgl-shadow-md);
+  font-size: 0.78rem;
+  font-weight: 620;
+  color: var(--pgl-ink);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.pgl-float .v-icon {
+  color: var(--pgl-teal);
+}
+
+/* Perched on the top edge of the window so they never cover its content. */
+.pgl-float--a {
+  inset-block-start: -22px;
+  inset-inline-start: 7%;
+}
+
+.pgl-float--b {
+  inset-block-start: -22px;
+  inset-inline-end: 7%;
+}
+
+@media (max-width: 960px) {
+  .pgl-hero__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pgl-hero__demo {
+    max-width: 580px;
+    margin-inline: auto;
+    width: 100%;
+  }
+
+  .pgl-float {
+    display: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .pgl-demo__body {
+    gap: 13px;
+  }
+
+  .pgl-demo__lock {
+    display: none;
+  }
+
+  .pgl-otp-box {
+    width: 36px;
+    height: 46px;
+  }
+
+  .pgl-demo__ledger {
+    margin-inline: 10px 0;
+  }
+}

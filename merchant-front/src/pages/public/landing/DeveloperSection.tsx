@@ -112,13 +112,13 @@ export const DeveloperSection = defineComponent({
                         <span class="pgl-code__verb">POST</span>
                         <span class="pgl-mono">/api/v1/external/links</span>
                     </div>
-                    <pre class="pgl-code__pre" tabindex={0} aria-label={t("Create a payment link request")}>
+                    <pre class="pgl-code__pre" role="region" tabindex={0} aria-label={t("Create a payment link request")}>
                         <code>{highlight(LANDING_SNIPPETS[language.value])}</code>
                     </pre>
                     <div class="pgl-code__res">
                         <span class="pgl-code__status">201 Created</span>
                     </div>
-                    <pre class="pgl-code__pre pgl-code__pre--res" tabindex={0} aria-label={t("Example response")}>
+                    <pre class="pgl-code__pre pgl-code__pre--res" role="region" tabindex={0} aria-label={t("Example response")}>
                         <code>{highlight(LANDING_SNIPPET_RESPONSE)}</code>
                     </pre>
                 </div>

@@ -1,0 +1,634 @@
+/* ============================================================================
+ * Merchant landing page — "Aurora Ledger" design system, part 1: fonts, tokens,
+ * typography, layout primitives and shared controls.
+ *
+ * Scope: everything is under `.pgl-root`. Light and dark are both first-class:
+ * dark values are applied under Vuetify's `.v-theme--dark`. RTL uses logical
+ * properties plus `html[dir="rtl"]` where a physical flip is unavoidable.
+ * Motion lives in landing.motion.css and is fully disabled for reduced motion.
+ * ========================================================================== */
+
+/* ------------------------------------------------------------------ Fonts */
+/* Self-hosted (SIL OFL, see assets/fonts/landing/LICENSE-*). The app-wide font
+   has a 0.17em word space, which reads as "Paymentlinks"; these have 0.25–0.28em. */
+@font-face {
+  font-family: "PGL Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("@/assets/fonts/landing/inter-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "PGL Geist";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("@/assets/fonts/landing/geist-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "PGL Serif";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("@/assets/fonts/landing/instrument-serif-latin-400-italic.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "PGL Readex";
+  font-style: normal;
+  font-weight: 160 700;
+  font-display: swap;
+  src: url("@/assets/fonts/landing/readex-pro-arabic-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC, U+102E0-102FB, U+10E60-10E7E, U+10EC2-10EC4, U+10EFC-10EFF, U+1EE00-1EEFF;
+}
+
+/* ----------------------------------------------------------------- Tokens */
+@property --pgl-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@property --pgl-sweep {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 0%;
+}
+
+.pgl-root {
+  /* Brand */
+  --pgl-blue: #2f5bff;
+  --pgl-blue-2: #5b86ff;
+  --pgl-violet: #7a55ff;
+  --pgl-teal: #0fb5a3;
+  --pgl-green: #16a34a;
+  --pgl-amber: #f59e0b;
+  --pgl-rose: #f0476b;
+
+  /* Surfaces & ink (light) */
+  --pgl-canvas: #f5f6fb;
+  --pgl-band: rgba(47, 91, 255, 0.045);
+  --pgl-surface: #ffffff;
+  --pgl-surface-2: #eef1f8;
+  --pgl-card: rgba(255, 255, 255, 0.78);
+  --pgl-card-solid: #ffffff;
+  --pgl-glass: rgba(255, 255, 255, 0.72);
+  --pgl-ink: #0a1020;
+  --pgl-ink-2: #46506a;
+  --pgl-ink-3: #5a6580;
+  --pgl-line: rgba(15, 23, 42, 0.09);
+  --pgl-line-strong: rgba(15, 23, 42, 0.17);
+  --pgl-grid: rgba(47, 91, 255, 0.07);
+  --pgl-glow-a: rgba(47, 91, 255, 0.34);
+  --pgl-glow-b: rgba(122, 85, 255, 0.28);
+  --pgl-glow-c: rgba(15, 181, 163, 0.26);
+  --pgl-grain-opacity: 0.045;
+  --pgl-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06), 0 2px 8px -2px rgba(15, 23, 42, 0.08);
+  --pgl-shadow-md: 0 10px 30px -12px rgba(30, 50, 120, 0.22), 0 2px 6px rgba(15, 23, 42, 0.05);
+  --pgl-shadow-lg: 0 40px 80px -28px rgba(32, 52, 140, 0.38), 0 18px 32px -18px rgba(15, 23, 42, 0.2);
+  --pgl-ring: rgba(47, 91, 255, 0.35);
+  --pgl-code-bg: #0b1020;
+
+  /* Motion */
+  --pgl-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --pgl-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --pgl-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --pgl-dur-1: 160ms;
+  --pgl-dur-2: 320ms;
+  --pgl-dur-3: 720ms;
+  --pgl-dir: 1;
+
+  /* Layout */
+  --pgl-header-h: 72px;
+  --pgl-max: 1200px;
+  --pgl-gutter: clamp(18px, 4.2vw, 36px);
+  --pgl-radius: 22px;
+  --pgl-radius-sm: 12px;
+
+  /* Type */
+  --pgl-font-body: "PGL Inter", "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --pgl-font-display: "PGL Geist", "PGL Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --pgl-font-serif: "PGL Serif", "Instrument Serif", Georgia, "Times New Roman", serif;
+  --pgl-font-mono: var(--pg-font-mono, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace);
+
+  /* The app shell is a flex container; with `overflow-x: clip` a flex child's automatic
+     minimum height is 0, so without `flex: none` this root shrinks to one viewport and
+     the canvas (and dark theme) stop painting after the first screen. */
+  flex: none;
+  min-height: 100vh;
+  background: var(--pgl-canvas);
+  color: var(--pgl-ink);
+  font-family: var(--pgl-font-body);
+  font-size: 1rem;
+  line-height: 1.6;
+  font-feature-settings: "kern", "calt", "liga", "cv11";
+  font-optical-sizing: auto;
+  /* The shell adds word-spacing for Plus Jakarta Sans; the landing fonts already have a proper space. */
+  word-spacing: normal;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
+}
+
+.v-theme--dark .pgl-root {
+  --pgl-blue: #6b93ff;
+  --pgl-blue-2: #8aa9ff;
+  --pgl-violet: #9a7bff;
+  --pgl-teal: #2dd4bf;
+  --pgl-green: #34d399;
+
+  --pgl-canvas: #05070f;
+  --pgl-band: rgba(107, 147, 255, 0.045);
+  --pgl-surface: #0c1120;
+  --pgl-surface-2: #111830;
+  --pgl-card: rgba(17, 24, 48, 0.62);
+  --pgl-card-solid: #0e1428;
+  --pgl-glass: rgba(10, 15, 32, 0.66);
+  --pgl-ink: #eef2ff;
+  --pgl-ink-2: #aab4d0;
+  --pgl-ink-3: #7b86a6;
+  --pgl-line: rgba(255, 255, 255, 0.085);
+  --pgl-line-strong: rgba(255, 255, 255, 0.18);
+  --pgl-grid: rgba(138, 169, 255, 0.075);
+  --pgl-glow-a: rgba(64, 104, 255, 0.42);
+  --pgl-glow-b: rgba(130, 90, 255, 0.34);
+  --pgl-glow-c: rgba(20, 200, 180, 0.28);
+  --pgl-grain-opacity: 0.07;
+  --pgl-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 8px -2px rgba(0, 0, 0, 0.5);
+  --pgl-shadow-md: 0 14px 34px -14px rgba(0, 0, 0, 0.7), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --pgl-shadow-lg: 0 44px 90px -30px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --pgl-ring: rgba(107, 147, 255, 0.5);
+  --pgl-code-bg: #070b18;
+}
+
+/* Arabic: Readex Pro, no tracking (Arabic letters join), taller line height. */
+html[dir="rtl"] .pgl-root {
+  --pgl-dir: -1;
+  --pgl-font-body: "PGL Readex", "PGL Inter", "Cairo", system-ui, sans-serif;
+  --pgl-font-display: "PGL Readex", "PGL Geist", "Cairo", system-ui, sans-serif;
+  line-height: 1.75;
+  font-feature-settings: "kern", "calt", "liga";
+}
+
+/* ------------------------------------------------------------ Base resets */
+.pgl-root :where(h1, h2, h3, h4, p, ul, ol, dl, dd, figure) {
+  margin: 0;
+}
+
+.pgl-root :where(ul, ol) {
+  padding: 0;
+  list-style: none;
+}
+
+.pgl-root :where(h1, h2, h3, h4) {
+  font-family: var(--pgl-font-display);
+  color: var(--pgl-ink);
+}
+
+.pgl-root [id] {
+  scroll-margin-top: calc(var(--pgl-header-h) + 12px);
+}
+
+.pgl-root section:focus,
+.pgl-main:focus {
+  outline: none;
+}
+
+.pgl-root ::selection {
+  background: color-mix(in srgb, var(--pgl-blue) 32%, transparent);
+}
+
+.pgl-container {
+  width: 100%;
+  max-width: var(--pgl-max);
+  margin-inline: auto;
+  padding-inline: var(--pgl-gutter);
+}
+
+.pgl-sr-only {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.pgl-mono {
+  font-family: var(--pgl-font-mono);
+  font-size: 0.86em;
+  letter-spacing: 0;
+  font-feature-settings: normal;
+}
+
+/* Tabular figures only where numbers must align (the app shell forces them on
+   everything, which makes body copy look uneven). */
+.pgl-tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "kern", "tnum", "zero";
+}
+
+.pgl-root :where(a, button, summary, input, [tabindex="0"]):focus-visible {
+  outline: 2px solid var(--pgl-blue);
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+
+.pgl-skip {
+  position: absolute;
+  inset-inline-start: 12px;
+  top: -64px;
+  z-index: 100;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: var(--pgl-ink);
+  color: var(--pgl-canvas);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.pgl-skip:focus {
+  top: 12px;
+}
+
+/* ------------------------------------------------------------- Typography */
+.pgl-h1 {
+  font-size: clamp(2.5rem, 1.2rem + 4.3vw, 4.35rem);
+  font-weight: 640;
+  line-height: 1.02;
+  letter-spacing: -0.042em;
+  text-wrap: balance;
+}
+
+.pgl-h2 {
+  font-size: clamp(2rem, 1.15rem + 2.7vw, 3.4rem);
+  font-weight: 620;
+  line-height: 1.08;
+  letter-spacing: -0.034em;
+  text-wrap: balance;
+}
+
+.pgl-h3 {
+  font-size: 1.28rem;
+  font-weight: 620;
+  line-height: 1.25;
+  letter-spacing: -0.018em;
+}
+
+.pgl-h4 {
+  font-size: 1.04rem;
+  font-weight: 620;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+html[dir="rtl"] .pgl-h1 {
+  line-height: 1.22;
+  letter-spacing: 0;
+  font-weight: 600;
+}
+
+html[dir="rtl"] .pgl-h2,
+html[dir="rtl"] .pgl-h3,
+html[dir="rtl"] .pgl-h4 {
+  line-height: 1.32;
+  letter-spacing: 0;
+  font-weight: 600;
+}
+
+.pgl-lede {
+  max-width: 62ch;
+  font-size: clamp(1.04rem, 0.98rem + 0.3vw, 1.2rem);
+  line-height: 1.65;
+  color: var(--pgl-ink-2);
+  text-wrap: pretty;
+}
+
+.pgl-lede--hero {
+  max-width: 54ch;
+  margin-top: clamp(18px, 2.4vw, 26px);
+}
+
+.pgl-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  font-family: var(--pgl-font-display);
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--pgl-blue);
+}
+
+.pgl-eyebrow:not(.pgl-eyebrow--pill)::before {
+  content: "";
+  width: 22px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--pgl-blue), var(--pgl-violet));
+}
+
+html[dir="rtl"] .pgl-eyebrow {
+  letter-spacing: 0;
+  font-size: 0.9rem;
+  text-transform: none;
+}
+
+.pgl-muted-note {
+  font-size: 0.85rem;
+  color: var(--pgl-ink-3);
+}
+
+/* ------------------------------------------------------------ Layout bits */
+.pgl-section {
+  position: relative;
+  padding-block: clamp(76px, 10vw, 140px);
+  /* No `content-visibility: auto` here: it hides skipped subtrees from IntersectionObserver
+     (breaking the lazy developer section and scroll reveals) and shifts layout on anchor jumps. */
+}
+
+.pgl-section--alt {
+  background: linear-gradient(180deg, transparent 0, var(--pgl-band) 14%, var(--pgl-band) 86%, transparent 100%);
+}
+
+.pgl-section-head {
+  max-width: 760px;
+  margin-bottom: clamp(36px, 5vw, 64px);
+}
+
+.pgl-section-head .pgl-lede {
+  margin-top: 16px;
+}
+
+.pgl-cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: clamp(26px, 3.4vw, 36px);
+}
+
+.pgl-cta-row--center {
+  justify-content: center;
+}
+
+/* ----------------------------------------------------------- Shared bits */
+.pgl-pulse {
+  position: relative;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--pgl-green);
+  flex: none;
+}
+
+.pgl-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 3px 9px;
+  border: 1px solid var(--pgl-line);
+  border-radius: 8px;
+  background: var(--pgl-surface-2);
+  color: var(--pgl-ink-2);
+  font-size: 0.74rem;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pgl-icon-tile {
+  --tint: var(--pgl-blue);
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: 12px;
+  color: var(--tint);
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--tint) 16%, transparent), color-mix(in srgb, var(--tint) 5%, transparent)),
+    var(--pgl-card-solid);
+  border: 1px solid color-mix(in srgb, var(--tint) 24%, var(--pgl-line));
+  box-shadow: 0 6px 16px -8px color-mix(in srgb, var(--tint) 55%, transparent);
+}
+
+.pgl-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.pgl-tags li {
+  padding: 5px 12px;
+  border: 1px solid var(--pgl-line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--pgl-surface) 70%, transparent);
+  font-size: 0.8rem;
+  font-weight: 550;
+  color: var(--pgl-ink-2);
+}
+
+.pgl-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex: none;
+  border: 1px solid var(--pgl-line);
+  border-radius: 12px;
+  background: var(--pgl-card);
+  color: var(--pgl-ink-2);
+  cursor: pointer;
+  transition: color var(--pgl-dur-1), background-color var(--pgl-dur-1), border-color var(--pgl-dur-1), transform var(--pgl-dur-2) var(--pgl-ease);
+}
+
+.pgl-icon-btn:hover {
+  color: var(--pgl-ink);
+  border-color: var(--pgl-line-strong);
+  background: var(--pgl-surface);
+}
+
+.pgl-icon-btn:active {
+  transform: scale(0.94);
+}
+
+/* Buttons (Vuetify VBtn restyled; keep their a11y/semantics). */
+.pgl-root .v-btn {
+  font-family: var(--pgl-font-body);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.pgl-root .pgl-btn-primary.v-btn,
+.pgl-root .pgl-btn-secondary.v-btn {
+  position: relative;
+  overflow: hidden;
+  height: 54px;
+  min-width: 0;
+  padding-inline: 26px;
+  border-radius: 16px;
+  font-size: 1rem;
+  font-weight: 620;
+  transition: transform var(--pgl-dur-2) var(--pgl-ease), box-shadow var(--pgl-dur-2) var(--pgl-ease), background-color var(--pgl-dur-2), border-color var(--pgl-dur-2);
+}
+
+.pgl-root .pgl-btn-primary.v-btn {
+  background: linear-gradient(135deg, #3a63ff 0%, #6b4dff 100%) !important;
+  color: #fff !important;
+  border: 0;
+  box-shadow:
+    0 14px 28px -10px rgba(58, 99, 255, 0.65),
+    0 0 0 1px rgba(255, 255, 255, 0.18) inset,
+    0 1px 0 rgba(255, 255, 255, 0.35) inset;
+}
+
+.pgl-root .pgl-btn-primary.v-btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 30%, rgba(255, 255, 255, 0.4) 50%, transparent 70%);
+  transform: translateX(-120%);
+  transition: transform 700ms var(--pgl-ease);
+  pointer-events: none;
+}
+
+html[dir="rtl"] .pgl-root .pgl-btn-primary.v-btn::after {
+  transform: translateX(120%);
+}
+
+.pgl-root .pgl-btn-primary.v-btn:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 20px 36px -12px rgba(58, 99, 255, 0.75),
+    0 0 0 1px rgba(255, 255, 255, 0.22) inset,
+    0 1px 0 rgba(255, 255, 255, 0.4) inset;
+}
+
+.pgl-root .pgl-btn-primary.v-btn:hover::after {
+  transform: translateX(120%);
+}
+
+html[dir="rtl"] .pgl-root .pgl-btn-primary.v-btn:hover::after {
+  transform: translateX(-120%);
+}
+
+.pgl-root .pgl-btn-primary.v-btn:active {
+  transform: translateY(0) scale(0.985);
+}
+
+.pgl-root .pgl-btn-primary .v-btn__append {
+  transition: transform var(--pgl-dur-2) var(--pgl-ease);
+}
+
+.pgl-root .pgl-btn-primary:hover .v-btn__append {
+  transform: translateX(calc(var(--pgl-dir) * 4px));
+}
+
+.pgl-root .pgl-btn-secondary.v-btn {
+  border: 1px solid var(--pgl-line-strong);
+  background: var(--pgl-card);
+  color: var(--pgl-ink);
+  backdrop-filter: blur(10px);
+}
+
+.pgl-root .pgl-btn-secondary.v-btn:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--pgl-blue) 55%, var(--pgl-line-strong));
+  background: var(--pgl-surface);
+  box-shadow: var(--pgl-shadow-md);
+}
+
+.pgl-root .pgl-btn-secondary .v-btn__overlay,
+.pgl-root .pgl-btn-primary .v-btn__overlay {
+  display: none;
+}
+
+/* Spotlight + gradient hairline shared by every interactive card. Position vars
+   (--mx/--my) are written by useSpotlight(); without them the glow is centred. */
+[data-spot] {
+  --mx: 50%;
+  --my: 0%;
+  --tint: var(--pgl-blue);
+}
+
+[data-spot]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(440px circle at var(--mx) var(--my), color-mix(in srgb, var(--tint) 16%, transparent), transparent 62%);
+  opacity: 0;
+  transition: opacity var(--pgl-dur-3) var(--pgl-ease);
+  pointer-events: none;
+  z-index: 0;
+}
+
+[data-spot]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: radial-gradient(260px circle at var(--mx) var(--my), color-mix(in srgb, var(--tint) 85%, transparent), transparent 70%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  opacity: 0;
+  transition: opacity var(--pgl-dur-3) var(--pgl-ease);
+  pointer-events: none;
+  z-index: 2;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  [data-spot]:hover::before,
+  [data-spot]:hover::after {
+    opacity: 1;
+  }
+}
+
+/* Forced colours: keep structure visible once backgrounds are removed. */
+@media (forced-colors: active) {
+  .pgl-cell,
+  .pgl-demo__window,
+  .pgl-demo__ledger,
+  .pgl-code,
+  .pgl-invariant,
+  .pgl-flow__node {
+    border: 1px solid CanvasText;
+  }
+
+  .pgl-rail[aria-pressed="true"],
+  .pgl-lang button[aria-pressed="true"] {
+    outline: 2px solid Highlight;
+  }
+}
+
+/* The app-wide reset sets `background-repeat: no-repeat` on every element, which
+   silently turns tiled patterns (grid lines, grain) into a single tile. Layers
+   that need tiling opt back in explicitly (see .pgl-grid-bg, .pgl-grain, ...). */
+
+/* Match the document canvas to the page so overscroll never flashes the app's
+   default colour. `:has()` keeps this inert on every other route. */
+html:has(.pgl-root),
+body:has(.pgl-root) {
+  background: #f5f6fb;
+}
+
+html:has(.v-theme--dark .pgl-root),
+body:has(.v-theme--dark .pgl-root) {
+  background: #05070f;
+}

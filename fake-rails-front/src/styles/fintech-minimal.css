@@ -158,6 +158,9 @@ html[dir="ltr"] body,
 html[dir="ltr"] .v-application {
   font-family: var(--pg-font-sans-ltr);
   letter-spacing: -0.005em;
+  /* Plus Jakarta Sans has a 0.17em word space (Inter/Geist: 0.25-0.28em), which reads as
+     "Paymentlinks". +0.07em brings it to ~0.24em without changing the glyphs. */
+  word-spacing: 0.07em;
 }
 
 html[dir="rtl"] body {
