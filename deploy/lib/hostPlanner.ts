@@ -3,6 +3,7 @@ import {
   effectiveDatabase,
   parseNodeList,
   pgStorageConfigured,
+  withIpv6Loopback,
   type DeployConfig,
   type DeployRole,
   type HostRole,
@@ -354,7 +355,7 @@ const fakeRailsEnv = (config: DeployConfig): Record<string, string> => ({
   FAKE_RAILS_ADMIN_PASSWORD: config.FAKE_RAILS_ADMIN_PASSWORD ?? "",
   FAKE_RAILS_JWT_SECRET: config.FAKE_RAILS_JWT_SECRET ?? "",
   FAKE_RAILS_SEEDER_TOKEN: config.FAKE_RAILS_SEEDER_TOKEN ?? "",
-  FAKE_RAILS_ALLOWED_CIDRS: config.FAKE_RAILS_ALLOWED_CIDRS,
+  FAKE_RAILS_ALLOWED_CIDRS: withIpv6Loopback(config.FAKE_RAILS_ALLOWED_CIDRS),
 });
 
 /**
@@ -384,7 +385,7 @@ const edgeEnv = (
         ...base,
         PORT: String(node?.port ?? config.ADMIN_BACK_PORT),
         ADMIN_BIND_HOST: node?.privateIp ?? "127.0.0.1",
-        ADMIN_LAN_CIDRS: config.LAN_ALLOWED_CIDRS,
+        ADMIN_LAN_CIDRS: withIpv6Loopback(config.LAN_ALLOWED_CIDRS),
       };
     case "merchant":
       return {

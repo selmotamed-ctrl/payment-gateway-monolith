@@ -14,6 +14,17 @@ const ipv4 = z
   .regex(/^(\d{1,3}\.){3}\d{1,3}$/, "must be an IPv4 address")
   .refine((value) => value.split(".").every((octet) => Number(octet) >= 0 && Number(octet) <= 255), "octet out of range");
 
+/**
+ * `localhost` resolves to `::1` on most hosts, and nginx listens on both address
+ * families, so a LAN allowlist that permits IPv4 loopback must permit IPv6
+ * loopback too or `http://localhost:<port>/` answers 403 while 127.0.0.1 works.
+ */
+export const withIpv6Loopback = (cidrs: string): string => {
+  const entries = cidrs.split(",").map((entry) => entry.trim()).filter(Boolean);
+  if (entries.includes("127.0.0.1/32") && !entries.includes("::1/128")) entries.push("::1/128");
+  return entries.join(",");
+};
+
 const cidrList = z
   .string()
   .trim()

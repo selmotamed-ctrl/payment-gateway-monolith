@@ -168,6 +168,7 @@
 | `deploy/test/testMatrix.test.ts` | 413 | 33 |
 | `deploy/test/templates.test.ts` | 228 | 16 |
 | `deploy/test/redactSecrets.test.ts` | 25 | 3 |
+| `deploy/test/ipv6Loopback.test.ts` | 37 | 2 |
 | `deploy/test/healthVerifierScale.test.ts` | 140 | 4 |
 | `deploy/backup-daemon/test/backupEngine.test.ts` | 350 | 18 |
 | `deploy/backup-daemon/test/cron.test.ts` | 82 | 8 |
@@ -213,5 +214,5 @@
 | `tests/unit/checkout-redirect.test.ts` | 24 | 4 |
 | `tests/unit/guide-content.test.ts` | 174 | 9 |
 
-- Total files: **208**
-- Total literal test declarations: **1966**
+- Total files: **209**
+- Total literal test declarations: **1968**

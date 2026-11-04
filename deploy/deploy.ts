@@ -2,7 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { effectiveDatabase, loadDeployConfig, parseNodeList, pgStorageConfigured, type DeployConfig, type DeployRole } from "./lib/configSchema";
+import { effectiveDatabase, loadDeployConfig, withIpv6Loopback, parseNodeList, pgStorageConfigured, type DeployConfig, type DeployRole } from "./lib/configSchema";
 import { findSshConflicts, planHosts, renderTopology, type DeployPlan, type HostPlan, type ServicePlan } from "./lib/hostPlanner";
 import { buildPki, certFilesForHost, readMaterial, verifyPki } from "./lib/pkiManager";
 import { effectiveTargetHome, effectiveTargetUser, SshRunner } from "./lib/sshRunner";
@@ -235,7 +235,7 @@ export const renderNginxTemplate = (input: {
   upstreamName?: string;
   upstreamServers?: string[];
 }): string => {
-  const lanRules = input.lanAllowedCidrs.split(",")
+  const lanRules = withIpv6Loopback(input.lanAllowedCidrs).split(",")
     .map((cidr) => cidr.trim())
     .filter((cidr) => cidr.length > 0)
     .map((cidr) => `    allow ${cidr};`)
@@ -263,7 +263,7 @@ export const renderNginxTemplate = (input: {
     .replaceAll("{{STATIC_ROOT}}", input.staticRoot)
     .replaceAll("{{BACKEND_PORT}}", String(input.backendPort))
     .replaceAll("{{UPSTREAM_NAME}}", input.upstreamName ?? `127.0.0.1:${input.backendPort}`)
-    .replaceAll("{{LAN_ALLOWED_CIDRS}}", input.lanAllowedCidrs);
+    .replaceAll("{{LAN_ALLOWED_CIDRS}}", withIpv6Loopback(input.lanAllowedCidrs));
 };
 
 const renderNginx = (host: HostPlan, config: DeployConfig, runner: SshRunner, role?: string): void => {

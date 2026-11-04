@@ -83,6 +83,8 @@ The node spec carries only host, SSH port, private IP and service port. SSH user
 | Synthetic seeder | `RUN_SYNTHETIC_HISTORY_SEED`, `SYNTHETIC_SEED_PROFILE`, `SYNTHETIC_SEED_KEY`, `SYNTHETIC_YEARS_SPAN` | Test-server-only historical data. |
 | Test marker | `IS_TEST_SERVER` | Required for the synthetic seed and used as a test-installation declaration. |
 
+`LAN_ALLOWED_CIDRS` is applied through `withIpv6Loopback()` (`deploy/lib/configSchema.ts`): whenever `127.0.0.1/32` is allowed, `::1/128` is added to the rendered nginx `allow` rules of every LAN vhost (admin, merchant, checkout, Fake Rails) and to `ADMIN_LAN_CIDRS` / `FAKE_RAILS_ALLOWED_CIDRS`. Without it `http://localhost:<port>/` answered `403 Forbidden` (browsers resolve `localhost` to `::1` first and nginx also listens on `[::]`) while `http://127.0.0.1:<port>/` worked. The admin vhost listens on IPv4 only, so clients reach it over `127.0.0.1` after a fallback.
+
 ### 3.4 Precedence rules
 
 1. **Node arrays over legacy host fields.** `CORE_NODES` overrides `CORE_SSH_HOST`, `CORE_SSH_PORT`, `CORE_PRIVATE_IP` and `CORE_PORT` for planning. The same applies to admin, merchant and checkout. SSH user/key/sudo are still taken from the legacy fields.
