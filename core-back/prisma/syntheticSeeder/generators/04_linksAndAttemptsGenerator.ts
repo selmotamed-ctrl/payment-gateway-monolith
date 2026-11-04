@@ -538,6 +538,9 @@ export const generateLinksAndAttempts = (ctx: SeederContext): void => {
     // ---- attempt group (customer retries share a group)
     const groups = groupsByLink.get(plan.id) ?? [];
     let group = groups.length > 0 && previous.ids.length > 0 && ctx.rng.chance(85) ? groups[groups.length - 1]! : undefined;
+    // `attempt_groups_single_success` (CHECK success_count <= 1): a payer who already paid on this
+    // link has had their one success, so a further success belongs to a different payer/group.
+    if (group && status === "SUCCEEDED" && Number(group.row.successCount) >= 1) group = undefined;
     if (!group) {
       const fingerprint = sha256Like(ctx, `fingerprint:${plan.id}:${groups.length}:${attemptId}`);
       group = {
@@ -550,8 +553,7 @@ export const generateLinksAndAttempts = (ctx: SeederContext): void => {
       groupsByLink.set(plan.id, groups);
       ctx.dataset.attemptGroups.push(group.row);
     }
-    if (status === "SUCCEEDED" && metaKind !== "AML_RELEASED") group.row.successCount = Number(group.row.successCount) + 1;
-    if (status === "SUCCEEDED" && metaKind === "AML_RELEASED") group.row.successCount = Number(group.row.successCount) + 1;
+    if (status === "SUCCEEDED") group.row.successCount = Number(group.row.successCount) + 1;
     group.row.updatedAt = lastTime;
 
     const phone = `09${ctx.rng.int(1, 5)}${String(ctx.rng.int(0, 9_999_999)).padStart(7, "0")}`;

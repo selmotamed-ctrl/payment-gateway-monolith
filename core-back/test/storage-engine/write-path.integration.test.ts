@@ -9,9 +9,9 @@ import {
   createPrisma,
   databaseIsReachable,
   describeDatabase,
+  seedActorUser,
   seedGlAccount,
   uniqueId,
-  uniqueUuid,
 } from "./helpers/db";
 
 const client = createPrisma({ max: 10 });
@@ -33,7 +33,7 @@ if (!databaseIsReachable) {
 describeDatabase("transactional write-path helpers (live PostgreSQL)", () => {
   test("writeAudit writes the compatibility row and the transactional audit outbox atomically", async () => {
     process.env.AUDIT_DATABASE_URL = DATABASE_URL;
-    const actorId = uniqueUuid();
+    const actorId = await seedActorUser(client);
     const entityId = uniqueId("write-audit");
     const created = await writeAudit(client, {
       data: {

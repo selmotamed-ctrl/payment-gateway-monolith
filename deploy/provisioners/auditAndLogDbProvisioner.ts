@@ -57,6 +57,7 @@ CREATE INDEX IF NOT EXISTS audit_records_trgm_search_idx
 CREATE OR REPLACE FUNCTION compute_audit_chain_hash_trg() RETURNS trigger AS $$
 DECLARE
   v_prev_hash CHAR(64);
+  v_prev_seq BIGINT;
   v_canonical TEXT;
 BEGIN
   PERFORM pg_advisory_xact_lock(994001);
@@ -64,12 +65,14 @@ BEGIN
   -- The identity default is evaluated before this BEFORE trigger runs, so
   -- concurrent inserts can receive seq_no values in the opposite order from
   -- the advisory lock. Reassign under the lock so seq_no and hash order agree.
-  NEW.seq_no := nextval(pg_get_serial_sequence('audit_records', 'seq_no'));
-
-  SELECT row_hash INTO v_prev_hash
+  -- Derive it from the previous row rather than calling nextval() again:
+  -- a second nextval() burns two sequence values per insert and leaves gaps,
+  -- and a gap-free seq_no is what makes a deleted audit row detectable.
+  SELECT seq_no, row_hash INTO v_prev_seq, v_prev_hash
   FROM audit_records
   ORDER BY seq_no DESC
   LIMIT 1;
+  NEW.seq_no := COALESCE(v_prev_seq, 0) + 1;
 
   IF v_prev_hash IS NULL THEN
     v_prev_hash := repeat('0', 64);

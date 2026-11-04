@@ -6412,7 +6412,9 @@ Both require the seeder token and are implemented in `fake-rails-back/api/portal
 
 - The bulk writer is not transactional. An interrupted run leaves partial rows; the retry skips duplicates and the post-seed audit (database/dataset equality) fails instead of passing silently. Operational risk.
 - The seeder does not clear previously seeded rows. A rebuild requires a database reset.
-- The DB-backed path (writer, Vault enrichment, SQL audit, read-model SQL) has not run in this environment: no PostgreSQL/Redis exist here, DB suites skip. Verification risk.
+- The DB-backed path (writer, Vault enrichment, SQL audit, read-model SQL) ran once, on 2026-11-04, against a clean database (see the change history). Two bugs surfaced only there: the operator-case audit rejected events that reference baseline webhook channels (the DB-free fixture had no baseline channels), and the generator let a payer succeed twice in one `attempt_groups` row, violating `attempt_groups_single_success (success_count <= 1)`. Both are fixed and covered by regression tests; the fixture now includes baseline channels.
+- Seeding is not idempotent across seed keys: ids are namespaced by key but emails, phones and similar unique values derive from the index and `SYNTHETIC_DATA_NAMESPACE`. `createMany(skipDuplicates)` hides the collision, so a second key on a non-empty database (or after an interrupted run) produces `user_identities_user_id_fkey` failures and leaves partial rows. Seed into an empty database, or use a new namespace.
+- Prisma's pg adapter prints `Calling client.query() when the client is already executing a query is deprecated` during the large writes (breaks in pg@9); the writer itself is sequential, so the cause is inside the adapter.
 - Engine observations found while mirroring its rules (the seeder works around them; not changed because they are outside the seeder): (1) `INTERNAL_CONFIRMATION` books the requested amount only, so an INTERNAL rail with a payer surcharge cannot balance - the seeder keeps INTERNAL/MERCHANT_DIRECT rails on MERCHANT_ABSORBS; (2) `AML_HOLD_AND_RELEASE` (release) books no gateway fee accrual, so a released hold leaves the fee unaccrued; (3) `LedgerPoster` resolves the merchant wallet by `ownerId` only, i.e. the merchant's first wallet, not the link's wallet (the seeder maps the link's wallet explicitly); (4) `SYSTEM_AUTOMATION_USER_ID = "SYSTEM_AUTOMATION"` is not a UUID but is written to `users.id` (a `uuid` column); (5) the refund commission split is not rounded to 4 decimals, so the journal amounts can be re-rounded on write; (6) the guard writes BLOCKED attempts with `MERCHANT_ABSORBS` but the real bearer's amounts; (7) `postSettlementSweeps` dedupes by `batchReference`, so a batch reference shared by many items sweeps only the first.
 - `SYNTHETIC_SEED_YEARS_SPAN` is now accepted; the deploy planner needs no change.
 
@@ -12836,7 +12838,7 @@ It also requires atomic releases, a symlinked `current`, least-privilege environ
 
 `main()` parses CLI options, checks that `deploy.env` exists, loads and validates it, runs `findSshConflicts()`, calls `planHosts()`, prints `renderTopology()` and creates an `SshRunner` with `verbose: true`.
 
-A missing file, schema error, cross-field error or SSH credential conflict aborts before any remote command. With `--dry-run`, every later command is logged instead of executed.
+A missing file, schema error, cross-field error or SSH credential conflict aborts before any remote command. With `--dry-run`, every later command is logged instead of executed. Every logged command line passes through `redactSecrets` (`deploy/lib/sshRunner.ts`), which masks the value of any `NAME=value` whose name contains PASSWORD, PASSWD, SECRET, TOKEN, AUTH, API_KEY, ACCESS_KEY or MASTER_KEY (for example `PGPASSWORD=`, `REDISCLI_AUTH=`); before 2026-11-04 these were printed in the clear.
 
 ### 3.2 Step 2: build SPAs locally
 
@@ -13465,7 +13467,7 @@ Not covered:
 - `pgClusterFor()` maps port 5432 to the Debian `main` cluster and every other role to an independent cluster (`replica_<nodeId>`, `audit`, `log`) with its own data directory, config directory, HBA and `postgresql@18-<cluster>` unit.
 - Replica initialization creates the cluster first, stops it, replaces the empty data directory with `pg_basebackup -R`, then starts the cluster.
 - PgBouncer is provisioned once per host and now has a `[databases]` mapping to the local PostgreSQL port.
-- The audit DDL installs `pgcrypto`, the `compute_audit_chain_hash_trg` BEFORE INSERT trigger with `pg_advisory_xact_lock(994001)`, and `verify_audit_chain()` for the multi-machine matrix audit gate (`testing.multi-machine-matrix`).
+- The audit DDL installs `pgcrypto`, the `compute_audit_chain_hash_trg` BEFORE INSERT trigger with `pg_advisory_xact_lock(994001)`, and `verify_audit_chain()` for the multi-machine matrix audit gate (`testing.multi-machine-matrix`). The trigger derives `seq_no` from the previous row under the advisory lock (2026-11-04 fix): the earlier `NEW.seq_no := nextval(...)` ran after the identity default had already consumed a value, so every insert burned two numbers and `seq_no` had gaps, which defeats gap-based deletion detection. `seq_no` is now gap-free.
 - `backupDaemonEnv()` derives `PG_DATA_DIR` and `PG_AUDIT_DATA_DIR` from the real cluster names.
 
 ## 12. Cluster-aware cron and port fixes (2026-11-03)

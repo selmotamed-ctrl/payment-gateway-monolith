@@ -46,7 +46,7 @@ export const baselineRefs = (): SeedReferences => {
       settlementTarget: gateway.code === "plutu" ? "PROVIDER_HELD" : "PLATFORM_CLEARING", ownerMerchantId: null, status: "VERIFIED",
     })));
   const types = ["TREASURY", "GATEWAY_CLEARING", "PLATFORM_INCOME", "PROVIDER_FEE_EXPENSE", "GATEWAY_FEE_EXPENSE", "GATEWAY_FEE_ACCRUAL", "COMMISSION_RECEIVABLE", "AML_HOLD", "CHARGEBACK_RESERVE", "SUSPENSE"];
-  return {
+  const refs = {
     gateways,
     versions: gateways.map((gateway, index) => ({ id: uuid(11 + index), gatewayId: gateway.id, gatewayCode: gateway.code, versionNumber: 1, state: "LIVE", environments: [] })),
     rails,
@@ -62,8 +62,17 @@ export const baselineRefs = (): SeedReferences => {
     notificationTemplates: ["PAYMENT_SUCCEEDED", "PAYMENT_FAILED", "DISPUTE_OPENED", "CASHOUT_REQUESTED", "APPROVAL_REQUIRED"].flatMap((code) =>
       (["AR", "EN"] as const).map((lang) => ({ code, channel: "EMAIL", lang }))),
     requiredDocumentsSetting: null,
-    confirmationChannels: [],
+    confirmationChannels: [] as Array<{ id: string; gatewayVersionId: string; type: string }>,
   };
+  // The real baseline seed (Fake Rails blueprints) already owns webhook channels for some gateway
+  // versions; the generator only adds channels where one is missing. Mirror that split so events
+  // that point at baseline channels are exercised by the DB-free audit too.
+  refs.confirmationChannels = refs.versions.slice(0, 2).map((version, index) => ({
+    id: uuid(90 + index),
+    gatewayVersionId: version.id,
+    type: "WEBHOOK",
+  }));
+  return refs;
 };
 
 export const buildFixtureContext = (seedKey = "fixture", volumes: Partial<ProfileVolumes> = {}, namespace = "synthv1"): SeederContext => {

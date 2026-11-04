@@ -25,6 +25,41 @@ import { buildFixtureContext, runAllGenerators, smallVolumes } from "./helpers/s
 
 const run = (seed = "realism", volumes = {}) => runAllGenerators(buildFixtureContext(seed, volumes));
 
+describe("regressions found by the first DB-backed STANDARD seed run", () => {
+  test("inbound events may reference channels the baseline already owns, and the audit accepts them", () => {
+    const ctx = run("baseline-channels");
+    const baselineIds = new Set((ctx.refs.confirmationChannels ?? []).map((channel) => String(channel.id)));
+    expect(baselineIds.size).toBeGreaterThan(0);
+    const usingBaseline = ctx.dataset.inboundEvents.filter((event) => baselineIds.has(String(event.channelId)));
+    expect(usingBaseline.length).toBeGreaterThan(0);
+    expect(auditInMemory(ctx).operatorCases.inboundEventViolations).toBe(0);
+  });
+
+  test("the audit still rejects an inbound event that points at a channel nobody owns", () => {
+    const ctx = run("unknown-channel");
+    const event = ctx.dataset.inboundEvents[0];
+    expect(event).toBeDefined();
+    event!.channelId = "00000000-0000-0000-0000-00000000dead";
+    expect(auditInMemory(ctx).operatorCases.inboundEventViolations).toBeGreaterThan(0);
+  });
+
+  test("an attempt group never records two successes (DB CHECK attempt_groups_single_success)", () => {
+    for (const seed of ["g1", "g2", "g3"]) {
+      const ctx = run(seed, { paymentAttempts: 5000, paymentLinks: 400, merchants: 30 });
+      const worst = Math.max(0, ...ctx.dataset.attemptGroups.map((group) => Number(group.successCount)));
+      expect(worst).toBeLessThanOrEqual(1);
+      expect(checkInvariants(ctx).total).toBe(0);
+    }
+  });
+
+  test("the invariant suite flags a group with two successes", () => {
+    const ctx = run("tamper-group");
+    const group = ctx.dataset.attemptGroups[0]!;
+    group.successCount = 2;
+    expect(checkInvariants(ctx).byRule["group.single-success"]).toBeGreaterThan(0);
+  });
+});
+
 describe("the generated history satisfies every invariant", () => {
   for (const seed of ["alpha", "beta", "libya-pg-2023-2026"]) {
     test(`seed '${seed}': zero violations across relations, lifecycle, ledger and governance`, () => {

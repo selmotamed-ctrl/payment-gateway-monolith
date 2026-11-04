@@ -10,7 +10,7 @@ import {
   describeDatabase,
   seedGlAccount,
   uniqueId,
-  uniqueUuid,
+  seedActorUser,
 } from "../helpers/db";
 
 const client = createPrisma({ max: 10 });
@@ -35,7 +35,7 @@ if (!databaseIsReachable) {
 describeDatabase("write-path benchmark (live PostgreSQL)", () => {
   test("300 transactional audit writes with audit_outbox finish under 10s", async () => {
     process.env.AUDIT_DATABASE_URL = DATABASE_URL;
-    const actorId = uniqueUuid();
+    const actorId = await seedActorUser(client);
     const prefix = uniqueId("bench-audit");
     const ids: string[] = [];
     const started = performance.now();

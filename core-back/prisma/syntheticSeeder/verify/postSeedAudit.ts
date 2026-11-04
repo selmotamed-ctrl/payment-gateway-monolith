@@ -46,7 +46,11 @@ const auditOperatorCases = (ctx: SeederContext): OperatorCaseAudit => {
   const attempts = new Map(ctx.dataset.paymentAttempts.map((attempt) => [String(attempt.id), attempt]));
   const items = new Map(ctx.dataset.reconciliationItems.map((item) => [String(item.id), item]));
   const approvals = new Map(ctx.dataset.approvalRequests.map((approval) => [String(approval.id), approval]));
-  const channels = new Set(ctx.dataset.confirmationChannels.map((channel) => String(channel.id)));
+  // Events may reference channels the baseline already owns (ctx.refs) as well as channels
+  // this run created, so both sets are valid targets.
+  const channels = new Set(
+    [...(ctx.refs.confirmationChannels ?? []), ...ctx.dataset.confirmationChannels].map((channel) => String(channel.id)),
+  );
   const countsByKind: Record<string, number> = {};
   const countsByState: Record<string, number> = {};
   const duplicateOpen = new Map<string, number>();

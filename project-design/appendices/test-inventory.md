@@ -11,11 +11,11 @@
 | `core-back/test/helpers/guardsFake.ts` | 785 | 0 |
 | `core-back/test/helpers/backgroundJobFake.ts` | 411 | 0 |
 | `core-back/test/helpers/retentionFake.ts` | 586 | 1 |
-| `core-back/test/helpers/seederFixture.ts` | 88 | 0 |
+| `core-back/test/helpers/seederFixture.ts` | 97 | 0 |
 | `core-back/test/helpers/fakePrisma.ts` | 237 | 0 |
 | `core-back/test/helpers/fakeRepositories.ts` | 329 | 0 |
 | `core-back/test/storage-engine/read-store.test.ts` | 281 | 14 |
-| `core-back/test/storage-engine/helpers/db.ts` | 510 | 0 |
+| `core-back/test/storage-engine/helpers/db.ts` | 528 | 0 |
 | `core-back/test/storage-engine/performance/storage-performance.test.ts` | 363 | 11 |
 | `core-back/test/storage-engine/performance/write-path-benchmark.test.ts` | 110 | 2 |
 | `core-back/test/storage-engine/engine-factory.test.ts` | 107 | 3 |
@@ -113,7 +113,7 @@
 | `core-back/test/gateway-inquiry-schedules.test.ts` | 91 | 4 |
 | `core-back/test/spec-materializer.test.ts` | 211 | 4 |
 | `core-back/test/reporting-rule-evaluator.test.ts` | 209 | 5 |
-| `core-back/test/synthetic-seeder-realism.test.ts` | 352 | 34 |
+| `core-back/test/synthetic-seeder-realism.test.ts` | 387 | 38 |
 | `core-back/test/expiry-sweeper-aml.test.ts` | 91 | 3 |
 | `core-back/test/notifications-and-gl-accounts.test.ts` | 522 | 20 |
 | `core-back/test/refund-three-phase.test.ts` | 129 | 3 |
@@ -167,6 +167,7 @@
 | `deploy/test/rollingDeploy.test.ts` | 52 | 5 |
 | `deploy/test/testMatrix.test.ts` | 413 | 33 |
 | `deploy/test/templates.test.ts` | 228 | 16 |
+| `deploy/test/redactSecrets.test.ts` | 25 | 3 |
 | `deploy/test/healthVerifierScale.test.ts` | 140 | 4 |
 | `deploy/backup-daemon/test/backupEngine.test.ts` | 350 | 18 |
 | `deploy/backup-daemon/test/cron.test.ts` | 82 | 8 |
@@ -212,5 +213,5 @@
 | `tests/unit/checkout-redirect.test.ts` | 24 | 4 |
 | `tests/unit/guide-content.test.ts` | 174 | 9 |
 
-- Total files: **207**
-- Total literal test declarations: **1959**
+- Total files: **208**
+- Total literal test declarations: **1966**

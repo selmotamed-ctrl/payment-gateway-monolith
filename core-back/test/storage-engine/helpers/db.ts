@@ -33,6 +33,23 @@ export const uniqueId = (prefix = "storage"): string => {
 
 export const uniqueUuid = (): string => randomUUID();
 
+/**
+ * `audit_log.actor_id` (and other actor columns) have a real foreign key to
+ * `users`, so a test that writes the compatibility audit row needs an actual
+ * user. Returns the new user's id. The row is left in place: audit rows that
+ * reference it are append-only, so deleting the actor would be refused.
+ */
+export const seedActorUser = async (
+  client: PrismaClient,
+  role: "SECURITY_ADMIN" | "GATEWAY_ADMIN" = "SECURITY_ADMIN",
+): Promise<string> => {
+  const id = uniqueUuid();
+  await client.user.create({
+    data: { id, email: `${uniqueId("actor")}@storage-test.invalid`, role, authoritiesMap: {} },
+  });
+  return id;
+};
+
 export interface PrismaOptions {
   url?: string;
   max?: number;
@@ -193,14 +210,15 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE OR REPLACE FUNCTION ${schema}.compute_audit_chain_hash_trg() RETURNS trigger AS $$
 DECLARE
   v_prev_hash CHAR(64);
+  v_prev_seq BIGINT;
   v_canonical TEXT;
 BEGIN
   PERFORM pg_advisory_xact_lock(994001);
-  NEW.seq_no := nextval(pg_get_serial_sequence('${schema}.audit_records', 'seq_no'));
-  SELECT row_hash INTO v_prev_hash
+  SELECT seq_no, row_hash INTO v_prev_seq, v_prev_hash
   FROM ${schema}.audit_records
   ORDER BY seq_no DESC
   LIMIT 1;
+  NEW.seq_no := COALESCE(v_prev_seq, 0) + 1;
   IF v_prev_hash IS NULL THEN
     v_prev_hash := repeat('0', 64);
   END IF;

@@ -296,6 +296,8 @@ export const checkInvariants = (ctx: SeederContext): InvariantReport => {
     if (SETTLED_STATUSES.has(String(attempt.status)) && meta.attempts.get(String(attempt.id))?.kind !== "SUSPENSE") groupSuccess.set(String(attempt.attemptGroupId), (groupSuccess.get(String(attempt.attemptGroupId)) ?? 0) + 1);
   }
   for (const group of ds.attemptGroups!) if (Number(group.successCount) !== (groupSuccess.get(String(group.id)) ?? 0)) fail("group.success-count", String(group.id));
+  // DB: CHECK attempt_groups_single_success (success_count <= 1)
+  for (const group of ds.attemptGroups!) if (Number(group.successCount) > 1) fail("group.single-success", String(group.id));
 
   // ---- 7. maker-checker
   const userById = new Map<string, Row>(ds.users!.map((row) => [String(row.id), row]));

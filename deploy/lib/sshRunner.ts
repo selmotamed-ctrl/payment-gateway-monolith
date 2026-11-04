@@ -68,13 +68,22 @@ const sshArgs = (target: SshTarget): string[] => [
   `${target.user}@${target.host}`,
 ];
 
+/**
+ * Command lines are logged verbatim, and many carry credentials as inline
+ * environment assignments (`PGPASSWORD=...`, `REDISCLI_AUTH=...`). Mask the
+ * value of any secret-looking `NAME=value` before it reaches a log.
+ */
+const SECRET_ASSIGNMENT = /\b([A-Za-z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|AUTH|API_?KEY|ACCESS_?KEY|MASTER_?KEY)[A-Za-z0-9_]*)=("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s;&|)]+)/gi;
+export const redactSecrets = (message: string): string => message.replace(SECRET_ASSIGNMENT, "$1=<redacted>");
+
 export class SshRunner {
   private readonly options: RunnerOptions;
   private readonly logger: (message: string) => void;
 
   constructor(options: RunnerOptions = {}) {
     this.options = options;
-    this.logger = options.logger ?? ((message) => console.log(message));
+    const sink = options.logger ?? ((message: string) => console.log(message));
+    this.logger = (message) => sink(redactSecrets(message));
   }
 
   /** True when the runner only prints the commands. */

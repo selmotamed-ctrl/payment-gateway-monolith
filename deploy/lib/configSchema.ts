@@ -827,7 +827,9 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
     if (!config.FAKE_RAILS_ADMIN_PASSWORD) problems.push("FAKE_RAILS_ADMIN_PASSWORD is required when FAKE_RAILS_ENABLED=true");
     if (!config.FAKE_RAILS_JWT_SECRET) problems.push("FAKE_RAILS_JWT_SECRET is required when FAKE_RAILS_ENABLED=true");
     if (!config.FAKE_RAILS_SEEDER_TOKEN) problems.push("FAKE_RAILS_SEEDER_TOKEN is required when FAKE_RAILS_ENABLED=true");
-    if (config.DEPLOY_ENV === "production" && !config.FAKE_RAILS_ALLOW_IN_PRODUCTION) {
+    // fake-rails-back always runs with NODE_ENV=production under PM2 (hostPlanner), and its
+    // runtime guard keys off NODE_ENV, not DEPLOY_ENV, so the opt-in is required for every deploy.
+    if (!config.FAKE_RAILS_ALLOW_IN_PRODUCTION) {
       problems.push(
         'FAKE_RAILS_PRODUCTION_GUARD_BLOCKED: Set FAKE_RAILS_ALLOW_IN_PRODUCTION="true" to run Fake Rails in production mode',
       );
