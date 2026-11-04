@@ -3,6 +3,7 @@ import { RouterLink } from "vue-router";
 import { VBtn } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { StatusBadge, type BadgeTone } from "./StatusBadge";
+import { ContextHelpButton } from "@/components/guide/ContextHelpButton";
 
 export interface BreadcrumbItem {
     label: string;
@@ -128,6 +129,7 @@ export const PageHeader = defineComponent({
                             {t("SOP & Help")}
                         </VBtn>
                     )}
+                    <ContextHelpButton />
                     {props.end?.()}
                     {slots.actions?.()}
                 </div>

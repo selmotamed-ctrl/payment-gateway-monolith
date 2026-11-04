@@ -9,6 +9,7 @@ import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+import { useSafeguard } from "@/components/guide/useSafeguard";
 import { CLOSE_REASONS, SUSPENSION_REASONS } from "../merchantHelp";
 import type { MerchantSummary } from "../types";
 
@@ -84,6 +85,8 @@ const MerchantActionDialog = dc(
                     : [],
         );
         const checklistComplete = computed(() => !showChecklists || checks.value.every((check) => checklist.value[check.key] === true));
+        const suspendSafeguard = useSafeguard("sg-suspend-merchant");
+        const reinstateSafeguard = useSafeguard("sg-reinstate-merchant");
 
         const submit = async () => {
             if (!props.merchant) return;
@@ -95,6 +98,8 @@ const MerchantActionDialog = dc(
                 error.value = t("Complete all checklist items before continuing");
                 return;
             }
+            if (props.mode === "SUSPEND" && !(await suspendSafeguard.confirm())) return;
+            if (props.mode === "REINSTATE" && !(await reinstateSafeguard.confirm())) return;
             saving.value = true;
             error.value = null;
             try {

@@ -68,6 +68,7 @@ export const emptyAcademyProgress = (): EmployeeAcademyProgress => ({
     completedLabIds: {},
     quizScores: {},
     earnedBadges: [],
+    guideRead: {},
 });
 
 export const moduleLessonIds = (module: AcademyModule): string[] => module.lessons.map((lesson) => lesson.id);
@@ -159,11 +160,25 @@ export const normalizeAcademyProgress = (input: unknown): EmployeeAcademyProgres
     const earned = Array.isArray(source.earnedBadges)
         ? source.earnedBadges.filter((entry): entry is AcademyBadge => typeof entry === "string")
         : [];
+    const guideRead: NonNullable<EmployeeAcademyProgress["guideRead"]> = {};
+    if (source.guideRead !== null && typeof source.guideRead === "object" && !Array.isArray(source.guideRead)) {
+        for (const [articleId, value] of Object.entries(source.guideRead as Record<string, unknown>)) {
+            if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+                const row = value as Record<string, unknown>;
+                if (typeof row.v !== "string") continue;
+                guideRead[articleId] = {
+                    v: row.v,
+                    at: typeof row.at === "string" ? row.at : "",
+                };
+            }
+        }
+    }
     return {
         completedLessonIds,
         completedLabIds,
         quizScores,
         earnedBadges: earned,
+        guideRead,
         lastModuleId: typeof source.lastModuleId === "string" ? source.lastModuleId : undefined,
         updatedAt: typeof source.updatedAt === "string" ? source.updatedAt : undefined,
     };

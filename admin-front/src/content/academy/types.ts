@@ -99,6 +99,7 @@ export type EmployeeAcademyProgress = {
         }
     >;
     earnedBadges: AcademyBadge[];
+    guideRead?: Record<string, { v: string; at: string }>;
     lastModuleId?: string;
     updatedAt?: string;
 };

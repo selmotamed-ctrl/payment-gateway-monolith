@@ -28,7 +28,7 @@ tests:
 gaps:
   - This register is not a commitment or a schedule; it records current implementation gaps.
   - Some items are code gaps, some are documentation gaps, and some are intentional deferrals.
-  - The voucher, guide v2 and smart-AI voucher halves have dedicated future parts and are only cross-referenced here.
+  - The voucher and smart-AI voucher halves have dedicated future parts and are only cross-referenced here; the admin guide v2 is implemented and lives under `03-admin-front/06-guide-v2.md`.
 ---
 
 # Deferred and Partial Features
@@ -41,13 +41,13 @@ This part is the catch-all register for missing or partial features that are not
 - `partial`: present but narrow or incomplete.
 - `deferred`: intentionally postponed with a recorded decision.
 
-The voucher system, guide v2 and the voucher half of the Smart AI importer have dedicated parts in this directory. They are listed here for completeness but their full design lives in those parts.
+The voucher system and the voucher half of the Smart AI importer have dedicated parts in this directory. They are listed here for completeness but their full design lives in those parts. The admin guide v2 is implemented and is documented under `03-admin-front/06-guide-v2.md`.
 
 This file is not current-behaviour documentation for the missing items. Each entry states what exists today and what acceptance would require.
 
 ## 2. Design intent (extracted and synthesized from ./design)
 
-The historical design backlog identifies several P0/P1 gaps: schema counts, attempt lifecycle, engine phases, ledger scenarios, transforms, CQRS, replica reads, pagination, audit outbox, backup scheduling, deploy prune, PM2 templates, storage mTLS, admin/merchant routes, guide v2, fake rails, voucher, exhaustive tests and stale frontend notes.
+The historical design backlog identifies several P0/P1 gaps: schema counts, attempt lifecycle, engine phases, ledger scenarios, transforms, CQRS, replica reads, pagination, audit outbox, backup scheduling, deploy prune, PM2 templates, storage mTLS, admin/merchant routes, fake rails, voucher, exhaustive tests and stale frontend notes. The admin guide v2 item is now implemented.
 
 Most factual counts are now fixed in the canonical parts. The remaining items below are behavioural or architectural gaps that require code work, not a doc edit.
 
@@ -58,7 +58,7 @@ Most factual counts are now fixed in the canonical parts. The remaining items be
 | ID | Feature | Status | Current evidence | Acceptance criteria |
 | :--- | :--- | :--- | :--- | :--- |
 | D-01 | Voucher Provider Management System | `missing` | No voucher code, schema, API or UI | See `future.voucher`; all phases and tests delivered as a separate service |
-| D-02 | Admin Guide v2 | `missing` | Current 12-book guide and 8 academy modules only | See `future.guide-v2`; 14 books/125 articles/151 terms/22 cards/29 situations/5 simulators/8 routes, generated and tested |
+| D-02 | Admin Guide v2 | `implemented` | 14 books/125 articles/151 terms/22 cards/29 situations/5 simulators/8 routes with generated content, context help and safeguards | See `admin-ui.guide-v2`; only the Arabic article set remains outstanding |
 | D-03 | Smart AI voucher importer half | `missing` | Gateway importer only in `core-back/engine/specImporter/**` | See `future.smart-ai-voucher`; voucher schema/validator/simulator/materializer/transcript/UI/tests |
 | D-04 | Merchant Google OIDC login | `deferred` | `core-back/api/internal/merchant.ts` `/auth/google` returns `501 GOOGLE_IDENTITY_NOT_CONFIGURED` | Configure issuer/client/audience, verify ID tokens, map identities, test success/failure |
 | D-05 | Keyset pagination | `partial` | `core-back/lib/listQuery.ts` uses `skip/take` offset pagination with page/pageSize | Add stable cursor keys, cursor encode/decode, index coverage, API compatibility and tests at high offsets |

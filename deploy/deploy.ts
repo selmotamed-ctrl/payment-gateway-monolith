@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { effectiveDatabase, loadDeployConfig, parseNodeList, pgStorageConfigured, type DeployConfig, type DeployRole } from "./lib/configSchema";
 import { findSshConflicts, planHosts, renderTopology, type DeployPlan, type HostPlan, type ServicePlan } from "./lib/hostPlanner";
 import { buildPki, certFilesForHost, readMaterial, verifyPki } from "./lib/pkiManager";
-import { SshRunner } from "./lib/sshRunner";
+import { effectiveTargetHome, effectiveTargetUser, SshRunner } from "./lib/sshRunner";
 import { applyFirewall, readFirewallStatus } from "./lib/firewallConfigurator";
 import { probeCoreService, probeEdgeService, renderVerification, verifyDeployment } from "./lib/healthVerifier";
 import { bootstrapPackagesCommand, detectHostOs } from "./lib/osDetector";
@@ -334,7 +334,8 @@ const deployService = (input: {
   const releaseDir = `${releaseRoot}/${releaseTimestamp}`;
   const frontend = service.role === "core" || service.role === "db" ? null : FRONTENDS[service.role];
   const appDir = `${releaseDir}/${service.sourceDir}`;
-  const owner = `${host.ssh.user}:${host.ssh.user}`;
+  const targetUser = effectiveTargetUser(host.ssh);
+  const owner = `${targetUser}:${targetUser}`;
 
   // The tree lives under /var/www, so creating it needs sudo; everything the
   // application reads afterwards (keys, .env, PM2 files, the release tree) is
@@ -449,9 +450,10 @@ const deployBackupDaemon = (input: {
   const { runner, config, host } = input;
   const installDir = "/opt/pg-backup-daemon";
   const sourceDir = join(REPO_ROOT, "deploy", "backup-daemon");
+  const targetUser = effectiveTargetUser(host.ssh);
   runner.run(
     host.ssh,
-    `install -d -m 0755 -o ${host.ssh.user} -g ${host.ssh.user} ${installDir} && chown -R ${host.ssh.user}:${host.ssh.user} ${installDir}`,
+    `install -d -m 0755 -o ${targetUser} -g ${targetUser} ${installDir} && chown -R ${targetUser}:${targetUser} ${installDir}`,
     { sudo: true },
   );
   runner.sync({
@@ -463,7 +465,21 @@ const deployBackupDaemon = (input: {
   });
   runner.run(host.ssh, `chown -R postgres:postgres ${installDir}`, { sudo: true });
   runner.run(host.ssh, 'command -v /usr/local/bin/bun >/dev/null 2>&1 || (command -v bun >/dev/null 2>&1 || curl -fsSL https://bun.sh/install | bash)', { sudo: false });
-  runner.run(host.ssh, `test -x /usr/local/bin/bun || ln -sfn /home/${host.ssh.user}/.bun/bin/bun /usr/local/bin/bun`, { sudo: true });
+  // The daemon runs as postgres, so a symlink into the SSH user's home can be
+  // unreadable when that home is not world-traversable. Install a real copy.
+  const bunPath = runner.dryRun
+    ? `${effectiveTargetHome(host.ssh)}/.bun/bin/bun`
+    : runner.capture(host.ssh, "command -v bun || true", { sudo: false }).trim();
+  if (!bunPath && !runner.dryRun) {
+    throw new Error(`bun is required on ${host.ssh.host} to run pg-backup-daemon`);
+  }
+  if (bunPath) {
+    runner.run(
+      host.ssh,
+      `install -m 0755 ${JSON.stringify(bunPath)} /usr/local/bin/bun.staged && mv -f /usr/local/bin/bun.staged /usr/local/bin/bun`,
+      { sudo: true },
+    );
+  }
   runner.run(host.ssh, "/usr/local/bin/bun install --frozen-lockfile", { cwd: installDir, sudo: true, sudoUser: "postgres" });
   runner.run(
     host.ssh,
@@ -530,9 +546,10 @@ const backupDatabase = (input: { runner: SshRunner; config: DeployConfig; host: 
   const target = `${backupDir}/pre-migrate-${releaseTimestamp}`;
   const { command } = preMigrationBackup(config, target);
   // The tree lives under /var/www and may not exist yet on an update deploy, so
-  // the directory is created as root and handed to the SSH user before the
-  // dump writes into it.
-  runner.run(host.ssh, `mkdir -p ${backupDir} && chown ${host.ssh.user}:${host.ssh.user} ${backupDir}`, { sudo: true });
+  // the directory is created as root and handed to the effective target user
+  // before the dump writes into it.
+  const targetUser = effectiveTargetUser(host.ssh);
+  runner.run(host.ssh, `mkdir -p ${backupDir} && chown ${targetUser}:${targetUser} ${backupDir}`, { sudo: true });
   runner.run(host.ssh, command, { sudo: false });
   log(`  pre-migration backup -> ${target}`);
 };
@@ -670,14 +687,16 @@ const main = async (): Promise<void> => {
         runner.run(host.ssh, "command -v bun >/dev/null 2>&1 || curl -fsSL https://bun.sh/install | bash", { sudo: false });
         // PM2 is a Node program and its shebang is `node`; expose Bun on a
         // stable absolute path so the PM2 interpreter setting always resolves.
-        runner.run(host.ssh, `ln -sfn /home/${host.ssh.user}/.bun/bin/bun /usr/local/bin/bun`, { sudo: true });
+        const targetUser = effectiveTargetUser(host.ssh);
+        const targetHome = effectiveTargetHome(host.ssh);
+        runner.run(host.ssh, `ln -sfn ${targetHome}/.bun/bin/bun /usr/local/bin/bun`, { sudo: true });
         runner.run(host.ssh, 'test -x "$HOME/.bun/bin/pm2" || PATH="$HOME/.bun/bin:/usr/local/bin:$PATH" bun add -g pm2', { sudo: false });
-        runner.run(host.ssh, `ln -sfn /home/${host.ssh.user}/.bun/bin/bunx /usr/local/bin/bunx`, { sudo: true });
+        runner.run(host.ssh, `ln -sfn ${targetHome}/.bun/bin/bunx /usr/local/bin/bunx`, { sudo: true });
         // Best effort: re-register the PM2 process list on boot.
-        const pm2Path = `/home/${host.ssh.user}/.bun/bin:/usr/local/bin:/usr/bin:/bin`;
+        const pm2Path = `${targetHome}/.bun/bin:/usr/local/bin:/usr/bin:/bin`;
         runner.run(
           host.ssh,
-          `env PATH=${pm2Path} pm2 startup systemd -u ${host.ssh.user} --hp /home/${host.ssh.user} >/dev/null 2>&1 || true`,
+          `env PATH=${pm2Path} pm2 startup systemd -u ${targetUser} --hp ${targetHome} >/dev/null 2>&1 || true`,
           { sudo: true },
         );
       }
@@ -776,7 +795,7 @@ const main = async (): Promise<void> => {
           pki,
           releaseTimestamp,
           keepReleases: options.keepReleases ?? config.KEEP_RELEASES,
-          runMigrations: target.role === "core" ? fresh && unit.service.nodeId === plan.nodes.core[0]?.nodeId : undefined,
+          runMigrations: target.role === "core" ? unit.service.nodeId === plan.nodes.core[0]?.nodeId : undefined,
         });
       }
       if (options.dryRun) continue;
@@ -805,7 +824,9 @@ const main = async (): Promise<void> => {
     log("  skipped (FAKE_RAILS_ENABLED=false)");
   } else if (shouldRun(options, "core")) {
     const firstCore = plan.nodes.core[0];
-    const coreCurrent = firstCore ? `${config.CORE_REMOTE_DIR}/current-${firstCore.nodeId}` : `${config.CORE_REMOTE_DIR}/current`;
+    const coreService = coreHost.services.find((service) => service.role === "core" && service.nodeId === firstCore?.nodeId)
+      ?? coreHost.services.find((service) => service.role === "core");
+    const coreCurrent = coreService?.currentLink ?? `${config.CORE_REMOTE_DIR}/current`;
     const coreRemote = `${coreCurrent}/core-back`;
     const coreSeedTarget = firstCore?.ssh ?? coreHost.ssh;
     const bun = 'PATH="$HOME/.bun/bin:/usr/local/bin:$PATH" bun';

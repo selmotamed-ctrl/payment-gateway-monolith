@@ -1,5 +1,5 @@
 import { defineComponent, type PropType } from "vue";
-import { lookupTerm } from "@/content/guide";
+import { lookupTerm } from "@/content/guide/legacy";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 
 export type StatusTone = "success" | "error" | "warning" | "info" | "primary" | "neutral";

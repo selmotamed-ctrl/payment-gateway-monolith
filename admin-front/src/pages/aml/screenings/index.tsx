@@ -20,6 +20,7 @@ import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+import { useSafeguard } from "@/components/guide/useSafeguard";
 import { FormModal } from "@/components/ui/FormModal";
 import { FormField } from "@/components/ui/FormField";
 import { FormChecklist } from "@/components/ui/FormChecklist";
@@ -266,6 +267,7 @@ const AmlScreeningsPage = dc(() => {
         void clearOpenQueryParam();
     };
     const dispositionChecklistComplete = computed(() => !showChecklists || DISPOSITION_CHECKS.every((check) => dispositionChecklist.value[check.key] === true));
+    const dispositionSafeguard = useSafeguard("sg-aml-disposition");
     const submitDisposition = async () => {
         actionError.value = "";
         if (!selectedMatchId.value) {
@@ -280,6 +282,7 @@ const AmlScreeningsPage = dc(() => {
             showSnackBar({ type: "warning", message: t("Complete all disposition checklist items before saving") });
             return;
         }
+        if (!(await dispositionSafeguard.confirm())) return;
         actionLoading.value = true;
         try {
             await api.post(urlsMap.amlMatchDisposition(selectedMatchId.value), {

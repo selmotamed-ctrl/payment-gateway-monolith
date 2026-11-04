@@ -540,9 +540,15 @@ fi`,
     const primaryService = primarySpec ? pgClusterFor(config, "primary", primarySpec).service : "postgresql";
     commands.push(`systemctl restart ${primaryService}`);
     runner.run(primary, `systemctl restart ${primaryService}`, { sudo: true });
+    const primaryReady = `for i in $(seq 1 30); do pg_isready -h 127.0.0.1 -p ${primaryPort} >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1`;
+    commands.push(primaryReady);
+    runner.run(primary, primaryReady, { sudo: true });
     if (config.PGBOUNCER_ENABLED) {
       commands.push("systemctl restart pgbouncer");
       runner.run(primary, "systemctl restart pgbouncer || true", { sudo: true });
+      const poolerReady = `for i in $(seq 1 30); do pg_isready -h 127.0.0.1 -p ${config.PGBOUNCER_PORT} >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1`;
+      commands.push(poolerReady);
+      runner.run(primary, poolerReady, { sudo: true });
     }
     runner.writeRemoteFile({
       target: primary,
@@ -572,6 +578,21 @@ fi`,
     const auditService = auditSpec ? pgClusterFor(config, "audit", auditSpec).service : "postgresql";
     commands.push(`systemctl restart ${auditService}`);
     runner.run(audit, `systemctl restart ${auditService}`, { sudo: true });
+    const auditReady = `for i in $(seq 1 30); do pg_isready -h 127.0.0.1 -p ${auditPort} >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1`;
+    commands.push(auditReady);
+    runner.run(audit, auditReady, { sudo: true });
+  }
+
+  // The audit target can share the primary cluster, so its archive restart may
+  // have happened after the earlier PgBouncer restart. Restart the pooler last
+  // and clear any cached "database system is shutting down" login failure
+  // before the core release runs migrations through PgBouncer.
+  if (primary && config.PGBOUNCER_ENABLED) {
+    commands.push("systemctl restart pgbouncer");
+    runner.run(primary, "systemctl restart pgbouncer || true", { sudo: true });
+    const poolerReady = `for i in $(seq 1 30); do pg_isready -h 127.0.0.1 -p ${config.PGBOUNCER_PORT} >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1`;
+    commands.push(poolerReady);
+    runner.run(primary, poolerReady, { sudo: true });
   }
 
   return {

@@ -21,6 +21,7 @@ import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+import { useSafeguard } from "@/components/guide/useSafeguard";
 
 import { FormModal } from "@/components/ui/FormModal";
 import { FormField } from "@/components/ui/FormField";
@@ -351,6 +352,7 @@ const AmlCasesPage = dc(() => {
     const canPropose = computed(() => selected.value && ["OPEN", "IN_REVIEW"].includes(selected.value.status));
 
     const caseChecklistComplete = computed(() => !showChecklists || AML_CASE_CHECKS.every((check) => caseChecklist.value[check.key] === true));
+    const caseSafeguard = useSafeguard("sg-aml-propose-resolution");
 
     const propose = async () => {
         if (!selected.value) return;
@@ -363,6 +365,7 @@ const AmlCasesPage = dc(() => {
             showSnackBar({ type: "warning", message: t("Complete all case checklist items before proposing") });
             return;
         }
+        if (!(await caseSafeguard.confirm())) return;
         actionLoading.value = true;
         try {
             const response = await api.post(urlsMap.amlCasePropose(selected.value.id), {

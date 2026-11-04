@@ -1,0 +1,116 @@
+[
+  {
+    "code": "UNKNOWN",
+    "where": "A payment status",
+    "meaning": "We do not know whether money moved.",
+    "action": "UNKNOWN: what it means and exactly what to do"
+  },
+  {
+    "code": "LIMIT_EXCEEDED",
+    "where": "Error classification",
+    "meaning": "A customer or merchant limit was reached.",
+    "action": "Explain the limit; do not retry in a loop."
+  },
+  {
+    "code": "RETRYABLE_OTP",
+    "where": "Error classification",
+    "meaning": "The customer typed a wrong code and may try again.",
+    "action": "Nothing; three tries by default."
+  },
+  {
+    "code": "TERMINAL_DECLINE",
+    "where": "Error classification",
+    "meaning": "A final refusal by the partner.",
+    "action": "Nothing; the payment failed."
+  },
+  {
+    "code": "GATEWAY_FAULT",
+    "where": "Error classification",
+    "meaning": "The partner is broken. Counts toward the circuit breaker.",
+    "action": "RB-01 Gateway outage and the circuit breaker"
+  },
+  {
+    "code": "AMBIGUOUS",
+    "where": "Error classification",
+    "meaning": "We cannot tell what happened. Treated as UNKNOWN on money steps.",
+    "action": "UNKNOWN: what it means and exactly what to do"
+  },
+  {
+    "code": "INSUFFICIENT_FUNDS",
+    "where": "Customer-facing reason",
+    "meaning": "The customer's account did not have enough.",
+    "action": "Tell the customer to use another method."
+  },
+  {
+    "code": "LINK_NOT_AVAILABLE",
+    "where": "Starting a payment",
+    "meaning": "The link expired, was cancelled or has no free slot.",
+    "action": "Merchant creates a new link, or wait if a payment is in progress."
+  },
+  {
+    "code": "VALIDATION_FAILED",
+    "where": "Back Office or portal request",
+    "meaning": "The request shape was wrong (for example a field name).",
+    "action": "Report with the screen; do not retry blindly."
+  },
+  {
+    "code": "SCHEMA_INVALID",
+    "where": "AI import check",
+    "meaning": "The spec file has the wrong shape.",
+    "action": "Use the repair message (Smart AI Integration: adding a gateway with an AI assistant, safely)."
+  },
+  {
+    "code": "STEP_TYPE_NOT_IMPORTABLE",
+    "where": "AI import check",
+    "meaning": "A step type must be added in the wizard instead.",
+    "action": "Smart AI Integration: adding a gateway with an AI assistant, safely"
+  },
+  {
+    "code": "INVALID_ATTEMPT_TRANSITION",
+    "where": "Engine log",
+    "meaning": "An event tried an illegal state change.",
+    "action": "Report to Engineering."
+  },
+  {
+    "code": "FORBIDDEN_SERVICE_IDENTITY",
+    "where": "Core log",
+    "meaning": "A service used the wrong certificate or channel.",
+    "action": "Security Admin."
+  },
+  {
+    "code": "403",
+    "where": "Any screen",
+    "meaning": "The core refused: role, authority or the two-person rule.",
+    "action": "When a button is missing or an action is refused"
+  },
+  {
+    "code": "401",
+    "where": "Any screen",
+    "meaning": "Not signed in or session ended.",
+    "action": "Sign in again."
+  },
+  {
+    "code": "409",
+    "where": "Partner answer",
+    "meaning": "A conflict (for example the same request body changed).",
+    "action": "Gateway Admin."
+  },
+  {
+    "code": "422",
+    "where": "Partner answer",
+    "meaning": "The partner rejected the data (for example a duplicate reference).",
+    "action": "Gateway Admin."
+  },
+  {
+    "code": "429",
+    "where": "Partner answer",
+    "meaning": "Too many requests too quickly.",
+    "action": "Do not retry in a loop."
+  },
+  {
+    "code": "500",
+    "where": "Any answer",
+    "meaning": "The other side broke. On a money step this becomes UNKNOWN.",
+    "action": "UNKNOWN: what it means and exactly what to do"
+  }
+]

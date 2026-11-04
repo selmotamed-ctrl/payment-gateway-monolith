@@ -26,7 +26,7 @@ The merchant portal is the self-service business workspace:
 6. **POS is a real-time surface.** A paired screen reflects the current payment state and must not be treated as a payment authority.
 7. **Disputes are evidence workflows.** The merchant uploads evidence before the deadline; money movement remains an admin finance action.
 8. **API tokens are scoped secrets.** Tokens are shown once, can be revoked, and can be constrained by IP CIDR allowlists.
-9. **Help is merchant-specific.** The shell exposes merchant guild search/help, not the admin 12-book guide.
+9. **Help is merchant-specific.** The shell exposes merchant guide search/help, not the admin 14-book guide.
 10. **All money and spreadsheet output uses decimal.js and the shared XLSX pipeline.**
 
 ## 3. As-built architecture
@@ -275,13 +275,13 @@ The portal uses no admin checklist/help-panel flags. Its shell always exposes gu
 - The guide/developer routes are open learning surfaces, which is intentional but means any authenticated merchant can read them.
 - The portal shows maker/checker posture but does not provide a full pending-change diff workflow for every sensitive object.
 - Google OIDC is listed in the API map but the actual merchant `/auth/google` endpoint returns 501, so no working Google flow ships.
-- Merchant help and guide content are the 10+5 chapter baseline, not guide v2.
+- Merchant help and guide content are the 10+5 chapter baseline; the admin guide v2 is a separate implemented product.
 
 ### Missing / deferred
 
 - No self-service activation override; KYB approval remains admin-controlled.
 - No merchant-side certification/training gate for production authorities.
-- No guide v2 context map/playbook/read tracking.
+- No admin-guide-v2 context map/playbook/read tracking is reused for merchants.
 - No working Google sign-in.
 
 ### Known bugs / risks
@@ -290,7 +290,7 @@ The portal uses no admin checklist/help-panel flags. Its shell always exposes gu
 - **Onboarding risk:** client-side progress and completion are convenience signals, not activation authority.
 - **POS risk:** a displayed `SUCCEEDED` screen is a reflection; the merchant must still follow the server-confirmed payment status and settlement rules.
 - **Documentation risk:** do not describe the portal as having a working Google login or a fully server-enforced route gate.
-- **Guide risk:** merchant chapter content must not be conflated with the admin 12-book guide or guide v2.
+- **Guide risk:** merchant chapter content must not be conflated with the admin 14-book guide.
 
 ## 8. Verification and tests
 
@@ -352,7 +352,7 @@ This part owns the merchant-facing interactive guide and developer API reference
 - The guide page, role filtering, chapter search, first-5 checklist, fee/net settlement calculator, code generator, and webhook verification checks.
 - The dedicated developer guide page and its code-template viewer.
 
-It does not own the external API implementation or the merchant portal data pages. It also does not present the future guide v2 workstream as current.
+It does not own the external API implementation or the merchant portal data pages. It also does not reuse the admin guide v2 content model.
 
 ## 2. Design intent (extracted and synthesized from ./design)
 
@@ -512,7 +512,7 @@ The page uses the same D-01..D-05 content as the operations guide's developer ch
 7. **Redirect URLs must be allowlisted.** The guide teaches this; the external API and checkout enforce it.
 8. **Webhook verification uses the raw body.** The guide's signature checks are normative integration guidance.
 9. **First-5 checklist state is local.** It is not a server permission or activation record.
-10. **Guide v2 is not current.** Merchant content remains the 10+5 baseline until a future implementation lands.
+10. **Admin guide v2 is separate.** Merchant content remains the 10+5 baseline; the 14-book admin guide is implemented only for the admin portal.
 
 ## 5. Data / API / config / deployment surface
 
@@ -560,7 +560,7 @@ The page uses the same D-01..D-05 content as the operations guide's developer ch
 
 ### Missing / deferred
 
-- No guide v2 content, context map, safeguard cards, playbook or read tracking for merchants.
+- No admin-guide-v2 content, context map, safeguard cards, playbook or read tracking for merchants.
 - No server-side checklist/progress record for the first-5 flow.
 - No interactive API sandbox that executes calls against a sandbox token.
 - No generated SDK package.
@@ -570,7 +570,7 @@ The page uses the same D-01..D-05 content as the operations guide's developer ch
 - **Security risk:** the token field is a plaintext browser input; a real token can be exposed on screen or in a screenshot. Use a scoped test token and rotate it.
 - **Accuracy risk:** the fee calculator's gateway-fee estimate is not the ledger truth.
 - **Training risk:** the first-5 checklist is local and can be manually toggled; it must not be used as proof of activation.
-- **Doc risk:** the 10+5 baseline is current; guide v2 is future and must not be described as shipped.
+- **Doc risk:** the merchant 10+5 baseline is current; the admin guide v2 is shipped only in `admin-front`.
 
 ## 8. Verification and tests
 

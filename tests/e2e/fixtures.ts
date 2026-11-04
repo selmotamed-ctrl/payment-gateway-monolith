@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 
 export const ADMIN_KEY = "PAYMENT_GATEWAY:ADMIN:USER";
 export const MERCHANT_KEY = "PAYMENT_GATEWAY:MERCHANT:USER";
@@ -129,3 +129,16 @@ export const geometry = async (page: Page) => {
 
 export const noHorizontalOverflow = async (page: Page): Promise<boolean> =>
   page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1);
+
+/** Ticks every required safeguard checkbox and continues. */
+export const confirmSafeguard = async (page: Page): Promise<void> => {
+  const dialog = page.locator(".guide-safeguard");
+  await expect(dialog).toBeVisible();
+  const checks = dialog.locator(".guide-safeguard-check input[type=checkbox]");
+  const count = await checks.count();
+  for (let index = 0; index < count; index += 1) {
+    await checks.nth(index).check();
+  }
+  await dialog.getByRole("button", { name: "Continue" }).click();
+  await expect(dialog).toBeHidden();
+};

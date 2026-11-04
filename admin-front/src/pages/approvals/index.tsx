@@ -22,6 +22,7 @@ import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+import { useSafeguard } from "@/components/guide/useSafeguard";
 import ApprovalHelpPanel from "./components/ApprovalHelpPanel";
 import {
     APPROVAL_BLOCK_REASON_HELP,
@@ -427,6 +428,8 @@ const ApprovalsPage = dc(() => {
     });
 
     const decisionChecklistComplete = computed(() => !showChecklists || APPROVAL_CHECKS.every((check) => decisionChecklist.value[check.key] === true));
+    const approveSafeguard = useSafeguard("sg-approve-request");
+    const rejectSafeguard = useSafeguard("sg-reject-request");
 
     const decide = async (approve: boolean) => {
         if (!selected.value) return;
@@ -445,6 +448,8 @@ const ApprovalsPage = dc(() => {
             showSnackBar({ type: "warning", message: t("Complete all decision checklist items before deciding") });
             return;
         }
+        const safeguardConfirmed = await (approve ? approveSafeguard : rejectSafeguard).confirm();
+        if (!safeguardConfirmed) return;
         actionLoading.value = true;
         try {
             const response = await api.post(

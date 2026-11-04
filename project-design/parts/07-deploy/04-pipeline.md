@@ -3,8 +3,8 @@ id: deploy.pipeline
 title: Deployment Pipeline
 status: partial
 confidence: high
-last_verified: 2026-11-03
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-04
+verified_against: working-tree
 code:
   - deploy/deploy.ts
   - deploy/deploy.sh
@@ -77,7 +77,7 @@ For every host, when `fresh` or `--enforce-firewall`:
 
 - assert the SSH key exists (unless dry-run);
 - run `true` to prove connectivity;
-- if fresh, detect the OS, install `nginx rsync ufw curl ca-certificates nodejs` (or the Arch equivalent), install Bun if absent, symlink Bun/bunx into `/usr/local/bin`, install PM2 if absent and best-effort register `pm2 startup systemd`;
+- if fresh, detect the OS, install `nginx rsync ufw curl ca-certificates nodejs` (or the Arch equivalent), install Bun if absent, symlink Bun/bunx into `/usr/local/bin`, install PM2 if absent and best-effort register `pm2 startup systemd`. For local targets the symlink and `pm2 startup` paths use the orchestrator's OS user/home, not the configured SSH name, which may not exist on the machine;
 - apply UFW, print the command count and read back `ufw status verbose`.
 
 The firewall is only applied in fresh or enforce mode. An ordinary `--update` does not reconcile it.
@@ -97,7 +97,7 @@ The legacy path creates the database/role when `DB_MANAGE_VIA_SSH` and no PG tie
 
 #### Pre-migration backup details
 
-`preMigrationBackup()` resolves the primary direct port (never PgBouncer) and the PG or legacy credentials, then builds `PGPASSWORD="<password>" pg_dump -h <host> -p <port> -U <user> -Fc <db> > <target>.dump`. `backupDatabase()` creates `<CORE_REMOTE_DIR>/shared/backups`, chowns it to the SSH user, and runs the command on the **core host** as that user. The file is `pre-migrate-<releaseTimestamp>.dump`.
+`preMigrationBackup()` resolves the primary direct port (never PgBouncer) and the PG or legacy credentials, then builds `PGPASSWORD="<password>" pg_dump -h <host> -p <port> -U <user> -Fc <db> > <target>.dump`. `backupDatabase()` creates `<CORE_REMOTE_DIR>/shared/backups`, chowns it to the effective target user (the SSH user for a remote host, the orchestrator's OS user for a local target), and runs the command on the **core host** as that user. The file is `pre-migrate-<releaseTimestamp>.dump`.
 
 No dump is taken on a fresh install. A failure aborts before migrations. `pg_dump` must already exist (the bootstrap package list omits `postgresql-client`), `PGPASSWORD` appears in the verbose remote command, and the dump is not automatically verified or restored.
 
@@ -105,11 +105,11 @@ No dump is taken on a fresh install. A failure aborts before migrations. `pg_dum
 
 After `provisionBackupEngine()`, `deployBackupDaemon()`:
 
-- creates `/opt/pg-backup-daemon` owned by the SSH user;
+- creates `/opt/pg-backup-daemon` owned by the effective target user (the SSH user remotely, the orchestrator's OS user locally);
 - rsyncs `deploy/backup-daemon` with `--delete`, excluding `node_modules`, `.git`, `dist`, `test`, `*.log` and `.env`;
-- chowns the install directory to `pgbackup:pgbackup`;
-- ensures `/usr/local/bin/bun` exists;
-- runs `bun install --frozen-lockfile` as `pgbackup`;
+- chowns the install directory to `postgres:postgres` (the daemon's service user);
+- ensures Bun exists and installs a real copy at `/usr/local/bin/bun` (not a symlink through the SSH user's home, which may not be traversable by `postgres`);
+- runs `bun install --frozen-lockfile` as `postgres`;
 - runs `systemctl daemon-reload && systemctl enable pg-backup-daemon && systemctl restart pg-backup-daemon`.
 
 The systemd unit and `/etc/pg-backup/backup.env` are written by the provisioner, not by `deployBackupDaemon()`. If `BACKUP_ENABLED` is true but the plan has no backup host, the deploy warns and skips the daemon; validation normally prevents that.
@@ -135,7 +135,7 @@ For each role, the pipeline skips excluded roles, collects units for that role (
 1. Creates the timestamped release and `shared/{certs,backups,pm2,data}` directories and chowns the remote tree.
 2. Syncs the backend source with rsync, excluding `node_modules`, `.git`, `dist`, `generated`, `test`, `certs`, `.certs`, `*.log` and `.env`; syncs the locally built frontend `dist` for edge roles and writes admin `runtime-config.js`.
 3. Writes the host's certificate set and the 0600 per-node environment (`shared/.env` for a single node, `shared/.env.<nodeId>` for a multi-node tier), then symlinks it to `.env` in the release app directory.
-4. Runs `bun install --frozen-lockfile`; for core also `bunx prisma generate`, `bun run migrate-deploy` and optional `db-seed`.
+4. Runs `bun install --frozen-lockfile`; for core also `bunx prisma generate`, `bun run migrate-deploy` and optional `db-seed`. Migrations run on the first core node in every mode (fresh and update), after step 5's pre-migration dump; other core nodes in a multi-node tier skip them.
 5. Switches `current` with `ln -sfn`, writes the inline PM2 ecosystem, runs `pm2 delete`, `pm2 start --update-env` and `pm2 save`.
 6. Renders the Nginx sites for that role, symlinks them, removes the default site, runs `nginx -t` and reloads.
 7. Prunes with `ls -1dt <remote>/releases/*/ | tail -n +<keep+1> | xargs -r rm -rf`.
@@ -345,3 +345,11 @@ No test performs a real multi-host deployment, migration, PM2 restart or Nginx r
 ## 11. Per-node release isolation (2026-11-03)
 
 `deployService()` now writes `shared/.env.<nodeId>` and points the release's `.env` symlink at it. Releases live under `releases/<nodeId>/<timestamp>` and the atomic switch updates `current-<nodeId>`. The prune command is scoped to that node's release root, so deploying `core-2` cannot delete `core-1`'s current release. Nginx is rendered with the plan's upstream list rather than a single loopback backend port.
+
+## 12. Single-machine ownership and migration fixes (2026-11-04)
+
+- `effectiveTargetUser()`/`effectiveTargetHome()` were added to `deploy/lib/sshRunner.ts`. Release trees, pre-migration backup directories, the backup-daemon install tree and bootstrap Bun/PM2 paths now use the orchestrator's OS user when the target is local, instead of a configured SSH name that may not exist on the machine.
+- The backup daemon installs a real `/usr/local/bin/bun` copy so the `postgres` service user can execute it even when the orchestrator's home is not world-traversable.
+- Core migrations now run on the first core node in `auto`/`update` mode as well as `fresh` mode. Previously `RUN_PRISMA_SEED=true` could run the seed against a database whose migrations had never been applied.
+- The deploy no longer trips over a stale empty migration directory; only committed `migration.sql` files are applied.
+- A real single-machine run completed all 14 steps, including core/admin/merchant/checkout releases, Nginx, PM2, storage probes and final verification.

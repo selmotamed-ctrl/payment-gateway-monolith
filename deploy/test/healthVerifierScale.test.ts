@@ -115,6 +115,16 @@ describe("scaled health verification", () => {
     expect(all).toContain(":4090/health");
   });
 
+  test("uses plain HTTP for the backup daemon when insecure HTTP is allowed", () => {
+    const { config, plan } = fixture();
+    const insecure = { ...config, BACKUP_ALLOW_INSECURE_HTTP: true };
+    const fake = new FakeRunner();
+    const results = probeBackupDaemon(asRunner(fake), plan, insecure);
+    expect(results.every((result) => result.ok)).toBe(true);
+    expect(fake.commands.some((entry) => entry.command.startsWith("curl") && entry.command.includes("http://"))).toBe(true);
+    expect(fake.commands.some((entry) => entry.command.includes("backup-daemon.crt"))).toBe(false);
+  });
+
   test("verifyDeployment keeps the legacy probes and adds storage when configured", () => {
     const { config, plan } = fixture();
     const verification = verifyDeployment(asRunner(new FakeRunner()), plan, config);

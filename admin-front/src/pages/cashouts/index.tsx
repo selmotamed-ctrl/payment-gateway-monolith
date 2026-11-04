@@ -21,6 +21,7 @@ import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+import { useSafeguard } from "@/components/guide/useSafeguard";
 
 import { FormModal } from "@/components/ui/FormModal";
 import { FormField } from "@/components/ui/FormField";
@@ -352,6 +353,8 @@ const CashoutsPage = dc(() => {
     };
 
     const checklistComplete = computed(() => !showChecklists || PROCESS_CHECKS.every((check) => checklist.value[check.key] === true));
+    const processSafeguard = useSafeguard("sg-process-cashout");
+    const rejectSafeguard = useSafeguard("sg-reject-cashout");
 
     const process = async () => {
         if (!selected.value) return;
@@ -365,6 +368,7 @@ const CashoutsPage = dc(() => {
             showSnackBar({ type: "warning", message: t("A rejection reason is required") });
             return;
         }
+        if (!(await (decision.value === "APPROVE" ? processSafeguard : rejectSafeguard).confirm())) return;
         actionLoading.value = true;
         try {
             await api.post(urlsMap.cashoutProcess(selected.value.id), {

@@ -14,6 +14,7 @@ import { user, hasOneOfAuthorities } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+import { useSafeguard } from "@/components/guide/useSafeguard";
 import { statusTone } from "@/components/Table/statusTone";
 import {
     CASE_REFERENCE_SOURCE_HELP,
@@ -275,6 +276,7 @@ const OperatorCaseDetailPage = dc(() => {
     };
 
     const resolveChecklistComplete = computed(() => !showChecklists || RESOLVE_CHECKS.every((check) => resolveChecklist.value[check.key] === true));
+    const resolveSafeguard = useSafeguard("sg-resolve-unknown");
 
     const proposeResolution = async () => {
         if (!detail.value || resolveReason.value.trim().length < 3) return;
@@ -286,6 +288,7 @@ const OperatorCaseDetailPage = dc(() => {
             showSnackBar({ type: "warning", message: t("Complete all resolution checklist items before submitting") });
             return;
         }
+        if (!(await resolveSafeguard.confirm())) return;
         actionLoading.value = true;
         try {
             await api.post(urlsMap.operatorCaseResolve(caseId.value), {

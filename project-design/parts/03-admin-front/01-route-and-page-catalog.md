@@ -3,7 +3,7 @@ id: admin-ui.routes
 title: Admin Route and Page Catalog
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-04
 verified_against: 5a24f6f+working-tree
 code:
   - admin-front/src/router/index.ts
@@ -28,7 +28,6 @@ gaps:
   - Eight admin route names have no effective UI authority gate; AdminGuide and AdminAcademy are deliberate learning surfaces, while AdminUsers, AdminUserDetail, PricingControls, GatewayAiImport, AdminPlatformSettings, and AdminCheckoutHelp are privilege gaps.
   - The merchant Statements route has no router-level authority entry even though navigation hides it without statement authority.
   - The checkout catch-all NotFound page links to a non-existent Dashboard route, so its recovery button returns to the catch-all.
-  - Several admin routes have no contextual-help mapping and no matching guide chapter.
 ---
 
 # Admin Route and Page Catalog
@@ -68,7 +67,7 @@ The historical operator-case design also expects a dedicated operator-case inqui
 
 ### 3.2 Admin protected routes (37)
 
-The authority column is the UI gate. "None" means no effective `routesAuthorities` entry; the backend may still require an authority. Help shows the book/chapter used by `GUIDE_ROUTE_HELP`; "none" means no mapping resolves.
+The authority column is the UI gate. "None" means no effective `routesAuthorities` entry; the backend may still require an authority. Help shows the guide screen used by the generated context map; "none" means no mapping resolves.
 
 | # | Path | Name | UI authority / role | Help | Purpose |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -109,6 +108,13 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 | 35 | `/settings/platform` | `AdminPlatformSettings` | none (backend `settings:read`/`settings:write`) | none | Versioned platform settings, backup export and restore preview. |
 | 36 | `/settings/checkout-help` | `AdminCheckoutHelp` | none (backend `settings:read`/`settings:write`) | 4 / 4.2 | Checkout support config, preview, version history and diff. |
 | 37 | `/system/backups` | `SystemBackups` | `security:read` or `gateway:read` | none | WAL/daemon/target health, backup history, drills and policy. |
+| 38 | `/guide/book/:bookId` | `AdminGuideBook` | none (learning surface) | 1 / 1.1 | One guide book with ordered articles and progress. |
+| 39 | `/guide/a/:articleId` | `AdminGuideArticle` | none (learning surface) | 1 / 1.1 | Guide article reader with glossary, TOC, widgets and read tracking. |
+| 40 | `/guide/glossary/:slug?` | `AdminGuideGlossary` | none (learning surface) | 13 / 13.1 | A–Z glossary and deep-linkable term detail. |
+| 41 | `/guide/tools/:tool?` | `AdminGuideTools` | none (learning surface) | 1 / 1.1 | Five client-only teaching simulators. |
+| 42 | `/guide/playbook/:id?` | `AdminGuidePlaybook` | none (learning surface) | 10 / 10.1 | Symptom-to-action situation playbook. |
+| 43 | `/guide/cards/:id?` | `AdminGuideCards` | none (learning surface) | 1 / 1.1 | Safeguard checklist card catalog. |
+| 44 | `/guide/edge-cases` | `AdminGuideEdgeCases` | none (learning surface) | 13 / 13.5 | Filterable 140-case edge-case catalog. |
 
 Public admin routes are `/login` (`Login`, visitor-only) and the catch-all `NotFound`. The root `/` redirects to `Dashboard`.
 
@@ -165,7 +171,7 @@ Public admin routes are `/login` (`Login`, visitor-only) and the catch-all `NotF
 | Merchant routes | `merchant-front/src/router/index.ts` |
 | Merchant navigation and gates | `merchant-front/src/layouts/sections.tsx` |
 | Checkout routes | `checkout-front/src/router/index.ts` |
-| Admin help map | `admin-front/src/content/guide/index.ts` |
+| Admin help map | `admin-front/src/content/guide/generated/context-map.json` |
 | Merchant help map | `merchant-front/src/components/guide/ContextualHelpDrawer.tsx` |
 
 ### 5.1 Missing admin UI authority gates
@@ -185,8 +191,8 @@ The merchant portal has a similar gap: `Statements` is shown in navigation only 
 
 ## 6. Operational usage
 
-- Adding an admin page: add the explicit router record, the navigation item, the authority entry, and the `GUIDE_ROUTE_HELP` mapping in the same change.
-- Adding a detail page: set `meta.parentName` so navigation/help resolve to the parent; if the parent has no help mapping, add both.
+- Adding an admin page: add the explicit router record, the navigation item, the authority entry, and a `context-map.json` screen/route-name entry in the same change.
+- Adding a detail page: set `meta.parentName` so navigation/help resolve to the parent; if the parent has no context-map screen, add the route name to the owning screen or `General`.
 - Adding a merchant page: add the route, section item, `routesAuthorities` entry (unless intentionally open), and the merchant `ROUTE_HELP` entry.
 - Adding a checkout page: keep the router minimal; do not assume the `Dashboard` route exists.
 - Testing a route: verify both the hidden-navigation case and the direct-URL case; a hidden nav item is not a route gate.
@@ -238,7 +244,7 @@ These suites require a running stack and are skipped without the live/edge servi
 
 - `design/ui/portal_ui_implementation_plan.md` — page and shell rollout.
 - `design/fixes/_0001_operator_cases.md` — operator-case and inquiry workflow.
-- `design/guide_system_design_and_content (2).md` — future guide route/context-map expectations (not current).
+- `design/07-guides-and-academy/guide_system_design_and_content (2).md` — current guide routes, context map and content.
 
 ### Code paths
 

@@ -334,17 +334,21 @@ export const probeBackupDaemon = (runner: SshRunner, plan: DeployPlan, config: D
   const certs = config.BACKUP_DAEMON_CERT_DIR;
   const configuredBind = config.BACKUP_DAEMON_BIND_HOST.trim();
   const healthHost = !configuredBind || configuredBind === "0.0.0.0" ? node.privateIp : configuredBind;
-  const command = mtlsCurl({
-    certs,
-    certName: "backup-daemon",
-    url: `https://${healthHost}:${config.BACKUP_DAEMON_PORT}/health`,
-    expect: "OK",
-  });
+  const insecure = config.BACKUP_ALLOW_INSECURE_HTTP;
+  const command = insecure
+    ? `curl -fsS --max-time 10 ${JSON.stringify(`http://${healthHost}:${config.BACKUP_DAEMON_PORT}/health`)}`
+    : mtlsCurl({
+        certs,
+        certName: "backup-daemon",
+        url: `https://${healthHost}:${config.BACKUP_DAEMON_PORT}/health`,
+        expect: "OK",
+      });
+  const label = insecure ? "backup-daemon /health (HTTP)" : "backup-daemon /health (mTLS)";
   try {
     const body = runner.capture(node.ssh, command, { sudo: true });
-    return [result(node, "backup-daemon /health (mTLS)", /"status"\s*:\s*"ok"/.test(body) || body.includes("ok"), body.slice(0, 200))];
+    return [result(node, label, /"status"\s*:\s*"ok"/.test(body) || body.includes("ok"), body.slice(0, 200))];
   } catch (error) {
-    return [result(node, "backup-daemon /health (mTLS)", false, (error as Error).message)];
+    return [result(node, label, false, (error as Error).message)];
   }
 };
 

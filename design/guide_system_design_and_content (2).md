@@ -4512,7 +4512,10 @@ Tell the Gateway Admin; the reference format contract test (gate 4) is the place
    "screenId": "JoinRequests",
    "routeNames": [
     "JoinRequests",
-    "KybReview"
+    "JoinRequestNew",
+    "JoinRequestDetail",
+    "KybReview",
+    "KybReviewDetail"
    ],
    "pageDir": "pages/join-requests",
    "summary": "The queue of businesses applying to join. You check seven things, then approve, reject or ask for information. Approval makes the business active and able to take live payments.",
@@ -4653,7 +4656,9 @@ Tell the Gateway Admin; the reference format contract test (gate 4) is the place
   {
    "screenId": "OperatorCases",
    "routeNames": [
-    "OperatorCases"
+    "OperatorCases",
+    "OperatorCaseDetail",
+    "GatewayInquirySchedules"
    ],
    "pageDir": "pages/operator-cases",
    "summary": "Tasks for payments and statement lines that need a human: unknown, conflict, mismatch, late success. Inquire first; resolve by hand only with evidence and a second person.",
@@ -4761,7 +4766,8 @@ Tell the Gateway Admin; the reference format contract test (gate 4) is the place
     "Invariant",
     "FinanceProfitability",
     "FinanceLiquidity",
-    "FinanceInvariant"
+    "FinanceInvariant",
+    "PricingControls"
    ],
    "pageDir": "pages/finance",
    "summary": "Profit, cash cover and ledger integrity, all computed from the ledger. Any drift in the invariant is a priority-1 incident.",
@@ -4854,7 +4860,8 @@ Tell the Gateway Admin; the reference format contract test (gate 4) is the place
   {
    "screenId": "Routes",
    "routeNames": [
-    "Routes"
+    "Routes",
+    "GatewayRoutes"
    ],
    "pageDir": "pages/routes",
    "summary": "Connects a rail to a gateway with priority, cost, limits, health and scope. Changes alter which methods customers see and what fees apply.",
@@ -4875,7 +4882,8 @@ Tell the Gateway Admin; the reference format contract test (gate 4) is the place
    "screenId": "CheckoutHelp",
    "routeNames": [
     "CheckoutHelp",
-    "SettingsCheckoutHelp"
+    "SettingsCheckoutHelp",
+    "AdminCheckoutHelp"
    ],
    "pageDir": "pages/settings/checkout-help",
    "summary": "The help and contact details payers see at checkout. Use official company contacts only, in Arabic and English.",
@@ -4925,7 +4933,12 @@ Tell the Gateway Admin; the reference format contract test (gate 4) is the place
    "routeNames": [
     "Users",
     "Settings",
-    "Profile"
+    "Profile",
+    "AdminUsers",
+    "AdminUserDetail",
+    "AuditLog",
+    "AdminPlatformSettings",
+    "SystemBackups"
    ],
    "pageDir": "(any other page)",
    "summary": "This screen is not described individually yet. Check your role and the environment badge, read before you click, and ask if unsure.",

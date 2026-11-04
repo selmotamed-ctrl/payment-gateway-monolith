@@ -489,11 +489,19 @@ const currentDirFor = (remoteDir: string, localNodes?: NodePlan[], allNodes?: No
   return (allNodes?.length ?? 0) > 1 ? `${remoteDir}/current-${localNodes[0]!.nodeId}` : `${remoteDir}/current`;
 };
 
-const upstreamFor = (role: string, nodes: NodePlan[] | undefined, fallbackIp: string, fallbackPort: number): {
+const upstreamFor = (
+  role: string,
+  site: string | null,
+  nodes: NodePlan[] | undefined,
+  fallbackIp: string,
+  fallbackPort: number,
+): {
   upstreamName: string;
   upstreamServers: string[];
 } => ({
-  upstreamName: `pg_${role}_backend`,
+  // Upstream names are global in nginx, so a role with both a public and a LAN
+  // site must not reuse the same name in two files.
+  upstreamName: site ? `pg_${role}_${site}_backend` : `pg_${role}_backend`,
   upstreamServers: nodes && nodes.length > 0
     ? nodes.map((node) => `${node.privateIp}:${node.port}`)
     : [`${fallbackIp}:${fallbackPort}`],
@@ -505,9 +513,11 @@ const buildNginx = (config: DeployConfig, privateIp?: string, nodes: ComputeNode
     const matching = list?.filter((node) => !privateIp || node.privateIp === privateIp);
     return matching && matching.length > 0 ? matching : list;
   };
-  const adminUpstream = upstreamFor("admin", nodes.admin, "127.0.0.1", config.ADMIN_BACK_PORT);
-  const merchantUpstream = upstreamFor("merchant", nodes.merchant, "127.0.0.1", config.MERCHANT_BACK_PORT);
-  const checkoutUpstream = upstreamFor("checkout", nodes.checkout, "127.0.0.1", config.CHECKOUT_BACK_PORT);
+  const adminUpstream = upstreamFor("admin", null, nodes.admin, "127.0.0.1", config.ADMIN_BACK_PORT);
+  const merchantPublicUpstream = upstreamFor("merchant", "public", nodes.merchant, "127.0.0.1", config.MERCHANT_BACK_PORT);
+  const merchantLanUpstream = upstreamFor("merchant", "lan", nodes.merchant, "127.0.0.1", config.MERCHANT_BACK_PORT);
+  const checkoutPublicUpstream = upstreamFor("checkout", "public", nodes.checkout, "127.0.0.1", config.CHECKOUT_BACK_PORT);
+  const checkoutLanUpstream = upstreamFor("checkout", "lan", nodes.checkout, "127.0.0.1", config.CHECKOUT_BACK_PORT);
   return [
     {
       site: "admin-lan",
@@ -535,7 +545,7 @@ const buildNginx = (config: DeployConfig, privateIp?: string, nodes: ComputeNode
       certPath: config.MERCHANT_SSL_CERT_PATH ?? `/etc/letsencrypt/live/${config.MERCHANT_DOMAIN}/fullchain.pem`,
       keyPath: config.MERCHANT_SSL_KEY_PATH ?? `/etc/letsencrypt/live/${config.MERCHANT_DOMAIN}/privkey.pem`,
       staticRoot: `${currentDirFor(config.MERCHANT_REMOTE_DIR, local(nodes.merchant), nodes.merchant)}/merchant-front/dist`,
-      ...merchantUpstream,
+      ...merchantPublicUpstream,
     },
     {
       site: "checkout-public",
@@ -550,7 +560,7 @@ const buildNginx = (config: DeployConfig, privateIp?: string, nodes: ComputeNode
       certPath: config.CHECKOUT_SSL_CERT_PATH ?? `/etc/letsencrypt/live/${config.CHECKOUT_DOMAIN}/fullchain.pem`,
       keyPath: config.CHECKOUT_SSL_KEY_PATH ?? `/etc/letsencrypt/live/${config.CHECKOUT_DOMAIN}/privkey.pem`,
       staticRoot: `${currentDirFor(config.CHECKOUT_REMOTE_DIR, local(nodes.checkout), nodes.checkout)}/checkout-front/dist`,
-      ...checkoutUpstream,
+      ...checkoutPublicUpstream,
     },
     ...(config.MERCHANT_LAN_PORT > 0
       ? [{
@@ -564,7 +574,7 @@ const buildNginx = (config: DeployConfig, privateIp?: string, nodes: ComputeNode
           serverName: privateIp ?? config.MERCHANT_PRIVATE_IP ?? "_",
           sslMode: "self_signed" as const,
           staticRoot: `${currentDirFor(config.MERCHANT_REMOTE_DIR, local(nodes.merchant), nodes.merchant)}/merchant-front/dist`,
-          ...merchantUpstream,
+          ...merchantLanUpstream,
         }]
       : []),
     ...(config.CHECKOUT_LAN_PORT > 0
@@ -579,7 +589,7 @@ const buildNginx = (config: DeployConfig, privateIp?: string, nodes: ComputeNode
           serverName: privateIp ?? config.CHECKOUT_PRIVATE_IP ?? "_",
           sslMode: "self_signed" as const,
           staticRoot: `${currentDirFor(config.CHECKOUT_REMOTE_DIR, local(nodes.checkout), nodes.checkout)}/checkout-front/dist`,
-          ...checkoutUpstream,
+          ...checkoutLanUpstream,
         }]
       : []),
     ...(config.FAKE_RAILS_ENABLED

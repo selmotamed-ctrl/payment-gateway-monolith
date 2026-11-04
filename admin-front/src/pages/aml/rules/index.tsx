@@ -21,6 +21,7 @@ import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+import { useSafeguard } from "@/components/guide/useSafeguard";
 import { FormModal } from "@/components/ui/FormModal";
 import { FormField } from "@/components/ui/FormField";
 import { FormChecklist } from "@/components/ui/FormChecklist";
@@ -287,6 +288,7 @@ const AmlRulesPage = dc(() => {
         void clearOpenQueryParam();
     };
     const ruleChecklistComplete = computed(() => !showChecklists || RULE_CHECKS.every((check) => ruleChecklist.value[check.key] === true));
+    const ruleSafeguard = useSafeguard("sg-aml-rule-change");
     const submit = async () => {
         createError.value = "";
         const scope = parseJsonObject(form.value.scopeText);
@@ -299,6 +301,7 @@ const AmlRulesPage = dc(() => {
             showSnackBar({ type: "warning", message: t("Complete all rule checklist items before drafting") });
             return;
         }
+        if (!(await ruleSafeguard.confirm())) return;
         actionLoading.value = true;
         try {
             const response = await api.post(urlsMap.amlRules, {

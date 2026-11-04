@@ -13,6 +13,7 @@ import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+import { useSafeguard } from "@/components/guide/useSafeguard";
 
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { MetaPill } from "@/components/ui/MetaPill";
@@ -389,6 +390,7 @@ const GatewayAiImportPage = dc(() => {
     };
 
     const importChecklistComplete = computed(() => !showChecklists || IMPORT_CHECKS.every((check) => importChecklist.value[check.key] === true));
+    const importSafeguard = useSafeguard("sg-ai-import-draft");
 
     const runImport = async () => {
         if (!canImport.value) {
@@ -398,6 +400,7 @@ const GatewayAiImportPage = dc(() => {
             importError.value = t("Complete all import checklist items before creating the draft");
             return;
         }
+        if (!(await importSafeguard.confirm())) return;
         importLoading.value = true;
         importError.value = null;
         importRepairPrompt.value = null;

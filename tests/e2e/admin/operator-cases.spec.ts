@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { ADMIN_KEY, adminSession, seedSession } from "../fixtures";
+import { ADMIN_KEY, adminSession, confirmSafeguard, seedSession } from "../fixtures";
 
 const json = (status: number, body: unknown) => ({
   status,
@@ -152,6 +152,7 @@ test("filters by merchant name and runs a bulk inquiry with case ids", async ({ 
     }
   }
   await page.getByRole("button", { name: /^Inquire \(1\)$/ }).click();
+  await confirmSafeguard(page);
 
   await expect.poll(() => bulkBody).not.toBeNull();
   expect(bulkBody.caseIds).toEqual(["oc_1"]);

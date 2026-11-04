@@ -1,0 +1,472 @@
+{
+  "fallbackScreenId": "General",
+  "screens": [
+    {
+      "screenId": "Dashboard",
+      "routeNames": [
+        "Dashboard",
+        "Home"
+      ],
+      "pageDir": "pages/dashboard",
+      "summary": "A smoke alarm for the platform: how many merchants, what is waiting, how many payments are stuck, which routes are switched off, and how late the queues are. It shows tiles, not details; open the screen a tile points to.",
+      "articles": [
+        "b03-05",
+        "b07-03",
+        "b10-02"
+      ],
+      "cards": [],
+      "situations": [
+        "s-unknown-attempt",
+        "s-breaker-open",
+        "s-sandbox-live"
+      ]
+    },
+    {
+      "screenId": "JoinRequests",
+      "routeNames": [
+        "JoinRequests",
+        "JoinRequestNew",
+        "JoinRequestDetail",
+        "KybReview",
+        "KybReviewDetail"
+      ],
+      "pageDir": "pages/join-requests",
+      "summary": "The queue of businesses applying to join. You check seven things, then approve, reject or ask for information. Approval makes the business active and able to take live payments.",
+      "articles": [
+        "b05-02",
+        "b05-03",
+        "b05-04",
+        "b05-05",
+        "b05-10"
+      ],
+      "cards": [
+        "sg-approve-join-request",
+        "sg-reject-join-request"
+      ],
+      "situations": [
+        "s-join-duplicate",
+        "s-aml-match"
+      ]
+    },
+    {
+      "screenId": "Merchants",
+      "routeNames": [
+        "Merchants",
+        "MerchantDetail"
+      ],
+      "pageDir": "pages/merchants",
+      "summary": "Look up a merchant, see its state and history, edit descriptive fields, submit sensitive changes for approval, suspend or reinstate it.",
+      "articles": [
+        "b05-01",
+        "b05-08",
+        "b05-09",
+        "b04-02",
+        "b04-04"
+      ],
+      "cards": [
+        "sg-suspend-merchant",
+        "sg-reinstate-merchant",
+        "sg-edit-merchant-sensitive"
+      ],
+      "situations": [
+        "s-merchant-restricted",
+        "s-emergency-suspension",
+        "s-token-leak"
+      ]
+    },
+    {
+      "screenId": "Approvals",
+      "routeNames": [
+        "Approvals"
+      ],
+      "pageDir": "pages/approvals",
+      "summary": "Requests waiting for a checker. You see who proposed, what would change and why. Approving executes the change at once. You can never approve your own request.",
+      "articles": [
+        "b04-01",
+        "b04-03",
+        "b04-05",
+        "b04-06"
+      ],
+      "cards": [
+        "sg-approve-request",
+        "sg-reject-request"
+      ],
+      "situations": [
+        "s-approval-refused",
+        "s-approval-expired",
+        "s-wrong-approval"
+      ]
+    },
+    {
+      "screenId": "AmlCases",
+      "routeNames": [
+        "AmlCases"
+      ],
+      "pageDir": "pages/aml/cases",
+      "summary": "Confidential compliance cases with severity and deadlines. An analyst proposes a resolution; the MLRO approves; only then does money move. Never discuss a case outside Compliance.",
+      "articles": [
+        "b09-05",
+        "b09-06",
+        "b09-08"
+      ],
+      "cards": [
+        "sg-aml-propose-resolution"
+      ],
+      "situations": [
+        "s-aml-match",
+        "s-emergency-suspension"
+      ]
+    },
+    {
+      "screenId": "AmlScreenings",
+      "routeNames": [
+        "AmlScreenings"
+      ],
+      "pageDir": "pages/aml/screenings",
+      "summary": "Results of name screening against official and internal lists. Each possible match must be decided with a written rationale.",
+      "articles": [
+        "b09-03",
+        "b05-05"
+      ],
+      "cards": [
+        "sg-aml-disposition"
+      ],
+      "situations": [
+        "s-aml-match"
+      ]
+    },
+    {
+      "screenId": "AmlRules",
+      "routeNames": [
+        "AmlRules"
+      ],
+      "pageDir": "pages/aml/rules",
+      "summary": "The rules that hold money and open cases. Every change needs the MLRO. Tightening may be immediate; loosening never skips review.",
+      "articles": [
+        "b09-04"
+      ],
+      "cards": [
+        "sg-aml-rule-change"
+      ],
+      "situations": []
+    },
+    {
+      "screenId": "AmlReports",
+      "routeNames": [
+        "AmlReports"
+      ],
+      "pageDir": "pages/aml/reports",
+      "summary": "Draft, review and submit reports to the authority. A provisional rule can never produce a live filing.",
+      "articles": [
+        "b09-07",
+        "b09-08"
+      ],
+      "cards": [
+        "sg-aml-report"
+      ],
+      "situations": []
+    },
+    {
+      "screenId": "OperatorCases",
+      "routeNames": [
+        "OperatorCases",
+        "OperatorCaseDetail",
+        "GatewayInquirySchedules"
+      ],
+      "pageDir": "pages/operator-cases",
+      "summary": "Tasks for payments and statement lines that need a human: unknown, conflict, mismatch, late success. Inquire first; resolve by hand only with evidence and a second person.",
+      "articles": [
+        "b07-03",
+        "b07-04",
+        "b07-08",
+        "b07-09"
+      ],
+      "cards": [
+        "sg-resolve-unknown",
+        "sg-release-reservation",
+        "sg-bulk-inquiry"
+      ],
+      "situations": [
+        "s-unknown-attempt",
+        "s-customer-deducted",
+        "s-late-success",
+        "s-conflict",
+        "s-amount-mismatch"
+      ]
+    },
+    {
+      "screenId": "Disputes",
+      "routeNames": [
+        "Disputes"
+      ],
+      "pageDir": "pages/disputes",
+      "summary": "Disputes and chargebacks with evidence deadlines. The system drafts the money movement; a human Finance checker must approve it.",
+      "articles": [
+        "b08-09",
+        "b08-08"
+      ],
+      "cards": [],
+      "situations": [
+        "s-chargeback-arrives"
+      ]
+    },
+    {
+      "screenId": "Adjustments",
+      "routeNames": [
+        "Adjustments"
+      ],
+      "pageDir": "pages/adjustments",
+      "summary": "Refunds, chargebacks, manual credits and debits and corrections. Always two people. An executed adjustment is never edited; it is offset by a new one.",
+      "articles": [
+        "b08-08",
+        "b08-13",
+        "b04-05"
+      ],
+      "cards": [
+        "sg-propose-adjustment",
+        "sg-reverse-adjustment"
+      ],
+      "situations": [
+        "s-negative-balance",
+        "s-wrong-approval"
+      ]
+    },
+    {
+      "screenId": "Cashouts",
+      "routeNames": [
+        "Cashouts",
+        "CashOuts"
+      ],
+      "pageDir": "pages/cashouts",
+      "summary": "Merchant payout requests. Check the bank snapshot, process, make the real transfer, and a different Finance user approves the subtraction.",
+      "articles": [
+        "b08-07",
+        "b08-13"
+      ],
+      "cards": [
+        "sg-process-cashout",
+        "sg-reject-cashout"
+      ],
+      "situations": [
+        "s-cashout-request"
+      ]
+    },
+    {
+      "screenId": "Reconciliation",
+      "routeNames": [
+        "Reconciliation"
+      ],
+      "pageDir": "pages/reconciliation",
+      "summary": "Match a partner's statement file against our books. Problem lines open cases. Never edit a file to make it match.",
+      "articles": [
+        "b08-06",
+        "b08-10",
+        "b10-05"
+      ],
+      "cards": [
+        "sg-run-reconciliation"
+      ],
+      "situations": [
+        "s-statement-lines",
+        "s-ledger-drift"
+      ]
+    },
+    {
+      "screenId": "Finance",
+      "routeNames": [
+        "Profitability",
+        "Liquidity",
+        "Invariant",
+        "FinanceProfitability",
+        "FinanceLiquidity",
+        "FinanceInvariant",
+        "PricingControls"
+      ],
+      "pageDir": "pages/finance",
+      "summary": "Profit, cash cover and ledger integrity, all computed from the ledger. Any drift in the invariant is a priority-1 incident.",
+      "articles": [
+        "b08-05",
+        "b08-11",
+        "b10-05"
+      ],
+      "cards": [],
+      "situations": [
+        "s-ledger-drift"
+      ]
+    },
+    {
+      "screenId": "Gateways",
+      "routeNames": [
+        "Gateways"
+      ],
+      "pageDir": "pages/gateways",
+      "summary": "The list of payment-company integrations. Create a gateway, open its wizard, or start the AI-assisted import. Gateways are versioned; the live version is never edited in place.",
+      "articles": [
+        "b06-01",
+        "b06-13",
+        "b06-14",
+        "b06-16"
+      ],
+      "cards": [],
+      "situations": [
+        "s-credential-failing",
+        "s-gateway-live-bad"
+      ]
+    },
+    {
+      "screenId": "GatewayWizard",
+      "routeNames": [
+        "GatewayWizard",
+        "GatewayEdit"
+      ],
+      "pageDir": "pages/gateways/wizard",
+      "summary": "The eight-step wizard that builds a gateway as a draft version. Nothing here changes live payments until a Security Admin approves and promotes it.",
+      "articles": [
+        "b06-13",
+        "b06-03",
+        "b06-04",
+        "b06-06",
+        "b06-16"
+      ],
+      "cards": [
+        "sg-submit-gateway-version"
+      ],
+      "situations": [
+        "s-amount-wrong",
+        "s-reference-rejected",
+        "s-gateway-live-bad"
+      ]
+    },
+    {
+      "screenId": "GatewayAiImport",
+      "routeNames": [
+        "GatewayAiImport",
+        "AiImport"
+      ],
+      "pageDir": "pages/gateways/ai-import",
+      "summary": "Draft a gateway with an AI assistant in your own browser. The platform verifies the result offline and saves it only as a draft. Never give the AI a real secret.",
+      "articles": [
+        "b06-14"
+      ],
+      "cards": [
+        "sg-ai-import-draft"
+      ],
+      "situations": []
+    },
+    {
+      "screenId": "Rails",
+      "routeNames": [
+        "Rails"
+      ],
+      "pageDir": "pages/rails",
+      "summary": "What customers see and pick. A rail has a form, limits and a collection mode. A rail that was ever used is blocked, never deleted.",
+      "articles": [
+        "b06-11",
+        "b06-05",
+        "b06-02"
+      ],
+      "cards": [],
+      "situations": [
+        "s-method-missing"
+      ]
+    },
+    {
+      "screenId": "Routes",
+      "routeNames": [
+        "Routes",
+        "GatewayRoutes"
+      ],
+      "pageDir": "pages/routes",
+      "summary": "Connects a rail to a gateway with priority, cost, limits, health and scope. Changes alter which methods customers see and what fees apply.",
+      "articles": [
+        "b06-11",
+        "b06-12",
+        "b10-02"
+      ],
+      "cards": [
+        "sg-edit-route"
+      ],
+      "situations": [
+        "s-method-missing",
+        "s-breaker-open"
+      ]
+    },
+    {
+      "screenId": "CheckoutHelp",
+      "routeNames": [
+        "CheckoutHelp",
+        "SettingsCheckoutHelp",
+        "AdminCheckoutHelp"
+      ],
+      "pageDir": "pages/settings/checkout-help",
+      "summary": "The help and contact details payers see at checkout. Use official company contacts only, in Arabic and English.",
+      "articles": [
+        "b07-10"
+      ],
+      "cards": [],
+      "situations": []
+    },
+    {
+      "screenId": "Guide",
+      "routeNames": [
+        "AdminGuide",
+        "AdminGuideBook",
+        "AdminGuideArticle",
+        "AdminGuideGlossary",
+        "AdminGuideTools",
+        "AdminGuidePlaybook",
+        "AdminGuideCards",
+        "AdminGuideEdgeCases"
+      ],
+      "pageDir": "pages/guide",
+      "summary": "The Interactive Guide: books, glossary, tools, situations, checklists and the 140 edge cases.",
+      "articles": [
+        "b00-02",
+        "b13-04"
+      ],
+      "cards": [],
+      "situations": []
+    },
+    {
+      "screenId": "Academy",
+      "routeNames": [
+        "AdminAcademy"
+      ],
+      "pageDir": "pages/academy",
+      "summary": "The Employee Academy: lessons, labs and exams for your track.",
+      "articles": [
+        "b00-04",
+        "b13-04"
+      ],
+      "cards": [],
+      "situations": []
+    },
+    {
+      "screenId": "General",
+      "routeNames": [
+        "Users",
+        "Settings",
+        "Profile",
+        "AdminUsers",
+        "AdminUserDetail",
+        "AuditLog",
+        "AdminPlatformSettings",
+        "SystemBackups"
+      ],
+      "pageDir": "(any other page)",
+      "summary": "This screen is not described individually yet. Check your role and the environment badge, read before you click, and ask if unsure.",
+      "articles": [
+        "b03-02",
+        "b03-03",
+        "b03-06",
+        "b03-07",
+        "b03-08"
+      ],
+      "cards": [],
+      "situations": [
+        "s-approval-refused",
+        "s-sandbox-live"
+      ]
+    }
+  ]
+}

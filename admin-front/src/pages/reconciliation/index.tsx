@@ -22,6 +22,7 @@ import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+import { useSafeguard } from "@/components/guide/useSafeguard";
 import { formatPlainNumber } from "@/utils/money";
 
 import { FormModal } from "@/components/ui/FormModal";
@@ -292,6 +293,7 @@ const ReconciliationPage = dc(() => {
     };
 
     const uploadChecklistComplete = computed(() => !showChecklists || UPLOAD_CHECKS.every((check) => uploadChecklist.value[check.key] === true));
+    const reconciliationSafeguard = useSafeguard("sg-run-reconciliation");
 
     const upload = async () => {
         if (!file.value || !selectedSourceId.value) {
@@ -306,6 +308,7 @@ const ReconciliationPage = dc(() => {
             showSnackBar({ type: "warning", message: t("Complete all upload checklist items before uploading") });
             return;
         }
+        if (!(await reconciliationSafeguard.confirm())) return;
         uploadLoading.value = true;
         try {
             const body = new FormData();

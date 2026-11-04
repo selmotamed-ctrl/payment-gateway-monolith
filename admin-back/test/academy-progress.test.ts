@@ -55,7 +55,7 @@ describe("zero-to-hero academy progress schema", () => {
 
     test("rejects an unknown progress field", () => {
         expect(() =>
-            academyProgressSchema.parse({ progress: { ...zeroToHeroProgress.progress, unexpected: true } }),
+            academyProgressSchema.parse({ progress: { ...zeroToHeroProgress.progress, unexpectedField: true } }),
         ).toThrow();
     });
 });

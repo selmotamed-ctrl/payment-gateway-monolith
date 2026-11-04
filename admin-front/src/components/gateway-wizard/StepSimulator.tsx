@@ -14,6 +14,7 @@ import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+import { useSafeguard } from "@/components/guide/useSafeguard";
 import type { WizardStepProps } from "./StepIdentity";
 
 const DRY_RUN_CHECKS = [
@@ -163,8 +164,10 @@ export const StepSimulator = dc(
         };
 
         const submitChecklistComplete = computed(() => !showChecklists || SUBMIT_CHECKS.every((check) => submitChecklist.value[check.key] === true));
+        const submitSafeguard = useSafeguard("sg-submit-gateway-version");
 
         const submitForApproval = async () => {
+            if (!(await submitSafeguard.confirm())) return;
             submitting.value = true;
             try {
                 await api.post(urlsMap.gatewayVersionSubmitApproval(props.model.versionId ?? ""), {

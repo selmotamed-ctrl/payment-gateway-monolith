@@ -1,0 +1,86 @@
+[
+  {
+    "id": "0",
+    "title": "Start Here",
+    "audience": "Everyone, on day one",
+    "summary": "What this system is, how to use this guide, and the ten rules that protect money and people."
+  },
+  {
+    "id": "1",
+    "title": "Foundations from Zero",
+    "audience": "Anyone with no payments, accounting, compliance or software background",
+    "summary": "Plain-language meaning of every basic idea the rest of the guide builds on."
+  },
+  {
+    "id": "2",
+    "title": "The Platform Map",
+    "audience": "Everyone",
+    "summary": "The whole system on one page: who uses it, which parts exist, why they are separated, and the life of a payment and of a merchant."
+  },
+  {
+    "id": "3",
+    "title": "Working in the Back Office",
+    "audience": "Every staff member",
+    "summary": "Signing in, understanding your role, reading screens safely, and working in a way that prevents mistakes."
+  },
+  {
+    "id": "4",
+    "title": "Governance: Four Eyes",
+    "audience": "Every staff member; essential for makers and checkers",
+    "summary": "Why two people must agree, which changes need approval, and how to write a decision that can be audited."
+  },
+  {
+    "id": "5",
+    "title": "Merchants",
+    "audience": "Operators, compliance, support",
+    "summary": "How a business joins, is checked, is configured, is supported, and is suspended."
+  },
+  {
+    "id": "6",
+    "title": "Gateways, Rails & the Engine",
+    "audience": "Gateway admins, security admins, operators who need to understand failures",
+    "summary": "How a payment partner is plugged in without writing code, and how it is kept safe."
+  },
+  {
+    "id": "7",
+    "title": "Payments in Operation",
+    "audience": "Operators, support, finance",
+    "summary": "What happens to a payment from start to finish, and how to handle the ones that do not finish."
+  },
+  {
+    "id": "8",
+    "title": "Money & the Ledger",
+    "audience": "Finance; everyone who handles money screens",
+    "summary": "Double-entry bookkeeping from zero, every account, every worked entry, settlement, refunds and disputes."
+  },
+  {
+    "id": "9",
+    "title": "Risk, AML & Compliance",
+    "audience": "Compliance, MLRO; essential awareness for all",
+    "summary": "Anti-money-laundering in plain language, the cases we handle, and what we must never say."
+  },
+  {
+    "id": "10",
+    "title": "When Things Go Wrong",
+    "audience": "Operators, finance, gateway and security admins",
+    "summary": "Calm, step-by-step procedures for outages, stuck payments, drift and attacks."
+  },
+  {
+    "id": "11",
+    "title": "Security for Everyone",
+    "audience": "Every staff member",
+    "summary": "How attackers think, what protects us, and what you must never do."
+  },
+  {
+    "id": "12",
+    "title": "Deployment & Hosting",
+    "audience": "Security admins, gateway admins, engineers",
+    "summary": "Where each part runs, how servers are protected, how releases are made and undone."
+  },
+  {
+    "id": "13",
+    "title": "Reference",
+    "audience": "Everyone, when looking something up",
+    "summary": "Statuses, codes, roles, gates, situations and quick answers."
+  }
+]

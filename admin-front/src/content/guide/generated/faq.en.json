@@ -1,0 +1,350 @@
+[
+  {
+    "id": "q-001",
+    "article": "b07-03",
+    "question": "What does UNKNOWN mean?",
+    "answer": "We asked the payment company to take money and did not get a clear answer. We do not know whether money moved. Do not guess: press Inquire, then follow the UNKNOWN article."
+  },
+  {
+    "id": "q-002",
+    "article": "b07-03",
+    "question": "Can I mark an old UNKNOWN as failed?",
+    "answer": "No. Age is not evidence. Resolve it by hand only with evidence from the partner (a statement line or a written reply) and a second person."
+  },
+  {
+    "id": "q-003",
+    "article": "b07-12",
+    "question": "A customer says they paid but I see FAILED. What do I say?",
+    "answer": "Say you have no confirmed payment. Ask them to keep their receipt and reference, and not to pay again. Open a case. A late confirmation may still arrive."
+  },
+  {
+    "id": "q-004",
+    "article": "b07-03",
+    "question": "Should I ask the customer to pay again?",
+    "answer": "No. If the first payment actually succeeded they would pay twice."
+  },
+  {
+    "id": "q-005",
+    "article": "b07-12",
+    "question": "Can I confirm a payment from a screenshot?",
+    "answer": "No. Only a status you read in the platform counts. Screens on customers' phones can be faked."
+  },
+  {
+    "id": "q-006",
+    "article": "b07-09",
+    "question": "What if the partner has no status question?",
+    "answer": "The screen will say an inquiry is not possible. Wait for the next statement, or ask the partner's support with our reference and the provider reference."
+  },
+  {
+    "id": "q-007",
+    "article": "b07-06",
+    "question": "Why can't another customer pay a single-use link while one payment is unknown?",
+    "answer": "The first payment might have succeeded. The slot stays reserved so one invoice cannot be paid twice."
+  },
+  {
+    "id": "q-008",
+    "article": "b07-07",
+    "question": "How many wrong OTP tries are allowed?",
+    "answer": "Three by default. The third wrong code fails the payment."
+  },
+  {
+    "id": "q-009",
+    "article": "b07-08",
+    "question": "What is a late success?",
+    "answer": "A confirmation that arrives after the payment expired or failed. If the slot is free it is posted; if the link was already paid, the money is parked in SUSPENSE and a refund is drafted."
+  },
+  {
+    "id": "q-010",
+    "article": "b07-08",
+    "question": "What happens when a webhook and an inquiry disagree?",
+    "answer": "Nothing is posted, the payment stays UNKNOWN and a priority-1 conflict case opens."
+  },
+  {
+    "id": "q-011",
+    "article": "b06-04",
+    "question": "Why do amounts have three decimals?",
+    "answer": "One dinar is 1000 dirhams. Some partners use two decimals or whole dirhams, so the amount settings must be exact or the amount is 1000 times wrong."
+  },
+  {
+    "id": "q-012",
+    "article": "b06-04",
+    "question": "A customer was asked for 1000 times the amount. What now?",
+    "answer": "Stop, treat it as P1, tell the Gateway Admin and Security Admin, pause the route and do not retry."
+  },
+  {
+    "id": "q-013",
+    "article": "b06-12",
+    "question": "Why does a customer not see a payment method?",
+    "answer": "One of the nine visible-rails conditions fails. Walk down the table to find the first one."
+  },
+  {
+    "id": "q-014",
+    "article": "b06-11",
+    "question": "What is a circuit breaker?",
+    "answer": "An automatic switch-off of a failing route. Customers stop seeing it and new payments use the next route. Only partner faults count, not customer mistakes."
+  },
+  {
+    "id": "q-015",
+    "article": "b06-01",
+    "question": "Can I edit a live gateway?",
+    "answer": "No. Editing creates a new draft version. The live version stays untouched until the new one is approved and promoted."
+  },
+  {
+    "id": "q-016",
+    "article": "b06-14",
+    "question": "Can I paste the partner's secret key into the AI?",
+    "answer": "Never. Give the AI only the names of the credentials. Type the real secrets into the platform afterwards."
+  },
+  {
+    "id": "q-017",
+    "article": "b06-14",
+    "question": "Does an AI-generated spec go live automatically?",
+    "answer": "No. It arrives as a draft with a paused route and an untested credential set. It still needs the credential check, the 12 gates and a second person."
+  },
+  {
+    "id": "q-018",
+    "article": "b06-16",
+    "question": "How many go-live gates are there?",
+    "answer": "Twelve. A version cannot go live until all pass."
+  },
+  {
+    "id": "q-019",
+    "article": "b06-06",
+    "question": "Why do signatures fail?",
+    "answer": "Usually the key encoding, the field order or set, or the upper or lower case of the result."
+  },
+  {
+    "id": "q-020",
+    "article": "b06-09",
+    "question": "Can an administrator read a stored secret?",
+    "answer": "No. Secrets are write-only: you can replace them but never read them back."
+  },
+  {
+    "id": "q-021",
+    "article": "b04-01",
+    "question": "Why must a second person approve?",
+    "answer": "It catches honest mistakes, prevents one person acting alone, and creates a clear record of who proposed and who approved."
+  },
+  {
+    "id": "q-022",
+    "article": "b04-03",
+    "question": "How long does an approval request last?",
+    "answer": "Seven days. After that it returns to draft and the maker must re-submit."
+  },
+  {
+    "id": "q-023",
+    "article": "b03-07",
+    "question": "The system says Forbidden. What do I do?",
+    "answer": "The core refused: role, authority or the two-person rule. Do not retry or work around it. Ask your manager or the Security Admin."
+  },
+  {
+    "id": "q-024",
+    "article": "b04-02",
+    "question": "What is the difference between descriptive and sensitive fields?",
+    "answer": "Descriptive fields (for example a trade name) are edited directly. Sensitive fields change money flow, compliance or attack surface and need two people."
+  },
+  {
+    "id": "q-025",
+    "article": "b04-04",
+    "question": "What is an emergency suspension?",
+    "answer": "One authorised person suspends a merchant at once. A different Compliance user or the MLRO must ratify it within 24 hours. It stays in force if nobody does."
+  },
+  {
+    "id": "q-026",
+    "article": "b04-06",
+    "question": "What makes a good reason?",
+    "answer": "What you checked, what you found, what you decided and why, written so a stranger can understand it months later."
+  },
+  {
+    "id": "q-027",
+    "article": "b05-03",
+    "question": "How many checks does a join request review need?",
+    "answer": "Seven. All must be completed and recorded."
+  },
+  {
+    "id": "q-028",
+    "article": "b05-03",
+    "question": "When does a second reviewer have to approve a join request?",
+    "answer": "When the platform setting requires it. The default risk-based policy requires it for high risk, an unclear screening result, a politically exposed owner, a high-risk category, high volume, a payout account mismatch or a previous rejection."
+  },
+  {
+    "id": "q-029",
+    "article": "b05-06",
+    "question": "Why does an application have exactly one wallet?",
+    "answer": "So a payment can never be ambiguous about where its money goes."
+  },
+  {
+    "id": "q-030",
+    "article": "b05-07",
+    "question": "Can I see a merchant's API token?",
+    "answer": "No. It is shown once to the merchant when created. Never ask for it."
+  },
+  {
+    "id": "q-031",
+    "article": "b05-08",
+    "question": "What happens when a merchant is suspended?",
+    "answer": "New payments and cash-outs are blocked, tokens and POS screens return a neutral message, and the balance is kept."
+  },
+  {
+    "id": "q-032",
+    "article": "b05-09",
+    "question": "A merchant asks why it was restricted. What do I say?",
+    "answer": "Say only that the account is restricted and to contact the support address in the notice. Never mention compliance or investigation."
+  },
+  {
+    "id": "q-033",
+    "article": "b08-01",
+    "question": "What does double-entry mean?",
+    "answer": "Every movement is written on two sides that must add up. If they do not, the system refuses the entry."
+  },
+  {
+    "id": "q-034",
+    "article": "b08-01",
+    "question": "Can a ledger entry be edited?",
+    "answer": "No. The ledger is append-only. A mistake is corrected by a new approved entry that offsets it."
+  },
+  {
+    "id": "q-035",
+    "article": "b08-02",
+    "question": "How many kinds of GL account are there?",
+    "answer": "Eleven."
+  },
+  {
+    "id": "q-036",
+    "article": "b08-03",
+    "question": "What is the difference between commission and gateway fee?",
+    "answer": "Commission is what we charge the merchant. Gateway fee is what the payment company charges us."
+  },
+  {
+    "id": "q-037",
+    "article": "b08-05",
+    "question": "What does ledger drift mean?",
+    "answer": "The two sides of the ledger equation differ. It must always be zero. Any drift is a priority-1 incident and automatic payouts stop."
+  },
+  {
+    "id": "q-038",
+    "article": "b08-06",
+    "question": "What is MISSING_AT_GATEWAY?",
+    "answer": "We say a payment succeeded but the partner's statement does not show it. This is the most serious reconciliation result."
+  },
+  {
+    "id": "q-039",
+    "article": "b08-07",
+    "question": "Who approves the subtraction of a cash-out?",
+    "answer": "A different Finance user from the one who processed it."
+  },
+  {
+    "id": "q-040",
+    "article": "b08-08",
+    "question": "How do I fix a wrong adjustment?",
+    "answer": "Never edit it. Propose a new adjustment that offsets it, which also needs approval."
+  },
+  {
+    "id": "q-041",
+    "article": "b08-09",
+    "question": "Who approves a chargeback?",
+    "answer": "A human Finance checker. The system may draft it but can never approve it."
+  },
+  {
+    "id": "q-042",
+    "article": "b08-13",
+    "question": "What if a chargeback is bigger than the merchant's balance?",
+    "answer": "If it would pass the merchant's negative-balance ceiling it does not post and a priority-1 case opens. Finance chooses to collect, net or suspend."
+  },
+  {
+    "id": "q-043",
+    "article": "b09-01",
+    "question": "What is money laundering?",
+    "answer": "Making money from crime look like it came from a legitimate source, usually through placement, layering and integration."
+  },
+  {
+    "id": "q-044",
+    "article": "b09-08",
+    "question": "What is tipping-off?",
+    "answer": "Telling someone, directly or by hint, that they are under suspicion or that a report exists. It is forbidden and can be a crime."
+  },
+  {
+    "id": "q-045",
+    "article": "b09-08",
+    "question": "May Support see why a merchant is suspended?",
+    "answer": "No. Support can see that a merchant is suspended, never why."
+  },
+  {
+    "id": "q-046",
+    "article": "b09-03",
+    "question": "What happens on a possible screening match?",
+    "answer": "A Compliance analyst decides each match. An applicant cannot be approved until then."
+  },
+  {
+    "id": "q-047",
+    "article": "b09-05",
+    "question": "Who approves an AML case resolution?",
+    "answer": "The MLRO, never the same person as the analyst who proposed it. Money moves only after approval."
+  },
+  {
+    "id": "q-048",
+    "article": "b09-07",
+    "question": "Can we file a report from a provisional rule?",
+    "answer": "No. The database refuses it. Until the Central Bank's requirements are confirmed the platform works in internal-only mode."
+  },
+  {
+    "id": "q-049",
+    "article": "b09-10",
+    "question": "I think something is suspicious. What do I do?",
+    "answer": "Do not confront anyone. Write down the facts and tell Compliance the same day. Keep it confidential."
+  },
+  {
+    "id": "q-050",
+    "article": "b10-01",
+    "question": "Which runbook do I use?",
+    "answer": "Use the table in the incident principles article: breaker for outages, RB-02 for signatures, RB-03 for UNKNOWN backlog, RB-04 for drift, RB-05 for credentials."
+  },
+  {
+    "id": "q-051",
+    "article": "b10-05",
+    "question": "Why did payouts stop?",
+    "answer": "The ledger equation shows drift. Automatic payouts stop until the cause is understood and the drift is zero."
+  },
+  {
+    "id": "q-052",
+    "article": "b10-07",
+    "question": "I think my password leaked. What now?",
+    "answer": "Tell the Security Admin immediately and change your password from a clean device. Do not wait to be sure."
+  },
+  {
+    "id": "q-053",
+    "article": "b11-03",
+    "question": "Can I share my login with a colleague who is locked out?",
+    "answer": "Never. Ask the Security Admin."
+  },
+  {
+    "id": "q-054",
+    "article": "b12-01",
+    "question": "Why can't I open the Back Office from home?",
+    "answer": "It is LAN-only by design. It is not reachable from the internet."
+  },
+  {
+    "id": "q-055",
+    "article": "b12-06",
+    "question": "What is Fake Rails?",
+    "answer": "Our internal service that imitates payment companies for drills. It must never run in production."
+  },
+  {
+    "id": "q-056",
+    "article": "b01-08",
+    "question": "What is the difference between sandbox and live?",
+    "answer": "Sandbox is a practice world; nothing real moves. Live is real money. Always check the badge before acting."
+  },
+  {
+    "id": "q-057",
+    "article": "b13-04",
+    "question": "What if the guide and the screen disagree?",
+    "answer": "Stop and ask. Use Report a problem on the article."
+  },
+  {
+    "id": "q-058",
+    "article": "b00-03",
+    "question": "What are the most serious breaches?",
+    "answer": "Sharing credentials, guessing on UNKNOWN and tipping-off."
+  }
+]
