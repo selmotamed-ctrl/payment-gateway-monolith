@@ -1,0 +1,603 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "type": "number",
+      "const": 1
+    },
+    "lab": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,40}$"
+        },
+        "lanCidrs": {
+          "default": [],
+          "description": "Allowed LAN CIDRs for edge listeners. Default: each machine's privateIp/32.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^\\d{1,3}(\\.\\d{1,3}){3}\\/\\d{1,2}$"
+          }
+        },
+        "markerFile": {
+          "default": "/etc/pg-lab-matrix",
+          "description": "File that marks a host as disposable lab hardware; destructive teardown refuses hosts without it.",
+          "type": "string",
+          "pattern": "^\\/[A-Za-z0-9._/-]+$"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "ssh": {
+      "type": "object",
+      "properties": {
+        "user": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_-]{0,31}$",
+          "description": "SSH user for every machine. The deploy engine plans SSH credentials per tier, so one user is shared by all machines."
+        },
+        "port": {
+          "default": 22,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "keyPath": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Private key path on the controller (e.g. ~/.ssh/id_ed25519_pg_lab). Passphrase-protected keys must be loaded in ssh-agent because SSH runs with BatchMode=yes."
+        },
+        "generateKeyIfMissing": {
+          "default": false,
+          "description": "Create an unencrypted Ed25519 key at keyPath when it does not exist. The public key must still be authorized on each machine by the operator (ssh-copy-id).",
+          "type": "boolean"
+        },
+        "sudo": {
+          "default": {
+            "mode": "nopasswd"
+          },
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "const": "nopasswd",
+                  "description": "Passwordless sudo (recommended for lab hosts)."
+                }
+              },
+              "required": [
+                "mode"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "const": "password"
+                },
+                "passwordEnv": {
+                  "type": "string",
+                  "pattern": "^[A-Z_][A-Z0-9_]*$",
+                  "description": "Name of the environment variable holding the sudo password. The value is never stored in JSON or the repo."
+                }
+              },
+              "required": [
+                "mode",
+                "passwordEnv"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "user",
+        "keyPath"
+      ],
+      "additionalProperties": false
+    },
+    "machines": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,30}$",
+            "description": "Stable machine id used in topology ids and reports."
+          },
+          "address": {
+            "type": "string",
+            "description": "IPv4 address the controller uses for SSH."
+          },
+          "privateIp": {
+            "description": "LAN IPv4 services bind to; defaults to address.",
+            "type": "string"
+          },
+          "sshPort": {
+            "description": "Overrides ssh.port for this machine.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "roles": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "controller",
+                "app",
+                "edge",
+                "db",
+                "cache",
+                "logs",
+                "backup",
+                "object-store",
+                "vault"
+              ]
+            },
+            "description": "Capabilities the topology generator may place on this machine."
+          },
+          "labels": {
+            "default": {},
+            "description": "Free-form labels copied into reports (zone, rack, os...).",
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_.-]*$"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          "capacity": {
+            "default": {
+              "maxNodesPerTier": 3
+            },
+            "type": "object",
+            "properties": {
+              "maxNodesPerTier": {
+                "default": 3,
+                "description": "Maximum instances of one compute tier (core/admin/merchant/checkout) on this machine.",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 8
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "address",
+          "roles"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "services": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "objectStore": {
+          "type": "object",
+          "properties": {
+            "machine": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,30}$",
+              "description": "Machine that runs the S3-compatible test store (MinIO)."
+            },
+            "port": {
+              "default": 9000,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "bucket": {
+              "default": "pg-backups-test",
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9.-]{2,62}$"
+            },
+            "image": {
+              "default": "cgr.dev/chainguard/minio:latest",
+              "type": "string",
+              "minLength": 1
+            },
+            "provision": {
+              "default": true,
+              "description": "Install/start MinIO during bootstrap. false = use an existing endpoint with the credentials below.",
+              "type": "boolean"
+            },
+            "accessKeyEnv": {
+              "description": "Optional env var with the S3 access key; generated per lab when omitted.",
+              "type": "string",
+              "pattern": "^[A-Z_][A-Z0-9_]*$"
+            },
+            "secretKeyEnv": {
+              "description": "Optional env var with the S3 secret key; generated per lab when omitted.",
+              "type": "string",
+              "pattern": "^[A-Z_][A-Z0-9_]*$"
+            }
+          },
+          "required": [
+            "machine"
+          ],
+          "additionalProperties": false
+        },
+        "vault": {
+          "type": "object",
+          "properties": {
+            "machine": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,30}$",
+              "description": "Machine that receives the secondary SSH backup copies."
+            },
+            "basePath": {
+              "default": "/var/backups/pg-lab-vault",
+              "type": "string",
+              "pattern": "^\\/[A-Za-z0-9._/-]+$"
+            }
+          },
+          "required": [
+            "machine"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "topologies": {
+      "default": {
+        "families": [
+          "single-host",
+          "split",
+          "replicated",
+          "dmz",
+          "mesh",
+          "scale",
+          "chaos"
+        ],
+        "include": [],
+        "exclude": []
+      },
+      "type": "object",
+      "properties": {
+        "families": {
+          "default": [
+            "single-host",
+            "split",
+            "replicated",
+            "dmz",
+            "mesh",
+            "scale",
+            "chaos"
+          ],
+          "description": "Topology families to derive from the machines.",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "single-host",
+              "split",
+              "replicated",
+              "dmz",
+              "mesh",
+              "scale",
+              "chaos"
+            ]
+          }
+        },
+        "include": {
+          "default": [],
+          "description": "Restrict to these topology ids or legacy aliases (e.g. T1). Empty = every derived topology.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "exclude": {
+          "default": [],
+          "description": "Topology ids or aliases to drop.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "maxPerFamily": {
+          "description": "Cap the number of variants generated per family (variants are ordered by machine declaration order).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "shardCount": {
+          "description": "Force STORAGE_SHARD_COUNT for every topology; default 16 for single-host/split/dmz and 32 otherwise.",
+          "anyOf": [
+            {
+              "type": "number",
+              "const": 16
+            },
+            {
+              "type": "number",
+              "const": 32
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "intensity": {
+      "default": {
+        "preset": "standard",
+        "overrides": {}
+      },
+      "type": "object",
+      "properties": {
+        "preset": {
+          "default": "standard",
+          "type": "string",
+          "enum": [
+            "smoke",
+            "standard",
+            "soak",
+            "chaos",
+            "certification"
+          ]
+        },
+        "overrides": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "durationSec": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 86400,
+              "description": "Steady-state duration of each sustained workload phase."
+            },
+            "rampUpSec": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 3600,
+              "description": "Linear ramp from 0 to targetTps before the steady window."
+            },
+            "targetTps": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 100000,
+              "description": "Offered checkout rate (open-loop)."
+            },
+            "concurrency": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 10000,
+              "description": "Maximum in-flight requests; when saturated the offered rate is not met and minTps decides."
+            },
+            "requestTimeoutMs": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 300000
+            },
+            "hotLink": {
+              "type": "object",
+              "properties": {
+                "attempts": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 100000
+                },
+                "concurrency": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 10000
+                },
+                "useCount": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 100000,
+                  "description": "Slot limit set on the contended link; exactly this many attempts must win."
+                }
+              },
+              "additionalProperties": false
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "seedProfile": {
+                  "type": "string",
+                  "enum": [
+                    "COMPACT",
+                    "STANDARD",
+                    "STRESS"
+                  ]
+                },
+                "seedYearsSpan": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 10
+                }
+              },
+              "additionalProperties": false
+            },
+            "searchQueries": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 100000
+            },
+            "readSamples": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 10000,
+              "description": "Admin list reads used to measure replica routing."
+            },
+            "gates": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "all"
+                },
+                {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "provisioning",
+                      "storage-routing",
+                      "seeder-invariants",
+                      "checkout-stress",
+                      "realtime-sse",
+                      "workers",
+                      "audit-chain",
+                      "log-db-outage",
+                      "search",
+                      "backup",
+                      "scale",
+                      "chaos"
+                    ]
+                  }
+                }
+              ]
+            },
+            "continueOnGateFailure": {
+              "type": "boolean",
+              "description": "Run later gates after a failure (provisioning failure always stops the topology)."
+            },
+            "attempts": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5,
+              "description": "Deploy+gate attempts per topology. Results record the attempt that produced them."
+            },
+            "chaos": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "allowDestructive": {
+                  "type": "boolean",
+                  "description": "Required for primary-pitr (wipes the primary data directory)."
+                },
+                "faults": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "core-restart",
+                          "core-kill",
+                          "replica-stop",
+                          "redis-stop",
+                          "log-db-stop",
+                          "primary-pitr"
+                        ]
+                      },
+                      "everySec": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "maximum": 86400,
+                        "description": "Inject this fault every N seconds while the chaos workload runs (first injection after one interval)."
+                      },
+                      "downSec": {
+                        "default": 10,
+                        "description": "How long the target stays down before it is restored.",
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 3600
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "everySec"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false
+            },
+            "slo": {
+              "type": "object",
+              "properties": {
+                "minTps": {
+                  "type": "number",
+                  "minimum": 0,
+                  "description": "Minimum achieved successful checkouts per second over the steady-state window."
+                },
+                "maxP95Ms": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "maxP99Ms": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "maxErrorRate": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "Transport/5xx/4xx (non-409) failures divided by requests."
+                },
+                "searchP95Ms": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "chaosMaxErrorRate": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "Error budget while faults are being injected."
+                },
+                "recoverySec": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "description": "Time allowed for checkouts to succeed again after a fault is restored."
+                },
+                "backupTimeoutSec": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "queueDrainSec": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "description": "How long gate 'workers' waits for inbound/outbox queues to drain."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "version",
+    "lab",
+    "ssh",
+    "machines"
+  ],
+  "additionalProperties": false,
+  "title": "Payment gateway multi-machine test lab",
+  "$id": "machines.schema.json"
+}

@@ -13,8 +13,8 @@ code:
   - core-back/test/storage-engine/uow.test.ts
   - deploy/backup-daemon/test/**
 design_sources:
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#7-testing-and-benchmarks
-  - design/master_exhaustive_test_plan_for_opencode.md#10-suite-09-postgresql-18-storage-engine-replicas-auditlog-databases-backups-restore-drills-900-tests
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#7-testing-and-benchmarks
+  - design/05-testing/master_exhaustive_test_plan_for_opencode.md#10-suite-09-postgresql-18-storage-engine-replicas-auditlog-databases-backups-restore-drills-900-tests
 tests:
   - core-back/test/storage-engine/performance/write-path-benchmark.test.ts
   - core-back/test/storage-engine/performance/storage-performance.test.ts
@@ -262,9 +262,9 @@ A run must state whether PostgreSQL and Redis were available. Without both, the 
 
 ### Old design sections
 
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 7.
-- `design/master_exhaustive_test_plan_for_opencode.md` Suite 09.
-- `design/master_exhaustive_test_plan_for_opencode.md` Suite 11 for seeder/deploy volume.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 7.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` Suite 09.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` Suite 11 for seeder/deploy volume.
 
 ### Code paths
 

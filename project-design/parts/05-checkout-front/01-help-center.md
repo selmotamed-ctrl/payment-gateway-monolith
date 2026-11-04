@@ -14,9 +14,9 @@ code:
   - core-back/prisma/seedGuides.ts
   - admin-front/src/pages/settings/checkout-help/index.tsx
 design_sources:
-  - design/payment_gateway_deployment_and_guides_architecture.md
-  - design/complete_zero_to_hero_guides_and_academy_specification.md
-  - design/guide_system_design_and_content (2).md
+  - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md
+  - design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md
+  - design/07-guides-and-academy/guide_system_design_and_content.md
 tests:
   - core-back/test/guides-support.test.ts
   - tests/e2e/checkout/pay.spec.ts
@@ -280,9 +280,9 @@ The core support test requires PostgreSQL/Redis; the Playwright suites require t
 
 ### Old design sections
 
-- `design/payment_gateway_deployment_and_guides_architecture.md` — checkout/help deployment context.
-- `design/complete_zero_to_hero_guides_and_academy_specification.md` — collection-mode and trustworthy-confirmation terminology used by the payer guidance.
-- `design/guide_system_design_and_content (2).md` — future guide workstream; not current checkout help behavior.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` — checkout/help deployment context.
+- `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` — collection-mode and trustworthy-confirmation terminology used by the payer guidance.
+- `design/07-guides-and-academy/guide_system_design_and_content.md` — future guide workstream; not current checkout help behavior.
 
 ### Code paths
 

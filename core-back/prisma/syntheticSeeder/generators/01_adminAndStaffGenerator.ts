@@ -1,53 +1,60 @@
 import type { SeederContext } from "../context";
-import { addDays, randomName } from "../builders";
+import { metaOf } from "../context";
+import { addDays } from "../builders";
+import { ROLE_AUTHORITIES, ROLE_FLAGS, type AdminRole } from "../../../scripts/createAdminPlan";
 
-const PLATFORM_ROLES = [
+/**
+ * The platform staff of the simulated operator: one row per seat, with the
+ * SAME flat authority list and maker/checker flags the bootstrap CLI and the
+ * baseline seed use (`scripts/createAdminPlan.ts`). The previous generator
+ * wrote a nested `{ gateway: ["read"] }` map that `parseAuthorities` ignores,
+ * so every seeded staff member resolved to zero authorities.
+ */
+export const PLATFORM_SEATS: readonly AdminRole[] = [
   "GATEWAY_ADMIN", "GATEWAY_ADMIN", "SECURITY_ADMIN", "FINANCE", "FINANCE",
-  "OPERATOR", "OPERATOR", "OPERATOR", "COMPLIANCE", "COMPLIANCE", "MLRO", "SUPPORT",
-] as const;
+  "OPERATOR", "OPERATOR", "OPERATOR", "OPERATOR", "COMPLIANCE", "COMPLIANCE", "MLRO", "SUPPORT",
+];
 
-const AUTHORITIES: Record<string, Record<string, string[]>> = {
-  GATEWAY_ADMIN: { gateway: ["read", "write", "publish"], version: ["read", "write"] },
-  SECURITY_ADMIN: { security: ["read", "write"], audit: ["read"] },
-  FINANCE: { finance: ["read", "write"], reconciliation: ["read", "write"] },
-  OPERATOR: { attempt: ["read", "write"], operator_case: ["read", "write"] },
-  COMPLIANCE: { compliance: ["read", "write"], aml_case: ["read", "write"] },
-  MLRO: { compliance: ["read", "write"], aml_case: ["read", "approve"], report: ["read", "approve"] },
-  SUPPORT: { attempt: ["read"], merchant: ["read"] },
-};
+export const staffEmail = (ctx: SeederContext, role: string, index: number): string =>
+  `${role.toLowerCase().replaceAll("_", ".")}.${index}@${ctx.config.namespace}.pg.internal`;
 
-/** Platform staff, maker/checker pairs, rules and notification templates. */
+/** Platform staff, the system drafter, rules and policy rows. */
 export const generateAdminAndStaff = (ctx: SeederContext): void => {
   const start = ctx.timeline.start;
-  const roles = [...PLATFORM_ROLES];
   let index = 0;
-  for (const role of roles) {
+  for (const role of PLATFORM_SEATS) {
     index += 1;
-    const name = randomName(ctx);
-    const createdAt = addDays(start, ctx.rng.int(0, 120));
-    const isMaker = ["GATEWAY_ADMIN", "SECURITY_ADMIN", "FINANCE", "OPERATOR", "COMPLIANCE", "MLRO"].includes(role);
-    const isChecker = ["SECURITY_ADMIN", "FINANCE", "MLRO"].includes(role);
+    const createdAt = addDays(start, ctx.rng.int(0, 60));
+    const flags = ROLE_FLAGS[role];
+    // Every maker and checker seat stays ACTIVE so the maker-checker queues
+    // always have an eligible pair; only the support desk shows the other
+    // lifecycle states.
+    const status = role === "SUPPORT" ? "INVITED" : "ACTIVE";
     const id = ctx.nextId("user");
+    const email = staffEmail(ctx, role, index);
     ctx.dataset.users.push({
       id,
       createdAt,
       updatedAt: createdAt,
       merchantId: null,
-      email: `${role.toLowerCase().replaceAll("_", ".")}.${index}@${ctx.config.namespace}.pg.internal`,
+      email,
       phone: null,
       passwordHash: null,
       role,
-      authoritiesMap: AUTHORITIES[role] ?? {},
+      authoritiesMap: [...ROLE_AUTHORITIES[role]],
       appScopeIds: null,
-      isMaker,
-      isChecker,
+      isMaker: flags.isMaker,
+      isChecker: flags.isChecker,
       mfaRequired: true,
       mfaSecretCiphertext: null,
-      status: ctx.rng.chance(8) ? "INVITED" : ctx.rng.chance(3) ? "SUSPENDED" : "ACTIVE",
+      invitationTokenHash: null,
+      invitationExpiresAt: null,
+      invitedById: null,
+      status,
       academyProgressJson: {
-        completedModules: ctx.rng.int(0, 6),
+        completedModules: ctx.rng.int(1, 6),
         quizScores: { aml: ctx.rng.int(60, 100), pci: ctx.rng.int(60, 100) },
-        badges: isMaker ? ["maker"] : ["checker"],
+        badges: [flags.isMaker ? "maker" : null, flags.isChecker ? "checker" : null].filter(Boolean),
       },
     });
     ctx.dataset.userIdentities.push({
@@ -56,83 +63,97 @@ export const generateAdminAndStaff = (ctx: SeederContext): void => {
       updatedAt: createdAt,
       userId: id,
       kind: "EMAIL",
-      identifierNormalized: `${role.toLowerCase()}.${index}@${ctx.config.namespace}.pg.internal`,
+      identifierNormalized: email,
       providerSubject: null,
-      verifiedAt: createdAt,
+      verifiedAt: status === "ACTIVE" ? createdAt : null,
       isPrimary: true,
-      lastUsedAt: ctx.timeline.end,
+      lastUsedAt: status === "ACTIVE" ? addDays(ctx.timeline.end, -ctx.rng.int(0, 3)) : null,
     });
-    ctx.refs.adminUsers.push({ id, email: `${role.toLowerCase()}.${index}@${ctx.config.namespace}.pg.internal`, role });
-    void name;
+    ctx.refs.adminUsers.push({ id, email, role });
   }
 
-  // Notification templates for the main customer/operator events.
-  const templates: Array<[string, string, string, string]> = [
-    ["PAYMENT_SUCCEEDED", "SMS", "AR", "تم الدفع بنجاح"],
-    ["PAYMENT_SUCCEEDED", "SMS", "EN", "Payment succeeded"],
-    ["PAYMENT_FAILED", "SMS", "AR", "فشل الدفع"],
-    ["PAYMENT_FAILED", "EMAIL", "EN", "Payment failed"],
-    ["OTP_CODE", "SMS", "AR", "رمز التحقق الخاص بك"],
-    ["OTP_CODE", "SMS", "EN", "Your verification code"],
-    ["KYB_DOC_EXPIRING", "EMAIL", "EN", "A KYB document is expiring"],
-    ["AML_HOLD", "EMAIL", "AR", "تم تعليق العملية للمراجعة"],
-    ["DISPUTE_OPENED", "EMAIL", "EN", "A dispute was opened"],
-    ["CASHOUT_COMPLETE", "SMS", "AR", "تم تحويل المبلغ"],
+  // The automation identity that drafts chargebacks and SUSPENSE refunds.
+  // It mirrors `ensureSystemAutomationUser` (DISABLED, never maker/checker)
+  // with a UUID id: the engine constant `SYSTEM_AUTOMATION` is not a UUID and
+  // cannot be stored in `users.id` (reported separately).
+  const systemId = ctx.nextId("user");
+  ctx.dataset.users.push({
+    id: systemId,
+    createdAt: start,
+    updatedAt: start,
+    merchantId: null,
+    email: `system-drafter@${ctx.config.namespace}.pg.internal`,
+    phone: null,
+    passwordHash: null,
+    role: "OPERATOR",
+    authoritiesMap: {},
+    appScopeIds: [],
+    isMaker: false,
+    isChecker: false,
+    mfaRequired: false,
+    mfaSecretCiphertext: null,
+    invitationTokenHash: null,
+    invitationExpiresAt: null,
+    invitedById: null,
+    status: "DISABLED",
+    academyProgressJson: null,
+  });
+  metaOf(ctx).systemUserId = systemId;
+
+  // Velocity rules. Thresholds are the ones a Libyan switch would really run:
+  // tight per-customer limits that REJECT, wide merchant/rail limits that only
+  // FLAG. (The previous thresholds - e.g. RAIL REJECT above 20 payments an
+  // hour - would have blocked live test traffic on the seeded server.)
+  const velocity: Array<[string, number, number, string, string]> = [
+    ["END_CLIENT_IP", 900, 12, "15000.0000", "REJECT"],
+    ["END_CLIENT_PHONE", 3600, 8, "20000.0000", "REJECT"],
+    ["END_CLIENT_CARD", 3600, 6, "15000.0000", "REJECT"],
+    ["MERCHANT", 3600, 1500, "750000.0000", "FLAG"],
+    ["APPLICATION", 3600, 1200, "500000.0000", "FLAG"],
+    ["RAIL", 3600, 20000, "5000000.0000", "FLAG"],
+    ["LINK", 3600, 40, "100000.0000", "FLAG"],
   ];
-  for (const [code, channel, lang, body] of templates) {
-    ctx.dataset.notificationTemplates.push({
-      id: ctx.nextId("template"),
-      createdAt: start,
-      updatedAt: start,
-      code,
-      channel,
-      lang,
-      subjectTemplate: null,
-      bodyTemplate: `${body} {{reference}}`,
-      confidentialityClass: code.startsWith("AML") ? "INTERNAL" : "MERCHANT",
-      version: 1,
-      active: true,
-    });
-  }
-
-  // Velocity rules (one of each scope), AML rules and reporting rules.
-  const velocityScopes = ["END_CLIENT_IP", "END_CLIENT_PHONE", "END_CLIENT_CARD", "MERCHANT", "APPLICATION", "RAIL", "LINK"];
-  for (const scope of velocityScopes) {
+  for (const [scopeType, windowSeconds, maxCount, maxAmount, action] of velocity) {
+    const createdAt = addDays(start, ctx.rng.int(0, 30));
     ctx.dataset.velocityRules.push({
       id: ctx.nextId("velocity"),
-      createdAt: addDays(start, ctx.rng.int(0, 90)),
-      updatedAt: ctx.timeline.end,
-      scopeType: scope,
+      createdAt,
+      updatedAt: createdAt,
+      scopeType,
       scopeValue: null,
-      windowSeconds: 3600,
-      maxCount: ctx.rng.int(20, 200),
-      maxAmount: ctx.rng.decimal(1000, 50000, 4),
-      action: ctx.rng.chance(70) ? "REJECT" : "FLAG",
+      windowSeconds,
+      maxCount,
+      maxAmount,
+      action,
       active: true,
       version: 1,
-      effectiveFrom: start,
+      effectiveFrom: createdAt,
       effectiveTo: null,
       approvalRequestId: null,
     });
   }
-  const amlRules = [
-    ["AML-SINGLE-LARGE", "Single large transaction", "SINGLE_AMOUNT", "HOLD", "HIGH"],
-    ["AML-STRUCTURING", "Structuring pattern", "STRUCTURING", "CASE_ONLY", "CRITICAL"],
-    ["AML-CUMULATIVE", "Cumulative window", "CUMULATIVE_WINDOW", "FLAG", "MEDIUM"],
-    ["AML-RISK-TIER", "High risk tier", "RISK_TIER", "FLAG", "HIGH"],
-    ["AML-COUNTERPARTY", "High risk counterparty country", "COUNTERPARTY_COUNTRY", "BLOCK", "CRITICAL"],
-    ["AML-MERCHANT-DIRECT", "Merchant direct amount", "MERCHANT_DIRECT_AMOUNT", "HOLD", "MEDIUM"],
-  ] as const;
-  for (const [code, name, ruleType, action, severity] of amlRules) {
+
+  // AML rules with the parameter keys `AmlRuleEngine.evaluateRule` reads
+  // (`min_amount`, `max_amount`/`max_count`/`window_seconds`, `threshold`,
+  // `tier`, `countries`/`mode`). The old rows carried a generic `threshold`
+  // key, so five of the six rules could never fire.
+  const amlRules: Array<[string, string, string, Record<string, unknown>, string, string]> = [
+    ["AML-SINGLE-LARGE", "Single large transaction", "SINGLE_AMOUNT", { min_amount: "25000.0000", currency: "LYD" }, "HOLD", "HIGH"],
+    ["AML-STRUCTURING", "Structuring below the CBL threshold", "STRUCTURING", { threshold: "50000.0000", band_percent: 10, min_count: 3, window_seconds: 86_400 }, "CASE_ONLY", "CRITICAL"],
+    ["AML-CUMULATIVE", "Cumulative 24h window", "CUMULATIVE_WINDOW", { max_amount: "120000.0000", max_count: 60, window_seconds: 86_400 }, "FLAG", "MEDIUM"],
+    ["AML-RISK-TIER", "High risk tier large payment", "RISK_TIER", { tier: "HIGH", min_amount: "10000.0000" }, "HOLD", "HIGH"],
+    ["AML-COUNTERPARTY", "High risk counterparty country", "COUNTERPARTY_COUNTRY", { countries: ["KP", "IR", "SY"], mode: "DENY" }, "BLOCK", "CRITICAL"],
+  ];
+  for (const [code, name, ruleType, params, action, severity] of amlRules) {
     ctx.dataset.amlRules.push({
       id: ctx.nextId("aml-rule"),
       createdAt: start,
       updatedAt: start,
-      code,
+      code: `${code}-${ctx.config.namespace}`.toUpperCase(),
       name,
       ruleType,
       scope: { rail: null, merchantId: null },
-      params: { threshold: ctx.rng.decimal(5000, 50000, 4) },
+      params,
       action,
       baseSeverity: severity,
       active: true,
@@ -142,39 +163,11 @@ export const generateAdminAndStaff = (ctx: SeederContext): void => {
       approvalRequestId: null,
     });
   }
-  const reportingRules = [
-    ["LARGE_TRANSACTION", "LARGE_TRANSACTION", 50000],
-    ["SUSPICIOUS_ACTIVITY", "SUSPICIOUS_ACTIVITY", null],
-    ["PERIODIC_RETURN", "PERIODIC_RETURN", null],
-  ] as const;
-  for (const [name, reportType, threshold] of reportingRules) {
-    ctx.dataset.reportingRules.push({
-      id: ctx.nextId("reporting-rule"),
-      createdAt: start,
-      updatedAt: start,
-      authority: "CBL",
-      reportType,
-      thresholdAmount: threshold ? String(threshold) : null,
-      windowSeconds: reportType === "PERIODIC_RETURN" ? 30 * 86_400 : null,
-      currency: "LYD",
-      conditions: { name },
-      sourceReference: null,
-      status: "CONFIRMED",
-      effectiveFrom: start,
-      effectiveTo: null,
-      approvalRequestId: null,
-    });
-  }
 
-  ctx.dataset.platformSettings.push({
-    id: ctx.nextId("platform-setting"),
-    createdAt: start,
-    updatedAt: ctx.timeline.end,
-    key: "server.environment_mode",
-    scope: "PLATFORM",
-    version: 1,
-    valueJson: { mode: "TEST_SANDBOX" },
-    effectiveFrom: start,
-    approvalRequestId: null,
-  });
+  // Reporting rules and notification templates are NOT generated: the baseline
+  // seed (`prisma/seed.ts`) owns the bilingual template catalogue and the CBL
+  // reporting rules. Re-creating them here produced duplicate CONFIRMED
+  // LARGE_TRANSACTION rules (double filings) and template rows the unique key
+  // silently dropped. The `server.environment_mode` setting likewise belongs to
+  // `seedFakeRails.ts`.
 };

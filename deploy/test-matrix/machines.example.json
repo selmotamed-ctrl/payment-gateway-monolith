@@ -1,0 +1,55 @@
+{
+  "$schema": "./machines.schema.json",
+  "version": 1,
+  "lab": {
+    "name": "three-node-lab",
+    "lanCidrs": ["10.209.250.0/24"]
+  },
+  "ssh": {
+    "user": "labops",
+    "port": 22,
+    "keyPath": "~/.ssh/id_ed25519_pg_lab",
+    "sudo": { "mode": "password", "passwordEnv": "LAB_SUDO_PASS" }
+  },
+  "machines": [
+    {
+      "id": "lab-a",
+      "address": "10.209.250.48",
+      "roles": ["controller", "app", "db", "cache", "logs", "backup"],
+      "labels": { "zone": "private", "os": "debian-13" },
+      "capacity": { "maxNodesPerTier": 3 }
+    },
+    {
+      "id": "lab-b",
+      "address": "10.209.250.205",
+      "roles": ["app", "edge", "db", "cache", "logs", "backup", "object-store", "vault"],
+      "labels": { "zone": "dmz", "os": "debian-13" }
+    },
+    {
+      "id": "lab-c",
+      "address": "192.168.56.77",
+      "privateIp": "10.209.250.77",
+      "sshPort": 2222,
+      "roles": ["app", "db", "backup"],
+      "labels": { "zone": "private", "rack": "r2" },
+      "capacity": { "maxNodesPerTier": 2 }
+    }
+  ],
+  "services": {
+    "objectStore": { "machine": "lab-b", "port": 9000, "bucket": "pg-backups-test" },
+    "vault": { "machine": "lab-b", "basePath": "/var/backups/pg-lab-vault" }
+  },
+  "topologies": {
+    "families": ["single-host", "split", "replicated", "dmz", "mesh", "scale", "chaos"],
+    "maxPerFamily": 2,
+    "exclude": []
+  },
+  "intensity": {
+    "preset": "standard",
+    "overrides": {
+      "durationSec": 120,
+      "targetTps": 250,
+      "slo": { "minTps": 200 }
+    }
+  }
+}

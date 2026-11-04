@@ -311,10 +311,10 @@ No build or test was run for this documentation change.
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` §2.1 service roles, §2.2 mTLS transport, §15? request/response envelope context.
-- `design/opencode_technical_delivery_design.md` §4.1 server/CN guard, §28 storage runtime.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` §2.1 ports and §2.2 unit of work.
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md` §15 stable error envelope.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §2.1 service roles, §2.2 mTLS transport, §15? request/response envelope context.
+- `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` §4.1 server/CN guard, §28 storage runtime.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` §2.1 ports and §2.2 unit of work.
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` §15 stable error envelope.
 
 ### Code paths
 
@@ -860,10 +860,10 @@ No build or test was run for this documentation change. Database-backed route te
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` §16.1 checkout, §16.2 merchant, §16.3 admin.
-- `design/payment-gateway-refined-design-v4.1.md` §14.1 wizard, §15.4 four-eyes matrix.
-- `design/fixes/_0001_operator_cases.md` for the operator-case route family.
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md` §15 API surface and observability.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §16.1 checkout, §16.2 merchant, §16.3 admin.
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` §14.1 wizard, §15.4 four-eyes matrix.
+- `design/10-fixes/_0001_operator_cases.md` for the operator-case route family.
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` §15 API surface and observability.
 
 ### Code paths
 
@@ -1478,12 +1478,12 @@ No build or test was run for this documentation change. Tests that require Postg
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` §8 engine contract/registry/transforms/crypto, §8.2 six methods, §8.4 transform library, §9 state machine and slot invariant, §14 go-live gates.
-- `design/payment-gateway-refined-design-v4.1.md` §6 engine contract and §7 state machine.
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md` §5 flow engine, §9 confirmation/verification.
-- `design/opencode_technical_delivery_design.md` §15 Smart AI onboarding.
-- `design/smart_ai_rail_and_voucher_onboarding_plan.md`.
-- `design/fake_payment_rails_service_architecture.md` for the emulator intent.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §8 engine contract/registry/transforms/crypto, §8.2 six methods, §8.4 transform library, §9 state machine and slot invariant, §14 go-live gates.
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` §6 engine contract and §7 state machine.
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` §5 flow engine, §9 confirmation/verification.
+- `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` §15 Smart AI onboarding.
+- `design/08-ai-onboarding/smart_ai_rail_and_voucher_onboarding_plan.md`.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` for the emulator intent.
 
 ### Code paths
 
@@ -1838,8 +1838,8 @@ The unit suites run without PostgreSQL. The checkpoint, shard, UoW, and write-pa
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` §11 — fee bearers, invariant, 15 worked entries; `design/payment-gateway-refined-design-v4.1.md` §9 — original ledger model and entries.
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md` §10 — clearing account rationale and merchant-direct model; `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` §3.1 — sharded sub-accounts and read path.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §11 — fee bearers, invariant, 15 worked entries; `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` §9 — original ledger model and entries.
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` §10 — clearing account rationale and merchant-direct model; `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` §3.1 — sharded sub-accounts and read path.
 - `core-back/test/exhaustive/02-ledger/all-15-templates-matrix.test.ts` — current 20-label matrix despite the historical title.
 
 ### Code paths
@@ -2187,9 +2187,9 @@ Some governance tests use fake clients; database-backed suites require PostgreSQ
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` Part IX (incorporates v4.1 §15–§22).
-- `design/payment-gateway-refined-design-v4.1.md` §15 roles/authorities/four-eyes, §16 onboarding/KYB, §17 detail governance, §18 AML, §19 disputes, §20 profitability; `design/Dynamic-Payment-Gateway-Management-Design-v2.md` §9 and §13.
-- `design/fixes/_0001_operator_cases.md` — operator-case inquiry eligibility and bulk behavior.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` Part IX (incorporates v4.1 §15–§22).
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` §15 roles/authorities/four-eyes, §16 onboarding/KYB, §17 detail governance, §18 AML, §19 disputes, §20 profitability; `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` §9 and §13.
+- `design/10-fixes/_0001_operator_cases.md` — operator-case inquiry eligibility and bulk behavior.
 
 ### Code paths
 
@@ -2533,8 +2533,8 @@ Database-backed suites require PostgreSQL 18; Redis-backed invalidation tests re
 
 ### Old design sections
 
-- `design/opencode_technical_delivery_design.md` Phase 4 worker task; §10.5 governance/screening/observability; §12.4 operational defects; §28 delivery run 4; `design/fixes/_0001_operator_cases.md`.
-- `design/payment_gateway_final_design-v5.md` §9.1 rules 3 and 8; `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` §3.2.
+- `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` Phase 4 worker task; §10.5 governance/screening/observability; §12.4 operational defects; §28 delivery run 4; `design/10-fixes/_0001_operator_cases.md`.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §9.1 rules 3 and 8; `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` §3.2.
 
 ### Code paths
 
@@ -2905,11 +2905,11 @@ There is no benchmark in this part that proves the blueprint's 1,000+ TPS sustai
 
 ### Old design sections
 
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#2-segment-1--the-core-back-storage-driver-engine-core-backlibstorageengine`
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#3-2-outbox-driven-read-models--uncompromised-20-group-deep-search-on-replicas`
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#5-segment-4--backup-management-orchestrator--admin-control-plane-pg-backup-daemon--core-back--admin-front`
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#6-segment-5--horizontal-node-scaling--multi-host-storage-orchestration-in-deploydeployenv--deploydeployts`
-- `design/blueprint-management.md#5-documentation-corrections-backlog`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#2-segment-1--the-core-back-storage-driver-engine-core-backlibstorageengine`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#3-2-outbox-driven-read-models--uncompromised-20-group-deep-search-on-replicas`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#5-segment-4--backup-management-orchestrator--admin-control-plane-pg-backup-daemon--core-back--admin-front`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#6-segment-5--horizontal-node-scaling--multi-host-storage-orchestration-in-deploydeployenv--deploydeployts`
+- `design/00-process/blueprint-management.md#5-documentation-corrections-backlog`
 
 ### Code paths
 
@@ -3289,12 +3289,12 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md#7-database-schema`
-- `design/payment-gateway-refined-design-v4.1.md#5-database-schema`
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md#4-database-schema`
-- `design/synthetic_operational_data_seeder_architecture.md#3-comprehensive-multi-state-distribution-across-all-66-database-models`
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#4-segment-3--postgresql-18-ddl-partialcoveringgin-indexes--dedicated-auditlog-schemas`
-- `design/blueprint-management.md#5-documentation-corrections-backlog`
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md#7-database-schema`
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#5-database-schema`
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md#4-database-schema`
+- `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md#3-comprehensive-multi-state-distribution-across-all-66-database-models`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#4-segment-3--postgresql-18-ddl-partialcoveringgin-indexes--dedicated-auditlog-schemas`
+- `design/00-process/blueprint-management.md#5-documentation-corrections-backlog`
 
 ### Code paths
 
@@ -3679,15 +3679,15 @@ The core test is a unit/authority suite and does not require PostgreSQL. The Pla
 
 ### Old design sections
 
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#1-executive-summary--why-a-declarative-plugin-architecture-is-required`
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#2-product-behavior--ux-contract`
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#3-api-contract--shared-security-predicates`
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#4-server-side-plugin-architecture-core-back`
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#5-admin-bff-layer-admin-back`
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#6-frontend-plugin-registry--global-command-palette-admin-front`
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#7-universal-one-shot-deep-link-composable-useopenquery--page-wiring`
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#9-comprehensive-automated-verification--test-plan`
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#3-2-outbox-driven-read-models--uncompromised-20-group-deep-search-on-replicas`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#1-executive-summary--why-a-declarative-plugin-architecture-is-required`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#2-product-behavior--ux-contract`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#3-api-contract--shared-security-predicates`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#4-server-side-plugin-architecture-core-back`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#5-admin-bff-layer-admin-back`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#6-frontend-plugin-registry--global-command-palette-admin-front`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#7-universal-one-shot-deep-link-composable-useopenquery--page-wiring`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#9-comprehensive-automated-verification--test-plan`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#3-2-outbox-driven-read-models--uncompromised-20-group-deep-search-on-replicas`
 
 ### Code paths
 
@@ -4104,12 +4104,12 @@ Core backup-admin route tests that touch PostgreSQL skip when the database is un
 
 ### Old design sections
 
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#5-segment-4--backup-management-orchestrator--admin-control-plane-pg-backup-daemon--core-back--admin-front`
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#5-1-architecture-wrapping-wal-g--barman-with-an-admin-accessible-control-plane`
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#5-2-core-back--admin-front-backup-management-api-contract`
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#6-segment-5--horizontal-node-scaling--multi-host-storage-orchestration-in-deploydeployenv--deploydeployts`
-- `design/payment_gateway_deployment_and_guides_architecture.md`
-- `design/blueprint-management.md#5-documentation-corrections-backlog`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#5-segment-4--backup-management-orchestrator--admin-control-plane-pg-backup-daemon--core-back--admin-front`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#5-1-architecture-wrapping-wal-g--barman-with-an-admin-accessible-control-plane`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#5-2-core-back--admin-front-backup-management-api-contract`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#6-segment-5--horizontal-node-scaling--multi-host-storage-orchestration-in-deploydeployenv--deploydeployts`
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md`
+- `design/00-process/blueprint-management.md#5-documentation-corrections-backlog`
 
 ### Code paths
 
@@ -4489,13 +4489,13 @@ The unit tests do not require a live database or Fake Rails; they use fakes for 
 
 ### Old design sections
 
-- `design/synthetic_operational_data_seeder_architecture.md#executive-summary--architectural-vision`
-- `design/synthetic_operational_data_seeder_architecture.md#1-pre-flight-safety-gate--fake-rails-dependency-verification`
-- `design/synthetic_operational_data_seeder_architecture.md#2-chronological-simulation-engine--volume-scaling-profiles`
-- `design/synthetic_operational_data_seeder_architecture.md#3-comprehensive-multi-state-distribution-across-all-66-database-models`
-- `design/synthetic_operational_data_seeder_architecture.md#4-two-phase-seeder-execution--fake-rails-bulk-synchronization-pipeline`
-- `design/synthetic_operational_data_seeder_architecture.md#5-directory-structure-of-the-synthetic-seeder-module`
-- `design/blueprint-management.md#5-documentation-corrections-backlog`
+- `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md#executive-summary--architectural-vision`
+- `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md#1-pre-flight-safety-gate--fake-rails-dependency-verification`
+- `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md#2-chronological-simulation-engine--volume-scaling-profiles`
+- `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md#3-comprehensive-multi-state-distribution-across-all-66-database-models`
+- `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md#4-two-phase-seeder-execution--fake-rails-bulk-synchronization-pipeline`
+- `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md#5-directory-structure-of-the-synthetic-seeder-module`
+- `design/00-process/blueprint-management.md#5-documentation-corrections-backlog`
 
 ### Code paths
 
@@ -4869,13 +4869,13 @@ Database-backed suites require PostgreSQL 18; Redis-backed suites require Redis.
 
 ### Old design sections
 
-- `design/master_exhaustive_test_plan_for_opencode.md#executive-summary--testing-philosophy`
-- `design/master_exhaustive_test_plan_for_opencode.md#1-master-test-volume--coverage-matrix-38500-assertions`
-- `design/master_exhaustive_test_plan_for_opencode.md#10-suite-09-postgresql-18-storage-engine-replicas-auditlog-databases-backups--restore-drills-900-tests`
-- `design/master_exhaustive_test_plan_for_opencode.md#11-suite-10-full-surface-playwright-ui-filter-dialog-rtlltr--geometry-matrix-across-all-4-portals-2300-tests`
-- `design/master_exhaustive_test_plan_for_opencode.md#12-suite-11-full-cross-service-end-to-end-journeys-synthetic-seeder--deploy-engine-verification-1200-tests`
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#7-step-by-step-opencode-execution-plan`
-- `design/blueprint-management.md#5-documentation-corrections-backlog`
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md#executive-summary--testing-philosophy`
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md#1-master-test-volume--coverage-matrix-38500-assertions`
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md#10-suite-09-postgresql-18-storage-engine-replicas-auditlog-databases-backups--restore-drills-900-tests`
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md#11-suite-10-full-surface-playwright-ui-filter-dialog-rtlltr--geometry-matrix-across-all-4-portals-2300-tests`
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md#12-suite-11-full-cross-service-end-to-end-journeys-synthetic-seeder--deploy-engine-verification-1200-tests`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#7-step-by-step-opencode-execution-plan`
+- `design/00-process/blueprint-management.md#5-documentation-corrections-backlog`
 
 ### Code paths
 

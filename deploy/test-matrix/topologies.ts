@@ -1,325 +1,145 @@
-import type { LabHostsConfig, TopologyId, TopologyMatrixSpec } from "./types";
+import { machineById, machinePrivateIp, machineSshPort, type LabConfig } from "./labConfig";
+import type { LabSecrets } from "./labSecrets";
+import type { ResolvedIntensity } from "./intensity";
+import type { DerivedTopology, NodeRef } from "./topologyDerivation";
 
-const node = (nodeId: string, host: string, port: number): string => `${nodeId}@${host}:22:${host}:${port}`;
+/**
+ * Renders a derived topology into a deploy.env record that the real deploy
+ * engine (`deploy/deploy.ts`, `lib/configSchema.ts`) accepts.
+ *
+ * Fixes against the archived T1-T8 generator:
+ * - every tier uses the configured SSH user/key/sudo (the old generator used
+ *   HOST_B's user and HOST_A's sudo password for every tier);
+ * - no secret literals: secrets come from the generated `LabSecrets`;
+ * - LAN_ALLOWED_CIDRS is narrowed to the declared machines (or lab.lanCidrs)
+ *   instead of 10.0.0.0/8 + 192.168.0.0/16;
+ * - seed profile/years come from the resolved intensity, not the topology.
+ */
 
-const strongTesterPassword = "Lab-FakeRails-2026-Xy9-qP2!";
+export interface RenderInput {
+  config: LabConfig;
+  topology: DerivedTopology;
+  secrets: LabSecrets;
+  intensity: ResolvedIntensity;
+  sudoPassword: string;
+}
 
-const baseSecrets = (lab: LabHostsConfig) => ({
-  DEPLOY_MODE: "fresh",
-  DEPLOY_ENV: "production",
-  ROLLING_BATCH_SIZE: "1",
-  KEEP_RELEASES: "3",
-  LAN_ALLOWED_CIDRS: "10.0.0.0/8,192.168.0.0/16,127.0.0.0/8",
-  KMS_MASTER_KEY_ID: "v1",
-  KMS_MASTER_KEY_HEX: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-  KMS_MASTER_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-  BASE_CURRENCY: "LYD",
-  GATEWAY_TIMEZONE: "Africa/Tripoli",
-  IS_TEST_SERVER: "true",
-  FAKE_RAILS_ENABLED: "true",
-  FAKE_RAILS_ALLOW_IN_PRODUCTION: "true",
-  FAKE_RAILS_ALLOWED_HOSTS: `${lab.hostALanIp},${lab.hostBLanIp},127.0.0.1,localhost`,
-  FAKE_RAILS_ADMIN_USER: "tester",
-  FAKE_RAILS_ADMIN_PASSWORD: strongTesterPassword,
-  FAKE_RAILS_JWT_SECRET: "pg-lab-fake-rails-jwt-secret-2026",
-  FAKE_RAILS_SEEDER_TOKEN: "seeder-secret-token-2026",
-  FAKE_RAILS_SSH_USER: lab.hostBSshUser,
-  FAKE_RAILS_SSH_KEY_PATH: lab.sshKeyPath,
-  FAKE_RAILS_SUDO_PASSWORD: lab.hostASudoPass,
-  FAKE_RAILS_NGINX_PORT: "8444",
-  FAKE_RAILS_SSL: "false",
-  RUN_PRISMA_SEED: "true",
-  RUN_SYNTHETIC_HISTORY_SEED: "true",
-  SYNTHETIC_SEED_PROFILE: "COMPACT",
-  SYNTHETIC_YEARS_SPAN: "3.5",
-  PG_MANAGE_VIA_SSH: "true",
-  PG_VERSION: "18",
-  PG_DB_NAME: "payment_gateway_prod",
-  PG_DB_USER: "core_user",
-  PG_DB_PASSWORD: "pg_core_pass_1234",
-  PG_REPLICATION_USER: "replicator",
-  PG_REPLICATION_PASSWORD: "pg_repl_pass_1234",
-  READ_REPLICA_MAX_LAG_MS: "60000",
-  PG_SSH_USER: lab.hostBSshUser,
-  PG_SSH_KEY_PATH: lab.sshKeyPath,
-  PG_SUDO_PASSWORD: lab.hostASudoPass,
-  PGBOUNCER_ENABLED: "true",
-  PGBOUNCER_DEFAULT_POOL_SIZE: "40",
-  PGBOUNCER_MAX_CLIENT_CONN: "1000",
-  PGBOUNCER_MAX_PREPARED_STATEMENTS: "256",
-  REDIS_MANAGE_VIA_SSH: "true",
-  REDIS_SSH_USER: lab.hostBSshUser,
-  REDIS_SSH_KEY_PATH: lab.sshKeyPath,
-  REDIS_SUDO_PASSWORD: lab.hostASudoPass,
-  REDIS_PASSWORD: "pg_redis_pass_1234",
-  AUDIT_DB_MANAGE_VIA_SSH: "true",
-  AUDIT_DB_NAME: "pg_audit_db",
-  AUDIT_DB_USER: "audit_writer",
-  AUDIT_DB_PASSWORD: "pg_audit_pass_1234",
-  AUDIT_DB_SSH_USER: lab.hostBSshUser,
-  AUDIT_DB_SSH_KEY_PATH: lab.sshKeyPath,
-  AUDIT_DB_SUDO_PASSWORD: lab.hostASudoPass,
-  LOG_DB_MANAGE_VIA_SSH: "true",
-  LOG_DB_NAME: "pg_logs_db",
-  LOG_DB_USER: "log_writer",
-  LOG_DB_PASSWORD: "pg_log_pass_1234",
-  LOG_DB_SSH_USER: lab.hostBSshUser,
-  LOG_DB_SSH_KEY_PATH: lab.sshKeyPath,
-  LOG_DB_SUDO_PASSWORD: lab.hostASudoPass,
-  BACKUP_ENABLED: "true",
-  BACKUP_SSH_USER: lab.hostBSshUser,
-  BACKUP_SSH_KEY_PATH: lab.sshKeyPath,
-  BACKUP_SUDO_PASSWORD: lab.hostASudoPass,
-  BACKUP_COMPRESSION: "zstd",
-  BACKUP_ENCRYPTION_KEY_HEX: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
-  BACKUP_PRIMARY_S3_ENDPOINT: `http://${lab.hostBLanIp}:9000`,
-  BACKUP_PRIMARY_S3_BUCKET: "s3://pg-backups-test",
-  BACKUP_PRIMARY_S3_ACCESS_KEY: "minioadmin",
-  BACKUP_PRIMARY_S3_SECRET_KEY: "minioadmin1234",
-  BACKUP_ALLOW_INSECURE_HTTP: "false",
-  CORE_SSH_USER: lab.hostBSshUser,
-  CORE_SSH_KEY_PATH: lab.sshKeyPath,
-  CORE_SUDO_PASSWORD: lab.hostASudoPass,
-  ADMIN_SSH_USER: lab.hostBSshUser,
-  ADMIN_SSH_KEY_PATH: lab.sshKeyPath,
-  ADMIN_SUDO_PASSWORD: lab.hostASudoPass,
-  MERCHANT_SSH_USER: lab.hostBSshUser,
-  MERCHANT_SSH_KEY_PATH: lab.sshKeyPath,
-  MERCHANT_SUDO_PASSWORD: lab.hostASudoPass,
-  CHECKOUT_SSH_USER: lab.hostBSshUser,
-  CHECKOUT_SSH_KEY_PATH: lab.sshKeyPath,
-  CHECKOUT_SUDO_PASSWORD: lab.hostASudoPass,
-  PAY_RATE_LIMIT_MAX: "10000",
-  MERCHANT_DOMAIN: "merchant.lab.internal",
-  CHECKOUT_DOMAIN: "checkout.lab.internal",
-  MERCHANT_SSL: "false",
-  CHECKOUT_SSL: "false",
-  MERCHANT_LAN_PORT: "0",
-  CHECKOUT_LAN_PORT: "0",
-  ADMIN_SSL: "false",
-  ADMIN_NGINX_LAN_PORT: "8443",
-  ADMIN_DOMAIN: "_",
-});
-
-export const buildAllTopologySpecs = (): TopologyMatrixSpec[] => {
-  const A = (lab: LabHostsConfig) => lab.hostALanIp;
-  const B = (lab: LabHostsConfig) => lab.hostBLanIp;
-  const base = (lab: LabHostsConfig) => baseSecrets(lab);
-  const fakeRails = (lab: LabHostsConfig, host: string) => ({
-    FAKE_RAILS_NODE: node("fakerails-1", host, 4400),
-    FAKE_RAILS_PUBLIC_BASE_URL: `http://${host}:8444`,
-  });
-
-  return [
-    {
-      id: "T1",
-      name: "Single-Host Multi-Node Density & Co-Located Storage (WAL-G on Same Host)",
-      description: "2 Core, 2 Checkout, 1 Merchant, 1 Admin, Primary+Local Replica, Redis, Audit/Log DB & WAL-G all on HOST_A",
-      glShardCount: 16,
-      seedProfile: "COMPACT",
-      backupMode: "wal-g",
-      buildEnv: (lab) => ({
-        ...base(lab),
-        STORAGE_SHARD_COUNT: "16",
-              CORE_NODES: `${node("core-1", A(lab), 4000)},${node("core-2", A(lab), 4001)}`,
-        ADMIN_NODES: node("admin-1", A(lab), 4101),
-        MERCHANT_NODES: node("merch-1", A(lab), 4102),
-        CHECKOUT_NODES: `${node("chk-1", A(lab), 4103)},${node("chk-2", A(lab), 4113)}`,
-        ...fakeRails(lab, A(lab)),
-        PG_PRIMARY_NODE: node("pg-pri", A(lab), 5432),
-        PG_REPLICA_NODES: node("pg-rep-local", A(lab), 5433),
-        REDIS_NODES: node("redis-1", A(lab), 6379),
-        AUDIT_DB_NODE: node("audit-1", A(lab), 5434),
-        LOG_DB_NODE: node("log-1", A(lab), 5435),
-        BACKUP_NODE: node("backup-1", A(lab), 4090),
-        BACKUP_ENGINE_MODE: "wal-g",
-        BACKUP_SECONDARY_SSH_TARGET: `${lab.hostBSshUser}@${B(lab)}:/var/backups/pg-vault-t1`,
-      }),
-    },
-    {
-      id: "T2",
-      name: "Compute-on-A / Storage-on-B Split + Cross-Host Barman Backup",
-      description: "3 Core & 4 Edge nodes on HOST_A; Primary DB, Redis, Audit & Log DB on HOST_B; Barman on HOST_A",
-      glShardCount: 16,
-      seedProfile: "COMPACT",
-      backupMode: "barman",
-      buildEnv: (lab) => ({
-        ...base(lab),
-        STORAGE_SHARD_COUNT: "16",
-              CORE_NODES: `${node("core-1", A(lab), 4000)},${node("core-2", A(lab), 4001)},${node("core-3", A(lab), 4002)}`,
-        ADMIN_NODES: node("admin-1", A(lab), 4101),
-        MERCHANT_NODES: `${node("merch-1", A(lab), 4102)},${node("merch-2", A(lab), 4112)}`,
-        CHECKOUT_NODES: `${node("chk-1", A(lab), 4103)},${node("chk-2", A(lab), 4113)}`,
-        ...fakeRails(lab, A(lab)),
-        PG_PRIMARY_NODE: node("pg-pri", B(lab), 5432),
-        PG_REPLICA_NODES: "",
-        REDIS_NODES: node("redis-1", B(lab), 6379),
-        AUDIT_DB_NODE: node("audit-1", B(lab), 5434),
-        LOG_DB_NODE: node("log-1", B(lab), 5435),
-        BACKUP_NODE: node("backup-1", A(lab), 4090),
-        BACKUP_ENGINE_MODE: "barman",
-        BACKUP_SECONDARY_SSH_TARGET: `${lab.hostASshUser}@${A(lab)}:/var/backups/pg-vault-t2`,
-      }),
-    },
-    {
-      id: "T3",
-      name: "DB & Redis Separated + Cross-Host Streaming Replica + WAL-G",
-      description: "PG_PRIMARY on HOST_A; REDIS + PG_REPLICA_1 + Audit/Log DB on HOST_B; Core & Checkout split across both machines",
-      glShardCount: 16,
-      seedProfile: "COMPACT",
-      backupMode: "wal-g",
-      buildEnv: (lab) => ({
-        ...base(lab),
-        STORAGE_SHARD_COUNT: "16",
-              CORE_NODES: `${node("core-1", A(lab), 4000)},${node("core-2", B(lab), 4000)}`,
-        ADMIN_NODES: node("admin-1", A(lab), 4101),
-        MERCHANT_NODES: node("merch-1", B(lab), 4102),
-        CHECKOUT_NODES: `${node("chk-1", A(lab), 4103)},${node("chk-2", B(lab), 4103)}`,
-        ...fakeRails(lab, B(lab)),
-        PG_PRIMARY_NODE: node("pg-pri", A(lab), 5432),
-        PG_REPLICA_NODES: node("pg-rep-1", B(lab), 5432),
-        REDIS_NODES: node("redis-1", B(lab), 6379),
-        AUDIT_DB_NODE: node("audit-1", B(lab), 5434),
-        LOG_DB_NODE: node("log-1", B(lab), 5435),
-        PG_AUDIT_DATA_DIR: "/var/lib/postgresql/18/audit",
-        BACKUP_NODE: node("backup-1", A(lab), 4090),
-        BACKUP_ENGINE_MODE: "wal-g",
-        BACKUP_SECONDARY_SSH_TARGET: `${lab.hostBSshUser}@${B(lab)}:/var/backups/pg-vault-t3`,
-      }),
-    },
-    {
-      id: "T4",
-      name: "Reversed DB/Redis Separation + Dual Replicas (1 Local + 1 Remote) + Standby Barman",
-      description: "PG_PRIMARY on HOST_B; PG_REPLICA_1 on HOST_B:5433 + PG_REPLICA_2 on HOST_A:5432; REDIS on HOST_A; Barman on HOST_A",
-      glShardCount: 32,
-      seedProfile: "COMPACT",
-      backupMode: "barman",
-      buildEnv: (lab) => ({
-        ...base(lab),
-        STORAGE_SHARD_COUNT: "32",
-              CORE_NODES: `${node("core-1", A(lab), 4000)},${node("core-2", A(lab), 4001)},${node("core-3", B(lab), 4000)}`,
-        ADMIN_NODES: node("admin-1", B(lab), 4101),
-        MERCHANT_NODES: node("merch-1", A(lab), 4102),
-        CHECKOUT_NODES: `${node("chk-1", B(lab), 4103)},${node("chk-2", B(lab), 4113)}`,
-        ...fakeRails(lab, A(lab)),
-        PG_PRIMARY_NODE: node("pg-pri", B(lab), 5432),
-        PG_REPLICA_NODES: `${node("pg-rep-1", B(lab), 5433)},${node("pg-rep-2", A(lab), 5432)}`,
-        REDIS_NODES: node("redis-1", A(lab), 6379),
-        AUDIT_DB_NODE: node("audit-1", A(lab), 5434),
-        LOG_DB_NODE: node("log-1", A(lab), 5435),
-        BACKUP_NODE: node("backup-1", A(lab), 4090),
-        BACKUP_ENGINE_MODE: "barman",
-        BACKUP_SECONDARY_SSH_TARGET: `${lab.hostASshUser}@${A(lab)}:/var/backups/pg-vault-t4`,
-      }),
-    },
-    {
-      id: "T5",
-      name: "Production DMZ Edge Split (Public Edge on HOST_B, Private Core/Vault on HOST_A)",
-      description: "All Checkout & Merchant edge nodes on HOST_B; Core, Admin, DBs & Redis locked inside HOST_A private zone",
-      glShardCount: 16,
-      seedProfile: "COMPACT",
-      backupMode: "barman",
-      buildEnv: (lab) => ({
-        ...base(lab),
-        STORAGE_SHARD_COUNT: "16",
-              CORE_NODES: `${node("core-1", A(lab), 4000)},${node("core-2", A(lab), 4001)}`,
-        ADMIN_NODES: node("admin-1", A(lab), 4101),
-        MERCHANT_NODES: `${node("merch-1", B(lab), 4102)},${node("merch-2", B(lab), 4112)}`,
-        CHECKOUT_NODES: `${node("chk-1", B(lab), 4103)},${node("chk-2", B(lab), 4113)},${node("chk-3", B(lab), 4123)}`,
-        ...fakeRails(lab, B(lab)),
-        PG_PRIMARY_NODE: node("pg-pri", A(lab), 5432),
-        PG_REPLICA_NODES: node("pg-rep-1", A(lab), 5433),
-        REDIS_NODES: node("redis-1", A(lab), 6379),
-        AUDIT_DB_NODE: node("audit-1", A(lab), 5434),
-        LOG_DB_NODE: node("log-1", A(lab), 5435),
-        BACKUP_NODE: node("backup-1", B(lab), 4090),
-        BACKUP_ENGINE_MODE: "barman",
-        BACKUP_SECONDARY_SSH_TARGET: `${lab.hostBSshUser}@${B(lab)}:/var/backups/pg-vault-t5`,
-      }),
-    },
-    {
-      id: "T6",
-      name: "Full Symmetric High-Availability Mesh (4 Core, 4 Checkout, 4 Merchant, 2 Admin, 2 Replicas, STANDARD 120k Seed)",
-      description: "Every compute tier horizontally scaled across BOTH HOST_A and HOST_B with 32-shard ledger & STANDARD 120k seed",
-      glShardCount: 32,
-      seedProfile: "STANDARD",
-      backupMode: "barman",
-      buildEnv: (lab) => ({
-        ...base(lab),
-        STORAGE_SHARD_COUNT: "32",
-              SYNTHETIC_SEED_PROFILE: "STANDARD",
-        CORE_NODES: `${node("core-1", A(lab), 4000)},${node("core-2", A(lab), 4001)},${node("core-3", B(lab), 4000)},${node("core-4", B(lab), 4001)}`,
-        ADMIN_NODES: `${node("admin-1", A(lab), 4101)},${node("admin-2", B(lab), 4101)}`,
-        MERCHANT_NODES: `${node("merch-1", A(lab), 4102)},${node("merch-2", A(lab), 4112)},${node("merch-3", B(lab), 4102)},${node("merch-4", B(lab), 4112)}`,
-        CHECKOUT_NODES: `${node("chk-1", A(lab), 4103)},${node("chk-2", A(lab), 4113)},${node("chk-3", B(lab), 4103)},${node("chk-4", B(lab), 4113)}`,
-        ...fakeRails(lab, B(lab)),
-        PG_PRIMARY_NODE: node("pg-pri", A(lab), 5432),
-        PG_REPLICA_NODES: `${node("pg-rep-1", A(lab), 5433)},${node("pg-rep-2", B(lab), 5432)}`,
-        REDIS_NODES: `${node("redis-pri", B(lab), 6379)},${node("redis-rep", A(lab), 6380)}`,
-        AUDIT_DB_NODE: node("audit-1", B(lab), 5434),
-        LOG_DB_NODE: node("log-1", B(lab), 5435),
-        BACKUP_NODE: node("backup-1", B(lab), 4090),
-        BACKUP_ENGINE_MODE: "barman",
-        BACKUP_SECONDARY_SSH_TARGET: `${lab.hostBSshUser}@${B(lab)}:/var/backups/pg-vault-t6`,
-      }),
-    },
-    {
-      id: "T7",
-      name: "Live Rolling Scale-Out (1->4 Nodes) & Scale-In (4->2 Nodes) Under Active 500 TPS Load",
-      description: "Tests zero-downtime horizontal node addition and removal during continuous payment processing",
-      glShardCount: 32,
-      seedProfile: "COMPACT",
-      backupMode: "barman",
-      buildEnv: (lab) => ({
-        ...base(lab),
-        STORAGE_SHARD_COUNT: "32",
-              DEPLOY_MODE: "rolling_update",
-        CORE_NODES: `${node("core-1", A(lab), 4000)},${node("core-2", A(lab), 4001)},${node("core-3", B(lab), 4000)},${node("core-4", B(lab), 4001)}`,
-        ADMIN_NODES: node("admin-1", A(lab), 4101),
-        MERCHANT_NODES: `${node("merch-1", A(lab), 4102)},${node("merch-2", B(lab), 4102)}`,
-        CHECKOUT_NODES: `${node("chk-1", A(lab), 4103)},${node("chk-2", A(lab), 4113)},${node("chk-3", B(lab), 4103)},${node("chk-4", B(lab), 4113)}`,
-        ...fakeRails(lab, B(lab)),
-        PG_PRIMARY_NODE: node("pg-pri", A(lab), 5432),
-        PG_REPLICA_NODES: node("pg-rep-1", B(lab), 5432),
-        REDIS_NODES: node("redis-1", B(lab), 6379),
-        AUDIT_DB_NODE: node("audit-1", B(lab), 5434),
-        LOG_DB_NODE: node("log-1", B(lab), 5435),
-        BACKUP_NODE: node("backup-1", B(lab), 4090),
-        BACKUP_ENGINE_MODE: "barman",
-        BACKUP_SECONDARY_SSH_TARGET: `${lab.hostBSshUser}@${B(lab)}:/var/backups/pg-vault-t7`,
-      }),
-    },
-    {
-      id: "T8",
-      name: "Chaos Engineering, Node Kill, Replica Lag & Full Primary PITR Disaster Recovery Gauntlet",
-      description: "Executes mid-flight kills of core-back, PG_REPLICA, Redis, and PG_LOG_DB, plus full PG_PRIMARY wipe & PITR restore",
-      glShardCount: 32,
-      seedProfile: "COMPACT",
-      backupMode: "wal-g",
-      buildEnv: (lab) => ({
-        ...base(lab),
-        STORAGE_SHARD_COUNT: "32",
-              CORE_NODES: `${node("core-1", A(lab), 4000)},${node("core-2", A(lab), 4001)},${node("core-3", B(lab), 4000)},${node("core-4", B(lab), 4001)}`,
-        ADMIN_NODES: `${node("admin-1", A(lab), 4101)},${node("admin-2", B(lab), 4101)}`,
-        MERCHANT_NODES: `${node("merch-1", A(lab), 4102)},${node("merch-2", B(lab), 4102)}`,
-        CHECKOUT_NODES: `${node("chk-1", A(lab), 4103)},${node("chk-2", B(lab), 4103)}`,
-        ...fakeRails(lab, B(lab)),
-        PG_PRIMARY_NODE: node("pg-pri", A(lab), 5432),
-        PG_REPLICA_NODES: `${node("pg-rep-1", A(lab), 5433)},${node("pg-rep-2", B(lab), 5432)}`,
-        REDIS_NODES: node("redis-1", B(lab), 6379),
-        AUDIT_DB_NODE: node("audit-1", B(lab), 5434),
-        LOG_DB_NODE: node("log-1", B(lab), 5435),
-        PG_AUDIT_DATA_DIR: "/var/lib/postgresql/18/audit",
-        BACKUP_NODE: node("backup-1", A(lab), 4090),
-        BACKUP_ENGINE_MODE: "wal-g",
-        BACKUP_SECONDARY_SSH_TARGET: `${lab.hostBSshUser}@${B(lab)}:/var/backups/pg-vault-t8`,
-      }),
-    },
-  ];
+export const nodeSpec = (config: LabConfig, ref: NodeRef): string => {
+  const machine = machineById(config, ref.machineId);
+  return `${ref.nodeId}@${machine.address}:${machineSshPort(config, machine)}:${machinePrivateIp(machine)}:${ref.port}`;
 };
 
-export const topologyById = (id: TopologyId): TopologyMatrixSpec => {
-  const found = buildAllTopologySpecs().find((spec) => spec.id === id);
-  if (!found) throw new Error(`Unknown topology ${id}`);
-  return found;
+const nodeList = (config: LabConfig, refs: NodeRef[]): string => refs.map((ref) => nodeSpec(config, ref)).join(",");
+
+const lanCidrs = (config: LabConfig): string => {
+  const cidrs = config.lab.lanCidrs.length > 0
+    ? config.lab.lanCidrs
+    : config.machines.map((machine) => `${machinePrivateIp(machine)}/32`);
+  return [...new Set([...cidrs, "127.0.0.0/8"])].join(",");
 };
+
+const sshFields = (config: LabConfig, sudoPassword: string): Record<string, string> => {
+  const fields: Record<string, string> = {};
+  for (const prefix of ["CORE", "ADMIN", "MERCHANT", "CHECKOUT", "FAKE_RAILS", "PG", "REDIS", "AUDIT_DB", "LOG_DB", "BACKUP"]) {
+    fields[`${prefix}_SSH_USER`] = config.ssh.user;
+    fields[`${prefix}_SSH_KEY_PATH`] = config.ssh.keyPath;
+    fields[`${prefix}_SUDO_PASSWORD`] = sudoPassword;
+  }
+  return fields;
+};
+
+export const renderTopologyEnv = ({ config, topology, secrets, intensity, sudoPassword }: RenderInput): Record<string, string> => {
+  const fakeRailsMachine = machineById(config, topology.fakeRails.machineId);
+  const objectStore = config.services.objectStore;
+  const objectStoreMachine = objectStore ? machineById(config, objectStore.machine) : undefined;
+  const allHosts = [...new Set(config.machines.flatMap((machine) => [machine.address, machinePrivateIp(machine)]))];
+  const vaultMachine = topology.vault ? machineById(config, topology.vault.machineId) : undefined;
+  const auditOffBackupHost = topology.auditDb.machineId !== topology.backup.machineId;
+
+  return {
+    DEPLOY_MODE: topology.deployMode,
+    DEPLOY_ENV: "production",
+    ROLLING_BATCH_SIZE: "1",
+    KEEP_RELEASES: "3",
+    LAN_ALLOWED_CIDRS: lanCidrs(config),
+    KMS_MASTER_KEY_ID: "v1",
+    KMS_MASTER_KEY_HEX: secrets.kmsMasterKeyHex,
+    KMS_MASTER_KEY: secrets.kmsMasterKeyHex,
+    BASE_CURRENCY: "LYD",
+    GATEWAY_TIMEZONE: "Africa/Tripoli",
+    IS_TEST_SERVER: "true",
+    ...sshFields(config, sudoPassword),
+    FAKE_RAILS_ENABLED: "true",
+    FAKE_RAILS_ALLOW_IN_PRODUCTION: "true",
+    FAKE_RAILS_ALLOWED_HOSTS: [...allHosts, "127.0.0.1", "localhost"].join(","),
+    FAKE_RAILS_ADMIN_USER: "tester",
+    FAKE_RAILS_ADMIN_PASSWORD: secrets.fakeRailsAdminPassword,
+    FAKE_RAILS_JWT_SECRET: secrets.fakeRailsJwtSecret,
+    FAKE_RAILS_SEEDER_TOKEN: secrets.fakeRailsSeederToken,
+    FAKE_RAILS_NGINX_PORT: "8444",
+    FAKE_RAILS_SSL: "false",
+    FAKE_RAILS_NODE: nodeSpec(config, topology.fakeRails),
+    FAKE_RAILS_PUBLIC_BASE_URL: `http://${machinePrivateIp(fakeRailsMachine)}:8444`,
+    RUN_PRISMA_SEED: "true",
+    RUN_SYNTHETIC_HISTORY_SEED: "true",
+    SYNTHETIC_SEED_PROFILE: intensity.data.seedProfile,
+    SYNTHETIC_YEARS_SPAN: String(intensity.data.seedYearsSpan),
+    STORAGE_SHARD_COUNT: String(topology.shardCount),
+    PG_MANAGE_VIA_SSH: "true",
+    PG_VERSION: "18",
+    PG_DB_NAME: "payment_gateway_prod",
+    PG_DB_USER: "core_user",
+    PG_DB_PASSWORD: secrets.pgDbPassword,
+    PG_REPLICATION_USER: "replicator",
+    PG_REPLICATION_PASSWORD: secrets.pgReplicationPassword,
+    READ_REPLICA_MAX_LAG_MS: "60000",
+    PGBOUNCER_ENABLED: "true",
+    PGBOUNCER_DEFAULT_POOL_SIZE: "40",
+    PGBOUNCER_MAX_CLIENT_CONN: "1000",
+    PGBOUNCER_MAX_PREPARED_STATEMENTS: "256",
+    PG_PRIMARY_NODE: nodeSpec(config, topology.pgPrimary),
+    PG_REPLICA_NODES: nodeList(config, topology.pgReplicas),
+    REDIS_MANAGE_VIA_SSH: "true",
+    REDIS_PASSWORD: secrets.redisPassword,
+    REDIS_NODES: nodeList(config, topology.redis),
+    AUDIT_DB_MANAGE_VIA_SSH: "true",
+    AUDIT_DB_NAME: "pg_audit_db",
+    AUDIT_DB_USER: "audit_writer",
+    AUDIT_DB_PASSWORD: secrets.auditDbPassword,
+    AUDIT_DB_NODE: nodeSpec(config, topology.auditDb),
+    LOG_DB_MANAGE_VIA_SSH: "true",
+    LOG_DB_NAME: "pg_logs_db",
+    LOG_DB_USER: "log_writer",
+    LOG_DB_PASSWORD: secrets.logDbPassword,
+    LOG_DB_NODE: nodeSpec(config, topology.logDb),
+    ...(topology.backupMode === "wal-g" && auditOffBackupHost ? { PG_AUDIT_DATA_DIR: "/var/lib/postgresql/18/audit" } : {}),
+    BACKUP_ENABLED: "true",
+    BACKUP_NODE: nodeSpec(config, topology.backup),
+    BACKUP_ENGINE_MODE: topology.backupMode,
+    BACKUP_COMPRESSION: "zstd",
+    BACKUP_ENCRYPTION_KEY_HEX: secrets.backupEncryptionKeyHex,
+    BACKUP_PRIMARY_S3_ENDPOINT: objectStore && objectStoreMachine ? `http://${machinePrivateIp(objectStoreMachine)}:${objectStore.port}` : "",
+    BACKUP_PRIMARY_S3_BUCKET: objectStore ? `s3://${objectStore.bucket}` : "",
+    BACKUP_PRIMARY_S3_ACCESS_KEY: secrets.objectStoreAccessKey,
+    BACKUP_PRIMARY_S3_SECRET_KEY: secrets.objectStoreSecretKey,
+    BACKUP_ALLOW_INSECURE_HTTP: "false",
+    BACKUP_SECONDARY_SSH_TARGET: topology.vault && vaultMachine ? `${config.ssh.user}@${vaultMachine.address}:${topology.vault.path}` : "",
+    CORE_NODES: nodeList(config, topology.nodes.core),
+    ADMIN_NODES: nodeList(config, topology.nodes.admin),
+    MERCHANT_NODES: nodeList(config, topology.nodes.merchant),
+    CHECKOUT_NODES: nodeList(config, topology.nodes.checkout),
+    PAY_RATE_LIMIT_MAX: String(Math.min(1_000_000, Math.max(10_000, Math.ceil(intensity.targetTps * 120)))),
+    MERCHANT_DOMAIN: "merchant.lab.internal",
+    CHECKOUT_DOMAIN: "checkout.lab.internal",
+    MERCHANT_SSL: "false",
+    CHECKOUT_SSL: "false",
+    MERCHANT_LAN_PORT: "0",
+    CHECKOUT_LAN_PORT: "0",
+    ADMIN_SSL: "false",
+    ADMIN_NGINX_LAN_PORT: "8443",
+    ADMIN_DOMAIN: "_",
+  };
+};
+
+export const renderEnvFile = (env: Record<string, string>): string =>
+  `${Object.entries(env).map(([key, value]) => `${key}=${JSON.stringify(value)}`).join("\n")}\n`;

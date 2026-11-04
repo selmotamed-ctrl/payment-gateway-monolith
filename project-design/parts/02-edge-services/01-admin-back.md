@@ -14,9 +14,9 @@ code:
   - admin-back/lib/error/index.ts
   - admin-back/lib/requestLogger/index.ts
 design_sources:
-  - design/payment_gateway_final_design-v5.md#21-service-roles-boundaries-and-security-constraints
-  - design/payment_gateway_final_design-v5.md#163-admin-back-lan-only-api-apiv1admin---forwards-to-core-back-internaladmin
-  - design/payment_gateway_deployment_and_guides_architecture.md#5-host-aware-ufw-firewall--network-isolation-provisioning
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#21-service-roles-boundaries-and-security-constraints
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#163-admin-back-lan-only-api-apiv1admin---forwards-to-core-back-internaladmin
+  - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#5-host-aware-ufw-firewall--network-isolation-provisioning
 tests:
   - admin-back/test/admin-surface.test.ts
   - admin-back/test/core-contract.test.ts
@@ -249,9 +249,9 @@ The tests use a local HTTPS/HTTP stub and do not require PostgreSQL or Redis. A 
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` section 2.1, service boundaries.
-- `design/payment_gateway_final_design-v5.md` section 16.3, admin API surface.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall policy.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 2.1, service boundaries.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 16.3, admin API surface.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall policy.
 
 ### Code paths
 

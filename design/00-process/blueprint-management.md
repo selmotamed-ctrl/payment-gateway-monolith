@@ -123,7 +123,7 @@ verified_against: 5a24f6f+working-tree
 code:
   - core-back/lib/storageEngine/**
 design_sources:
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#2-6
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#2-6
 tests:
   - core-back/test/storage-engine/**
 gaps:

@@ -241,9 +241,9 @@ The suites cover URL parsing, least-in-flight and round-robin selection, cooldow
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` section 2.2, mutual TLS and forwarded context.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 6.2, edge-to-core upstream pool.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.2, the same pool specification.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 2.2, mutual TLS and forwarded context.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 6.2, edge-to-core upstream pool.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.2, the same pool specification.
 
 ### Code paths
 
@@ -466,9 +466,9 @@ The suites are local and do not require PostgreSQL/Redis. A live gateway webhook
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` section 2.1, checkout boundary.
-- `design/payment_gateway_final_design-v5.md` section 16.1, checkout API surface.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.2, pool behavior.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 2.1, checkout boundary.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 16.1, checkout API surface.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.2, pool behavior.
 
 ### Code paths
 

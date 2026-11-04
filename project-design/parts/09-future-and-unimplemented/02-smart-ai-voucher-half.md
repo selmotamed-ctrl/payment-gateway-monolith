@@ -10,9 +10,9 @@ code:
   - core-back/api/internal/admin.ts
   - admin-front/src/pages/gateways/ai-import/index.tsx
 design_sources:
-  - design/smart_ai_rail_and_voucher_onboarding_plan.md
-  - design/Voucher-Provider-Management-System-Technical-Design.md
-  - design/voucher-system-raw-design.md
+  - design/08-ai-onboarding/smart_ai_rail_and_voucher_onboarding_plan.md
+  - design/09-voucher-system-external/Voucher-Provider-Management-System-Technical-Design.md
+  - design/09-voucher-system-external/voucher-system-raw-design.md
 tests:
   - core-back/test/spec-importer.test.ts
   - core-back/test/spec-materializer.test.ts
@@ -236,9 +236,9 @@ Voucher half: none. Acceptance requires the voucher module, routes, UI, schema, 
 
 ### Old design sections
 
-- `design/smart_ai_rail_and_voucher_onboarding_plan.md` sections 1-5.
-- `design/Voucher-Provider-Management-System-Technical-Design.md` sections 5, 6 and 17.
-- `design/voucher-system-raw-design.md` for the purchase/query model.
+- `design/08-ai-onboarding/smart_ai_rail_and_voucher_onboarding_plan.md` sections 1-5.
+- `design/09-voucher-system-external/Voucher-Provider-Management-System-Technical-Design.md` sections 5, 6 and 17.
+- `design/09-voucher-system-external/voucher-system-raw-design.md` for the purchase/query model.
 
 ### Code paths
 

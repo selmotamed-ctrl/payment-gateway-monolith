@@ -64,12 +64,37 @@ export const loadRailCatalog = async (
 ): Promise<RailCatalog> => {
   const now = options.now ?? new Date();
   const repositories = new PrismaRepositories(db);
-  const processed = await dailyProcessedAmountByRoute(repositories.payments, db, { now });
-  const [rails, routes, credentialSets, commissionProfiles] = await Promise.all([
+  // All five reads are independent, so they run concurrently. The daily
+  // volume query is served by payment_attempts_succeeded_settled_at_idx.
+  // Credential sets are narrowed to the columns the resolver reads: the
+  // encrypted entries / mTLS material never leave the database here, and only
+  // VERIFIED sets are visible to the resolver anyway.
+  const [processed, rails, routes, credentialSets, commissionProfiles] = await Promise.all([
+    dailyProcessedAmountByRoute(repositories.payments, db, { now }),
     db.rail.findMany({ orderBy: { displayOrder: "asc" } }),
     db.railRoute.findMany(),
-    db.credentialSet.findMany(),
-    db.commissionProfile.findMany(),
+    db.credentialSet.findMany({
+      where: { status: "VERIFIED" },
+      select: {
+        id: true,
+        gatewayId: true,
+        env: true,
+        ownerType: true,
+        ownerMerchantId: true,
+        settlementTarget: true,
+        status: true,
+      },
+    }),
+    db.commissionProfile.findMany({
+      select: {
+        id: true,
+        merchantId: true,
+        applicationId: true,
+        railCode: true,
+        effectiveFrom: true,
+        effectiveTo: true,
+      },
+    }),
   ]);
 
   return {

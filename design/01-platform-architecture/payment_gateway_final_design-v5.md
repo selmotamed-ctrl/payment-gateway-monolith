@@ -9,7 +9,7 @@
 **Coverage (20 Gateways):** Moamalat (NPG) · LYPay (CBL Instant Payment) · Numo Pay · Sadad (Almadar) · Libyana · Edfali / Edfaa Li (BCD) · MobiCash (Masarat) · Tadawul / T-LYNC · OnePay · Yussor Pay (NCB) · Sahara Pay · Masrefy Pay (Jumhouria Bank) · Hawelli (Zaho) · GPay Libya & Google Pay · Visa / Mastercard (MPGS / 3DS2) · Evo Pay · NeomPay (First-Party Wallet) · Aggregators (DPay, Plutu, MyPay)
 
 > **Document status (November 2026):** the database rules in §7 are **superseded** by
-> `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md`.
+> `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md`.
 > PostgreSQL 18 is the only supported runtime engine (`provider = "postgresql"`,
 > `@prisma/adapter-pg` + `pg`). The MySQL/MariaDB text in the history below is retained only as a
 > historical record of an earlier delivery run and must not be used to configure the platform.
@@ -351,7 +351,7 @@ All 64 tables reside exclusively in `core-back/prisma/schema.prisma`. The histor
 - **Primary Keys & Timestamps:** Every table includes `id String @id @default(uuid(7))`, `createdAt DateTime @default(now())`, and `updatedAt DateTime @updatedAt`.
 - **Monetary Precision:** All monetary columns use `@db.Decimal(18, 4)` (`Prisma.Decimal` / `decimal.js`) — floating-point types (`Float`, `Double`) are strictly banned.
 - **Encryption at Rest:** All ciphertexts use AES-256-GCM formatted as `keyId:iv:authTag:ciphertext`.
-- **Database Engine:** **PostgreSQL 18** only, reached through `@prisma/adapter-pg` (`PrismaPg`) on top of the `pg` driver package. The datasource is `provider = "postgresql"`; the database name, host, port and credentials come from the connection string (`postgresql://user:password@host:5432/payment_gateway`). The current storage blueprint is `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md`.
+- **Database Engine:** **PostgreSQL 18** only, reached through `@prisma/adapter-pg` (`PrismaPg`) on top of the `pg` driver package. The datasource is `provider = "postgresql"`; the database name, host, port and credentials come from the connection string (`postgresql://user:password@host:5432/payment_gateway`). The current storage blueprint is `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md`.
 
 ### Prisma 7 Rules (PostgreSQL 18)
 

@@ -16,8 +16,8 @@ code:
   - merchant-back/api/forward.ts
   - checkout-back/api/public/inbound.ts
 design_sources:
-  - design/payment_gateway_final_design-v5.md#22-mutual-tls-mtls-inter-service-transport-architecture
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#62-edge-to-core-mtls-upstream-load-balancer--health-failover-admin-back-merchant-back-checkout-back
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#22-mutual-tls-mtls-inter-service-transport-architecture
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#62-edge-to-core-mtls-upstream-load-balancer--health-failover-admin-back-merchant-back-checkout-back
 tests:
   - admin-back/test/core-internal-client.test.ts
   - admin-back/test/mtls-client.test.ts
@@ -270,9 +270,9 @@ The suites cover URL parsing, least-in-flight and round-robin selection, cooldow
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` section 2.2, mutual TLS and forwarded context.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 6.2, edge-to-core upstream pool.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.2, the same pool specification.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 2.2, mutual TLS and forwarded context.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 6.2, edge-to-core upstream pool.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.2, the same pool specification.
 
 ### Code paths
 

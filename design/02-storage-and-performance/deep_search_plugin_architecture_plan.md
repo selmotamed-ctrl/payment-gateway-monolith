@@ -3884,10 +3884,12 @@ Create `core-back/test/globalSearch.test.ts` with automated registry-wide contra
    - Seeds 15 mock rows for a provider with `limit = 5`; verifies `fetchCandidates` is called with `take = 15` (`limit * 3`), exact matches outrank prefix matches, prefix matches outrank substring matches, ties break by newest timestamp, `items.length === 5`, and `truncated === true`.
 4. **Fault Isolation (`Promise.allSettled`):**
    - Simulates one provider throwing a database timeout error while others succeed; verifies HTTP `200`, `partial: true`, remaining groups intact, and `logger.error` called with `requestId` and **without** the raw search query string.
-5. **Audit Log Detail Route Tests (`core-back/test/auditLogDetail.test.ts`):**
+5. **Audit Log Detail Route Tests (`core-back/test/auditLogDetail.test.ts`):** *(as-built 2026-11-04: covered in `core-back/test/internal-routes.test.ts`; no separate file)*
    - Verifies `GET /internal/admin/audit-logs/:id` returns `401` unauthenticated, `403` without `security:read`, `404` when missing, `200` with full detail for `SECURITY_ADMIN`, and does not shadow `GET /internal/admin/audit-logs/export`.
 
 ### 9.2 Admin BFF Tests (`admin-back/test/search.test.ts` & `admin-surface.test.ts`)
+
+*(As-built 2026-11-04: `admin-back/test/search.test.ts` was added on 2026-11-04 and covers validation, the per-session 120/min limiter and `no-store`; the audit-detail proxy is covered in `admin-back/test/admin-surface.test.ts`.)*
 
 1. Verifies `POST /api/v1/admin/search` validates `query` length (`2..120`), `limit` (`1..10`), sets `Cache-Control: no-store`, and forwards to `/internal/admin/search`.
 2. Verifies the token-hashed rate limiter allows 120 requests/minute per session token and returns `429` with `Retry-After` on request 121 without affecting a second admin session token.

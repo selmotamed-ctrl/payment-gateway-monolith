@@ -517,8 +517,8 @@ Canonical design:
 
 Historical reference only:
 
-- [`design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md`](../../design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md)
-- [`design/payment_gateway_deployment_and_guides_architecture.md`](../../design/payment_gateway_deployment_and_guides_architecture.md)
+- [`design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md`](../../design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md)
+- [`design/03-deployment/payment_gateway_deployment_and_guides_architecture.md`](../../design/03-deployment/payment_gateway_deployment_and_guides_architecture.md)
 
 Related operator docs:
 

@@ -20,15 +20,15 @@ code:
   - deploy/deploy.env.example
   - deploy/lib/configSchema.ts
 design_sources:
-  - design/payment_gateway_final_design-v5.md#1-executive-summary-and-architectural-vision
-  - design/payment_gateway_final_design-v5.md#2-zero-trust-7-service-split-architecture-mtls--reverse-proxy-topology
-  - design/payment-gateway-refined-design-v4.1.md#1-executive-summary-and-architectural-vision
-  - design/payment-gateway-refined-design-v4.1.md#15-actors-interfaces-roles--the-four-eyes-matrix
-  - design/Dynamic-Payment-Gateway-Management-Design-v2.md#1-summary
-  - design/Dynamic-Payment-Gateway-Management-Design-v2.md#3-core-concepts
-  - design/opencode_technical_delivery_design.md#28-delivery-run-4--postgresql-18-storage-engine-backups-and-horizontal-scaling
-  - design/payment_gateway_deployment_and_guides_architecture.md#1-flexible-1n-compute--storage-topology-model-same-server-vs-fully-distributed
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#1-executive-summary--architectural-philosophy
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#1-executive-summary-and-architectural-vision
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#2-zero-trust-7-service-split-architecture-mtls--reverse-proxy-topology
+  - design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#1-executive-summary-and-architectural-vision
+  - design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#15-actors-interfaces-roles--the-four-eyes-matrix
+  - design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md#1-summary
+  - design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md#3-core-concepts
+  - design/90-archive/delivery-logs/opencode_technical_delivery_design.md#28-delivery-run-4--postgresql-18-storage-engine-backups-and-horizontal-scaling
+  - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#1-flexible-1n-compute--storage-topology-model-same-server-vs-fully-distributed
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#1-executive-summary--architectural-philosophy
 tests:
   - core-back/test/phase1-mtls-and-schema.test.ts
   - core-back/test/exhaustive/05-api-matrix/mtls-channel-isolation.test.ts
@@ -81,13 +81,13 @@ The target scale stated in the historical design is a national switch with tens 
 
 ### Design lineage
 
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md` introduced the four catalog layers, the two collection/confirmation axes, the declarative engine, the ownership-aware ledger and the `UNKNOWN` rule.
-- `design/payment-gateway-refined-design-v4.1.md` restored the operational/compliance program: roles, four-eyes matrix, onboarding/KYB, AML, disputes, ledger-derived reporting and the 140-case catalog.
-- `design/payment_gateway_final_design-v5.md` is the consolidated multi-service production narrative. It is authoritative for intent but stale on counts, route lists and some runtime behavior; this part set corrects those.
-- `design/opencode_technical_delivery_design.md` is a delivery tracker and historical verification log, including the PostgreSQL 18 storage/backup/scaling delivery run (section 28).
-- `design/payment_gateway_deployment_and_guides_architecture.md` is the deployment topology, PKI, firewall and pipeline source.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` is authoritative for the storage/backup/scaling intent, with the DDL/read-model/LSN drift corrected by the storage part.
-- `design/fake_payment_rails_service_architecture.md` and the Fake Rails code define the optional emulator.
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` introduced the four catalog layers, the two collection/confirmation axes, the declarative engine, the ownership-aware ledger and the `UNKNOWN` rule.
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` restored the operational/compliance program: roles, four-eyes matrix, onboarding/KYB, AML, disputes, ledger-derived reporting and the 140-case catalog.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` is the consolidated multi-service production narrative. It is authoritative for intent but stale on counts, route lists and some runtime behavior; this part set corrects those.
+- `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` is a delivery tracker and historical verification log, including the PostgreSQL 18 storage/backup/scaling delivery run (section 28).
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` is the deployment topology, PKI, firewall and pipeline source.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` is authoritative for the storage/backup/scaling intent, with the DDL/read-model/LSN drift corrected by the storage part.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` and the Fake Rails code define the optional emulator.
 - `design/**` remains historical/reference only. Canonical current behavior is `project-design/parts/**` and the code.
 
 ## 3. As-built architecture
@@ -238,12 +238,12 @@ No build or test was run for this documentation change. Database-backed suites r
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` §1 executive summary and architectural vision; §2 seven-service split, mTLS topology and reverse proxies; §16 API surface.
-- `design/payment-gateway-refined-design-v4.1.md` §1 executive summary; §15 roles, interfaces and the four-eyes matrix.
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md` §1 summary; §3 gateway/credential-set/rail/route concepts and collection modes.
-- `design/opencode_technical_delivery_design.md` §28 as-built PostgreSQL 18 storage/backups/horizontal delivery record.
-- `design/payment_gateway_deployment_and_guides_architecture.md` §1 flexible topology and §6 ordered deployment pipeline.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` executive summary and topology.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §1 executive summary and architectural vision; §2 seven-service split, mTLS topology and reverse proxies; §16 API surface.
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` §1 executive summary; §15 roles, interfaces and the four-eyes matrix.
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` §1 summary; §3 gateway/credential-set/rail/route concepts and collection modes.
+- `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` §28 as-built PostgreSQL 18 storage/backups/horizontal delivery record.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` §1 flexible topology and §6 ordered deployment pipeline.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` executive summary and topology.
 
 ### Code paths
 

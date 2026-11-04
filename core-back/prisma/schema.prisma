@@ -1333,6 +1333,8 @@ model ApprovalRequest {
   @@index([state])
   @@index([state, createdAt])
   @@index([subjectType, state])
+  // Detail pages and approval guards look approvals up by their subject.
+  @@index([subjectType, subjectId, state])
   @@map("approval_requests")
 }
 
@@ -1988,8 +1990,11 @@ model PaymentAttempt {
   reconciliationItems ReconciliationItem[]
 
   @@unique([linkId, idempotencyKey])
-  @@index([linkId])
-  @@index([merchantId])
+  // Link attempt history is listed newest first; this also serves every
+  // plain linkId lookup, so the old single-column linkId index was dropped.
+  @@index([linkId, createdAt])
+  // merchantId lookups are served by [merchantId, createdAt]; the
+  // single-column merchantId index was a redundant prefix and was dropped.
   @@index([status, nextCheckAt])
   @@index([gatewayVersionId])
   // The daily volume aggregate of the rail resolution groups the succeeded
@@ -2022,7 +2027,7 @@ model AttemptStepLog {
   gatewayVersion GatewayVersion @relation(fields: [gatewayVersionId], references: [id], onDelete: Restrict)
   step           FlowStep?      @relation(fields: [stepId], references: [id], onDelete: SetNull)
 
-  @@index([attemptId])
+  @@index([attemptId, createdAt])
   @@map("attempt_step_logs")
 }
 
@@ -2050,6 +2055,7 @@ model InboundEvent {
 
   @@unique([channelId, dedupeKey])
   @@index([gatewayId])
+  @@index([attemptId, receivedAt])
   @@map("inbound_events")
 }
 
@@ -2198,8 +2204,9 @@ model ReconciliationItem {
   attempt      PaymentAttempt?   @relation(fields: [attemptId], references: [id], onDelete: SetNull)
   operatorCase OperatorCase?     @relation("OperatorCaseReconciliationItem")
 
-  @@index([runId])
+  @@index([runId, createdAt])
   @@index([result])
+  @@index([createdAt])
   @@map("reconciliation_items")
 }
 
@@ -2264,8 +2271,10 @@ model AuditLog {
   actor           User             @relation("AuditLogActor", fields: [actorId], references: [id], onDelete: Restrict)
   approvalRequest ApprovalRequest? @relation("AuditLogApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
 
-  @@index([entityType, entityId])
+  // [entityType, entityId] alone was a redundant prefix of this index.
   @@index([entityType, entityId, createdAt])
+  @@index([createdAt])
+  @@index([actorId, createdAt])
   @@map("audit_log")
 }
 
@@ -2706,6 +2715,8 @@ model AuditOutbox {
   afterJson         Json      @map("after_json")
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   shippedAt         DateTime? @map("shipped_at") @db.Timestamptz(3)
+  /// Reservation of an in-flight shipper batch; NULL once shipped.
+  leaseUntil        DateTime? @map("lease_until") @db.Timestamptz(3)
 
   @@index([createdAt, id], map: "audit_outbox_unshipped_idx")
   @@map("audit_outbox")
@@ -2755,15 +2766,18 @@ model BackupRestoreDrill {
 }
 
 model RmMerchantDailyStat {
-  merchantId   String   @map("merchant_id") @db.Uuid
-  day          DateTime @db.Date
-  currency     String   @db.Char(3)
-  attemptCount Int      @default(0) @map("attempt_count")
-  successCount Int      @default(0) @map("success_count")
-  failureCount Int      @default(0) @map("failure_count")
-  grossAmount  Decimal  @default(0) @map("gross_amount") @db.Decimal(18, 4)
-  netAmount    Decimal  @default(0) @map("net_amount") @db.Decimal(18, 4)
-  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  merchantId       String   @map("merchant_id") @db.Uuid
+  day              DateTime @db.Date
+  currency         String   @db.Char(3)
+  attemptCount     Int      @default(0) @map("attempt_count")
+  successCount     Int      @default(0) @map("success_count")
+  failureCount     Int      @default(0) @map("failure_count")
+  grossAmount      Decimal  @default(0) @map("gross_amount") @db.Decimal(18, 4)
+  netAmount        Decimal  @default(0) @map("net_amount") @db.Decimal(18, 4)
+  /// Gross / net of the attempts that SUCCEEDED on this day.
+  successAmount    Decimal  @default(0) @map("success_amount") @db.Decimal(18, 4)
+  successNetAmount Decimal  @default(0) @map("success_net_amount") @db.Decimal(18, 4)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@id([merchantId, day, currency])
   @@index([day])
@@ -2776,6 +2790,7 @@ model RmRouteDailyVolume {
   currency     String   @db.Char(3)
   attemptCount Int      @default(0) @map("attempt_count")
   successCount Int      @default(0) @map("success_count")
+  /// Volume of the attempts that SUCCEEDED on this day (cap semantics).
   volumeAmount Decimal  @default(0) @map("volume_amount") @db.Decimal(18, 4)
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 

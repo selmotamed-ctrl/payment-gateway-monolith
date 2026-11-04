@@ -22,12 +22,12 @@ code:
   - deploy/lib/configSchema.ts
   - deploy/deploy.ts
 design_sources:
-  - design/payment_gateway_final_design-v5.md#21-service-roles-boundaries-and-security-constraints
-  - design/payment_gateway_final_design-v5.md#91-the-nine-governing-state-machine-rules
-  - design/opencode_technical_delivery_design.md#28-delivery-run-4--postgresql-18-storage-engine-backups-and-horizontal-scaling
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#2-segment-1--the-core-back-storage-driver-engine-core-backlibstorageengine
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#11-high-level-system--storage-topology-diagram
-  - design/payment_gateway_deployment_and_guides_architecture.md#6-ordered-14-step-multi-host-deployment-pipeline
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#21-service-roles-boundaries-and-security-constraints
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#91-the-nine-governing-state-machine-rules
+  - design/90-archive/delivery-logs/opencode_technical_delivery_design.md#28-delivery-run-4--postgresql-18-storage-engine-backups-and-horizontal-scaling
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#2-segment-1--the-core-back-storage-driver-engine-core-backlibstorageengine
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#11-high-level-system--storage-topology-diagram
+  - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#6-ordered-14-step-multi-host-deployment-pipeline
 tests:
   - core-back/test/db-connection-config.test.ts
   - core-back/test/runtime/raw-body.test.ts
@@ -445,11 +445,11 @@ No test run was performed for this documentation change. PostgreSQL/Redis-backed
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` §2.1 roles and boundaries, §9.1 durable timers/state rules.
-- `design/opencode_technical_delivery_design.md` §28 PostgreSQL 18, storage engine, workers and horizontal scaling.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` §2 storage engine ports and §3 outbox/read models.
-- `design/payment_gateway_deployment_and_guides_architecture.md` §6 ordered pipeline and env delivery.
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md` §15 API/observability intent.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §2.1 roles and boundaries, §9.1 durable timers/state rules.
+- `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` §28 PostgreSQL 18, storage engine, workers and horizontal scaling.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` §2 storage engine ports and §3 outbox/read models.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` §6 ordered pipeline and env delivery.
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` §15 API/observability intent.
 
 ### Code paths
 

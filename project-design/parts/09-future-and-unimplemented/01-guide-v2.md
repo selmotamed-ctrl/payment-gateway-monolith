@@ -11,8 +11,8 @@ code:
   - admin-front/src/pages/academy/index.tsx
   - admin-front/src/content/academy/**
 design_sources:
-  - design/guide_system_design_and_content (2).md
-  - design/complete_zero_to_hero_guides_and_academy_specification.md
+  - design/07-guides-and-academy/guide_system_design_and_content.md
+  - design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md
 tests:
   - admin-front/src/content/__tests__/content-completeness.test.ts
 gaps:
@@ -90,7 +90,7 @@ The current implementation is:
 - The current guide has `GlobalGuideSearchModal`, glossary definitions and 140 edge-case definitions, but it has no v2 `GuideSearchPalette`, `ContextHelpDrawer`, `SafeguardDialog`, `playbook`, `cards` or `edge-cases` routes.
 - `admin-front/src/content/__tests__/content-completeness.test.ts` asserts the current content shape, not the v2 counts.
 
-`design/complete_zero_to_hero_guides_and_academy_specification.md` describes an alternative 12-book admin guide, 8-module academy, 10-chapter merchant guide and developer API guide. It is the current guide's lineage. It is **not** the 14-book guide v2.
+`design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` describes an alternative 12-book admin guide, 8-module academy, 10-chapter merchant guide and developer API guide. It is the current guide's lineage. It is **not** the 14-book guide v2.
 
 ### 3.2 Future information architecture
 
@@ -146,13 +146,13 @@ Route names: `AdminGuide`, `AdminGuideBook`, `AdminGuideArticle`, `AdminGuideGlo
 | Data blocks | 3 | `ledger-events` (16 events), `visible-rails` (7 vectors), `attempt-transitions` |
 | Context-map screens | 23 | `screens` array |
 | Error codes | 19 | Article `b13-01` |
-| Edge cases | 140 | Parsed from `design/payment-gateway-refined-design-v4.1.md` |
+| Edge cases | 140 | Parsed from `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` |
 
 The content test must fail if `meta.json.counts` differs.
 
 ### 3.5 Content pipeline
 
-The source is `design/guide_system_design_and_content (2).md`, parsed between `<!-- CONTENT:BEGIN -->` and `<!-- CONTENT:END -->`.
+The source is `design/07-guides-and-academy/guide_system_design_and_content.md`, parsed between `<!-- CONTENT:BEGIN -->` and `<!-- CONTENT:END -->`.
 
 Block syntax:
 
@@ -330,9 +330,9 @@ There are no v2 tests. Acceptance requires the unit and E2E suites in section 3.
 
 ### Old design sections
 
-- `design/guide_system_design_and_content (2).md` Parts 0-III, especially II-1 through II-13.
-- `design/complete_zero_to_hero_guides_and_academy_specification.md` for the current 12-book/8-module lineage.
-- `design/payment-gateway-refined-design-v4.1.md` section 13 for the 140 edge cases.
+- `design/07-guides-and-academy/guide_system_design_and_content.md` Parts 0-III, especially II-1 through II-13.
+- `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` for the current 12-book/8-module lineage.
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` section 13 for the 140 edge cases.
 
 ### Code paths
 

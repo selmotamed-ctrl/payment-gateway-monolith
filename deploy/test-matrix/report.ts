@@ -1,44 +1,72 @@
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { GateResult, TopologyRunResult } from "./types";
+import { redact } from "./labSecrets";
+import type { GateResult, MatrixRunMeta, TopologyRunResult } from "./types";
 
-const statusCell = (gates: GateResult[]): string => {
-  if (gates.length === 0) return "not run";
-  return gates.every((gate) => gate.status === "PASSED") ? "PASSED" : "FAILED";
-};
+export const DEFAULT_REPORTS_DIR = join(import.meta.dirname, "reports");
 
-export const renderCertificationReport = (results: TopologyRunResult[]): string => {
+const tally = (gates: GateResult[]) => ({
+  passed: gates.filter((gate) => gate.status === "PASSED").length,
+  failed: gates.filter((gate) => gate.status === "FAILED").length,
+  skipped: gates.filter((gate) => gate.status === "SKIPPED").length,
+  notRun: gates.filter((gate) => gate.status === "NOT_RUN").length,
+});
+
+/**
+ * Markdown report. Unlike the archived report ("2/11" meant "2 gates ran",
+ * not "2 passed"), the gate column shows passed/failed/skipped/not-run
+ * explicitly, and the header records the config hash and resolved intensity.
+ */
+export const renderCertificationReport = (meta: MatrixRunMeta, results: TopologyRunResult[]): string => {
   const lines = [
-    "# Two-Machine Multi-Topology Certification Report",
+    `# Multi-Machine Topology Certification Report — ${meta.labName}`,
     "",
-    `Generated: ${new Date().toISOString()}`,
+    `- Run: \`${meta.runId}\` · started ${meta.startedAt} · finished ${meta.finishedAt}`,
+    `- Config: \`${meta.configPath}\` · sha256 \`${meta.configHash}\``,
+    `- Intensity: \`${meta.intensity.preset}\`${meta.intensity.overridden.length ? ` + overrides (${meta.intensity.overridden.join(", ")})` : ""} · sha256 \`${meta.intensityHash}\``,
+    `- Git commit: \`${meta.gitCommit}\``,
+    `- Machines: ${meta.machines.map((machine) => `\`${machine.id}\` ${machine.address} [${machine.roles.join(",")}]`).join("; ")}`,
     "",
-    "| Topology | Name | Deploy | Gates | Gate status |",
-    "| :--- | :--- | :--- | :--- | :--- |",
+    "| Topology | Aliases | Family | Deploy | Attempt | Passed | Failed | Skipped | Not run | Verdict |",
+    "| :--- | :--- | :--- | :--- | :--- | ---: | ---: | ---: | ---: | :--- |",
   ];
   for (const result of results) {
-    lines.push(`| ${result.topology} | ${result.name} | ${result.deploy.ok ? "PASSED" : "FAILED"} (${result.deploy.durationMs}ms) | ${result.gates.length}/11 | ${statusCell(result.gates)} |`);
+    const counts = tally(result.gates);
+    lines.push(`| ${result.topology.id} | ${result.topology.aliases.join(",") || "-"} | ${result.topology.family} | ${result.deploy.ok ? "OK" : "FAILED"} (${Math.round(result.deploy.durationMs / 1000)}s) | ${result.attempt}/${result.attemptsAllowed} | ${counts.passed} | ${counts.failed} | ${counts.skipped} | ${counts.notRun} | ${result.passed ? "CERTIFIED" : "NOT CERTIFIED"} |`);
   }
-  lines.push("", "## Gate detail", "");
+  if (meta.skippedFamilies.length > 0) {
+    lines.push("", "## Families that produced no topology", "");
+    for (const entry of meta.skippedFamilies) lines.push(`- \`${entry.family}\`: ${entry.reason}`);
+  }
+  lines.push("", "## Resolved intensity", "", "```json", JSON.stringify(meta.intensity, null, 2), "```", "", "## Gate detail", "");
   for (const result of results) {
-    lines.push(`### ${result.topology} — ${result.name}`, "");
-    lines.push(`Started: ${result.startedAt} · Finished: ${result.finishedAt}`, "");
+    lines.push(`### ${result.topology.id} — ${result.topology.name}`, "");
+    lines.push(`Started ${result.startedAt} · finished ${result.finishedAt} · machines ${result.topology.machinesUsed.join(", ")}`, "");
+    if (!result.deploy.ok) lines.push("Deploy failed; see the JSON report for the redacted deploy output and diagnostics.", "");
     for (const gate of result.gates) {
-      lines.push(`- **Gate ${gate.gate} ${gate.name}** — ${gate.status} (${gate.durationMs}ms)`);
+      lines.push(`- **Gate ${gate.gate} ${gate.id}** — ${gate.status} (${gate.durationMs}ms) — ${gate.name}`);
       for (const entry of gate.checks) {
-        lines.push(`  - ${entry.ok ? "PASS" : "FAIL"} ${entry.name}${entry.detail ? ` — ${entry.detail}` : ""}`);
+        lines.push(`  - ${entry.status} ${entry.name}${entry.detail ? ` — ${entry.detail.replace(/\n/g, " ")}` : ""}`);
       }
-      if (gate.error) lines.push(`  - error: ${gate.error}`);
+      if (gate.error) lines.push(`  - note: ${gate.error}`);
     }
     lines.push("");
   }
-  lines.push("## Ledger invariant", "");
-  lines.push("Every completed topology gate verifies double-entry drift and `gl_account_shards == journal_lines`. A non-zero drift is a hard failure.");
+  lines.push("## Verdict rule", "");
+  lines.push("A topology is CERTIFIED only when it deployed, no gate FAILED or was NOT_RUN, and at least one gate PASSED. SKIPPED gates/checks (not applicable or not implemented) are listed and never count as passes. Every money-writing gate asserts zero double-entry drift and `gl_account_shards == journal_lines`.");
   return `${lines.join("\n")}\n`;
 };
 
-export const writeCertificationReport = (results: TopologyRunResult[]): string => {
-  const path = join(import.meta.dirname, "TOPOLOGY_CERTIFICATION_REPORT.md");
-  writeFileSync(path, renderCertificationReport(results));
-  return path;
+export const writeCertificationReport = (
+  meta: MatrixRunMeta,
+  results: TopologyRunResult[],
+  options: { directory?: string; knownSecrets?: string[] } = {},
+): { markdown: string; json: string } => {
+  const directory = join(options.directory ?? DEFAULT_REPORTS_DIR, meta.runId);
+  mkdirSync(directory, { recursive: true });
+  const markdown = join(directory, "report.md");
+  const json = join(directory, "report.json");
+  writeFileSync(markdown, redact(renderCertificationReport(meta, results), options.knownSecrets));
+  writeFileSync(json, redact(JSON.stringify({ meta, results }, null, 2), options.knownSecrets));
+  return { markdown, json };
 };

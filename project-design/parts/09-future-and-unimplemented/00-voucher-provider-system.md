@@ -7,9 +7,9 @@ last_verified: 2026-11-03
 verified_against: 5a24f6f+working-tree
 code:
 design_sources:
-  - design/Voucher-Provider-Management-System-Technical-Design.md
-  - design/voucher-system-raw-design.md
-  - design/smart_ai_rail_and_voucher_onboarding_plan.md
+  - design/09-voucher-system-external/Voucher-Provider-Management-System-Technical-Design.md
+  - design/09-voucher-system-external/voucher-system-raw-design.md
+  - design/08-ai-onboarding/smart_ai_rail_and_voucher_onboarding_plan.md
 tests:
 gaps:
   - No voucher system code, schema, API, UI or tests exist in this repository.
@@ -401,9 +401,9 @@ There are no voucher tests. Acceptance requires at minimum:
 
 ### Old design sections
 
-- `design/Voucher-Provider-Management-System-Technical-Design.md` sections 1-17.
-- `design/voucher-system-raw-design.md` for the raw data model and sample `ApiConsumer`.
-- `design/smart_ai_rail_and_voucher_onboarding_plan.md` for the reusable importer pattern.
+- `design/09-voucher-system-external/Voucher-Provider-Management-System-Technical-Design.md` sections 1-17.
+- `design/09-voucher-system-external/voucher-system-raw-design.md` for the raw data model and sample `ApiConsumer`.
+- `design/08-ai-onboarding/smart_ai_rail_and_voucher_onboarding_plan.md` for the reusable importer pattern.
 
 ### Code paths
 

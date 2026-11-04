@@ -15,9 +15,9 @@ code:
   - deploy/lib/hostPlanner.ts
   - deploy/lib/healthVerifier.ts
 design_sources:
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#4-segment-3--postgresql-18-ddl-partialcoveringgin-indexes--dedicated-auditlog-schemas
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#63-individual-storage-solution-provisioners-in-deployprovisioners
-  - design/payment_gateway_deployment_and_guides_architecture.md#6-ordered-14-step-multi-host-deployment-pipeline
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#4-segment-3--postgresql-18-ddl-partialcoveringgin-indexes--dedicated-auditlog-schemas
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#63-individual-storage-solution-provisioners-in-deployprovisioners
+  - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#6-ordered-14-step-multi-host-deployment-pipeline
 tests:
   - deploy/test/testMatrix.test.ts
   - deploy/test/provisioners.test.ts
@@ -322,10 +322,10 @@ Not covered:
 
 ### Old design sections
 
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 4, DDL.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.3, provisioners.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 9, storage and backup.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 4, DDL.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.3, provisioners.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 9, storage and backup.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall.
 
 ### Code paths
 
@@ -351,7 +351,7 @@ Not covered:
 - `pgClusterFor()` maps port 5432 to the Debian `main` cluster and every other role to an independent cluster (`replica_<nodeId>`, `audit`, `log`) with its own data directory, config directory, HBA and `postgresql@18-<cluster>` unit.
 - Replica initialization creates the cluster first, stops it, replaces the empty data directory with `pg_basebackup -R`, then starts the cluster.
 - PgBouncer is provisioned once per host and now has a `[databases]` mapping to the local PostgreSQL port.
-- The audit DDL installs `pgcrypto`, the `compute_audit_chain_hash_trg` BEFORE INSERT trigger with `pg_advisory_xact_lock(994001)`, and `verify_audit_chain()` for the two-machine gate.
+- The audit DDL installs `pgcrypto`, the `compute_audit_chain_hash_trg` BEFORE INSERT trigger with `pg_advisory_xact_lock(994001)`, and `verify_audit_chain()` for the multi-machine matrix audit gate (`testing.multi-machine-matrix`).
 - `backupDaemonEnv()` derives `PG_DATA_DIR` and `PG_AUDIT_DATA_DIR` from the real cluster names.
 
 ## 12. Cluster-aware cron and port fixes (2026-11-03)

@@ -61,6 +61,10 @@ export const envSchema = z.strictObject({
   STORAGE_LOG_BUFFER_MAX: z.coerce.number().int().positive().max(100_000).default(5000),
   STORAGE_LOG_FLUSH_INTERVAL_MS: z.coerce.number().int().positive().max(60_000).default(250),
   STORAGE_SHARD_COUNT: z.coerce.number().int().positive().max(16).default(16),
+  // Processed outbox_events / shipped audit_outbox rows are pruned after this
+  // window (0 disables pruning). The dedicated audit DB is the durable copy.
+  STORAGE_OUTBOX_RETENTION_MS: z.coerce.number().int().nonnegative().default(3_600_000),
+  STORAGE_AUDIT_OUTBOX_RETENTION_MS: z.coerce.number().int().nonnegative().default(3_600_000),
   /** pg-backup-daemon mTLS control plane. */
   BACKUP_DAEMON_URL: z.url().optional(),
   BACKUP_DAEMON_CA_CERT_PATH: z.string().min(1).optional(),
@@ -233,6 +237,8 @@ const resolveEnvironment = (): CoreEnv => {
     STORAGE_LOG_BUFFER_MAX: 5000,
     STORAGE_LOG_FLUSH_INTERVAL_MS: 250,
     STORAGE_SHARD_COUNT: 16,
+    STORAGE_OUTBOX_RETENTION_MS: 3_600_000,
+    STORAGE_AUDIT_OUTBOX_RETENTION_MS: 3_600_000,
     BACKUP_DAEMON_URL: undefined,
     BACKUP_DAEMON_CA_CERT_PATH: undefined,
     BACKUP_DAEMON_CLIENT_CERT_PATH: undefined,

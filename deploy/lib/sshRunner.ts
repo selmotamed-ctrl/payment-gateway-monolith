@@ -129,7 +129,7 @@ export class SshRunner {
   }
 
   /** Runs a command and returns its stdout, trimming the trailing newline. */
-  capture(target: SshTarget, command: string, options: { sudo?: boolean; sudoUser?: string; cwd?: string } = {}): string {
+  capture(target: SshTarget, command: string, options: { sudo?: boolean; sudoUser?: string; cwd?: string; timeoutMs?: number } = {}): string {
     return this.run(target, command, options).stdout.trim();
   }
 
@@ -188,8 +188,23 @@ export class SshRunner {
     const mode = input.mode ?? 0o600;
     const parent = input.path.slice(0, input.path.lastIndexOf("/")) || ".";
     const command = `mkdir -p ${shellQuote(parent)} && cat > ${shellQuote(input.path)} && chmod ${mode.toString(8)} ${shellQuote(input.path)}`;
+    // With sudo, the first stdin line is the password and the rest is the
+    // file. The remote script reads the password line itself and installs a
+    // temporary copy with `sudo install`, so the password can never end up in
+    // the written file. (Previously `sudo -S bash -c 'cat > file'` was fed
+    // password+content: with NOPASSWD sudo or a cached sudo timestamp, sudo
+    // did not consume the password line and it became line 1 of the file.)
+    const sudoScript = [
+      "IFS= read -r PG_SUDO_PW",
+      "tmp=$(umask 077 && mktemp)",
+      "cat > \"$tmp\" || { rm -f \"$tmp\"; exit 1; }",
+      `printf '%s\\n' "$PG_SUDO_PW" | sudo -S -p '' install -D -m ${mode.toString(8)} "$tmp" ${shellQuote(input.path)}`,
+      "rc=$?",
+      "rm -f \"$tmp\"",
+      "exit $rc",
+    ].join("; ");
     const wrapped = input.sudo
-      ? `sudo -S -p '' bash -lc ${shellQuote(command)}`
+      ? `bash -c ${shellQuote(sudoScript)}`
       : `bash -lc ${shellQuote(command)}`;
     if (this.options.dryRun) {
       this.logger(`[dry-run] write ${input.target.user}@${input.target.host}:${input.path} (${Buffer.byteLength(input.content)} bytes, mode ${mode.toString(8)})`);

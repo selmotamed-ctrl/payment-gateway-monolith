@@ -93,7 +93,7 @@ import { executeGlobalSearch } from "../../lib/globalSearch";
 import { getConfiguredAuditStore, readThroughReplicaOrPrimary } from "../../lib/storageEngine";
 import { getBackupControlClient, isBackupDaemonConfigured } from "../../lib/storageEngine/backupControlClient";
 import { backupPolicySchema } from "./backups";
-import { loadShardBalanceRows, naturalShardBalance } from "../../lib/storageEngine/shardBalances";
+import { loadLiveAccountBalances } from "../../lib/storageEngine/shardBalances";
 import type { Decimal } from "decimal.js";
 import { decimal } from "../../engine/ledger/LedgerPoster";
 import { LedgerPoster } from "../../engine/ledger/LedgerPoster";
@@ -14637,31 +14637,15 @@ router.post("/velocity-rules", async (request: Request, response: Response) => {
  * window the checkpoint already covers.
  */
 const loadLedgerBalances = async (): Promise<Map<string, Decimal>> => {
-  const accounts = await client.glAccount.findMany();
-  const shardRows = await loadShardBalanceRows(client as never);
-  const byAccount = new Map(
-    shardRows.map((row) => [
-      row.id,
-      decimal(naturalShardBalance(row.accountType, row.total)),
-    ]),
-  );
+  // One grouped statement (shard totals, or checkpoint + post-checkpoint
+  // lines) instead of one journal_lines query per account without shards.
+  const live = await loadLiveAccountBalances(client as never);
   const balances = new Map<string, Decimal>();
-  for (const account of accounts) {
-    let balance = byAccount.get(account.id);
-    if (!balance) {
-      const lines = await client.journalLine.findMany({
-        where: account.checkpointAt
-          ? { glAccountId: account.id, createdAt: { gt: account.checkpointAt } }
-          : { glAccountId: account.id },
-        select: { direction: true, amount: true },
-      });
-      balance = decimal(account.checkpointBalance ?? 0);
-      for (const line of lines) {
-        const value = decimal(line.amount);
-        balance = line.direction === "DEBIT" ? balance.plus(value) : balance.minus(value);
-      }
-    }
-    balances.set(account.accountType, (balances.get(account.accountType) ?? decimal(0)).plus(balance));
+  for (const account of live) {
+    balances.set(
+      account.accountType,
+      (balances.get(account.accountType) ?? decimal(0)).plus(decimal(account.balance)),
+    );
   }
   return balances;
 };

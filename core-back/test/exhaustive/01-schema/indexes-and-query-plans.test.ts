@@ -100,6 +100,7 @@ describeDb("Suite 01 · storage-engine index inventory", () => {
     { table: "outbox_events", name: "outbox_events_unprocessed_idx", type: "btree", partial: true },
     { table: "outbox_events", name: "outbox_events_created_brin_idx", type: "brin" },
     { table: "audit_outbox", name: "audit_outbox_unshipped_idx", type: "btree", partial: true },
+    { table: "audit_outbox", name: "audit_outbox_shipped_idx", type: "btree", partial: true },
     { table: "journal_lines", name: "journal_lines_account_id_cov_idx", type: "btree" },
     { table: "journal_lines", name: "journal_lines_created_brin_idx", type: "brin" },
     { table: "payment_attempts", name: "payment_attempts_active_expiry_partial_idx", type: "btree", partial: true },

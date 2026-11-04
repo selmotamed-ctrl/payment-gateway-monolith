@@ -16,9 +16,9 @@ code:
   - deploy/test/**
   - deploy/backup-daemon/test/**
 design_sources:
-  - design/master_exhaustive_test_plan_for_opencode.md#1-master-test-volume-coverage-matrix-38500-assertions
-  - design/master_exhaustive_test_plan_for_opencode.md#2-suite-01-database-schema-66-models-100-enums-fks-triggers-indexes-2200-tests
-  - design/master_exhaustive_test_plan_for_opencode.md#13-opencode-phased-execution-tracker-master-runner-script
+  - design/05-testing/master_exhaustive_test_plan_for_opencode.md#1-master-test-volume-coverage-matrix-38500-assertions
+  - design/05-testing/master_exhaustive_test_plan_for_opencode.md#2-suite-01-database-schema-66-models-100-enums-fks-triggers-indexes-2200-tests
+  - design/05-testing/master_exhaustive_test_plan_for_opencode.md#13-opencode-phased-execution-tracker-master-runner-script
 tests:
   - core-back/test/exhaustive/01-schema/models-and-columns.test.ts
   - core-back/test/exhaustive/02-ledger/all-15-templates-matrix.test.ts
@@ -308,9 +308,9 @@ This catalog is derived by counting literal declarations and inspecting the suit
 
 ### Old design sections
 
-- `design/master_exhaustive_test_plan_for_opencode.md` section 1.
-- `design/master_exhaustive_test_plan_for_opencode.md` sections 2-12.
-- `design/master_exhaustive_test_plan_for_opencode.md` section 13.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` section 1.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` sections 2-12.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` section 13.
 
 ### Code paths
 

@@ -16,10 +16,10 @@ code:
   - fake-rails-back/engine/webhooks/WebhookDispatcher.ts
   - core-back/prisma/syntheticSeeder/**
 design_sources:
-  - design/blueprint-management.md#5-documentation-corrections-backlog
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md
-  - design/master_exhaustive_test_plan_for_opencode.md
-  - design/fake_payment_rails_service_architecture.md
+  - design/00-process/blueprint-management.md#5-documentation-corrections-backlog
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md
+  - design/05-testing/master_exhaustive_test_plan_for_opencode.md
+  - design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md
 tests:
   - core-back/test/list-query.test.ts
   - core-back/test/fake-rails-allowlist.test.ts
@@ -244,13 +244,13 @@ No test currently verifies D-04 success, D-06 projection, D-08 encrypted storage
 
 ### Old design sections
 
-- `design/blueprint-management.md` section 5.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` sections 5-7.
-- `design/master_exhaustive_test_plan_for_opencode.md` sections 1-13.
-- `design/fake_payment_rails_service_architecture.md` sections 2-7.
-- `design/Voucher-Provider-Management-System-Technical-Design.md`.
-- `design/guide_system_design_and_content (2).md`.
-- `design/smart_ai_rail_and_voucher_onboarding_plan.md`.
+- `design/00-process/blueprint-management.md` section 5.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` sections 5-7.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` sections 1-13.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` sections 2-7.
+- `design/09-voucher-system-external/Voucher-Provider-Management-System-Technical-Design.md`.
+- `design/07-guides-and-academy/guide_system_design_and_content.md`.
+- `design/08-ai-onboarding/smart_ai_rail_and_voucher_onboarding_plan.md`.
 
 ### Code paths
 

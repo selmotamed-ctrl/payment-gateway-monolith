@@ -13,9 +13,9 @@ code:
   - core-back/test/storage-engine/helpers/db.ts
   - tests/e2e/fixtures.ts
 design_sources:
-  - design/master_exhaustive_test_plan_for_opencode.md#executive-summary-testing-philosophy
-  - design/master_exhaustive_test_plan_for_opencode.md#1-master-test-volume-coverage-matrix-38500-assertions
-  - design/master_exhaustive_test_plan_for_opencode.md#13-opencode-phased-execution-tracker-master-runner-script
+  - design/05-testing/master_exhaustive_test_plan_for_opencode.md#executive-summary-testing-philosophy
+  - design/05-testing/master_exhaustive_test_plan_for_opencode.md#1-master-test-volume-coverage-matrix-38500-assertions
+  - design/05-testing/master_exhaustive_test_plan_for_opencode.md#13-opencode-phased-execution-tracker-master-runner-script
 tests:
   - deploy/test/testMatrix.test.ts
   - core-back/test/exhaustive/**
@@ -23,7 +23,7 @@ tests:
   - tests/e2e/**
   - tests/e2e-live/**
 gaps:
-  - The eight live topologies and 11 gates are not certified because HOST_B was unreachable during implementation.
+  - The multi-machine matrix (`testing.multi-machine-matrix`) has no live certification run yet; topologies and gates are only unit-verified.
   - The claimed 38,500 assertions are not present; the working tree has about 1,807 literal test declarations.
   - Suite 09 has no exhaustive directory.
   - Most UI tests mock every API response and verify geometry rather than behaviour.
@@ -259,9 +259,9 @@ This part is verified by inspecting the runner, configs and suite files. It has 
 
 ### Old design sections
 
-- `design/master_exhaustive_test_plan_for_opencode.md` executive summary and section 1.
-- `design/master_exhaustive_test_plan_for_opencode.md` sections 2-12 for suite intent.
-- `design/master_exhaustive_test_plan_for_opencode.md` section 13 for the runner.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` executive summary and section 1.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` sections 2-12 for suite intent.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` section 13 for the runner.
 
 ### Code paths
 
@@ -283,15 +283,14 @@ This part is verified by inspecting the runner, configs and suite files. It has 
 
 - 2026-11-03: initial canonical part. Verified against `5a24f6f+working-tree`.
 
-## 11. Two-machine matrix (2026-11-03)
+## 11. Multi-machine matrix (2026-11-04)
 
-`deploy/test-matrix/**` is the executable realization of `design/two-machine-test/two_machine_multi_topology_deployment_and_stress_test_plan.md`:
+`deploy/test-matrix/**` is the executable realization of `design/05-testing/multi_machine_topology_and_stress_test_plan.md`, which supersedes the archived two-machine plan:
 
-- `bootstrapTwoMachineLab.ts` discovers HOST_A, installs bidirectional SSH keys, MinIO and vault directories;
-- `generateTopologyConfigs.ts` writes T1-T8 configs;
-- `teardownTopology.ts` removes lab-owned PM2 apps, vhosts, releases and marked PostgreSQL clusters;
-- `gates.ts` implements the 11 verification gates;
-- `stressWorkload.ts` drives checkout bursts and hot-link contention;
-- `runAllTopologiesAndHeal.ts` deploys, gates, captures diagnostics, retries and writes `TOPOLOGY_CERTIFICATION_REPORT.md`.
+- a JSON lab config (`machines.example.json`, `machines.two-host-lab.example.json`, schema `machines.schema.json`, Zod validator `labConfig.ts`) declares N machines, roles, topology families and test intensity, with no secrets;
+- `topologyDerivation.ts` derives topologies per family from the machines; the two-host example keeps `T1`–`T8` as aliases;
+- `intensity.ts` resolves presets (`smoke`, `standard`, `soak`, `chaos`, `certification`) plus overrides into every workload size and SLO;
+- `gates.ts` runs 12 measured gates; `stressWorkload.ts` adds an open-loop generator that measures achieved TPS;
+- `cli.ts` validates, plans, bootstraps, runs, tears down and writes reports carrying the config hash and resolved intensity.
 
-See `testing.two-machine-matrix` for the as-built details and gaps.
+See `testing.multi-machine-matrix` for the as-built details and gaps.

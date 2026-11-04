@@ -611,20 +611,20 @@ Other operator docs:
 - [`deploy.env.example`](deploy.env.example) - every deploy key and topology example.
 - [`project-design/appendices/env-and-config-matrix.md`](../project-design/appendices/env-and-config-matrix.md) - generated env catalog.
 
-## 17. Two-machine topology lab
+## 17. Multi-machine topology lab
 
-`deploy/test-matrix/` implements the T1-T8 two-machine plan.
+`deploy/test-matrix/` is a JSON-configured lab harness for any number of machines (see [`test-matrix/README.md`](test-matrix/README.md) and `project-design/parts/08-testing/04-multi-machine-matrix.md`).
 
 ```bash
 cd deploy
-bun run test-matrix:bootstrap          # SSH keys, MinIO on HOST_B, vault directories
-bun run test-matrix --dry-run          # write configs/deploy.T1.env ... T8
-bun run test-matrix --topologies=T1,T2 # deploy, run 11 gates, retry on failure
+cp test-matrix/machines.example.json test-matrix/machines.local.json   # edit machines/roles/intensity
+bun run test-matrix:validate           # schema + derived topologies, no SSH
+export LAB_SUDO_PASS                   # only when ssh.sudo.mode = "password"
+bun run test-matrix:plan               # write 0600 deploy configs, validate each
+bun run test-matrix:bootstrap          # verify key SSH + sudo, peer keys, MinIO, vault
+bun run test-matrix --topologies=T1 --intensity=smoke
 ```
 
-- `topologies.ts` generates all eight configs from `HOST_A_LAN_IP` and `salem@10.209.250.205`.
-- `teardownTopology.ts` only drops PostgreSQL clusters when `/etc/pg-lab-matrix` exists.
-- `gates.ts` implements provisioning/mTLS/UFW, replica routing/RYOW, seeder invariants, stress, SSE, workers, audit chain, log outage, search, backup/PITR and chaos gates.
-- `runAllTopologiesAndHeal.ts` writes `test-matrix/TOPOLOGY_CERTIFICATION_REPORT.md`.
-
-The live run requires `HOST_B` reachable and passwordless sudo on both hosts. Without it, only config generation and unit tests run.
+- Topologies are derived from machine roles per family (`single-host`, `split`, `replicated`, `dmz`, `mesh`, `scale`, `chaos`); `machines.two-host-lab.example.json` reproduces the old T1-T8 lab as aliases.
+- No password is stored in the JSON or the repo; the sudo password is read from the env var named by `ssh.sudo.passwordEnv`, lab secrets are generated into git-ignored `test-matrix/configs/`.
+- Reports are written to `test-matrix/reports/<runId>/` with the config hash and resolved intensity.

@@ -14,9 +14,9 @@ code:
   - deploy/backup-daemon/src/server.ts
   - core-back/lib/storageEngine/backupControlClient.ts
 design_sources:
-  - design/payment_gateway_final_design-v5.md#22-mutual-tls-mtls-inter-service-transport-architecture
-  - design/payment_gateway_deployment_and_guides_architecture.md#4-automated-mtls-13-pki-generation-san-binding--least-privilege-distribution
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#4-segment-3--postgresql-18-ddl-partialcoveringgin-indexes--dedicated-auditlog-schemas
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#22-mutual-tls-mtls-inter-service-transport-architecture
+  - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#4-automated-mtls-13-pki-generation-san-binding--least-privilege-distribution
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#4-segment-3--postgresql-18-ddl-partialcoveringgin-indexes--dedicated-auditlog-schemas
 tests:
   - deploy/test/pkiScale.test.ts
   - deploy/test/exhaustive-deploy-matrix.test.ts
@@ -294,9 +294,9 @@ Not covered by automated tests:
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` section 2.2, mTLS and certificate roles.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 4, PKI generation and distribution.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 4, storage DDL.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 2.2, mTLS and certificate roles.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 4, PKI generation and distribution.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 4, storage DDL.
 
 ### Code paths
 

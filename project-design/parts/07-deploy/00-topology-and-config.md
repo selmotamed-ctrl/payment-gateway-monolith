@@ -14,9 +14,9 @@ code:
   - deploy/deploy.env.example
   - deploy/DEPLOYMENT_GUIDE.md
 design_sources:
-  - design/payment_gateway_deployment_and_guides_architecture.md#1-flexible-1n-compute--storage-topology-model-same-server-vs-fully-distributed
-  - design/payment_gateway_deployment_and_guides_architecture.md#3-multi-host-configuration-architecture-deployenv--zod-4-validator
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#6-segment-5--horizontal-node-scaling--multi-host-storage-orchestration-in-deploydeployenv--deploydeployts
+  - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#1-flexible-1n-compute--storage-topology-model-same-server-vs-fully-distributed
+  - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#3-multi-host-configuration-architecture-deployenv--zod-4-validator
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#6-segment-5--horizontal-node-scaling--multi-host-storage-orchestration-in-deploydeployenv--deploydeployts
 tests:
   - deploy/test/testMatrix.test.ts
   - deploy/test/configScale.test.ts
@@ -285,9 +285,9 @@ These tests run without PostgreSQL/Redis or remote hosts. A real deploy requires
 
 ### Old design sections
 
-- `design/payment_gateway_deployment_and_guides_architecture.md` sections 1-3.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.
-- `design/payment_gateway_final_design-v5.md` section 2, service topology.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` sections 1-3.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 2, service topology.
 
 ### Code paths
 
@@ -313,4 +313,5 @@ These tests run without PostgreSQL/Redis or remote hosts. A real deploy requires
 - PostgreSQL duplicate-IP validation now compares `privateIp:servicePort`, so a co-located primary/replica pair is valid.
 - New keys: `FAKE_RAILS_NODE` (one node spec, overrides the legacy Fake Rails host/port/private IP), `STORAGE_SHARD_COUNT` (1-32), `KMS_MASTER_KEY_ID` and `KMS_MASTER_KEY_HEX`.
 - `FAKE_RAILS_NODE` is accepted by the real deploy schema and feeds the Fake Rails service, Nginx upstream, firewall and core allowlist.
-- `deploy/test-matrix/topologies.ts` generates T1-T8 and `deploy/test/testMatrix.test.ts` validates every generated file through `loadDeployConfig`.
+- `deploy/test-matrix/topologies.ts` renders every topology derived from the multi-machine lab config (see `testing.multi-machine-matrix`; the two-host example keeps the T1-T8 aliases) and `deploy/test/testMatrix.test.ts` validates every rendered file through `loadDeployConfig` and `planHosts`.
+- The node grammar accepts only IPv4 for `sshHost` and `privateIp`, and SSH user/key/sudo are per tier, not per host; the lab config enforces both.

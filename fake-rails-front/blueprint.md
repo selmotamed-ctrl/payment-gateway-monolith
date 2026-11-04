@@ -318,9 +318,9 @@ curl -X POST http://127.0.0.1:4104/portal-api/webhooks/$TX_ID/fire \
 
 ### Old design sections
 
-- `design/fake_payment_rails_service_architecture.md` section 5.
-- `design/fake_payment_rails_service_architecture.md` section 5.1, 5.2 and 5.3.
-- `design/fake_payment_rails_service_architecture.md` section 6 and 6.1.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 5.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 5.1, 5.2 and 5.3.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 6 and 6.1.
 
 ### Code paths
 
@@ -624,9 +624,9 @@ bun run deploy.ts --only=fake-rails
 
 ### Old design sections
 
-- `design/fake_payment_rails_service_architecture.md` section 2.
-- `design/fake_payment_rails_service_architecture.md` section 2.3 and 2.4.
-- `design/fake_payment_rails_service_architecture.md` section 7.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 2.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 2.3 and 2.4.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 7.
 
 ### Code paths
 

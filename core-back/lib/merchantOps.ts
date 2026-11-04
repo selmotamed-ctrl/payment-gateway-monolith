@@ -1,7 +1,7 @@
 import { ApiError } from "./error";
 import type { PrismaClient } from "../generated/prisma/client";
 import { decimal } from "../engine/ledger/LedgerPoster";
-import { loadShardBalanceRows, naturalShardBalance } from "./storageEngine/shardBalances";
+import { loadLiveAccountBalances } from "./storageEngine/shardBalances";
 
 export const MERCHANT_DESCRIPTIVE_FIELDS = [
   "tradeName",
@@ -189,35 +189,8 @@ export const merchantWalletBalance = async (
   });
   if (wallets.length === 0) return { balance: "0.0000", wallets: [] };
   const walletAccountIds = wallets.map((wallet) => wallet.glAccountId);
-  const shardRows = await loadShardBalanceRows(db as never, walletAccountIds);
-  const shardBalance = new Map(
-    shardRows.map((row) => [
-      row.id,
-      decimal(naturalShardBalance(row.accountType, row.total)),
-    ]),
-  );
-  const missing = walletAccountIds.filter((id) => !shardBalance.has(id));
-  if (missing.length > 0) {
-    const accounts = await db.glAccount.findMany({
-      where: { id: { in: missing } },
-      select: { id: true, checkpointBalance: true },
-    });
-    for (const account of accounts) {
-      shardBalance.set(account.id, decimal(account.checkpointBalance ?? 0));
-    }
-    const lines = await db.journalLine.findMany({
-      where: { glAccountId: { in: missing } },
-      select: { glAccountId: true, direction: true, amount: true },
-    });
-    for (const line of lines) {
-      const current = shardBalance.get(line.glAccountId) ?? decimal(0);
-      const value = decimal(line.amount);
-      shardBalance.set(
-        line.glAccountId,
-        line.direction === "CREDIT" ? current.plus(value) : current.minus(value),
-      );
-    }
-  }
+  const live = await loadLiveAccountBalances(db as never, walletAccountIds);
+  const shardBalance = new Map(live.map((row) => [row.id, decimal(row.balance)]));
   const rows = wallets.map((wallet) => ({
     id: wallet.id,
     walletId: wallet.id,

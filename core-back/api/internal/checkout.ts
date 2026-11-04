@@ -104,7 +104,26 @@ interface LoadedLink {
 const loadLink = async (linkKey: string): Promise<LoadedLink | null> => {
   const link = await client.paymentLink.findUnique({
     where: { key: linkKey },
-    include: { application: { include: { merchant: true } } },
+    // Only the columns the checkout uses (the merchant row carries payout
+    // bank JSON and other wide columns that the payer flow never needs).
+    include: {
+      application: {
+        select: {
+          merchantId: true,
+          railWhitelist: true,
+          merchant: {
+            select: {
+              tradeName: true,
+              legalName: true,
+              status: true,
+              riskTier: true,
+              contactPhone: true,
+              contactEmail: true,
+            },
+          },
+        },
+      },
+    },
   });
   if (!link) {
     return null;
@@ -1200,13 +1219,15 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
   if (!attemptId) {
     throw new ApiError(500, "ATTEMPT_NOT_CREATED", "The payment attempt was not created");
   }
-  const attempt = await client.paymentAttempt.findUnique({ where: { id: attemptId } });
+  // Three independent reads in one round of latency instead of three.
+  const [attempt, widget, redirect] = await Promise.all([
+    client.paymentAttempt.findUnique({ where: { id: attemptId } }),
+    client.widgetDefinition.findUnique({ where: { routeId: routeRow.id } }),
+    client.redirectDefinition.findUnique({ where: { routeId: routeRow.id } }),
+  ]);
   if (!attempt) {
     throw new ApiError(500, "ATTEMPT_NOT_CREATED", "The payment attempt was not created");
   }
-
-  const widget = await client.widgetDefinition.findUnique({ where: { routeId: routeRow.id } });
-  const redirect = await client.redirectDefinition.findUnique({ where: { routeId: routeRow.id } });
 
   const fallbackAction = buildClientAction(mode, {
     expiresAt,
@@ -1247,7 +1268,7 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
     { slotReserved: decision.slotReserved === true },
   );
 
-  const attemptRow = await client.paymentAttempt.findUnique({ where: { id: attempt.id } });
+  const attemptRow = await client.paymentAttempt.findUnique({ where: { id: attempt.id }, select: { status: true } });
   const clientAction = engineResult.clientAction
     ? toClientActionPayload(engineResult.clientAction)
     : fallbackAction;
@@ -1260,18 +1281,23 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
   });
 });
 
+/**
+ * Loads an attempt scoped to its link key with ONE query (relation filter)
+ * instead of loading the link, application and merchant first. The link is
+ * only probed on the not-found path to keep the two distinct 404 codes.
+ */
 const loadAttempt = async (linkKey: string, attemptId: string) => {
-  const link = await loadLink(linkKey);
-  if (!link) {
-    throw new ApiError(404, "PAYMENT_LINK_NOT_FOUND", "The payment link does not exist");
-  }
   const attempt = await client.paymentAttempt.findFirst({
-    where: { id: attemptId, linkId: link.id },
+    where: { id: attemptId, link: { key: linkKey } },
   });
   if (!attempt) {
+    const link = await client.paymentLink.findUnique({ where: { key: linkKey }, select: { id: true } });
+    if (!link) {
+      throw new ApiError(404, "PAYMENT_LINK_NOT_FOUND", "The payment link does not exist");
+    }
     throw new ApiError(404, "PAYMENT_ATTEMPT_NOT_FOUND", "The payment attempt does not exist");
   }
-  return { link, attempt };
+  return { attempt };
 };
 
 route.get("/pay/:linkKey/logs/:attemptId", async (request: Request, response: Response) => {
@@ -1341,7 +1367,13 @@ route.get("/pay/:linkKey/logs/:attemptId/status", async (request: Request, respo
       response.end();
       return;
     }
-    const attempt = await client.paymentAttempt.findUnique({ where: { id: attemptId } });
+    // Polling fallback next to the realtime subscription: read only the four
+    // columns the frame needs, not the full row (customer fields JSON,
+    // encrypted context, public outputs).
+    const attempt = await client.paymentAttempt.findUnique({
+      where: { id: attemptId },
+      select: { id: true, reference: true, status: true, substatus: true },
+    });
     if (!attempt) {
       response.end();
       return;
@@ -1390,7 +1422,7 @@ route.post("/pay/:linkKey/logs/:attemptId/confirm", async (request: Request, res
     claim: async (targetAttemptId) =>
       (await claimAttemptForConfirm(client, targetAttemptId, idempotencyKeyHash)).claimed,
   });
-  const updated = await client.paymentAttempt.findUnique({ where: { id: attempt.id } });
+  const updated = await client.paymentAttempt.findUnique({ where: { id: attempt.id }, select: { status: true } });
   const commitLsn = platform.consumeCommitLsn(attempt.id);
   if (commitLsn) {
     response.setHeader("x-pg-min-lsn", commitLsn);
@@ -1452,7 +1484,7 @@ route.post("/pay/:linkKey/logs/:attemptId/client-event", async (request: Request
   // engine inquires the gateway and trusts only verified facts.
   const platform = getPlatformRuntime(client as never);
   const result = await platform.engine.inquire(attempt as unknown as DynamicAttempt);
-  const updated = await client.paymentAttempt.findUnique({ where: { id: attempt.id } });
+  const updated = await client.paymentAttempt.findUnique({ where: { id: attempt.id }, select: { status: true } });
   response.json({
     attemptId: attempt.id,
     status: updated?.status ?? result.status,
@@ -1470,7 +1502,7 @@ route.get("/return/:attemptToken", async (request: Request, response: Response) 
   }
   const platform = getPlatformRuntime(client as never);
   const result = await platform.engine.inquire(attempt as unknown as DynamicAttempt);
-  const updated = await client.paymentAttempt.findUnique({ where: { id: attempt.id } });
+  const updated = await client.paymentAttempt.findUnique({ where: { id: attempt.id }, select: { status: true } });
   response.json({
     attemptId: attempt.id,
     reference: attempt.reference,
@@ -1489,7 +1521,7 @@ route.post("/return/:attemptToken", async (request: Request, response: Response)
   }
   const platform = getPlatformRuntime(client as never);
   const result = await platform.engine.inquire(attempt as unknown as DynamicAttempt);
-  const updated = await client.paymentAttempt.findUnique({ where: { id: attempt.id } });
+  const updated = await client.paymentAttempt.findUnique({ where: { id: attempt.id }, select: { status: true } });
   response.json({
     attemptId: attempt.id,
     reference: attempt.reference,

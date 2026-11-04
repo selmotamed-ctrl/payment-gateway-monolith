@@ -1400,7 +1400,7 @@ Execute this architecture in **7 ordered milestones**:
 
 * \[ \] **Milestone 4 — Build the Backup Daemon & Admin Portal Disaster Recovery UI (`deploy/backup-daemon/`, `core-back`, `admin-front`):**
 
-  * Implement `deploy/backup-daemon/index.ts` (mTLS `:4090` wrapping WAL-G / Barman + `RestoreDrillRunner.ts` scratch-Postgres PITR & Ledger Invariant verifier).
+  * Implement `deploy/backup-daemon/src/index.ts` *(as-built path; corrected 2026-11-04)* (mTLS `:4090` wrapping WAL-G / Barman + `RestoreDrillRunner.ts` scratch-Postgres PITR & Ledger Invariant verifier).
 
   * Add `/internal/admin/system/backups/*` in `core-back`, proxy in `admin-back`, and build `admin-front/src/pages/system/backups/index.tsx` showing live WAL lag, bucket status, 1-click backup trigger, and weekly restore drill verification cards.
 

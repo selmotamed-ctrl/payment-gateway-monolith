@@ -26,16 +26,16 @@ code:
   - core-back/api/internal/merchant.ts
   - core-back/prisma/schema.prisma
 design_sources:
-  - design/payment_gateway_final_design-v5.md#part-ix-platform-interfaces-onboarding-governance-compliance-program
-  - design/payment-gateway-refined-design-v4.1.md#15
-  - design/payment-gateway-refined-design-v4.1.md#16
-  - design/payment-gateway-refined-design-v4.1.md#17
-  - design/payment-gateway-refined-design-v4.1.md#18
-  - design/payment-gateway-refined-design-v4.1.md#19
-  - design/payment-gateway-refined-design-v4.1.md#20
-  - design/Dynamic-Payment-Gateway-Management-Design-v2.md#9
-  - design/Dynamic-Payment-Gateway-Management-Design-v2.md#13
-  - design/fixes/_0001_operator_cases.md
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#part-ix-platform-interfaces-onboarding-governance-compliance-program
+  - design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#15
+  - design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#16
+  - design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#17
+  - design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#18
+  - design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#19
+  - design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#20
+  - design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md#9
+  - design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md#13
+  - design/10-fixes/_0001_operator_cases.md
 tests:
   - core-back/test/engine/governance.test.ts
   - core-back/test/governance-execution.test.ts
@@ -380,9 +380,9 @@ Some governance tests use fake clients; database-backed suites require PostgreSQ
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` Part IX (incorporates v4.1 §15–§22).
-- `design/payment-gateway-refined-design-v4.1.md` §15 roles/authorities/four-eyes, §16 onboarding/KYB, §17 detail governance, §18 AML, §19 disputes, §20 profitability; `design/Dynamic-Payment-Gateway-Management-Design-v2.md` §9 and §13.
-- `design/fixes/_0001_operator_cases.md` — operator-case inquiry eligibility and bulk behavior.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` Part IX (incorporates v4.1 §15–§22).
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` §15 roles/authorities/four-eyes, §16 onboarding/KYB, §17 detail governance, §18 AML, §19 disputes, §20 profitability; `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` §9 and §13.
+- `design/10-fixes/_0001_operator_cases.md` — operator-case inquiry eligibility and bulk behavior.
 
 ### Code paths
 

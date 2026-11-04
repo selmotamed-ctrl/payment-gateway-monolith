@@ -15,9 +15,9 @@ code:
   - core-back/api/internal/backups.ts
   - admin-back/api/protected/backups.ts
 design_sources:
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#5-segment-4--backup-management-orchestrator--admin-control-plane-pg-backup-daemon--core-back--admin-front
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#52-core-back--admin-front-backup-management-api-contract
-  - design/payment_gateway_deployment_and_guides_architecture.md#6-ordered-14-step-multi-host-deployment-pipeline
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#5-segment-4--backup-management-orchestrator--admin-control-plane-pg-backup-daemon--core-back--admin-front
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#52-core-back--admin-front-backup-management-api-contract
+  - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#6-ordered-14-step-multi-host-deployment-pipeline
 tests:
   - deploy/backup-daemon/test/backupEngine.test.ts
   - deploy/backup-daemon/test/catalogStore.test.ts
@@ -238,8 +238,8 @@ Not covered: a real WAL-G/Barman backup or restore; a real PostgreSQL 18 scratch
 
 ### Old design sections
 
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 5.1 and 5.2.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 6, deployment pipeline.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 5.1 and 5.2.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 6, deployment pipeline.
 
 ### Code paths
 

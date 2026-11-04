@@ -225,23 +225,49 @@ export const setStorageEngine = (engine: StorageEngine | undefined): void => {
   engineSingleton = engine;
 };
 
+const consistencyFor = (minLsnHeader: string | undefined) =>
+  minLsnHeader ? { atLeastLsn: minLsnHeader, maxWaitMs: 250 } : ("replica" as const);
+
+/**
+ * `ReadStorePort.execute` already falls back to the primary when the chosen
+ * replica throws. The helpers below therefore only retry on the primary when
+ * the read store itself failed BEFORE running the query (it never reached
+ * `fn`); a query that fails on the primary is rethrown instead of being run a
+ * second (or third) time, which previously doubled the load of every failing
+ * read and hid caller bugs.
+ */
+const executeOnce = async <T>(
+  engine: StorageEngine,
+  primary: PrismaClient,
+  minLsnHeader: string | undefined,
+  fn: (reader: PrismaClient) => Promise<T>,
+  timeoutMs: number,
+): Promise<T> => {
+  let reachedQuery = false;
+  const tracked = (reader: PrismaClient): Promise<T> => {
+    reachedQuery = true;
+    return fn(reader);
+  };
+  try {
+    const result = await engine.readStore.execute(consistencyFor(minLsnHeader), tracked, { timeoutMs });
+    recordReadSource(result.servedBy, minLsnHeader);
+    return result.data;
+  } catch (error) {
+    if (reachedQuery) {
+      throw error;
+    }
+    recordReadSource("primary", minLsnHeader);
+    return fn(primary);
+  }
+};
+
 export const readThroughReplica = async <T>(
   minLsnHeader: string | undefined,
   fn: (reader: PrismaClient) => Promise<T>,
   timeoutMs = 3_000,
 ): Promise<T> => {
   const engine = getStorageEngine();
-  const consistency = minLsnHeader
-    ? { atLeastLsn: minLsnHeader, maxWaitMs: 250 }
-    : ("replica" as const);
-  try {
-    const result = await engine.readStore.execute(consistency, fn, { timeoutMs });
-    recordReadSource(result.servedBy, minLsnHeader);
-    return result.data;
-  } catch {
-    recordReadSource("primary", minLsnHeader);
-    return fn(engine.primary);
-  }
+  return executeOnce(engine, engine.primary, minLsnHeader, fn, timeoutMs);
 };
 
 /**
@@ -259,17 +285,7 @@ export const readThroughReplicaOrPrimary = async <T>(
   if (!engine) {
     return fn(primary);
   }
-  const consistency = minLsnHeader
-    ? { atLeastLsn: minLsnHeader, maxWaitMs: 250 }
-    : ("replica" as const);
-  try {
-    const result = await engine.readStore.execute(consistency, fn, { timeoutMs });
-    recordReadSource(result.servedBy, minLsnHeader);
-    return result.data;
-  } catch {
-    recordReadSource("primary", minLsnHeader);
-    return fn(primary);
-  }
+  return executeOnce(engine, primary, minLsnHeader, fn, timeoutMs);
 };
 
 export const getConfiguredAuditStore = (): AuditStorePort | null =>

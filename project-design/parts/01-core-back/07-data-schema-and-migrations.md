@@ -360,12 +360,12 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md#7-database-schema`
-- `design/payment-gateway-refined-design-v4.1.md#5-database-schema`
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md#4-database-schema`
-- `design/synthetic_operational_data_seeder_architecture.md#3-comprehensive-multi-state-distribution-across-all-66-database-models`
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#4-segment-3--postgresql-18-ddl-partialcoveringgin-indexes--dedicated-auditlog-schemas`
-- `design/blueprint-management.md#5-documentation-corrections-backlog`
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md#7-database-schema`
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#5-database-schema`
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md#4-database-schema`
+- `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md#3-comprehensive-multi-state-distribution-across-all-66-database-models`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#4-segment-3--postgresql-18-ddl-partialcoveringgin-indexes--dedicated-auditlog-schemas`
+- `design/00-process/blueprint-management.md#5-documentation-corrections-backlog`
 
 ### Code paths
 

@@ -1,10 +1,13 @@
 # ADMIN INTERACTIVE GUIDE — COMPLETE DESIGN, IMPLEMENTATION SPEC & FULL CONTENT · VERSION 1.0
 
+
+> **2026-11-04 repository note.** This spec is **not implemented** (see `project-design/parts/09-future-and-unimplemented/01-guide-v2.md`). Its companion files `design/07-guides-and-academy/academy_system_design_and_content.md`, `guide_content_fixes.md` and `guide_content_questions.md` are referenced below but **are not yet in the repository**. The owner has said that revised guide/academy documents with major changes will follow. Treat this file as a draft until those arrive.
+
 **Subtitle:** The employee-grade, zero-assumption, searchable reference for the whole Payment Gateway Platform — rebuilt from the ground up to replace the current `admin-front` `/guide`.
 
 **Target repository:** `selmotamed-ctrl/payment-gateway-monolith` (primary work in `admin-front`, small supporting changes in `admin-back` and `core-back`, tests in `tests/`).
-**Companion file:** `design/academy_system_design_and_content.md` (the Employee Academy). The Academy and this Guide share one progress record (defined in the Academy file, §A-3). **Implement Academy phase A-1 before Guide phase G-4.**
-**Supersedes:** `design/payment_gateway_deployment_and_guides_architecture.md` §9, §10 and §11 for the Admin Guide only. The Merchant Guide (`merchant-front`) and the Checkout Help Center (`checkout-front`) are **out of scope** and must not be touched by this work.
+**Companion file:** `design/07-guides-and-academy/academy_system_design_and_content.md` (the Employee Academy). The Academy and this Guide share one progress record (defined in the Academy file, §A-3). **Implement Academy phase A-1 before Guide phase G-4.**
+**Supersedes:** `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` §9, §10 and §11 for the Admin Guide only. The Merchant Guide (`merchant-front`) and the Checkout Help Center (`checkout-front`) are **out of scope** and must not be touched by this work.
 
 ---
 
@@ -32,7 +35,7 @@ You are implementing a safety-critical training and reference system for people 
 2. **Content is extracted by a script, not retyped.** You will write `admin-front/scripts/extract-guide-content.ts` (spec in §II-2) which reads this very file from `design/` and emits JSON. You never paste article text into `.ts`/`.tsx` files.
 3. **Use the real UI labels.** Where an article names a button, screen or menu item in **bold** it uses the label currently in the code (`t("...")` strings). If you discover a label in an article that does not exist in the code, follow rule 5 (verification procedure).
 4. **Money math uses `decimal.js` only. No `eval`, no `new Function`, no `Function(...)`, no `vm`.** Simulators are pure client-side code with no network calls.
-5. **Verification procedure for content mismatches.** When implementing, you must open each screen file named in the *Screen-to-Article map* (§III-F.3) and compare the bold UI labels in the linked articles with the strings in the source. For each mismatch: (a) change **only the label text** inside the design file's article, (b) append a line to `design/guide_content_fixes.md` (`articleId | old label | new label | file:line`), (c) never change any explanation. If a statement of *behaviour* (not label) looks wrong, do **not** edit it: append it to `design/guide_content_questions.md` and continue. Never block on a content question.
+5. **Verification procedure for content mismatches.** When implementing, you must open each screen file named in the *Screen-to-Article map* (§III-F.3) and compare the bold UI labels in the linked articles with the strings in the source. For each mismatch: (a) change **only the label text** inside the design file's article, (b) append a line to `design/07-guides-and-academy/guide_content_fixes.md` (`articleId | old label | new label | file:line`), (c) never change any explanation. If a statement of *behaviour* (not label) looks wrong, do **not** edit it: append it to `design/07-guides-and-academy/guide_content_questions.md` and continue. Never block on a content question.
 6. **Counts must match.** After extraction the generated metadata must equal the numbers in §II-2.5 (EXPECTED COUNTS). The content test fails the build otherwise.
 7. **Source-of-truth numbers from code (already verified against the repository):** the database enum `AttemptStatus` has **14** values; `GlAccountType` has **11** values (it includes `GATEWAY_FEE_EXPENSE`); the Add-a-Gateway wizard in code has **8** steps named *Identity & Basics, Environments & Auth, Customer Catalog, Crypto Profiles, Flow Builder, Client Action & Channels, Status Rules & Costs, Simulator & Approval*. Older design documents say "13 states" and "10 GL types": the guide uses the code numbers (14 and 11). Do not "fix" the content back to 13 or 10.
 8. **Do not touch** `merchant-front`, `checkout-front`, `merchant-back`, `checkout-back`, or any ledger/engine code. Backend changes are limited to those listed in §II-9.
@@ -133,7 +136,7 @@ admin-front/
   src/pages/guide/index.tsx                         REWRITE
 tests/unit/guide-*.test.ts                          NEW
 tests/e2e/admin/guide-*.spec.ts                     NEW
-design/guide_content_fixes.md, guide_content_questions.md   NEW (empty headers, filled per rule 5)
+design/07-guides-and-academy/guide_content_fixes.md, guide_content_questions.md   NEW (empty headers, filled per rule 5)
 ```
 
 The existing `ledger.ts` and `transform.ts` in `components/guide/` may be reused as the starting point of `widgets/engine/ledger.ts` and `transforms.ts` **only if** they pass the vectors in §II-5. Otherwise rewrite them.
@@ -172,7 +175,7 @@ Lines outside blocks (headings such as `### BOOK 4`, blank lines) are ignored. I
 
 Run with `bun run content:guide`. Steps:
 
-1. Locate the design file: `design/guide_system_design_and_content.md` (relative to repo root, found via `../design/` from `admin-front`). If absent: print an error and exit 1.
+1. Locate the design file: `design/07-guides-and-academy/guide_system_design_and_content.md` (relative to repo root, found via `../design/` from `admin-front`). If absent: print an error and exit 1.
 2. Read the file as UTF-8, normalise `\r\n` to `\n`. **Only parse content between the two marker lines `<!-- CONTENT:BEGIN -->` and `<!-- CONTENT:END -->` (each marker is a whole line by itself; mentions of them inside other text are not markers)** (markers exist in PART III).
 3. Parse blocks line by line with the grammar above. Unknown `@@` keywords, duplicate ids, a missing `@@end`, or an unparsable JSON fence → exit 1 with file line number.
 4. Validate cross-references: every `related`, `[[a:]]`, `[[c:]]`, `[[s:]]`, `[[g:]]`, `articles=`, `article=`, path entry and context-map id must exist.
@@ -242,7 +245,7 @@ export const loadArticles: (lang:"en"|"ar") => Promise<Article[]>; // dynamic im
 * `PageHeader` renders `<ContextHelpButton/>` **automatically** (icon `mdi-help-circle-outline`, accessible name "How this page works") using the current route **name**. Pages never wire it by hand.
 * The map `context-map.json` (from `@@map id=context-map`, §III-F.3) has `{ fallbackScreenId, screens: ContextScreen[] }` where `ContextScreen = { screenId, routeNames: string[], pageDir, summary, articles: string[], cards: string[], situations: string[] }`. A route name is looked up by `routeNames`; an unknown name uses the `fallbackScreenId` entry. `pageDir` is the source folder under `admin-front/src/` used by the verification procedure of Part 0 rule 5.
 * Drawer (right side in LTR, left in RTL; non-modal; width 420px; does not unmount the page, form state is preserved): (1) **What this screen is for** (`summary`, 2–4 sentences), (2) **Before you act** — the cards for this screen, each collapsed with title + risk badge, (3) **Common problems** — situations, (4) **Learn more** — articles, (5) "Open the whole guide".
-* Acceptance: a test enumerates every named route in `router/index.ts` except `Login` and `NotFound` and asserts the name appears in some screen's `routeNames`; adding a screen without an entry fails the build. **Route names in the map are best guesses made without access to the router.** In phase G-4, for every router name that is not listed, add it to the `routeNames` of the screen whose `pageDir` matches the page file that route renders (changing only that list), append the change to `design/guide_content_fixes.md`, and if no screen fits add it to `General`. Never invent summaries, articles or cards.
+* Acceptance: a test enumerates every named route in `router/index.ts` except `Login` and `NotFound` and asserts the name appears in some screen's `routeNames`; adding a screen without an entry fails the build. **Route names in the map are best guesses made without access to the router.** In phase G-4, for every router name that is not listed, add it to the `routeNames` of the screen whose `pageDir` matches the page file that route renders (changing only that list), append the change to `design/07-guides-and-academy/guide_content_fixes.md`, and if no screen fits add it to `General`. Never invent summaries, articles or cards.
 
 ## II-7. Safeguard cards at the moment of action
 
@@ -315,7 +318,7 @@ The Guide itself has no backend. Read-tracking reuses the Academy progress recor
 * [ ] **G-3 Simulators.** Five widgets + engines + `tools` page. *Verify:* `guide-widgets.test.ts`.
 * [ ] **G-4 Context help + safeguards.** `ContextHelpButton/Drawer`, `PageHeader` integration, `useSafeguard` + dialog + the 22 integrations in §II-7. *Verify:* `guide-context.spec.ts`, `guide-safeguard.spec.ts`, the route-coverage unit test.
 * [ ] **G-5 Progress.** After Academy phase A-1: `ReadToggle` persists to the progress record (`guideRead`), "Continue reading", per-book progress rings, graceful offline fallback to `localStorage` key `pg.guide.read`. *Verify:* `guide-reader.spec.ts` read-persistence step.
-* [ ] **G-6 Cleanup & audit.** Delete old `content.ts`; run the verification procedure of Part 0 rule 5 over all screens; fill `guide_content_fixes.md` / `guide_content_questions.md`; full test run; update `design/opencode_technical_delivery_design.md` §17 with a short note "Guide v1.0 replaced by design/guide_system_design_and_content.md".
+* [ ] **G-6 Cleanup & audit.** Delete old `content.ts`; run the verification procedure of Part 0 rule 5 over all screens; fill `guide_content_fixes.md` / `guide_content_questions.md`; full test run; update `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` §17 with a short note "Guide v1.0 replaced by design/07-guides-and-academy/guide_system_design_and_content.md".
 
 ## II-13. Simulator specifications and test vectors
 

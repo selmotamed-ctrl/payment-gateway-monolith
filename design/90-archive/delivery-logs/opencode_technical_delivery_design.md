@@ -29,7 +29,7 @@ When executing this delivery plan, the **OpenCode AI Agent** must follow these s
 
 ### 1.1 Database Engine
 
-The platform is standardized on **PostgreSQL 18**: `core-back/prisma/schema.prisma` declares `provider = "postgresql"`, the connection is made through `@prisma/adapter-pg` on top of the `pg` driver package, and the baseline migration `core-back/prisma/migrations/20261103000000_postgres18_init/migration.sql` is PostgreSQL 18 DDL. The storage-engine and CQRS migrations add partial/covering/BRIN/trigram indexes, `gl_account_shards`, `outbox_events`, `audit_outbox` and the `rm_*` read models. MySQL/MariaDB appear in this tracker only as historical delivery-run notes. The authoritative storage rules are `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md`; the database section of `design/payment_gateway_final_design-v5.md` carries a status note pointing there.
+The platform is standardized on **PostgreSQL 18**: `core-back/prisma/schema.prisma` declares `provider = "postgresql"`, the connection is made through `@prisma/adapter-pg` on top of the `pg` driver package, and the baseline migration `core-back/prisma/migrations/20261103000000_postgres18_init/migration.sql` is PostgreSQL 18 DDL. The storage-engine and CQRS migrations add partial/covering/BRIN/trigram indexes, `gl_account_shards`, `outbox_events`, `audit_outbox` and the `rm_*` read models. MySQL/MariaDB appear in this tracker only as historical delivery-run notes. The authoritative storage rules are `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md`; the database section of `design/01-platform-architecture/payment_gateway_final_design-v5.md` carries a status note pointing there.
 
 ## 2. Workspace Directory Architecture & Port Allocation
 
@@ -436,7 +436,7 @@ export function recursiveSet(
 ### PHASE 8: Reverse Proxy Configs, 140-Edge-Case Regression Suite & Production Readiness
 
 - [x] **`T-8.1` Author Production Reverse Proxy (Nginx) & Process Orchestration Configs**
-  - **Target:** `design/deploy/nginx-public.conf`, `design/deploy/nginx-lan-admin.conf`, `design/deploy/systemd/`
+  - **Target:** `design/90-archive/legacy-deploy-configs/nginx-public.conf`, `design/90-archive/legacy-deploy-configs/nginx-lan-admin.conf`, `design/90-archive/legacy-deploy-configs/systemd/`
   - **Action:** Create the hardened SSL reverse proxy configurations for `merchant.<domain>`, `pay.<domain>`, and LAN-only `admin.internal:8443`, enforcing TLS 1.3, HSTS, CSP, SSE `proxy_buffering off`, and zero public exposure for `core-back` and `admin-back`.
 - [x] **`T-8.2` Execute Full 140-Edge-Case Automated Verification Suite**
   - **Target:** `core-back/test/edge-cases/catalog-140.test.ts`
@@ -465,7 +465,7 @@ explicitly does not claim a fresh test run.
 
 ## 10. Hardening Pass · Audit Findings Closed (Delivery Run 2)
 
-A structured audit of the implementation against `design/payment_gateway_final_design-v5.md` produced a large
+A structured audit of the implementation against `design/01-platform-architecture/payment_gateway_final_design-v5.md` produced a large
 defect list. The following are the defects that were **closed** in this pass, grouped by severity.
 
 ### 10.1 The platform could not actually run (critical)
@@ -712,7 +712,7 @@ A final audit of the **composed** production paths (rather than the units) found
 
 ## 15. Smart AI-Assisted Provider Onboarding (Bring-Your-Own-AI)
 
-Implemented from `design/smart_ai_rail_and_voucher_onboarding_plan.md`. The platform never calls an external AI and never receives a live secret before the import; the admin drives a frontier model in their own browser and the platform verifies the result offline.
+Implemented from `design/08-ai-onboarding/smart_ai_rail_and_voucher_onboarding_plan.md`. The platform never calls an external AI and never receives a live secret before the import; the admin drives a frontier model in their own browser and the platform verifies the result offline.
 
 ### 15.1 The four-stage flow
 
@@ -760,7 +760,7 @@ The offline simulator found a real engine bug: a `required` step output stored a
 
 ## 16. Multi-Host Deployment Engine (`deploy/`)
 
-Implemented from `design/payment_gateway_deployment_and_guides_architecture.md` Part I (PG-D1…PG-D4).
+Implemented from `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` Part I (PG-D1…PG-D4).
 
 ### 16.1 What it does
 

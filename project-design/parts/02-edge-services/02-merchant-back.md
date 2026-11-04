@@ -15,9 +15,9 @@ code:
   - merchant-back/lib/error/index.ts
   - merchant-back/lib/requestLogger/index.ts
 design_sources:
-  - design/payment_gateway_final_design-v5.md#21-service-roles-boundaries-and-security-constraints
-  - design/payment_gateway_final_design-v5.md#162-merchant-back-public-api-apiv1merchant--apiv1external---forwards-to-core-back-internalmerchant
-  - design/payment_gateway_deployment_and_guides_architecture.md#5-host-aware-ufw-firewall--network-isolation-provisioning
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#21-service-roles-boundaries-and-security-constraints
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#162-merchant-back-public-api-apiv1merchant--apiv1external---forwards-to-core-back-internalmerchant
+  - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#5-host-aware-ufw-firewall--network-isolation-provisioning
 tests:
   - core-back/test/storage-engine/telemetry-and-realtime.test.ts
   - merchant-back/test/core-forwarding.test.ts
@@ -278,9 +278,9 @@ These suites do not require PostgreSQL or Redis. The Google route is expected to
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` section 2.1, service boundaries.
-- `design/payment_gateway_final_design-v5.md` section 16.2, merchant API surface.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall policy.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 2.1, service boundaries.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 16.2, merchant API surface.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall policy.
 
 ### Code paths
 

@@ -257,9 +257,9 @@ These tests run without PostgreSQL/Redis or remote hosts. A real deploy requires
 
 ### Old design sections
 
-- `design/payment_gateway_deployment_and_guides_architecture.md` sections 1-3.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.
-- `design/payment_gateway_final_design-v5.md` section 2, service topology.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` sections 1-3.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 2, service topology.
 
 ### Code paths
 
@@ -534,9 +534,9 @@ The suites cover five-host, two-host and single-host scenarios; firewall source 
 
 ### Old design sections
 
-- `design/payment_gateway_deployment_and_guides_architecture.md` sections 1-2.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall union intent.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` sections 1-2.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall union intent.
 
 ### Code paths
 
@@ -826,9 +826,9 @@ Not covered by automated tests:
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` section 2.2, mTLS and certificate roles.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 4, PKI generation and distribution.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 4, storage DDL.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 2.2, mTLS and certificate roles.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 4, PKI generation and distribution.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 4, storage DDL.
 
 ### Code paths
 
@@ -1082,9 +1082,9 @@ Not covered:
 
 ### Old design sections
 
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall matrix.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 6, step 4.
-- `design/payment_gateway_final_design-v5.md` section 2.3, reverse proxy exposure.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall matrix.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 6, step 4.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 2.3, reverse proxy exposure.
 
 ### Code paths
 
@@ -1393,9 +1393,9 @@ No test performs a real multi-host deployment, migration, PM2 restart or Nginx r
 
 ### Old design sections
 
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 6, 14-step pipeline.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 2, directory structure.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.1, horizontal deployment.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 6, 14-step pipeline.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 2, directory structure.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.1, horizontal deployment.
 
 ### Code paths
 
@@ -1710,10 +1710,10 @@ Not covered:
 
 ### Old design sections
 
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 4, DDL.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.3, provisioners.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 9, storage and backup.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 4, DDL.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.3, provisioners.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 9, storage and backup.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall.
 
 ### Code paths
 
@@ -1950,8 +1950,8 @@ Not covered: a real WAL-G/Barman backup or restore; a real PostgreSQL 18 scratch
 
 ### Old design sections
 
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 5.1 and 5.2.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 6, deployment pipeline.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 5.1 and 5.2.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 6, deployment pipeline.
 
 ### Code paths
 
@@ -2271,8 +2271,8 @@ Not covered: a real edge-to-core handshake, Nginx reload/vhost probe, PostgreSQL
 
 ### Old design sections
 
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 6, pipeline verification and recovery.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 5.2, backup/restore control.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 6, pipeline verification and recovery.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 5.2, backup/restore control.
 
 ### Code paths
 

@@ -20,9 +20,9 @@ code:
   - deploy/templates/nginx.fakerails.conf.tpl
   - checkout-front/src/components/renderers/EmbeddedWidgetRenderer.tsx
 design_sources:
-  - design/fake_payment_rails_service_architecture.md#2-deployment-engine-integration-production-guardrails
-  - design/fake_payment_rails_service_architecture.md#2-3-scoped-ssrf-tls-allowlist-in-core-back-for-fake-rails
-  - design/fake_payment_rails_service_architecture.md#7-core-back-pre-seeded-fake-gateway-blueprints-seedfakerails-ts
+  - design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md#2-deployment-engine-integration-production-guardrails
+  - design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md#2-3-scoped-ssrf-tls-allowlist-in-core-back-for-fake-rails
+  - design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md#7-core-back-pre-seeded-fake-gateway-blueprints-seedfakerails-ts
 tests:
   - core-back/test/fake-rails-allowlist.test.ts
   - core-back/test/exhaustive/10-seeder-and-deploy/synthetic-seeder-safety-and-audit.test.ts
@@ -313,9 +313,9 @@ bun run deploy.ts --only=fake-rails
 
 ### Old design sections
 
-- `design/fake_payment_rails_service_architecture.md` section 2.
-- `design/fake_payment_rails_service_architecture.md` section 2.3 and 2.4.
-- `design/fake_payment_rails_service_architecture.md` section 7.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 2.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 2.3 and 2.4.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 7.
 
 ### Code paths
 

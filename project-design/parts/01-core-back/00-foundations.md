@@ -19,11 +19,11 @@ code:
   - core-back/api/middleware/mtlsGuard.ts
   - core-back/api/middleware/authDoubleCheck.ts
 design_sources:
-  - design/payment_gateway_final_design-v5.md#21-service-roles-boundaries-and-security-constraints
-  - design/payment_gateway_final_design-v5.md#22-mutual-tls-mtls-inter-service-transport-architecture
-  - design/opencode_technical_delivery_design.md#41-core-back-mtls-server--channel-bound-cn-guard
-  - design/opencode_technical_delivery_design.md#28-delivery-run-4--postgresql-18-storage-engine-backups-and-horizontal-scaling
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#21-core-port-interfaces-core-backlibstorageengineportsts
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#21-service-roles-boundaries-and-security-constraints
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#22-mutual-tls-mtls-inter-service-transport-architecture
+  - design/90-archive/delivery-logs/opencode_technical_delivery_design.md#41-core-back-mtls-server--channel-bound-cn-guard
+  - design/90-archive/delivery-logs/opencode_technical_delivery_design.md#28-delivery-run-4--postgresql-18-storage-engine-backups-and-horizontal-scaling
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#21-core-port-interfaces-core-backlibstorageengineportsts
 tests:
   - core-back/test/phase1-mtls-and-schema.test.ts
   - core-back/test/internal-routes.test.ts
@@ -345,10 +345,10 @@ No build or test was run for this documentation change.
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` §2.1 service roles, §2.2 mTLS transport, §15? request/response envelope context.
-- `design/opencode_technical_delivery_design.md` §4.1 server/CN guard, §28 storage runtime.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` §2.1 ports and §2.2 unit of work.
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md` §15 stable error envelope.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §2.1 service roles, §2.2 mTLS transport, §15? request/response envelope context.
+- `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` §4.1 server/CN guard, §28 storage runtime.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` §2.1 ports and §2.2 unit of work.
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` §15 stable error envelope.
 
 ### Code paths
 

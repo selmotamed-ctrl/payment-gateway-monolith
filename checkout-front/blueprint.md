@@ -278,9 +278,9 @@ The Playwright/live suites require the running stack; the redirect unit test is 
 
 ### Old design sections
 
-- `design/payment_gateway_deployment_and_guides_architecture.md` — checkout deployment/help context.
-- `design/complete_zero_to_hero_guides_and_academy_specification.md` — collection modes, confirmation channels and trusted-success facts referenced by the guide.
-- `design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — payer surface token/primitives intent.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` — checkout deployment/help context.
+- `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` — collection modes, confirmation channels and trusted-success facts referenced by the guide.
+- `design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — payer surface token/primitives intent.
 
 ### Code paths
 
@@ -555,9 +555,9 @@ The core support test requires PostgreSQL/Redis; the Playwright suites require t
 
 ### Old design sections
 
-- `design/payment_gateway_deployment_and_guides_architecture.md` — checkout/help deployment context.
-- `design/complete_zero_to_hero_guides_and_academy_specification.md` — collection-mode and trustworthy-confirmation terminology used by the payer guidance.
-- `design/guide_system_design_and_content (2).md` — future guide workstream; not current checkout help behavior.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` — checkout/help deployment context.
+- `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` — collection-mode and trustworthy-confirmation terminology used by the payer guidance.
+- `design/07-guides-and-academy/guide_system_design_and_content.md` — future guide workstream; not current checkout help behavior.
 
 ### Code paths
 

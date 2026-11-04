@@ -27,7 +27,7 @@ The system is shared by four Vue 3 + Vuetify 3 TSX applications at different lev
 
 The historical UI design starts from an anti-"AI-generated UI" premise. The target is a restrained fintech back office: a neutral canvas, hairline borders, flat surfaces, tabular numerals, a single semantic status dot or primary action, and no decorative gradients or stacked card shadows.
 
-The key intent from `design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md` and `design/ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md` is:
+The key intent from `design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md` and `design/06-ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md` is:
 
 1. **Neutral architectural canvas.** Light background `#F8FAFC`, surface `#FFFFFF`, dark background `#09090B`, dark surface `#121215`. Color is reserved for semantic signals.
 2. **Typography with a purpose.** Plus Jakarta Sans for Latin/LTR, Cairo for Arabic/RTL, and JetBrains Mono for references, UUIDs, hashes, and money-adjacent technical strings. All fonts are self-hosted; no CDN is required.
@@ -241,9 +241,9 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 
 ### Old design sections
 
-- `design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — v1 token system, primitive catalogue, shell and page map.
-- `design/ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md` — v2 geometry, tables, filters, padding, and anti-reset rules.
-- `design/ui/portal_ui_implementation_plan.md` — as-built rollout and the 13-vs-14 primitive correction.
+- `design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — v1 token system, primitive catalogue, shell and page map.
+- `design/06-ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md` — v2 geometry, tables, filters, padding, and anti-reset rules.
+- `design/06-ui/portal_ui_implementation_plan.md` — as-built rollout and the 13-vs-14 primitive correction.
 
 ### Code paths
 
@@ -476,9 +476,9 @@ These suites require a running stack and are skipped without the live/edge servi
 
 ### Old design sections
 
-- `design/ui/portal_ui_implementation_plan.md` — page and shell rollout.
-- `design/fixes/_0001_operator_cases.md` — operator-case and inquiry workflow.
-- `design/guide_system_design_and_content (2).md` — future guide route/context-map expectations (not current).
+- `design/06-ui/portal_ui_implementation_plan.md` — page and shell rollout.
+- `design/10-fixes/_0001_operator_cases.md` — operator-case and inquiry workflow.
+- `design/07-guides-and-academy/guide_system_design_and_content.md` — future guide route/context-map expectations (not current).
 
 ### Code paths
 
@@ -739,9 +739,9 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 ### Old design sections
 
-- `design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — v1 table, status, row-action and export intent.
-- `design/ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md` — v2 40 px rows, filter drawer/chips, summary export cards, checklist flags.
-- `design/ui/portal_ui_implementation_plan.md` — as-built table and CSV-to-XLSX rollout.
+- `design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — v1 table, status, row-action and export intent.
+- `design/06-ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md` — v2 40 px rows, filter drawer/chips, summary export cards, checklist flags.
+- `design/06-ui/portal_ui_implementation_plan.md` — as-built table and CSV-to-XLSX rollout.
 
 ### Code paths
 
@@ -784,7 +784,7 @@ It does not own the merchant guide or checkout help center. It also does not pre
 
 ## 2. Design intent (extracted and synthesized from ./design)
 
-The implemented baseline is the "zero-to-hero" specification in `design/complete_zero_to_hero_guides_and_academy_specification.md`:
+The implemented baseline is the "zero-to-hero" specification in `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md`:
 
 1. **The guide is an operational manual, not a feature tour.** Every chapter explains the concept, the exact workflow, the screen to use, and the human error to avoid.
 2. **The reader is assumed to know nothing.** The glossary defines every banking, accounting, compliance and software term with an analogy and a fatal-error warning.
@@ -794,7 +794,7 @@ The implemented baseline is the "zero-to-hero" specification in `design/complete
 6. **Content is data, not hard-coded prose in TSX.** Books, chapters, glossary entries and academy modules live in typed content modules so the UI can render, search and test them.
 7. **Every claim must be testable.** The content-completeness test asserts book count, chapter depth, glossary counts, status/collection/channel/runbook counts, edge-case count, module count, lesson depth, lab traps, quiz count and track definitions.
 
-The future guide v2 specification in `design/guide_system_design_and_content (2).md` goes further: 14 books (0-13), 125 articles, a 23-screen context map, safeguard cards, a symptom playbook, reading paths, read tracking, five simulators and an edge-case catalog. It is not the current implementation.
+The future guide v2 specification in `design/07-guides-and-academy/guide_system_design_and_content.md` goes further: 14 books (0-13), 125 articles, a 23-screen context map, safeguard cards, a symptom playbook, reading paths, read tracking, five simulators and an edge-case catalog. It is not the current implementation.
 
 ## 3. As-built architecture
 
@@ -983,7 +983,7 @@ Progress persistence uses `GET/PUT v1/admin/academy/progress`. It stores complet
 
 ### Missing / deferred
 
-- **Guide v2 is missing.** Target: 14 books (0-13), 125 articles, 23 context-map screens, five simulators, reading paths, safeguard cards, symptom playbook, read tracking and a full edge-case catalog. See `project-design/parts/09-future-and-unimplemented/01-guide-v2.md` and `design/guide_system_design_and_content (2).md`.
+- **Guide v2 is missing.** Target: 14 books (0-13), 125 articles, 23 context-map screens, five simulators, reading paths, safeguard cards, symptom playbook, read tracking and a full edge-case catalog. See `project-design/parts/09-future-and-unimplemented/01-guide-v2.md` and `design/07-guides-and-academy/guide_system_design_and_content.md`.
 - No server-side quiz/lab validation.
 - No immutable certification record or expiry/re-certification cycle.
 - No completion tracking tied to route-level or authority-level access grants.
@@ -1013,9 +1013,9 @@ The content test is a Bun test and does not require PostgreSQL. The Playwright s
 
 ### Old design sections
 
-- `design/complete_zero_to_hero_guides_and_academy_specification.md` — implemented 12-book/8-module baseline.
-- `design/guide_system_design_and_content (2).md` — future guide v2 workstream, not current.
-- `design/payment_gateway_deployment_and_guides_architecture.md` — deployment and guide architecture context.
+- `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` — implemented 12-book/8-module baseline.
+- `design/07-guides-and-academy/guide_system_design_and_content.md` — future guide v2 workstream, not current.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` — deployment and guide architecture context.
 
 ### Code paths
 
@@ -1285,9 +1285,9 @@ The content test and `guides-support` test require Bun; the latter requires Post
 
 ### Old design sections
 
-- `design/complete_zero_to_hero_guides_and_academy_specification.md` — implemented four-surface help model and merchant guide chapters.
-- `design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — 560 px drawer intent.
-- `design/guide_system_design_and_content (2).md` — future context-map/safeguard workstream.
+- `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` — implemented four-surface help model and merchant guide chapters.
+- `design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — 560 px drawer intent.
+- `design/07-guides-and-academy/guide_system_design_and_content.md` — future context-map/safeguard workstream.
 
 ### Code paths
 
@@ -1582,9 +1582,9 @@ The backup E2E suite requires the live stack; the core backup test requires Post
 
 ### Old design sections
 
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` — backup/restore/drill intent and corrected as-built notes.
-- `design/payment_gateway_deployment_and_guides_architecture.md` — admin operations/guide placement.
-- `design/ui/portal_ui_implementation_plan.md` — settings, backups and export rollout.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` — backup/restore/drill intent and corrected as-built notes.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` — admin operations/guide placement.
+- `design/06-ui/portal_ui_implementation_plan.md` — settings, backups and export rollout.
 
 ### Code paths
 

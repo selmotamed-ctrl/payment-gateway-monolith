@@ -20,9 +20,9 @@ code:
   - fake-rails-front/src/styles/**
   - fake-rails-front/src/components/ui/**
 design_sources:
-  - design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md
-  - design/ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md
-  - design/ui/portal_ui_implementation_plan.md
+  - design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md
+  - design/06-ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md
+  - design/06-ui/portal_ui_implementation_plan.md
 tests:
   - admin-front/src/components/ui/__tests__/ui-abstraction-compliance.test.ts
   - tests/e2e/admin/shell.spec.ts
@@ -56,7 +56,7 @@ The system is shared by four Vue 3 + Vuetify 3 TSX applications at different lev
 
 The historical UI design starts from an anti-"AI-generated UI" premise. The target is a restrained fintech back office: a neutral canvas, hairline borders, flat surfaces, tabular numerals, a single semantic status dot or primary action, and no decorative gradients or stacked card shadows.
 
-The key intent from `design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md` and `design/ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md` is:
+The key intent from `design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md` and `design/06-ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md` is:
 
 1. **Neutral architectural canvas.** Light background `#F8FAFC`, surface `#FFFFFF`, dark background `#09090B`, dark surface `#121215`. Color is reserved for semantic signals.
 2. **Typography with a purpose.** Plus Jakarta Sans for Latin/LTR, Cairo for Arabic/RTL, and JetBrains Mono for references, UUIDs, hashes, and money-adjacent technical strings. All fonts are self-hosted; no CDN is required.
@@ -270,9 +270,9 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 
 ### Old design sections
 
-- `design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — v1 token system, primitive catalogue, shell and page map.
-- `design/ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md` — v2 geometry, tables, filters, padding, and anti-reset rules.
-- `design/ui/portal_ui_implementation_plan.md` — as-built rollout and the 13-vs-14 primitive correction.
+- `design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — v1 token system, primitive catalogue, shell and page map.
+- `design/06-ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md` — v2 geometry, tables, filters, padding, and anti-reset rules.
+- `design/06-ui/portal_ui_implementation_plan.md` — as-built rollout and the 13-vs-14 primitive correction.
 
 ### Code paths
 

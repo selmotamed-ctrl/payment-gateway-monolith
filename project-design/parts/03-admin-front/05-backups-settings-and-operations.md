@@ -15,9 +15,9 @@ code:
   - admin-front/src/components/ui/SummaryExportCard.tsx
   - admin-front/src/components/ui/FormChecklist.tsx
 design_sources:
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md
-  - design/payment_gateway_deployment_and_guides_architecture.md
-  - design/ui/portal_ui_implementation_plan.md
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md
+  - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md
+  - design/06-ui/portal_ui_implementation_plan.md
 tests:
   - tests/e2e/admin/backups.spec.ts
   - core-back/test/backup-admin/backup-admin-routes.test.ts
@@ -298,9 +298,9 @@ The backup E2E suite requires the live stack; the core backup test requires Post
 
 ### Old design sections
 
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` — backup/restore/drill intent and corrected as-built notes.
-- `design/payment_gateway_deployment_and_guides_architecture.md` — admin operations/guide placement.
-- `design/ui/portal_ui_implementation_plan.md` — settings, backups and export rollout.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` — backup/restore/drill intent and corrected as-built notes.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` — admin operations/guide placement.
+- `design/06-ui/portal_ui_implementation_plan.md` — settings, backups and export rollout.
 
 ### Code paths
 

@@ -25,10 +25,16 @@ export const SegmentedTabs = defineComponent({
             requestAnimationFrame(() => document.getElementById(`${baseId}-${index}`)?.focus());
         };
         const onKeydown = (event: KeyboardEvent, index: number) => {
-            if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+            // In RTL the visual "next" tab is to the left, so the horizontal arrows swap.
+            // Read the rendered direction so an LTR island inside an RTL page still works.
+            const target = event.currentTarget as HTMLElement | null;
+            const rtl = !!target && getComputedStyle(target).direction === "rtl";
+            const nextKey = rtl ? "ArrowLeft" : "ArrowRight";
+            const prevKey = rtl ? "ArrowRight" : "ArrowLeft";
+            if (event.key === nextKey || event.key === "ArrowDown") {
                 event.preventDefault();
                 select((index + 1) % props.tabs.length);
-            } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+            } else if (event.key === prevKey || event.key === "ArrowUp") {
                 event.preventDefault();
                 select((index - 1 + props.tabs.length) % props.tabs.length);
             } else if (event.key === "Home") {

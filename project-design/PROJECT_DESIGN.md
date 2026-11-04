@@ -102,13 +102,13 @@ The target scale stated in the historical design is a national switch with tens 
 
 ### Design lineage
 
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md` introduced the four catalog layers, the two collection/confirmation axes, the declarative engine, the ownership-aware ledger and the `UNKNOWN` rule.
-- `design/payment-gateway-refined-design-v4.1.md` restored the operational/compliance program: roles, four-eyes matrix, onboarding/KYB, AML, disputes, ledger-derived reporting and the 140-case catalog.
-- `design/payment_gateway_final_design-v5.md` is the consolidated multi-service production narrative. It is authoritative for intent but stale on counts, route lists and some runtime behavior; this part set corrects those.
-- `design/opencode_technical_delivery_design.md` is a delivery tracker and historical verification log, including the PostgreSQL 18 storage/backup/scaling delivery run (section 28).
-- `design/payment_gateway_deployment_and_guides_architecture.md` is the deployment topology, PKI, firewall and pipeline source.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` is authoritative for the storage/backup/scaling intent, with the DDL/read-model/LSN drift corrected by the storage part.
-- `design/fake_payment_rails_service_architecture.md` and the Fake Rails code define the optional emulator.
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` introduced the four catalog layers, the two collection/confirmation axes, the declarative engine, the ownership-aware ledger and the `UNKNOWN` rule.
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` restored the operational/compliance program: roles, four-eyes matrix, onboarding/KYB, AML, disputes, ledger-derived reporting and the 140-case catalog.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` is the consolidated multi-service production narrative. It is authoritative for intent but stale on counts, route lists and some runtime behavior; this part set corrects those.
+- `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` is a delivery tracker and historical verification log, including the PostgreSQL 18 storage/backup/scaling delivery run (section 28).
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` is the deployment topology, PKI, firewall and pipeline source.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` is authoritative for the storage/backup/scaling intent, with the DDL/read-model/LSN drift corrected by the storage part.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` and the Fake Rails code define the optional emulator.
 - `design/**` remains historical/reference only. Canonical current behavior is `project-design/parts/**` and the code.
 
 ## 3. As-built architecture
@@ -259,12 +259,12 @@ No build or test was run for this documentation change. Database-backed suites r
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` §1 executive summary and architectural vision; §2 seven-service split, mTLS topology and reverse proxies; §16 API surface.
-- `design/payment-gateway-refined-design-v4.1.md` §1 executive summary; §15 roles, interfaces and the four-eyes matrix.
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md` §1 summary; §3 gateway/credential-set/rail/route concepts and collection modes.
-- `design/opencode_technical_delivery_design.md` §28 as-built PostgreSQL 18 storage/backups/horizontal delivery record.
-- `design/payment_gateway_deployment_and_guides_architecture.md` §1 flexible topology and §6 ordered deployment pipeline.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` executive summary and topology.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §1 executive summary and architectural vision; §2 seven-service split, mTLS topology and reverse proxies; §16 API surface.
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` §1 executive summary; §15 roles, interfaces and the four-eyes matrix.
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` §1 summary; §3 gateway/credential-set/rail/route concepts and collection modes.
+- `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` §28 as-built PostgreSQL 18 storage/backups/horizontal delivery record.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` §1 flexible topology and §6 ordered deployment pipeline.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` executive summary and topology.
 
 ### Code paths
 
@@ -587,11 +587,11 @@ These are unit/integration tests. No live multi-host deployment was run for this
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` §2.1 service roles and boundaries, §2.2 mTLS transport, §2.3 reverse proxy topology.
-- `design/payment-gateway-refined-design-v4.1.md` §1 architecture vision and interface catalogue.
-- `design/payment_gateway_deployment_and_guides_architecture.md` §1 topology model, §6 ordered pipeline.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` §1.1 topology diagram, §6.2 edge load balancing.
-- `design/opencode_technical_delivery_design.md` §2 workspace/ports, §28 horizontal delivery.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §2.1 service roles and boundaries, §2.2 mTLS transport, §2.3 reverse proxy topology.
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` §1 architecture vision and interface catalogue.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` §1 topology model, §6 ordered pipeline.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` §1.1 topology diagram, §6.2 edge load balancing.
+- `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` §2 workspace/ports, §28 horizontal delivery.
 
 ### Code paths
 
@@ -956,10 +956,10 @@ No test run was performed for this documentation change. Integration suites that
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` §2.1 service roles, §2.2 mTLS transport, §12 safeguards and STRIDE.
-- `design/payment-gateway-refined-design-v4.1.md` §10.1 fourteen safeguards, §10.2 STRIDE register, §15.2–§15.4 roles and four-eyes.
-- `design/opencode_technical_delivery_design.md` §4.1 server/CN guard, §4.2 edge mTLS wrapper.
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md` §12 security.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §2.1 service roles, §2.2 mTLS transport, §12 safeguards and STRIDE.
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` §10.1 fourteen safeguards, §10.2 STRIDE register, §15.2–§15.4 roles and four-eyes.
+- `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` §4.1 server/CN guard, §4.2 edge mTLS wrapper.
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` §12 security.
 
 ### Code paths
 
@@ -1388,11 +1388,11 @@ No test run was performed for this documentation change. PostgreSQL/Redis-backed
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` §2.1 roles and boundaries, §9.1 durable timers/state rules.
-- `design/opencode_technical_delivery_design.md` §28 PostgreSQL 18, storage engine, workers and horizontal scaling.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` §2 storage engine ports and §3 outbox/read models.
-- `design/payment_gateway_deployment_and_guides_architecture.md` §6 ordered pipeline and env delivery.
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md` §15 API/observability intent.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §2.1 roles and boundaries, §9.1 durable timers/state rules.
+- `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` §28 PostgreSQL 18, storage engine, workers and horizontal scaling.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` §2 storage engine ports and §3 outbox/read models.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` §6 ordered pipeline and env delivery.
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` §15 API/observability intent.
 
 ### Code paths
 
@@ -1825,11 +1825,11 @@ No live monitoring stack, metrics scrape, restore drill or production-shaped log
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` §11 SLOs and runbooks.
-- `design/payment-gateway-refined-design-v4.1.md` §11.1 SLOs, §11.2 runbooks.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` §2.4 log/audit adapters, §5 backup control plane.
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md` §15 API surface and observability.
-- `design/opencode_technical_delivery_design.md` §28 backup endpoints and storage delivery.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §11 SLOs and runbooks.
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` §11.1 SLOs, §11.2 runbooks.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` §2.4 log/audit adapters, §5 backup control plane.
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` §15 API surface and observability.
+- `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` §28 backup endpoints and storage delivery.
 
 ### Code paths
 
@@ -2163,10 +2163,10 @@ No build or test was run for this documentation change.
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` §2.1 service roles, §2.2 mTLS transport, §15? request/response envelope context.
-- `design/opencode_technical_delivery_design.md` §4.1 server/CN guard, §28 storage runtime.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` §2.1 ports and §2.2 unit of work.
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md` §15 stable error envelope.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §2.1 service roles, §2.2 mTLS transport, §15? request/response envelope context.
+- `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` §4.1 server/CN guard, §28 storage runtime.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` §2.1 ports and §2.2 unit of work.
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` §15 stable error envelope.
 
 ### Code paths
 
@@ -2716,10 +2716,10 @@ No build or test was run for this documentation change. Database-backed route te
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` §16.1 checkout, §16.2 merchant, §16.3 admin.
-- `design/payment-gateway-refined-design-v4.1.md` §14.1 wizard, §15.4 four-eyes matrix.
-- `design/fixes/_0001_operator_cases.md` for the operator-case route family.
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md` §15 API surface and observability.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §16.1 checkout, §16.2 merchant, §16.3 admin.
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` §14.1 wizard, §15.4 four-eyes matrix.
+- `design/10-fixes/_0001_operator_cases.md` for the operator-case route family.
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` §15 API surface and observability.
 
 ### Code paths
 
@@ -3338,12 +3338,12 @@ No build or test was run for this documentation change. Tests that require Postg
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` §8 engine contract/registry/transforms/crypto, §8.2 six methods, §8.4 transform library, §9 state machine and slot invariant, §14 go-live gates.
-- `design/payment-gateway-refined-design-v4.1.md` §6 engine contract and §7 state machine.
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md` §5 flow engine, §9 confirmation/verification.
-- `design/opencode_technical_delivery_design.md` §15 Smart AI onboarding.
-- `design/smart_ai_rail_and_voucher_onboarding_plan.md`.
-- `design/fake_payment_rails_service_architecture.md` for the emulator intent.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §8 engine contract/registry/transforms/crypto, §8.2 six methods, §8.4 transform library, §9 state machine and slot invariant, §14 go-live gates.
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` §6 engine contract and §7 state machine.
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` §5 flow engine, §9 confirmation/verification.
+- `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` §15 Smart AI onboarding.
+- `design/08-ai-onboarding/smart_ai_rail_and_voucher_onboarding_plan.md`.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` for the emulator intent.
 
 ### Code paths
 
@@ -3702,8 +3702,8 @@ The unit suites run without PostgreSQL. The checkpoint, shard, UoW, and write-pa
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` §11 — fee bearers, invariant, 15 worked entries; `design/payment-gateway-refined-design-v4.1.md` §9 — original ledger model and entries.
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md` §10 — clearing account rationale and merchant-direct model; `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` §3.1 — sharded sub-accounts and read path.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §11 — fee bearers, invariant, 15 worked entries; `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` §9 — original ledger model and entries.
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` §10 — clearing account rationale and merchant-direct model; `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` §3.1 — sharded sub-accounts and read path.
 - `core-back/test/exhaustive/02-ledger/all-15-templates-matrix.test.ts` — current 20-label matrix despite the historical title.
 
 ### Code paths
@@ -4055,9 +4055,9 @@ Some governance tests use fake clients; database-backed suites require PostgreSQ
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` Part IX (incorporates v4.1 §15–§22).
-- `design/payment-gateway-refined-design-v4.1.md` §15 roles/authorities/four-eyes, §16 onboarding/KYB, §17 detail governance, §18 AML, §19 disputes, §20 profitability; `design/Dynamic-Payment-Gateway-Management-Design-v2.md` §9 and §13.
-- `design/fixes/_0001_operator_cases.md` — operator-case inquiry eligibility and bulk behavior.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` Part IX (incorporates v4.1 §15–§22).
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` §15 roles/authorities/four-eyes, §16 onboarding/KYB, §17 detail governance, §18 AML, §19 disputes, §20 profitability; `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` §9 and §13.
+- `design/10-fixes/_0001_operator_cases.md` — operator-case inquiry eligibility and bulk behavior.
 
 ### Code paths
 
@@ -4405,8 +4405,8 @@ Database-backed suites require PostgreSQL 18; Redis-backed invalidation tests re
 
 ### Old design sections
 
-- `design/opencode_technical_delivery_design.md` Phase 4 worker task; §10.5 governance/screening/observability; §12.4 operational defects; §28 delivery run 4; `design/fixes/_0001_operator_cases.md`.
-- `design/payment_gateway_final_design-v5.md` §9.1 rules 3 and 8; `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` §3.2.
+- `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` Phase 4 worker task; §10.5 governance/screening/observability; §12.4 operational defects; §28 delivery run 4; `design/10-fixes/_0001_operator_cases.md`.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §9.1 rules 3 and 8; `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` §3.2.
 
 ### Code paths
 
@@ -4781,11 +4781,11 @@ There is no benchmark in this part that proves the blueprint's 1,000+ TPS sustai
 
 ### Old design sections
 
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#2-segment-1--the-core-back-storage-driver-engine-core-backlibstorageengine`
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#3-2-outbox-driven-read-models--uncompromised-20-group-deep-search-on-replicas`
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#5-segment-4--backup-management-orchestrator--admin-control-plane-pg-backup-daemon--core-back--admin-front`
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#6-segment-5--horizontal-node-scaling--multi-host-storage-orchestration-in-deploydeployenv--deploydeployts`
-- `design/blueprint-management.md#5-documentation-corrections-backlog`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#2-segment-1--the-core-back-storage-driver-engine-core-backlibstorageengine`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#3-2-outbox-driven-read-models--uncompromised-20-group-deep-search-on-replicas`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#5-segment-4--backup-management-orchestrator--admin-control-plane-pg-backup-daemon--core-back--admin-front`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#6-segment-5--horizontal-node-scaling--multi-host-storage-orchestration-in-deploydeployenv--deploydeployts`
+- `design/00-process/blueprint-management.md#5-documentation-corrections-backlog`
 
 ### Code paths
 
@@ -5169,12 +5169,12 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md#7-database-schema`
-- `design/payment-gateway-refined-design-v4.1.md#5-database-schema`
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md#4-database-schema`
-- `design/synthetic_operational_data_seeder_architecture.md#3-comprehensive-multi-state-distribution-across-all-66-database-models`
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#4-segment-3--postgresql-18-ddl-partialcoveringgin-indexes--dedicated-auditlog-schemas`
-- `design/blueprint-management.md#5-documentation-corrections-backlog`
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md#7-database-schema`
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#5-database-schema`
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md#4-database-schema`
+- `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md#3-comprehensive-multi-state-distribution-across-all-66-database-models`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#4-segment-3--postgresql-18-ddl-partialcoveringgin-indexes--dedicated-auditlog-schemas`
+- `design/00-process/blueprint-management.md#5-documentation-corrections-backlog`
 
 ### Code paths
 
@@ -5563,15 +5563,15 @@ The core test is a unit/authority suite and does not require PostgreSQL. The Pla
 
 ### Old design sections
 
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#1-executive-summary--why-a-declarative-plugin-architecture-is-required`
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#2-product-behavior--ux-contract`
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#3-api-contract--shared-security-predicates`
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#4-server-side-plugin-architecture-core-back`
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#5-admin-bff-layer-admin-back`
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#6-frontend-plugin-registry--global-command-palette-admin-front`
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#7-universal-one-shot-deep-link-composable-useopenquery--page-wiring`
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#9-comprehensive-automated-verification--test-plan`
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#3-2-outbox-driven-read-models--uncompromised-20-group-deep-search-on-replicas`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#1-executive-summary--why-a-declarative-plugin-architecture-is-required`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#2-product-behavior--ux-contract`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#3-api-contract--shared-security-predicates`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#4-server-side-plugin-architecture-core-back`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#5-admin-bff-layer-admin-back`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#6-frontend-plugin-registry--global-command-palette-admin-front`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#7-universal-one-shot-deep-link-composable-useopenquery--page-wiring`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#9-comprehensive-automated-verification--test-plan`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#3-2-outbox-driven-read-models--uncompromised-20-group-deep-search-on-replicas`
 
 ### Code paths
 
@@ -5992,12 +5992,12 @@ Core backup-admin route tests that touch PostgreSQL skip when the database is un
 
 ### Old design sections
 
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#5-segment-4--backup-management-orchestrator--admin-control-plane-pg-backup-daemon--core-back--admin-front`
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#5-1-architecture-wrapping-wal-g--barman-with-an-admin-accessible-control-plane`
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#5-2-core-back--admin-front-backup-management-api-contract`
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#6-segment-5--horizontal-node-scaling--multi-host-storage-orchestration-in-deploydeployenv--deploydeployts`
-- `design/payment_gateway_deployment_and_guides_architecture.md`
-- `design/blueprint-management.md#5-documentation-corrections-backlog`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#5-segment-4--backup-management-orchestrator--admin-control-plane-pg-backup-daemon--core-back--admin-front`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#5-1-architecture-wrapping-wal-g--barman-with-an-admin-accessible-control-plane`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#5-2-core-back--admin-front-backup-management-api-contract`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#6-segment-5--horizontal-node-scaling--multi-host-storage-orchestration-in-deploydeployenv--deploydeployts`
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md`
+- `design/00-process/blueprint-management.md#5-documentation-corrections-backlog`
 
 ### Code paths
 
@@ -6381,13 +6381,13 @@ The unit tests do not require a live database or Fake Rails; they use fakes for 
 
 ### Old design sections
 
-- `design/synthetic_operational_data_seeder_architecture.md#executive-summary--architectural-vision`
-- `design/synthetic_operational_data_seeder_architecture.md#1-pre-flight-safety-gate--fake-rails-dependency-verification`
-- `design/synthetic_operational_data_seeder_architecture.md#2-chronological-simulation-engine--volume-scaling-profiles`
-- `design/synthetic_operational_data_seeder_architecture.md#3-comprehensive-multi-state-distribution-across-all-66-database-models`
-- `design/synthetic_operational_data_seeder_architecture.md#4-two-phase-seeder-execution--fake-rails-bulk-synchronization-pipeline`
-- `design/synthetic_operational_data_seeder_architecture.md#5-directory-structure-of-the-synthetic-seeder-module`
-- `design/blueprint-management.md#5-documentation-corrections-backlog`
+- `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md#executive-summary--architectural-vision`
+- `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md#1-pre-flight-safety-gate--fake-rails-dependency-verification`
+- `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md#2-chronological-simulation-engine--volume-scaling-profiles`
+- `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md#3-comprehensive-multi-state-distribution-across-all-66-database-models`
+- `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md#4-two-phase-seeder-execution--fake-rails-bulk-synchronization-pipeline`
+- `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md#5-directory-structure-of-the-synthetic-seeder-module`
+- `design/00-process/blueprint-management.md#5-documentation-corrections-backlog`
 
 ### Code paths
 
@@ -6765,13 +6765,13 @@ Database-backed suites require PostgreSQL 18; Redis-backed suites require Redis.
 
 ### Old design sections
 
-- `design/master_exhaustive_test_plan_for_opencode.md#executive-summary--testing-philosophy`
-- `design/master_exhaustive_test_plan_for_opencode.md#1-master-test-volume--coverage-matrix-38500-assertions`
-- `design/master_exhaustive_test_plan_for_opencode.md#10-suite-09-postgresql-18-storage-engine-replicas-auditlog-databases-backups--restore-drills-900-tests`
-- `design/master_exhaustive_test_plan_for_opencode.md#11-suite-10-full-surface-playwright-ui-filter-dialog-rtlltr--geometry-matrix-across-all-4-portals-2300-tests`
-- `design/master_exhaustive_test_plan_for_opencode.md#12-suite-11-full-cross-service-end-to-end-journeys-synthetic-seeder--deploy-engine-verification-1200-tests`
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#7-step-by-step-opencode-execution-plan`
-- `design/blueprint-management.md#5-documentation-corrections-backlog`
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md#executive-summary--testing-philosophy`
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md#1-master-test-volume--coverage-matrix-38500-assertions`
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md#10-suite-09-postgresql-18-storage-engine-replicas-auditlog-databases-backups--restore-drills-900-tests`
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md#11-suite-10-full-surface-playwright-ui-filter-dialog-rtlltr--geometry-matrix-across-all-4-portals-2300-tests`
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md#12-suite-11-full-cross-service-end-to-end-journeys-synthetic-seeder--deploy-engine-verification-1200-tests`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#7-step-by-step-opencode-execution-plan`
+- `design/00-process/blueprint-management.md#5-documentation-corrections-backlog`
 
 ### Code paths
 
@@ -7050,9 +7050,9 @@ The suites cover URL parsing, least-in-flight and round-robin selection, cooldow
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` section 2.2, mutual TLS and forwarded context.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 6.2, edge-to-core upstream pool.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.2, the same pool specification.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 2.2, mutual TLS and forwarded context.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 6.2, edge-to-core upstream pool.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.2, the same pool specification.
 
 ### Code paths
 
@@ -7292,9 +7292,9 @@ The tests use a local HTTPS/HTTP stub and do not require PostgreSQL or Redis. A 
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` section 2.1, service boundaries.
-- `design/payment_gateway_final_design-v5.md` section 16.3, admin API surface.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall policy.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 2.1, service boundaries.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 16.3, admin API surface.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall policy.
 
 ### Code paths
 
@@ -7566,9 +7566,9 @@ These suites do not require PostgreSQL or Redis. The Google route is expected to
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` section 2.1, service boundaries.
-- `design/payment_gateway_final_design-v5.md` section 16.2, merchant API surface.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall policy.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 2.1, service boundaries.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 16.2, merchant API surface.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall policy.
 
 ### Code paths
 
@@ -7804,9 +7804,9 @@ The suites are local and do not require PostgreSQL/Redis. A live gateway webhook
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` section 2.1, checkout boundary.
-- `design/payment_gateway_final_design-v5.md` section 16.1, checkout API surface.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.2, pool behavior.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 2.1, checkout boundary.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 16.1, checkout API surface.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.2, pool behavior.
 
 ### Code paths
 
@@ -7861,7 +7861,7 @@ The system is shared by four Vue 3 + Vuetify 3 TSX applications at different lev
 
 The historical UI design starts from an anti-"AI-generated UI" premise. The target is a restrained fintech back office: a neutral canvas, hairline borders, flat surfaces, tabular numerals, a single semantic status dot or primary action, and no decorative gradients or stacked card shadows.
 
-The key intent from `design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md` and `design/ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md` is:
+The key intent from `design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md` and `design/06-ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md` is:
 
 1. **Neutral architectural canvas.** Light background `#F8FAFC`, surface `#FFFFFF`, dark background `#09090B`, dark surface `#121215`. Color is reserved for semantic signals.
 2. **Typography with a purpose.** Plus Jakarta Sans for Latin/LTR, Cairo for Arabic/RTL, and JetBrains Mono for references, UUIDs, hashes, and money-adjacent technical strings. All fonts are self-hosted; no CDN is required.
@@ -8075,9 +8075,9 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 
 ### Old design sections
 
-- `design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — v1 token system, primitive catalogue, shell and page map.
-- `design/ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md` — v2 geometry, tables, filters, padding, and anti-reset rules.
-- `design/ui/portal_ui_implementation_plan.md` — as-built rollout and the 13-vs-14 primitive correction.
+- `design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — v1 token system, primitive catalogue, shell and page map.
+- `design/06-ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md` — v2 geometry, tables, filters, padding, and anti-reset rules.
+- `design/06-ui/portal_ui_implementation_plan.md` — as-built rollout and the 13-vs-14 primitive correction.
 
 ### Code paths
 
@@ -8314,9 +8314,9 @@ These suites require a running stack and are skipped without the live/edge servi
 
 ### Old design sections
 
-- `design/ui/portal_ui_implementation_plan.md` — page and shell rollout.
-- `design/fixes/_0001_operator_cases.md` — operator-case and inquiry workflow.
-- `design/guide_system_design_and_content (2).md` — future guide route/context-map expectations (not current).
+- `design/06-ui/portal_ui_implementation_plan.md` — page and shell rollout.
+- `design/10-fixes/_0001_operator_cases.md` — operator-case and inquiry workflow.
+- `design/07-guides-and-academy/guide_system_design_and_content.md` — future guide route/context-map expectations (not current).
 
 ### Code paths
 
@@ -8581,9 +8581,9 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 ### Old design sections
 
-- `design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — v1 table, status, row-action and export intent.
-- `design/ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md` — v2 40 px rows, filter drawer/chips, summary export cards, checklist flags.
-- `design/ui/portal_ui_implementation_plan.md` — as-built table and CSV-to-XLSX rollout.
+- `design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — v1 table, status, row-action and export intent.
+- `design/06-ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md` — v2 40 px rows, filter drawer/chips, summary export cards, checklist flags.
+- `design/06-ui/portal_ui_implementation_plan.md` — as-built table and CSV-to-XLSX rollout.
 
 ### Code paths
 
@@ -8630,7 +8630,7 @@ It does not own the merchant guide or checkout help center. It also does not pre
 
 ## 2. Design intent (extracted and synthesized from ./design)
 
-The implemented baseline is the "zero-to-hero" specification in `design/complete_zero_to_hero_guides_and_academy_specification.md`:
+The implemented baseline is the "zero-to-hero" specification in `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md`:
 
 1. **The guide is an operational manual, not a feature tour.** Every chapter explains the concept, the exact workflow, the screen to use, and the human error to avoid.
 2. **The reader is assumed to know nothing.** The glossary defines every banking, accounting, compliance and software term with an analogy and a fatal-error warning.
@@ -8640,7 +8640,7 @@ The implemented baseline is the "zero-to-hero" specification in `design/complete
 6. **Content is data, not hard-coded prose in TSX.** Books, chapters, glossary entries and academy modules live in typed content modules so the UI can render, search and test them.
 7. **Every claim must be testable.** The content-completeness test asserts book count, chapter depth, glossary counts, status/collection/channel/runbook counts, edge-case count, module count, lesson depth, lab traps, quiz count and track definitions.
 
-The future guide v2 specification in `design/guide_system_design_and_content (2).md` goes further: 14 books (0-13), 125 articles, a 23-screen context map, safeguard cards, a symptom playbook, reading paths, read tracking, five simulators and an edge-case catalog. It is not the current implementation.
+The future guide v2 specification in `design/07-guides-and-academy/guide_system_design_and_content.md` goes further: 14 books (0-13), 125 articles, a 23-screen context map, safeguard cards, a symptom playbook, reading paths, read tracking, five simulators and an edge-case catalog. It is not the current implementation.
 
 ## 3. As-built architecture
 
@@ -8829,7 +8829,7 @@ Progress persistence uses `GET/PUT v1/admin/academy/progress`. It stores complet
 
 ### Missing / deferred
 
-- **Guide v2 is missing.** Target: 14 books (0-13), 125 articles, 23 context-map screens, five simulators, reading paths, safeguard cards, symptom playbook, read tracking and a full edge-case catalog. See `project-design/parts/09-future-and-unimplemented/01-guide-v2.md` and `design/guide_system_design_and_content (2).md`.
+- **Guide v2 is missing.** Target: 14 books (0-13), 125 articles, 23 context-map screens, five simulators, reading paths, safeguard cards, symptom playbook, read tracking and a full edge-case catalog. See `project-design/parts/09-future-and-unimplemented/01-guide-v2.md` and `design/07-guides-and-academy/guide_system_design_and_content.md`.
 - No server-side quiz/lab validation.
 - No immutable certification record or expiry/re-certification cycle.
 - No completion tracking tied to route-level or authority-level access grants.
@@ -8859,9 +8859,9 @@ The content test is a Bun test and does not require PostgreSQL. The Playwright s
 
 ### Old design sections
 
-- `design/complete_zero_to_hero_guides_and_academy_specification.md` — implemented 12-book/8-module baseline.
-- `design/guide_system_design_and_content (2).md` — future guide v2 workstream, not current.
-- `design/payment_gateway_deployment_and_guides_architecture.md` — deployment and guide architecture context.
+- `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` — implemented 12-book/8-module baseline.
+- `design/07-guides-and-academy/guide_system_design_and_content.md` — future guide v2 workstream, not current.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` — deployment and guide architecture context.
 
 ### Code paths
 
@@ -9135,9 +9135,9 @@ The content test and `guides-support` test require Bun; the latter requires Post
 
 ### Old design sections
 
-- `design/complete_zero_to_hero_guides_and_academy_specification.md` — implemented four-surface help model and merchant guide chapters.
-- `design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — 560 px drawer intent.
-- `design/guide_system_design_and_content (2).md` — future context-map/safeguard workstream.
+- `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` — implemented four-surface help model and merchant guide chapters.
+- `design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — 560 px drawer intent.
+- `design/07-guides-and-academy/guide_system_design_and_content.md` — future context-map/safeguard workstream.
 
 ### Code paths
 
@@ -9436,9 +9436,9 @@ The backup E2E suite requires the live stack; the core backup test requires Post
 
 ### Old design sections
 
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` — backup/restore/drill intent and corrected as-built notes.
-- `design/payment_gateway_deployment_and_guides_architecture.md` — admin operations/guide placement.
-- `design/ui/portal_ui_implementation_plan.md` — settings, backups and export rollout.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` — backup/restore/drill intent and corrected as-built notes.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` — admin operations/guide placement.
+- `design/06-ui/portal_ui_implementation_plan.md` — settings, backups and export rollout.
 
 ### Code paths
 
@@ -9769,10 +9769,10 @@ The shell/auth/a11y suites require the live stack. The content test is a Bun tes
 
 ### Old design sections
 
-- `design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — shared portal tokens/primitives/shell intent.
-- `design/ui/portal_ui_implementation_plan.md` — merchant rollout and shared table/primitives.
-- `design/complete_zero_to_hero_guides_and_academy_specification.md` — merchant guide chapter baseline.
-- `design/payment_gateway_deployment_and_guides_architecture.md` — merchant portal/guide architecture.
+- `design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — shared portal tokens/primitives/shell intent.
+- `design/06-ui/portal_ui_implementation_plan.md` — merchant rollout and shared table/primitives.
+- `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` — merchant guide chapter baseline.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` — merchant portal/guide architecture.
 
 ### Code paths
 
@@ -10051,8 +10051,8 @@ The content test is a Bun test; the Playwright suites require the live stack.
 
 ### Old design sections
 
-- `design/complete_zero_to_hero_guides_and_academy_specification.md` — merchant operations and developer API content baseline.
-- `design/payment_gateway_deployment_and_guides_architecture.md` — merchant guide/portal architecture context.
+- `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` — merchant operations and developer API content baseline.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` — merchant guide/portal architecture context.
 
 ### Code paths
 
@@ -10353,9 +10353,9 @@ The Playwright/live suites require the running stack; the redirect unit test is 
 
 ### Old design sections
 
-- `design/payment_gateway_deployment_and_guides_architecture.md` — checkout deployment/help context.
-- `design/complete_zero_to_hero_guides_and_academy_specification.md` — collection modes, confirmation channels and trusted-success facts referenced by the guide.
-- `design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — payer surface token/primitives intent.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` — checkout deployment/help context.
+- `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` — collection modes, confirmation channels and trusted-success facts referenced by the guide.
+- `design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — payer surface token/primitives intent.
 
 ### Code paths
 
@@ -10634,9 +10634,9 @@ The core support test requires PostgreSQL/Redis; the Playwright suites require t
 
 ### Old design sections
 
-- `design/payment_gateway_deployment_and_guides_architecture.md` — checkout/help deployment context.
-- `design/complete_zero_to_hero_guides_and_academy_specification.md` — collection-mode and trustworthy-confirmation terminology used by the payer guidance.
-- `design/guide_system_design_and_content (2).md` — future guide workstream; not current checkout help behavior.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` — checkout/help deployment context.
+- `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` — collection-mode and trustworthy-confirmation terminology used by the payer guidance.
+- `design/07-guides-and-academy/guide_system_design_and_content.md` — future guide workstream; not current checkout help behavior.
 
 ### Code paths
 
@@ -10906,9 +10906,9 @@ bun run start
 
 ### Old design sections
 
-- `design/fake_payment_rails_service_architecture.md` sections 1, 2 and 3.
-- `design/fake_payment_rails_service_architecture.md` section 5.3 for the SQLite schema intent.
-- `design/fake_payment_rails_service_architecture.md` section 8 for the implementation checklist.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` sections 1, 2 and 3.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 5.3 for the SQLite schema intent.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 8 for the implementation checklist.
 
 ### Code paths
 
@@ -11217,9 +11217,9 @@ Only the outbound webhook path computes signatures (`FakeCryptoSigner` plus six 
 
 ### Old design sections
 
-- `design/fake_payment_rails_service_architecture.md` section 4 and 4.1.
-- `design/fake_payment_rails_service_architecture.md` section 4.2.
-- `design/fake_payment_rails_service_architecture.md` section 5 for chaos phase intent.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 4 and 4.1.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 4.2.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 5 for chaos phase intent.
 
 ### Code paths
 
@@ -11563,9 +11563,9 @@ curl -X POST http://127.0.0.1:4104/portal-api/webhooks/$TX_ID/fire \
 
 ### Old design sections
 
-- `design/fake_payment_rails_service_architecture.md` section 5.
-- `design/fake_payment_rails_service_architecture.md` section 5.1, 5.2 and 5.3.
-- `design/fake_payment_rails_service_architecture.md` section 6 and 6.1.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 5.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 5.1, 5.2 and 5.3.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 6 and 6.1.
 
 ### Code paths
 
@@ -11873,9 +11873,9 @@ bun run deploy.ts --only=fake-rails
 
 ### Old design sections
 
-- `design/fake_payment_rails_service_architecture.md` section 2.
-- `design/fake_payment_rails_service_architecture.md` section 2.3 and 2.4.
-- `design/fake_payment_rails_service_architecture.md` section 7.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 2.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 2.3 and 2.4.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 7.
 
 ### Code paths
 
@@ -12161,9 +12161,9 @@ These tests run without PostgreSQL/Redis or remote hosts. A real deploy requires
 
 ### Old design sections
 
-- `design/payment_gateway_deployment_and_guides_architecture.md` sections 1-3.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.
-- `design/payment_gateway_final_design-v5.md` section 2, service topology.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` sections 1-3.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 2, service topology.
 
 ### Code paths
 
@@ -12442,9 +12442,9 @@ The suites cover five-host, two-host and single-host scenarios; firewall source 
 
 ### Old design sections
 
-- `design/payment_gateway_deployment_and_guides_architecture.md` sections 1-2.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall union intent.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` sections 1-2.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall union intent.
 
 ### Code paths
 
@@ -12738,9 +12738,9 @@ Not covered by automated tests:
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` section 2.2, mTLS and certificate roles.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 4, PKI generation and distribution.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 4, storage DDL.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 2.2, mTLS and certificate roles.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 4, PKI generation and distribution.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 4, storage DDL.
 
 ### Code paths
 
@@ -12998,9 +12998,9 @@ Not covered:
 
 ### Old design sections
 
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall matrix.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 6, step 4.
-- `design/payment_gateway_final_design-v5.md` section 2.3, reverse proxy exposure.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall matrix.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 6, step 4.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 2.3, reverse proxy exposure.
 
 ### Code paths
 
@@ -13313,9 +13313,9 @@ No test performs a real multi-host deployment, migration, PM2 restart or Nginx r
 
 ### Old design sections
 
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 6, 14-step pipeline.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 2, directory structure.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.1, horizontal deployment.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 6, 14-step pipeline.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 2, directory structure.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.1, horizontal deployment.
 
 ### Code paths
 
@@ -13634,10 +13634,10 @@ Not covered:
 
 ### Old design sections
 
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 4, DDL.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.3, provisioners.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 9, storage and backup.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 4, DDL.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.3, provisioners.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 9, storage and backup.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall.
 
 ### Code paths
 
@@ -13878,8 +13878,8 @@ Not covered: a real WAL-G/Barman backup or restore; a real PostgreSQL 18 scratch
 
 ### Old design sections
 
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 5.1 and 5.2.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 6, deployment pipeline.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 5.1 and 5.2.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 6, deployment pipeline.
 
 ### Code paths
 
@@ -14203,8 +14203,8 @@ Not covered: a real edge-to-core handshake, Nginx reload/vhost probe, PostgreSQL
 
 ### Old design sections
 
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 6, pipeline verification and recovery.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 5.2, backup/restore control.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 6, pipeline verification and recovery.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 5.2, backup/restore control.
 
 ### Code paths
 
@@ -14455,9 +14455,9 @@ This part is verified by inspecting the runner, configs and suite files. It has 
 
 ### Old design sections
 
-- `design/master_exhaustive_test_plan_for_opencode.md` executive summary and section 1.
-- `design/master_exhaustive_test_plan_for_opencode.md` sections 2-12 for suite intent.
-- `design/master_exhaustive_test_plan_for_opencode.md` section 13 for the runner.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` executive summary and section 1.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` sections 2-12 for suite intent.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` section 13 for the runner.
 
 ### Code paths
 
@@ -14481,7 +14481,7 @@ This part is verified by inspecting the runner, configs and suite files. It has 
 
 ## 11. Two-machine matrix (2026-11-03)
 
-`deploy/test-matrix/**` is the executable realization of `design/two-machine-test/two_machine_multi_topology_deployment_and_stress_test_plan.md`:
+`deploy/test-matrix/**` is the executable realization of `design/90-archive/superseded-testing/two_machine_multi_topology_deployment_and_stress_test_plan.md`:
 
 - `bootstrapTwoMachineLab.ts` discovers HOST_A, installs bidirectional SSH keys, MinIO and vault directories;
 - `generateTopologyConfigs.ts` writes T1-T8 configs;
@@ -14767,9 +14767,9 @@ This catalog is derived by counting literal declarations and inspecting the suit
 
 ### Old design sections
 
-- `design/master_exhaustive_test_plan_for_opencode.md` section 1.
-- `design/master_exhaustive_test_plan_for_opencode.md` sections 2-12.
-- `design/master_exhaustive_test_plan_for_opencode.md` section 13.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` section 1.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` sections 2-12.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` section 13.
 
 ### Code paths
 
@@ -15078,9 +15078,9 @@ No test in this part verifies the fixture itself. The fixture is exercised indir
 
 ### Old design sections
 
-- `design/master_exhaustive_test_plan_for_opencode.md` section 10.2.
-- `design/master_exhaustive_test_plan_for_opencode.md` section 12.
-- `design/master_exhaustive_test_plan_for_opencode.md` section 13.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` section 10.2.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` section 12.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` section 13.
 
 ### Code paths
 
@@ -15344,9 +15344,9 @@ A run must state whether PostgreSQL and Redis were available. Without both, the 
 
 ### Old design sections
 
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 7.
-- `design/master_exhaustive_test_plan_for_opencode.md` Suite 09.
-- `design/master_exhaustive_test_plan_for_opencode.md` Suite 11 for seeder/deploy volume.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 7.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` Suite 09.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` Suite 11 for seeder/deploy volume.
 
 ### Code paths
 
@@ -15855,9 +15855,9 @@ There are no voucher tests. Acceptance requires at minimum:
 
 ### Old design sections
 
-- `design/Voucher-Provider-Management-System-Technical-Design.md` sections 1-17.
-- `design/voucher-system-raw-design.md` for the raw data model and sample `ApiConsumer`.
-- `design/smart_ai_rail_and_voucher_onboarding_plan.md` for the reusable importer pattern.
+- `design/09-voucher-system-external/Voucher-Provider-Management-System-Technical-Design.md` sections 1-17.
+- `design/09-voucher-system-external/voucher-system-raw-design.md` for the raw data model and sample `ApiConsumer`.
+- `design/08-ai-onboarding/smart_ai_rail_and_voucher_onboarding_plan.md` for the reusable importer pattern.
 
 ### Code paths
 
@@ -15945,7 +15945,7 @@ The current implementation is:
 - The current guide has `GlobalGuideSearchModal`, glossary definitions and 140 edge-case definitions, but it has no v2 `GuideSearchPalette`, `ContextHelpDrawer`, `SafeguardDialog`, `playbook`, `cards` or `edge-cases` routes.
 - `admin-front/src/content/__tests__/content-completeness.test.ts` asserts the current content shape, not the v2 counts.
 
-`design/complete_zero_to_hero_guides_and_academy_specification.md` describes an alternative 12-book admin guide, 8-module academy, 10-chapter merchant guide and developer API guide. It is the current guide's lineage. It is **not** the 14-book guide v2.
+`design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` describes an alternative 12-book admin guide, 8-module academy, 10-chapter merchant guide and developer API guide. It is the current guide's lineage. It is **not** the 14-book guide v2.
 
 ### 3.2 Future information architecture
 
@@ -16001,13 +16001,13 @@ Route names: `AdminGuide`, `AdminGuideBook`, `AdminGuideArticle`, `AdminGuideGlo
 | Data blocks | 3 | `ledger-events` (16 events), `visible-rails` (7 vectors), `attempt-transitions` |
 | Context-map screens | 23 | `screens` array |
 | Error codes | 19 | Article `b13-01` |
-| Edge cases | 140 | Parsed from `design/payment-gateway-refined-design-v4.1.md` |
+| Edge cases | 140 | Parsed from `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` |
 
 The content test must fail if `meta.json.counts` differs.
 
 ### 3.5 Content pipeline
 
-The source is `design/guide_system_design_and_content (2).md`, parsed between `<!-- CONTENT:BEGIN -->` and `<!-- CONTENT:END -->`.
+The source is `design/07-guides-and-academy/guide_system_design_and_content.md`, parsed between `<!-- CONTENT:BEGIN -->` and `<!-- CONTENT:END -->`.
 
 Block syntax:
 
@@ -16185,9 +16185,9 @@ There are no v2 tests. Acceptance requires the unit and E2E suites in section 3.
 
 ### Old design sections
 
-- `design/guide_system_design_and_content (2).md` Parts 0-III, especially II-1 through II-13.
-- `design/complete_zero_to_hero_guides_and_academy_specification.md` for the current 12-book/8-module lineage.
-- `design/payment-gateway-refined-design-v4.1.md` section 13 for the 140 edge cases.
+- `design/07-guides-and-academy/guide_system_design_and_content.md` Parts 0-III, especially II-1 through II-13.
+- `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` for the current 12-book/8-module lineage.
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` section 13 for the 140 edge cases.
 
 ### Code paths
 
@@ -16430,9 +16430,9 @@ Voucher half: none. Acceptance requires the voucher module, routes, UI, schema, 
 
 ### Old design sections
 
-- `design/smart_ai_rail_and_voucher_onboarding_plan.md` sections 1-5.
-- `design/Voucher-Provider-Management-System-Technical-Design.md` sections 5, 6 and 17.
-- `design/voucher-system-raw-design.md` for the purchase/query model.
+- `design/08-ai-onboarding/smart_ai_rail_and_voucher_onboarding_plan.md` sections 1-5.
+- `design/09-voucher-system-external/Voucher-Provider-Management-System-Technical-Design.md` sections 5, 6 and 17.
+- `design/09-voucher-system-external/voucher-system-raw-design.md` for the purchase/query model.
 
 ### Code paths
 
@@ -16675,13 +16675,13 @@ No test currently verifies D-04 success, D-06 projection, D-08 encrypted storage
 
 ### Old design sections
 
-- `design/blueprint-management.md` section 5.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` sections 5-7.
-- `design/master_exhaustive_test_plan_for_opencode.md` sections 1-13.
-- `design/fake_payment_rails_service_architecture.md` sections 2-7.
-- `design/Voucher-Provider-Management-System-Technical-Design.md`.
-- `design/guide_system_design_and_content (2).md`.
-- `design/smart_ai_rail_and_voucher_onboarding_plan.md`.
+- `design/00-process/blueprint-management.md` section 5.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` sections 5-7.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` sections 1-13.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` sections 2-7.
+- `design/09-voucher-system-external/Voucher-Provider-Management-System-Technical-Design.md`.
+- `design/07-guides-and-academy/guide_system_design_and_content.md`.
+- `design/08-ai-onboarding/smart_ai_rail_and_voucher_onboarding_plan.md`.
 
 ### Code paths
 

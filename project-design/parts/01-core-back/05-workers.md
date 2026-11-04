@@ -26,13 +26,13 @@ code:
   - core-back/lib/audit/writeAudit.ts
   - core-back/index.ts
 design_sources:
-  - design/opencode_technical_delivery_design.md#phase-4-onboarding-kyb-aml-program-disputes-reconciliation-workers-core-back
-  - design/opencode_technical_delivery_design.md#105-governance-execution-screening-layers-and-observability
-  - design/opencode_technical_delivery_design.md#12-fourth-hardening-pass-conformance-audit-findings-closed
-  - design/opencode_technical_delivery_design.md#28-delivery-run-4-postgresql-18-storage-engine-backups-and-horizontal-scaling
-  - design/payment_gateway_final_design-v5.md#91-the-nine-governing-state-machine-rules
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#32
-  - design/fixes/_0001_operator_cases.md
+  - design/90-archive/delivery-logs/opencode_technical_delivery_design.md#phase-4-onboarding-kyb-aml-program-disputes-reconciliation-workers-core-back
+  - design/90-archive/delivery-logs/opencode_technical_delivery_design.md#105-governance-execution-screening-layers-and-observability
+  - design/90-archive/delivery-logs/opencode_technical_delivery_design.md#12-fourth-hardening-pass-conformance-audit-findings-closed
+  - design/90-archive/delivery-logs/opencode_technical_delivery_design.md#28-delivery-run-4-postgresql-18-storage-engine-backups-and-horizontal-scaling
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#91-the-nine-governing-state-machine-rules
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#32
+  - design/10-fixes/_0001_operator_cases.md
 tests:
   - deploy/test/testMatrix.test.ts
   - core-back/test/engine/guards-and-workers.test.ts
@@ -385,8 +385,8 @@ Database-backed suites require PostgreSQL 18; Redis-backed invalidation tests re
 
 ### Old design sections
 
-- `design/opencode_technical_delivery_design.md` Phase 4 worker task; §10.5 governance/screening/observability; §12.4 operational defects; §28 delivery run 4; `design/fixes/_0001_operator_cases.md`.
-- `design/payment_gateway_final_design-v5.md` §9.1 rules 3 and 8; `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` §3.2.
+- `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` Phase 4 worker task; §10.5 governance/screening/observability; §12.4 operational defects; §28 delivery run 4; `design/10-fixes/_0001_operator_cases.md`.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §9.1 rules 3 and 8; `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` §3.2.
 
 ### Code paths
 

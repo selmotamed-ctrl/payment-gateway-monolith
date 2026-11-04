@@ -12,9 +12,9 @@ code:
   - deploy/lib/sshRunner.ts
   - deploy/deploy.ts
 design_sources:
-  - design/payment_gateway_deployment_and_guides_architecture.md#5-host-aware-ufw-firewall--network-isolation-provisioning
-  - design/payment_gateway_deployment_and_guides_architecture.md#6-ordered-14-step-multi-host-deployment-pipeline
-  - design/payment_gateway_final_design-v5.md#23-reverse-proxy-nginx--caddy-topology
+  - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#5-host-aware-ufw-firewall--network-isolation-provisioning
+  - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#6-ordered-14-step-multi-host-deployment-pipeline
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#23-reverse-proxy-nginx--caddy-topology
 tests:
   - deploy/test/hostPlanner.test.ts
   - deploy/test/hostPlannerScale.test.ts
@@ -259,9 +259,9 @@ Not covered:
 
 ### Old design sections
 
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall matrix.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 6, step 4.
-- `design/payment_gateway_final_design-v5.md` section 2.3, reverse proxy exposure.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall matrix.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 6, step 4.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 2.3, reverse proxy exposure.
 
 ### Code paths
 

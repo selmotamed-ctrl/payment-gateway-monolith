@@ -64,13 +64,26 @@ export interface LedgerPrismaClient {
   glAccount: {
     findFirst(args: { where: Record<string, unknown>; select?: Record<string, boolean> }): Promise<LedgerAccountRecord | null>;
     findUnique?(args: { where: { id: string } }): Promise<LedgerAccountRecord | null>;
+    /** When present, every selector of a posting is resolved in ONE query. */
+    findMany?(args: { where: Record<string, unknown>; select?: Record<string, boolean>; orderBy?: Record<string, "asc" | "desc"> }): Promise<LedgerAccountRecord[]>;
   };
   journalEntry: {
     findFirst(args: { where: Record<string, unknown> }): Promise<JournalEntryRecord | null>;
     create(args: { data: Record<string, unknown> }): Promise<JournalEntryRecord>;
+    /**
+     * When present the entry is inserted with `ON CONFLICT DO NOTHING`
+     * (`skipDuplicates`). That is one round trip on the common path and, unlike
+     * catching a unique violation, it does not abort the surrounding
+     * PostgreSQL transaction when two posters race on the same reference.
+     */
+    // Typed loosely: the generated Prisma signature is generic.
+    createManyAndReturn?(args: any): Promise<JournalEntryRecord[]>;
   };
   journalLine: {
     create(args: { data: Record<string, unknown> }): Promise<JournalLineRecord>;
+    /** When present all lines of an entry are inserted in one statement. */
+    // Typed loosely: the generated Prisma signature is generic.
+    createManyAndReturn?(args: any): Promise<JournalLineRecord[]>;
   };
   $transaction?<R>(callback: (transaction: LedgerPrismaClient) => Promise<R>): Promise<R>;
 }
@@ -97,7 +110,7 @@ export interface LedgerShardLine {
  */
 export type LedgerShardWriter = (
   transaction: LedgerPrismaClient,
-  line: LedgerShardLine,
+  lines: readonly LedgerShardLine[],
 ) => Promise<void>;
 
 export interface LedgerAccountSelector {
@@ -625,6 +638,16 @@ function requireFee(value: DecimalInput | undefined, label: string): Decimal {
   return amount;
 }
 
+type AccountLookupPlan =
+  | { kind: "direct"; id: string }
+  | {
+      kind: "lookup";
+      key: string;
+      accountType: LedgerAccountType;
+      scoped: Record<string, unknown>;
+      fallback: Record<string, unknown>;
+    };
+
 export class LedgerPoster {
   private readonly client: LedgerPrismaClient;
   private readonly transactionRunner: LedgerTransactionRunner;
@@ -656,55 +679,77 @@ export class LedgerPoster {
   ): Promise<LedgerPostResult> {
     this.validateTemplate(template);
     const write = async (runner: LedgerPrismaClient): Promise<LedgerPostResult> => {
-      const existing = await runner.journalEntry.findFirst({
-        where: { refType: template.refType, refId: template.refId },
-      });
-      if (existing) {
-        return { entry: existing, lines: [], created: false, idempotent: true };
-      }
+      const entryData = {
+        refType: template.refType,
+        refId: template.refId,
+        description: template.description,
+      };
       let entry: JournalEntryRecord;
-      try {
-        entry = await runner.journalEntry.create({
-          data: {
-            refType: template.refType,
-            refId: template.refId,
-            description: template.description,
-          },
+      if (typeof runner.journalEntry.createManyAndReturn === "function") {
+        const inserted = await runner.journalEntry.createManyAndReturn({
+          data: [entryData],
+          skipDuplicates: true,
         });
-      } catch (error) {
-        if (isUniqueConstraintError(error)) {
-          const raced = await runner.journalEntry.findFirst({
+        if (inserted.length === 0) {
+          const existing = await runner.journalEntry.findFirst({
             where: { refType: template.refType, refId: template.refId },
           });
-          if (raced) {
-            return { entry: raced, lines: [], created: false, idempotent: true };
+          if (!existing) {
+            throw moneyError("JOURNAL_ENTRY_CONFLICT", "The journal entry conflicted but could not be read back");
           }
+          return { entry: existing, lines: [], created: false, idempotent: true };
         }
-        throw error;
-      }
-      const lines: JournalLineRecord[] = [];
-      for (const line of template.lines) {
-        const accountId = await this.resolveAccountId(runner, line.account, context);
-        const created = await runner.journalLine.create({
-          data: {
-            entryId: entry.id,
-            glAccountId: accountId,
-            direction: line.direction,
-            amount: decimal(line.amount),
-          },
+        entry = inserted[0]!;
+      } else {
+        const existing = await runner.journalEntry.findFirst({
+          where: { refType: template.refType, refId: template.refId },
         });
-        lines.push(created);
-        if (this.shardWriter) {
-          await this.shardWriter(runner, {
+        if (existing) {
+          return { entry: existing, lines: [], created: false, idempotent: true };
+        }
+        try {
+          entry = await runner.journalEntry.create({ data: entryData });
+        } catch (error) {
+          if (isUniqueConstraintError(error)) {
+            const raced = await runner.journalEntry.findFirst({
+              where: { refType: template.refType, refId: template.refId },
+            });
+            if (raced) {
+              return { entry: raced, lines: [], created: false, idempotent: true };
+            }
+          }
+          throw error;
+        }
+      }
+      const accountIds = await this.resolveAccountIds(runner, template.lines, context);
+      const lineData = template.lines.map((line, index) => ({
+        entryId: entry.id,
+        glAccountId: accountIds[index]!,
+        direction: line.direction,
+        amount: decimal(line.amount),
+      }));
+      let lines: JournalLineRecord[];
+      if (typeof runner.journalLine.createManyAndReturn === "function") {
+        lines = await runner.journalLine.createManyAndReturn({ data: lineData });
+      } else {
+        lines = [];
+        for (const data of lineData) {
+          lines.push(await runner.journalLine.create({ data }));
+        }
+      }
+      if (this.shardWriter) {
+        await this.shardWriter(
+          runner,
+          template.lines.map((line, index) => ({
             entryId: entry.id,
             refType: template.refType,
             refId: template.refId,
-            glAccountId: accountId,
+            glAccountId: accountIds[index]!,
             accountType: line.account.accountType,
             direction: line.direction,
             amount: line.amount,
-          });
-        }
+          })),
+        );
       }
       if (this.postedOutboxWriter) {
         await this.postedOutboxWriter(runner, entry, lines);
@@ -761,6 +806,125 @@ export class LedgerPoster {
     }
   }
 
+  /**
+   * Resolves the account of every line. Selectors that are not mapped by id
+   * are resolved with ONE `findMany` over the OR of their scoped and
+   * platform-wide fallback predicates (instead of one or two `findFirst` per
+   * line), then matched in memory with the same precedence as
+   * `resolveAccountId`. Clients without `findMany` (in-memory test doubles)
+   * keep the per-line path. Identical selectors are resolved once.
+   */
+  private async resolveAccountIds(
+    transaction: LedgerPrismaClient,
+    lines: readonly LedgerLineTemplate[],
+    context: LedgerPostContext,
+  ): Promise<string[]> {
+    const plans = lines.map((line) => this.accountLookupPlan(line.account, context));
+    const pending = plans.filter((plan): plan is Extract<AccountLookupPlan, { kind: "lookup" }> => plan.kind === "lookup");
+    if (pending.length === 0 || typeof transaction.glAccount.findMany !== "function") {
+      // Sequential on purpose: the queries share one transaction connection.
+      const memo = new Map<string, string>();
+      const ids: string[] = [];
+      for (const [index, line] of lines.entries()) {
+        const plan = plans[index]!;
+        if (plan.kind === "direct") {
+          ids.push(plan.id);
+          continue;
+        }
+        const known = memo.get(plan.key) ?? (await this.resolveAccountId(transaction, line.account, context));
+        memo.set(plan.key, known);
+        ids.push(known);
+      }
+      return ids;
+    }
+    const predicates = new Map<string, Record<string, unknown>>();
+    for (const plan of pending) {
+      predicates.set(JSON.stringify(plan.scoped), plan.scoped);
+      predicates.set(JSON.stringify(plan.fallback), plan.fallback);
+    }
+    const candidates = await transaction.glAccount.findMany({
+      where: { OR: [...predicates.values()] },
+      select: {
+        id: true,
+        accountType: true,
+        ownerId: true,
+        gatewayId: true,
+        credentialSetId: true,
+        env: true,
+        currency: true,
+      },
+      orderBy: { id: "asc" },
+    });
+    const matches = (record: LedgerAccountRecord, predicate: Record<string, unknown>): boolean =>
+      Object.entries(predicate).every(([field, expected]) => {
+        const actual = (record as unknown as Record<string, unknown>)[field];
+        return expected === null ? actual === null || actual === undefined : actual === expected;
+      });
+    return plans.map((plan) => {
+      if (plan.kind === "direct") {
+        return plan.id;
+      }
+      const scoped = candidates.find((record) => matches(record, plan.scoped));
+      if (scoped) {
+        return scoped.id;
+      }
+      const fallback = candidates.find((record) => matches(record, plan.fallback));
+      if (!fallback) {
+        throw moneyError("GL_ACCOUNT_NOT_FOUND", `No ${plan.accountType} account matched the posting context`);
+      }
+      return fallback.id;
+    });
+  }
+
+  private accountLookupPlan(selector: LedgerAccountSelector, context: LedgerPostContext): AccountLookupPlan {
+    if (selector.accountId) {
+      return { kind: "direct", id: selector.accountId };
+    }
+    const mapped = context.accounts?.[selector.accountType];
+    if (mapped) {
+      return { kind: "direct", id: mapped };
+    }
+    const { scopedWhere, fallbackWhere } = this.accountPredicates(selector, context);
+    return {
+      kind: "lookup",
+      key: JSON.stringify(scopedWhere),
+      accountType: selector.accountType,
+      scoped: scopedWhere,
+      fallback: fallbackWhere,
+    };
+  }
+
+  private accountPredicates(
+    selector: LedgerAccountSelector,
+    context: LedgerPostContext,
+  ): { scopedWhere: Record<string, unknown>; fallbackWhere: Record<string, unknown> } {
+    const currency = selector.currency ?? context.currency;
+    const scoping = ACCOUNT_SCOPING[selector.accountType] ?? "GLOBAL";
+    const ownerId = selector.ownerId ?? (scoping === "MERCHANT" ? context.merchantId : undefined);
+    const gatewayId = selector.gatewayId ?? (scoping === "GATEWAY" ? context.gatewayId : undefined);
+    const credentialSetId = selector.credentialSetId
+      ?? (scoping === "GATEWAY" ? context.credentialSetId : undefined);
+    const env = selector.env ?? (scoping === "GATEWAY" ? context.env : undefined);
+    return {
+      scopedWhere: {
+        accountType: selector.accountType,
+        ...(ownerId ? { ownerId } : {}),
+        ...(gatewayId ? { gatewayId } : {}),
+        ...(credentialSetId ? { credentialSetId } : {}),
+        ...(env ? { env } : {}),
+        ...(currency ? { currency } : {}),
+      },
+      fallbackWhere: {
+        accountType: selector.accountType,
+        ownerId: null,
+        gatewayId: null,
+        credentialSetId: null,
+        env: null,
+        ...(currency ? { currency } : {}),
+      },
+    };
+  }
+
   private async resolveAccountId(
     transaction: LedgerPrismaClient,
     selector: LedgerAccountSelector,
@@ -773,31 +937,14 @@ export class LedgerPoster {
     if (mapped) {
       return mapped;
     }
-    const currency = selector.currency ?? context.currency;
     // The chart of accounts has three kinds of account (design §7.1):
     //   - a merchant wallet belongs to ONE merchant,
     //   - a gateway clearing account belongs to ONE (gateway, env, credential set),
-    //   - every other account (treasury, income, the two fee accounts, the fee
-    //     accrual, the commission receivable, the AML hold, the chargeback
-    //     reserve and suspense) is platform wide.
-    // The resolver therefore only narrows a lookup by the dimensions the
-    // account type actually carries, and it falls back to the platform wide
-    // account when no dedicated one has been configured.
-    const scoping = ACCOUNT_SCOPING[selector.accountType] ?? "GLOBAL";
-    const ownerId = selector.ownerId ?? (scoping === "MERCHANT" ? context.merchantId : undefined);
-    const gatewayId = selector.gatewayId ?? (scoping === "GATEWAY" ? context.gatewayId : undefined);
-    const credentialSetId = selector.credentialSetId
-      ?? (scoping === "GATEWAY" ? context.credentialSetId : undefined);
-    const env = selector.env ?? (scoping === "GATEWAY" ? context.env : undefined);
-
-    const scopedWhere = {
-      accountType: selector.accountType,
-      ...(ownerId ? { ownerId } : {}),
-      ...(gatewayId ? { gatewayId } : {}),
-      ...(credentialSetId ? { credentialSetId } : {}),
-      ...(env ? { env } : {}),
-      ...(currency ? { currency } : {}),
-    };
+    //   - every other account is platform wide.
+    // The resolver only narrows a lookup by the dimensions the account type
+    // actually carries, and it falls back to the platform wide account when
+    // no dedicated one has been configured.
+    const { scopedWhere, fallbackWhere } = this.accountPredicates(selector, context);
     const record = await transaction.glAccount.findFirst({
       where: scopedWhere,
       select: { id: true },
@@ -807,14 +954,7 @@ export class LedgerPoster {
     }
     // Fall back to the platform wide account of the same type and currency.
     const fallback = await transaction.glAccount.findFirst({
-      where: {
-        accountType: selector.accountType,
-        ownerId: null,
-        gatewayId: null,
-        credentialSetId: null,
-        env: null,
-        ...(currency ? { currency } : {}),
-      },
+      where: fallbackWhere,
       select: { id: true },
     });
     if (!fallback) {

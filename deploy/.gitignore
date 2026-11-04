@@ -3,3 +3,5 @@ node_modules/
 deploy.env
 *.log
 test-matrix/configs/
+test-matrix/reports/
+test-matrix/*.local.json

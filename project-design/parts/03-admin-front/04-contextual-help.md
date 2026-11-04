@@ -17,9 +17,9 @@ code:
   - core-back/api/internal/checkout.ts
   - core-back/prisma/seedGuides.ts
 design_sources:
-  - design/complete_zero_to_hero_guides_and_academy_specification.md
-  - design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md
-  - design/guide_system_design_and_content (2).md
+  - design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md
+  - design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md
+  - design/07-guides-and-academy/guide_system_design_and_content.md
 tests:
   - admin-front/src/content/__tests__/content-completeness.test.ts
   - tests/e2e/admin/global-search.spec.ts
@@ -276,9 +276,9 @@ The content test and `guides-support` test require Bun; the latter requires Post
 
 ### Old design sections
 
-- `design/complete_zero_to_hero_guides_and_academy_specification.md` — implemented four-surface help model and merchant guide chapters.
-- `design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — 560 px drawer intent.
-- `design/guide_system_design_and_content (2).md` — future context-map/safeguard workstream.
+- `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` — implemented four-surface help model and merchant guide chapters.
+- `design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — 560 px drawer intent.
+- `design/07-guides-and-academy/guide_system_design_and_content.md` — future context-map/safeguard workstream.
 
 ### Code paths
 

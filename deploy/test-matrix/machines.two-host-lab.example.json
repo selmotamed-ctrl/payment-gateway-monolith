@@ -1,0 +1,38 @@
+{
+  "$schema": "./machines.schema.json",
+  "version": 1,
+  "lab": {
+    "name": "two-host-lab",
+    "lanCidrs": ["10.209.250.0/24"]
+  },
+  "ssh": {
+    "user": "salem",
+    "keyPath": "~/.ssh/id_ed25519_pg_lab_matrix",
+    "sudo": { "mode": "password", "passwordEnv": "LAB_SUDO_PASS" }
+  },
+  "machines": [
+    {
+      "id": "host-a",
+      "address": "10.209.250.48",
+      "roles": ["controller", "app", "db", "cache", "logs", "backup"],
+      "labels": { "legacy": "HOST_A" }
+    },
+    {
+      "id": "host-b",
+      "address": "10.209.250.205",
+      "roles": ["app", "edge", "db", "cache", "logs", "backup", "object-store", "vault"],
+      "labels": { "legacy": "HOST_B" }
+    }
+  ],
+  "services": {
+    "objectStore": { "machine": "host-b", "port": 9000, "bucket": "pg-backups-test" },
+    "vault": { "machine": "host-b" }
+  },
+  "topologies": {
+    "include": ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8"]
+  },
+  "intensity": {
+    "preset": "standard",
+    "overrides": { "chaos": { "enabled": true } }
+  }
+}

@@ -4,6 +4,12 @@
 **Covered Workspaces (10):** `core-back` · `admin-back` · `admin-front` · `merchant-back` · `merchant-front` · `checkout-back` · `checkout-front` · `fake-rails-back` · `fake-rails-front` · `deploy`  
 **Test Frameworks:** `bun test` (Backend Unit, Combinatorial, Property-Based Fuzz, Concurrency & Live DB Integration) · `vitest` (Frontend Component & Utility Matrices) · `@playwright/test` (Full-Surface Multi-Portal UI, Geometry, RTL/LTR & Cross-Service E2E)
 
+
+> **2026-11-04 corrections / as-built.** Canonical status is `project-design/parts/08-testing/01-suite-catalog.md` and the generated `project-design/appendices/test-inventory.md`.
+> - Counts in this plan are aspirational: "38,500+ assertions", "66 models / 100 enums", "15 ledger templates" and "36 transforms" are stale (see stale-claims SC-001/004/006/022). Use the generated catalogs.
+> - These planned files **do not exist**: `core-back/test/exhaustive/05-api-matrix/{checkout-zero-trust-matrix,merchant-and-external-rbac-idor}.test.ts`, `06-concurrency/concurrent-refunds-and-cashouts.test.ts`, `07-workflows/{aml-7-layers-and-reporting,disputes-chargebacks-and-ceilings,onboarding-kyb-and-duplicates,smart-ai-spec-importer-and-12-gates,statement-reconciliation-engine}.test.ts` (partly covered by `onboarding-and-aml.test.ts` and `recon-and-go-live-gates.test.ts`), `08-security-edge/catalog-140-expanded-matrix.test.ts`, the whole `09-storage-backup/` suite, `deploy/backup-daemon/test/exhaustive/backup-restore-matrix.test.ts`, and the per-portal `e2e/exhaustive-*-surface.spec.ts` Playwright files (portal journeys live under `tests/e2e*`).
+> - The two-machine lab referenced by later plans is superseded by `design/05-testing/multi_machine_topology_and_stress_test_plan.md`.
+
 ## Executive Summary & Testing Philosophy
 
 For a mission-critical financial switch and multi-rail payment gateway, a small set of happy-path unit tests is insufficient. Subtle defects hide in the intersections: a 3-decimal LYD split-fee rounding remainder on a 2-decimal aggregator route, a concurrent duplicate `confirm` racing an early webhook, an IPv4-mapped IPv6 SSRF address (`::ffff:127.0.0.1`), a `v-model` JSX binding that silently fails to open a dialog, or a seeded historical transaction that fails when an operator clicks **Inquire** or **Refund**.

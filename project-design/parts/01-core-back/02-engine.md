@@ -23,15 +23,15 @@ code:
   - core-back/engine/specImporter/**
   - core-back/engine/mockGateway/MockGatewayServer.ts
 design_sources:
-  - design/payment_gateway_final_design-v5.md#8-engine-contract-apiconsumer-registry-recursiveset-transforms--crypto-engine
-  - design/payment_gateway_final_design-v5.md#82-the-six-method-universal-engine-contract-dynamicrailengine
-  - design/payment_gateway_final_design-v5.md#84-the-closed-transform-library-transformpipe--pure-operations
-  - design/payment_gateway_final_design-v5.md#9-the-13-state-attempt-lifecycle-machine-and-atomic-slot-reservation-invariant
-  - design/payment-gateway-refined-design-v4.1.md#6-engine-contract-client-actions-auth-registry-transforms--crypto-engine
-  - design/Dynamic-Payment-Gateway-Management-Design-v2.md#5-the-flow-engine
-  - design/Dynamic-Payment-Gateway-Management-Design-v2.md#9-confirmation-and-verification
-  - design/opencode_technical_delivery_design.md#15-smart-ai-assisted-provider-onboarding-bring-your-own-ai
-  - design/smart_ai_rail_and_voucher_onboarding_plan.md
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#8-engine-contract-apiconsumer-registry-recursiveset-transforms--crypto-engine
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#82-the-six-method-universal-engine-contract-dynamicrailengine
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#84-the-closed-transform-library-transformpipe--pure-operations
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#9-the-13-state-attempt-lifecycle-machine-and-atomic-slot-reservation-invariant
+  - design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#6-engine-contract-client-actions-auth-registry-transforms--crypto-engine
+  - design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md#5-the-flow-engine
+  - design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md#9-confirmation-and-verification
+  - design/90-archive/delivery-logs/opencode_technical_delivery_design.md#15-smart-ai-assisted-provider-onboarding-bring-your-own-ai
+  - design/08-ai-onboarding/smart_ai_rail_and_voucher_onboarding_plan.md
 tests:
   - core-back/test/engine/step-executor.test.ts
   - core-back/test/engine/api-consumer.test.ts
@@ -649,12 +649,12 @@ No build or test was run for this documentation change. Tests that require Postg
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` §8 engine contract/registry/transforms/crypto, §8.2 six methods, §8.4 transform library, §9 state machine and slot invariant, §14 go-live gates.
-- `design/payment-gateway-refined-design-v4.1.md` §6 engine contract and §7 state machine.
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md` §5 flow engine, §9 confirmation/verification.
-- `design/opencode_technical_delivery_design.md` §15 Smart AI onboarding.
-- `design/smart_ai_rail_and_voucher_onboarding_plan.md`.
-- `design/fake_payment_rails_service_architecture.md` for the emulator intent.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §8 engine contract/registry/transforms/crypto, §8.2 six methods, §8.4 transform library, §9 state machine and slot invariant, §14 go-live gates.
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` §6 engine contract and §7 state machine.
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` §5 flow engine, §9 confirmation/verification.
+- `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` §15 Smart AI onboarding.
+- `design/08-ai-onboarding/smart_ai_rail_and_voucher_onboarding_plan.md`.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` for the emulator intent.
 
 ### Code paths
 

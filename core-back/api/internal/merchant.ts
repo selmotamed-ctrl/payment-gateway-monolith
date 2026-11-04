@@ -9,7 +9,7 @@ import { detectDuplicateFlags, nationalIdHash, payoutAccountHash } from "../../l
 import { payoutOwnerMismatch } from "../../lib/kybReview";
 import { queueKybNotification } from "../../lib/kybNotifications";
 import { scanKybBytes } from "../../lib/kybScan";
-import { buildListQuery, listResponse } from "../../lib/listQuery";
+import { buildListQuery, countUnlessSkipped, listResponse } from "../../lib/listQuery";
 import { buildMerchantUserInfo } from "../../lib/auth/uiAuthorities";
 import {
   generateAccessToken,
@@ -24,7 +24,7 @@ import {
 } from "../../lib/auth";
 import { Vault } from "../../engine/crypto/Vault";
 import { decimal } from "../../engine/ledger/LedgerPoster";
-import { loadShardBalanceRows, naturalShardBalance } from "../../lib/storageEngine/shardBalances";
+import { loadLiveAccountBalances } from "../../lib/storageEngine/shardBalances";
 import { moneyFromDecimal } from "../../engine/db/money";
 import { getPlatformRuntime } from "../../engine/runtime";
 import { readThroughReplicaOrPrimary } from "../../lib/storageEngine";
@@ -563,6 +563,53 @@ const requireMerchantId = (principal: { merchantId: string | null }): string => 
     throw new ApiError(403, "MERCHANT_CONTEXT_REQUIRED", "The principal is not bound to a merchant");
   }
   return principal.merchantId;
+};
+
+/**
+ * Columns a merchant list may return for a payment attempt. Lists never load
+ * `context_ciphertext` (encrypted flow context), the masked customer fields
+ * JSON, gateway public outputs, the raw wire amount or the payer IP / user
+ * agent: they are wide, unused by the portal and must not leave core-back.
+ */
+const merchantAttemptListSelect = {
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  reference: true,
+  linkId: true,
+  applicationId: true,
+  merchantId: true,
+  railId: true,
+  routeId: true,
+  env: true,
+  mode: true,
+  subMode: true,
+  status: true,
+  substatus: true,
+  gatewayReference: true,
+  providerReference: true,
+  networkReference: true,
+  requestedAmount: true,
+  surchargeAmount: true,
+  totalChargedAmount: true,
+  settledAmount: true,
+  gatewayFeeAmount: true,
+  platformCommissionAmount: true,
+  netMerchantAmount: true,
+  feeBearer: true,
+  settlementTarget: true,
+  currency: true,
+  expiresAt: true,
+  terminalAt: true,
+} as const;
+
+/** [from, to) of a YYYY-MM month in UTC. */
+const monthRangeUtc = (month: string): { from: Date; to: Date } => {
+  const [year, monthIndex] = month.split("-").map(Number) as [number, number];
+  return {
+    from: new Date(Date.UTC(year, monthIndex - 1, 1)),
+    to: new Date(Date.UTC(year, monthIndex, 1)),
+  };
 };
 
 const merchantIdOf = (request: Request): string => {
@@ -1370,26 +1417,16 @@ router.get("/wallets/:id", async (request: Request, response: Response) => {
 router.get("/wallets/:id/balance", async (request: Request, response: Response) => {
   const merchantId = merchantIdOf(request);
   const { id } = parseOrThrow(idSchema, request.params);
-  const wallet = await client.wallet.findFirst({ where: { id, merchantId }, include: { glAccount: true } });
+  const wallet = await client.wallet.findFirst({
+    where: { id, merchantId },
+    select: { id: true, currency: true, glAccountId: true, glAccount: { select: { checkpointBalance: true } } },
+  });
   if (!wallet) {
     throw new ApiError(404, "WALLET_NOT_FOUND", "The wallet does not exist");
   }
-  const shardRows = await loadShardBalanceRows(client as never, [wallet.glAccountId]);
-  const shardTotal = shardRows[0];
-  let balance: ReturnType<typeof decimal>;
-  if (shardTotal) {
-    balance = decimal(naturalShardBalance(shardTotal.accountType, shardTotal.total));
-  } else {
-    const lines = await client.journalLine.findMany({
-      where: { glAccountId: wallet.glAccountId },
-      select: { direction: true, amount: true },
-    });
-    balance = decimal(wallet.glAccount.checkpointBalance);
-    for (const line of lines) {
-      const value = decimal(line.amount);
-      balance = line.direction === "CREDIT" ? balance.plus(value) : balance.minus(value);
-    }
-  }
+  // One statement: shard total, or checkpoint + post-checkpoint lines.
+  const [live] = await loadLiveAccountBalances(client as never, [wallet.glAccountId]);
+  const balance = decimal(live?.balance ?? 0);
   response.json({
     walletId: wallet.id,
     currency: wallet.currency,
@@ -1406,10 +1443,19 @@ router.get("/wallets/:id/statements", async (request: Request, response: Respons
     throw new ApiError(404, "WALLET_NOT_FOUND", "The wallet does not exist");
   }
   const query = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional() }).parse(request.query ?? {});
+  // The month parameter now bounds the query (it used to be echoed back while
+  // the last 31 days were returned regardless).
+  const range = query.month ? monthRangeUtc(query.month) : null;
   const attempts = await client.paymentAttempt.findMany({
-    where: { merchantId, createdAt: { gte: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000) } },
-    orderBy: { createdAt: "desc" },
+    where: {
+      merchantId,
+      createdAt: range
+        ? { gte: range.from, lt: range.to }
+        : { gte: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000) },
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: 200,
+    select: merchantAttemptListSelect,
   });
   response.json({ walletId: wallet.id, month: query.month ?? null, attempts });
 });
@@ -1425,13 +1471,25 @@ router.get("/wallets/:id/statements/:month/export", async (request: Request, res
   if (!wallet) {
     throw new ApiError(404, "WALLET_NOT_FOUND", "The wallet does not exist");
   }
+  // Bounded by the month in SQL (served by [merchant_id, status, created_at]).
+  // Previously the latest 1,000 successes were loaded and filtered in JS, so
+  // any older month came back empty or truncated.
+  const range = monthRangeUtc(month);
   const attempts = await client.paymentAttempt.findMany({
-    where: { merchantId, status: "SUCCEEDED" },
-    orderBy: { createdAt: "desc" },
-    take: 1000,
+    where: { merchantId, status: "SUCCEEDED", createdAt: { gte: range.from, lt: range.to } },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: 50_000,
+    select: {
+      reference: true,
+      createdAt: true,
+      totalChargedAmount: true,
+      platformCommissionAmount: true,
+      netMerchantAmount: true,
+      currency: true,
+      status: true,
+    },
   });
   const rows = attempts
-    .filter((attempt) => attempt.createdAt.toISOString().startsWith(month))
     .map((attempt) => [
       attempt.reference,
       attempt.createdAt.toISOString(),
@@ -1651,21 +1709,24 @@ router.get("/links", async (request: Request, response: Response) => {
   const rawState = typeof request.query.state === "string" ? request.query.state : undefined;
   const state = rawState === "ACTIVE" ? "PENDING" : rawState;
   const built = buildListQuery(request.query, {
-    search: ["key", "description"],
+    search: ["key"],
     equals: { applicationId: "applicationId", walletId: "walletId" },
     ranges: { amount: { path: "amount", kind: "decimal" } },
     dates: { createdAt: { path: "createdAt" }, expiresAt: { path: "expiresAt", fromKey: "dateFrom", toKey: "dateTo" } },
     sortable: { linkKey: "key", amount: "amount", useCount: "useCount", status: "state", expiresAt: "expiresAt", createdAt: "createdAt" },
     defaultSort: { createdAt: "desc" },
   });
-  const where = { merchantId, application: { merchantId }, ...(state ? { state } : {}), ...built.where } as never;
+  // payment_links has no merchant_id column: the former top-level
+  // `merchantId` filter made Prisma reject every request. Ownership is the
+  // application relation.
+  const where = { application: { merchantId }, ...(state ? { state } : {}), ...built.where } as never;
   const { links, total } = await readThroughReplicaOrPrimary(
     client as never,
     request.header("x-pg-min-lsn") ?? undefined,
     async (reader) => {
       const [rows, count] = await Promise.all([
         reader.paymentLink.findMany({ where, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
-        reader.paymentLink.count({ where }),
+        countUnlessSkipped(built, () => reader.paymentLink.count({ where })),
       ]);
       return { links: rows, total: count };
     },
@@ -1722,13 +1783,17 @@ router.post("/links/:id/cancel", async (request: Request, response: Response) =>
 router.get("/links/:id/attempts", async (request: Request, response: Response) => {
   const merchantId = merchantIdOf(request);
   const { id } = parseOrThrow(idSchema, request.params);
-  const link = await client.paymentLink.findFirst({ where: { id, application: { merchantId } } });
+  const link = await client.paymentLink.findFirst({ where: { id, application: { merchantId } }, select: { id: true } });
   if (!link) {
     throw new ApiError(404, "PAYMENT_LINK_NOT_FOUND", "The payment link does not exist");
   }
+  // Bounded (an infinite-use link can carry a very long history) and served
+  // by [link_id, created_at].
   const attempts = await client.paymentAttempt.findMany({
     where: { linkId: link.id },
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: 500,
+    select: merchantAttemptListSelect,
   });
   response.json({ attempts });
 });
@@ -1743,9 +1808,13 @@ router.get("/payments", async (request: Request, response: Response) => {
       commission: { path: "platformCommissionAmount", kind: "decimal" },
       net: { path: "netMerchantAmount", kind: "decimal" },
     },
-    dates: { createdAt: { path: "createdAt" }, confirmedAt: { path: "confirmedAt", fromKey: "dateFrom", toKey: "dateTo" } },
-    sortable: { reference: "reference", amount: "totalChargedAmount", status: "status", createdAt: "createdAt", confirmedAt: "confirmedAt" },
+    // payment_attempts has no confirmed_at column; the confirmation instant is
+    // terminal_at. Filtering/sorting on "confirmedAt" used to make Prisma
+    // reject the request.
+    dates: { createdAt: { path: "createdAt" }, confirmedAt: { path: "terminalAt", fromKey: "dateFrom", toKey: "dateTo" } },
+    sortable: { reference: "reference", amount: "totalChargedAmount", status: "status", createdAt: "createdAt", confirmedAt: "terminalAt" },
     defaultSort: { createdAt: "desc" },
+    keysetFields: ["reference", "totalChargedAmount", "status"],
   });
   const where = { merchantId, ...built.where } as never;
   const { payments, total } = await readThroughReplicaOrPrimary(
@@ -1753,8 +1822,14 @@ router.get("/payments", async (request: Request, response: Response) => {
     request.header("x-pg-min-lsn") ?? undefined,
     async (reader) => {
       const [rows, count] = await Promise.all([
-        reader.paymentAttempt.findMany({ where, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
-        reader.paymentAttempt.count({ where }),
+        reader.paymentAttempt.findMany({
+          where,
+          orderBy: built.orderBy as never,
+          skip: built.skip,
+          take: built.take,
+          select: merchantAttemptListSelect,
+        }),
+        countUnlessSkipped(built, () => reader.paymentAttempt.count({ where })),
       ]);
       return { payments: rows, total: count };
     },
@@ -1764,7 +1839,6 @@ router.get("/payments", async (request: Request, response: Response) => {
 
 router.get("/disputes", async (request: Request, response: Response) => {
   const merchantId = merchantIdOf(request);
-  const attempts = await client.paymentAttempt.findMany({ where: { merchantId, status: "DISPUTED" }, select: { id: true } });
   const built = buildListQuery(request.query, {
     search: ["disputeRef", "reasonCode"],
     in: { status: "status" },
@@ -1773,7 +1847,10 @@ router.get("/disputes", async (request: Request, response: Response) => {
     sortable: { disputeRef: "disputeRef", status: "status", amount: "amount", evidenceDueAt: "evidenceDueAt" },
     defaultSort: { openedAt: "desc" },
   });
-  const where = { attemptId: { in: attempts.map((attempt) => attempt.id) }, ...built.where } as never;
+  // Relation filter (one semi-join) instead of loading every DISPUTED attempt
+  // id of the merchant and shipping it back twice as an IN list. It also
+  // includes disputes whose attempt has since moved on from DISPUTED.
+  const where = { attempt: { merchantId }, ...built.where } as never;
   const [disputes, total] = await Promise.all([
     client.dispute.findMany({ where, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
     client.dispute.count({ where }),
@@ -2402,10 +2479,12 @@ router.get("/pos/screens/:screenCode/stream", async (request: Request, response:
   const screenCode = String(request.params.screenCode ?? "");
   const screen = await client.posScreen.findFirst({
     where: { screenCode, pos: { application: { merchantId } } },
+    select: { id: true },
   });
   if (!screen) {
     throw new ApiError(404, "POS_SCREEN_NOT_FOUND", "The POS screen does not exist");
   }
+  let lastHeartbeatAt = 0;
   response.setHeader("content-type", "text/event-stream");
   response.setHeader("cache-control", "no-cache, no-transform");
   response.setHeader("x-accel-buffering", "no");
@@ -2437,11 +2516,20 @@ router.get("/pos/screens/:screenCode/stream", async (request: Request, response:
       response.end();
       return;
     }
-    await client.posScreen.update({ where: { id: screen.id }, data: { lastActiveAt: new Date() } });
+    // Heartbeat at most once a minute instead of an UPDATE every 3 s per
+    // open screen (nothing reads last_active_at at finer resolution).
+    if (Date.now() - lastHeartbeatAt >= 60_000) {
+      lastHeartbeatAt = Date.now();
+      await client.posScreen.update({ where: { id: screen.id }, data: { lastActiveAt: new Date() }, select: { id: true } });
+    }
+    // Filter on the merchant_id column ([merchant_id, created_at] index)
+    // rather than through the applications relation, and never ship the
+    // encrypted context or customer fields to the screen.
     const attempts = await client.paymentAttempt.findMany({
-      where: { application: { merchantId } },
-      orderBy: { createdAt: "desc" },
+      where: { merchantId },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 10,
+      select: merchantAttemptListSelect,
     });
     sendAttempts(attempts);
     setTimeout(() => {
@@ -2464,71 +2552,87 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
   const since = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
   const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 
-  const attempts = await client.paymentAttempt.findMany({
-    where: { merchantId, createdAt: { gte: since } },
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      reference: true,
-      status: true,
-      totalChargedAmount: true,
-      platformCommissionAmount: true,
-      netMerchantAmount: true,
-      currency: true,
-      createdAt: true,
-      rail: { select: { code: true } },
-    },
-  });
+  // Aggregated by PostgreSQL instead of loading every attempt of the window
+  // (up to 90 days) and summing in JS. Same response contract.
+  const [statusGroups, successGroups, recent, walletRows, pendingCashouts] = await Promise.all([
+    client.paymentAttempt.groupBy({
+      by: ["status"],
+      where: { merchantId, createdAt: { gte: since } },
+      _count: { _all: true },
+    }),
+    client.$queryRaw<Array<{ day: string; railCode: string | null; count: number; gross: string; commission: string; net: string }>>`
+      SELECT (pa.created_at)::date::text AS day,
+             r.code AS "railCode",
+             COUNT(*)::int AS count,
+             SUM(pa.total_charged_amount)::text AS gross,
+             SUM(pa.platform_commission_amount)::text AS commission,
+             SUM(pa.net_merchant_amount)::text AS net
+      FROM payment_attempts pa
+      LEFT JOIN rails r ON r.id = pa.rail_id
+      WHERE pa.merchant_id = ${merchantId}::uuid
+        AND pa.status = 'SUCCEEDED'
+        AND pa.created_at >= ${since}
+      GROUP BY 1, 2
+    `,
+    client.paymentAttempt.findMany({
+      where: { merchantId, createdAt: { gte: since } },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: 6,
+      select: {
+        id: true,
+        reference: true,
+        status: true,
+        totalChargedAmount: true,
+        currency: true,
+        createdAt: true,
+        rail: { select: { code: true } },
+      },
+    }),
+    client.wallet.findMany({ where: { merchantId }, select: { currency: true, glAccountId: true } }),
+    client.cashoutRequest.count({ where: { merchantId, state: { in: ["PENDING", "PROCESSING"] } } }),
+  ]);
 
   let volume = decimal(0);
   let commission = decimal(0);
   let net = decimal(0);
   let todayVolume = decimal(0);
+  const todayKey = startOfDay.toISOString().slice(0, 10);
   const byStatus: Record<string, number> = {};
+  let attemptCount = 0;
+  for (const group of statusGroups) {
+    byStatus[group.status] = group._count._all;
+    attemptCount += group._count._all;
+  }
   const dayTotals = new Map<string, { gross: ReturnType<typeof decimal>; commission: ReturnType<typeof decimal>; net: ReturnType<typeof decimal> }>();
   const railTotals = new Map<string, { gross: ReturnType<typeof decimal>; count: number }>();
-
-  for (const attempt of attempts) {
-    byStatus[attempt.status] = (byStatus[attempt.status] ?? 0) + 1;
-    if (attempt.status !== "SUCCEEDED") {
-      continue;
-    }
-    const gross = decimal(attempt.totalChargedAmount);
-    const commissionAmount = decimal(attempt.platformCommissionAmount);
-    const netAmount = decimal(attempt.netMerchantAmount);
+  for (const group of successGroups) {
+    const gross = decimal(group.gross ?? 0);
+    const commissionAmount = decimal(group.commission ?? 0);
+    const netAmount = decimal(group.net ?? 0);
     volume = volume.plus(gross);
     commission = commission.plus(commissionAmount);
     net = net.plus(netAmount);
-    if (attempt.createdAt >= startOfDay) {
+    if (group.day === todayKey) {
       todayVolume = todayVolume.plus(gross);
     }
-
-    const day = attempt.createdAt.toISOString().slice(0, 10);
-    const dayEntry = dayTotals.get(day) ?? { gross: decimal(0), commission: decimal(0), net: decimal(0) };
-    dayTotals.set(day, {
+    const dayEntry = dayTotals.get(group.day) ?? { gross: decimal(0), commission: decimal(0), net: decimal(0) };
+    dayTotals.set(group.day, {
       gross: dayEntry.gross.plus(gross),
       commission: dayEntry.commission.plus(commissionAmount),
       net: dayEntry.net.plus(netAmount),
     });
-
-    const railCode = attempt.rail?.code ?? "UNKNOWN";
+    const railCode = group.railCode ?? "UNKNOWN";
     const railEntry = railTotals.get(railCode) ?? { gross: decimal(0), count: 0 };
-    railTotals.set(railCode, { gross: railEntry.gross.plus(gross), count: railEntry.count + 1 });
+    railTotals.set(railCode, { gross: railEntry.gross.plus(gross), count: railEntry.count + Number(group.count) });
   }
 
-  const [wallets, pendingCashouts] = await Promise.all([
-    client.wallet.findMany({
-      where: { merchantId },
-      select: { currency: true, glAccount: { select: { checkpointBalance: true } } },
-    }),
-    client.cashoutRequest.count({ where: { merchantId, state: { in: ["PENDING", "PROCESSING"] } } }),
-  ]);
-
-  const walletBalance = wallets.reduce(
-    (total, wallet) => total.plus(decimal(wallet.glAccount?.checkpointBalance ?? 0)),
-    decimal(0),
-  );
-  const currency = wallets[0]?.currency ?? attempts[0]?.currency ?? "LYD";
+  // Live wallet balance (shards, or checkpoint + post-checkpoint lines). The
+  // previous code summed gl_accounts.checkpoint_balance only, which is stale
+  // between checkpoints (and debit-positive).
+  const liveBalances = await loadLiveAccountBalances(client as never, walletRows.map((wallet) => wallet.glAccountId));
+  const walletBalance = liveBalances.reduce((total, row) => total.plus(decimal(row.balance)), decimal(0));
+  const attempts = { length: attemptCount };
+  const currency = walletRows[0]?.currency ?? recent[0]?.currency ?? "LYD";
   const succeeded = byStatus.SUCCEEDED ?? 0;
   const successRate = attempts.length > 0 ? ((succeeded / attempts.length) * 100).toFixed(2) : "0.00";
 
@@ -2546,7 +2650,7 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
     todayVolume: todayVolume.toFixed(4),
     successRate,
     pendingCashouts: String(pendingCashouts),
-    recentPayments: attempts.slice(0, 6).map((attempt) => ({
+    recentPayments: recent.map((attempt) => ({
       id: attempt.id,
       reference: attempt.reference,
       railCode: attempt.rail?.code ?? "UNKNOWN",

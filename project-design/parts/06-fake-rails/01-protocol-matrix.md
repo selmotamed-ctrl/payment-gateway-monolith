@@ -12,9 +12,9 @@ code:
   - core-back/prisma/seedBlueprints.ts
   - core-back/prisma/seedFakeRails.ts
 design_sources:
-  - design/fake_payment_rails_service_architecture.md#4-comprehensive-multi-rail-protocol-emulation-all-20-gateways-9-modes
-  - design/fake_payment_rails_service_architecture.md#4-1-complete-endpoint-protocol-map-in-fake-rails-back
-  - design/fake_payment_rails_service_architecture.md#4-2-interactive-browser-flows-redirect-embedded-mode-simulation
+  - design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md#4-comprehensive-multi-rail-protocol-emulation-all-20-gateways-9-modes
+  - design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md#4-1-complete-endpoint-protocol-map-in-fake-rails-back
+  - design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md#4-2-interactive-browser-flows-redirect-embedded-mode-simulation
 tests:
   - fake-rails-back/test/chaos.test.ts
   - fake-rails-back/test/api.test.ts
@@ -302,9 +302,9 @@ Only the outbound webhook path computes signatures (`FakeCryptoSigner` plus six 
 
 ### Old design sections
 
-- `design/fake_payment_rails_service_architecture.md` section 4 and 4.1.
-- `design/fake_payment_rails_service_architecture.md` section 4.2.
-- `design/fake_payment_rails_service_architecture.md` section 5 for chaos phase intent.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 4 and 4.1.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 4.2.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 5 for chaos phase intent.
 
 ### Code paths
 

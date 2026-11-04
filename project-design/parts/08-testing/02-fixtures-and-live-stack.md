@@ -17,8 +17,8 @@ code:
   - core-back/test/exhaustive/_harness.ts
   - core-back/test/storage-engine/helpers/db.ts
 design_sources:
-  - design/master_exhaustive_test_plan_for_opencode.md#10-2-environment
-  - design/master_exhaustive_test_plan_for_opencode.md#12-suite-11-full-cross-service-end-to-end-journeys-synthetic-seeder-deploy-engine-verification-1200-tests
+  - design/05-testing/master_exhaustive_test_plan_for_opencode.md#10-2-environment
+  - design/05-testing/master_exhaustive_test_plan_for_opencode.md#12-suite-11-full-cross-service-end-to-end-journeys-synthetic-seeder-deploy-engine-verification-1200-tests
 tests:
   - tests/e2e/fixtures.ts
   - tests/e2e-live/live.spec.ts
@@ -310,9 +310,9 @@ No test in this part verifies the fixture itself. The fixture is exercised indir
 
 ### Old design sections
 
-- `design/master_exhaustive_test_plan_for_opencode.md` section 10.2.
-- `design/master_exhaustive_test_plan_for_opencode.md` section 12.
-- `design/master_exhaustive_test_plan_for_opencode.md` section 13.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` section 10.2.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` section 12.
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md` section 13.
 
 ### Code paths
 

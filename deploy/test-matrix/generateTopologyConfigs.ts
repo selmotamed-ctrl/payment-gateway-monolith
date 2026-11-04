@@ -1,24 +1,38 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { LabHostsConfig, TopologyId } from "./types";
-import { buildAllTopologySpecs } from "./topologies";
+import type { LabConfig } from "./labConfig";
+import type { LabSecrets } from "./labSecrets";
+import type { ResolvedIntensity } from "./intensity";
+import type { DerivedTopology } from "./topologyDerivation";
+import { renderEnvFile, renderTopologyEnv } from "./topologies";
 
-const renderEnv = (env: Record<string, string>): string =>
-  `${Object.entries(env).map(([key, value]) => `${key}=${JSON.stringify(value)}`).join("\n")}\n`;
+export const DEFAULT_CONFIGS_DIR = join(import.meta.dirname, "configs");
 
-export const configPathFor = (id: TopologyId, directory = join(import.meta.dirname, "configs")): string =>
-  join(directory, `deploy.${id}.env`);
+export const configPathFor = (config: LabConfig, topology: DerivedTopology, directory = DEFAULT_CONFIGS_DIR): string =>
+  join(directory, config.lab.name, `deploy.${topology.slug}.env`);
 
-export const writeTopologyConfigs = (lab: LabHostsConfig, directory = join(import.meta.dirname, "configs")): string[] => {
-  mkdirSync(directory, { recursive: true });
-  const paths: string[] = [];
-  for (const spec of buildAllTopologySpecs()) {
-    const path = configPathFor(spec.id, directory);
-    writeFileSync(path, renderEnv(spec.buildEnv(lab)), { mode: 0o600 });
-    paths.push(path);
+/**
+ * Writes one deploy.env per selected topology with mode 0600 under the
+ * git-ignored `configs/<lab>/` directory. The files contain runtime secrets
+ * (generated lab secrets and, if used, the sudo password from the env var)
+ * and are never committed.
+ */
+export const writeTopologyConfigs = (input: {
+  config: LabConfig;
+  topologies: DerivedTopology[];
+  secrets: LabSecrets;
+  intensity: ResolvedIntensity;
+  sudoPassword: string;
+  directory?: string;
+}): Map<string, string> => {
+  const directory = input.directory ?? DEFAULT_CONFIGS_DIR;
+  mkdirSync(join(directory, input.config.lab.name), { recursive: true, mode: 0o700 });
+  const paths = new Map<string, string>();
+  for (const topology of input.topologies) {
+    const path = configPathFor(input.config, topology, directory);
+    writeFileSync(path, renderEnvFile(renderTopologyEnv({ ...input, topology })), { mode: 0o600 });
+    chmodSync(path, 0o600);
+    paths.set(topology.id, path);
   }
   return paths;
 };
-
-export { buildAllTopologySpecs } from "./topologies";
-export type { TopologyMatrixSpec } from "./types";

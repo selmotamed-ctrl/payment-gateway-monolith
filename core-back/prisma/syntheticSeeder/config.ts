@@ -100,8 +100,14 @@ export const loadSeederConfig = (now = new Date()): SeederConfig => {
   const rawProfile = (process.env.SYNTHETIC_SEED_PROFILE ?? process.env.SYNTHETIC_DATA_PROFILE ?? "STANDARD").toUpperCase();
   const profile: SeederProfile = rawProfile === "COMPACT" || rawProfile === "STRESS" ? rawProfile : "STANDARD";
   const volumes = { ...PROFILES[profile] };
-  const years = Number(process.env.SYNTHETIC_YEARS_SPAN ?? process.env.SYNTHETIC_DATA_YEARS ?? volumes.yearsSpan);
-  if (Number.isFinite(years) && years > 0) {
+  // `deploy/lib/hostPlanner.ts` writes SYNTHETIC_SEED_YEARS_SPAN; the seeder
+  // historically read only SYNTHETIC_YEARS_SPAN, so the deployed span was
+  // silently ignored. Every spelling is accepted now (first one set wins).
+  const rawYears = process.env.SYNTHETIC_SEED_YEARS_SPAN
+    ?? process.env.SYNTHETIC_YEARS_SPAN
+    ?? process.env.SYNTHETIC_DATA_YEARS;
+  const years = Number(rawYears ?? volumes.yearsSpan);
+  if (Number.isFinite(years) && years > 0 && years <= 10) {
     volumes.yearsSpan = years;
   }
   return {

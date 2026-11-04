@@ -11,9 +11,9 @@ code:
   - fake-rails-back/engine/**
   - fake-rails-back/lib/**
 design_sources:
-  - design/fake_payment_rails_service_architecture.md#1-service-topology-isolation-boundary-workspace-layout
-  - design/fake_payment_rails_service_architecture.md#2-deployment-engine-integration-production-guardrails
-  - design/fake_payment_rails_service_architecture.md#3-single-user-authentication-architecture
+  - design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md#1-service-topology-isolation-boundary-workspace-layout
+  - design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md#2-deployment-engine-integration-production-guardrails
+  - design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md#3-single-user-authentication-architecture
 tests:
   - fake-rails-back/test/api.test.ts
   - fake-rails-back/test/crypto.test.ts
@@ -267,9 +267,9 @@ bun run start
 
 ### Old design sections
 
-- `design/fake_payment_rails_service_architecture.md` sections 1, 2 and 3.
-- `design/fake_payment_rails_service_architecture.md` section 5.3 for the SQLite schema intent.
-- `design/fake_payment_rails_service_architecture.md` section 8 for the implementation checklist.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` sections 1, 2 and 3.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 5.3 for the SQLite schema intent.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 8 for the implementation checklist.
 
 ### Code paths
 

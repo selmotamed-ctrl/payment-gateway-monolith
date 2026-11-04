@@ -1,11 +1,13 @@
 import { createI18n } from "vue-i18n";
 import { en as vuetifyEn, ar as vuetifyAr } from "vuetify/locale";
 import { appCatalogue } from "@/constants/i18nCatalogue";
+import { landingCatalogue } from "@/constants/landingCatalogue";
 
 const buildAppMessages = () => {
     const en: Record<string, string> = {};
     const ar: Record<string, string> = {};
-    for (const [key, pair] of Object.entries(appCatalogue)) {
+    // The app catalogue wins on any key collision (the landing test forbids collisions).
+    for (const [key, pair] of Object.entries({ ...landingCatalogue, ...appCatalogue })) {
         en[key] = pair[0];
         ar[key] = pair[1];
     }

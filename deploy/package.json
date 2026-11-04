@@ -7,8 +7,12 @@
     "deploy": "bun run deploy.ts",
     "typecheck": "bunx --bun tsc --noEmit",
     "test": "bun test",
-    "test-matrix:bootstrap": "bun run test-matrix/bootstrapTwoMachineLab.ts",
-    "test-matrix": "bun run test-matrix/runAllTopologiesAndHeal.ts"
+    "test-matrix:schema": "bun run test-matrix/cli.ts schema",
+    "test-matrix:validate": "bun run test-matrix/cli.ts validate",
+    "test-matrix:plan": "bun run test-matrix/cli.ts plan",
+    "test-matrix:bootstrap": "bun run test-matrix/cli.ts bootstrap",
+    "test-matrix:teardown": "bun run test-matrix/cli.ts teardown",
+    "test-matrix": "bun run test-matrix/cli.ts run"
   },
   "dependencies": {
     "zod": "^4.5.4"

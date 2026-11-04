@@ -9,6 +9,8 @@ export interface InvariantPrismaClient {
   journalLine: {
     findMany(args?: { where?: Record<string, unknown> }): Promise<JournalLineRecord[]>;
   };
+  /** When present, every account is summed by PostgreSQL in ONE statement. */
+  $queryRawUnsafe?: (query: string, ...values: unknown[]) => Promise<unknown>;
 }
 
 export interface InvariantBalanceProvider {
@@ -107,6 +109,33 @@ export class InvariantVerifier {
   private async loadBalances(): Promise<AccountBalance[]> {
     if (!this.client) {
       return [];
+    }
+    if (typeof this.client.$queryRawUnsafe === "function") {
+      // Exact NUMERIC sums in the database, one statement for the whole chart
+      // of accounts (was: one journal_lines query per account every 60 s,
+      // summed row by row in JS).
+      const rows = (await this.client.$queryRawUnsafe(
+        `SELECT g.id::text AS id, g.account_type::text AS "accountType",
+                g.checkpoint_balance::text AS "checkpointBalance", g.checkpoint_at AS "checkpointAt",
+                COALESCE(SUM(CASE WHEN jl.direction = 'DEBIT' THEN jl.amount ELSE -jl.amount END), 0)::text AS delta
+         FROM gl_accounts g
+         LEFT JOIN journal_lines jl
+           ON jl.gl_account_id = g.id
+          AND (g.checkpoint_at IS NULL OR jl.created_at > g.checkpoint_at)
+         GROUP BY g.id, g.account_type, g.checkpoint_balance, g.checkpoint_at`,
+      )) as Array<{ id: string; accountType: string; checkpointBalance: string | null; checkpointAt: Date | null; delta: string }>;
+      return rows.map((row) => {
+        const checkpointBalance = decimal(row.checkpointBalance ?? 0);
+        const delta = decimal(row.delta ?? 0);
+        return {
+          accountId: row.id,
+          accountType: row.accountType as AccountBalance["accountType"],
+          checkpointBalance,
+          delta,
+          liveBalance: checkpointBalance.plus(delta),
+          checkpointAt: row.checkpointAt ?? undefined,
+        };
+      });
     }
     const accounts = await this.client.glAccount.findMany();
     const balances: AccountBalance[] = [];

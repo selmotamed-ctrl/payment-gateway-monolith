@@ -20,13 +20,13 @@ code:
   - core-back/lib/approvalQueue.ts
   - core-back/engine/governance/GovernanceExecution.ts
 design_sources:
-  - design/payment_gateway_final_design-v5.md#16-complete-multi-service-api-surface-mapping
-  - design/payment_gateway_final_design-v5.md#161-checkout-back-public-api-apiv1pay-apiv1inbound--forwards-to-core-back-internalcheckout
-  - design/payment_gateway_final_design-v5.md#162-merchant-back-public-api-apiv1merchant-apiv1external--forwards-to-core-back-internalmerchant
-  - design/payment_gateway_final_design-v5.md#163-admin-back-lan-only-api-apiv1admin--forwards-to-core-back-internaladmin
-  - design/payment-gateway-refined-design-v4.1.md#14-the-8-step-admin-add-a-gateway-wizard--6-stage-delivery-plan
-  - design/payment-gateway-refined-design-v4.1.md#154-the-four-eyes-action-matrix
-  - design/fixes/_0001_operator_cases.md
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#16-complete-multi-service-api-surface-mapping
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#161-checkout-back-public-api-apiv1pay-apiv1inbound--forwards-to-core-back-internalcheckout
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#162-merchant-back-public-api-apiv1merchant-apiv1external--forwards-to-core-back-internalmerchant
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#163-admin-back-lan-only-api-apiv1admin--forwards-to-core-back-internaladmin
+  - design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#14-the-8-step-admin-add-a-gateway-wizard--6-stage-delivery-plan
+  - design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#154-the-four-eyes-action-matrix
+  - design/10-fixes/_0001_operator_cases.md
 tests:
   - core-back/test/internal-routes.test.ts
   - core-back/test/list-query.test.ts
@@ -572,10 +572,10 @@ No build or test was run for this documentation change. Database-backed route te
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` §16.1 checkout, §16.2 merchant, §16.3 admin.
-- `design/payment-gateway-refined-design-v4.1.md` §14.1 wizard, §15.4 four-eyes matrix.
-- `design/fixes/_0001_operator_cases.md` for the operator-case route family.
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md` §15 API surface and observability.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §16.1 checkout, §16.2 merchant, §16.3 admin.
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` §14.1 wizard, §15.4 four-eyes matrix.
+- `design/10-fixes/_0001_operator_cases.md` for the operator-case route family.
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` §15 API surface and observability.
 
 ### Code paths
 

@@ -16,9 +16,9 @@ code:
   - checkout-front/src/utils/redirect.ts
   - checkout-front/src/constants/urlsMap/index.ts
 design_sources:
-  - design/payment_gateway_deployment_and_guides_architecture.md
-  - design/complete_zero_to_hero_guides_and_academy_specification.md
-  - design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md
+  - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md
+  - design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md
+  - design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md
 tests:
   - tests/e2e/checkout/pay.spec.ts
   - tests/e2e/checkout/a11y.spec.ts
@@ -305,9 +305,9 @@ The Playwright/live suites require the running stack; the redirect unit test is 
 
 ### Old design sections
 
-- `design/payment_gateway_deployment_and_guides_architecture.md` — checkout deployment/help context.
-- `design/complete_zero_to_hero_guides_and_academy_specification.md` — collection modes, confirmation channels and trusted-success facts referenced by the guide.
-- `design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — payer surface token/primitives intent.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` — checkout deployment/help context.
+- `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` — collection modes, confirmation channels and trusted-success facts referenced by the guide.
+- `design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — payer surface token/primitives intent.
 
 ### Code paths
 

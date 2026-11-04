@@ -12,9 +12,9 @@ code:
   - fake-rails-back/api/portal/**
   - fake-rails-front/src/**
 design_sources:
-  - design/fake_payment_rails_service_architecture.md#5-probabilistic-chaos-failure-injection-engine
-  - design/fake_payment_rails_service_architecture.md#6-single-user-tester-portal-dashboard-architecture-fake-rails-front
-  - design/fake_payment_rails_service_architecture.md#5-3-embedded-sqlite-schema
+  - design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md#5-probabilistic-chaos-failure-injection-engine
+  - design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md#6-single-user-tester-portal-dashboard-architecture-fake-rails-front
+  - design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md#5-3-embedded-sqlite-schema
 tests:
   - fake-rails-back/test/chaos.test.ts
   - fake-rails-back/test/api.test.ts
@@ -340,9 +340,9 @@ curl -X POST http://127.0.0.1:4104/portal-api/webhooks/$TX_ID/fire \
 
 ### Old design sections
 
-- `design/fake_payment_rails_service_architecture.md` section 5.
-- `design/fake_payment_rails_service_architecture.md` section 5.1, 5.2 and 5.3.
-- `design/fake_payment_rails_service_architecture.md` section 6 and 6.1.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 5.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 5.1, 5.2 and 5.3.
+- `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` section 6 and 6.1.
 
 ### Code paths
 

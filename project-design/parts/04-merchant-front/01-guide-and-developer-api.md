@@ -13,8 +13,8 @@ code:
   - merchant-front/src/pages/guide/developers/index.tsx
   - merchant-front/src/components/guide/**
 design_sources:
-  - design/complete_zero_to_hero_guides_and_academy_specification.md
-  - design/payment_gateway_deployment_and_guides_architecture.md
+  - design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md
+  - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md
 tests:
   - merchant-front/src/content/__tests__/content-completeness.test.ts
   - tests/e2e/exhaustive/exhaustive-merchant-surface.spec.ts
@@ -270,8 +270,8 @@ The content test is a Bun test; the Playwright suites require the live stack.
 
 ### Old design sections
 
-- `design/complete_zero_to_hero_guides_and_academy_specification.md` — merchant operations and developer API content baseline.
-- `design/payment_gateway_deployment_and_guides_architecture.md` — merchant guide/portal architecture context.
+- `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` — merchant operations and developer API content baseline.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` — merchant guide/portal architecture context.
 
 ### Code paths
 

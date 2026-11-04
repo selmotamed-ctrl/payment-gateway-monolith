@@ -16,10 +16,10 @@ code:
   - core-back/prisma/seedGlAccounts.ts
   - core-back/prisma/schema.prisma
 design_sources:
-  - design/payment_gateway_final_design-v5.md#11
-  - design/payment-gateway-refined-design-v4.1.md#9
-  - design/Dynamic-Payment-Gateway-Management-Design-v2.md#10
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#31
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#11
+  - design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#9
+  - design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md#10
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#31
 tests:
   - core-back/test/engine/ledger.test.ts
   - core-back/test/phase2-ledger-and-governance.test.ts
@@ -369,8 +369,8 @@ The unit suites run without PostgreSQL. The checkpoint, shard, UoW, and write-pa
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` §11 — fee bearers, invariant, 15 worked entries; `design/payment-gateway-refined-design-v4.1.md` §9 — original ledger model and entries.
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md` §10 — clearing account rationale and merchant-direct model; `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` §3.1 — sharded sub-accounts and read path.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §11 — fee bearers, invariant, 15 worked entries; `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` §9 — original ledger model and entries.
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` §10 — clearing account rationale and merchant-direct model; `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` §3.1 — sharded sub-accounts and read path.
 - `core-back/test/exhaustive/02-ledger/all-15-templates-matrix.test.ts` — current 20-label matrix despite the historical title.
 
 ### Code paths

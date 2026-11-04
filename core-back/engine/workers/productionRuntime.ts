@@ -311,14 +311,21 @@ export const createProductionWorkerRuntime = (
       ? [
           new OutboxRelayWorker(options.db as unknown as PrismaClient, {
             intervalMs: 250,
+            maxIdleIntervalMs: 2_000,
             batchSize: Math.max(50, (options.batchSize ?? 50) * 2),
+            retention: { retentionMs: env.STORAGE_OUTBOX_RETENTION_MS },
           }),
           ...(options.storage.auditStore instanceof DedicatedAuditDatabaseDriver
             ? [
                 new AuditShipperWorker(
                   options.db as unknown as PrismaClient,
                   options.storage.auditStore,
-                  { intervalMs: 500, batchSize: Math.max(50, (options.batchSize ?? 50) * 2) },
+                  {
+                    intervalMs: 500,
+                    maxIdleIntervalMs: 5_000,
+                    batchSize: Math.max(50, (options.batchSize ?? 50) * 2),
+                    retention: { retentionMs: env.STORAGE_AUDIT_OUTBOX_RETENTION_MS },
+                  },
                 ),
               ]
             : []),

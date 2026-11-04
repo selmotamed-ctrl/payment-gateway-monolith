@@ -12,9 +12,9 @@ code:
   - admin-front/src/pages/academy/**
   - admin-front/src/components/guide/**
 design_sources:
-  - design/complete_zero_to_hero_guides_and_academy_specification.md
-  - design/guide_system_design_and_content (2).md
-  - design/payment_gateway_deployment_and_guides_architecture.md
+  - design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md
+  - design/07-guides-and-academy/guide_system_design_and_content.md
+  - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md
 tests:
   - admin-front/src/content/__tests__/content-completeness.test.ts
   - tests/e2e/exhaustive/exhaustive-admin-surface.spec.ts
@@ -43,7 +43,7 @@ It does not own the merchant guide or checkout help center. It also does not pre
 
 ## 2. Design intent (extracted and synthesized from ./design)
 
-The implemented baseline is the "zero-to-hero" specification in `design/complete_zero_to_hero_guides_and_academy_specification.md`:
+The implemented baseline is the "zero-to-hero" specification in `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md`:
 
 1. **The guide is an operational manual, not a feature tour.** Every chapter explains the concept, the exact workflow, the screen to use, and the human error to avoid.
 2. **The reader is assumed to know nothing.** The glossary defines every banking, accounting, compliance and software term with an analogy and a fatal-error warning.
@@ -53,7 +53,7 @@ The implemented baseline is the "zero-to-hero" specification in `design/complete
 6. **Content is data, not hard-coded prose in TSX.** Books, chapters, glossary entries and academy modules live in typed content modules so the UI can render, search and test them.
 7. **Every claim must be testable.** The content-completeness test asserts book count, chapter depth, glossary counts, status/collection/channel/runbook counts, edge-case count, module count, lesson depth, lab traps, quiz count and track definitions.
 
-The future guide v2 specification in `design/guide_system_design_and_content (2).md` goes further: 14 books (0-13), 125 articles, a 23-screen context map, safeguard cards, a symptom playbook, reading paths, read tracking, five simulators and an edge-case catalog. It is not the current implementation.
+The future guide v2 specification in `design/07-guides-and-academy/guide_system_design_and_content.md` goes further: 14 books (0-13), 125 articles, a 23-screen context map, safeguard cards, a symptom playbook, reading paths, read tracking, five simulators and an edge-case catalog. It is not the current implementation.
 
 ## 3. As-built architecture
 
@@ -242,7 +242,7 @@ Progress persistence uses `GET/PUT v1/admin/academy/progress`. It stores complet
 
 ### Missing / deferred
 
-- **Guide v2 is missing.** Target: 14 books (0-13), 125 articles, 23 context-map screens, five simulators, reading paths, safeguard cards, symptom playbook, read tracking and a full edge-case catalog. See `project-design/parts/09-future-and-unimplemented/01-guide-v2.md` and `design/guide_system_design_and_content (2).md`.
+- **Guide v2 is missing.** Target: 14 books (0-13), 125 articles, 23 context-map screens, five simulators, reading paths, safeguard cards, symptom playbook, read tracking and a full edge-case catalog. See `project-design/parts/09-future-and-unimplemented/01-guide-v2.md` and `design/07-guides-and-academy/guide_system_design_and_content.md`.
 - No server-side quiz/lab validation.
 - No immutable certification record or expiry/re-certification cycle.
 - No completion tracking tied to route-level or authority-level access grants.
@@ -272,9 +272,9 @@ The content test is a Bun test and does not require PostgreSQL. The Playwright s
 
 ### Old design sections
 
-- `design/complete_zero_to_hero_guides_and_academy_specification.md` — implemented 12-book/8-module baseline.
-- `design/guide_system_design_and_content (2).md` — future guide v2 workstream, not current.
-- `design/payment_gateway_deployment_and_guides_architecture.md` — deployment and guide architecture context.
+- `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` — implemented 12-book/8-module baseline.
+- `design/07-guides-and-academy/guide_system_design_and_content.md` — future guide v2 workstream, not current.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` — deployment and guide architecture context.
 
 ### Code paths
 

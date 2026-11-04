@@ -15,9 +15,9 @@ code:
   - checkout-front/src/router/index.ts
   - checkout-front/src/pages/**
 design_sources:
-  - design/ui/portal_ui_implementation_plan.md
-  - design/fixes/_0001_operator_cases.md
-  - design/guide_system_design_and_content (2).md
+  - design/06-ui/portal_ui_implementation_plan.md
+  - design/10-fixes/_0001_operator_cases.md
+  - design/07-guides-and-academy/guide_system_design_and_content.md
 tests:
   - tests/e2e/admin/shell.spec.ts
   - tests/e2e/exhaustive/exhaustive-admin-surface.spec.ts
@@ -236,9 +236,9 @@ These suites require a running stack and are skipped without the live/edge servi
 
 ### Old design sections
 
-- `design/ui/portal_ui_implementation_plan.md` — page and shell rollout.
-- `design/fixes/_0001_operator_cases.md` — operator-case and inquiry workflow.
-- `design/guide_system_design_and_content (2).md` — future guide route/context-map expectations (not current).
+- `design/06-ui/portal_ui_implementation_plan.md` — page and shell rollout.
+- `design/10-fixes/_0001_operator_cases.md` — operator-case and inquiry workflow.
+- `design/07-guides-and-academy/guide_system_design_and_content.md` — future guide route/context-map expectations (not current).
 
 ### Code paths
 

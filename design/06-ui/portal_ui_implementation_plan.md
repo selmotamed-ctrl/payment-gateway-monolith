@@ -1,7 +1,7 @@
 # Portal UI Abstraction & Modern FinTech Redesign — Execution Plan
 
 **Status:** Approved for implementation  
-**Source blueprint:** `design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md`  
+**Source blueprint:** `design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md`  
 **Execution date:** 2026-11-02  
 **Working branch:** `master`
 
@@ -473,7 +473,7 @@ Test harness corrections:
 
 ## 10. v2.0 implementation plan — padding, compact tables, row actions, SectionFields
 
-Source: `design/ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md`
+Source: `design/06-ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md`
 
 ### 10.1 Non-negotiable v2 outcomes
 

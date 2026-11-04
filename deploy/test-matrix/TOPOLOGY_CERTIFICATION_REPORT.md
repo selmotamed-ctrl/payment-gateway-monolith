@@ -1,5 +1,7 @@
 # Two-Machine Multi-Topology Certification Report
 
+> Historical (2026-11-03): produced by the superseded two-machine runner. It records no config hash or intensity, and its "Gates" column counts gates that ran, not gates that passed (2/11 = gate 1 passed, gate 2 failed, 9 not run). New runs write `reports/<runId>/report.{md,json}`; see `README.md`.
+
 Generated: 2026-11-03T20:37:34.353Z
 
 | Topology | Name | Deploy | Gates | Gate status |

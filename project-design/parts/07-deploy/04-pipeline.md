@@ -13,9 +13,9 @@ code:
   - deploy/templates/**
   - deploy/DEPLOYMENT_GUIDE.md
 design_sources:
-  - design/payment_gateway_deployment_and_guides_architecture.md#6-ordered-14-step-multi-host-deployment-pipeline
-  - design/payment_gateway_deployment_and_guides_architecture.md#2-complete-deploy-directory-structure
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#61-upgraded-deploydeployenvexample-horizontal-node-arrays--individual-storage-solutions
+  - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#6-ordered-14-step-multi-host-deployment-pipeline
+  - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#2-complete-deploy-directory-structure
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#61-upgraded-deploydeployenvexample-horizontal-node-arrays--individual-storage-solutions
 tests:
   - deploy/test/pipeline.test.ts
   - deploy/test/rollingDeploy.test.ts
@@ -240,7 +240,7 @@ It then prints `Deployment complete.` There is no post-deploy state file and no 
 
 - `deploy/deploy.sh`: Bun/env preflight and `exec bun run deploy.ts`.
 - `deploy/deploy.ts`: pipeline.
-- `deploy/lib/sshRunner.ts`: SSH/sudo/rsync/file streaming.
+- `deploy/lib/sshRunner.ts`: SSH/sudo/rsync/file streaming. A sudo `writeRemoteFile` to a remote host reads the password line in a small remote script and installs a 0600 temp copy with `sudo install`, so the password can never be written into the file (2026-11-04 fix: the previous `sudo -S bash -c 'cat > file'` wrote the password as line 1 when sudo was NOPASSWD or had a cached timestamp). `capture()` now forwards `timeoutMs`.
 - `deploy/lib/healthVerifier.ts`: probes.
 - `deploy/templates/**`: live Nginx templates and dead PM2 templates.
 - Generated release tree on each host.
@@ -320,9 +320,9 @@ No test performs a real multi-host deployment, migration, PM2 restart or Nginx r
 
 ### Old design sections
 
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 6, 14-step pipeline.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 2, directory structure.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.1, horizontal deployment.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 6, 14-step pipeline.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 2, directory structure.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.1, horizontal deployment.
 
 ### Code paths
 

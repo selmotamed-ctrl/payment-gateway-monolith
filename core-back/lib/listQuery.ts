@@ -125,6 +125,16 @@ export interface ListSpec {
   sortable?: Record<string, string>;
   defaultSort: Record<string, "asc" | "desc"> | Array<Record<string, "asc" | "desc">>;
   defaultPageSize?: number;
+  /**
+   * Top-level NOT NULL columns that may drive keyset (cursor) pagination in
+   * addition to `createdAt`, `updatedAt` and `id`. A sort on any other column
+   * (nullable, or a relation path) falls back to offset pagination.
+   */
+  keysetFields?: string[];
+}
+
+export interface KeysetPlan {
+  fields: Array<{ path: string; direction: "asc" | "desc" }>;
 }
 
 export interface BuiltListQuery {
@@ -134,7 +144,103 @@ export interface BuiltListQuery {
   pageSize: number;
   skip: number;
   take: number;
+  /** Present when the active sort can be paged with a cursor. */
+  keyset?: KeysetPlan;
+  /** True when the request supplied a valid `cursor` (skip is then 0). */
+  cursorApplied: boolean;
+  /** False when the client sent `includeTotal=false` (skip the COUNT). */
+  includeTotal: boolean;
 }
+
+const DEFAULT_KEYSET_FIELDS = new Set(["createdAt", "updatedAt", "id"]);
+
+type CursorValue = string | number | boolean | { d: string } | { n: string };
+
+const encodeCursorValue = (value: unknown): CursorValue | undefined => {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? undefined : { d: value.toISOString() };
+  }
+  if (typeof value === "string" || typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : undefined;
+  }
+  if (typeof value === "bigint") {
+    return { n: value.toString() };
+  }
+  if (value && typeof value === "object" && typeof (value as { toFixed?: unknown }).toFixed === "function") {
+    // Prisma.Decimal / decimal.js: keep the exact decimal text, never a float.
+    return { n: String(value) };
+  }
+  return undefined;
+};
+
+const decodeCursorValue = (value: unknown): unknown => {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (typeof record.d === "string") {
+      const date = new Date(record.d);
+      if (!Number.isNaN(date.getTime())) {
+        return date;
+      }
+    }
+    if (typeof record.n === "string" && /^-?\d+(\.\d+)?$/.test(record.n)) {
+      return new Prisma.Decimal(record.n);
+    }
+  }
+  throw new Error("INVALID_CURSOR_VALUE");
+};
+
+/** Encodes the keyset position of `row` (sort values + id) as an opaque token. */
+export const encodeListCursor = (keyset: KeysetPlan, row: Record<string, unknown>): string | undefined => {
+  const values: CursorValue[] = [];
+  for (const field of keyset.fields) {
+    const encoded = encodeCursorValue(row[field.path]);
+    if (encoded === undefined) {
+      return undefined;
+    }
+    values.push(encoded);
+  }
+  return Buffer.from(JSON.stringify(values), "utf8").toString("base64url");
+};
+
+const decodeListCursor = (keyset: KeysetPlan, token: string): unknown[] | undefined => {
+  try {
+    if (token.length > 2048) {
+      return undefined;
+    }
+    const parsed = JSON.parse(Buffer.from(token, "base64url").toString("utf8")) as unknown;
+    if (!Array.isArray(parsed) || parsed.length !== keyset.fields.length) {
+      return undefined;
+    }
+    return parsed.map(decodeCursorValue);
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Rows strictly after the cursor for ORDER BY f1 d1, ..., fn dn:
+ * OR_k (f1 = v1 AND ... AND f(k-1) = v(k-1) AND fk (> | <) vk).
+ * Only NOT NULL columns are keyset fields, so no NULL ordering rules apply.
+ */
+export const keysetWhere = (keyset: KeysetPlan, values: unknown[]): Record<string, unknown> => {
+  const branches: Record<string, unknown>[] = [];
+  for (let index = 0; index < keyset.fields.length; index += 1) {
+    const clause: Record<string, unknown>[] = [];
+    for (let prior = 0; prior < index; prior += 1) {
+      clause.push({ [keyset.fields[prior]!.path]: values[prior] });
+    }
+    const field = keyset.fields[index]!;
+    clause.push({ [field.path]: { [field.direction === "asc" ? "gt" : "lt"]: values[index] } });
+    branches.push(clause.length === 1 ? clause[0]! : { AND: clause });
+  }
+  return branches.length === 1 ? branches[0]! : { OR: branches };
+};
 
 export const buildListQuery = (raw: unknown, spec: ListSpec): BuiltListQuery => {
   const query = parseListQuery(raw);
@@ -217,12 +323,82 @@ export const buildListQuery = (raw: unknown, spec: ListSpec): BuiltListQuery => 
   const requestedPageSize = typeof rawSource.pageSize === "string" && rawSource.pageSize !== "";
   const pageSize = Math.min(200, Math.max(1, requestedPageSize ? query.pageSize : spec.defaultPageSize ?? query.pageSize));
   const page = query.page;
-  return { where, orderBy, page, pageSize, skip: (page - 1) * pageSize, take: pageSize };
+  const includeTotal = asString(rawSource.includeTotal) !== "false";
+
+  // Keyset pagination (GAP-002): available when every ORDER BY term is a
+  // top-level NOT NULL column. A valid `cursor` replaces OFFSET, so deep pages
+  // cost the same as the first page instead of scanning and discarding
+  // (page - 1) * pageSize rows.
+  const allowed = new Set([...DEFAULT_KEYSET_FIELDS, ...(spec.keysetFields ?? [])]);
+  const fields: KeysetPlan["fields"] = [];
+  let keysetable = true;
+  for (const term of orderBy) {
+    const entries = Object.entries(term);
+    const [path, direction] = entries[0] ?? [];
+    if (entries.length !== 1 || !path || path.includes(".") || !allowed.has(path)
+      || (direction !== "asc" && direction !== "desc")) {
+      keysetable = false;
+      break;
+    }
+    fields.push({ path, direction });
+  }
+  const keyset = keysetable && fields.length > 0 ? { fields } : undefined;
+  const cursorToken = asString(rawSource.cursor);
+  const cursorValues = keyset && cursorToken ? decodeListCursor(keyset, cursorToken) : undefined;
+  if (keyset && cursorValues) {
+    const conditionsWithCursor = [...conditions, keysetWhere(keyset, cursorValues)];
+    return {
+      where: { AND: conditionsWithCursor },
+      orderBy,
+      page,
+      pageSize,
+      skip: 0,
+      take: pageSize,
+      keyset,
+      cursorApplied: true,
+      includeTotal,
+    };
+  }
+  return {
+    where,
+    orderBy,
+    page,
+    pageSize,
+    skip: (page - 1) * pageSize,
+    take: pageSize,
+    ...(keyset ? { keyset } : {}),
+    cursorApplied: false,
+    includeTotal,
+  };
 };
 
+/** Runs `count` unless the client opted out with `includeTotal=false`. */
+export const countUnlessSkipped = async (
+  built: Pick<BuiltListQuery, "includeTotal">,
+  count: () => Promise<number>,
+): Promise<number | null> => (built.includeTotal ? count() : null);
+
+/**
+ * Standard list envelope. When the sort supports keyset pagination and a full
+ * page was returned, `nextCursor` carries the position of the last row; the
+ * client passes it back as `cursor`. `sourceRows` are the raw database rows
+ * when `rows` were reshaped and no longer carry the sort columns.
+ */
 export const listResponse = <T>(
   key: string,
   rows: T[],
-  total: number,
-  built: Pick<BuiltListQuery, "page" | "pageSize">,
-): Record<string, unknown> => ({ [key]: rows, total, page: built.page, pageSize: built.pageSize });
+  total: number | null,
+  built: Pick<BuiltListQuery, "page" | "pageSize"> & Partial<Pick<BuiltListQuery, "keyset">>,
+  sourceRows?: readonly unknown[],
+): Record<string, unknown> => {
+  const response: Record<string, unknown> = { [key]: rows, total, page: built.page, pageSize: built.pageSize };
+  const source = sourceRows ?? rows;
+  const last = source[source.length - 1];
+  if (built.keyset && source.length >= built.pageSize && last && typeof last === "object") {
+    const nextCursor = encodeListCursor(built.keyset, last as Record<string, unknown>);
+    if (nextCursor) {
+      response.nextCursor = nextCursor;
+    }
+  }
+  return response;
+};

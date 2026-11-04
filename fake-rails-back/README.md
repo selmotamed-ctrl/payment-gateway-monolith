@@ -470,7 +470,7 @@ Canonical design:
 
 Historical reference only:
 
-- [`design/fake_payment_rails_service_architecture.md`](../design/fake_payment_rails_service_architecture.md)
+- [`design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md`](../design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md)
 
 Related implementation:
 

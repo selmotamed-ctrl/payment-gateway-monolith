@@ -376,15 +376,15 @@ The core test is a unit/authority suite and does not require PostgreSQL. The Pla
 
 ### Old design sections
 
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#1-executive-summary--why-a-declarative-plugin-architecture-is-required`
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#2-product-behavior--ux-contract`
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#3-api-contract--shared-security-predicates`
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#4-server-side-plugin-architecture-core-back`
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#5-admin-bff-layer-admin-back`
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#6-frontend-plugin-registry--global-command-palette-admin-front`
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#7-universal-one-shot-deep-link-composable-useopenquery--page-wiring`
-- `design/performance-efficiency/deep_search_plugin_architecture_plan.md#9-comprehensive-automated-verification--test-plan`
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#3-2-outbox-driven-read-models--uncompromised-20-group-deep-search-on-replicas`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#1-executive-summary--why-a-declarative-plugin-architecture-is-required`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#2-product-behavior--ux-contract`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#3-api-contract--shared-security-predicates`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#4-server-side-plugin-architecture-core-back`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#5-admin-bff-layer-admin-back`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#6-frontend-plugin-registry--global-command-palette-admin-front`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#7-universal-one-shot-deep-link-composable-useopenquery--page-wiring`
+- `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md#9-comprehensive-automated-verification--test-plan`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#3-2-outbox-driven-read-models--uncompromised-20-group-deep-search-on-replicas`
 
 ### Code paths
 

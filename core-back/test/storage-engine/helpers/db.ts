@@ -442,7 +442,8 @@ CREATE TABLE ${schema}.audit_outbox (
   before_json         JSONB        NOT NULL,
   after_json          JSONB        NOT NULL,
   created_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
-  shipped_at          TIMESTAMPTZ  NULL
+  shipped_at          TIMESTAMPTZ  NULL,
+  lease_until         TIMESTAMPTZ  NULL
 );
 
 CREATE TABLE ${schema}.rm_merchant_daily_stats (
@@ -454,6 +455,8 @@ CREATE TABLE ${schema}.rm_merchant_daily_stats (
   failure_count  INT          NOT NULL DEFAULT 0,
   gross_amount   NUMERIC(18, 4) NOT NULL DEFAULT 0,
   net_amount     NUMERIC(18, 4) NOT NULL DEFAULT 0,
+  success_amount NUMERIC(18, 4) NOT NULL DEFAULT 0,
+  success_net_amount NUMERIC(18, 4) NOT NULL DEFAULT 0,
   updated_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
   PRIMARY KEY (merchant_id, day, currency)
 );

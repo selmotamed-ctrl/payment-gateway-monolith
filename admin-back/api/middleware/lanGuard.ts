@@ -8,9 +8,9 @@ const LOOPBACK_CIDRS = ["127.0.0.1/32", "::1/128"];
 /**
  * Peers whose forwarded headers are trusted.
  *
- * The shipped nginx (`design/deploy/nginx-lan-admin.conf`) proxies the back office from
- * the loopback interface and sets `X-Real-IP` (not `X-Real-Client-IP`), so both header
- * names have to be honoured. Forwarded headers are only accepted when the immediate peer
+ * The deploy-rendered nginx (`deploy/templates/nginx.admin.lan.conf.tpl`) proxies the back office from
+ * the loopback interface and sets both `X-Real-IP` and `X-Real-Client-IP`; older hand-written
+ * configs set only `X-Real-IP`, so both header names are honoured. Forwarded headers are only accepted when the immediate peer
  * is a loopback address or an explicitly configured trusted proxy.
  */
 const trustedProxyCidrs = (): string[] => [

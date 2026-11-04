@@ -56,7 +56,7 @@ You can hand these 5 milestones to **OpenCode** for first implementing the featu
 
 ### Milestone 1: Unified Spec Zod Schema & Cross-Field Semantic Validator
 - **Where:**
-  - Payment Gateway: `core-back/engine/specImporter/specSchema.ts` & `specValidator.ts` (mirrored in `admin-back/lib/zReady/specSchema.ts`).
+  - Payment Gateway: `core-back/engine/specImporter/specSchema.ts` & `specValidator.ts` (*corrected 2026-11-04:* the planned `admin-back` mirror was never created; `admin-back` proxies spec import to `core-back`, which is the single validator).
   - Voucher System: `back/lib/specImporter/specSchema.ts` & `specValidator.ts`.
 - **What to Build:**
   - Define the complete `IntegrationSpecSchema` in Zod 4 covering identity, auth, required credentials manifest, flows/queries, mappings/extractions, and `test_vectors`.

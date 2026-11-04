@@ -13,9 +13,9 @@ code:
   - admin-front/src/constants/env/index.ts
   - admin-front/src/pages/**
 design_sources:
-  - design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md
-  - design/ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md
-  - design/ui/portal_ui_implementation_plan.md
+  - design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md
+  - design/06-ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md
+  - design/06-ui/portal_ui_implementation_plan.md
 tests:
   - tests/e2e/admin/table-and-padding-geometry.spec.ts
   - tests/e2e/admin/create.spec.ts
@@ -264,9 +264,9 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 ### Old design sections
 
-- `design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — v1 table, status, row-action and export intent.
-- `design/ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md` — v2 40 px rows, filter drawer/chips, summary export cards, checklist flags.
-- `design/ui/portal_ui_implementation_plan.md` — as-built table and CSV-to-XLSX rollout.
+- `design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — v1 table, status, row-action and export intent.
+- `design/06-ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md` — v2 40 px rows, filter drawer/chips, summary export cards, checklist flags.
+- `design/06-ui/portal_ui_implementation_plan.md` — as-built table and CSV-to-XLSX rollout.
 
 ### Code paths
 

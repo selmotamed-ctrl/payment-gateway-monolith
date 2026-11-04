@@ -355,13 +355,13 @@ Database-backed suites require PostgreSQL 18; Redis-backed suites require Redis.
 
 ### Old design sections
 
-- `design/master_exhaustive_test_plan_for_opencode.md#executive-summary--testing-philosophy`
-- `design/master_exhaustive_test_plan_for_opencode.md#1-master-test-volume--coverage-matrix-38500-assertions`
-- `design/master_exhaustive_test_plan_for_opencode.md#10-suite-09-postgresql-18-storage-engine-replicas-auditlog-databases-backups--restore-drills-900-tests`
-- `design/master_exhaustive_test_plan_for_opencode.md#11-suite-10-full-surface-playwright-ui-filter-dialog-rtlltr--geometry-matrix-across-all-4-portals-2300-tests`
-- `design/master_exhaustive_test_plan_for_opencode.md#12-suite-11-full-cross-service-end-to-end-journeys-synthetic-seeder--deploy-engine-verification-1200-tests`
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#7-step-by-step-opencode-execution-plan`
-- `design/blueprint-management.md#5-documentation-corrections-backlog`
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md#executive-summary--testing-philosophy`
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md#1-master-test-volume--coverage-matrix-38500-assertions`
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md#10-suite-09-postgresql-18-storage-engine-replicas-auditlog-databases-backups--restore-drills-900-tests`
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md#11-suite-10-full-surface-playwright-ui-filter-dialog-rtlltr--geometry-matrix-across-all-4-portals-2300-tests`
+- `design/05-testing/master_exhaustive_test_plan_for_opencode.md#12-suite-11-full-cross-service-end-to-end-journeys-synthetic-seeder--deploy-engine-verification-1200-tests`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#7-step-by-step-opencode-execution-plan`
+- `design/00-process/blueprint-management.md#5-documentation-corrections-backlog`
 
 ### Code paths
 

@@ -370,13 +370,13 @@ The unit tests do not require a live database or Fake Rails; they use fakes for 
 
 ### Old design sections
 
-- `design/synthetic_operational_data_seeder_architecture.md#executive-summary--architectural-vision`
-- `design/synthetic_operational_data_seeder_architecture.md#1-pre-flight-safety-gate--fake-rails-dependency-verification`
-- `design/synthetic_operational_data_seeder_architecture.md#2-chronological-simulation-engine--volume-scaling-profiles`
-- `design/synthetic_operational_data_seeder_architecture.md#3-comprehensive-multi-state-distribution-across-all-66-database-models`
-- `design/synthetic_operational_data_seeder_architecture.md#4-two-phase-seeder-execution--fake-rails-bulk-synchronization-pipeline`
-- `design/synthetic_operational_data_seeder_architecture.md#5-directory-structure-of-the-synthetic-seeder-module`
-- `design/blueprint-management.md#5-documentation-corrections-backlog`
+- `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md#executive-summary--architectural-vision`
+- `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md#1-pre-flight-safety-gate--fake-rails-dependency-verification`
+- `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md#2-chronological-simulation-engine--volume-scaling-profiles`
+- `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md#3-comprehensive-multi-state-distribution-across-all-66-database-models`
+- `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md#4-two-phase-seeder-execution--fake-rails-bulk-synchronization-pipeline`
+- `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md#5-directory-structure-of-the-synthetic-seeder-module`
+- `design/00-process/blueprint-management.md#5-documentation-corrections-backlog`
 
 ### Code paths
 

@@ -24,12 +24,12 @@ code:
   - admin-back/api/middleware/authorityGuard.ts
   - core-back/scripts/generate-mtls-certs.ts
 design_sources:
-  - design/payment_gateway_final_design-v5.md#22-mutual-tls-mtls-inter-service-transport-architecture
-  - design/payment_gateway_final_design-v5.md#12-fourteen-engineering-safeguards-inter-service-double-validation--stride-threat-model
-  - design/payment-gateway-refined-design-v4.1.md#101-the-14-code-level-engineering-safeguards
-  - design/payment-gateway-refined-design-v4.1.md#102-complete-24-item-stride-threat-register
-  - design/payment_gateway_final_design-v5.md#21-service-roles-boundaries-and-security-constraints
-  - design/opencode_technical_delivery_design.md#41-core-back-mtls-server--channel-bound-cn-guard
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#22-mutual-tls-mtls-inter-service-transport-architecture
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#12-fourteen-engineering-safeguards-inter-service-double-validation--stride-threat-model
+  - design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#101-the-14-code-level-engineering-safeguards
+  - design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#102-complete-24-item-stride-threat-register
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#21-service-roles-boundaries-and-security-constraints
+  - design/90-archive/delivery-logs/opencode_technical_delivery_design.md#41-core-back-mtls-server--channel-bound-cn-guard
 tests:
   - core-back/test/phase1-mtls-and-schema.test.ts
   - core-back/test/exhaustive/05-api-matrix/mtls-channel-isolation.test.ts
@@ -386,10 +386,10 @@ No test run was performed for this documentation change. Integration suites that
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` §2.1 service roles, §2.2 mTLS transport, §12 safeguards and STRIDE.
-- `design/payment-gateway-refined-design-v4.1.md` §10.1 fourteen safeguards, §10.2 STRIDE register, §15.2–§15.4 roles and four-eyes.
-- `design/opencode_technical_delivery_design.md` §4.1 server/CN guard, §4.2 edge mTLS wrapper.
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md` §12 security.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §2.1 service roles, §2.2 mTLS transport, §12 safeguards and STRIDE.
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` §10.1 fourteen safeguards, §10.2 STRIDE register, §15.2–§15.4 roles and four-eyes.
+- `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` §4.1 server/CN guard, §4.2 edge mTLS wrapper.
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` §12 security.
 
 ### Code paths
 

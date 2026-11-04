@@ -306,10 +306,10 @@ The shell/auth/a11y suites require the live stack. The content test is a Bun tes
 
 ### Old design sections
 
-- `design/ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — shared portal tokens/primitives/shell intent.
-- `design/ui/portal_ui_implementation_plan.md` — merchant rollout and shared table/primitives.
-- `design/complete_zero_to_hero_guides_and_academy_specification.md` — merchant guide chapter baseline.
-- `design/payment_gateway_deployment_and_guides_architecture.md` — merchant portal/guide architecture.
+- `design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — shared portal tokens/primitives/shell intent.
+- `design/06-ui/portal_ui_implementation_plan.md` — merchant rollout and shared table/primitives.
+- `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` — merchant guide chapter baseline.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` — merchant portal/guide architecture.
 
 ### Code paths
 
@@ -584,8 +584,8 @@ The content test is a Bun test; the Playwright suites require the live stack.
 
 ### Old design sections
 
-- `design/complete_zero_to_hero_guides_and_academy_specification.md` — merchant operations and developer API content baseline.
-- `design/payment_gateway_deployment_and_guides_architecture.md` — merchant guide/portal architecture context.
+- `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` — merchant operations and developer API content baseline.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` — merchant guide/portal architecture context.
 
 ### Code paths
 

@@ -15,9 +15,9 @@ code:
   - merchant-back/index.ts
   - checkout-back/index.ts
 design_sources:
-  - design/payment_gateway_deployment_and_guides_architecture.md#6-ordered-14-step-multi-host-deployment-pipeline
-  - design/payment_gateway_final_design-v5.md#22-mutual-tls-mtls-inter-service-transport-architecture
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#52-core-back--admin-front-backup-management-api-contract
+  - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#6-ordered-14-step-multi-host-deployment-pipeline
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#22-mutual-tls-mtls-inter-service-transport-architecture
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#52-core-back--admin-front-backup-management-api-contract
 tests:
   - deploy/test/healthVerifierScale.test.ts
   - deploy/test/pipeline.test.ts
@@ -332,8 +332,8 @@ Not covered: a real edge-to-core handshake, Nginx reload/vhost probe, PostgreSQL
 
 ### Old design sections
 
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 6, pipeline verification and recovery.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 5.2, backup/restore control.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 6, pipeline verification and recovery.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 5.2, backup/restore control.
 
 ### Code paths
 

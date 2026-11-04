@@ -21,12 +21,12 @@ code:
   - deploy/lib/configSchema.ts
   - deploy/lib/hostPlanner.ts
 design_sources:
-  - design/payment_gateway_final_design-v5.md#2-zero-trust-7-service-split-architecture-mtls--reverse-proxy-topology
-  - design/payment-gateway-refined-design-v4.1.md#1-executive-summary-and-architectural-vision
-  - design/payment_gateway_deployment_and_guides_architecture.md#1-flexible-1n-compute--storage-topology-model-same-server-vs-fully-distributed
-  - design/payment_gateway_deployment_and_guides_architecture.md#6-ordered-14-step-multi-host-deployment-pipeline
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#11-high-level-system--storage-topology-diagram
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#62-edge-to-core-mtls-upstream-load-balancer--health-failover-admin-back-merchant-back-checkout-back
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#2-zero-trust-7-service-split-architecture-mtls--reverse-proxy-topology
+  - design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#1-executive-summary-and-architectural-vision
+  - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#1-flexible-1n-compute--storage-topology-model-same-server-vs-fully-distributed
+  - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#6-ordered-14-step-multi-host-deployment-pipeline
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#11-high-level-system--storage-topology-diagram
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#62-edge-to-core-mtls-upstream-load-balancer--health-failover-admin-back-merchant-back-checkout-back
 tests:
   - core-back/test/exhaustive/05-api-matrix/mtls-channel-isolation.test.ts
   - admin-back/test/mtls-client.test.ts
@@ -334,11 +334,11 @@ These are unit/integration tests. No live multi-host deployment was run for this
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` §2.1 service roles and boundaries, §2.2 mTLS transport, §2.3 reverse proxy topology.
-- `design/payment-gateway-refined-design-v4.1.md` §1 architecture vision and interface catalogue.
-- `design/payment_gateway_deployment_and_guides_architecture.md` §1 topology model, §6 ordered pipeline.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` §1.1 topology diagram, §6.2 edge load balancing.
-- `design/opencode_technical_delivery_design.md` §2 workspace/ports, §28 horizontal delivery.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §2.1 service roles and boundaries, §2.2 mTLS transport, §2.3 reverse proxy topology.
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` §1 architecture vision and interface catalogue.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` §1 topology model, §6 ordered pipeline.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` §1.1 topology diagram, §6.2 edge load balancing.
+- `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` §2 workspace/ports, §28 horizontal delivery.
 
 ### Code paths
 

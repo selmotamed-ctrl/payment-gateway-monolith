@@ -12,9 +12,9 @@ code:
   - deploy/deploy.ts
   - deploy/lib/firewallConfigurator.ts
 design_sources:
-  - design/payment_gateway_deployment_and_guides_architecture.md#1-flexible-1n-compute--storage-topology-model-same-server-vs-fully-distributed
-  - design/payment_gateway_deployment_and_guides_architecture.md#2-complete-deploy-directory-structure
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#6-segment-5--horizontal-node-scaling--multi-host-storage-orchestration-in-deploydeployenv--deploydeployts
+  - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#1-flexible-1n-compute--storage-topology-model-same-server-vs-fully-distributed
+  - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#2-complete-deploy-directory-structure
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#6-segment-5--horizontal-node-scaling--multi-host-storage-orchestration-in-deploydeployenv--deploydeployts
 tests:
   - deploy/test/testMatrix.test.ts
   - deploy/test/hostPlanner.test.ts
@@ -275,9 +275,9 @@ The suites cover five-host, two-host and single-host scenarios; firewall source 
 
 ### Old design sections
 
-- `design/payment_gateway_deployment_and_guides_architecture.md` sections 1-2.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.
-- `design/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall union intent.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` sections 1-2.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 5, firewall union intent.
 
 ### Code paths
 

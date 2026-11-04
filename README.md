@@ -14,7 +14,7 @@ Read the canonical design before changing behavior:
 - [`project-design/TRACKER.md`](project-design/TRACKER.md) — append-only change, gap and verification log.
 - [`project-design/appendices/`](project-design/appendices/) — generated schema, migration, API, environment and test inventories.
 
-`project-design/parts/**` is the editable source of truth. `design/**` is historical/reference material only and is not current authority.
+`project-design/parts/**` is the editable source of truth. `design/**` is historical/reference material only and is not current authority. [`design/README.md`](design/README.md) indexes the original blueprints by topic (`00-process` … `10-fixes`, plus `90-archive/` for superseded material) and tags each as ACTIVE, REFERENCE, FUTURE or ARCHIVE.
 
 ## Repository map
 

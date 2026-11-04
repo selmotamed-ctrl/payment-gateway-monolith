@@ -6,6 +6,13 @@ import { enqueueOutboxEvent } from "./outbox";
 export interface LedgerPosterOptions {
   transactionRunner?: LedgerTransactionRunner;
   shardCount?: number;
+  /**
+   * Emit `ledger.entry_posted` in the posting transaction. Off by default since
+   * 2026-11-04: the topic has no consumer (its relay handler is a no-op), so
+   * every posting paid one extra INSERT plus relay work for nothing. Wallet
+   * balances are read from `gl_account_shards`, which is written
+   * synchronously in the same transaction.
+   */
   emitOutbox?: boolean;
 }
 
@@ -23,7 +30,7 @@ export const createLedgerPoster = (
     client,
     options.transactionRunner,
     createLedgerShardWriter(shardCount),
-    options.emitOutbox === false
+    options.emitOutbox !== true
       ? undefined
       : async (transaction, entry) => {
           await enqueueOutboxEvent(transaction, {

@@ -1,381 +1,576 @@
-import type { SeederContext } from "../context";
+import type { MerchantInfo, SeederContext } from "../context";
+import { metaOf } from "../context";
 import {
-  addDays, createWalletAccount, formatMoney, randomAddress, randomBank, randomBusinessName,
-  randomCategory, randomName, randomPhone, randomTaxId, sha256Like,
+  addDays, addMinutes, allocateVolume, between, shuffle, createWalletAccount, maxDate, randomAddress, randomBank,
+  randomBusinessName, randomCategory, randomName, randomTaxId, sha256Like,
 } from "../builders";
+import { pickIban, pickPhone, NATIONALITIES } from "../libyanDataCatalog";
+import { D } from "../money";
+import { businessHour, iterateDays, tripoliDateTime } from "../timelineClock";
 import {
   JOIN_REQUEST_CHECKLIST_KEYS,
   nationalIdHash,
   payoutAccountHash,
+  requiredDocumentsFromSetting,
 } from "../../../lib/joinRequestOnboarding";
 
-const MERCHANT_STATUS_WEIGHTS = {
-  ACTIVE: 62,
-  PENDING: 12,
-  SUSPENDED: 11,
-  REJECTED: 9,
-  CLOSED: 6,
-} as const;
-
-const JOIN_STATUS_WEIGHTS = {
-  APPROVED: 58,
-  REJECTED: 11,
-  IN_REVIEW: 8,
-  INFO_REQUESTED: 6,
-  PENDING_CHECKER: 5,
-  SUBMITTED: 4,
-  DRAFT: 3,
-  WITHDRAWN: 2,
-  EXPIRED: 3,
-} as const;
-
-const KYB_DOC_TYPES = [
-  "COMMERCIAL_REGISTRY", "TAX_CERTIFICATE", "ARTICLES_OF_ASSOCIATION", "OWNER_ID",
-  "SIGNATORY_ID", "PROOF_OF_ADDRESS", "BANK_LETTER", "SECTOR_LICENSE",
-] as const;
-
-const OWNER_ROLES = ["OWNER", "DIRECTOR", "SIGNATORY", "CONTROLLER"] as const;
-
+const MERCHANT_STATUS_WEIGHTS = { ACTIVE: 62, PENDING: 12, SUSPENDED: 11, REJECTED: 9, CLOSED: 6 } as const;
+const PENDING_JOIN_WEIGHTS = { SUBMITTED: 18, IN_REVIEW: 30, INFO_REQUESTED: 22, PENDING_CHECKER: 20, DRAFT: 10 } as const;
+const PRIOR_JOIN_OUTCOMES = { REJECTED: 45, EXPIRED: 35, WITHDRAWN: 20 } as const;
+const OPTIONAL_DOC_TYPES = ["ARTICLES_OF_ASSOCIATION", "SIGNATORY_ID", "SECTOR_LICENSE", "OWNER_ID", "OTHER"] as const;
+const OWNER_ROLES = ["DIRECTOR", "SIGNATORY", "CONTROLLER", "OWNER"] as const;
 const SUSPENSION_REASONS = ["AML", "FRAUD", "KYB_EXPIRED", "COMMISSION_CEILING", "MERCHANT_REQUEST", "OTHER"] as const;
 const REJECTION_REASONS = ["UNVERIFIABLE_BUSINESS", "INCOMPLETE_DOCUMENTS", "PROHIBITED_ACTIVITY", "POLICY"] as const;
+const CITY_CODES: Record<string, string> = {
+  Tripoli: "TR", Benghazi: "BE", Misrata: "MI", Zawiya: "ZA", Sabha: "SB", Tobruk: "TB",
+};
 
+/** Users of the platform staff (generator 01) by role. */
+const staffBy = (ctx: SeederContext, roles: readonly string[]) =>
+  ctx.dataset.users.filter((user) => user.merchantId === null && user.status === "ACTIVE" && roles.includes(user.role));
+
+const slug = (value: string): string => value.toLowerCase().replaceAll(/[^a-z0-9]+/g, ".").replace(/^\.+|\.+$/g, "");
+
+/**
+ * Merchants with their whole onboarding history: join requests (including
+ * rejected/expired/withdrawn earlier attempts and resubmissions), KYB
+ * documents, beneficial owners, wallets + GL accounts, applications, users,
+ * access tokens, POS terminals, merchant-owned credential sets and negotiated
+ * commission profiles.
+ *
+ * Every per-merchant collection is sized by its profile volume
+ * (`joinRequests`, `kybDocuments`, `beneficialOwners`, `users`, `wallets`,
+ * `applications`) through `allocateVolume`, and every timestamp follows the
+ * real onboarding order: request -> submission -> review -> decision ->
+ * activation -> (suspension | closure), never after the simulation clock.
+ */
 export const generateMerchantCohort = (ctx: SeederContext): void => {
-  const total = ctx.config.volumes.merchants;
-  const start = ctx.timeline.start;
+  const meta = metaOf(ctx);
+  const volumes = ctx.config.volumes;
+  const total = volumes.merchants;
   const end = ctx.timeline.end;
-  const spanDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86_400_000));
+  const days = iterateDays(ctx.timeline);
+  const onboardingDays = days.slice(0, Math.max(1, days.length - 45));
+  const cumulative: number[] = [];
+  let running = 0;
+  for (const day of onboardingDays) {
+    running += 1 + day.monthIndex / 6; // onboarding follows the adoption curve, more gently than payments
+    cumulative.push(running);
+  }
+  const sampleOnboardingDay = (): Date => {
+    const roll = ctx.rng.next() * running;
+    let low = 0;
+    let high = cumulative.length - 1;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (cumulative[mid]! < roll) low = mid + 1;
+      else high = mid;
+    }
+    return onboardingDays[low]!.date;
+  };
+  const atBusinessTime = (day: Date): Date =>
+    tripoliDateTime(day, Math.min(20, Math.max(8, businessHour(ctx.rng, day))), ctx.rng.int(0, 59), ctx.rng.int(0, 59));
 
-  // The three deliberate duplicate-document pairs (compliance alert showcase).
-  const duplicateHashes = Array.from({ length: 3 }, (_, index) => sha256Like(ctx, `duplicate-doc-${index}`));
-  const duplicateMerchantIndexes = [3, 11, 23];
+  const reviewers = staffBy(ctx, ["OPERATOR"]);
+  const kybReviewers = staffBy(ctx, ["COMPLIANCE", "OPERATOR"]);
+  const assistants = staffBy(ctx, ["OPERATOR", "SUPPORT"]);
+  const requiredDocsFor = (categoryCode: string): string[] =>
+    requiredDocumentsFromSetting(ctx.refs.requiredDocumentsSetting, categoryCode);
+
+  // ---------------------------------------------------------- statuses first
+  const statuses = Array.from({ length: total }, () => ctx.rng.weighted(MERCHANT_STATUS_WEIGHTS) as string);
+  const operating = (index: number) => ["ACTIVE", "SUSPENDED", "CLOSED"].includes(statuses[index]!);
+  const staffSeats = ctx.dataset.users.filter((user) => user.merchantId === null).length;
+  const joinCounts = allocateVolume(ctx, volumes.joinRequests, total, 1, 3, (index) => (statuses[index] === "PENDING" ? 0.5 : 1));
+  const walletCounts = allocateVolume(ctx, volumes.wallets, total, 1, 3, (index) => (operating(index) ? 1 : 0));
+  const appCounts = allocateVolume(ctx, volumes.applications, total, 1, 5, (index) => (operating(index) ? 1 : 0.15));
+  const userCounts = allocateVolume(ctx, Math.max(total, volumes.users - staffSeats), total, 1, 8, (index) => (operating(index) ? 1 : 0.2));
+  const ownerCounts = allocateVolume(ctx, volumes.beneficialOwners, total, 1, 6);
+  const categories = Array.from({ length: total }, () => randomCategory(ctx));
+  const requiredCounts = categories.map((category) => requiredDocsFor(category.code).length);
+  const docMin = Math.max(...requiredCounts, 1);
+  const docCounts = allocateVolume(ctx, volumes.kybDocuments, total, docMin, docMin + 6);
+
+  // Deliberate duplicate showcase: the same document hash and payout account
+  // under two different merchants (the compliance duplicate alert).
+  const duplicatePairs: Array<[number, number]> = ([[3, 11], [23, 31], [40, 47]] as Array<[number, number]>)
+    .filter(([left, right]) => left < total && right < total);
+  const duplicateOf = new Map<number, number>();
+  for (const [left, right] of duplicatePairs) duplicateOf.set(right, left);
+  const pairHash = new Map<number, string>();
+  const pairAccount = new Map<number, { bank: string; account: string }>();
+
+  const usedPhones = new Set<string>();
+  const uniquePhone = (): string => {
+    for (let tries = 0; tries < 50; tries += 1) {
+      const phone = pickPhone(ctx.rng);
+      if (!usedPhones.has(phone)) {
+        usedPhones.add(phone);
+        return phone;
+      }
+    }
+    throw new Error("Could not allocate a unique synthetic phone number");
+  };
 
   for (let index = 0; index < total; index += 1) {
-    const status = ctx.rng.weighted(MERCHANT_STATUS_WEIGHTS);
-    const recent = status === "PENDING";
-    const createdAt = recent
-      ? addDays(end, -ctx.rng.int(0, 20))
-      : addDays(start, ctx.rng.int(0, Math.max(1, spanDays - 20)));
+    let status = statuses[index]!;
+    const category = categories[index]!;
     const business = randomBusinessName(ctx);
-    const name = randomName(ctx);
     const address = randomAddress(ctx);
-    const city = ctx.rng.pick(["Tripoli", "Benghazi", "Misrata", "Zawiya", "Sabha", "Tobruk"]);
+    const city = ctx.rng.pick(Object.keys(CITY_CODES));
     const merchantId = ctx.nextId("merchant");
-    const kybStatus = status === "ACTIVE" || status === "SUSPENDED" || status === "CLOSED"
-      ? "VERIFIED"
-      : status === "REJECTED" ? "REJECTED" : "PENDING";
-    const activatedAt = kybStatus === "VERIFIED" ? addDays(createdAt, ctx.rng.int(1, 20)) : null;
-    const suspendedAt = status === "SUSPENDED" ? addDays(end, -ctx.rng.int(0, 400)) : null;
-    const closedAt = status === "CLOSED" ? addDays(end, -ctx.rng.int(30, 300)) : null;
+    const riskTier = ctx.rng.weighted({ LOW: 25, STANDARD: 60, HIGH: 15 }) as string;
+    const onboardingChannel = ctx.rng.chance(65) ? "SELF_SERVICE" : "ADMIN_ASSISTED";
+    const taxId = randomTaxId(ctx);
+    const registrationNo = `${ctx.rng.int(100000, 999999)}-${CITY_CODES[city]}`;
+    const contactEmail = `${slug(business.en)}.${index}@${ctx.config.namespace}.ly`;
+    const contactPhone = uniquePhone();
 
-    const payoutBankDetails = {
-      bank: randomBank(ctx).en,
-      account: duplicateMerchantIndexes.includes(index)
-        ? "LY8300000000000000000001"
-        : `LY${ctx.rng.int(10, 99)}${ctx.rng.int(1000000000, 9999999999)}`,
-      holder: business.en,
-      address: address.en,
-    };
+    // ------------------------------------------------ final join request
+    let finalCreated: Date;
+    let joinStatus: string;
+    if (status === "PENDING") {
+      joinStatus = ctx.rng.weighted(PENDING_JOIN_WEIGHTS) as string;
+      finalCreated = atBusinessTime(addDays(end, -ctx.rng.int(6, 30)));
+    } else {
+      joinStatus = status === "REJECTED" ? "REJECTED" : "APPROVED";
+      finalCreated = atBusinessTime(sampleOnboardingDay());
+    }
+    const submittedAt = joinStatus === "DRAFT" ? null : addMinutes(finalCreated, ctx.rng.int(20, 2 * 24 * 60));
+    const reviewStart = submittedAt ? addMinutes(submittedAt, ctx.rng.int(60, 2 * 24 * 60)) : null;
+    const infoRequestedAt = joinStatus === "INFO_REQUESTED" && reviewStart ? addMinutes(reviewStart, ctx.rng.int(60, 24 * 60)) : null;
+    const proposedAt = ["PENDING_CHECKER", "APPROVED", "REJECTED"].includes(joinStatus) && reviewStart
+      ? addMinutes(reviewStart, ctx.rng.int(12 * 60, 6 * 24 * 60))
+      : null;
+    const decidedAt = ["APPROVED", "REJECTED"].includes(joinStatus) && proposedAt
+      ? addMinutes(proposedAt, ctx.rng.int(30, 3 * 24 * 60))
+      : null;
+    const activatedAt = joinStatus === "APPROVED" && decidedAt ? addMinutes(decidedAt, ctx.rng.int(5, 18 * 60)) : null;
+    // A suspension/closure needs at least a month of trading first.
+    let stoppedAt: Date | null = null;
+    if ((status === "SUSPENDED" || status === "CLOSED") && activatedAt) {
+      const earliest = addDays(activatedAt, status === "CLOSED" ? 60 : 30);
+      if (earliest.getTime() < addDays(end, -2).getTime()) {
+        stoppedAt = between(ctx, earliest, addDays(end, -1));
+      } else {
+        status = "ACTIVE";
+      }
+    }
+    const suspensionReason = status === "SUSPENDED" ? ctx.rng.pick(SUSPENSION_REASONS) : null;
+    const kybStatus = joinStatus === "APPROVED" ? "VERIFIED" : joinStatus === "REJECTED" ? "REJECTED" : joinStatus === "DRAFT" ? "UNVERIFIED" : "PENDING";
+
+    // ------------------------------------------------ earlier join requests
+    const priorCount = joinCounts[index]! - 1;
+    const priors: Array<{ createdAt: Date; submittedAt: Date; decidedAt: Date; outcome: string }> = [];
+    let cursor = finalCreated;
+    for (let prior = 0; prior < priorCount; prior += 1) {
+      const decided = addDays(cursor, -ctx.rng.int(2, 30));
+      const submitted = addDays(decided, -ctx.rng.int(3, 20));
+      const created = addMinutes(submitted, -ctx.rng.int(30, 2 * 24 * 60));
+      if (created.getTime() <= ctx.timeline.start.getTime()) break;
+      priors.unshift({ createdAt: created, submittedAt: submitted, decidedAt: decided, outcome: ctx.rng.weighted(PRIOR_JOIN_OUTCOMES) as string });
+      cursor = created;
+    }
+    const merchantCreatedAt = priors[0]?.createdAt ?? finalCreated;
+    const lastEventAt = maxDate(merchantCreatedAt, submittedAt, infoRequestedAt, proposedAt, decidedAt, activatedAt, stoppedAt);
+
+    const bank = randomBank(ctx);
+    const duplicateSource = duplicateOf.get(index);
+    const payout = duplicateSource !== undefined && pairAccount.has(duplicateSource)
+      ? pairAccount.get(duplicateSource)!
+      : { bank: bank.en, account: pickIban(ctx.rng, bank.ibanCode) };
+    pairAccount.set(index, payout);
+    const payoutBankDetails = { bank: payout.bank, account: payout.account, holder: business.en, address: address.en };
+    const negativeBalanceCeiling = status === "ACTIVE" && ctx.rng.chance(12) ? `${ctx.rng.int(1, 5) * 100}.0000` : "0.0000";
+
     ctx.dataset.merchants.push({
       id: merchantId,
-      createdAt,
-      updatedAt: suspendedAt ?? closedAt ?? activatedAt ?? createdAt,
+      version: 1,
+      createdAt: merchantCreatedAt,
+      updatedAt: lastEventAt,
       legalName: business.en,
       tradeName: business.ar,
       displayName: business.ar,
       logoUrl: null,
-      supportEmail: `${business.en.toLowerCase().replaceAll(/[^a-z0-9]+/g, ".")}.${index}@${ctx.config.namespace}.ly`,
-      supportPhone: randomPhone(ctx),
-      taxId: randomTaxId(ctx),
-      registrationNo: `${ctx.rng.int(100000, 999999)}-${city.slice(0, 2).toUpperCase()}`,
-      businessCategory: randomCategory(ctx).en,
+      supportEmail: contactEmail,
+      supportPhone: contactPhone,
+      taxId,
+      registrationNo,
+      businessCategory: category.en,
       status,
       kybStatus,
-      riskTier: ctx.rng.weighted({ LOW: 25, STANDARD: 60, HIGH: 15 }),
-      onboardingChannel: ctx.rng.chance(65) ? "SELF_SERVICE" : "ADMIN_ASSISTED",
+      riskTier,
+      onboardingChannel,
       country: "LY",
-      contactPhone: randomPhone(ctx),
-      contactEmail: `${business.en.toLowerCase().replaceAll(/[^a-z0-9]+/g, ".")}.${index}@${ctx.config.namespace}.ly`,
+      contactPhone,
+      contactEmail,
       activatedAt,
-      suspendedAt,
-      suspensionReasonCode: status === "SUSPENDED" ? ctx.rng.pick(SUSPENSION_REASONS) : null,
-      suspensionNotes: status === "SUSPENDED" ? "Synthetic suspension awaiting the documented lifecycle review." : null,
-      closedAt,
-      closedReasonCode: status === "CLOSED" ? "BUSINESS_CLOSED" : null,
-      closedNotes: status === "CLOSED" ? "Synthetic merchant closed after the relationship ended." : null,
-      commissionReceivableCeiling: ctx.rng.chance(10) ? ctx.rng.decimal(500, 5000, 4) : null,
-      negativeBalanceCeiling: ctx.rng.chance(12) ? ctx.rng.decimal(100, 500, 4) : "0.0000",
+      suspendedAt: status === "SUSPENDED" ? stoppedAt : null,
+      suspensionReasonCode: suspensionReason,
+      suspensionNotes: status === "SUSPENDED" ? `Suspended (${suspensionReason}) after the documented lifecycle review.` : null,
+      closedAt: status === "CLOSED" ? stoppedAt : null,
+      closedReasonCode: status === "CLOSED" ? ctx.rng.pick(["BUSINESS_CLOSED", "MERCHANT_REQUEST", "INACTIVITY"]) : null,
+      closedNotes: status === "CLOSED" ? "Relationship ended; wallet settled and closed." : null,
+      commissionReceivableCeiling: ctx.rng.chance(10) ? `${ctx.rng.int(5, 50) * 100}.0000` : null,
+      negativeBalanceCeiling,
       payoutBankDetailsJson: payoutBankDetails,
       payoutAccountHash: payoutAccountHash(payoutBankDetails),
+      nextKybReviewAt: null,
     });
 
-    // Wallet + GL account for every merchant that reached onboarding.
-    const walletAt = activatedAt ?? createdAt;
-    const walletGlId = createWalletAccount(ctx, merchantId, walletAt);
-    const walletId = ctx.nextId("wallet");
-    ctx.dataset.wallets.push({
-      id: walletId,
-      createdAt: walletAt,
-      updatedAt: closedAt ?? walletAt,
-      merchantId,
-      glAccountId: walletGlId,
-      currency: "LYD",
-      status: status === "SUSPENDED" && ctx.rng.chance(45) ? "FROZEN" : status === "CLOSED" ? "CLOSED" : status === "PENDING" ? "PENDING" : "ACTIVE",
-    });
-
-    // Applications (1-3) and their merchant users.
-    const appCount = ctx.rng.int(1, 3);
-    const appIds: string[] = [];
-    for (let appIndex = 0; appIndex < appCount; appIndex += 1) {
-      const applicationId = ctx.nextId("application");
-      appIds.push(applicationId);
-      ctx.dataset.applications.push({
-        id: applicationId,
-        createdAt: addDays(walletAt, ctx.rng.int(0, 30)),
-        updatedAt: walletAt,
-        merchantId,
-        name: `${business.en} ${appIndex + 1}`,
-        businessUseDescription: `${randomCategory(ctx).en} online checkout and in-store collection.`,
-        expectedMonthlyVolume: ctx.rng.decimal(2000, 250000, 4),
-        assignedWalletId: walletId,
-        railWhitelist: null,
-        redirectDomainAllowlist: [`https://${business.en.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}.${ctx.config.namespace}.ly`],
-        status: status === "ACTIVE" ? (ctx.rng.chance(78) ? "ACTIVE" : ctx.rng.chance(50) ? "PENDING" : "DRAFT")
-          : status === "SUSPENDED" ? (ctx.rng.chance(60) ? "SUSPENDED" : "ACTIVE")
-            : status === "CLOSED" ? "CLOSED" : "DRAFT",
-      });
-    }
-
-    const userCount = ctx.rng.int(1, 4);
-    for (let userIndex = 0; userIndex < userCount; userIndex += 1) {
+    // ---------------------------------------------------------------- users
+    const userIds: string[] = [];
+    let adminUserId: string | null = null;
+    for (let userIndex = 0; userIndex < userCounts[index]!; userIndex += 1) {
       const userId = ctx.nextId("user");
-      const role = userIndex === 0 ? "MERCHANT_ADMIN" : ctx.rng.chance(60) ? "MERCHANT_STAFF" : "MERCHANT_CASHIER";
-      const email = `merchant.${index}.${userIndex}@${ctx.config.namespace}.ly`;
+      const role = userIndex === 0 ? "MERCHANT_ADMIN" : ctx.rng.chance(65) ? "MERCHANT_STAFF" : "MERCHANT_CASHIER";
+      const email = userIndex === 0 ? contactEmail.replace("@", ".admin@") : `merchant.${index}.${userIndex}@${ctx.config.namespace}.ly`;
+      const createdAt = userIndex === 0 ? merchantCreatedAt : between(ctx, activatedAt ?? merchantCreatedAt, addDays(stoppedAt ?? end, 0));
+      const invited = userIndex > 0 && ctx.rng.chance(8);
+      const userStatus = status === "CLOSED" ? "DISABLED" : invited ? "INVITED" : status === "SUSPENDED" && userIndex > 0 && ctx.rng.chance(30) ? "SUSPENDED" : "ACTIVE";
+      const phone = uniquePhone();
       ctx.dataset.users.push({
         id: userId,
-        createdAt: addDays(createdAt, ctx.rng.int(0, 10)),
-        updatedAt: ctx.timeline.end,
+        createdAt,
+        updatedAt: createdAt,
         merchantId,
         email,
-        phone: randomPhone(ctx),
+        phone,
         passwordHash: null,
         role,
-        authoritiesMap: role === "MERCHANT_ADMIN" ? { app: ["read", "write"], payment: ["read", "refund"] } : { payment: ["read"] },
-        appScopeIds: role === "MERCHANT_STAFF" ? appIds : null,
+        authoritiesMap: role === "MERCHANT_ADMIN"
+          ? ["link:write", "merchant:read", "merchant:write", "payment:read"]
+          : role === "MERCHANT_STAFF" ? ["link:write", "merchant:read", "payment:read"] : ["link:write", "payment:read"],
+        appScopeIds: null,
         isMaker: false,
         isChecker: false,
         mfaRequired: role === "MERCHANT_ADMIN",
         mfaSecretCiphertext: null,
-        status: ctx.rng.chance(6) ? "INVITED" : ctx.rng.chance(3) ? "SUSPENDED" : "ACTIVE",
+        invitationTokenHash: invited ? sha256Like(ctx, `invite:${userId}`) : null,
+        invitationExpiresAt: invited ? addDays(createdAt, 7) : null,
+        invitedById: userIndex > 0 ? adminUserId : null,
+        status: userStatus,
         academyProgressJson: null,
       });
+      userIds.push(userId);
+      if (userIndex === 0) adminUserId = userId;
+      // Identity rows: the e-mail identity always matches the account e-mail;
+      // a phone identity (unique number) is added for verified users.
+      const verified = userStatus !== "INVITED";
       ctx.dataset.userIdentities.push({
         id: ctx.nextId("identity"),
         createdAt,
         updatedAt: createdAt,
         userId,
-        kind: ctx.rng.chance(70) ? "EMAIL" : "PHONE",
-        identifierNormalized: ctx.rng.chance(70) ? email : randomPhone(ctx),
+        kind: "EMAIL",
+        identifierNormalized: email,
         providerSubject: null,
-        verifiedAt: ctx.rng.chance(85) ? createdAt : null,
+        verifiedAt: verified ? createdAt : null,
         isPrimary: true,
-        lastUsedAt: ctx.timeline.end,
+        lastUsedAt: verified && userStatus === "ACTIVE" ? between(ctx, createdAt, end) : null,
       });
+      if (verified && ctx.rng.chance(60)) {
+        ctx.dataset.userIdentities.push({
+          id: ctx.nextId("identity"),
+          createdAt,
+          updatedAt: createdAt,
+          userId,
+          kind: "PHONE",
+          identifierNormalized: phone,
+          providerSubject: null,
+          verifiedAt: createdAt,
+          isPrimary: false,
+          lastUsedAt: null,
+        });
+      }
     }
 
-    // Join request (one per merchant) with the full status range.
-    const joinStatus = status === "ACTIVE" || status === "SUSPENDED" || status === "CLOSED"
-      ? "APPROVED"
-      : status === "REJECTED"
-        ? "REJECTED"
-        : ctx.rng.weighted(JOIN_STATUS_WEIGHTS);
+    // -------------------------------------------------------- join requests
+    const assistant = onboardingChannel === "ADMIN_ASSISTED" ? ctx.rng.pick(assistants)?.id ?? null : null;
+    const profileJson = {
+      legalName: business.en,
+      tradeName: business.ar,
+      country: "LY",
+      businessCategory: category.code,
+      registrationNumber: registrationNo,
+      taxId,
+      registeredAddress: address.en,
+      websiteUrl: `https://${slug(business.en).replaceAll(".", "-")}.${ctx.config.namespace}.ly`,
+      contactPhone,
+      contactEmail,
+      expectedMonthlyVolume: `${Math.round(category.max * ctx.rng.int(40, 400))}.0000`,
+      currency: "LYD",
+      businessUseDescription: `${business.en} collects ${category.en.toLowerCase()} payments online${category.pos ? " and at the counter" : ""}.`,
+      payoutAccount: payout.account,
+      ...(assistant ? { adminAssistedByUserId: assistant } : {}),
+    };
+    const submitter = adminUserId ?? assistant ?? ctx.dataset.users[0]?.id;
+    let previousRequestId: string | null = null;
+    const priorIds: string[] = [];
+    for (const prior of priors) {
+      const id = ctx.nextId("join");
+      priorIds.push(id);
+      ctx.dataset.joinRequests.push({
+        id,
+        createdAt: prior.createdAt,
+        updatedAt: prior.decidedAt,
+        merchantId,
+        submittedByUserId: submitter,
+        status: prior.outcome,
+        onboardingChannel,
+        submittedAt: prior.submittedAt,
+        assignedReviewerId: prior.outcome === "REJECTED" ? ctx.rng.pick(reviewers)?.id ?? null : null,
+        slaDueAt: addDays(prior.submittedAt, 5),
+        screeningId: null,
+        proposedRiskTier: riskTier,
+        fourEyesRequired: false,
+        fourEyesReasons: null,
+        decision: prior.outcome === "REJECTED" ? "REJECTED" : null,
+        decisionReasonCode: prior.outcome === "REJECTED" ? "INCOMPLETE_DOCUMENTS" : prior.outcome === "EXPIRED" ? "INFO_NOT_PROVIDED" : "APPLICANT_WITHDREW",
+        decisionNotes: prior.outcome === "REJECTED" ? "The registry extract was missing; please re-apply with the full set." : null,
+        infoRequestJson: prior.outcome === "EXPIRED" ? [{ field: "tax_certificate", message: "Please upload the current tax certificate." }] : null,
+        profileJson,
+        reviewChecklistJson: prior.outcome === "REJECTED" ? Object.fromEntries(JOIN_REQUEST_CHECKLIST_KEYS.map((key, i) => [key, i < 2])) : null,
+        duplicateFlagsJson: [],
+        slaPausedAt: null,
+        slaRemainingSeconds: null,
+        lastScreenedAt: null,
+        resubmissionOfId: previousRequestId,
+        approvalRequestId: null,
+      });
+      previousRequestId = id;
+    }
+    const fourEyes = riskTier === "HIGH" || (["APPROVED", "PENDING_CHECKER"].includes(joinStatus) && ctx.rng.chance(20));
     const joinRequestId = ctx.nextId("join");
-    const submittedBy = ctx.dataset.users.find((user) => user.merchantId === merchantId && user.role === "MERCHANT_ADMIN");
-    const onboardingChannel = ctx.rng.chance(65) ? "SELF_SERVICE" : "ADMIN_ASSISTED";
-    const completedChecklist = Object.fromEntries(JOIN_REQUEST_CHECKLIST_KEYS.map((key) => [key, true]));
-    const partialChecklist = Object.fromEntries(
-      JOIN_REQUEST_CHECKLIST_KEYS.map((key, checklistIndex) => [key, checklistIndex < 4]),
-    );
-    const infoRequestedAt = joinStatus === "INFO_REQUESTED" ? addDays(createdAt, 2) : null;
+    const reviewerId = reviewStart ? ctx.rng.pick(reviewers)?.id ?? null : null;
     ctx.dataset.joinRequests.push({
       id: joinRequestId,
-      createdAt,
-      updatedAt: ctx.timeline.end,
+      createdAt: finalCreated,
+      updatedAt: maxDate(finalCreated, submittedAt, infoRequestedAt, proposedAt, decidedAt),
       merchantId,
-      submittedByUserId: submittedBy?.id ?? ctx.refs.adminUsers[0]?.id ?? ctx.nextId("user"),
+      submittedByUserId: submitter,
       status: joinStatus,
       onboardingChannel,
-      submittedAt: joinStatus === "DRAFT" ? null : addDays(createdAt, 1),
-      assignedReviewerId: ["IN_REVIEW", "INFO_REQUESTED", "PENDING_CHECKER", "APPROVED", "REJECTED"].includes(joinStatus)
-        ? ctx.rng.pick(ctx.refs.adminUsers.filter((user) => user.role === "OPERATOR" || user.role === "COMPLIANCE"))?.id ?? null
-        : null,
-      slaDueAt: addDays(createdAt, ctx.rng.int(3, 14)),
+      submittedAt,
+      assignedReviewerId: reviewerId,
+      slaDueAt: addDays(submittedAt ?? finalCreated, 5),
       screeningId: null,
-      proposedRiskTier: ctx.rng.weighted({ LOW: 30, STANDARD: 55, HIGH: 15 }),
-      fourEyesRequired: ctx.rng.chance(40),
-      fourEyesReasons: ctx.rng.chance(40) ? ["HIGH_RISK", "PEP_MATCH"] : null,
+      proposedRiskTier: riskTier,
+      fourEyesRequired: fourEyes,
+      fourEyesReasons: fourEyes ? (riskTier === "HIGH" ? ["HIGH_RISK"] : ["RISK_BASED"]) : null,
       decision: joinStatus === "APPROVED" ? "APPROVED" : joinStatus === "REJECTED" ? "REJECTED" : null,
       decisionReasonCode: joinStatus === "REJECTED" ? ctx.rng.pick(REJECTION_REASONS) : null,
-      decisionNotes: joinStatus === "INFO_REQUESTED" ? "Please re-upload a clearer tax certificate." : null,
+      decisionNotes: joinStatus === "INFO_REQUESTED"
+        ? "Please re-upload a clearer tax certificate."
+        : joinStatus === "REJECTED" ? "Rejected after document and screening review." : null,
       infoRequestJson: joinStatus === "INFO_REQUESTED"
         ? [
             { field: "tax_certificate", message: "Please re-upload a clearer tax certificate." },
             { field: "payout_account", message: "Confirm the account holder matches the legal entity." },
           ]
         : null,
-      profileJson: {
-        legalName: business.en,
-        tradeName: business.ar,
-        country: "LY",
-        businessCategory: ctx.rng.pick(["RETAIL", "ECOMMERCE", "SERVICES", "TRANSPORT", "EDUCATION"]),
-        registrationNumber: `${ctx.rng.int(100000, 999999)}-${city.slice(0, 2).toUpperCase()}`,
-        taxId: randomTaxId(ctx),
-        registeredAddress: address.en,
-        websiteUrl: `https://${business.en.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}.${ctx.config.namespace}.ly`,
-        contactPhone: randomPhone(ctx),
-        contactEmail: `${business.en.toLowerCase().replaceAll(/[^a-z0-9]+/g, ".")}.${index}@${ctx.config.namespace}.ly`,
-        expectedMonthlyVolume: ctx.rng.decimal(5000, 400000, 4),
-        currency: "LYD",
-        businessUseDescription: `${business.en} collects online and in-store payments for ${randomCategory(ctx).en.toLowerCase()} customers.`,
-        ...(onboardingChannel === "ADMIN_ASSISTED"
-          ? { adminAssistedByUserId: ctx.rng.pick(ctx.refs.adminUsers)?.id ?? null }
-          : {}),
-      },
+      profileJson,
       reviewChecklistJson: ["IN_REVIEW", "INFO_REQUESTED", "PENDING_CHECKER"].includes(joinStatus)
-        ? partialChecklist
+        ? Object.fromEntries(JOIN_REQUEST_CHECKLIST_KEYS.map((key, i) => [key, joinStatus === "PENDING_CHECKER" || i < 4]))
         : ["APPROVED", "REJECTED"].includes(joinStatus)
-          ? completedChecklist
+          ? Object.fromEntries(JOIN_REQUEST_CHECKLIST_KEYS.map((key) => [key, joinStatus === "APPROVED" || ctx.rng.chance(60)]))
           : null,
-      duplicateFlagsJson: duplicateMerchantIndexes.includes(index)
-        ? [{ type: "DUPLICATE_OR_RELATED", field: "payoutAccount" }]
-        : [],
+      duplicateFlagsJson: duplicateSource !== undefined
+        ? [{ type: "DUPLICATE_OR_RELATED", field: "payoutAccount" }, { type: "DUPLICATE_OR_RELATED", field: "kybDocumentHash" }]
+        : priors.length > 0 ? [{ type: "RESUBMISSION", field: "merchant" }] : [],
       slaPausedAt: infoRequestedAt,
-      slaRemainingSeconds: infoRequestedAt ? 2 * 24 * 60 * 60 : null,
-      lastScreenedAt: joinStatus === "DRAFT" ? null : addDays(createdAt, 1),
-      resubmissionOfId: null,
+      slaRemainingSeconds: infoRequestedAt && submittedAt
+        ? Math.max(0, Math.round((addDays(submittedAt, 5).getTime() - infoRequestedAt.getTime()) / 1000))
+        : null,
+      lastScreenedAt: null,
+      resubmissionOfId: previousRequestId,
       approvalRequestId: null,
     });
 
-    // KYB documents (4-7) with the four statuses and expiring/duplicate cases.
-    const docCount = ctx.rng.int(4, 7);
-    for (let docIndex = 0; docIndex < docCount; docIndex += 1) {
-      const docType = KYB_DOC_TYPES[docIndex % KYB_DOC_TYPES.length]!;
-      const isDuplicatePair = index === duplicateMerchantIndexes[0] || index === duplicateMerchantIndexes[1] || index === duplicateMerchantIndexes[2];
-      const docStatus = kybStatus === "VERIFIED"
-        ? (ctx.rng.chance(90) ? "ACCEPTED" : ctx.rng.chance(50) ? "EXPIRED" : "REJECTED")
-        : ctx.rng.weighted({ UPLOADED: 45, ACCEPTED: 30, REJECTED: 15, EXPIRED: 10 });
-      const expiresOn = addDays(ctx.timeline.end, ctx.rng.chance(6) ? ctx.rng.int(1, 30) : -ctx.rng.int(0, 900));
-      const uploadedBy = ctx.rng.pick(ctx.refs.adminUsers.filter((user) => ["OPERATOR", "COMPLIANCE"].includes(user.role)));
-      ctx.dataset.kybDocuments.push({
-        id: ctx.nextId("kyb-doc"),
-        createdAt: addDays(createdAt, ctx.rng.int(0, 20)),
-        updatedAt: ctx.timeline.end,
-        merchantId,
-        joinRequestId,
-        subjectType: "MERCHANT",
-        subjectId: merchantId,
-        docType,
-        storageKey: `synthetic/${ctx.config.namespace}/merchants/${merchantId}/${docType}.pdf`,
-        originalFileName: `${docType.toLowerCase()}.pdf`,
-        contentCiphertext: null,
-        sha256: isDuplicatePair && docIndex === 0
-          ? duplicateHashes[duplicateMerchantIndexes.indexOf(index)]!
-          : sha256Like(ctx, `${merchantId}:${docType}:${docIndex}`),
-        mime: "application/pdf",
-        sizeBytes: ctx.rng.int(80_000, 3_500_000),
-        avStatus: ctx.rng.chance(2) ? "INFECTED" : ctx.rng.chance(8) ? "PENDING" : "CLEAN",
-        status: docStatus,
-        uploadedById: uploadedBy?.id ?? null,
-        reviewedById: docStatus === "ACCEPTED" || docStatus === "REJECTED"
-          ? ctx.rng.pick(ctx.refs.adminUsers.filter((user) => user.role === "COMPLIANCE" || user.role === "OPERATOR"))?.id ?? null
-          : null,
-        reviewedAt: docStatus === "ACCEPTED" || docStatus === "REJECTED" ? addDays(createdAt, ctx.rng.int(1, 15)) : null,
-        expiresOn,
-        rejectionReasonCode: docStatus === "REJECTED" ? "BLURRY_OR_EXPIRED" : null,
-        reviewNotes: docStatus === "REJECTED" ? "The scan is not readable; request a fresh copy." : null,
-      });
+    // ------------------------------------------------------- KYB documents
+    // Each document type is a chain of copies: earlier copies were rejected
+    // or expired and replaced, the last copy is the current one. Every copy
+    // is uploaded and reviewed inside the onboarding window, in order.
+    const requiredDocs = requiredDocsFor(category.code);
+    const docTypes: string[] = [...requiredDocs];
+    while (docTypes.length < docCounts[index]!) {
+      const optional = OPTIONAL_DOC_TYPES.find((type) => !docTypes.includes(type));
+      docTypes.push(optional ?? ctx.rng.pick(requiredDocs));
+    }
+    const copiesByType = new Map<string, number>();
+    for (const docType of docTypes) copiesByType.set(docType, (copiesByType.get(docType) ?? 0) + 1);
+    const windowStart = merchantCreatedAt;
+    const windowEndRaw = decidedAt ?? proposedAt ?? infoRequestedAt ?? reviewStart ?? submittedAt ?? addMinutes(finalCreated, 120);
+    const windowEnd = windowEndRaw.getTime() > end.getTime() ? end : windowEndRaw;
+    let docIndex = 0;
+    for (const [docType, copies] of copiesByType) {
+      const points = Array.from({ length: copies * 2 }, () => between(ctx, windowStart, windowEnd).getTime()).sort((a, b) => a - b);
+      for (let copy = 0; copy < copies; copy += 1) {
+        const superseded = copy < copies - 1;
+        const uploadedAt = new Date(points[copy * 2]!);
+        const reviewPoint = new Date(points[copy * 2 + 1]!);
+        const required = requiredDocs.includes(docType);
+        let docStatus: string;
+        let avStatus = "CLEAN";
+        if (superseded) {
+          docStatus = ctx.rng.chance(60) ? "REJECTED" : "EXPIRED";
+        } else if (kybStatus === "VERIFIED") {
+          docStatus = "ACCEPTED";
+        } else if (kybStatus === "REJECTED") {
+          docStatus = required && ctx.rng.chance(40) ? "REJECTED" : "ACCEPTED";
+        } else if (joinStatus === "DRAFT" || joinStatus === "SUBMITTED") {
+          docStatus = "UPLOADED";
+          avStatus = ctx.rng.chance(15) ? "PENDING" : "CLEAN";
+        } else {
+          docStatus = ctx.rng.weighted({ UPLOADED: 35, ACCEPTED: 50, REJECTED: 15 }) as string;
+        }
+        if (docStatus === "REJECTED" && ctx.rng.chance(10)) avStatus = "INFECTED";
+        const reviewedAt = docStatus === "UPLOADED" ? null : reviewPoint;
+        // Registry/tax/licence documents expire yearly. An ACTIVE merchant keeps
+        // valid documents (a few expire within 30 days and got the 30-day
+        // notice); an EXPIRED copy lapsed before its replacement was uploaded.
+        const yearly = ["COMMERCIAL_REGISTRY", "TAX_CERTIFICATE", "SECTOR_LICENSE"].includes(docType);
+        let expiresOn: Date | null = null;
+        let expiredAt: Date | null = null;
+        let notice30: Date | null = null;
+        if (docStatus === "EXPIRED") {
+          const replacementAt = new Date(points[copy * 2 + 2] ?? reviewPoint.getTime());
+          expiredAt = between(ctx, reviewPoint, replacementAt);
+          expiresOn = expiredAt;
+        } else if (yearly && docStatus === "ACCEPTED") {
+          const soon = status === "ACTIVE" && ctx.rng.chance(6);
+          expiresOn = soon ? addDays(end, ctx.rng.int(3, 29)) : addDays(end, ctx.rng.int(45, 330));
+          if (soon) notice30 = maxDate(addDays(expiresOn, -30), reviewedAt);
+        }
+        const sharedHash = duplicateSource !== undefined && docIndex === 0 ? pairHash.get(duplicateSource) : undefined;
+        const sha = sharedHash ?? sha256Like(ctx, `${merchantId}:${docType}:${copy}`);
+        if (docIndex === 0) pairHash.set(index, sha);
+        ctx.dataset.kybDocuments.push({
+          id: ctx.nextId("kyb-doc"),
+          createdAt: uploadedAt,
+          updatedAt: maxDate(uploadedAt, reviewedAt, expiredAt, notice30 && notice30 <= end ? notice30 : null),
+          merchantId,
+          joinRequestId: superseded && priorIds.length > 0 ? priorIds[priorIds.length - 1] : joinRequestId,
+          subjectType: "MERCHANT",
+          subjectId: merchantId,
+          docType,
+          storageKey: `synthetic/${ctx.config.namespace}/merchants/${merchantId}/${docType.toLowerCase()}-${copy}.pdf`,
+          originalFileName: `${docType.toLowerCase()}${superseded ? `-v${copy + 1}` : ""}.pdf`,
+          contentCiphertext: null,
+          sha256: sha,
+          mime: "application/pdf",
+          sizeBytes: ctx.rng.int(80_000, 3_500_000),
+          avStatus,
+          status: docStatus,
+          uploadedById: onboardingChannel === "ADMIN_ASSISTED" ? assistant : adminUserId,
+          reviewedById: reviewedAt ? ctx.rng.pick(kybReviewers)?.id ?? null : null,
+          reviewedAt,
+          expiresOn,
+          rejectionReasonCode: docStatus === "REJECTED" ? (avStatus === "INFECTED" ? "MALWARE_DETECTED" : "BLURRY_OR_EXPIRED") : null,
+          reviewNotes: docStatus === "REJECTED" ? "The scan is not readable; request a fresh copy." : null,
+          duplicateJustification: sharedHash ? "Group companies share the same registry extract." : null,
+          statusChangedAt: expiredAt ?? reviewedAt,
+          expiryNotice30SentAt: notice30,
+          expiryNotice7SentAt: null,
+          expiredAt,
+        });
+        docIndex += 1;
+      }
     }
 
-    // Beneficial owners (1-4), including historical owner changes.
-    const ownerCount = ctx.rng.int(1, 4);
-    for (let ownerIndex = 0; ownerIndex < ownerCount; ownerIndex += 1) {
+    // ---------------------------------------------------- beneficial owners
+    let remainingShare = 100;
+    for (let ownerIndex = 0; ownerIndex < ownerCounts[index]!; ownerIndex += 1) {
       const ownerName = randomName(ctx);
-      const active = !(ownerIndex === ownerCount - 1 && ctx.rng.chance(25));
-      const rawNationalId = `NID-${merchantId}-${ownerIndex}`;
-      ctx.dataset.beneficialOwners.push({
+      const isLast = ownerIndex === ownerCounts[index]! - 1;
+      const share = ownerIndex === 0
+        ? Math.min(remainingShare, ctx.rng.int(35, 90))
+        : isLast ? remainingShare : Math.min(remainingShare, ctx.rng.int(0, Math.max(0, Math.floor(remainingShare / 2))));
+      remainingShare -= share;
+      const formerOwner = ownerIndex > 0 && ctx.rng.chance(15) && activatedAt !== null;
+      const validTo = formerOwner ? between(ctx, addDays(activatedAt!, 10), stoppedAt ?? end) : null;
+      const rawNationalId = `${ctx.rng.int(1, 2)}${String(ctx.rng.int(1950, 2003))}${String(ctx.rng.int(0, 9_999_999)).padStart(7, "0")}`;
+      const owner: Record<string, unknown> = {
         id: ctx.nextId("owner"),
-        createdAt,
-        updatedAt: ctx.timeline.end,
+        createdAt: finalCreated,
+        updatedAt: validTo ?? finalCreated,
         merchantId,
         fullNameAr: ownerName.ar,
         fullNameEn: ownerName.en,
-        nationalIdCiphertext: Buffer.from(rawNationalId).toString("base64"),
+        nationalIdCiphertext: "",
         nationalIdHash: nationalIdHash(rawNationalId),
-        dateOfBirth: addDays(ctx.timeline.start, -ctx.rng.int(9000, 18000)),
-        nationality: ctx.rng.chance(88) ? "LY" : ctx.rng.pick(["EG", "TN", "TR"]),
-        ownershipPercent: ownerIndex === 0 ? ctx.rng.int(35, 90).toFixed(2) : ctx.rng.int(1, 30).toFixed(2),
-        role: ownerIndex === 0 ? "OWNER" : ctx.rng.pick(OWNER_ROLES),
-        pepDeclared: ctx.rng.chance(4),
-        screeningStatus: ctx.rng.chance(88) ? "CLEAR" : ctx.rng.chance(50) ? "POTENTIAL_MATCH" : "NOT_SCREENED",
-        active,
-        validFrom: createdAt,
-        validTo: active ? null : addDays(ctx.timeline.end, -ctx.rng.int(30, 300)),
-      });
+        dateOfBirth: addDays(end, -ctx.rng.int(21 * 365, 70 * 365)),
+        nationality: ctx.rng.chance(88) ? "LY" : ctx.rng.pick(NATIONALITIES.filter((code) => code !== "LY")),
+        ownershipPercent: share > 0 ? share.toFixed(2) : null,
+        role: ownerIndex === 0 ? "OWNER" : share >= 25 ? "OWNER" : ctx.rng.pick(OWNER_ROLES),
+        pepDeclared: ctx.rng.chance(3),
+        screeningStatus: joinStatus === "DRAFT" ? "NOT_SCREENED" : ctx.rng.chance(93) ? "CLEAR" : "POTENTIAL_MATCH",
+        active: !formerOwner,
+        validFrom: finalCreated,
+        validTo,
+      };
+      ctx.dataset.beneficialOwners.push(owner);
+      meta.pendingSecrets.push({ row: owner, field: "nationalIdCiphertext", plaintext: rawNationalId, keyId: "kyb-national-id", mode: "secret" });
     }
 
-    // Commission profile (one per merchant).
-    ctx.dataset.commissionProfiles.push({
-      id: ctx.nextId("commission"),
-      createdAt,
-      updatedAt: createdAt,
-      merchantId,
-      applicationId: null,
-      railCode: ctx.rng.pick(ctx.refs.rails).code,
-      calcType: ctx.rng.chance(70) ? "PERCENTAGE" : ctx.rng.chance(50) ? "HYBRID" : "TIERED",
-      flatFee: ctx.rng.decimal(0, 1, 4),
-      percentageRate: ctx.rng.decimal(0.5, 3.5, 6),
-      tiersJson: null,
-      minFee: "0.0000",
-      maxFee: ctx.rng.chance(30) ? ctx.rng.decimal(5, 50, 4) : null,
-      feeBearerDefault: ctx.rng.weighted({ MERCHANT_ABSORBS: 70, PAYER_SURCHARGE: 20, SPLIT: 10 }),
-      roundingMode: "NEAREST",
-      effectiveFrom: createdAt,
-      effectiveTo: null,
-      version: 1,
-      approvalRequestId: null,
-      seedKey: `synthetic:${ctx.config.namespace}:commission:${merchantId}`,
-    });
+    // ---------------------------------------------------- wallets + GL
+    const walletInfos: MerchantInfo["wallets"] = [];
+    for (let walletIndex = 0; walletIndex < walletCounts[index]!; walletIndex += 1) {
+      const walletAt = walletIndex === 0 ? merchantCreatedAt : between(ctx, activatedAt ?? merchantCreatedAt, stoppedAt ?? end);
+      const glAccountId = createWalletAccount(ctx, merchantId, walletAt, walletIndex);
+      const walletId = ctx.nextId("wallet");
+      const walletStatus = status === "PENDING" ? "PENDING"
+        : status === "REJECTED" || status === "CLOSED" ? "CLOSED"
+          : status === "SUSPENDED" && (suspensionReason === "AML" || suspensionReason === "FRAUD") ? "FROZEN"
+            : "ACTIVE";
+      ctx.dataset.wallets.push({
+        id: walletId,
+        createdAt: walletAt,
+        updatedAt: maxDate(walletAt, activatedAt, stoppedAt),
+        merchantId,
+        glAccountId,
+        currency: "LYD",
+        status: walletStatus,
+      });
+      walletInfos.push({ id: walletId, glAccountId, createdAt: walletAt, status: walletStatus });
+    }
 
-    // Merchant-owned credential sets for direct settlement.
-    if ((status === "ACTIVE" || status === "SUSPENDED") && ctx.rng.chance(18)) {
-      const gateway = ctx.rng.pick(ctx.refs.gateways);
-      const env = ctx.rng.chance(70) ? "LIVE" : "SANDBOX";
-      ctx.dataset.credentialSets.push({
-        id: ctx.nextId("credential"),
+    // --------------------------------------------------------- applications
+    const appIds: string[] = [];
+    for (let appIndex = 0; appIndex < appCounts[index]!; appIndex += 1) {
+      const wallet = walletInfos[appIndex % walletInfos.length]!;
+      const createdAt = appIndex === 0 ? maxDate(finalCreated, wallet.createdAt) : between(ctx, maxDate(activatedAt ?? finalCreated, wallet.createdAt), stoppedAt ?? end);
+      const appStatus = status === "ACTIVE" ? (appIndex === 0 || ctx.rng.chance(85) ? "ACTIVE" : ctx.rng.chance(50) ? "PENDING" : "DRAFT")
+        : status === "SUSPENDED" ? "SUSPENDED"
+          : status === "CLOSED" ? "CLOSED"
+            : status === "PENDING" ? (appIndex === 0 ? "PENDING" : "DRAFT")
+              : "DRAFT";
+      const applicationId = ctx.nextId("application");
+      appIds.push(applicationId);
+      ctx.dataset.applications.push({
+        id: applicationId,
         createdAt,
-        updatedAt: ctx.timeline.end,
-        gatewayId: gateway.id,
-        env,
-        ownerType: "MERCHANT",
-        ownerMerchantId: merchantId,
-        externalMerchantId: `MERCH-${merchantId}`,
-        settlementTarget: "MERCHANT_DIRECT",
-        entriesCiphertext: [],
-        mtlsCertCiphertext: null,
-        status: ctx.rng.weighted({ VERIFIED: 45, UNTESTED: 30, FAILING: 15, REVOKED: 10 }),
-        lastVerifiedAt: ctx.rng.chance(60) ? addDays(ctx.timeline.end, -ctx.rng.int(1, 120)) : null,
-        expiresAt: null,
+        updatedAt: maxDate(createdAt, stoppedAt && stoppedAt > createdAt ? stoppedAt : null),
+        merchantId,
+        name: appIndex === 0 ? `${business.en} checkout` : `${business.en} ${["mobile app", "branch", "e-shop", "invoices"][appIndex - 1] ?? appIndex}`,
+        businessUseDescription: `${category.en} payments collected by ${business.en}.`,
+        expectedMonthlyVolume: `${Math.round(category.max * ctx.rng.int(20, 200))}.0000`,
+        assignedWalletId: wallet.id,
+        railWhitelist: null,
+        redirectDomainAllowlist: [`https://${slug(business.en).replaceAll(".", "-")}.${ctx.config.namespace}.ly`],
+        status: appStatus,
       });
-    }
 
-    // Access tokens and POS terminals for a subset of applications.
-    for (const applicationId of appIds) {
-      if (ctx.rng.chance(35)) {
+      // Server keys and IP allow lists for live applications.
+      if (appStatus !== "DRAFT" && ctx.rng.chance(40)) {
         const tokenId = ctx.nextId("token");
         const tokenHash = sha256Like(ctx, `token:${applicationId}`);
+        const tokenAt = between(ctx, createdAt, stoppedAt ?? end);
+        const revokedAt = status === "CLOSED" ? stoppedAt : ctx.rng.chance(10) ? between(ctx, tokenAt, end) : null;
         ctx.dataset.accessTokens.push({
           id: tokenId,
-          createdAt: addDays(createdAt, ctx.rng.int(0, 20)),
-          updatedAt: ctx.timeline.end,
+          createdAt: tokenAt,
+          updatedAt: revokedAt ?? tokenAt,
           merchantId,
           applicationId,
           name: "Default server key",
@@ -383,48 +578,199 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
           lastFour: tokenHash.slice(-4),
           scopes: ["payments:write", "payments:read", "refunds:write"],
           ipWhitelistEnabled: ctx.rng.chance(40),
-          revokedAt: ctx.rng.chance(10) ? addDays(ctx.timeline.end, -ctx.rng.int(1, 100)) : null,
-          lastUsedAt: ctx.rng.chance(70) ? addDays(ctx.timeline.end, -ctx.rng.int(0, 10)) : null,
+          revokedAt,
+          lastUsedAt: ctx.rng.chance(70) ? between(ctx, tokenAt, revokedAt ?? stoppedAt ?? end) : null,
         });
         if (ctx.rng.chance(40)) {
           ctx.dataset.accessTokenIps.push({
             id: ctx.nextId("token-ip"),
-            createdAt,
-            updatedAt: createdAt,
+            createdAt: tokenAt,
+            updatedAt: tokenAt,
             tokenId,
             cidr: `203.0.113.${ctx.rng.int(1, 250)}/32`,
           });
         }
       }
-      if (ctx.rng.chance(22)) {
+      // Counter terminals only for counter-trading categories.
+      if (category.pos && appStatus !== "DRAFT" && ctx.rng.chance(45)) {
         const posId = ctx.nextId("pos");
+        const posAt = between(ctx, createdAt, stoppedAt ?? end);
         ctx.dataset.posTerminals.push({
           id: posId,
-          createdAt: addDays(createdAt, ctx.rng.int(0, 30)),
-          updatedAt: ctx.timeline.end,
+          createdAt: posAt,
+          updatedAt: posAt,
           applicationId,
           name: `POS ${business.en.slice(0, 18)}`,
           location: address.en,
-          status: ctx.rng.weighted({ ACTIVE: 70, INACTIVE: 20, BLOCKED: 10 }),
+          status: status === "CLOSED" ? "INACTIVE" : ctx.rng.weighted({ ACTIVE: 80, INACTIVE: 15, BLOCKED: 5 }),
         });
         const screenCount = ctx.rng.int(1, 3);
         for (let screenIndex = 0; screenIndex < screenCount; screenIndex += 1) {
-          const screenCode = `SCR-${ctx.config.namespace}-${posId.slice(-6)}-${screenIndex}`;
+          const screenCode = `SCR-${ctx.config.namespace}-${posId.slice(-8)}-${screenIndex}`;
           ctx.dataset.posScreens.push({
             id: ctx.nextId("pos-screen"),
-            createdAt,
-            updatedAt: ctx.timeline.end,
+            createdAt: posAt,
+            updatedAt: posAt,
             posId,
             screenCode,
             authTokenHash: sha256Like(ctx, `screen:${screenCode}`),
             realtimeRoomId: `room-${screenCode}`,
-            lastActiveAt: ctx.rng.chance(50) ? addDays(ctx.timeline.end, -ctx.rng.int(0, 30)) : null,
+            lastActiveAt: ctx.rng.chance(50) ? between(ctx, posAt, stoppedAt ?? end) : null,
           });
         }
       }
     }
 
-    void name;
-    void formatMoney;
+    // ------------------------------------------- merchant-owned credentials
+    if ((status === "ACTIVE" || status === "SUSPENDED") && activatedAt && ctx.rng.chance(15)) {
+      const directRoutes = ctx.refs.routes.filter((route) =>
+        route.credentialPolicy === "MERCHANT_REQUIRED" || route.credentialPolicy === "MERCHANT_OR_PLATFORM");
+      const route = directRoutes.length > 0 ? ctx.rng.pick(directRoutes) : null;
+      if (route) {
+        const credentialAt = between(ctx, activatedAt, addDays(activatedAt, 30));
+        const credentialStatus = ctx.rng.weighted({ VERIFIED: 75, UNTESTED: 10, FAILING: 10, REVOKED: 5 }) as string;
+        const credentialId = ctx.nextId("credential");
+        ctx.dataset.credentialSets.push({
+          id: credentialId,
+          createdAt: credentialAt,
+          updatedAt: credentialAt,
+          gatewayId: route.gatewayId,
+          env: "LIVE",
+          ownerType: "MERCHANT",
+          ownerMerchantId: merchantId,
+          externalMerchantId: `MERCH-${ctx.config.namespace}-${merchantId.slice(-12)}`,
+          settlementTarget: "MERCHANT_DIRECT",
+          entriesCiphertext: [],
+          mtlsCertCiphertext: null,
+          status: credentialStatus,
+          lastVerifiedAt: credentialStatus === "VERIFIED" ? between(ctx, credentialAt, end) : null,
+          expiresAt: null,
+        });
+        ctx.refs.credentials.push({
+          id: credentialId,
+          gatewayId: route.gatewayId,
+          gatewayCode: route.gatewayCode,
+          env: "LIVE",
+          ownerType: "MERCHANT",
+          settlementTarget: "MERCHANT_DIRECT",
+          ownerMerchantId: merchantId,
+          status: credentialStatus,
+        });
+      }
+    }
+
+    // ---------------------------------------- negotiated commission profiles
+    if (activatedAt) {
+      const railCount = ctx.rng.int(0, 3);
+      const rails = shuffle(ctx, ctx.refs.rails).slice(0, railCount);
+      for (const rail of rails) {
+        const calcType = ctx.rng.weighted({ PERCENTAGE: 70, HYBRID: 20, TIERED: 10 }) as string;
+        ctx.dataset.commissionProfiles.push({
+          id: ctx.nextId("commission"),
+          createdAt: activatedAt,
+          updatedAt: activatedAt,
+          merchantId,
+          applicationId: null,
+          railCode: rail.code,
+          calcType,
+          // percentage_rate is a FRACTION (0.025000 = 2.5 %), DECIMAL(8,6):
+          // the old generator stored 0.5-3.5 (50-350 %).
+          flatFee: calcType === "HYBRID" ? D(ctx.rng.int(1, 4)).mul("0.25").toFixed(4) : "0.0000",
+          percentageRate: calcType === "TIERED" ? "0.000000" : `0.0${ctx.rng.int(10, 30)}000`,
+          tiersJson: calcType === "TIERED"
+            ? [{ upTo: "100", percent: "0.030" }, { upTo: "1000", percent: "0.025" }, { percent: "0.018" }]
+            : null,
+          minFee: "0.2500",
+          maxFee: ctx.rng.chance(30) ? `${ctx.rng.int(10, 60)}.0000` : null,
+          feeBearerDefault: "MERCHANT_ABSORBS",
+          roundingMode: "HALF_UP",
+          effectiveFrom: activatedAt,
+          effectiveTo: null,
+          version: 1,
+          approvalRequestId: null,
+          seedKey: `synthetic:${ctx.config.namespace}:${ctx.config.seedKey}:commission:${merchantId}:${rail.code}`,
+        });
+      }
+    }
+
+    meta.merchants.set(merchantId, {
+      id: merchantId,
+      status,
+      categoryCode: category.code,
+      ticketMin: category.min,
+      ticketMax: category.max,
+      pos: category.pos,
+      createdAt: merchantCreatedAt,
+      activatedAt,
+      stoppedAt,
+      suspensionReason,
+      adminUserId,
+      wallets: walletInfos,
+      applicationIds: appIds,
+      negativeBalanceCeiling,
+      join: {
+        requestId: joinRequestId,
+        status: joinStatus,
+        reviewerId,
+        proposedAt,
+        decidedAt,
+        fourEyes,
+      },
+    });
+    void userIds;
   }
+
+  ensureHistoricalDefaultProfile(ctx);
+};
+
+/**
+ * The baseline seed creates the platform `default` commission profile with
+ * `effective_from = 2026-01-01`. Attempts dated before that would have had no
+ * effective profile (no visible rail), so the history gets the predecessor
+ * profile that was in force until then.
+ */
+export const ensureHistoricalDefaultProfile = (ctx: SeederContext): void => {
+  const defaults = (ctx.refs.commissionProfiles ?? []).filter((profile) => profile.railCode === "default");
+  const earliest = defaults.reduce<Date | null>((min, profile) =>
+    !min || profile.effectiveFrom < min ? profile.effectiveFrom : min, null);
+  if (earliest && earliest.getTime() <= ctx.timeline.start.getTime()) return;
+  const row = {
+    id: ctx.nextId("commission"),
+    createdAt: ctx.timeline.start,
+    updatedAt: earliest ?? ctx.timeline.start,
+    merchantId: null,
+    applicationId: null,
+    railCode: "default",
+    calcType: "PERCENTAGE",
+    flatFee: "0.0000",
+    percentageRate: "0.025000",
+    tiersJson: null,
+    minFee: "0.2500",
+    maxFee: null,
+    feeBearerDefault: "MERCHANT_ABSORBS",
+    roundingMode: "HALF_UP",
+    effectiveFrom: ctx.timeline.start,
+    effectiveTo: earliest,
+    version: 0,
+    approvalRequestId: null,
+    seedKey: `synthetic:${ctx.config.namespace}:${ctx.config.seedKey}:platform-default-historical`,
+  };
+  ctx.dataset.commissionProfiles.push(row);
+  ctx.refs.commissionProfiles = [
+    ...(ctx.refs.commissionProfiles ?? []),
+    {
+      id: row.id,
+      merchantId: null,
+      applicationId: null,
+      railCode: "default",
+      calcType: row.calcType,
+      flatFee: row.flatFee,
+      percentageRate: row.percentageRate,
+      tiersJson: null,
+      minFee: row.minFee,
+      maxFee: null,
+      effectiveFrom: row.effectiveFrom,
+      effectiveTo: row.effectiveTo,
+    },
+  ];
 };

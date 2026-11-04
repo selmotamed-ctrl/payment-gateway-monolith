@@ -16,9 +16,9 @@ code:
   - checkout-back/lib/error/index.ts
   - checkout-back/lib/requestLogger/index.ts
 design_sources:
-  - design/payment_gateway_final_design-v5.md#21-service-roles-boundaries-and-security-constraints
-  - design/payment_gateway_final_design-v5.md#161-checkout-back-public-api-apiv1pay--apiv1inbound---forwards-to-core-back-internalcheckout
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#62-edge-to-core-mtls-upstream-load-balancer--health-failover-admin-back-merchant-back-checkout-back
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#21-service-roles-boundaries-and-security-constraints
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#161-checkout-back-public-api-apiv1pay--apiv1inbound---forwards-to-core-back-internalcheckout
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#62-edge-to-core-mtls-upstream-load-balancer--health-failover-admin-back-merchant-back-checkout-back
 tests:
   - core-back/test/storage-engine/telemetry-and-realtime.test.ts
   - checkout-back/test/checkout-zero-trust.test.ts
@@ -239,9 +239,9 @@ The suites are local and do not require PostgreSQL/Redis. A live gateway webhook
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` section 2.1, checkout boundary.
-- `design/payment_gateway_final_design-v5.md` section 16.1, checkout API surface.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.2, pool behavior.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 2.1, checkout boundary.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` section 16.1, checkout API surface.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 6.2, pool behavior.
 
 ### Code paths
 

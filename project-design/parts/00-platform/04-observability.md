@@ -19,11 +19,11 @@ code:
   - deploy/backup-daemon/src/server.ts
   - deploy/backup-daemon/src/backupEngine.ts
 design_sources:
-  - design/payment_gateway_final_design-v5.md#11-service-level-objectives-slos-incident-runbooks--dr-replay
-  - design/payment-gateway-refined-design-v4.1.md#11-service-level-objectives-slos-incident-runbooks--dr-replay
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#24-non-blocking-buffered-log-sink--dedicated-audit-shipper
-  - design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md#5-segment-4--backup-management-orchestrator--admin-control-plane-pg-backup-daemon--core-back--admin-front
-  - design/Dynamic-Payment-Gateway-Management-Design-v2.md#15-api-surface-and-observability
+  - design/01-platform-architecture/payment_gateway_final_design-v5.md#11-service-level-objectives-slos-incident-runbooks--dr-replay
+  - design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#11-service-level-objectives-slos-incident-runbooks--dr-replay
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#24-non-blocking-buffered-log-sink--dedicated-audit-shipper
+  - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#5-segment-4--backup-management-orchestrator--admin-control-plane-pg-backup-daemon--core-back--admin-front
+  - design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md#15-api-surface-and-observability
 tests:
   - core-back/test/worker-runtime-health.test.ts
   - core-back/test/internal-routes.test.ts
@@ -448,11 +448,11 @@ No live monitoring stack, metrics scrape, restore drill or production-shaped log
 
 ### Old design sections
 
-- `design/payment_gateway_final_design-v5.md` §11 SLOs and runbooks.
-- `design/payment-gateway-refined-design-v4.1.md` §11.1 SLOs, §11.2 runbooks.
-- `design/performance-efficiency/storage_driver_postgres18_backup_and_scaling_architecture.md` §2.4 log/audit adapters, §5 backup control plane.
-- `design/Dynamic-Payment-Gateway-Management-Design-v2.md` §15 API surface and observability.
-- `design/opencode_technical_delivery_design.md` §28 backup endpoints and storage delivery.
+- `design/01-platform-architecture/payment_gateway_final_design-v5.md` §11 SLOs and runbooks.
+- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` §11.1 SLOs, §11.2 runbooks.
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` §2.4 log/audit adapters, §5 backup control plane.
+- `design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md` §15 API surface and observability.
+- `design/90-archive/delivery-logs/opencode_technical_delivery_design.md` §28 backup endpoints and storage delivery.
 
 ### Code paths
 
