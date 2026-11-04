@@ -38,9 +38,16 @@
 
 .guide-primary-button {
   background: var(--pg-accent-primary);
-  color: #fff;
+  /* The accent is near-black in light mode and near-white in dark mode, so the label
+     must come from the surface token (as .v-btn--color-primary does), never a fixed #fff. */
+  color: var(--pg-bg-surface);
   border-color: var(--pg-accent-primary);
   font-weight: 600;
+}
+
+.guide-primary-button:hover:not(:disabled) {
+  background: var(--pg-accent-primary-hover);
+  border-color: var(--pg-accent-primary-hover);
 }
 
 .guide-primary-button:disabled {
@@ -1103,7 +1110,7 @@
 .guide-risk-low { background: var(--pg-status-success-bg); color: var(--pg-status-success-text); border-color: var(--pg-status-success-border); }
 .guide-risk-medium { background: var(--pg-status-warning-bg); color: var(--pg-status-warning-text); border-color: var(--pg-status-warning-border); }
 .guide-risk-high { background: var(--pg-status-danger-bg); color: var(--pg-status-danger-text); border-color: var(--pg-status-danger-border); }
-.guide-risk-critical { background: var(--pg-status-danger-text); color: #fff; border-color: var(--pg-status-danger-text); }
+.guide-risk-critical { background: var(--pg-status-danger-text); color: var(--pg-bg-surface); border-color: var(--pg-status-danger-text); }
 
 .guide-risk-dot {
   width: 9px;
