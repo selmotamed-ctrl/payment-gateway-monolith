@@ -3,8 +3,8 @@ id: deploy.storage
 title: Storage Provisioners
 status: partial
 confidence: high
-last_verified: 2026-11-03
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-04
+verified_against: working-tree
 code:
   - deploy/test/testMatrix.test.ts
   - deploy/provisioners/postgres18Provisioner.ts
@@ -111,20 +111,22 @@ The slots are created on the primary by `primaryBootstrapSql()`. Replication is 
 
 ### 3.3 PgBouncer
 
-When `PGBOUNCER_ENABLED=true`, PgBouncer is installed and configured on the primary and every replica. `/etc/pgbouncer/pgbouncer.ini` sets `listen_addr=0.0.0.0`, `listen_port=6432`, transaction pooling, `server_tls_sslmode=require`, 2000 client connections, pool size 50, reserve 10, 256 prepared statements, SCRAM auth and `/etc/pgbouncer/userlist.txt`. The userlist contains the application and replication users with plaintext passwords, mode 0600. PgBouncer is restarted after writing it.
+When `PGBOUNCER_ENABLED=true`, PgBouncer is installed and configured on the primary and every replica. `/etc/pgbouncer/pgbouncer.ini` sets `listen_addr=0.0.0.0`, `listen_port=6432`, transaction pooling, `server_tls_sslmode=prefer`, the configured client/pool limits, reserve 10, prepared statements, SCRAM auth and `/etc/pgbouncer/userlist.txt`. The userlist contains the application and replication users with plaintext passwords, mode 0600. PgBouncer is restarted after writing it.
+
+After writing both files, the provisioner resolves the service account from `systemctl show -p User --value pgbouncer` (falling back to `pgbouncer`, then `postgres`) and applies `0640` to the ini and `0600` to the userlist. This is required because Ubuntu's unit runs as `postgres` and does not create a `pgbouncer` system user; a root-owned `0640` file otherwise fails with `could not load file "/etc/pgbouncer/pgbouncer.ini": Permission denied`.
 
 Important as-built facts:
 
-- There is no `[databases]` section. PgBouncer has no mapping from a client database name to a PostgreSQL host/port/database. A client connecting to `:6432` cannot be routed to the application database by this configuration.
-- `server_tls_sslmode = require` encrypts the PgBouncer-to-PostgreSQL leg but does not verify the server certificate (`verify-full` would) and supplies no client certificate.
+- The `[databases]` section maps `PG_DB_NAME` to `127.0.0.1:<primaryPort>` with `PG_DB_USER` and its password, so a client connecting to `:6432` with that database name reaches the local PostgreSQL primary.
+- `server_tls_sslmode = prefer` encrypts the PgBouncer-to-PostgreSQL leg when the server offers TLS; it does not verify the server certificate (`verify-full` would) and supplies no client certificate.
 - There is no `client_tls_sslmode`, `client_tls_cert_file` or `client_tls_key_file`; clients are not required to present a certificate.
 - `listen_addr = 0.0.0.0` is protected by UFW only; the plan opens 6432 to core sources.
 
-The core environment points `PG_PRIMARY_PORT` and `DATABASE_REPLICA_URLS` at `PGBOUNCER_PORT` when the pooler is enabled. Because the generated PgBouncer has no database mapping, this is a deployment-breaking gap until a `[databases]` entry (or wildcard) is supplied.
+The core environment points `PG_PRIMARY_PORT` and `DATABASE_REPLICA_URLS` at `PGBOUNCER_PORT` when the pooler is enabled; the generated `[databases]` mapping keeps that route working.
 
 ### 3.4 Redis
 
-`redisProvisioner.ts` installs `redis-server`, enables it, and writes both `/etc/redis/redis.conf.d/zz-pg-switch.conf` and `/etc/redis/redis.conf` with a private-IP + loopback bind, `protected-mode yes`, the node port, `requirepass <REDIS_PASSWORD>`, `save 3600 1`, maxmemory/policy `allkeys-lru`, no append-only file and daemonize on. It runs `ufw allow` for core and backup sources and restarts Redis with `redis-cli PING`.
+`redisProvisioner.ts` installs `redis-server`, enables it, and writes both `/etc/redis/redis.conf.d/zz-pg-switch.conf` and `/etc/redis/redis.conf` with a deduplicated private-IP + loopback bind, `protected-mode yes`, the node port, `requirepass <REDIS_PASSWORD>`, `save 3600 1`, maxmemory/policy `allkeys-lru`, no append-only file, `daemonize no`, `supervised systemd` and `dir /var/lib/pg-redis`. It writes a systemd drop-in for `redis-server` and `valkey` granting `ReadWritePaths=/var/lib/pg-redis`, runs `systemctl daemon-reload`, runs `ufw allow` for core and backup sources, restarts Redis and verifies with `REDISCLI_AUTH=<password> redis-cli -p <port> PING`.
 
 There is no `tls-port`, `tls-cert-file`, `tls-key-file`, `tls-ca-cert-file` or `tls-auth-clients` setting. Redis traffic is plaintext inside the private network. The generated `redis-client` certificate is unused.
 
@@ -359,3 +361,22 @@ Not covered:
 - Journal partition cron uses the primary cluster port (`psql -p <port>`), not the default 5432.
 - Log partition cron uses the log cluster port (`psql -p <port>`), so a log cluster on 5435 is maintained instead of accidentally touching the main cluster.
 - Backup target verification checks the MinIO health endpoint instead of an unconfigured rclone remote.
+
+## 13. PgBouncer config ownership fix (2026-11-04)
+
+- PgBouncer config ownership is derived from the installed systemd unit instead of assuming a `pgbouncer` user exists.
+- The ownership command resolves `systemctl show -p User --value pgbouncer`, falls back to the `pgbouncer` account, then to `postgres`, and enforces `0640` on `pgbouncer.ini` plus `0600` on `userlist.txt`.
+- Fixes Ubuntu hosts where `pgbouncer.service` runs as `User=postgres`; the previous `chown pgbouncer:pgbouncer ... || true` silently failed and left the config unreadable.
+
+## 14. Redis single-machine and sandbox fixes (2026-11-04)
+
+- `bind` addresses are deduplicated. A loopback-only node (`REDIS_NODES="...:127.0.0.1:6379"`) previously rendered `bind 127.0.0.1 127.0.0.1`; Redis bound the first socket and aborted on the duplicate with `Address already in use`.
+- The provisioner writes `redis-server.service.d/zz-pg-switch.conf` and `valkey.service.d/zz-pg-switch.conf` with `ReadWritePaths=/var/lib/pg-redis`. Debian's unit uses `ProtectSystem=strict` and otherwise makes the configured `dir` read-only, so RDB saves failed with `Read-only file system`.
+- The restart/health step runs `systemctl daemon-reload`, targets the configured node port, and authenticates the `PING` with `REDISCLI_AUTH` instead of an unauthenticated `redis-cli PING`.
+- Before restarting, the step disables save-on-shutdown on the currently running instance (`CONFIG SET save ""`). A sandboxed instance with a read-only dir otherwise refuses to exit when its shutdown save fails, which hangs `systemctl` because Debian's unit sets `TimeoutStopSec=0`; the newly written config restores `save 3600 1`.
+
+## 15. PostgreSQL/pooler readiness (2026-11-04)
+
+- `provisionPostgres18()` waits for `pg_isready` on the primary port after restarting PostgreSQL.
+- `provisionBackupEngine()` waits after the core and audit archive restarts, restarts PgBouncer after the last PostgreSQL restart, and waits for PgBouncer on `PGBOUNCER_PORT`. The audit target can share the primary cluster, so its restart could otherwise leave PgBouncer caching `the database system is shutting down (server_login_retry)` when the core release runs migrations through `:6432`.
+- These waits prevent the core migration step from racing a PostgreSQL restart on single-machine and co-located audit deployments.

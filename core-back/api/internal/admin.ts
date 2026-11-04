@@ -15392,6 +15392,12 @@ const academyProgressSchema = z
       .record(z.string().max(80), z.union([z.number().min(0).max(100), academyQuizResultSchema]))
       .default({}),
     lastModuleId: z.string().max(40).optional(),
+    guideRead: z
+      .record(
+        z.string().max(120),
+        z.object({ v: z.string().max(20), at: z.string().max(60) }).strict(),
+      )
+      .default({}),
     updatedAt: z.string().max(40).optional(),
   });
 
@@ -15408,6 +15414,7 @@ router.get("/academy/progress", async (request: Request, response: Response) => 
       quizScores: {},
       completedLabs: [],
       badges: [],
+      guideRead: {},
     }) as unknown,
   });
 });
@@ -15446,7 +15453,8 @@ const buildAcademyOverviewSummary = async () => {
       || (Array.isArray(progress.completedLessonIds) && progress.completedLessonIds.length > 0)
       || (progress.completedLabIds && typeof progress.completedLabIds === "object" && Object.keys(progress.completedLabIds as object).length > 0)
       || (Array.isArray(progress.earnedBadges) && progress.earnedBadges.length > 0)
-      || (progress.quizScores && typeof progress.quizScores === "object" && Object.keys(progress.quizScores as object).length > 0);
+      || (progress.quizScores && typeof progress.quizScores === "object" && Object.keys(progress.quizScores as object).length > 0)
+      || (progress.guideRead && typeof progress.guideRead === "object" && Object.keys(progress.guideRead as object).length > 0);
     if (!hasProgress) continue;
     usersWithProgress += 1;
     byRole[user.role] = (byRole[user.role] ?? 0) + 1;

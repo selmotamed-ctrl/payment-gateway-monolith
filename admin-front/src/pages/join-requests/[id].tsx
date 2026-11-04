@@ -14,6 +14,7 @@ import { hasOneOfAuthorities, user } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+import { useSafeguard } from "@/components/guide/useSafeguard";
 import { statusTone } from "@/components/Table/statusTone";
 import {
     COLUMN_HELP,
@@ -338,6 +339,9 @@ const JoinRequestDetailPage = dc(() => {
         decisionOpen.value = false;
     };
 
+    const approveJoinSafeguard = useSafeguard("sg-approve-join-request");
+    const rejectJoinSafeguard = useSafeguard("sg-reject-join-request");
+
     const decide = async () => {
         if (decision.value === "APPROVED" && !readiness.value?.ready) {
             showSnackBar({ type: "warning", message: t("All approval blockers must be cleared before approval.") });
@@ -347,6 +351,7 @@ const JoinRequestDetailPage = dc(() => {
             showSnackBar({ type: "warning", message: t("A rejection note is required") });
             return;
         }
+        if (!(await (decision.value === "APPROVED" ? approveJoinSafeguard : rejectJoinSafeguard).confirm())) return;
         actionLoading.value = true;
         try {
             const response = await api.post(urlsMap.joinRequestDecide(requestId.value), {

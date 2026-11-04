@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { ADMIN_KEY, adminSession, seedSession } from "../fixtures";
+import { ADMIN_KEY, adminSession, confirmSafeguard, seedSession } from "../fixtures";
 
 const json = (status: number, body: unknown) => ({
   status,
@@ -77,6 +77,7 @@ test("merchant editing uses a form instead of a raw JSON patch", async ({ page }
     }
   }
   await page.getByRole("button", { name: "Submit for approval", exact: true }).click();
+  await confirmSafeguard(page);
 
   await expect.poll(() => submitted).not.toBeNull();
   expect(submitted.patch).toEqual(

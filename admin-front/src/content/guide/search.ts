@@ -8,7 +8,7 @@ import {
     GLOSSARY_TERMS,
     GUIDE_BOOKS,
     RUNBOOK_DEFINITIONS,
-} from "./index";
+} from "./legacy";
 import type { GuideSearchEntry } from "./types";
 
 const asTags = (...values: string[]): string[] => {

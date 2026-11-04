@@ -32,8 +32,9 @@ Historical `design/**` files are source lineage only; this document and the part
 - [Admin Route and Page Catalog](#admin-uiroutes) — `partial`
 - [Tables Filters and Exports](#admin-uitables) — `partial`
 - [Admin Guide and Academy](#admin-uiguide) — `partial`
-- [Contextual Help](#admin-uihelp) — `partial`
+- [Contextual Help](#admin-uihelp) — `implemented`
 - [Backups Settings and Operations](#admin-uioperations) — `partial`
+- [Admin Guide v2](#admin-uiguide-v2) — `implemented`
 - [Merchant Portal](#merchant-uiportal) — `partial`
 - [Merchant Guide and Developer API](#merchant-uiguide) — `partial`
 - [Checkout Payer Flow](#checkout-uiflow) — `partial`
@@ -56,7 +57,6 @@ Historical `design/**` files are source lineage only; this document and the part
 - [Benchmarks and Performance Gates](#testingbenchmarks) — `partial`
 - [Multi-Machine Topology and Stress Matrix](#testingmulti-machine-matrix) — `partial`
 - [Voucher Provider Management System (Future)](#futurevoucher) — `missing`
-- [Admin Guide v2 (Future)](#futureguide-v2) — `missing`
 - [Smart AI Spec Importer and Voucher Half (Future)](#futuresmart-ai-voucher) — `missing`
 - [Deferred and Partial Features](#futuredeferred) — `deferred`
 
@@ -146,7 +146,7 @@ The product scope implemented in code includes:
 - Optional Fake Rails emulator and tester portal.
 - Deploy engine with horizontal compute/storage node arrays, PKI, firewall, nginx/PM2 templates and ordered pipeline.
 
-The product scope intentionally not implemented is tracked in section 7 and in `project-design/appendices/stale-claims-register.md`. In particular, the voucher provider system exists only as design, guide v2 is future work, Google OIDC is a 501 stub, and `CAPTURE`/`SETTLEMENT_FETCH` are reserved enum values.
+The product scope intentionally not implemented is tracked in section 7 and in `project-design/appendices/stale-claims-register.md`. In particular, the voucher provider system exists only as design, Google OIDC is a 501 stub, and `CAPTURE`/`SETTLEMENT_FETCH` are reserved enum values. The admin guide v2 is implemented; merchant and checkout help remain separate.
 
 ## 4. Contracts and invariants
 
@@ -227,7 +227,7 @@ Production operation uses `deploy/deploy.ts` with `deploy/deploy.env`. The engin
 ### Missing / deferred
 
 - Voucher Provider Management System: absent (future part `09-future-and-unimplemented/00-voucher-provider-system.md`).
-- Guide v2: absent; the current guide is the implemented 12-book/8-module baseline.
+- Admin guide v2: implemented (14 books/125 articles, context help, safeguards, five simulators). Merchant and checkout help remain separate.
 - Google OIDC: `POST /internal/merchant/auth/google` and the edge route return `501 GOOGLE_IDENTITY_NOT_CONFIGURED`.
 - `CAPTURE` and `SETTLEMENT_FETCH`: present in the `FlowPhase` database enum but absent from the engine's runtime phase union and flow-provider mapping.
 - Storage-plane mTLS: certificates are generated and distributed, but PostgreSQL/Redis configuration does not consume them.
@@ -8168,7 +8168,7 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 
 <a id="admin-uiroutes"></a>
 
-> **Part ID:** `admin-ui.routes` · **Status:** `partial` · **Last verified:** 2026-11-03 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `admin-ui.routes` · **Status:** `partial` · **Last verified:** 2026-11-04 · **Verified against:** `5a24f6f+working-tree`
 
 # Admin Route and Page Catalog
 
@@ -8207,7 +8207,7 @@ The historical operator-case design also expects a dedicated operator-case inqui
 
 ### 3.2 Admin protected routes (37)
 
-The authority column is the UI gate. "None" means no effective `routesAuthorities` entry; the backend may still require an authority. Help shows the book/chapter used by `GUIDE_ROUTE_HELP`; "none" means no mapping resolves.
+The authority column is the UI gate. "None" means no effective `routesAuthorities` entry; the backend may still require an authority. Help shows the guide screen used by the generated context map; "none" means no mapping resolves.
 
 | # | Path | Name | UI authority / role | Help | Purpose |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -8248,6 +8248,13 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 | 35 | `/settings/platform` | `AdminPlatformSettings` | none (backend `settings:read`/`settings:write`) | none | Versioned platform settings, backup export and restore preview. |
 | 36 | `/settings/checkout-help` | `AdminCheckoutHelp` | none (backend `settings:read`/`settings:write`) | 4 / 4.2 | Checkout support config, preview, version history and diff. |
 | 37 | `/system/backups` | `SystemBackups` | `security:read` or `gateway:read` | none | WAL/daemon/target health, backup history, drills and policy. |
+| 38 | `/guide/book/:bookId` | `AdminGuideBook` | none (learning surface) | 1 / 1.1 | One guide book with ordered articles and progress. |
+| 39 | `/guide/a/:articleId` | `AdminGuideArticle` | none (learning surface) | 1 / 1.1 | Guide article reader with glossary, TOC, widgets and read tracking. |
+| 40 | `/guide/glossary/:slug?` | `AdminGuideGlossary` | none (learning surface) | 13 / 13.1 | A–Z glossary and deep-linkable term detail. |
+| 41 | `/guide/tools/:tool?` | `AdminGuideTools` | none (learning surface) | 1 / 1.1 | Five client-only teaching simulators. |
+| 42 | `/guide/playbook/:id?` | `AdminGuidePlaybook` | none (learning surface) | 10 / 10.1 | Symptom-to-action situation playbook. |
+| 43 | `/guide/cards/:id?` | `AdminGuideCards` | none (learning surface) | 1 / 1.1 | Safeguard checklist card catalog. |
+| 44 | `/guide/edge-cases` | `AdminGuideEdgeCases` | none (learning surface) | 13 / 13.5 | Filterable 140-case edge-case catalog. |
 
 Public admin routes are `/login` (`Login`, visitor-only) and the catch-all `NotFound`. The root `/` redirects to `Dashboard`.
 
@@ -8304,7 +8311,7 @@ Public admin routes are `/login` (`Login`, visitor-only) and the catch-all `NotF
 | Merchant routes | `merchant-front/src/router/index.ts` |
 | Merchant navigation and gates | `merchant-front/src/layouts/sections.tsx` |
 | Checkout routes | `checkout-front/src/router/index.ts` |
-| Admin help map | `admin-front/src/content/guide/index.ts` |
+| Admin help map | `admin-front/src/content/guide/generated/context-map.json` |
 | Merchant help map | `merchant-front/src/components/guide/ContextualHelpDrawer.tsx` |
 
 ### 5.1 Missing admin UI authority gates
@@ -8324,8 +8331,8 @@ The merchant portal has a similar gap: `Statements` is shown in navigation only 
 
 ## 6. Operational usage
 
-- Adding an admin page: add the explicit router record, the navigation item, the authority entry, and the `GUIDE_ROUTE_HELP` mapping in the same change.
-- Adding a detail page: set `meta.parentName` so navigation/help resolve to the parent; if the parent has no help mapping, add both.
+- Adding an admin page: add the explicit router record, the navigation item, the authority entry, and a `context-map.json` screen/route-name entry in the same change.
+- Adding a detail page: set `meta.parentName` so navigation/help resolve to the parent; if the parent has no context-map screen, add the route name to the owning screen or `General`.
 - Adding a merchant page: add the route, section item, `routesAuthorities` entry (unless intentionally open), and the merchant `ROUTE_HELP` entry.
 - Adding a checkout page: keep the router minimal; do not assume the `Dashboard` route exists.
 - Testing a route: verify both the hidden-navigation case and the direct-URL case; a hidden nav item is not a route gate.
@@ -8377,7 +8384,7 @@ These suites require a running stack and are skipped without the live/edge servi
 
 - `design/06-ui/portal_ui_implementation_plan.md` — page and shell rollout.
 - `design/10-fixes/_0001_operator_cases.md` — operator-case and inquiry workflow.
-- `design/07-guides-and-academy/guide_system_design_and_content.md` — future guide route/context-map expectations (not current).
+- `design/07-guides-and-academy/guide_system_design_and_content.md` — current guide routes, context map and content.
 
 ### Code paths
 
@@ -8674,555 +8681,196 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 <a id="admin-uiguide"></a>
 
-> **Part ID:** `admin-ui.guide` · **Status:** `partial` · **Last verified:** 2026-11-03 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `admin-ui.guide` · **Status:** `partial` · **Last verified:** 2026-11-04 · **Verified against:** `working-tree`
 
 # Admin Guide and Academy
 
 ## 1. Purpose and scope
 
-This part owns the admin interactive guide and the employee academy:
+This part owns two employee learning products in `admin-front`:
 
-- The `admin-front` guide content modules under `src/content/guide`.
-- The guide page at `/guide`, its global search modal, bookmarks, glossary, simulators, role checklists, and contextual-help data source.
-- The academy content modules under `src/content/academy`.
-- The academy page at `/academy`, its lessons, labs, quizzes, mastery gate, tracks, badges, team certification view and exports.
+- The Admin Interactive Guide at `/guide/**`: 14 books, 125 articles, glossary, safeguard cards, situation playbook, 140-case catalog, five simulators, reading paths, search palette, contextual help and read tracking.
+- The Employee Academy at `/academy`: lessons, labs, quizzes, mastery, badges, team reporting and XLSX exports.
 
-It does not own the merchant guide or checkout help center. It also does not present the future guide v2 specification as current behavior. The v2 workstream is recorded separately in `project-design/parts/09-future-and-unimplemented/01-guide-v2.md`.
+It does not own the merchant guide or the checkout help center. The future-guide design is now implemented; its detailed implementation notes live in `06-guide-v2.md`.
 
-## 2. Design intent (extracted and synthesized from ./design)
+## 2. Guide content pipeline
 
-The implemented baseline is the "zero-to-hero" specification in `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md`:
+The canonical content is `design/07-guides-and-academy/guide_system_design_and_content.md` (a root duplicate with CRLF line endings is also accepted as a fallback).
 
-1. **The guide is an operational manual, not a feature tour.** Every chapter explains the concept, the exact workflow, the screen to use, and the human error to avoid.
-2. **The reader is assumed to know nothing.** The glossary defines every banking, accounting, compliance and software term with an analogy and a fatal-error warning.
-3. **The academy is a flight simulator.** A learner reads lessons, passes an interactive lab with fatal traps, then scores 100% on a verification quiz before a module counts as mastered.
-4. **The guide and academy share a learning model.** Roles, tracks, badges and progress are visible to the learner and to management.
-5. **The guide is searchable and contextual.** Global search covers books, glossary, statuses, GL accounts, runbooks, error codes, edge cases and simulators; the shell help drawer maps the current route to a chapter.
-6. **Content is data, not hard-coded prose in TSX.** Books, chapters, glossary entries and academy modules live in typed content modules so the UI can render, search and test them.
-7. **Every claim must be testable.** The content-completeness test asserts book count, chapter depth, glossary counts, status/collection/channel/runbook counts, edge-case count, module count, lesson depth, lab traps, quiz count and track definitions.
+`admin-front/scripts/extract-guide-content.ts` (`bun run content:guide`) parses only the `<!-- CONTENT:BEGIN -->` … `<!-- CONTENT:END -->` region, validates every cross-reference, enforces the design counts, and emits committed JSON into `admin-front/src/content/guide/generated/`:
 
-The future guide v2 specification in `design/07-guides-and-academy/guide_system_design_and_content.md` goes further: 14 books (0-13), 125 articles, a 23-screen context map, safeguard cards, a symptom playbook, reading paths, read tracking, five simulators and an edge-case catalog. It is not the current implementation.
-
-## 3. As-built architecture
-
-### 3.1 Content modules
-
-| Module | Contents |
+| Artifact | Count / notes |
 | :--- | :--- |
-| `admin-front/src/content/guide/types.ts` | `GuideBook`, `GuideChapter`, glossary/reference/search types. |
-| `admin-front/src/content/guide/booksPart1.ts` | Books 1-6 and their chapters. |
-| `admin-front/src/content/guide/booksPart2.ts` | Books 7-12 and their chapters. |
-| `admin-front/src/content/guide/glossaryData.ts` | Glossary terms, GL accounts, attempt statuses, collection modes, confirmation channels, runbooks, edge cases and error codes. |
-| `admin-front/src/content/guide/index.ts` | Aggregates books/chapters, exposes lookups, simulator ids and `GUIDE_ROUTE_HELP`. |
-| `admin-front/src/content/guide/search.ts` | Builds and scores the in-memory search index. |
-| `admin-front/src/content/academy/types.ts` | Modules, lessons, labs, quizzes, tracks, badges and progress types. |
-| `admin-front/src/content/academy/modulesTrackA.ts` | Modules M1-M4. |
-| `admin-front/src/content/academy/modulesTrackB.ts` | Modules M5-M8. |
-| `admin-front/src/content/academy/index.ts` | Aggregates modules/tracks and computes mastery, badges and track percentages. |
+| `books.json` | 14 books |
+| `articles.en.json` | 125 articles with headings, plain text, roles, UI status and related ids |
+| `glossary.en.json` | 151 terms with aliases, Arabic term and related slugs |
+| `cards.en.json` | 22 cards and 99 required checklist items |
+| `playbook.en.json` | 29 situations with screens, cases and articles |
+| `paths.json` | 8 reading paths (`ALL` plus seven staff roles) |
+| `faq.en.json` | 58 quick answers |
+| `data.json` | `ledger-events`, `visible-rails`, `attempt-transitions` |
+| `context-map.json` | 23 screens plus the `General` fallback |
+| `error-codes.en.json` | 19 codes parsed from `b13-01` |
+| `edge-cases.en.json` | 140 rows parsed from the v4.1 design |
+| `meta.json` | `contentVersion`, deterministic `generatedAt`, counts and source SHA-256 |
 
-### 3.2 The 12 books and 27 chapters
+The extractor output is deterministic and byte-stable. The content test re-runs it into a temporary directory and fails on drift, count changes, unresolved links, empty bodies, external URLs, missing context-map routes, missing widgets or a gzip total above 400 KB.
 
-| Book | Title | Chapters |
+## 3. Guide reader and navigation
+
+Eight routes are registered with no authority gate:
+
+| Route name | Path | Page |
 | :--- | :--- | :--- |
-| 1 | Welcome to the Platform — How Money, Data, and Security Work From Zero | 1.1, 1.2 |
-| 2 | Roles, Authorities & the Four-Eyes (Maker-Checker) Governance Rule | 2.1, 2.2, 2.3, 2.4 |
-| 3 | The Four-Layer Payment Catalog (Gateway -> Credential Set -> Rail -> Route) | 3.1, 3.2 |
-| 4 | Collection Modes (Axis A) & Confirmation Channels (Axis B) — Why We Never Trust the Browser | 4.1, 4.2 |
-| 5 | The Universal Flow Engine, `TransformPipe[]` & Cryptographic Signing | 5.1, 5.2, 5.3 |
-| 6 | The 8-Step "Add-a-Gateway" Wizard & Smart AI Integration Importer | 6.1, 6.2 |
-| 7 | The 14-State Attempt Lifecycle & Resolving `UNKNOWN`, `CONFLICT`, and `HELD` Cases (`RB-01` to `RB-05`) | 7.1, 7.2, plus the misplaced 9.4 |
-| 8 | Double-Entry Accounting, Clearing Accounts, Fee Bearers & Statement Reconciliation | 8.1, 8.2 |
-| 9 | Merchant Onboarding, KYB Document Verification & Duplicate Detection | 9.1, 9.2, 9.3 |
-| 10 | The 7-Layer AML & Compliance Program, Screening Dispositions & CBL Reporting | 10.1 |
-| 11 | Disputes, Chargebacks, Refunds, Cash-Outs & Negative Balance Ceilings | 11.1, 11.2 |
-| 12 | Platform Profitability, Liquidity, Solvency & The 12 Go-Live Gates | 12.1 |
+| `AdminGuide` | `/guide` | Home: start here, role path, continue reading, books, tools, playbook |
+| `AdminGuideBook` | `/guide/book/:bookId` | Ordered article list with per-book progress |
+| `AdminGuideArticle` | `/guide/a/:articleId` | Reader with book outline, TOC, glossary, widgets, report and read toggle |
+| `AdminGuideGlossary` | `/guide/glossary/:slug?` | A–Z glossary and deep-linkable term detail |
+| `AdminGuideTools` | `/guide/tools/:tool?` | Five client-only simulators |
+| `AdminGuidePlaybook` | `/guide/playbook/:id?` | Situation cards and linked cases/articles |
+| `AdminGuideCards` | `/guide/cards/:id?` | Safeguard card catalog |
+| `AdminGuideEdgeCases` | `/guide/edge-cases` | Filterable 140-case catalog |
 
-The total is 27 chapter objects. The 9.4 object (`book-9-chapter-9.4`, merchant lifecycle/support) is physically inside `BOOKS_PART_2[0]`, which is Book 7. `findChapter(9, "9.4")` therefore returns `undefined`, while Book 7's table of contents renders a 9.4 chapter under Book 7. This is a content-placement bug, not a missing chapter body.
+`MarkdownView` uses `markdown-it` (`html:false`, `linkify:false`) and adds callouts, diagram fences, table scrolling, stable heading ids, article/card/situation/glossary links, glossary auto-linking (first occurrence per article, never in headings, links, code or table headers) and widget placeholders. The glossary popover is keyboard reachable and focus-trapped.
 
-### 3.3 Reference and glossary counts
+## 4. Search and contextual help
 
-| Collection | Count | Notes |
-| :--- | :--- | :--- |
-| `GLOSSARY_TERMS` | 24 | Zero-assumption terms with definition, analogy and fatal-error warning. |
-| `GL_ACCOUNT_DEFINITIONS` | 10 entries | Covers 11 core enum types because `PROVIDER_FEE_EXPENSE / GATEWAY_FEE_EXPENSE` is one combined label. |
-| `ATTEMPT_STATUS_DEFINITIONS` | 14 | Matches the core attempt lifecycle. |
-| `COLLECTION_MODE_DEFINITIONS` | 9 | OTP pull, redirect, embedded, push, QR, pay code, deep link, manual, hybrid. |
-| `CONFIRMATION_CHANNEL_DEFINITIONS` | 7 | Zero-trust versus server-trusted channels. |
-| `RUNBOOK_DEFINITIONS` | 5 | `RB-01` to `RB-05`. |
-| `EDGE_CASE_DEFINITIONS` | 140 | The guide's edge-case registry. |
-| `ERROR_CODE_GLOSSARY` | 5 | Canonical error categories such as `RETRYABLE_OTP`, `LIMIT_EXCEEDED`, `GATEWAY_FAULT`, `AMBIGUOUS`. |
+`GuideSearch.ts` builds a lazy MiniSearch index over articles, terms, cards, situations, edge cases, quick answers and error codes. Both index and query normalisation lowercase text, strip Arabic diacritics/tatweel, unify alef/ya/ta-marbuta and convert Arabic-Indic digits. Searches use prefix matching, fuzzy 0.2 and `AND` with an `OR` fallback; results are grouped with at most eight per type.
 
-The UI glossary headings say "10 GL account types", "9 collection modes" and "7 confirmation channels". The GL label is consistent with the content module but not with the core enum's 11 types; the guide therefore undercounts the canonical GL account types by representing the two fee-expense labels as one entry.
+`GuideSearchPalette` is mounted in the default layout. Ctrl/Cmd+K opens the guide palette on `/guide/**` and the global record palette elsewhere; the app-bar trigger and drawer "Search guide…" button also open the guide palette. Recent documents are stored under `pg.guide.recent`.
 
-### 3.4 Guide page surfaces
+`PageHeader` automatically renders `ContextHelpButton`; a shared `ContextHelpDrawer` resolves the current route (parent-first) through `context-map.json`, shows the screen summary, safeguard cards, situations and articles, and never unmounts the page. `SafeguardDialog` is mounted globally and `useSafeguard(cardId).confirm()` blocks 22 risky actions until every required box is ticked; Cancel resolves `false` without sending a request.
 
-`admin-front/src/pages/guide/index.tsx` provides four view modes:
+## 5. Simulators
 
-1. **Books** — 12-book tree, selected book summary, tags, human-error warning, SOP checklist, expandable chapters, "where to click" route pills, previous/next book, bookmark, copy link, and Markdown download.
-2. **Glossary** — filterable glossary plus expandable sections for 14 statuses, GL accounts, 9 collection modes, 7 confirmation channels, error codes, 5 runbooks and 140 edge cases.
-3. **Simulators** — three interactive widgets: `TransformPlayground`, `CryptoSignatureLab`, `LedgerTAccountVisualizer`. The same widgets are embedded inline in chapters 5.2, 5.3 and 8.2.
-4. **Checklists** — five role-based daily checklists: support, operations, compliance, finance, gateway architect.
+Five deterministic client-only tools live in `components/guide/widgets/`:
 
-Additional guide behavior:
+- `TransformSandbox` uses the closed operation library and `decimal.js` rounding.
+- `CryptoLab` computes HMAC-SHA256 and shows the exact canonical string, key byte length and output encoding.
+- `LedgerExplorer` evaluates the 16 journal events with a tokenizer/`Decimal` expression engine (no `eval`).
+- `VisibleRailsExplainer` implements the nine predicates and route-level checks.
+- `AttemptStateExplorer` implements the teaching transition table, including `SAME` events and `UNKNOWN`.
 
-- Global search modal opened by the shell (`Ctrl+K`/`Cmd+K`), searching books, chapters, glossary, errors, GL accounts, statuses, collection modes, channels, runbooks, edge cases and simulators.
-- Bookmark persistence in `localStorage` key `admin-guide-bookmarks`.
-- Daily checklist persistence in `localStorage` key `admin-guide-daily-checklists`.
-- Bookmark import/export as JSON, with unknown book ids skipped and an optional replace mode.
-- Deep links via `?entry=`, `?book=`, `?chapter=`, `?search=1`.
-- Route help mapping in `GUIDE_ROUTE_HELP` (29 entries), consumed by the shell drawer.
+Each tool has a Reset button, an explanation panel, bilingual labels and states that it is a teaching tool, not a real system. Unit tests cover the published transform, signature, ledger, visible-rails and attempt-state vectors.
 
-### 3.5 Academy content
+## 6. Progress record
 
-| Module | Focus | Lessons | Quiz questions |
-| :--- | :--- | :--- | :--- |
-| M1 | Foundations: digital payments, links, slots, zero-trust | 3 | 8 |
-| M2 | Four-eyes governance and field control | 2 | 8 |
-| M3 | Merchant onboarding, KYB forensics, beneficial owners, duplicates | 2 | 8 |
-| M4 | Double-entry accounting, fee bearers, clearing, reconciliation | 2 | 8 |
-| M5 | Rail engine, 8-step wizard, smart AI importer | 2 | 8 |
-| M6 | `UNKNOWN`, outages, circuit breakers, runbooks | 2 | 8 |
-| M7 | AML program, Arabic name matching, velocity, no tipping-off | 2 | 8 |
-| M8 | Disputes, chargebacks, refunds, ceilings, go-live gates | 2 | 8 |
+Guide read tracking reuses the Academy progress JSON on the user row. `guideRead[articleId] = { v, at }` is merged into the existing Academy payload, so no migration is needed. The core and edge Zod schemas accept `guideRead`; the Academy page sends it back when persisting. The guide keeps a `pg.guide.read` `localStorage` mirror as an offline fallback and falls back to it if the progress API is unreachable.
 
-Totals: 8 modules, 17 lessons, 8 labs with at least one fatal option, and 64 quiz questions (8 per module).
+## 7. Academy
 
-### 3.6 Academy page and mastery gate
+The Academy remains the zero-to-hero curriculum:
 
-`admin-front/src/pages/academy/index.tsx` provides:
+- 8 modules (M1–M8), 17 lessons, 8 labs with fatal options and 64 quiz questions (8 per module).
+- Six certification tracks including `MASTER_OPERATOR`.
+- Mastery requires all lessons, a passed lab and a 100% quiz.
+- Progress is stored on the user row; the team overview, summary and two XLSX exports require backend `user:read`.
+- Certification is a computed badge, not a server-issued certificate.
 
-- Track tabs with live progress percentages.
-- Module selection and three steps: lessons, interactive lab, verification quiz.
-- Lesson completion tracking.
-- Lab scenarios with fatal-error feedback; a fatal option does not pass the lab.
-- Quiz submission with 100% required to pass; immediate score and explanations.
-- Badge computation from track definitions.
-- Team certification accordion with per-user completion percentage and badges.
-- Summary health panel (`usersWithProgress`, not started, modules/lessons/labs, badges, active last 7 days).
-- Two XLSX exports: academy summary and team certifications.
+## 8. Contracts and invariants
 
-Mastery is computed client-side in `admin-front/src/content/academy/index.ts`:
+1. The design file content is the single source of truth; article prose is never retyped into TSX.
+2. Generated JSON is committed and byte-stable; count changes require updating the design table and meta counts.
+3. Guide content contains no live data, external links or secrets.
+4. Guide routes have no authority gate; every admin may read the guide.
+5. Money math in simulators uses `decimal.js`; no `eval`, `new Function` or `vm`.
+6. Safeguards never replace existing confirmations or maker-checker rules.
+7. Opening contextual help must not reset the current form.
+8. The guide and Academy share one progress record; a save from either page preserves the other's fields.
 
-- `moduleLessonsComplete` — every lesson id is in `completedLessonIds`.
-- `moduleLabPassed` — the module lab id is in `completedLabIds` with `passed: true`.
-- `moduleQuizPerfect` — the quiz score is 100%.
-- `moduleMastered` — all three are true.
-- `earnedBadges` — all modules in a track are mastered; `MASTER_OPERATOR` additionally requires all labs passed and all quizzes perfect.
-- `trackProgressPercent` — mastered modules divided by track modules.
+## 9. Verification
 
-Progress persistence uses `GET/PUT v1/admin/academy/progress`. It stores completed lesson ids, lab results, quiz scores, earned badges and last module id on the authenticated user row. Legacy `completedModules` data is converted into the new shape on load.
-
-### 3.7 Academy reporting and authority
-
-- Self progress endpoints: authenticated user, no extra authority.
-- Team overview: `GET v1/admin/academy/progress/overview`, backend requires `user:read`.
-- Summary: `GET v1/admin/academy/progress/overview/summary`, backend requires `user:read`.
-- Summary export: `GET .../summary/export`, backend requires `user:read` and writes an `ACADEMY_SUMMARY_EXPORTED` audit entry.
-- Certification export: `GET .../overview/export`, backend requires `user:read` and writes an `ACADEMY_CERTIFICATIONS_EXPORTED` audit entry.
-- UI route `/academy` has no router authority gate, so the page opens for any authenticated admin; the reporting calls fail without `user:read`.
-
-## 4. Contracts and invariants
-
-1. **Current guide counts are 12 books and 27 chapters.** The content test asserts 12 books; it does not assert exactly 27 chapters, so the count is verified by code inspection.
-2. **The current academy counts are 8 modules, 17 lessons, 64 quizzes.** The content test asserts 8 modules and exactly 8 quizzes per module.
-3. **A module is mastered only by lessons + passed lab + 100% quiz.** No UI button can skip the gate.
-4. **Badges are derived, not manually granted.** `earnedBadges` merges stored badges with newly earned track badges.
-5. **Guide/search content must be typed and testable.** New content goes into the content modules, not inline JSX.
-6. **The guide is allowed for all admins.** It contains no live data or secrets by design.
-7. **Academy progress is per user.** Team views aggregate the same JSON shape.
-8. **The guide v2 specification is not current authority.** It must not be described as shipped.
-
-## 5. Data / API / config / deployment surface
-
-| Surface | Location |
-| :--- | :--- |
-| Guide content | `admin-front/src/content/guide/**` |
-| Academy content | `admin-front/src/content/academy/**` |
-| Guide page | `admin-front/src/pages/guide/index.tsx` |
-| Academy page | `admin-front/src/pages/academy/index.tsx` |
-| Guide drawer/search | `admin-front/src/components/guide/**` |
-| Route help map | `admin-front/src/content/guide/index.ts` |
-| Progress APIs | `v1/admin/academy/progress`, `/overview`, `/overview/summary`, `/overview/export` |
-| Local storage | `admin-guide-bookmarks`, `admin-guide-daily-checklists` |
-| Future v2 destination | `project-design/parts/09-future-and-unimplemented/01-guide-v2.md` |
-
-## 6. Operational usage
-
-- Add a book or chapter: append to `booksPart1.ts` or `booksPart2.ts`, keep the id/number/title/body/tags shape, and update `GUIDE_ROUTE_HELP` if a screen should point to it.
-- Add a glossary entry: add to the appropriate array in `glossaryData.ts`; the search index and glossary UI pick it up automatically.
-- Add an academy module: add to a track module file, keep 8 quiz questions and at least one fatal lab option, then update the track definitions if the module belongs to a track.
-- Re-run `bun test src/content/__tests__/content-completeness.test.ts` after content changes.
-- Fix the 9.4 bug by moving the chapter object into Book 9 (or by changing the mapping to the actual book); do not duplicate the body.
-- Treat guide v2 as a separate future implementation, not as a content edit to the current modules.
-
-## 7. Status and deviations
-
-### Implemented
-
-- 12 books, 27 chapters, 24 glossary terms, 14 statuses, 9 collection modes, 7 channels, 5 runbooks, 140 edge cases and 5 error codes.
-- Three interactive simulators with inline chapter embeds.
-- Five role-based daily checklists with local persistence.
-- Global guide search, bookmarks, import/export, deep links and Markdown download.
-- 29-entry contextual route map.
-- 8 academy modules, 17 lessons, 8 labs, 64 quizzes, 6 certification tracks.
-- Client-side mastery gate, badge derivation and track progress.
-- Progress persistence and team overview/summary/certification exports with backend `user:read` gating.
-
-### Partial
-
-- The guide is content-rich but not fully bilingual; many chapters have Arabic bodies and many do not.
-- Academy assessment is client-computed. The backend accepts the posted progress JSON and does not independently verify answers, lab outcomes or mastery.
-- Certification is a computed badge, not a server-issued certificate with an immutable registry.
-- The guide v2 work is not merged; the current guide does not have v2's articles, context map, safeguard cards, playbook or read tracking.
-
-### Guide v2 comparison (future, not current)
-
-| Area | Current implementation | Guide v2 target |
-| :--- | :--- | :--- |
-| Books | 12 (1-12) | 14 (0-13) |
-| Articles/chapters | 27 chapter objects | 125 articles |
-| Context model | 29-entry route map | 23-screen context map with fallback |
-| Simulators | 3 | 5 |
-| Safeguard cards | none | Per-screen safeguard checklists |
-| Situation playbook | none | Symptom-to-action playbook |
-| Reading paths/progress | Bookmarks and role checklists only | Role reading paths and read tracking |
-| Edge cases | 140 | 140-case catalog plus v2 presentation |
-
-### Missing / deferred
-
-- **Guide v2 is missing.** Target: 14 books (0-13), 125 articles, 23 context-map screens, five simulators, reading paths, safeguard cards, symptom playbook, read tracking and a full edge-case catalog. See `project-design/parts/09-future-and-unimplemented/01-guide-v2.md` and `design/07-guides-and-academy/guide_system_design_and_content.md`.
-- No server-side quiz/lab validation.
-- No immutable certification record or expiry/re-certification cycle.
-- No completion tracking tied to route-level or authority-level access grants.
-- No Arabic content completeness gate.
-
-### Known bugs / risks
-
-- **Content-placement bug:** Chapter 9.4 lives under Book 7, so Book 9/9.4 help resolution fails and Book 7 shows an out-of-sequence chapter.
-- **Count gap:** The guide displays 10 GL entries while the core enum has 11 types. The combined `PROVIDER_FEE_EXPENSE / GATEWAY_FEE_EXPENSE` entry hides the distinction.
-- **Security gap:** A client could POST arbitrary progress JSON because mastery is not recomputed server-side. The stored progress is training data, not an authorization authority.
-- **Reporting gap:** `/academy` is open to all authenticated admins, but team overview/export fail without `user:read`; the page does not explain this before the request.
-- **Documentation risk:** The v2 specification must not be presented as current; it is future/unimplemented.
-
-## 8. Verification and tests
-
-- `admin-front/src/content/__tests__/content-completeness.test.ts` asserts:
-  - 12 books with depth, SOP checklist and human-error warnings.
-  - Glossary/reference counts: 10 GL entries, 14 statuses, 9 collection modes, 7 channels, 5 runbooks, 140 edge cases, at least 5 error codes.
-  - Search coverage for books, errors, GL accounts, statuses, runbooks, edge cases and simulators.
-  - 8 academy modules, at least 2 lessons per module, one lab per module with a fatal option, exactly 8 quizzes per module (64 total), and six track definitions.
-- `tests/e2e/exhaustive/exhaustive-admin-surface.spec.ts` includes `/guide` and `/academy`.
-- `tests/e2e/admin/global-search.spec.ts` covers the shell search split between records and guide search.
-
-The content test is a Bun test and does not require PostgreSQL. The Playwright surface checks require the running stack.
-
-## 9. Source references
-
-### Old design sections
-
-- `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` — implemented 12-book/8-module baseline.
-- `design/07-guides-and-academy/guide_system_design_and_content.md` — future guide v2 workstream, not current.
-- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` — deployment and guide architecture context.
-
-### Code paths
-
-- `admin-front/src/content/guide/booksPart1.ts`
-- `admin-front/src/content/guide/booksPart2.ts`
-- `admin-front/src/content/guide/glossaryData.ts`
-- `admin-front/src/content/guide/index.ts`
-- `admin-front/src/content/guide/search.ts`
-- `admin-front/src/content/academy/modulesTrackA.ts`
-- `admin-front/src/content/academy/modulesTrackB.ts`
-- `admin-front/src/content/academy/index.ts`
-- `admin-front/src/pages/guide/index.tsx`
-- `admin-front/src/pages/academy/index.tsx`
-- `admin-front/src/components/guide/**`
-
-### Generated appendices
-
-- `project-design/appendices/test-inventory.md`
-- `project-design/appendices/api-route-matrix.md`
-
-## 10. Change history
-
-- 2026-11-03 — Initial canonical guide/academy part. Confirms 12 books/27 chapters, 24 glossary terms, 10 GL entries covering 11 core types, 8 academy modules/17 lessons/64 quizzes, the client-side mastery gate, and the unimplemented guide v2 workstream.
+```bash
+cd admin-front && bun run content:guide && bun run type-check && bun run test:unit && bun run build
+cd ../tests && bun run test:unit
+cd ../tests && bunx playwright test --project=admin e2e/admin/guide-*.spec.ts
+cd ../admin-back && bun test test/academy-progress.test.ts test/admin-surface.test.ts
+```
 
 ---
 
 <a id="admin-uihelp"></a>
 
-> **Part ID:** `admin-ui.help` · **Status:** `partial` · **Last verified:** 2026-11-03 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `admin-ui.help` · **Status:** `implemented` · **Last verified:** 2026-11-04 · **Verified against:** `working-tree`
 
 # Contextual Help
 
 ## 1. Purpose and scope
 
-This part owns the admin contextual-help drawer and its route-to-guide mapping, the merchant portal help drawer, the unused `PageHeader` help props, and the boundary between admin/merchant contextual help and the payer-facing checkout help center.
+This part owns the admin contextual-help button and drawer, the 23-screen context map, and the safeguard dialog that appears before risky actions. The merchant portal drawer and payer checkout help are separate products; this part only records their boundary.
 
-The checkout help center has its own data contract and rendering rules; it is documented in `05-checkout-front/01-help-center.md`. This part only records how the products are separated and where the admin/merchant surfaces diverge.
+## 2. As-built architecture
 
-## 2. Design intent (extracted and synthesized from ./design)
+### 2.1 Button
 
-The design intent is that help is always one action away without destroying work in progress:
+`admin-front/src/components/ui/PageHeader.tsx` renders `ContextHelpButton` automatically. The button uses the current route name, preferring `route.meta.parentName` over `route.name`, and opens a shared drawer through `useContextHelp()`. Pages never wire the button by hand. The app-bar "Help & SOP" button and the `?` shortcut open the same drawer with the same parent-first rule.
 
-1. **Global admin drawer.** A "Help & SOP (?)" button in the shell and a `?` keyboard shortcut open a right-hand 560 px drawer for the current screen.
-2. **Context before content.** The drawer should show the mapped book/chapter, the book SOP checklist and the critical human-error warning for the current route.
-3. **No form reset.** Opening help must not unmount, close or reset the form being edited.
-4. **Search is separate from context.** `Ctrl+K`/`Cmd+K` opens the broader guide search palette; the drawer is for the current screen.
-5. **Merchant help is merchant-specific.** The merchant portal has its own M-xx/D-xx chapters and route map, not the admin 12-book guide.
-6. **Checkout help is payer-specific.** The checkout support drawer and per-rail banner are driven by the checkout projection, not by the admin guide.
-7. **Future guide v2 expects a formal 23-screen context map.** That exhaustive context-map model is not implemented; the current admin map is a simpler 29-entry record.
+The accessible name is "How this page works".
 
-## 3. As-built architecture
+### 2.2 Context map
 
-### 3.1 Admin drawer
+`context-map.json` is generated from `@@map id=context-map` in the guide design. It contains `fallbackScreenId` plus 23 `ContextScreen` entries with `screenId`, `routeNames`, `pageDir`, `summary`, `articles`, `cards` and `situations`.
 
-`admin-front/src/components/guide/ContextualHelpDrawer.tsx` renders a `VNavigationDrawer` with:
+Resolution rules:
 
-- `location="end"`, `temporary`, width 560.
-- A close button.
-- Status chips for "Help & SOP", the book number and the chapter number.
-- A mapping title (English only).
-- The book title in the current language when a book resolves.
-- The mapped chapter title and Markdown body (`GuideMarkdown compact`).
-- The book SOP checklist.
-- The book human-error warning.
-- An "Open the full guide" button.
-- A footer note that the drawer never closes/resets the current form.
+1. Find the first screen whose `routeNames` contains the current route name.
+2. If none matches, use the screen whose `screenId` equals `fallbackScreenId` (`General`).
+3. `pageDir` is the `admin-front/src` folder used by the label-verification procedure.
 
-If no chapter resolves, it shows a message telling the operator to use `Ctrl+K` to search records, pages and the guide.
+The route-coverage unit test parses every named route in `router/index.ts` (except `Login` and `NotFound`) and fails if a name has no context-map entry. Missing names were added to the owning screen or `General` and logged in `design/07-guides-and-academy/guide_content_fixes.md`.
 
-The drawer is mounted once in `admin-front/src/layouts/default.tsx`. The route name passed to it is:
+### 2.3 Drawer
 
-```text
-String(route.meta.parentName ?? route.name ?? "")
-```
+`ContextHelpDrawer` is a non-modal navigation drawer, 420 px wide, placed on the inline-end side (right in LTR, left in RTL). It shows:
 
-That parent-first rule means detail pages automatically use the parent mapping.
+1. **What this screen is for** — the screen summary.
+2. **Before you act** — collapsible safeguard cards with risk badges and the full four-section body.
+3. **Common problems** — situation links.
+4. **Learn more** — article links.
+5. **Open the whole guide** — route to `AdminGuide`.
 
-### 3.2 The 29-entry admin map
+The drawer does not unmount or reset the page, and a test types into the merchant filter, opens the drawer, closes it and asserts the value remains.
 
-`GUIDE_ROUTE_HELP` in `admin-front/src/content/guide/index.ts` has 29 entries.
+### 2.4 Safeguard dialog
 
-| Mapping key(s) | Book | Chapter | Mapping title |
-| :--- | :--- | :--- | :--- |
-| `Dashboard` | 1 | 1.1 | What the platform does |
-| `Approvals` | 2 | 2.4 | Approvals queue SOP |
-| `JoinRequests` (also `JoinRequestNew` via parent) | 9 | 9.1 | Join request lifecycle |
-| `KybReview`, `KybReviewDetail` | 9 | 9.3 | KYB review queue and per-document decisions |
-| `AmlCases`, `AmlScreenings`, `AmlRules`, `AmlReports` | 10 | 10.1 | AML case management / screening / rules / reporting |
-| `OperatorCases`, `OperatorCaseDetail`, `GatewayInquirySchedules` | 7 | 7.2 | Operator cases and runbooks |
-| `Disputes` | 11 | 11.1 | Dispute and chargeback SOP |
-| `Adjustments` | 11 | 11.2 | Refund adjustment SOP |
-| `CashOuts` | 12 | 12.1 | Liquidity before cash-outs |
-| `Reconciliation` | 8 | 8.2 | Statement reconciliation |
-| `Profitability`, `Liquidity`, `Invariant` | 12 | 12.1 | Profitability/liquidity/invariant guidance |
-| `Gateways`, `GatewayWizard` | 6 | 6.1 | Gateway wizard |
-| `GatewayAiImport` | 6 | 6.2 | Smart AI importer |
-| `Rails`, `GatewayRoutes` | 3 | 3.2 | Visible rails formula / route diagnostics |
-| `Merchants`, `MerchantDetail` | 9 | 9.4 | Merchant lifecycle and support operations |
-| `AdminCheckoutHelp` | 4 | 4.2 | Checkout confirmation channels |
-| `AdminGuide` | 1 | 1.1 | Admin system guide |
-| `AdminAcademy` | 1 | 1.1 | Employee academy |
+`SafeguardDialog` is mounted once in the default layout. `useSafeguard(cardId).confirm()` returns `Promise<boolean>`:
 
-The map has no Arabic titles. In Arabic mode the drawer still shows `mapping.titleEn`.
+- Every `- [ ]` item in the card's `Check first` section is a required checkbox.
+- **Continue** is disabled until every box is ticked.
+- **Cancel** resolves `false`.
+- Ticks reset on every open and are never stored or sent.
 
-### 3.3 Effective coverage and missing mappings
+The integration points are the 22 action areas named in the guide design: approvals, adjustments, cash-outs, operator cases, join requests, merchants, AML cases/screenings/rules/reports, gateway wizard, routes, AI import and reconciliation. Existing confirmation and maker-checker mechanisms remain in place after the safeguard. Two cards (`sg-reverse-adjustment`, `sg-release-reservation`) have no separate current UI action; this is documented in `design/07-guides-and-academy/guide_content_questions.md`.
 
-Because the drawer receives `parentName ?? name`, not every route name needs its own map key. With parent fallback, the current map covers 31 of the 37 protected routes. Six route names have no effective chapter:
+## 3. Contracts and invariants
 
-| Route | Effective help key | Result |
-| :--- | :--- | :--- |
-| `AdminUsers` | `AdminUsers` | No mapping; drawer shows the "no chapter" message. |
-| `AdminUserDetail` | `AdminUsers` via parent | Same. |
-| `AuditLog` | `AuditLog` | No mapping. |
-| `PricingControls` | `PricingControls` | No mapping. |
-| `AdminPlatformSettings` | `AdminPlatformSettings` | No mapping. |
-| `SystemBackups` | `SystemBackups` | No mapping. |
+1. Help is always one button away in `PageHeader`; no page wires it manually.
+2. The route key is parent-first, matching navigation and breadcrumbs.
+3. Unknown route names always fall back to `General`.
+4. Opening help never navigates or resets form state.
+5. The drawer never substitutes for an approval; safeguards are additional, not a replacement.
+6. The guide and drawer contain no live data, secrets or external links.
+7. Merchant and checkout help remain separate content domains.
 
-`GatewayAiImport`, `AdminCheckoutHelp`, `AdminGuide` and `AdminAcademy` are mapped even though some are not in the navigation or have no route authority gate. `JoinRequestNew` is not a map key but resolves through `meta.parentName = "JoinRequests"`.
-
-### 3.4 The 9.4 placement bug
-
-The merchant chapter object is:
-
-```text
-id: book-9-chapter-9.4
-number: 9.4
-title: Merchant Lifecycle, Sensitive Edits & Support Operations
-```
-
-It is physically inside `BOOKS_PART_2[0]`, whose `id` is `book-7` and whose `number` is 7. As a result:
-
-- Book 7's chapter list has three chapters: 7.1, 7.2 and 9.4.
-- Book 9's chapter list has only 9.1, 9.2 and 9.3.
-- `findChapter(9, "9.4")` returns `undefined`.
-- `GUIDE_ROUTE_HELP.Merchants` and `.MerchantDetail` point to 9/9.4, so the admin merchants help drawer shows "No chapter is mapped to this screen yet."
-- Global guide search still finds the 9.4 entry because the search index walks all chapter objects and records `bookNumber` from the containing book; the result is therefore presented as Book 7's chapter 9.4.
-
-This is a content-placement bug, not a missing body. Moving the object into Book 9 fixes the drawer without changing the mapping.
-
-### 3.5 PageHeader help props are unused
-
-`admin-front/src/components/ui/PageHeader.tsx` defines `helpChapterId` and `onOpenHelp` and conditionally renders an "SOP & Help" button. However, no route page passes either prop. The only working entry points are:
-
-- The shell "Help & SOP (?)" button.
-- The `?` shortcut when focus is not in an input/textarea/select/contenteditable.
-- The shell menu/guide link.
-
-Therefore the PageHeader help affordance is dead code in practice, and the help chapter cannot be selected per page through that prop.
-
-### 3.6 Merchant contextual help
-
-`merchant-front/src/components/guide/ContextualHelpDrawer.tsx` has a separate 16-entry `ROUTE_HELP` map:
-
-| Route | Chapter |
-| :--- | :--- |
-| `Dashboard` | `M-02` |
-| `Onboarding` | `M-01` |
-| `Wallets` | `M-07` |
-| `Statements` | `M-07` |
-| `Cashouts` | `M-07` |
-| `Links` | `M-03` |
-| `Applications` | `M-02` |
-| `PosTerminals` | `M-05` |
-| `PosScreen` | `M-05` |
-| `Payments` | `M-06` |
-| `Disputes` | `M-08` |
-| `DeveloperTokens` | `D-02` |
-| `Credentials` | `M-09` |
-| `Team` | `M-10` |
-| `MerchantGuide` | `M-01` |
-| `MerchantDeveloperGuide` | `D-01` |
-
-The merchant drawer:
-
-- Resolves the chapter from the merchant operations/developer content, not the admin 12-book guide.
-- Shows chapter id, role, developer/operations badge, title and Markdown body.
-- Has an "Open the full guide" footer that routes to the developer guide for developer routes and to the merchant guide otherwise.
-- Is opened by the merchant shell's "SOP & Help" button and `?` shortcut.
-- Uses the same parent-first route-name rule.
-
-The 9.4-under-Book-7 bug is an admin guide content bug. Merchant `M-07` and the merchant drawer are unaffected because they do not read the admin book arrays.
-
-### 3.7 Checkout help is a separate product
-
-The checkout help center does not consume `GUIDE_ROUTE_HELP` or the merchant `ROUTE_HELP` map. It consumes:
-
-- `PayLinkSummary.supportConfig` from the core checkout projection of `checkout.support_config`.
-- `RailDescriptor.helpGuide` from `rails.help_guide_json`.
-
-The admin `Checkout Help` page edits the support configuration; the per-rail guides are seeded from `core-back/prisma/seedGuides.ts` and sent through the checkout summary. The checkout drawer/banner are documented in `05-checkout-front/01-help-center.md`.
-
-## 4. Contracts and invariants
-
-1. **The admin drawer never closes or resets the underlying form.** It is a temporary navigation drawer, not a page transition.
-2. **The route key is parent-first.** `meta.parentName` wins over the detail route name.
-3. **Mappings carry a book number, optional chapter number and English title.** Missing chapter numbers fall back to the book's first chapter; missing mappings show the fallback message.
-4. **A mapped chapter must exist in the mapped book.** The 9.4 case violates this.
-5. **Help is role-agnostic.** Any authenticated admin may open the guide and drawer; it contains no live data.
-6. **Merchant and admin help are separate content domains.** Do not reuse admin book numbers in the merchant drawer.
-7. **Checkout help is data-driven.** It must not depend on admin guide content.
-8. **The future context map is not current.** Do not describe the 23-screen v2 map as implemented.
-
-## 5. Data / API / config / deployment surface
+## 4. Surface
 
 | Surface | Location |
 | :--- | :--- |
-| Admin drawer | `admin-front/src/components/guide/ContextualHelpDrawer.tsx` |
-| Admin shell mount and keyboard handling | `admin-front/src/layouts/default.tsx` |
-| Admin route map | `admin-front/src/content/guide/index.ts` |
-| Admin guide search | `admin-front/src/components/guide/GlobalGuideSearchModal.tsx` |
-| PageHeader help props | `admin-front/src/components/ui/PageHeader.tsx` |
-| Merchant drawer/map | `merchant-front/src/components/guide/ContextualHelpDrawer.tsx` |
-| Merchant shell mount | `merchant-front/src/layouts/default.tsx` |
-| Checkout help drawer/banner | `checkout-front/src/components/help/**` |
-| Checkout support projection | `core-back/api/internal/checkout.ts` |
-| Seeded support/rail guides | `core-back/prisma/seedGuides.ts` |
+| Button | `admin-front/src/components/guide/ContextHelpButton.tsx` |
+| Drawer | `admin-front/src/components/guide/ContextHelpDrawer.tsx` |
+| Shared state | `admin-front/src/components/guide/useContextHelp.ts` |
+| Safeguard dialog | `admin-front/src/components/guide/SafeguardDialog.tsx` |
+| Safeguard composable | `admin-front/src/components/guide/useSafeguard.ts` |
+| PageHeader mount | `admin-front/src/components/ui/PageHeader.tsx` |
+| Global mount | `admin-front/src/layouts/default.tsx` |
+| Context map | `admin-front/src/content/guide/generated/context-map.json` |
+| Merchant drawer | `merchant-front/src/components/guide/ContextualHelpDrawer.tsx` |
+| Checkout help | `checkout-front/src/components/help/**` |
 
-No deployment flag controls the admin/merchant contextual drawer. The `ADMIN_SHOW_HELP_PANELS` flag controls inline help panels on KYB, approvals and merchants, not the contextual drawer.
+## 5. Verification
 
-## 6. Operational usage
-
-- Add an admin mapping: add the route name to `GUIDE_ROUTE_HELP`, point it at an existing chapter, and confirm `findChapter(bookNumber, chapterNumber)` resolves.
-- Fix the 9.4 bug: move the chapter object from Book 7's array to Book 9's array; keep the `book-9-chapter-9.4` id and number.
-- Add a merchant mapping: add the route name to the merchant `ROUTE_HELP` map and ensure the referenced M/D chapter exists.
-- Debug "no chapter" in the admin drawer: check the effective route key (`parentName ?? name`), the map entry, and the chapter's actual containing book.
-- Do not wire per-page `PageHeader` help props until the shell and the page share a single open-state contract; the current shell owns drawer state.
-
-## 7. Status and deviations
-
-### Implemented
-
-- Admin global 560 px drawer with book/chapter/SOP/human-error rendering.
-- 29-entry admin route map with parent fallback.
-- `?` shortcut and shell button.
-- Merchant 16-route help map and separate M/D chapter content.
-- Guide search entry point.
-- Checkout help separate from admin/merchant guide content.
-
-### Partial
-
-- Effective admin help coverage is 31/37 routes; six routes fall back to "no chapter".
-- Mapping titles are English-only.
-- `PageHeader` help props are implemented but unused.
-- Merchant help is mapped for all 16 routes, but its content is still the 10+5 chapter baseline, not guide v2.
-
-### Missing / deferred
-
-- No full 23-screen context map, safeguard cards, playbook or read tracking from guide v2.
-- No admin UI to author per-rail checkout help guides.
-- No localized mapping titles.
-- No page-level help button wiring beyond the shell.
-
-### Known bugs / risks
-
-- **Content bug:** 9.4 under Book 7 breaks the Merchants/MerchantDetail admin help and misorders Book 7.
-- **Coverage gap:** AdminUsers, AdminUserDetail, AuditLog, PricingControls, AdminPlatformSettings and SystemBackups have no help chapter.
-- **Dead UI:** `PageHeader`'s help props are unused, so a page cannot request a different chapter than the shell route map supplies.
-- **Localization gap:** Arabic mode still shows the English mapping title.
-- **Future-doc risk:** the guide v2 context map must not be presented as current.
-
-## 8. Verification and tests
-
-- `admin-front/src/content/__tests__/content-completeness.test.ts` verifies book/chapter content shape and depth, but it does not assert that every `GUIDE_ROUTE_HELP` entry resolves. That is why the 9.4 bug can pass.
-- `tests/e2e/admin/global-search.spec.ts` checks the shell search split between records and guide search.
-- `tests/e2e/checkout/pay.spec.ts` checks the payer surface; checkout help behavior is covered in the checkout help part.
-- `core-back/test/guides-support.test.ts` verifies the checkout support setting and per-rail help guide seeding.
-
-The content test and `guides-support` test require Bun; the latter requires PostgreSQL/Redis. Playwright requires the live stack.
-
-## 9. Source references
-
-### Old design sections
-
-- `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` — implemented four-surface help model and merchant guide chapters.
-- `design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md` — 560 px drawer intent.
-- `design/07-guides-and-academy/guide_system_design_and_content.md` — future context-map/safeguard workstream.
-
-### Code paths
-
-- `admin-front/src/components/guide/ContextualHelpDrawer.tsx`
-- `admin-front/src/components/guide/GlobalGuideSearchModal.tsx`
-- `admin-front/src/components/ui/PageHeader.tsx`
-- `admin-front/src/layouts/default.tsx`
-- `admin-front/src/content/guide/index.ts`
-- `admin-front/src/content/guide/booksPart2.ts`
-- `merchant-front/src/components/guide/ContextualHelpDrawer.tsx`
-- `merchant-front/src/layouts/default.tsx`
-- `checkout-front/src/components/help/CheckoutHelpDrawer.tsx`
-- `checkout-front/src/components/help/PerRailInstructionsBanner.tsx`
-- `core-back/api/internal/checkout.ts`
-- `core-back/prisma/seedGuides.ts`
-
-### Generated appendices
-
-- `project-design/appendices/api-route-matrix.md`
-- `project-design/appendices/test-inventory.md`
-
-## 10. Change history
-
-- 2026-11-03 — Initial canonical contextual-help part. Records the 29-entry admin map, six missing effective mappings, unused PageHeader help props, the 9.4-under-Book-7 bug, the merchant map, and the separation from checkout help.
+`tests/unit/guide-content.test.ts` checks route coverage. `tests/e2e/admin/guide-context.spec.ts` checks five representative routes and form-state preservation. `tests/e2e/admin/guide-safeguard.spec.ts` checks the disabled Continue button, required checks and that Cancel sends no request.
 
 ---
 
@@ -9526,6 +9174,52 @@ The backup E2E suite requires the live stack; the core backup test requires Post
 
 ---
 
+<a id="admin-uiguide-v2"></a>
+
+> **Part ID:** `admin-ui.guide-v2` · **Status:** `implemented` · **Last verified:** 2026-11-04 · **Verified against:** `working-tree`
+
+# Admin Guide v2
+
+## 1. Status
+
+The Admin Interactive Guide v1.0 from
+`design/07-guides-and-academy/guide_system_design_and_content.md` is
+implemented. The earlier 12-book embedded-content page has been replaced.
+
+Delivered:
+
+- 14 books, 125 articles, 151 glossary terms, 22 safeguard cards (99 checks), 29 situations, 8 reading paths, 58 quick answers, 19 error codes and the 140-case catalog.
+- A deterministic extractor and committed JSON under `src/content/guide/generated/`.
+- Eight guide routes: home, book, article, glossary, tools, playbook, cards and edge cases.
+- Markdown reader with callouts, diagram fences, tables, stable heading ids, safe article/card/situation/glossary links and first-occurrence glossary popovers.
+- MiniSearch command palette with Arabic-aware normalisation, grouping, recents and keyboard navigation.
+- Contextual help button/drawer driven by the 23-screen context map, mounted automatically by `PageHeader`.
+- 22 safeguard integrations at risky action points; Continue is disabled until all required checks are ticked.
+- Five client-only simulators with published test vectors.
+- Guide read tracking stored in the shared Academy progress JSON with a `localStorage` fallback.
+- Unit, content, widget and Playwright coverage listed in the frontmatter.
+
+## 2. Key invariants
+
+1. Article prose is copied from the design by the extractor; it is never typed into TSX.
+2. Generated JSON is committed and byte-stable; the content test re-runs the extractor and compares bytes.
+3. Counts are asserted; content changes that alter a count must update the design table and meta contract.
+4. Simulators use `decimal.js` and never `eval`/`new Function`.
+5. Safeguards are additional to, not a replacement for, maker-checker and existing confirmations.
+6. Guide routes need no authority; every admin may read the guide.
+7. The guide contains no live data, secrets or external links.
+8. Arabic content is a separate human-reviewed work package; the loader must never machine-translate.
+
+## 3. Verification
+
+```bash
+cd admin-front && bun run content:guide && bun run type-check && bun run test:unit && bun run build
+cd ../tests && bun run test:unit
+cd ../tests && bunx playwright test --project=admin e2e/admin/guide-reader.spec.ts e2e/admin/guide-palette.spec.ts e2e/admin/guide-context.spec.ts e2e/admin/guide-safeguard.spec.ts
+```
+
+---
+
 <a id="merchant-uiportal"></a>
 
 > **Part ID:** `merchant-ui.portal` · **Status:** `partial` · **Last verified:** 2026-11-04 · **Verified against:** `5a24f6f+working-tree`
@@ -9550,7 +9244,7 @@ The merchant portal is the self-service business workspace:
 6. **POS is a real-time surface.** A paired screen reflects the current payment state and must not be treated as a payment authority.
 7. **Disputes are evidence workflows.** The merchant uploads evidence before the deadline; money movement remains an admin finance action.
 8. **API tokens are scoped secrets.** Tokens are shown once, can be revoked, and can be constrained by IP CIDR allowlists.
-9. **Help is merchant-specific.** The shell exposes merchant guild search/help, not the admin 12-book guide.
+9. **Help is merchant-specific.** The shell exposes merchant guide search/help, not the admin 14-book guide.
 10. **All money and spreadsheet output uses decimal.js and the shared XLSX pipeline.**
 
 ## 3. As-built architecture
@@ -9826,13 +9520,13 @@ The portal uses no admin checklist/help-panel flags. Its shell always exposes gu
 - The guide/developer routes are open learning surfaces, which is intentional but means any authenticated merchant can read them.
 - The portal shows maker/checker posture but does not provide a full pending-change diff workflow for every sensitive object.
 - Google OIDC is listed in the API map but the actual merchant `/auth/google` endpoint returns 501, so no working Google flow ships.
-- Merchant help and guide content are the 10+5 chapter baseline, not guide v2.
+- Merchant help and guide content are the 10+5 chapter baseline; the admin guide v2 is a separate implemented product.
 
 ### Missing / deferred
 
 - No self-service activation override; KYB approval remains admin-controlled.
 - No merchant-side certification/training gate for production authorities.
-- No guide v2 context map/playbook/read tracking.
+- No admin-guide-v2 context map/playbook/read tracking is reused for merchants.
 - No working Google sign-in.
 
 ### Known bugs / risks
@@ -9841,7 +9535,7 @@ The portal uses no admin checklist/help-panel flags. Its shell always exposes gu
 - **Onboarding risk:** client-side progress and completion are convenience signals, not activation authority.
 - **POS risk:** a displayed `SUCCEEDED` screen is a reflection; the merchant must still follow the server-confirmed payment status and settlement rules.
 - **Documentation risk:** do not describe the portal as having a working Google login or a fully server-enforced route gate.
-- **Guide risk:** merchant chapter content must not be conflated with the admin 12-book guide or guide v2.
+- **Guide risk:** merchant chapter content must not be conflated with the admin 14-book guide.
 
 ## 8. Verification and tests
 
@@ -9910,7 +9604,7 @@ This part owns the merchant-facing interactive guide and developer API reference
 - The guide page, role filtering, chapter search, first-5 checklist, fee/net settlement calculator, code generator, and webhook verification checks.
 - The dedicated developer guide page and its code-template viewer.
 
-It does not own the external API implementation or the merchant portal data pages. It also does not present the future guide v2 workstream as current.
+It does not own the external API implementation or the merchant portal data pages. It also does not reuse the admin guide v2 content model.
 
 ## 2. Design intent (extracted and synthesized from ./design)
 
@@ -10070,7 +9764,7 @@ The page uses the same D-01..D-05 content as the operations guide's developer ch
 7. **Redirect URLs must be allowlisted.** The guide teaches this; the external API and checkout enforce it.
 8. **Webhook verification uses the raw body.** The guide's signature checks are normative integration guidance.
 9. **First-5 checklist state is local.** It is not a server permission or activation record.
-10. **Guide v2 is not current.** Merchant content remains the 10+5 baseline until a future implementation lands.
+10. **Admin guide v2 is separate.** Merchant content remains the 10+5 baseline; the 14-book admin guide is implemented only for the admin portal.
 
 ## 5. Data / API / config / deployment surface
 
@@ -10118,7 +9812,7 @@ The page uses the same D-01..D-05 content as the operations guide's developer ch
 
 ### Missing / deferred
 
-- No guide v2 content, context map, safeguard cards, playbook or read tracking for merchants.
+- No admin-guide-v2 content, context map, safeguard cards, playbook or read tracking for merchants.
 - No server-side checklist/progress record for the first-5 flow.
 - No interactive API sandbox that executes calls against a sandbox token.
 - No generated SDK package.
@@ -10128,7 +9822,7 @@ The page uses the same D-01..D-05 content as the operations guide's developer ch
 - **Security risk:** the token field is a plaintext browser input; a real token can be exposed on screen or in a screenshot. Use a scoped test token and rotate it.
 - **Accuracy risk:** the fee calculator's gateway-fee estimate is not the ledger truth.
 - **Training risk:** the first-5 checklist is local and can be manually toggled; it must not be used as proof of activation.
-- **Doc risk:** the 10+5 baseline is current; guide v2 is future and must not be described as shipped.
+- **Doc risk:** the merchant 10+5 baseline is current; the admin guide v2 is shipped only in `admin-front`.
 
 ## 8. Verification and tests
 
@@ -10631,7 +10325,7 @@ This is the important distinction between design intent and code:
 
 ### 3.8 Separation from admin/merchant help
 
-- Admin contextual help uses `GUIDE_ROUTE_HELP` and the 12-book guide; it does not read `supportConfig`.
+- Admin contextual help uses the generated 23-screen context map and the 14-book guide; it does not read `supportConfig`.
 - Merchant contextual help uses M/D chapters; it does not read `supportConfig`.
 - Checkout help uses `supportConfig` and `helpGuide`; it does not read admin/merchant guide content.
 - The admin `/settings/checkout-help` page is the only authoring surface for the platform support config.
@@ -10701,7 +10395,7 @@ This is the important distinction between design intent and code:
 - No per-merchant support override; support is platform-wide.
 - No content version displayed to the payer.
 - No help-content search or FAQ deep links.
-- No guide v2 context/playbook/safeguard model for checkout.
+- No admin-guide-v2 context/playbook/safeguard model is reused for checkout.
 
 ### Known bugs / risks
 
@@ -10710,7 +10404,7 @@ This is the important distinction between design intent and code:
 - **Content risk:** per-rail guides are seeded code; a rail whose guide is stale or missing gives the payer less help than expected.
 - **Support risk:** the merchant contact comes from link data; if the merchant's phone/email is missing or stale, the payer sees no merchant channel.
 - **Security risk:** support flows must never ask for OTP/PIN; the guide and default FAQ reinforce this, but contact channels are external.
-- **Future-doc risk:** guide v2 is not the current checkout help implementation.
+- **Doc risk:** the admin guide v2 is implemented for the admin portal, but checkout help remains a separate data-driven product.
 
 ## 8. Verification and tests
 
@@ -10727,7 +10421,7 @@ The core support test requires PostgreSQL/Redis; the Playwright suites require t
 
 - `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` — checkout/help deployment context.
 - `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` — collection-mode and trustworthy-confirmation terminology used by the payer guidance.
-- `design/07-guides-and-academy/guide_system_design_and_content.md` — future guide workstream; not current checkout help behavior.
+- `design/07-guides-and-academy/guide_system_design_and_content.md` — admin guide content; not checkout help behavior.
 
 ### Code paths
 
@@ -12287,7 +11981,7 @@ These tests run without PostgreSQL/Redis or remote hosts. A real deploy requires
 
 <a id="deployplanner"></a>
 
-> **Part ID:** `deploy.planner` · **Status:** `implemented` · **Last verified:** 2026-11-03 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `deploy.planner` · **Status:** `implemented` · **Last verified:** 2026-11-04 · **Verified against:** `working-tree`
 
 # Host Planner
 
@@ -12356,7 +12050,7 @@ Edge environments are built from a base that deliberately excludes `DATABASE_URL
 - optional `checkout-lan` when `CHECKOUT_LAN_PORT > 0`;
 - optional `fake-rails` when enabled.
 
-Nginx plans are filtered per role and attached to the matching compute host(s). The public merchant/checkout vhosts use the configured domains; the LAN vhosts use the node private IP or `_`. The admin vhost is not attached to a non-admin host. Every site carries an `upstreamName` and all local/remote node addresses; the renderer emits a `least_conn` upstream with `max_fails=2 fail_timeout=3s`.
+Nginx plans are filtered per role and attached to the matching compute host(s). The public merchant/checkout vhosts use the configured domains; the LAN vhosts use the node private IP or `_`. The admin vhost is not attached to a non-admin host. Every site carries an `upstreamName` and all local/remote node addresses; the renderer emits a `least_conn` upstream with `max_fails=2 fail_timeout=3s`. Upstream names are unique per site: `pg_admin_backend`, `pg_merchant_public_backend`, `pg_merchant_lan_backend`, `pg_checkout_public_backend`, `pg_checkout_lan_backend` and `pg_fake_rails_backend`. Nginx requires names to be unique across the whole `http` context, so public and LAN vhosts cannot share one.
 
 ### 3.5 Certificate bundles
 
@@ -12561,6 +12255,12 @@ The suites cover five-host, two-host and single-host scenarios; firewall source 
 - `NginxPlan` carries `upstreamName` and `upstreamServers`. The renderer emits `upstream` blocks with `least_conn` and `max_fails=2 fail_timeout=3s` over all local and remote nodes.
 - Edge backends bind the node private IP instead of loopback. The planner adds a LAN-scoped firewall rule for each edge backend port so a remote Nginx upstream can reach it.
 - Replica read URLs use the replica's own PostgreSQL port, not a single PgBouncer port that would point a co-located replica back at the primary.
+
+## 12. Unique Nginx upstream names (2026-11-04)
+
+- Merchant and checkout each render both a public and a LAN vhost. Both previously used `pg_<role>_backend`, so `nginx -t` failed with `duplicate upstream`.
+- `upstreamFor()` now accepts a site suffix; public and LAN sites render distinct upstreams while still targeting the same backend node pool.
+- Admin remains `pg_admin_backend` because it has a single vhost; Fake Rails remains `pg_fake_rails_backend`.
 
 ---
 
@@ -13114,7 +12814,7 @@ Not covered:
 
 <a id="deploypipeline"></a>
 
-> **Part ID:** `deploy.pipeline` · **Status:** `partial` · **Last verified:** 2026-11-03 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `deploy.pipeline` · **Status:** `partial` · **Last verified:** 2026-11-04 · **Verified against:** `working-tree`
 
 # Deployment Pipeline
 
@@ -13162,7 +12862,7 @@ For every host, when `fresh` or `--enforce-firewall`:
 
 - assert the SSH key exists (unless dry-run);
 - run `true` to prove connectivity;
-- if fresh, detect the OS, install `nginx rsync ufw curl ca-certificates nodejs` (or the Arch equivalent), install Bun if absent, symlink Bun/bunx into `/usr/local/bin`, install PM2 if absent and best-effort register `pm2 startup systemd`;
+- if fresh, detect the OS, install `nginx rsync ufw curl ca-certificates nodejs` (or the Arch equivalent), install Bun if absent, symlink Bun/bunx into `/usr/local/bin`, install PM2 if absent and best-effort register `pm2 startup systemd`. For local targets the symlink and `pm2 startup` paths use the orchestrator's OS user/home, not the configured SSH name, which may not exist on the machine;
 - apply UFW, print the command count and read back `ufw status verbose`.
 
 The firewall is only applied in fresh or enforce mode. An ordinary `--update` does not reconcile it.
@@ -13182,7 +12882,7 @@ The legacy path creates the database/role when `DB_MANAGE_VIA_SSH` and no PG tie
 
 #### Pre-migration backup details
 
-`preMigrationBackup()` resolves the primary direct port (never PgBouncer) and the PG or legacy credentials, then builds `PGPASSWORD="<password>" pg_dump -h <host> -p <port> -U <user> -Fc <db> > <target>.dump`. `backupDatabase()` creates `<CORE_REMOTE_DIR>/shared/backups`, chowns it to the SSH user, and runs the command on the **core host** as that user. The file is `pre-migrate-<releaseTimestamp>.dump`.
+`preMigrationBackup()` resolves the primary direct port (never PgBouncer) and the PG or legacy credentials, then builds `PGPASSWORD="<password>" pg_dump -h <host> -p <port> -U <user> -Fc <db> > <target>.dump`. `backupDatabase()` creates `<CORE_REMOTE_DIR>/shared/backups`, chowns it to the effective target user (the SSH user for a remote host, the orchestrator's OS user for a local target), and runs the command on the **core host** as that user. The file is `pre-migrate-<releaseTimestamp>.dump`.
 
 No dump is taken on a fresh install. A failure aborts before migrations. `pg_dump` must already exist (the bootstrap package list omits `postgresql-client`), `PGPASSWORD` appears in the verbose remote command, and the dump is not automatically verified or restored.
 
@@ -13190,11 +12890,11 @@ No dump is taken on a fresh install. A failure aborts before migrations. `pg_dum
 
 After `provisionBackupEngine()`, `deployBackupDaemon()`:
 
-- creates `/opt/pg-backup-daemon` owned by the SSH user;
+- creates `/opt/pg-backup-daemon` owned by the effective target user (the SSH user remotely, the orchestrator's OS user locally);
 - rsyncs `deploy/backup-daemon` with `--delete`, excluding `node_modules`, `.git`, `dist`, `test`, `*.log` and `.env`;
-- chowns the install directory to `pgbackup:pgbackup`;
-- ensures `/usr/local/bin/bun` exists;
-- runs `bun install --frozen-lockfile` as `pgbackup`;
+- chowns the install directory to `postgres:postgres` (the daemon's service user);
+- ensures Bun exists and installs a real copy at `/usr/local/bin/bun` (not a symlink through the SSH user's home, which may not be traversable by `postgres`);
+- runs `bun install --frozen-lockfile` as `postgres`;
 - runs `systemctl daemon-reload && systemctl enable pg-backup-daemon && systemctl restart pg-backup-daemon`.
 
 The systemd unit and `/etc/pg-backup/backup.env` are written by the provisioner, not by `deployBackupDaemon()`. If `BACKUP_ENABLED` is true but the plan has no backup host, the deploy warns and skips the daemon; validation normally prevents that.
@@ -13220,7 +12920,7 @@ For each role, the pipeline skips excluded roles, collects units for that role (
 1. Creates the timestamped release and `shared/{certs,backups,pm2,data}` directories and chowns the remote tree.
 2. Syncs the backend source with rsync, excluding `node_modules`, `.git`, `dist`, `generated`, `test`, `certs`, `.certs`, `*.log` and `.env`; syncs the locally built frontend `dist` for edge roles and writes admin `runtime-config.js`.
 3. Writes the host's certificate set and the 0600 per-node environment (`shared/.env` for a single node, `shared/.env.<nodeId>` for a multi-node tier), then symlinks it to `.env` in the release app directory.
-4. Runs `bun install --frozen-lockfile`; for core also `bunx prisma generate`, `bun run migrate-deploy` and optional `db-seed`.
+4. Runs `bun install --frozen-lockfile`; for core also `bunx prisma generate`, `bun run migrate-deploy` and optional `db-seed`. Migrations run on the first core node in every mode (fresh and update), after step 5's pre-migration dump; other core nodes in a multi-node tier skip them.
 5. Switches `current` with `ln -sfn`, writes the inline PM2 ecosystem, runs `pm2 delete`, `pm2 start --update-env` and `pm2 save`.
 6. Renders the Nginx sites for that role, symlinks them, removes the default site, runs `nginx -t` and reloads.
 7. Prunes with `ls -1dt <remote>/releases/*/ | tail -n +<keep+1> | xargs -r rm -rf`.
@@ -13431,11 +13131,19 @@ No test performs a real multi-host deployment, migration, PM2 restart or Nginx r
 
 `deployService()` now writes `shared/.env.<nodeId>` and points the release's `.env` symlink at it. Releases live under `releases/<nodeId>/<timestamp>` and the atomic switch updates `current-<nodeId>`. The prune command is scoped to that node's release root, so deploying `core-2` cannot delete `core-1`'s current release. Nginx is rendered with the plan's upstream list rather than a single loopback backend port.
 
+## 12. Single-machine ownership and migration fixes (2026-11-04)
+
+- `effectiveTargetUser()`/`effectiveTargetHome()` were added to `deploy/lib/sshRunner.ts`. Release trees, pre-migration backup directories, the backup-daemon install tree and bootstrap Bun/PM2 paths now use the orchestrator's OS user when the target is local, instead of a configured SSH name that may not exist on the machine.
+- The backup daemon installs a real `/usr/local/bin/bun` copy so the `postgres` service user can execute it even when the orchestrator's home is not world-traversable.
+- Core migrations now run on the first core node in `auto`/`update` mode as well as `fresh` mode. Previously `RUN_PRISMA_SEED=true` could run the seed against a database whose migrations had never been applied.
+- The deploy no longer trips over a stale empty migration directory; only committed `migration.sql` files are applied.
+- A real single-machine run completed all 14 steps, including core/admin/merchant/checkout releases, Nginx, PM2, storage probes and final verification.
+
 ---
 
 <a id="deploystorage"></a>
 
-> **Part ID:** `deploy.storage` · **Status:** `partial` · **Last verified:** 2026-11-03 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `deploy.storage` · **Status:** `partial` · **Last verified:** 2026-11-04 · **Verified against:** `working-tree`
 
 # Storage Provisioners
 
@@ -13515,20 +13223,22 @@ The slots are created on the primary by `primaryBootstrapSql()`. Replication is 
 
 ### 3.3 PgBouncer
 
-When `PGBOUNCER_ENABLED=true`, PgBouncer is installed and configured on the primary and every replica. `/etc/pgbouncer/pgbouncer.ini` sets `listen_addr=0.0.0.0`, `listen_port=6432`, transaction pooling, `server_tls_sslmode=require`, 2000 client connections, pool size 50, reserve 10, 256 prepared statements, SCRAM auth and `/etc/pgbouncer/userlist.txt`. The userlist contains the application and replication users with plaintext passwords, mode 0600. PgBouncer is restarted after writing it.
+When `PGBOUNCER_ENABLED=true`, PgBouncer is installed and configured on the primary and every replica. `/etc/pgbouncer/pgbouncer.ini` sets `listen_addr=0.0.0.0`, `listen_port=6432`, transaction pooling, `server_tls_sslmode=prefer`, the configured client/pool limits, reserve 10, prepared statements, SCRAM auth and `/etc/pgbouncer/userlist.txt`. The userlist contains the application and replication users with plaintext passwords, mode 0600. PgBouncer is restarted after writing it.
+
+After writing both files, the provisioner resolves the service account from `systemctl show -p User --value pgbouncer` (falling back to `pgbouncer`, then `postgres`) and applies `0640` to the ini and `0600` to the userlist. This is required because Ubuntu's unit runs as `postgres` and does not create a `pgbouncer` system user; a root-owned `0640` file otherwise fails with `could not load file "/etc/pgbouncer/pgbouncer.ini": Permission denied`.
 
 Important as-built facts:
 
-- There is no `[databases]` section. PgBouncer has no mapping from a client database name to a PostgreSQL host/port/database. A client connecting to `:6432` cannot be routed to the application database by this configuration.
-- `server_tls_sslmode = require` encrypts the PgBouncer-to-PostgreSQL leg but does not verify the server certificate (`verify-full` would) and supplies no client certificate.
+- The `[databases]` section maps `PG_DB_NAME` to `127.0.0.1:<primaryPort>` with `PG_DB_USER` and its password, so a client connecting to `:6432` with that database name reaches the local PostgreSQL primary.
+- `server_tls_sslmode = prefer` encrypts the PgBouncer-to-PostgreSQL leg when the server offers TLS; it does not verify the server certificate (`verify-full` would) and supplies no client certificate.
 - There is no `client_tls_sslmode`, `client_tls_cert_file` or `client_tls_key_file`; clients are not required to present a certificate.
 - `listen_addr = 0.0.0.0` is protected by UFW only; the plan opens 6432 to core sources.
 
-The core environment points `PG_PRIMARY_PORT` and `DATABASE_REPLICA_URLS` at `PGBOUNCER_PORT` when the pooler is enabled. Because the generated PgBouncer has no database mapping, this is a deployment-breaking gap until a `[databases]` entry (or wildcard) is supplied.
+The core environment points `PG_PRIMARY_PORT` and `DATABASE_REPLICA_URLS` at `PGBOUNCER_PORT` when the pooler is enabled; the generated `[databases]` mapping keeps that route working.
 
 ### 3.4 Redis
 
-`redisProvisioner.ts` installs `redis-server`, enables it, and writes both `/etc/redis/redis.conf.d/zz-pg-switch.conf` and `/etc/redis/redis.conf` with a private-IP + loopback bind, `protected-mode yes`, the node port, `requirepass <REDIS_PASSWORD>`, `save 3600 1`, maxmemory/policy `allkeys-lru`, no append-only file and daemonize on. It runs `ufw allow` for core and backup sources and restarts Redis with `redis-cli PING`.
+`redisProvisioner.ts` installs `redis-server`, enables it, and writes both `/etc/redis/redis.conf.d/zz-pg-switch.conf` and `/etc/redis/redis.conf` with a deduplicated private-IP + loopback bind, `protected-mode yes`, the node port, `requirepass <REDIS_PASSWORD>`, `save 3600 1`, maxmemory/policy `allkeys-lru`, no append-only file, `daemonize no`, `supervised systemd` and `dir /var/lib/pg-redis`. It writes a systemd drop-in for `redis-server` and `valkey` granting `ReadWritePaths=/var/lib/pg-redis`, runs `systemctl daemon-reload`, runs `ufw allow` for core and backup sources, restarts Redis and verifies with `REDISCLI_AUTH=<password> redis-cli -p <port> PING`.
 
 There is no `tls-port`, `tls-cert-file`, `tls-key-file`, `tls-ca-cert-file` or `tls-auth-clients` setting. Redis traffic is plaintext inside the private network. The generated `redis-client` certificate is unused.
 
@@ -13764,6 +13474,25 @@ Not covered:
 - Log partition cron uses the log cluster port (`psql -p <port>`), so a log cluster on 5435 is maintained instead of accidentally touching the main cluster.
 - Backup target verification checks the MinIO health endpoint instead of an unconfigured rclone remote.
 
+## 13. PgBouncer config ownership fix (2026-11-04)
+
+- PgBouncer config ownership is derived from the installed systemd unit instead of assuming a `pgbouncer` user exists.
+- The ownership command resolves `systemctl show -p User --value pgbouncer`, falls back to the `pgbouncer` account, then to `postgres`, and enforces `0640` on `pgbouncer.ini` plus `0600` on `userlist.txt`.
+- Fixes Ubuntu hosts where `pgbouncer.service` runs as `User=postgres`; the previous `chown pgbouncer:pgbouncer ... || true` silently failed and left the config unreadable.
+
+## 14. Redis single-machine and sandbox fixes (2026-11-04)
+
+- `bind` addresses are deduplicated. A loopback-only node (`REDIS_NODES="...:127.0.0.1:6379"`) previously rendered `bind 127.0.0.1 127.0.0.1`; Redis bound the first socket and aborted on the duplicate with `Address already in use`.
+- The provisioner writes `redis-server.service.d/zz-pg-switch.conf` and `valkey.service.d/zz-pg-switch.conf` with `ReadWritePaths=/var/lib/pg-redis`. Debian's unit uses `ProtectSystem=strict` and otherwise makes the configured `dir` read-only, so RDB saves failed with `Read-only file system`.
+- The restart/health step runs `systemctl daemon-reload`, targets the configured node port, and authenticates the `PING` with `REDISCLI_AUTH` instead of an unauthenticated `redis-cli PING`.
+- Before restarting, the step disables save-on-shutdown on the currently running instance (`CONFIG SET save ""`). A sandboxed instance with a read-only dir otherwise refuses to exit when its shutdown save fails, which hangs `systemctl` because Debian's unit sets `TimeoutStopSec=0`; the newly written config restores `save 3600 1`.
+
+## 15. PostgreSQL/pooler readiness (2026-11-04)
+
+- `provisionPostgres18()` waits for `pg_isready` on the primary port after restarting PostgreSQL.
+- `provisionBackupEngine()` waits after the core and audit archive restarts, restarts PgBouncer after the last PostgreSQL restart, and waits for PgBouncer on `PGBOUNCER_PORT`. The audit target can share the primary cluster, so its restart could otherwise leave PgBouncer caching `the database system is shutting down (server_login_retry)` when the core release runs migrations through `:6432`.
+- These waits prevent the core migration step from racing a PostgreSQL restart on single-machine and co-located audit deployments.
+
 ---
 
 <a id="deploybackup"></a>
@@ -13993,7 +13722,7 @@ Not covered: a real WAL-G/Barman backup or restore; a real PostgreSQL 18 scratch
 
 <a id="deployhealth"></a>
 
-> **Part ID:** `deploy.health` · **Status:** `partial` · **Last verified:** 2026-11-03 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `deploy.health` · **Status:** `partial` · **Last verified:** 2026-11-04 · **Verified against:** `working-tree`
 
 # Health Verification, Rollback and Recovery
 
@@ -14085,9 +13814,9 @@ Fake Rails gets backend and vhost `/health` probes, with `-k` when SSL is enable
 | Redis | `REDISCLI_AUTH=<password> redis-cli -h 127.0.0.1 -p <port> PING`, expecting `PONG`. |
 | Audit DB | `psql SELECT 1` with the audit user/password. |
 | Log DB | `psql SELECT 1` with the log user/password. |
-| Backup daemon | HTTPS `/health` with the CA and the `backup-daemon` certificate/key, expecting `"status":"ok"` or `ok`. |
+| Backup daemon | HTTPS `/health` with the CA and the `backup-daemon` certificate/key when `BACKUP_ALLOW_INSECURE_HTTP=false`; plain HTTP when it is `true`. Expects `"status":"ok"` or `ok`. |
 
-The backup probe uses the daemon's server certificate (which also has clientAuth) rather than `backup-client`. It depends on the daemon being able to read its own 0600 key; if the key is root-owned and the daemon runs as `pgbackup`, the probe fails.
+The mTLS backup probe uses the daemon's server certificate (which also has clientAuth) rather than `backup-client`. It depends on the daemon being able to read its own 0600 key; if the key is root-owned and the daemon runs as `postgres`, the probe fails. When `BACKUP_ALLOW_INSECURE_HTTP=true` the daemon serves plain HTTP and the verifier uses an unauthenticated HTTP probe on the same host/port, so development deployments do not fail on TLS.
 
 ### 3.6 Verification aggregation
 
@@ -14311,6 +14040,12 @@ Not covered: a real edge-to-core handshake, Nginx reload/vhost probe, PostgreSQL
 ## 10. Change history
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
+
+## 11. Backup-daemon probe follows the HTTP setting (2026-11-04)
+
+- `probeBackupDaemon()` now branches on `BACKUP_ALLOW_INSECURE_HTTP`. The previous unconditional HTTPS probe failed with `wrong version number` against a daemon explicitly configured for plain HTTP.
+- The probe label is `backup-daemon /health (mTLS)` or `backup-daemon /health (HTTP)` so the verification report shows which mode was tested.
+- The mTLS path is unchanged and remains the default.
 
 ---
 
@@ -15999,344 +15734,6 @@ None. The current repository has no voucher implementation.
 
 ---
 
-<a id="futureguide-v2"></a>
-
-> **Part ID:** `future.guide-v2` · **Status:** `missing` · **Last verified:** 2026-11-03 · **Verified against:** `5a24f6f+working-tree`
-
-# Admin Guide v2 (Future)
-
-## 1. Purpose and scope
-
-This part preserves the complete future design for the admin interactive guide, employee academy integration, glossary, safeguard cards, command palette, contextual help and five simulators.
-
-It is **not current behaviour**. The current admin portal has a working 12-book guide and an 8-module academy, but it does not have the 14-book/125-article structure, generated content pipeline, contextual help drawer, safeguard dialogs, five simulators, playbook, edge-case catalog or the v2 Arabic content described here.
-
-This part also records the relationship between the current guide and the future design so no reader mistakes the design for shipped functionality.
-
-## 2. Design intent (future, not current)
-
-### 2.1 Why rebuild
-
-The historical design says the old guide reads like a feature tour: ten short books plus three simulators, assuming the reader already knows what a gateway, ledger, OTP, webhook or AML is. The new guide has three jobs, in priority order:
-
-1. **Prevent human error at the moment of action.** Every screen gets a "?" drawer; every risky action gets a checklist before it executes.
-2. **Teach from zero.** Anyone who can read can understand the system. Every unfamiliar word is defined where it first appears and again in the glossary.
-3. **Be the incident reference.** Calm runbooks, a symptom-to-action playbook and a plain-language catalog of the 140 edge cases.
-
-### 2.2 Audience
-
-| Audience | Need | Path |
-| :--- | :--- | :--- |
-| New employee, any role | Vocabulary and the big picture | Book 0 -> Book 1 -> Book 2 |
-| `OPERATOR`, `SUPPORT` | Daily queues, statuses, `UNKNOWN` | Books 3, 5, 7, 10 |
-| `FINANCE` | Ledger, settlement, cash-outs, refunds, disputes | Books 4, 7, 8 |
-| `COMPLIANCE`, `MLRO` | AML program, cases, reporting, confidentiality | Books 4, 5, 9 |
-| `GATEWAY_ADMIN`, `SECURITY_ADMIN` | Gateways, rails, routes, credentials, deployment, security | Books 4, 6, 11, 12 |
-| Management | The rules everyone is held to | Book 0, Book 4, Book 13 |
-
-All seven admin roles can open every article. Roles only change recommendations and reading paths. The guide contains no live data, real thresholds, names or secrets.
-
-### 2.3 Writing principles
-
-1. Zero assumed knowledge. Define every term at first use. Never write "obviously", "simply" or "just".
-2. Say who, where, what, why and what happens if the reader gets it wrong.
-3. Short sentences and concrete numbers (100 LYD, 3 percent commission).
-4. One meaning per word. Use the same term consistently.
-5. Be honest about gaps: `ui=NOT_YET` banner and who performs the task today.
-6. Safety first, in plain voice. Warnings explain the consequence, not just the rule.
-7. No secrets, live data or external links.
-8. Version every build with `contentVersion`; reading progress records the version.
-
-### 2.4 Scope
-
-In scope: Admin Guide `/guide/**`, global command palette, contextual "?" drawer, safeguard checklists, five simulators, glossary auto-linking, symptom playbook, 140-case catalog, reading paths, read tracking, English content with Arabic-ready terms.
-
-Out of scope: Merchant Guide, Checkout Help, changes to payment/ledger/engine behaviour, server-side search, analytics, external links, AI/LLM features.
-
-## 3. As-built architecture
-
-### 3.1 Current guide (predecessor, not v2)
-
-The current implementation is:
-
-- `admin-front/src/pages/guide/index.tsx`: one page with books, chapters, glossary, search and simulators.
-- `admin-front/src/content/guide/booksPart1.ts` and `booksPart2.ts`: embedded `GuideBook[]` arrays.
-- `admin-front/src/content/guide/glossaryData.ts`, `search.ts`, `types.ts`, `index.ts`.
-- `admin-front/src/content/academy/*`: eight academy modules across `modulesTrackA.ts` and `modulesTrackB.ts`.
-- `admin-front/src/pages/academy/index.tsx`: the employee academy page.
-- `admin-front/src/router/index.ts`: only `AdminGuide` (`/guide`) and `AdminAcademy` (`/academy`) under the Learning section.
-- The current guide has **12 books** and **8 academy modules**.
-- The current guide has three simulators: transform sandbox, crypto lab and ledger T-account explorer.
-- The current guide has `GlobalGuideSearchModal`, glossary definitions and 140 edge-case definitions, but it has no v2 `GuideSearchPalette`, `ContextHelpDrawer`, `SafeguardDialog`, `playbook`, `cards` or `edge-cases` routes.
-- `admin-front/src/content/__tests__/content-completeness.test.ts` asserts the current content shape, not the v2 counts.
-
-`design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` describes an alternative 12-book admin guide, 8-module academy, 10-chapter merchant guide and developer API guide. It is the current guide's lineage. It is **not** the 14-book guide v2.
-
-### 3.2 Future information architecture
-
-Routes:
-
-| Route | Purpose |
-| :--- | :--- |
-| `/guide` | Home: search, Start here, role path, continue reading, books, tools, "I'm stuck" |
-| `/guide/book/:bookId` | One book: summary, ordered articles, progress ring |
-| `/guide/a/:articleId` | Article reader with TOC, glossary tooltips, mark-as-read, prev/next |
-| `/guide/glossary/:slug?` | A-Z glossary with filter; one entry deep-linkable |
-| `/guide/tools/:tool?` | Simulator gallery |
-| `/guide/playbook/:id?` | "What you may see, and what to do" situation cards |
-| `/guide/cards/:id?` | Safeguard cards |
-| `/guide/edge-cases` | Full 140-case catalog with filters |
-| Global `Ctrl/Cmd+K` | Command palette over articles, glossary, cards, situations, error codes, edge cases |
-| PageHeader "?" | Contextual drawer for the current screen |
-
-Route names: `AdminGuide`, `AdminGuideBook`, `AdminGuideArticle`, `AdminGuideGlossary`, `AdminGuideTools`, `AdminGuidePlaybook`, `AdminGuideCards`, `AdminGuideEdgeCases`. They need no authority because every admin must be able to read the guide.
-
-### 3.3 The 14 books
-
-| Book | Title | Articles |
-| ---: | :--- | ---: |
-| 0 | Start Here | 4 |
-| 1 | Foundations from Zero | 10 |
-| 2 | The Platform Map | 7 |
-| 3 | Working in the Back Office | 8 |
-| 4 | Governance: Four Eyes | 7 |
-| 5 | Merchants | 10 |
-| 6 | Gateways, Rails & the Engine | 17 |
-| 7 | Payments in Operation | 12 |
-| 8 | Money & the Ledger | 13 |
-| 9 | Risk, AML & Compliance | 10 |
-| 10 | When Things Go Wrong | 9 |
-| 11 | Security for Everyone | 5 |
-| 12 | Deployment & Hosting | 8 |
-| 13 | Reference | 5 |
-| **Total** | | **125** |
-
-### 3.4 Expected content counts
-
-| Item | Count | Source |
-| :--- | ---: | :--- |
-| Books | 14 | `@@book` blocks |
-| Articles | 125 | `@@article` blocks |
-| Glossary terms | 151 | `@@term` lines |
-| Safeguard cards | 22 | `@@card` blocks |
-| Safeguard checklist items | 99 | `- [ ]` lines inside cards |
-| Situations | 29 | `@@situation` blocks |
-| Reading paths | 8 | `ALL` plus seven staff roles |
-| Quick answers (FAQ) | 58 | `@@faq` blocks |
-| Data blocks | 3 | `ledger-events` (16 events), `visible-rails` (7 vectors), `attempt-transitions` |
-| Context-map screens | 23 | `screens` array |
-| Error codes | 19 | Article `b13-01` |
-| Edge cases | 140 | Parsed from `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` |
-
-The content test must fail if `meta.json.counts` differs.
-
-### 3.5 Content pipeline
-
-The source is `design/07-guides-and-academy/guide_system_design_and_content.md`, parsed between `<!-- CONTENT:BEGIN -->` and `<!-- CONTENT:END -->`.
-
-Block syntax:
-
-- `@@book`
-- `@@article` with Markdown body, `@@end`
-- `@@term`
-- `@@card` with four fixed headings
-- `@@situation`
-- `@@path`
-- `@@data` / `@@map` with one JSON fence
-- `@@faq`
-
-The extractor is `admin-front/scripts/extract-guide-content.ts`, run by `bun run content:guide`. It must:
-
-1. Locate the design file, normalise CRLF.
-2. Parse only between the markers.
-3. Fail on unknown blocks, duplicate ids, missing `@@end` or invalid JSON.
-4. Validate every cross-reference.
-5. Emit `books.json`, `articles.en.json`, `glossary.en.json`, `cards.en.json`, `playbook.en.json`, `paths.json`, `faq.en.json`, `data.json`, `context-map.json`, `meta.json`, `error-codes.en.json` and `edge-cases.en.json`.
-6. Parse edge cases from the v4 design and require exactly 140 rows.
-7. Commit the generated files; a test re-runs the extractor and compares bytes.
-
-Types: `Book`, `Article`, `Term`, `Card`, `Situation`, `ContextScreen`, `EdgeCase`, `Role`, `UiStatus`. Loaders use dynamic `import()` and fall back to English.
-
-Markdown dialect: CommonMark plus tables, callouts (`:::note`, `:::tip`, `:::warning`, `:::danger`, `:::example`, `:::do`, `:::dont`), `{{widget:<id>}}`, article/card/situation/glossary links, stable heading ids, `diagram` fences and no raw HTML or external links.
-
-### 3.6 Glossary, search and context help
-
-Glossary:
-
-- Match terms and aliases case-insensitively, whole word, longest first, with Unicode-aware boundaries.
-- Wrap the first occurrence per article in a button.
-- Do not wrap headings, code, links, table header cells, callout titles or the glossary page.
-- Popover is a focus-trapped dialog with term, short definition, Arabic term, glossary link and related terms.
-- Hover is never the only way to read a definition.
-
-Search:
-
-- `minisearch` fields: title (5), headings (3), aliases (4), plainText (1).
-- `prefix:true`, `fuzzy:0.2`, `combineWith:"AND"` then `"OR"` on zero results.
-- Document types: article, term, card, situation, edge case, FAQ, error code.
-- Normalise Arabic diacritics, tatweel, alef/ya/ta-marbuta variants and Arabic-Indic digits.
-- Group results, max 8 per type, keyboard navigation, recent queries in `localStorage` under `pg.guide.recent`.
-- Lazy index build; target under 150 ms and fail tests above 1,000 ms.
-
-Context help:
-
-- `PageHeader` mounts `ContextHelpButton` automatically using the route name.
-- `context-map.json` maps `routeNames` to `pageDir`, summary, articles, cards and situations.
-- Unknown route uses a fallback screen.
-- Drawer is 420 px, non-modal, opposite side in RTL, preserves page state.
-- Sections: what the screen is for, Before you act, Common problems, Learn more, Open the whole guide.
-- A test enumerates every router name except Login/NotFound and requires a mapping.
-
-### 3.7 Safeguard cards
-
-A card has exactly four bold headings: `**What this does**`, `**Check first**` with `- [ ]` items, `**Never**` and `**If you made a mistake**`.
-
-`useSafeguard(cardId).confirm()` opens a dialog. Every checklist item is required; Continue is disabled until all are ticked; Cancel resolves false. Ticks are client-side only and reset every time.
-
-The 22 cards are:
-
-`sg-approve-request`, `sg-reject-request`, `sg-propose-adjustment`, `sg-reverse-adjustment`, `sg-process-cashout`, `sg-reject-cashout`, `sg-resolve-unknown`, `sg-release-reservation`, `sg-bulk-inquiry`, `sg-approve-join-request`, `sg-reject-join-request`, `sg-suspend-merchant`, `sg-reinstate-merchant`, `sg-edit-merchant-sensitive`, `sg-aml-propose-resolution`, `sg-aml-disposition`, `sg-aml-rule-change`, `sg-aml-report`, `sg-submit-gateway-version`, `sg-edit-route`, `sg-ai-import-draft`, `sg-run-reconciliation`.
-
-Integrations guard the matching Approve/Reject/Propose/Reverse/Process/Create/Save/Run actions on approvals, adjustments, cash-outs, operator cases, join requests, merchants, AML, gateway wizard, routes, AI import and reconciliation. Existing confirmation dialogs must remain.
-
-### 3.8 Internationalisation and progress
-
-- UI chrome strings go through the existing locale system with English and Arabic entries.
-- Content loader tries `articles.ar.json`; if missing, shows "Arabic version pending" and renders English with `lang="en" dir="ltr"`.
-- Glossary `ar=` is mandatory for later translation.
-- Read tracking reuses the Academy progress JSON (`guideRead`), with a `localStorage` fallback under `pg.guide.read`.
-- No schema migration is required.
-
-### 3.9 Five simulators
-
-All simulators are client-only, deterministic, keyboard accessible, have a Reset button and an "Explain this result" panel, use `decimal.js` for money and display "Teaching tool — not connected to any real system."
-
-| Simulator | What it teaches | Key vectors / data |
-| :--- | :--- | :--- |
-| `transform-sandbox` | Closed transform library and amount scaling | T1-T12, including `10.50 -> scale(1000) -> to_int -> "10500"` and `76.255 -> round(NEAREST) -> "76.26"` |
-| `crypto-lab` | Canonicalisation, key encodings and signatures | C1-C4 HMAC-SHA256 vectors; shows canonical string and match/no-match |
-| `ledger-explorer` | Double-entry T-accounts | 16 ledger events; E02 defaults balance at 100.8000 debit/credit |
-| `visible-rails` | Nine-predicate rail visibility | 7 vectors; shows first failing predicate |
-| `attempt-states` | Attempt transitions | Shows new state, slot reservation, money posted and human action |
-
-The source also names the data blocks `ledger-events`, `visible-rails` and `attempt-transitions`.
-
-### 3.10 Tests and quality bars
-
-Unit tests:
-
-- `guide-content.test.ts`: extractor byte equality, expected counts, links, non-empty bodies, no external URLs, unique slugs, non-empty card checklists, router coverage, card ids, widget ids, gzip under 400 KB.
-- `guide-search.test.ts`: query normalisation and top results; index build under 1,000 ms.
-- `guide-widgets.test.ts`: all simulator vectors.
-
-E2E:
-
-- `guide-reader.spec.ts`: search, article, glossary keyboard popover, mark-as-read persistence, no overflow at 360/1280, Arabic RTL.
-- `guide-palette.spec.ts`: Ctrl+K, type, Enter, Esc, focus return.
-- `guide-context.spec.ts`: five routes, "?" drawer, at least one card, form state preserved.
-- `guide-safeguard.spec.ts`: Approve opens the dialog, Continue disabled until all checked, Cancel sends no request.
-
-Quality bars: Lighthouse accessibility at least 95, keyboard reachability, AA contrast, first article render under 500 ms, no `#app` transform and no horizontal overflow.
-
-### 3.11 Delivery phases
-
-- `G-0`: extractor, generated JSON, content test.
-- `G-1`: reader routes/pages, Markdown renderer, glossary, paths, status banner.
-- `G-2`: search and command palette.
-- `G-3`: five simulators and tools page.
-- `G-4`: context drawer, safeguard dialog, 22 integrations.
-- `G-5`: read tracking and progress.
-- `G-6`: delete old `content.ts`, audit labels, record content fixes/questions, full test run.
-
-## 4. Contracts and invariants (future)
-
-1. The source content is copied, not rewritten, summarised or machine-translated.
-2. Counts in `meta.json` equal the expected table.
-3. Generated files are committed and byte-stable.
-4. Every cross-reference resolves.
-5. No article contains an external URL.
-6. All money math uses `decimal.js`; no `eval`, `new Function`, `Function` or `vm`.
-7. Every risky action integration calls the safeguard before the request.
-8. Guide routes require no authority, but the underlying action still does.
-9. Neither the guide nor the drawer unmounts or loses page form state.
-10. The guide never scales `#app` or introduces horizontal overflow.
-
-## 5. Data / API / config / deployment surface (future)
-
-- `admin-front/scripts/extract-guide-content.ts`
-- `admin-front/src/content/guide/generated/*.json`
-- `admin-front/src/content/guide/index.ts`
-- `admin-front/src/components/guide/**`
-- `admin-front/src/pages/guide/{index,book,article,glossary,tools,playbook,cards,edge-cases}.tsx`
-- `admin-front/src/components/PageHeader/index.tsx`
-- `admin-front/src/layouts/default.tsx`
-- `admin-front/src/router/index.ts`
-- `admin-front/src/layouts/sections.tsx`
-- `tests/unit/guide-*.test.ts`
-- `tests/e2e/admin/guide-*.spec.ts`
-- `design/guide_content_fixes.md` and `guide_content_questions.md`
-- Only new dependencies: `markdown-it` and `minisearch`.
-
-## 6. Operational usage
-
-Not applicable. No v2 guide exists. The current guide is reached at `/guide` and the academy at `/academy`.
-
-## 7. Status and deviations
-
-### Implemented
-
-Nothing from guide v2. The repository has a 12-book guide and 8 academy modules, which are the predecessor, not this design.
-
-### Partial
-
-Nothing from guide v2 is partially implemented under the v2 structure.
-
-### Missing / deferred
-
-All 14 books, 125 articles, 151 glossary terms, 22 cards, 99 checklist items, 29 situations, 8 paths, 58 FAQs, 3 data blocks, 23 context screens, 19 error codes, 8 v2 routes, the command palette, context drawer, safeguard system, five simulators and the generated v2 content pipeline. The 140 edge-case definitions already exist in the current guide; the v2 design adds the dedicated `/guide/edge-cases` route and generated JSON. The v2 Arabic article set is also absent.
-
-### Known bugs / risks
-
-- **Documentation risk:** SC-019 previously presented guide v2 as current. It is not.
-- **Content risk:** the current guide has stale claims (for example, "10 GL accounts" in one chapter title) that the v2 content must correct to 11.
-- **Design risk:** the extractor depends on a design file whose name contains spaces and parentheses; path resolution and CI must handle it exactly.
-- **Scope risk:** the 140 edge cases are parsed from a separate v4 design file; moving or renaming that file breaks the build.
-
-## 8. Verification and tests
-
-There are no v2 tests. Acceptance requires the unit and E2E suites in section 3.10, plus exact content counts and generated-file byte equality. The current completeness test is not evidence for v2.
-
-## 9. Source references
-
-### Old design sections
-
-- `design/07-guides-and-academy/guide_system_design_and_content.md` Parts 0-III, especially II-1 through II-13.
-- `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` for the current 12-book/8-module lineage.
-- `design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md` section 13 for the 140 edge cases.
-
-### Code paths
-
-- `admin-front/src/pages/guide/index.tsx`
-- `admin-front/src/content/guide/booksPart1.ts`
-- `admin-front/src/content/guide/booksPart2.ts`
-- `admin-front/src/content/guide/glossaryData.ts`
-- `admin-front/src/content/guide/search.ts`
-- `admin-front/src/pages/academy/index.tsx`
-- `admin-front/src/content/academy/modulesTrackA.ts`
-- `admin-front/src/content/academy/modulesTrackB.ts`
-- `admin-front/src/router/index.ts`
-
-### Generated appendices
-
-- `project-design/appendices/stale-claims-register.md` (SC-019)
-- `project-design/appendices/design-source-map.md`
-
-## 10. Change history
-
-- 2026-11-03: initial future design. Status explicitly `missing`; not current behaviour.
-
----
-
 <a id="futuresmart-ai-voucher"></a>
 
 > **Part ID:** `future.smart-ai-voucher` · **Status:** `missing` · **Last verified:** 2026-11-03 · **Verified against:** `5a24f6f+working-tree`
@@ -16597,13 +15994,13 @@ This part is the catch-all register for missing or partial features that are not
 - `partial`: present but narrow or incomplete.
 - `deferred`: intentionally postponed with a recorded decision.
 
-The voucher system, guide v2 and the voucher half of the Smart AI importer have dedicated parts in this directory. They are listed here for completeness but their full design lives in those parts.
+The voucher system and the voucher half of the Smart AI importer have dedicated parts in this directory. They are listed here for completeness but their full design lives in those parts. The admin guide v2 is implemented and is documented under `03-admin-front/06-guide-v2.md`.
 
 This file is not current-behaviour documentation for the missing items. Each entry states what exists today and what acceptance would require.
 
 ## 2. Design intent (extracted and synthesized from ./design)
 
-The historical design backlog identifies several P0/P1 gaps: schema counts, attempt lifecycle, engine phases, ledger scenarios, transforms, CQRS, replica reads, pagination, audit outbox, backup scheduling, deploy prune, PM2 templates, storage mTLS, admin/merchant routes, guide v2, fake rails, voucher, exhaustive tests and stale frontend notes.
+The historical design backlog identifies several P0/P1 gaps: schema counts, attempt lifecycle, engine phases, ledger scenarios, transforms, CQRS, replica reads, pagination, audit outbox, backup scheduling, deploy prune, PM2 templates, storage mTLS, admin/merchant routes, fake rails, voucher, exhaustive tests and stale frontend notes. The admin guide v2 item is now implemented.
 
 Most factual counts are now fixed in the canonical parts. The remaining items below are behavioural or architectural gaps that require code work, not a doc edit.
 
@@ -16614,7 +16011,7 @@ Most factual counts are now fixed in the canonical parts. The remaining items be
 | ID | Feature | Status | Current evidence | Acceptance criteria |
 | :--- | :--- | :--- | :--- | :--- |
 | D-01 | Voucher Provider Management System | `missing` | No voucher code, schema, API or UI | See `future.voucher`; all phases and tests delivered as a separate service |
-| D-02 | Admin Guide v2 | `missing` | Current 12-book guide and 8 academy modules only | See `future.guide-v2`; 14 books/125 articles/151 terms/22 cards/29 situations/5 simulators/8 routes, generated and tested |
+| D-02 | Admin Guide v2 | `implemented` | 14 books/125 articles/151 terms/22 cards/29 situations/5 simulators/8 routes with generated content, context help and safeguards | See `admin-ui.guide-v2`; only the Arabic article set remains outstanding |
 | D-03 | Smart AI voucher importer half | `missing` | Gateway importer only in `core-back/engine/specImporter/**` | See `future.smart-ai-voucher`; voucher schema/validator/simulator/materializer/transcript/UI/tests |
 | D-04 | Merchant Google OIDC login | `deferred` | `core-back/api/internal/merchant.ts` `/auth/google` returns `501 GOOGLE_IDENTITY_NOT_CONFIGURED` | Configure issuer/client/audience, verify ID tokens, map identities, test success/failure |
 | D-05 | Keyset pagination | `partial` | `core-back/lib/listQuery.ts` supports cursor pagination (2026-11-04) but only merchant `/payments` uses it; the other lists still use `skip/take` | Add stable cursor keys, cursor encode/decode, index coverage, API compatibility and tests at high offsets |

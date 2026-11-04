@@ -3,7 +3,7 @@ import { VBtn, VCard, VCardText, VChip, VMenu } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
-import { lookupTerm } from "@/content/guide";
+import { lookupTerm } from "@/content/guide/legacy";
 
 type TermTooltipProps = {
     term: string;

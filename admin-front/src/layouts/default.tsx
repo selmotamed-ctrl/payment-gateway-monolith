@@ -1,6 +1,6 @@
 import { dc } from "kt-dc";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
+import { RouterLink, RouterView, useRoute } from "vue-router";
 import {
     VAppBar,
     VAvatar,
@@ -23,12 +23,15 @@ import { routeLoading } from "@/state/route";
 import { toggleTheme } from "@/state/app/index";
 import { setLocale } from "@/plugins/localization";
 import { showSnackBar } from "@/utils/snackBar";
-import { GlobalGuideSearchModal } from "@/components/guide/GlobalGuideSearchModal";
 import { GlobalSearchPalette } from "@/components/search/GlobalSearchPalette";
 import { clearGlobalSearchCache } from "@/components/search/api";
 import type { NavigationSectionItem } from "@/components/search/localCommands";
 import { searchGuide } from "@/content/guide/search";
-import { ContextualHelpDrawer } from "@/components/guide/ContextualHelpDrawer";
+import { ContextHelpDrawer } from "@/components/guide/ContextHelpDrawer";
+import { GuideSearchPalette } from "@/components/guide/GuideSearchPalette";
+import { SafeguardDialog } from "@/components/guide/SafeguardDialog";
+import { useContextHelp } from "@/components/guide/useContextHelp";
+import { useGuideSearchPalette } from "@/components/guide/useGuideSearchPalette";
 import { routesAuthorities, routesRoles, useSections } from "./sections";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
@@ -40,16 +43,16 @@ const DefaultLayout = dc(() => {
     const theme = useTheme();
     const display = useDisplay();
     const route = useRoute();
-    const router = useRouter();
     const sections = useSections();
-    const guideSearchOpen = ref(false);
+    const { searchOpen: guideSearchOpen, openGuideSearch } = useGuideSearchPalette();
+    const { open: contextHelpOpen, openContextHelp, closeContextHelp } = useContextHelp();
+    const guideSearchTrigger = ref<HTMLButtonElement | null>(null);
     const globalSearchOpen = ref(false);
     const globalSearchFocusSignal = ref(0);
     const globalSearchTrigger = ref<HTMLButtonElement | null>(null);
     const isMacPlatform = /Mac|iPhone|iPad/i.test(navigator.platform || "");
     const searchShortcutLabel = isMacPlatform ? "⌘ K" : "Ctrl K";
     const searchShortcutAria = isMacPlatform ? "⌘K" : "Ctrl+K";
-    const helpDrawerOpen = ref(false);
     const collapsedSections = ref<number[]>([]);
 
     const isSectionCollapsed = (index: number) => collapsedSections.value.includes(index);
@@ -176,15 +179,19 @@ const DefaultLayout = dc(() => {
     const onGlobalKeydown = (event: KeyboardEvent) => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
             event.preventDefault();
-            openGlobalSearch();
+            if (String(route.name ?? "").startsWith("AdminGuide")) {
+                openGuideSearch();
+            } else {
+                openGlobalSearch();
+            }
         }
         if (event.key === "Escape") {
             if (globalSearchOpen.value) {
                 globalSearchOpen.value = false;
             } else if (guideSearchOpen.value) {
                 guideSearchOpen.value = false;
-            } else if (helpDrawerOpen.value) {
-                helpDrawerOpen.value = false;
+            } else if (contextHelpOpen.value) {
+                closeContextHelp();
             }
         }
         const target = event.target as HTMLElement | null;
@@ -195,7 +202,7 @@ const DefaultLayout = dc(() => {
             target?.isContentEditable === true;
         if (!typing && !event.ctrlKey && !event.metaKey && !event.altKey && event.key === "?") {
             event.preventDefault();
-            helpDrawerOpen.value = true;
+            openContextHelp(String(route.meta.parentName ?? route.name ?? ""));
         }
     };
 
@@ -288,7 +295,7 @@ const DefaultLayout = dc(() => {
                     prependIcon="mdi-help-circle-outline"
                     class="pg-help-btn"
                     aria-label={t("Help & SOP")}
-                    onClick={() => (helpDrawerOpen.value = true)}
+                    onClick={() => openContextHelp(String(route.meta.parentName ?? route.name ?? ""))}
                 >
                     <span class="pg-help-btn__label">{t("Help & SOP (?)")}</span>
                 </VBtn>
@@ -402,7 +409,7 @@ const DefaultLayout = dc(() => {
                     <StatusBadge status="LAN" label="LAN" toneOverride="neutral" showDot={false} />
                 </div>
                 <div class="pg-drawer__search">
-                    <button type="button" class="pg-search-pill" onClick={() => (guideSearchOpen.value = true)}>
+                    <button ref={guideSearchTrigger} type="button" class="pg-search-pill" onClick={openGuideSearch}>
                         <VIcon icon="mdi-book-search-outline" size={16} />
                         <span class="pg-search-pill__label">{t("Search guide…")}</span>
                     </button>
@@ -510,24 +517,15 @@ const DefaultLayout = dc(() => {
                 focusSignal={globalSearchFocusSignal.value}
             />
 
-            <GlobalGuideSearchModal
+            <GuideSearchPalette
                 modelValue={guideSearchOpen.value}
                 onUpdate:modelValue={(value: boolean) => (guideSearchOpen.value = value)}
-                onSelect={(entry: any) => {
-                    guideSearchOpen.value = false;
-                    void router.push({ name: "AdminGuide", query: { entry: entry.id } });
-                }}
+                locale={locale.value === "ar" ? "ar" : "en"}
+                triggerElement={guideSearchTrigger.value}
             />
 
-            <ContextualHelpDrawer
-                modelValue={helpDrawerOpen.value}
-                routeName={String(route.meta.parentName ?? route.name ?? "")}
-                onUpdate:modelValue={(value: boolean) => (helpDrawerOpen.value = value)}
-                onOpenFullGuide={() => {
-                    helpDrawerOpen.value = false;
-                    void router.push({ name: "AdminGuide" });
-                }}
-            />
+            <ContextHelpDrawer />
+            <SafeguardDialog />
         </>
     );
 });

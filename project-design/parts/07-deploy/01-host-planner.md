@@ -3,8 +3,8 @@ id: deploy.planner
 title: Host Planner
 status: implemented
 confidence: high
-last_verified: 2026-11-03
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-04
+verified_against: working-tree
 code:
   - deploy/test-matrix/gates.ts
   - deploy/lib/hostPlanner.ts
@@ -97,7 +97,7 @@ Edge environments are built from a base that deliberately excludes `DATABASE_URL
 - optional `checkout-lan` when `CHECKOUT_LAN_PORT > 0`;
 - optional `fake-rails` when enabled.
 
-Nginx plans are filtered per role and attached to the matching compute host(s). The public merchant/checkout vhosts use the configured domains; the LAN vhosts use the node private IP or `_`. The admin vhost is not attached to a non-admin host. Every site carries an `upstreamName` and all local/remote node addresses; the renderer emits a `least_conn` upstream with `max_fails=2 fail_timeout=3s`.
+Nginx plans are filtered per role and attached to the matching compute host(s). The public merchant/checkout vhosts use the configured domains; the LAN vhosts use the node private IP or `_`. The admin vhost is not attached to a non-admin host. Every site carries an `upstreamName` and all local/remote node addresses; the renderer emits a `least_conn` upstream with `max_fails=2 fail_timeout=3s`. Upstream names are unique per site: `pg_admin_backend`, `pg_merchant_public_backend`, `pg_merchant_lan_backend`, `pg_checkout_public_backend`, `pg_checkout_lan_backend` and `pg_fake_rails_backend`. Nginx requires names to be unique across the whole `http` context, so public and LAN vhosts cannot share one.
 
 ### 3.5 Certificate bundles
 
@@ -302,3 +302,9 @@ The suites cover five-host, two-host and single-host scenarios; firewall source 
 - `NginxPlan` carries `upstreamName` and `upstreamServers`. The renderer emits `upstream` blocks with `least_conn` and `max_fails=2 fail_timeout=3s` over all local and remote nodes.
 - Edge backends bind the node private IP instead of loopback. The planner adds a LAN-scoped firewall rule for each edge backend port so a remote Nginx upstream can reach it.
 - Replica read URLs use the replica's own PostgreSQL port, not a single PgBouncer port that would point a co-located replica back at the primary.
+
+## 12. Unique Nginx upstream names (2026-11-04)
+
+- Merchant and checkout each render both a public and a LAN vhost. Both previously used `pg_<role>_backend`, so `nginx -t` failed with `duplicate upstream`.
+- `upstreamFor()` now accepts a site suffix; public and LAN sites render distinct upstreams while still targeting the same backend node pool.
+- Admin remains `pg_admin_backend` because it has a single vhost; Fake Rails remains `pg_fake_rails_backend`.

@@ -50,8 +50,9 @@ This is the canonical entrypoint for the payment-gateway project design.
 - [Admin Route and Page Catalog](parts/03-admin-front/01-route-and-page-catalog.md) — `admin-ui.routes` · `partial`
 - [Tables Filters and Exports](parts/03-admin-front/02-tables-filters-exports.md) — `admin-ui.tables` · `partial`
 - [Admin Guide and Academy](parts/03-admin-front/03-guide-and-academy.md) — `admin-ui.guide` · `partial`
-- [Contextual Help](parts/03-admin-front/04-contextual-help.md) — `admin-ui.help` · `partial`
+- [Contextual Help](parts/03-admin-front/04-contextual-help.md) — `admin-ui.help` · `implemented`
 - [Backups Settings and Operations](parts/03-admin-front/05-backups-settings-and-operations.md) — `admin-ui.operations` · `partial`
+- [Admin Guide v2](parts/03-admin-front/06-guide-v2.md) — `admin-ui.guide-v2` · `implemented`
 
 ### 04-merchant-front
 
@@ -92,7 +93,6 @@ This is the canonical entrypoint for the payment-gateway project design.
 ### 09-future-and-unimplemented
 
 - [Voucher Provider Management System (Future)](parts/09-future-and-unimplemented/00-voucher-provider-system.md) — `future.voucher` · `missing`
-- [Admin Guide v2 (Future)](parts/09-future-and-unimplemented/01-guide-v2.md) — `future.guide-v2` · `missing`
 - [Smart AI Spec Importer and Voucher Half (Future)](parts/09-future-and-unimplemented/02-smart-ai-voucher-half.md) — `future.smart-ai-voucher` · `missing`
 - [Deferred and Partial Features](parts/09-future-and-unimplemented/03-deferred-features.md) — `future.deferred` · `deferred`
 

@@ -21,6 +21,7 @@ import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+import { useSafeguard } from "@/components/guide/useSafeguard";
 
 import { FormModal } from "@/components/ui/FormModal";
 import { FormField } from "@/components/ui/FormField";
@@ -360,6 +361,7 @@ const AdjustmentsPage = dc(() => {
     };
 
     const proposalChecklistComplete = computed(() => !showChecklists || ADJUSTMENT_CHECKS.every((check) => proposalChecklist.value[check.key] === true));
+    const proposeSafeguard = useSafeguard("sg-propose-adjustment");
 
     const submit = async () => {
         createError.value = "";
@@ -376,6 +378,7 @@ const AdjustmentsPage = dc(() => {
             showSnackBar({ type: "warning", message: t("Complete all proposal checklist items before drafting") });
             return;
         }
+        if (!(await proposeSafeguard.confirm())) return;
         actionLoading.value = true;
         try {
             const response = await api.post(urlsMap.adjustmentsList, {

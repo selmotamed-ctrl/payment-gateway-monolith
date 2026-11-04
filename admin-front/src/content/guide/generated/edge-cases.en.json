@@ -1,0 +1,1122 @@
+[
+  {
+    "n": 1,
+    "group": "A",
+    "groupName": "Lifecycle and Timing",
+    "scenario": "Customer closes browser after OTP sent or mid-redirect",
+    "resolution": "Attempt stays pending; page resumes from server state via attempt token; inquire() runs at expiry before declaring EXPIRED.",
+    "severity": "Med"
+  },
+  {
+    "n": 2,
+    "group": "A",
+    "groupName": "Lifecycle and Timing",
+    "scenario": "Reload or back button on OTP screen",
+    "resolution": "UI reads state from server; no second INITIATE; resend obeys otp_resend_cooldown_seconds and cap.",
+    "severity": "Low"
+  },
+  {
+    "n": 3,
+    "group": "A",
+    "groupName": "Lifecycle and Timing",
+    "scenario": "Gateway session expires before platform TTL (10m/15m)",
+    "resolution": "expires_at = min(gateway_session_ttl, platform_ttl); countdown shown; late submit rejected locally.",
+    "severity": "Med"
+  },
+  {
+    "n": 4,
+    "group": "A",
+    "groupName": "Lifecycle and Timing",
+    "scenario": "Repeated wrong OTP vs. brute-force attack",
+    "resolution": "RETRYABLE_OTP increments otp_attempts up to max_otp_attempts (3) in AWAITING_CUSTOMER, then transitions to FAILED.",
+    "severity": "Med"
+  },
+  {
+    "n": 5,
+    "group": "A",
+    "groupName": "Lifecycle and Timing",
+    "scenario": "Correct OTP entered, but SUBMIT (CONFIRM) call times out",
+    "resolution": "Transitions to UNKNOWN (never FAILED); same OTP is never resubmitted; slot reservation held; background reconciler polls VERIFY or statement.",
+    "severity": "High"
+  },
+  {
+    "n": 6,
+    "group": "A",
+    "groupName": "Lifecycle and Timing",
+    "scenario": "Server restart or pod crash during active attempt",
+    "resolution": "Durable expires_at and next_check_at in the PostgreSQL 18 database; stateless workers resume with native FOR UPDATE SKIP LOCKED.",
+    "severity": "High"
+  },
+  {
+    "n": 7,
+    "group": "A",
+    "groupName": "Lifecycle and Timing",
+    "scenario": "Two browser tabs or devices open the same single-use link",
+    "resolution": "Atomic active_locked_count reservation inside guard transaction; second tab sees *\"Payment in progress\"*.",
+    "severity": "Med"
+  },
+  {
+    "n": 8,
+    "group": "A",
+    "groupName": "Lifecycle and Timing",
+    "scenario": "Customer clicks retry while previous attempt is UNKNOWN",
+    "resolution": "Slot reservation remains held through UNKNOWN; retry blocked server-side until UNKNOWN resolves.",
+    "severity": "High"
+  },
+  {
+    "n": 9,
+    "group": "A",
+    "groupName": "Lifecycle and Timing",
+    "scenario": "Customer switches rail mid-flow (e.g., Edfali to Moamalat Card)",
+    "resolution": "Old attempt cancelled via CANCEL flow (or watched until expiry); new attempt joins same attempt_group_id (success_count <= 1).",
+    "severity": "Med"
+  },
+  {
+    "n": 10,
+    "group": "A",
+    "groupName": "Lifecycle and Timing",
+    "scenario": "Customer approves push or scans QR after EXPIRED",
+    "resolution": "Inbox stays open during grace_expires_at; verified late success transitions EXPIRED -> SUCCEEDED (or routes to refund if link already paid) and alerts ops.",
+    "severity": "High"
+  },
+  {
+    "n": 11,
+    "group": "A",
+    "groupName": "Lifecycle and Timing",
+    "scenario": "Clock skew and timezone differences (Africa/Tripoli vs. UTC)",
+    "resolution": "All DB timestamps UTC; format_date uses explicit gateway_timezone; webhook timestamps checked within timestamp_tolerance_sec (300s).",
+    "severity": "Med"
+  },
+  {
+    "n": 12,
+    "group": "A",
+    "groupName": "Lifecycle and Timing",
+    "scenario": "Link expires between checkout page load and form submit",
+    "resolution": "POST /initiate re-verifies link expires_at inside serializable guard transaction and returns LINK_NOT_AVAILABLE.",
+    "severity": "Low"
+  },
+  {
+    "n": 13,
+    "group": "A",
+    "groupName": "Lifecycle and Timing",
+    "scenario": "Multi-use link reaches use_count while attempts are in flight",
+    "resolution": "confirmed_count + active_locked_count < use_count enforced at initiation; any excess late settlement routes to SUSPENSE + refund adjustment.",
+    "severity": "High"
+  },
+  {
+    "n": 14,
+    "group": "A",
+    "groupName": "Lifecycle and Timing",
+    "scenario": "POS screen hits 15-minute idle timeout while QR is pending",
+    "resolution": "Attempt continues server-side; POS screen resyncs on reconnect; cashier can query by reference.",
+    "severity": "Low"
+  },
+  {
+    "n": 15,
+    "group": "B",
+    "groupName": "Confirmation and Trust",
+    "scenario": "Webhook arrives before INITIATE DB transaction commits",
+    "resolution": "Stored in inbound_events inbox immediately; async worker retries correlation for 60s before opening an alert.",
+    "severity": "Med"
+  },
+  {
+    "n": 16,
+    "group": "B",
+    "groupName": "Confirmation and Trust",
+    "scenario": "Webhook arrives for an unknown reference",
+    "resolution": "Stored in inbox with attempt_id = NULL; no state effect; volume spike alerts ops.",
+    "severity": "Low"
+  },
+  {
+    "n": 17,
+    "group": "B",
+    "groupName": "Confirmation and Trust",
+    "scenario": "Duplicate webhooks delivered by gateway",
+    "resolution": "Absorbed by UNIQUE(channel_id, dedupe_key) and UNIQUE(ref_type, ref_id) on journal_entries; returns idempotent 200 OK.",
+    "severity": "High"
+  },
+  {
+    "n": 18,
+    "group": "B",
+    "groupName": "Confirmation and Trust",
+    "scenario": "Out-of-order events (PAID webhook followed by late PENDING)",
+    "resolution": "State machine is strictly forward-only; SUCCEEDED can never be downgraded.",
+    "severity": "High"
+  },
+  {
+    "n": 19,
+    "group": "B",
+    "groupName": "Confirmation and Trust",
+    "scenario": "Verified success arrives after attempt was marked FAILED",
+    "resolution": "Transitions FAILED -> SUCCEEDED (or refund pipeline if link satisfied) and triggers P2 alert.",
+    "severity": "High"
+  },
+  {
+    "n": 20,
+    "group": "B",
+    "groupName": "Confirmation and Trust",
+    "scenario": "Verified webhook says SUCCESS, but VERIFY inquiry says FAILED",
+    "resolution": "Conflicting trusted signals: nothing posted to ledger, attempt parked in UNKNOWN, P1 CONFLICT operator case opened.",
+    "severity": "High"
+  },
+  {
+    "n": 21,
+    "group": "B",
+    "groupName": "Confirmation and Trust",
+    "scenario": "Moamalat Lightbox JS completeCallback fires, but no server webhook/inquiry",
+    "resolution": "Treated as hint only; attempt stays VERIFYING with backoff polling, then transitions to UNKNOWN if unconfirmed.",
+    "severity": "Med"
+  },
+  {
+    "n": 22,
+    "group": "B",
+    "groupName": "Confirmation and Trust",
+    "scenario": "Attacker sends forged webhook claiming payment success",
+    "resolution": "Blocked by path_token, IP CIDR allowlist, constant-time HMAC/RSA verification, and must_inquire.",
+    "severity": "High"
+  },
+  {
+    "n": 23,
+    "group": "B",
+    "groupName": "Confirmation and Trust",
+    "scenario": "Attacker replays a captured valid webhook hours later",
+    "resolution": "Rejected by timestamp_tolerance_sec (300s) and 7-day dedupe_key hash in inbound_events.",
+    "severity": "High"
+  },
+  {
+    "n": 24,
+    "group": "B",
+    "groupName": "Confirmation and Trust",
+    "scenario": "Gateway retries webhook aggressively due to slow processing",
+    "resolution": "Receiver stores raw event in inbound_events and returns ack_body_template in \\< 10ms before async processing.",
+    "severity": "Med"
+  },
+  {
+    "n": 25,
+    "group": "B",
+    "groupName": "Confirmation and Trust",
+    "scenario": "Valid webhook signature, but settled amount or currency differs",
+    "resolution": "Evaluated against route mismatch_policy; held in SUSPENSE above tolerance.",
+    "severity": "High"
+  },
+  {
+    "n": 26,
+    "group": "B",
+    "groupName": "Confirmation and Trust",
+    "scenario": "Sandbox webhook sent to Live endpoint (or vice versa)",
+    "resolution": "Separate path_token and secrets per environment; rejected with P2 security alert.",
+    "severity": "Med"
+  },
+  {
+    "n": 27,
+    "group": "B",
+    "groupName": "Confirmation and Trust",
+    "scenario": "Gateway silently changes signature field order or algorithm",
+    "resolution": "Signature-failure spike alert fires (RB-02); raw bytes preserved in inbound_events for lossless replay once new crypto_profile is approved.",
+    "severity": "High"
+  },
+  {
+    "n": 28,
+    "group": "B",
+    "groupName": "Confirmation and Trust",
+    "scenario": "Customer tampers with return_url query string (?status=success)",
+    "resolution": "Return parameters are ignored for confirmation decisions; they only trigger inquire(attempt).",
+    "severity": "Med"
+  },
+  {
+    "n": 29,
+    "group": "B",
+    "groupName": "Confirmation and Trust",
+    "scenario": "Callback arrives as application/x-www-form-urlencoded, XML, or non-UTF8",
+    "resolution": "Channel body_format and charset normalizer parse fields while preserving raw_body_bytes for HMAC check.",
+    "severity": "Med"
+  },
+  {
+    "n": 30,
+    "group": "B",
+    "groupName": "Confirmation and Trust",
+    "scenario": "Callback source IP masked by reverse proxy or changed by provider",
+    "resolution": "Real IP resolved through trusted proxy hops only; valid signature from unlisted IP triggers RB-02 alert.",
+    "severity": "Med"
+  },
+  {
+    "n": 31,
+    "group": "B",
+    "groupName": "Confirmation and Trust",
+    "scenario": "Gateway offers neither webhook signature nor inquiry API",
+    "resolution": "Flagged HIGH_RISK; requires executive risk acceptance, mandatory statement reconciliation, and operator approval above threshold.",
+    "severity": "High"
+  },
+  {
+    "n": 32,
+    "group": "C",
+    "groupName": "Money, Amounts, Fees and Ledger",
+    "scenario": "Settled amount differs from requested (aggregator rounding or fee)",
+    "resolution": "Stored in settled_amount; governed by route mismatch_policy (HOLD_FOR_REVIEW above tolerance).",
+    "severity": "High"
+  },
+  {
+    "n": 33,
+    "group": "C",
+    "groupName": "Money, Amounts, Fees and Ledger",
+    "scenario": "Amount scale bug (1000x too high or low on Moamalat Dirhams)",
+    "resolution": "Prevented by amount_scale config, sanity bound check against link.amount, and mandatory Go-Live Gate 3 contract test.",
+    "severity": "High"
+  },
+  {
+    "n": 34,
+    "group": "C",
+    "groupName": "Money, Amounts, Fees and Ledger",
+    "scenario": "Rail currency differs from Payment Link currency",
+    "resolution": "Visible-rails formula hides any rail where rail.currency != link.currency.",
+    "severity": "Med"
+  },
+  {
+    "n": 35,
+    "group": "C",
+    "groupName": "Money, Amounts, Fees and Ledger",
+    "scenario": "Customer-borne fee (PAYER_SURCHARGE or SPLIT)",
+    "resolution": "Surcharge calculated from CommissionProfile, displayed before confirmation, and booked per Section 9.1.",
+    "severity": "Med"
+  },
+  {
+    "n": 36,
+    "group": "C",
+    "groupName": "Money, Amounts, Fees and Ledger",
+    "scenario": "Customer hits personal CBL/wallet ceiling (LYPay 20k, MobiMal tier)",
+    "resolution": "Mapped to canonical LIMIT_EXCEEDED; customer prompted to pick another rail; excluded from circuit-breaker failure count.",
+    "severity": "Low"
+  },
+  {
+    "n": 37,
+    "group": "C",
+    "groupName": "Money, Amounts, Fees and Ledger",
+    "scenario": "Gateway changes min/max transaction limits",
+    "resolution": "Enforced on rail_routes plus optional capability-probe limit sync.",
+    "severity": "Med"
+  },
+  {
+    "n": 38,
+    "group": "C",
+    "groupName": "Money, Amounts, Fees and Ledger",
+    "scenario": "Partial payment or overpayment received",
+    "resolution": "Held in SUSPENSE under mismatch_policy; resolved via Maker-Checker Adjustment.",
+    "severity": "Med"
+  },
+  {
+    "n": 39,
+    "group": "C",
+    "groupName": "Money, Amounts, Fees and Ledger",
+    "scenario": "Refund requested after refund_window_days or on no-refund rail",
+    "resolution": "Blocked by rails.capabilities check; requires manual external refund + Maker-Checker Adjustment with provider_refund_ref evidence.",
+    "severity": "Med"
+  },
+  {
+    "n": 40,
+    "group": "C",
+    "groupName": "Money, Amounts, Fees and Ledger",
+    "scenario": "Upstream gateway initiates a chargeback/dispute",
+    "resolution": "Webhook/statement auto-drafts a CHARGEBACK Adjustment; upon Checker approval, debits Wallet/Income and credits CHARGEBACK_RESERVE.",
+    "severity": "High"
+  },
+  {
+    "n": 41,
+    "group": "C",
+    "groupName": "Money, Amounts, Fees and Ledger",
+    "scenario": "Second payment succeeds on a single-use link (late settlement race)",
+    "resolution": "attempt_groups.success_count detects duplicate; second funds post to SUSPENSE and auto-queue refund + operator alert.",
+    "severity": "High"
+  },
+  {
+    "n": 42,
+    "group": "C",
+    "groupName": "Money, Amounts, Fees and Ledger",
+    "scenario": "Bank/gateway statement has missing or extra lines",
+    "resolution": "Reconciliation job flags MISSING_AT_GATEWAY or MISSING_LOCALLY, opens operator cases, and halts automated payouts on drift.",
+    "severity": "High"
+  },
+  {
+    "n": 43,
+    "group": "C",
+    "groupName": "Money, Amounts, Fees and Ledger",
+    "scenario": "Gateway settles in T+N net batches (gross minus fees and refunds)",
+    "resolution": "statement_sources parser supports batch net lines, matching batch reference and reconciling constituent attempts.",
+    "severity": "Med"
+  },
+  {
+    "n": 44,
+    "group": "C",
+    "groupName": "Money, Amounts, Fees and Ledger",
+    "scenario": "Gateway changes its upstream fee rate mid-month",
+    "resolution": "Route cost_model is effective-dated; actual fee from statement posts difference to GATEWAY_FEE_EXPENSE as fee variance.",
+    "severity": "Low"
+  },
+  {
+    "n": 45,
+    "group": "C",
+    "groupName": "Money, Amounts, Fees and Ledger",
+    "scenario": "3-decimal LYD link (76.255) paid on a 2-decimal gateway (76.26)",
+    "resolution": "gateway_amount_wire stores \"76.26\"; rounding direction pinned by contract test; 0.005 variance handled by route tolerance rule.",
+    "severity": "High"
+  },
+  {
+    "n": 46,
+    "group": "C",
+    "groupName": "Money, Amounts, Fees and Ledger",
+    "scenario": "Percentage commission calculation leaves sub-0.0001 remainder",
+    "resolution": "Deterministic DECIMAL(18,4) rounding rule in CommissionProfile ensures net_merchant_amount + platform_commission_amount == amount.",
+    "severity": "Low"
+  },
+  {
+    "n": 47,
+    "group": "C",
+    "groupName": "Money, Amounts, Fees and Ledger",
+    "scenario": "Statement uploaded in Windows-1256 Arabic encoding or custom CSV delimiter",
+    "resolution": "statement_sources.parser_config specifies encoding, delimiter, decimal separator, and date format, verified in Test Console preview.",
+    "severity": "Med"
+  },
+  {
+    "n": 48,
+    "group": "C",
+    "groupName": "Money, Amounts, Fees and Ledger",
+    "scenario": "Merchant on MERCHANT_DIRECT fails to pay platform commission receivable",
+    "resolution": "When COMMISSION_RECEIVABLE exceeds commission_receivable_ceiling, merchant's direct routes auto-pause and balance nets against any platform-held wallet.",
+    "severity": "Med"
+  },
+  {
+    "n": 49,
+    "group": "D",
+    "groupName": "Routing, Failover and Availability",
+    "scenario": "Primary gateway down at INITIATE (connection refused / 5xx before send)",
+    "resolution": "Classified as definitive pre-point-of-no-return failure; engine transparently fails over to next ranked healthy route for that rail.",
+    "severity": "Med"
+  },
+  {
+    "n": 50,
+    "group": "D",
+    "groupName": "Routing, Failover and Availability",
+    "scenario": "Gateway slow or flapping",
+    "resolution": "Per-step AbortController timeouts + rolling gateway_health_samples transition route to DEGRADED then OPEN_BREAKER.",
+    "severity": "Med"
+  },
+  {
+    "n": 51,
+    "group": "D",
+    "groupName": "Routing, Failover and Availability",
+    "scenario": "Scheduled bank or switch maintenance window",
+    "resolution": "rail_routes.maintenance_windows hides the route proactively during the window.",
+    "severity": "Low"
+  },
+  {
+    "n": 52,
+    "group": "D",
+    "groupName": "Routing, Failover and Availability",
+    "scenario": "Gateway retired, merged, or migrated to a new switch operator",
+    "resolution": "Route set to DRAINING (in-flight attempts finish, new traffic routes elsewhere), then RETIRED preserving all historical references.",
+    "severity": "Med"
+  },
+  {
+    "n": 53,
+    "group": "D",
+    "groupName": "Routing, Failover and Availability",
+    "scenario": "The sole route for a rail opens its circuit breaker",
+    "resolution": "Rail disappears from visible_rails at checkout automatically; payment links remain valid on other rails; P1/P2 alert fires.",
+    "severity": "Med"
+  },
+  {
+    "n": 54,
+    "group": "D",
+    "groupName": "Routing, Failover and Availability",
+    "scenario": "Aggregator (e.g., DPay) is down while direct bank gateway is up",
+    "resolution": "Per-route circuit breaker isolates the aggregator route; direct route on the same rail continues serving traffic.",
+    "severity": "Med"
+  },
+  {
+    "n": 55,
+    "group": "D",
+    "groupName": "Routing, Failover and Availability",
+    "scenario": "Both aggregator and direct routes active; customer retries across both",
+    "resolution": "Both attempts share attempt_group_id; first to confirm wins; if both settle, duplicate-payment refund pipeline handles the second.",
+    "severity": "High"
+  },
+  {
+    "n": 56,
+    "group": "D",
+    "groupName": "Routing, Failover and Availability",
+    "scenario": "Gateway rate-limits platform (HTTP 429)",
+    "resolution": "Outbound rate limiter + concurrency cap per route; READ_ONLY steps back off and retry; 429 does not trip the circuit breaker.",
+    "severity": "Med"
+  },
+  {
+    "n": 57,
+    "group": "D",
+    "groupName": "Routing, Failover and Availability",
+    "scenario": "Gateway changes JSON response structure after a 200 OK debit",
+    "resolution": "Missing required step_outputs selector on MOVES_MONEY transitions attempt to UNKNOWN (never FAILED), preserves raw text in attempt_step_logs, and pages on-call.",
+    "severity": "High"
+  },
+  {
+    "n": 58,
+    "group": "D",
+    "groupName": "Routing, Failover and Availability",
+    "scenario": "Route hits its daily_cap_amount",
+    "resolution": "Ranker excludes the route for the remainder of the day and shifts traffic to the next active route.",
+    "severity": "Low"
+  },
+  {
+    "n": 59,
+    "group": "E",
+    "groupName": "Credentials and Account Ownership",
+    "scenario": "Merchant enters invalid API credentials in Merchant Portal",
+    "resolution": "CREDENTIAL_CHECK flow runs on save; credential set remains UNTESTED/FAILING and cannot route live traffic.",
+    "severity": "Low"
+  },
+  {
+    "n": 60,
+    "group": "E",
+    "groupName": "Credentials and Account Ownership",
+    "scenario": "Merchant credentials expire or are revoked by the gateway",
+    "resolution": "Nightly CREDENTIAL_CHECK and runtime auth errors mark set FAILING, hide its routes, alert merchant/ops, and let in-flight attempts finish.",
+    "severity": "Med"
+  },
+  {
+    "n": 61,
+    "group": "E",
+    "groupName": "Credentials and Account Ownership",
+    "scenario": "Zero-downtime rotation of webhook or API secrets",
+    "resolution": "credential_sets stores multiple active secret_version entries; verifier checks all active versions in constant time during the overlap window.",
+    "severity": "Med"
+  },
+  {
+    "n": 62,
+    "group": "E",
+    "groupName": "Credentials and Account Ownership",
+    "scenario": "OAuth2 token refresh fails transiently at gateway",
+    "resolution": "Single-flight refresh retains current valid token if unexpired, schedules jittered retry, and alerts on repeated failures (RB-05).",
+    "severity": "Med"
+  },
+  {
+    "n": 63,
+    "group": "E",
+    "groupName": "Credentials and Account Ownership",
+    "scenario": "Two merchants attempt to register the same gateway merchant ID",
+    "resolution": "Blocked by UNIQUE(gateway_id, env, external_merchant_id) on credential_sets and flagged for compliance review.",
+    "severity": "Med"
+  },
+  {
+    "n": 64,
+    "group": "E",
+    "groupName": "Credentials and Account Ownership",
+    "scenario": "Merchant migrates from MERCHANT_DIRECT to PLATFORM_CLEARING",
+    "resolution": "New credential_sets and rail_routes row activated via Maker-Checker; in-flight attempts finish on pinned set; historical ledger untouched.",
+    "severity": "Low"
+  },
+  {
+    "n": 65,
+    "group": "E",
+    "groupName": "Credentials and Account Ownership",
+    "scenario": "Merchant suspended while payments are in flight",
+    "resolution": "New attempts blocked by Guard 2; in-flight confirmed payments post to AML_HOLD / SUSPENSE per compliance policy.",
+    "severity": "Med"
+  },
+  {
+    "n": 66,
+    "group": "E",
+    "groupName": "Credentials and Account Ownership",
+    "scenario": "Misconfiguration attempts to use Merchant A's credentials for Merchant B",
+    "resolution": "Prevented by rail_routes.scope check in Ranker and hard assertion credential_set.owner_merchant_id == attempt.merchant_id in Orchestrator.",
+    "severity": "High"
+  },
+  {
+    "n": 67,
+    "group": "E",
+    "groupName": "Credentials and Account Ownership",
+    "scenario": "MERCHANT_DIRECT payment triggers an AML threshold hit",
+    "resolution": "Platform holds no cash for direct settlement: blocks completion screen, flags merchant, and opens operational aml_cases ticket for CBL reporting.",
+    "severity": "High"
+  },
+  {
+    "n": 68,
+    "group": "F",
+    "groupName": "Configuration, Versioning and Operations",
+    "scenario": "Admin edits a gateway flow while 50 users are entering OTPs",
+    "resolution": "Every payment_attempts row pins gateway_version_id at creation; all 50 in-flight attempts finish on the exact version they started with.",
+    "severity": "High"
+  },
+  {
+    "n": 69,
+    "group": "F",
+    "groupName": "Configuration, Versioning and Operations",
+    "scenario": "Defective gateway version promoted to LIVE",
+    "resolution": "Gated by 12 Go-Live Gates + Canary rollout; one-click rollback restores rollback_version_id and broadcasts on InvalidationBus.",
+    "severity": "High"
+  },
+  {
+    "n": 70,
+    "group": "F",
+    "groupName": "Configuration, Versioning and Operations",
+    "scenario": "Two admins edit the same gateway concurrently",
+    "resolution": "Optimistic concurrency on gateway_versions.version_number; each saves an independent draft snapshot.",
+    "severity": "Low"
+  },
+  {
+    "n": 71,
+    "group": "F",
+    "groupName": "Configuration, Versioning and Operations",
+    "scenario": "Sandbox test traffic accidentally routed to Live ledger",
+    "resolution": "Structural separation: env = SANDBOX attempts are rejected by LedgerPoster and excluded from all wallet/financial queries.",
+    "severity": "High"
+  },
+  {
+    "n": 72,
+    "group": "F",
+    "groupName": "Configuration, Versioning and Operations",
+    "scenario": "Gateway rejects reference format (e.g., T-LYNC 422 on duplicate, Moamalat numeric)",
+    "resolution": "Per-gateway reference_format generator enforces charset/length and checks UNIQUE(reference) before sending.",
+    "severity": "Med"
+  },
+  {
+    "n": 73,
+    "group": "F",
+    "groupName": "Configuration, Versioning and Operations",
+    "scenario": "Gateway brand name collision (Sadad Libya vs. KSA; Evo Wallet vs. EVO Payments)",
+    "resolution": "gateways stores code, operator, country, and aliases[], displayed prominently in the Admin Wizard.",
+    "severity": "Low"
+  },
+  {
+    "n": 74,
+    "group": "F",
+    "groupName": "Configuration, Versioning and Operations",
+    "scenario": "Exported gateway template imported into another environment",
+    "resolution": "Exports omit all secrets by construction; imported version lands as DRAFT / UNVERIFIED requiring secret entry and CREDENTIAL_CHECK.",
+    "severity": "Med"
+  },
+  {
+    "n": 75,
+    "group": "F",
+    "groupName": "Configuration, Versioning and Operations",
+    "scenario": "Maker user is unavailable or leaves company while approval is pending",
+    "resolution": "Any authorized Maker can supersede the draft, and any eligible Checker (checker_user_id != maker_user_id) can review; self-approval is impossible.",
+    "severity": "Low"
+  },
+  {
+    "n": 76,
+    "group": "F",
+    "groupName": "Configuration, Versioning and Operations",
+    "scenario": "Admin inspects step logs or exports config containing sensitive tokens",
+    "resolution": "Multi-layer redactor scrubs secret field names and literal decrypted secret strings at write time.",
+    "severity": "High"
+  },
+  {
+    "n": 77,
+    "group": "F",
+    "groupName": "Configuration, Versioning and Operations",
+    "scenario": "Backlog of UNKNOWN attempts accumulates during switch instability",
+    "resolution": "Operator Queue tracks SLA timers, supports bulk inquire(), and pages duty officer via RB-03 when age exceeds threshold.",
+    "severity": "Med"
+  },
+  {
+    "n": 78,
+    "group": "F",
+    "groupName": "Configuration, Versioning and Operations",
+    "scenario": "Migrating legacy hard-coded gateway classes into the dynamic platform",
+    "resolution": "Legacy classes wrap as kind = NATIVE_ADAPTER behind the 6-method contract, sharing the state machine, inbox, and LedgerPoster.",
+    "severity": "Low"
+  },
+  {
+    "n": 79,
+    "group": "F",
+    "groupName": "Configuration, Versioning and Operations",
+    "scenario": "Operator tries to delete a rail or gateway with historical attempts",
+    "resolution": "Hard deletion blocked by FK constraints; gateway transitions to RETIRED and rail to blocked = true.",
+    "severity": "Low"
+  },
+  {
+    "n": 80,
+    "group": "G",
+    "groupName": "Security and Abuse",
+    "scenario": "Client POSTs modified amount or currency in /initiate or /confirm",
+    "resolution": "Client request schemas have no amount field; amount is read exclusively from payment_links.amount.",
+    "severity": "High"
+  },
+  {
+    "n": 81,
+    "group": "G",
+    "groupName": "Security and Abuse",
+    "scenario": "Payer enters 7/9-digit card number on OTP rail",
+    "resolution": "Field marked sensitivity: PAN; held in memory only for the single step, excluded from context_ciphertext and logs, gated by PCI review.",
+    "severity": "High"
+  },
+  {
+    "n": 82,
+    "group": "G",
+    "groupName": "Security and Abuse",
+    "scenario": "Attacker probes registered phone numbers via OTP error differences",
+    "resolution": "ErrorMap normalizes subscriber-not-found and account-locked responses into a generic bilingual message.",
+    "severity": "Med"
+  },
+  {
+    "n": 83,
+    "group": "G",
+    "groupName": "Security and Abuse",
+    "scenario": "SMS OTP pumping attack across thousands of numbers",
+    "resolution": "Atomic sliding-window velocity rules per IP, link, rail, and carrier prefix + resend cooldowns block the flood.",
+    "severity": "High"
+  },
+  {
+    "n": 84,
+    "group": "G",
+    "groupName": "Security and Abuse",
+    "scenario": "Open redirect via payment_links.redirect_url or clickjacking on checkout",
+    "resolution": "redirect_url validated against applications.redirect_domain_allowlist; checkout serves CSP: frame-ancestors 'none'.",
+    "severity": "Med"
+  },
+  {
+    "n": 85,
+    "group": "G",
+    "groupName": "Security and Abuse",
+    "scenario": "Malicious/compromised gateway returns 100 MB payload or XML bomb",
+    "resolution": "Outbound client enforces max_response_bytes (2 MB), JSON depth \\<= 64, and disables XML DTD/external entities.",
+    "severity": "Med"
+  },
+  {
+    "n": 86,
+    "group": "G",
+    "groupName": "Security and Abuse",
+    "scenario": "Customer inputs \"}}<script> or \\r\\nX-Injected: into form field",
+    "resolution": "Destination-correct encoding (JSON serializer, xml_escape, URL percent-encoding) and CR/LF rejection (Safeguard 13).",
+    "severity": "High"
+  },
+  {
+    "n": 87,
+    "group": "G",
+    "groupName": "Security and Abuse",
+    "scenario": "SSRF or DNS-rebinding attack via configured gateway URL",
+    "resolution": "Custom DNS hook resolves and blocks private/loopback/link-local IPv4/IPv6 ranges at connection time (Safeguard 10).",
+    "severity": "High"
+  },
+  {
+    "n": 88,
+    "group": "G",
+    "groupName": "Security and Abuse",
+    "scenario": "Inbound webhook path_token leaked in third-party logs",
+    "resolution": "Rotate path_token with overlapping validity; cryptographic signature verification still blocks unauthorized callers.",
+    "severity": "Med"
+  },
+  {
+    "n": 89,
+    "group": "G",
+    "groupName": "Security and Abuse",
+    "scenario": "Compromised admin account attempts to reroute payouts or secrets",
+    "resolution": "All credential, route, commission, and payout bank edits require four-eyes Maker-Checker approval and emit P2 security alerts.",
+    "severity": "High"
+  },
+  {
+    "n": 90,
+    "group": "G",
+    "groupName": "Security and Abuse",
+    "scenario": "Payer uploads executable or malware disguised as MANUAL transfer receipt",
+    "resolution": "Strict magic-byte MIME check (image/png, image/jpeg, application/pdf), size cap, antivirus scan, isolated object storage with nosniff.",
+    "severity": "Med"
+  },
+  {
+    "n": 91,
+    "group": "H",
+    "groupName": "Customer Experience and Channels",
+    "scenario": "Customer types Arabic-Indic digits (٠٩١٢٣٤٥٦٧٨) or +218 phone prefix",
+    "resolution": "rail_fields.normalizer converts Arabic-Indic digits to ASCII and normalizes phone format (09xxxxxxxx / 2189xxxxxxxx) before validation.",
+    "severity": "Low"
+  },
+  {
+    "n": 92,
+    "group": "H",
+    "groupName": "Customer Experience and Channels",
+    "scenario": "In-app browser (Instagram/Facebook WebView) blocks Moamalat popup/script",
+    "resolution": "Checkout JS detects WebView restrictions and falls back to a REDIRECT route on the same rail or prompts *\"Open in system browser\"*.",
+    "severity": "Med"
+  },
+  {
+    "n": 93,
+    "group": "H",
+    "groupName": "Customer Experience and Channels",
+    "scenario": "Gateway returns raw Arabic/English technical error string",
+    "resolution": "ErrorMap translates mapped codes to polished bilingual messages; unmapped codes show a safe generic message and log the raw code.",
+    "severity": "Low"
+  },
+  {
+    "n": 94,
+    "group": "H",
+    "groupName": "Customer Experience and Channels",
+    "scenario": "Customer clicks DEEP_LINK button on desktop or without wallet app installed",
+    "resolution": "Checkout UI renders QR code / Pay Code alongside the deep link and falls back gracefully if app launch fails.",
+    "severity": "Low"
+  },
+  {
+    "n": 95,
+    "group": "H",
+    "groupName": "Customer Experience and Channels",
+    "scenario": "Cashier cancels a pending QR payment on POS terminal",
+    "resolution": "Triggers CANCEL flow at gateway (if supports_cancel = true), marks attempt CANCELLED, releases link reservation, and keeps inbox open for late settlement races.",
+    "severity": "Low"
+  },
+  {
+    "n": 96,
+    "group": "H",
+    "groupName": "Customer Experience and Channels",
+    "scenario": "Slow upstream SMS delivery causes customer to click submit/resend repeatedly",
+    "resolution": "UI disables button with live countdown; backend enforces idempotency key and otp_resend_cooldown_seconds.",
+    "severity": "Med"
+  },
+  {
+    "n": 97,
+    "group": "H",
+    "groupName": "Customer Experience and Channels",
+    "scenario": "Gateway confirms success, but the PostgreSQL 18 ledger insert encounters a transient lock/error",
+    "resolution": "Because status transition to SUCCEEDED and LedgerPoster share one DB transaction, attempt remains in VERIFYING and worker retries posting idempotently.",
+    "severity": "High"
+  },
+  {
+    "n": 98,
+    "group": "H",
+    "groupName": "Customer Experience and Channels",
+    "scenario": "Merchant webhook/notification emitted twice on retry",
+    "resolution": "Outbound merchant notifications are triggered strictly from the committed journal_entries outbox with a unique event_id.",
+    "severity": "Low"
+  },
+  {
+    "n": 99,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "DST or timezone database update shifts gateway local timestamp formatting",
+    "resolution": "format_date uses IANA tzdata (Africa/Tripoli); contract tests assert two fixed historical instants per gateway version.",
+    "severity": "Med"
+  },
+  {
+    "n": 100,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "Duplicate webhook redelivered across a worker pod restart (after DB commit, before HTTP ack)",
+    "resolution": "inbound_events dedupe key and UNIQUE(ref_type, ref_id) on journal_entries guarantee zero double-posting across restarts.",
+    "severity": "High"
+  },
+  {
+    "n": 101,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "Finance approves a REFUND adjustment while customer starts a new attempt on a multi-use link",
+    "resolution": "Refund Adjustment locks and references the specific source_attempt_id, operating independently of new attempts on the link.",
+    "severity": "Med"
+  },
+  {
+    "n": 102,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "Gateway silently reorders or renames columns in daily CSV/XLSX settlement statement",
+    "resolution": "statement_sources parser validates header row against required column map; halts ingest and fires P2 alert on schema drift.",
+    "severity": "Med"
+  },
+  {
+    "n": 103,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "Route paused or credential rotated on Node A while Node B serves checkout traffic",
+    "resolution": "InvalidationBus (Redis Pub/Sub) evicts Node B caches in \\< 1s; attempt initiation always verifies route/version state against the PostgreSQL 18 database.",
+    "severity": "Med"
+  },
+  {
+    "n": 104,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "Gateway incident unleashes 10,000 webhook retries in 60 seconds",
+    "resolution": "Inbox receiver performs lightweight insert + ack; bounded worker queue drains inbound_events with per-route concurrency caps.",
+    "severity": "Med"
+  },
+  {
+    "n": 105,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "POS tablet loses Wi-Fi/cellular connectivity mid-payment",
+    "resolution": "Attempt completes server-side; on reconnect, POS screen replays missed state from /v1/pay/{linkKey}/logs/{logId}/status.",
+    "severity": "Low"
+  },
+  {
+    "n": 106,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "Clock drift between platform cluster and gateway exceeds tolerance",
+    "resolution": "NTP sync monitored via alert; inbound timestamp rejection triggers RB-02 while preserving raw event in inbound_events for replay.",
+    "severity": "Med"
+  },
+  {
+    "n": 107,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "Admin accidentally configures a static reusable QR code across attempts",
+    "resolution": "Save-time validator requires QR/Pay-Code INITIATE flows to bind ATTEMPT.gateway_reference or dynamic session output.",
+    "severity": "High"
+  },
+  {
+    "n": 108,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "Rolling deployment runs two application versions simultaneously",
+    "resolution": "Both app versions execute the attempt's pinned gateway_version_id snapshot using the deterministic closed transform library.",
+    "severity": "Med"
+  },
+  {
+    "n": 109,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "Route set to DRAINING or Credential Set marked REVOKED with attempts in flight",
+    "resolution": "Pinned route_id and credential_set_id allow in-flight AWAITING_CUSTOMER / VERIFYING attempts to finish; only new attempts re-rank.",
+    "severity": "Med"
+  },
+  {
+    "n": 110,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "Automated settlement sweep runs at the exact moment a late payment confirms",
+    "resolution": "Row-level locking on the gl_accounts checkpoint and explicit reconciliation_items matching serialize the sweep cleanly.",
+    "severity": "High"
+  },
+  {
+    "n": 111,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "Merchant edits payout_bank_details_json while a cashout_requests row is PROCESSING",
+    "resolution": "cashout_requests snapshots destination_bank_json at request creation; subsequent edits require Maker-Checker and apply only to future payouts.",
+    "severity": "Med"
+  },
+  {
+    "n": 112,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "Aggregator (e.g., MyPay/DPay) renames an underlying payment method alias",
+    "resolution": "Nightly CREDENTIAL_CHECK capability probe detects missing alias, marks route DEGRADED, and alerts integration engineering.",
+    "severity": "Med"
+  },
+  {
+    "n": 113,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "Two partial refund Adjustments approved concurrently for the same attempt",
+    "resolution": "Execution serializes via SELECT ... FOR UPDATE on payment_attempts and asserts SUM(executed_refunds) + new_refund <= settled_amount.",
+    "severity": "High"
+  },
+  {
+    "n": 114,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "Gateway returns a non-unique provider_reference across two different attempts",
+    "resolution": "Correlation prioritizes our_reference (gateway_reference); provider_reference-only correlation scopes by (gateway_id, env, amount, active_window) and flags collisions to operator_cases.",
+    "severity": "Med"
+  },
+  {
+    "n": 115,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "Prolonged power/internet outage across a merchant's physical store POS fleet",
+    "resolution": "All state and timers reside on the server; expired POS links release reservations cleanly; settled payments credit the merchant wallet regardless of screen connectivity.",
+    "severity": "Low"
+  },
+  {
+    "n": 116,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "Applicant abandons a DRAFT join request after uploading documents",
+    "resolution": "Draft moves to EXPIRED after 30 inactive days; uploaded documents remain encrypted, are excluded from reviewer queues, and are purged by the retention job; the applicant can start a new request.",
+    "severity": "Low"
+  },
+  {
+    "n": 117,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "A Google sign-in presents an e-mail identical to an existing password-based account",
+    "resolution": "No auto-link. The user must authenticate to the existing account with a second factor before the Google sub is attached; otherwise a separate identity is created and flagged by duplicate detection.",
+    "severity": "High"
+  },
+  {
+    "n": 118,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "A rejected applicant re-applies under a new trade name, phone number and e-mail",
+    "resolution": "Duplicate detection matches tax ID, registration number, owner national ID, payout bank account, device fingerprint or document hash; the request is forced to four-eyes, risk tier is raised one level, and prior records are shown to the reviewer.",
+    "severity": "High"
+  },
+  {
+    "n": 119,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "An admin-assisted onboarding is prepared by the same operator who is assigned to decide it",
+    "resolution": "The person who prepared the request on behalf of the applicant is recorded as maker and is barred from the deciding-reviewer and checker roles for that request.",
+    "severity": "Med"
+  },
+  {
+    "n": 120,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "The same KYB document hash appears under two unrelated merchants",
+    "resolution": "Both requests receive a DUPLICATE_DOCUMENT flag; reviewers must justify acceptance; repeated reuse across merchants opens an AML case against the submitting identities.",
+    "severity": "Med"
+  },
+  {
+    "n": 121,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "Beneficial owners are added or changed between submission and decision",
+    "resolution": "A new screening is triggered for the changed owner; the request returns to IN_REVIEW; any pending approval is invalidated and must be re-submitted.",
+    "severity": "Med"
+  },
+  {
+    "n": 122,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "Arabic name variants (diacritics, transliterations) cause a missed sanctions hit or a flood of false positives",
+    "resolution": "Names are normalized and sent in Arabic and Latin forms; score thresholds are tuned against a fixed Arabic test set required by the compliance readiness checklist; reviewers see scores and may suppress confirmed false positives with an expiry.",
+    "severity": "High"
+  },
+  {
+    "n": 123,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "A watch-list update creates a new match on an already-active merchant",
+    "resolution": "A LIST_UPDATE screening opens a case, restricts cash-out immediately, and keeps payment acceptance unless severity is CRITICAL, in which case the merchant is emergency-suspended and ratified within 24 h.",
+    "severity": "High"
+  },
+  {
+    "n": 124,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "The screening provider is unavailable during onboarding",
+    "resolution": "The screening result is ERROR; approval is impossible (fail-closed); the request stays IN_REVIEW, retries run with backoff, the SLA is paused with reason PROVIDER_OUTAGE, and the incident is visible on the compliance dashboard.",
+    "severity": "Med"
+  },
+  {
+    "n": 125,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "A merchant splits one large sale across several links, applications or rails to stay under an AML threshold",
+    "resolution": "Rules aggregate by subject (merchant, beneficial owner, payer identifier) over the window, not by link or application; the STRUCTURING rule flags many payments clustered just under the threshold and opens a case.",
+    "severity": "High"
+  },
+  {
+    "n": 126,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "A voluntary refund was issued and a chargeback arrives later for the same payment",
+    "resolution": "The dispute is linked to the refund; execution asserts SUM(executed refunds) + chargeback <= settled_amount under SELECT ... FOR UPDATE (as in Edge Case 113); the chargeback Adjustment is capped to the not-yet-returned amount.",
+    "severity": "High"
+  },
+  {
+    "n": 127,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "An emergency suspension is never ratified within 24 hours",
+    "resolution": "A P2 alert and an escalation to MLRO fire; the suspension stays in force (fail-safe); it is never auto-reversed; the request remains open until ratified or replaced by a standard reinstatement approval.",
+    "severity": "Med"
+  },
+  {
+    "n": 128,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "A dispute webhook is replayed, or a statement containing the same chargeback is re-imported",
+    "resolution": "UNIQUE(gateway_id, external_dispute_ref) and the inbox dedupe key absorb the duplicate; no second Adjustment is drafted.",
+    "severity": "Med"
+  },
+  {
+    "n": 129,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "An AML hold is approved for release while the merchant is SUSPENDED or requesting closure",
+    "resolution": "The ledger resolution executes regardless of merchant state (accounting is independent of lifecycle); closure is refused while any hold, reserve, open dispute or non-zero balance exists.",
+    "severity": "Med"
+  },
+  {
+    "n": 130,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "Support staff or a merchant asks why an account was restricted for AML reasons",
+    "resolution": "The response is the generic notice; AML data is not exposed to SUPPORT or merchants; the request itself is logged; there is no tipping-off.",
+    "severity": "High"
+  },
+  {
+    "n": 131,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "The entered NeomPay wallet ID fails the check-digit test or has an unknown type code",
+    "resolution": "Rejected at field validation with a generic bilingual message; no call is made to NeomPay; the failure counts toward per-IP velocity so the check cannot be used to enumerate wallets.",
+    "severity": "Low"
+  },
+  {
+    "n": 132,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "The payer's wallet is frozen, closed or restricted in NeomPay",
+    "resolution": "ErrorMap classifies as TERMINAL_DECLINE with a generic customer message; it does not count toward the circuit breaker (a customer condition, not a gateway fault).",
+    "severity": "Low"
+  },
+  {
+    "n": 133,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "The NeomPay ledger times out or is unavailable",
+    "resolution": "On a MOVES_MONEY step the attempt becomes UNKNOWN and holds the link slot; idempotent retry and inquire(attempt) resolve it; the route moves to DEGRADED / OPEN_BREAKER and other rails remain offered.",
+    "severity": "High"
+  },
+  {
+    "n": 134,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "The payer wallet belongs to the same legal entity as the merchant (self-payment)",
+    "resolution": "SELF_PAYMENT_POLICY (default BLOCK) creates a terminal BLOCKED attempt; alternative FLAG_AND_ALLOW opens an AML case; prevents wash volume and artificial commission.",
+    "severity": "High"
+  },
+  {
+    "n": 135,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "NeomPay captured the payer's funds but the platform crashed before committing the journal entry",
+    "resolution": "On restart the sweeper runs inquire(attempt), finds a captured payment, and posts the entry idempotently; UNIQUE(ref_type, ref_id) prevents a second posting; the daily cross-ledger check would expose any miss.",
+    "severity": "High"
+  },
+  {
+    "n": 136,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "The payer approves a push request after the attempt has expired",
+    "resolution": "NeomPay-side request TTL equals the attempt's expires_at; a late capture is rejected. If a capture slipped through, State Machine Rule 6 (late-success recovery) applies, with funds in SUSPENSE and an auto-drafted refund if the link slot is gone.",
+    "severity": "Med"
+  },
+  {
+    "n": 137,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "The customer double-taps the OTP submit button or the browser retries the request",
+    "resolution": "The deterministic Idempotency-Key (gateway_reference) returns the same result; at most one debit occurs; the second request is a read of the first.",
+    "severity": "Med"
+  },
+  {
+    "n": 138,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "The payer wallet's type is not allowed to pay merchants",
+    "resolution": "The type-code allow-list on the rail field rejects it at validation with a neutral message; no money moves.",
+    "severity": "Low"
+  },
+  {
+    "n": 139,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "A refund is approved but the payer's NeomPay wallet has since been closed",
+    "resolution": "The REFUND step fails; the Adjustment stays EXECUTING and an operator case opens; FINANCE may complete the return by another channel with evidence under Maker-Checker, or, after the policy period, reclassify the funds to SUSPENSE as unclaimed.",
+    "severity": "Med"
+  },
+  {
+    "n": 140,
+    "group": "I",
+    "groupName": "Multi-Instance Cluster, Time, Concurrency & Drift",
+    "scenario": "The daily cross-ledger equality check (NeomPay ledger export versus Treasury inflows from NeomPay) shows drift",
+    "resolution": "Runbook RB-04 applies: automated payouts of NeomPay-sourced funds halt, a MISMATCH operator case is opened, and the daily job is re-run; no manual ledger edits are allowed; the correction is a Maker-Checker Adjustment.",
+    "severity": "High"
+  }
+]

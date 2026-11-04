@@ -228,6 +228,7 @@ const AcademyPage = dc(() => {
                     completedLabIds: progress.value.completedLabIds,
                     quizScores: progress.value.quizScores,
                     earnedBadges: progress.value.earnedBadges,
+                    guideRead: progress.value.guideRead ?? {},
                     lastModuleId: progress.value.lastModuleId,
                 },
             });

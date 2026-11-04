@@ -169,12 +169,12 @@ Public routes are `/login` (`Login`, visitor-only) and `/:pathMatch(.*)*` (`NotF
 
 ### Guide and academy
 
-- `/guide` has four modes: 12 books / 27 chapters, glossary and canonical definitions (24 glossary terms, 14 statuses, 10 GL entries covering 11 core types, 9 collection modes, 7 channels, 5 runbooks, 140 edge cases, at least 5 error codes), three simulators and five role-based daily checklists.
-- Guide search covers books, chapters, glossary, errors, GL accounts, statuses, collection modes, confirmation channels, runbooks, edge cases and simulators. Bookmarks use `admin-guide-bookmarks`; daily checklists use `admin-guide-daily-checklists`; deep links support `?entry=`, `?book=`, `?chapter=` and `?search=1`.
+- `/guide` is the Admin Interactive Guide v1.0: 14 books, 125 articles, 151 glossary terms, 22 safeguard cards, 29 situations, 8 reading paths, 58 quick answers, 19 error codes and a 140-case edge-case catalogue, extracted deterministically from `design/07-guides-and-academy/guide_system_design_and_content.md` into `src/content/guide/generated/` (`bun run content:guide`). Eight routes (home, book, article, glossary, tools, playbook, cards, edge cases), a MiniSearch command palette, five client-only simulators and per-article read tracking stored in the shared Academy progress JSON. Canonical part: [Admin Guide v2](../project-design/parts/03-admin-front/06-guide-v2.md).
+- Guide search is MiniSearch over articles, glossary, cards, situations, FAQ and error codes with Arabic-aware normalisation; `Ctrl+K` also searches platform records and admin pages.
 - `/academy` has 8 modules, 17 lessons, 8 labs with fatal options and 64 quiz questions, grouped into six certification tracks.
 - Mastery is computed client-side: all lessons complete, the lab passed and a 100% quiz. Badges are derived, not manually granted. The backend stores progress JSON but does not independently validate answers, labs or mastery.
 - Academy self-progress is available to any authenticated admin. Team overview, summary and both XLSX exports require `user:read`; the page itself has no router gate, so unauthorized users see the page load and the reporting calls fail.
-- Guide v2 is **not** implemented. The 14-book/125-article target, 23-screen context map, safeguard cards, symptom playbook, reading paths and read tracking remain future work in [the guide v2 part](../project-design/parts/09-future-and-unimplemented/01-guide-v2.md). Do not describe it as current.
+- Gaps: Arabic article bodies are not supplied (the reader falls back to English with an "Arabic version pending" chip), and two safeguard cards have no separate current UI action (see `design/07-guides-and-academy/guide_content_questions.md`).
 
 ### Contextual help
 
@@ -261,7 +261,6 @@ Relevant browser suites (from `tests/`): admin shell, table/padding geometry, ac
 | Settings save did not require a checker | Platform settings and checkout support are versioned/audited but not maker-checker. Only backup policy currently goes through the approval queue. |
 | Academy team report returns 403 | The page opens for any authenticated admin, but overview/summary/exports require `user:read`. |
 | Arabic help still shows English text | Mapping titles are English-only; chapter bodies are content-dependent. |
-| Missing guide v2 features | Guide v2 is future/unimplemented, not the current guide. |
 
 ## 11. References
 
@@ -274,4 +273,4 @@ Relevant browser suites (from `tests/`): admin shell, table/padding geometry, ac
   - [Contextual Help](../project-design/parts/03-admin-front/04-contextual-help.md)
   - [Backups Settings and Operations](../project-design/parts/03-admin-front/05-backups-settings-and-operations.md)
 - Generated appendices: [environment and config matrix](../project-design/appendices/env-and-config-matrix.md), [API route matrix](../project-design/appendices/api-route-matrix.md), [test inventory](../project-design/appendices/test-inventory.md)
-- Future work: [Guide v2](../project-design/parts/09-future-and-unimplemented/01-guide-v2.md)
+- [Admin Guide v2](../project-design/parts/03-admin-front/06-guide-v2.md)

@@ -23,6 +23,7 @@ import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+import { useSafeguard } from "@/components/guide/useSafeguard";
 import {
     COLUMN_HELP,
     caseHelp,
@@ -414,6 +415,7 @@ const OperatorCasesPage = dc(() => {
     };
 
     const inquiryChecklistComplete = computed(() => !showChecklists || INQUIRY_CHECKS.every((check) => inquiryChecklist.value[check.key] === true));
+    const bulkInquirySafeguard = useSafeguard("sg-bulk-inquiry");
 
     const confirmInquiry = () => {
         if (!inquiryChecklistComplete.value) return;
@@ -423,6 +425,7 @@ const OperatorCasesPage = dc(() => {
 
     const runBulkInquiry = async (caseIds: string[]) => {
         if (caseIds.length === 0) return;
+        if (!(await bulkInquirySafeguard.confirm())) return;
         bulkLoading.value = true;
         try {
             const response = await api.post(urlsMap.operatorCasesBulkInquire, {

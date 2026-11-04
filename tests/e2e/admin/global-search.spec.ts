@@ -47,7 +47,7 @@ test.describe("admin global deep search", () => {
     await expect(trigger).toBeFocused();
 
     await page.getByRole("button", { name: "Search guide…" }).click();
-    await expect(page.getByRole("textbox", { name: /Search every book/ })).toBeVisible();
+    await expect(page.getByRole("combobox", { name: /Search the guide/ })).toBeVisible();
   });
 
   test("Ctrl+K searches records with debounce and Enter opens the exact record", async ({ page }) => {

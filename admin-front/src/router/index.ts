@@ -188,6 +188,41 @@ const router = createRouter({
                     component: () => import("@/pages/guide/index"),
                 },
                 {
+                    path: "guide/book/:bookId",
+                    name: "AdminGuideBook",
+                    component: () => import("@/pages/guide/book"),
+                },
+                {
+                    path: "guide/a/:articleId",
+                    name: "AdminGuideArticle",
+                    component: () => import("@/pages/guide/article"),
+                },
+                {
+                    path: "guide/glossary/:slug?",
+                    name: "AdminGuideGlossary",
+                    component: () => import("@/pages/guide/glossary"),
+                },
+                {
+                    path: "guide/tools/:tool?",
+                    name: "AdminGuideTools",
+                    component: () => import("@/pages/guide/tools"),
+                },
+                {
+                    path: "guide/playbook/:id?",
+                    name: "AdminGuidePlaybook",
+                    component: () => import("@/pages/guide/playbook"),
+                },
+                {
+                    path: "guide/cards/:id?",
+                    name: "AdminGuideCards",
+                    component: () => import("@/pages/guide/cards"),
+                },
+                {
+                    path: "guide/edge-cases",
+                    name: "AdminGuideEdgeCases",
+                    component: () => import("@/pages/guide/edge-cases"),
+                },
+                {
                     path: "academy",
                     name: "AdminAcademy",
                     component: () => import("@/pages/academy/index"),

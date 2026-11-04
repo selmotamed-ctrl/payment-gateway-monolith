@@ -6,7 +6,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StatusChip } from "@/components/StatusChip";
 import { GuideMarkdown } from "@/components/guide/GuideMarkdown";
-import { findBookByNumber, findChapter, GUIDE_ROUTE_HELP } from "@/content/guide";
+import { findBookByNumber, findChapter, GUIDE_ROUTE_HELP } from "@/content/guide/legacy";
 
 type ContextualHelpDrawerProps = {
     modelValue: boolean;

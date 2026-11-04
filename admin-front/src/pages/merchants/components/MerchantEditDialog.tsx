@@ -9,6 +9,7 @@ import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+import { useSafeguard } from "@/components/guide/useSafeguard";
 import type { MerchantDetail, MerchantSummary } from "../types";
 
 import { FormModal } from "@/components/ui/FormModal";
@@ -165,6 +166,7 @@ const MerchantEditDialog = dc(
         };
 
         const checklistComplete = computed(() => !showChecklists || EDIT_CHECKS.every((check) => checklist.value[check.key] === true));
+        const sensitiveEditSafeguard = useSafeguard("sg-edit-merchant-sensitive");
 
         const submit = async () => {
             if (!props.merchant) return;
@@ -177,6 +179,7 @@ const MerchantEditDialog = dc(
                 error.value = t("Complete all edit checklist items before submitting");
                 return;
             }
+            if (props.mode === "SENSITIVE" && !(await sensitiveEditSafeguard.confirm())) return;
             saving.value = true;
             try {
                 if (props.mode === "DESCRIPTIVE") {

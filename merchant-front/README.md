@@ -250,4 +250,4 @@ Relevant browser suites (from `tests/`): merchant shell, auth, accessibility and
   - [Merchant Portal](../project-design/parts/04-merchant-front/00-portal.md)
   - [Merchant Guide and Developer API](../project-design/parts/04-merchant-front/01-guide-and-developer-api.md)
 - Generated appendices: [environment and config matrix](../project-design/appendices/env-and-config-matrix.md), [API route matrix](../project-design/appendices/api-route-matrix.md), [test inventory](../project-design/appendices/test-inventory.md)
-- Future work: [Guide v2](../project-design/parts/09-future-and-unimplemented/01-guide-v2.md)
+- Related: [Admin Guide v2](../project-design/parts/03-admin-front/06-guide-v2.md) (admin portal only; the merchant guide is separate)

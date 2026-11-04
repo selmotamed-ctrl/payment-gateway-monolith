@@ -30,7 +30,7 @@ Every file here is mapped in [`../project-design/appendices/design-source-map.md
 | | `portal_ui_implementation_plan.md`: as-built execution record for the UI redesign | REFERENCE | `parts/03-admin-front/**` |
 | | `merchant_landing_page_redesign.md`: merchant public landing page concept and motion system | ACTIVE | `parts/04-merchant-front/00-portal.md` |
 | `07-guides-and-academy/` | `complete_zero_to_hero_guides_and_academy_specification.md`: implemented guide/academy baseline | REFERENCE (being replaced) | `parts/03-admin-front/03`, `parts/04-merchant-front/01` |
-| | `guide_system_design_and_content.md`: Admin Guide v2 (not implemented; more revisions expected) | FUTURE | `parts/09-future-and-unimplemented/01-guide-v2.md` |
+| | `guide_system_design_and_content.md`: Admin Guide v1.0 spec (implemented; content is extracted from it), plus `academy_system_design_and_content.md` (Academy spec, only the progress record is built), `guide_content_fixes.md`, `guide_content_questions.md` | ACTIVE (guide) / FUTURE (academy rebuild) | `parts/03-admin-front/06-guide-v2.md`, `03-guide-and-academy.md` |
 | `08-ai-onboarding/` | `smart_ai_rail_and_voucher_onboarding_plan.md`: BYO-AI spec importer (gateway half built; voucher half for the separate voucher system) | ACTIVE / FUTURE | `parts/01-core-back/02-engine.md`, `parts/09-future-and-unimplemented/02` |
 | `09-voucher-system-external/` | `Voucher-Provider-Management-System-Technical-Design.md`, `voucher-system-raw-design.md`: separate voucher system, kept for shared patterns | FUTURE / external | `parts/09-future-and-unimplemented/00` |
 | `10-fixes/` | `_0001_operator_cases.md`: operator cases feature fix (implemented) | REFERENCE | `parts/01-core-back/01,04`, `parts/03-admin-front/01` |

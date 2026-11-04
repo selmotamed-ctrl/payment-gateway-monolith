@@ -22,7 +22,7 @@ This register records known false, outdated or misleading claims in historical `
 | SC-016 | PM2 templates are used | Templates exist but `deploy.ts` generates PM2 config inline | `parts/07-deploy/04-pipeline.md` | FIXED |
 | SC-017 | Storage mTLS is provisioned end to end | Certs are generated but PostgreSQL/Redis configs do not consume them | `parts/07-deploy/05-storage-provisioners.md` | OPEN |
 | SC-018 | 36 admin routes / 15 merchant routes | 37 protected admin routes / 16 merchant portal routes | `parts/03-admin-front/01-route-and-page-catalog.md` | FIXED |
-| SC-019 | Guide v2 14 books/125 articles is current | Current guide is 12 books/8 academy modules; guide v2 is future | `parts/09-future-and-unimplemented/01-guide-v2.md` | FIXED |
+| SC-019 | Guide v2 14 books/125 articles is current | Current guide is 12 books/8 academy modules; guide v2 is future | `parts/09-future-and-unimplemented/01-guide-v2.md` | SUPERSEDED 2026-11-04: guide v2 is now implemented (`parts/03-admin-front/06-guide-v2.md`) |
 | SC-020 | Fake Rails has 20 fully working gateways and all modes/phases | 20 descriptors, 13 seeded core gateways, route/credential/protocol gaps | `parts/06-fake-rails/**` | OPEN |
 | SC-021 | Voucher system exists | Entirely absent | `parts/09-future-and-unimplemented/00-voucher-provider-system.md` | FIXED |
 | SC-022 | 38,500+ exhaustive assertions | 1,778 literal test declarations; many suites mocked/skipped/missing | `parts/08-testing/01-suite-catalog.md` | FIXED |

@@ -23,6 +23,7 @@ import { useOpenQuery } from "@/composables/useOpenQuery";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+import { useSafeguard } from "@/components/guide/useSafeguard";
 
 import { FormModal } from "@/components/ui/FormModal";
 import { FormField } from "@/components/ui/FormField";
@@ -235,6 +236,7 @@ const RoutesPage = dc(() => {
         if (creating.value || !routeForm.value.railId || !routeForm.value.gatewayId) {
             return;
         }
+        if (!(await routeSafeguard.confirm())) return;
         creating.value = true;
         try {
             await api.post(urlsMap.routesList, {
@@ -297,6 +299,7 @@ const RoutesPage = dc(() => {
     };
 
     const routeEditChecklistComplete = computed(() => !showChecklists || ROUTE_EDIT_CHECKS.every((check) => routeEditChecklist.value[check.key] === true));
+    const routeSafeguard = useSafeguard("sg-edit-route");
 
     const saveRoute = async () => {
         if (!editingRoute.value || actionLoading.value) {
@@ -315,6 +318,7 @@ const RoutesPage = dc(() => {
             showSnackBar({ type: "warning", message: t("Complete all route checklist items before saving") });
             return;
         }
+        if (!(await routeSafeguard.confirm())) return;
         actionLoading.value = true;
         try {
             const form = routeEditForm.value;

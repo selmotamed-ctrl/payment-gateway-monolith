@@ -58,7 +58,7 @@ The merchant portal is the self-service business workspace:
 6. **POS is a real-time surface.** A paired screen reflects the current payment state and must not be treated as a payment authority.
 7. **Disputes are evidence workflows.** The merchant uploads evidence before the deadline; money movement remains an admin finance action.
 8. **API tokens are scoped secrets.** Tokens are shown once, can be revoked, and can be constrained by IP CIDR allowlists.
-9. **Help is merchant-specific.** The shell exposes merchant guild search/help, not the admin 12-book guide.
+9. **Help is merchant-specific.** The shell exposes merchant guide search/help, not the admin 14-book guide.
 10. **All money and spreadsheet output uses decimal.js and the shared XLSX pipeline.**
 
 ## 3. As-built architecture
@@ -334,13 +334,13 @@ The portal uses no admin checklist/help-panel flags. Its shell always exposes gu
 - The guide/developer routes are open learning surfaces, which is intentional but means any authenticated merchant can read them.
 - The portal shows maker/checker posture but does not provide a full pending-change diff workflow for every sensitive object.
 - Google OIDC is listed in the API map but the actual merchant `/auth/google` endpoint returns 501, so no working Google flow ships.
-- Merchant help and guide content are the 10+5 chapter baseline, not guide v2.
+- Merchant help and guide content are the 10+5 chapter baseline; the admin guide v2 is a separate implemented product.
 
 ### Missing / deferred
 
 - No self-service activation override; KYB approval remains admin-controlled.
 - No merchant-side certification/training gate for production authorities.
-- No guide v2 context map/playbook/read tracking.
+- No admin-guide-v2 context map/playbook/read tracking is reused for merchants.
 - No working Google sign-in.
 
 ### Known bugs / risks
@@ -349,7 +349,7 @@ The portal uses no admin checklist/help-panel flags. Its shell always exposes gu
 - **Onboarding risk:** client-side progress and completion are convenience signals, not activation authority.
 - **POS risk:** a displayed `SUCCEEDED` screen is a reflection; the merchant must still follow the server-confirmed payment status and settlement rules.
 - **Documentation risk:** do not describe the portal as having a working Google login or a fully server-enforced route gate.
-- **Guide risk:** merchant chapter content must not be conflated with the admin 12-book guide or guide v2.
+- **Guide risk:** merchant chapter content must not be conflated with the admin 14-book guide.
 
 ## 8. Verification and tests
 

@@ -14,7 +14,10 @@ Every historical design file must map to a canonical part or be explicitly marke
 | `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md` | Design source; correct to 55 collections / 9 generators / actual safety gate | `parts/01-core-back/10-synthetic-seeder.md` |
 | `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` | Design source; document protocol/chaos/portal and current gaps | `parts/06-fake-rails/**` |
 | `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` | Implemented baseline for guide/academy | `parts/03-admin-front/03-guide-and-academy.md`, `parts/04-merchant-front/01-guide-and-developer-api.md` |
-| `design/07-guides-and-academy/guide_system_design_and_content.md` | Future workstream; not current implementation | `parts/09-future-and-unimplemented/01-guide-v2.md` |
+| `design/07-guides-and-academy/guide_system_design_and_content.md` | Implemented as Admin Guide v1.0 (content extracted into `admin-front/src/content/guide/generated/`); stale DB statements corrected | `parts/03-admin-front/06-guide-v2.md` |
+| `design/07-guides-and-academy/academy_system_design_and_content.md` | Academy spec; only the shared progress record (`guideRead`) is implemented, the academy rebuild is not | `parts/03-admin-front/03-guide-and-academy.md` |
+| `design/07-guides-and-academy/guide_content_fixes.md` | Implementation log of label/route-map corrections | `parts/03-admin-front/06-guide-v2.md` |
+| `design/07-guides-and-academy/guide_content_questions.md` | Open behaviour questions found during implementation | `parts/03-admin-front/06-guide-v2.md` |
 | `design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md` | SUPERSEDED by v2 (`design/06-ui/..._2.md`); UI design source; correct route counts and actual primitives | `parts/03-admin-front/00-ui-system.md` |
 | `design/06-ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md` | UI v2 design source | `parts/03-admin-front/00-ui-system.md`, `02-tables-filters-exports.md` |
 | `design/06-ui/portal_ui_implementation_plan.md` | As-built UI execution record | `parts/03-admin-front/**`, `TRACKER.md` |

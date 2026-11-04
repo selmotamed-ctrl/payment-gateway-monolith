@@ -307,6 +307,26 @@ const write = (runner: ProvisionRunner, target: SshTarget, path: string, content
 };
 
 /**
+ * The systemd unit decides which account owns the PgBouncer config: Debian
+ * and Ubuntu units run as `postgres` (and may not create a `pgbouncer` user),
+ * while other distributions use `pgbouncer`. Resolve the unit user, fall back
+ * to `postgres`, and only then set ownership so the service can read the
+ * files.
+ */
+const pgbouncerConfigOwnership = (): string => {
+  const ini = "/etc/pgbouncer/pgbouncer.ini";
+  const userlist = "/etc/pgbouncer/userlist.txt";
+  return [
+    `pgbouncer_owner="$(systemctl show -p User --value pgbouncer 2>/dev/null)"`,
+    `[ -n "$pgbouncer_owner" ] || pgbouncer_owner=pgbouncer`,
+    `if ! id "$pgbouncer_owner" >/dev/null 2>&1; then pgbouncer_owner=postgres; fi`,
+    `chown "$pgbouncer_owner:" ${ini} ${userlist}`,
+    `chmod 0640 ${ini}`,
+    `chmod 0600 ${userlist}`,
+  ].join(" && ");
+};
+
+/**
  * Applies PostgreSQL 18, streaming replicas and PgBouncer. The runner is the
  * only side effect; tests pass a recording fake.
  */
@@ -348,6 +368,9 @@ export const provisionPostgres18 = (input: PostgresProvisionInput): ProvisionRep
   commands.push(bootstrap);
   runner.run(primarySsh, bootstrap, { sudo: true });
   runner.run(primarySsh, `systemctl restart ${primaryCluster.service}`, { sudo: true });
+  const primaryReady = `for i in $(seq 1 30); do pg_isready -h 127.0.0.1 -p ${primaryCluster.port} >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1`;
+  commands.push(primaryReady);
+  runner.run(primarySsh, primaryReady, { sudo: true });
   const journalPartitionCron = `30 1 * * * root runuser -u postgres -- psql -p ${primaryCluster.port} -d ${config.PG_DB_NAME} -c 'SELECT ensure_journal_line_partitions(18)' >/var/log/pg-journal-partitions.log 2>&1`;
   runner.writeRemoteFile({
     target: primarySsh,
@@ -361,7 +384,7 @@ export const provisionPostgres18 = (input: PostgresProvisionInput): ProvisionRep
   if (config.PGBOUNCER_ENABLED) {
     write(runner, primarySsh, "/etc/pgbouncer/pgbouncer.ini", pgbouncerIni(config, primaryCluster.port), 0o640);
     write(runner, primarySsh, "/etc/pgbouncer/userlist.txt", pgbouncerUserlist(config), 0o600);
-    runner.run(primarySsh, "chown pgbouncer:pgbouncer /etc/pgbouncer/pgbouncer.ini /etc/pgbouncer/userlist.txt 2>/dev/null || true", { sudo: true });
+    runner.run(primarySsh, pgbouncerConfigOwnership(), { sudo: true });
     const restart = "systemctl enable --now pgbouncer && systemctl restart pgbouncer";
     commands.push(restart);
     runner.run(primarySsh, restart, { sudo: true });
@@ -399,7 +422,7 @@ export const provisionPostgres18 = (input: PostgresProvisionInput): ProvisionRep
       pgbouncerHosts.add(replicaSsh.host);
       write(runner, replicaSsh, "/etc/pgbouncer/pgbouncer.ini", pgbouncerIni(config, replicaCluster.port), 0o640);
       write(runner, replicaSsh, "/etc/pgbouncer/userlist.txt", pgbouncerUserlist(config), 0o600);
-      runner.run(replicaSsh, "chown pgbouncer:pgbouncer /etc/pgbouncer/pgbouncer.ini /etc/pgbouncer/userlist.txt 2>/dev/null || true", { sudo: true });
+      runner.run(replicaSsh, pgbouncerConfigOwnership(), { sudo: true });
       const restart = "systemctl enable --now pgbouncer && systemctl restart pgbouncer";
       commands.push(restart);
       runner.run(replicaSsh, restart, { sudo: true });

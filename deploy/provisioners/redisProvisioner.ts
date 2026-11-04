@@ -16,8 +16,14 @@ const nodeSsh = (config: DeployConfig, spec: { sshHost: string; sshPort: number 
   sudoPassword: config.REDIS_SUDO_PASSWORD,
 });
 
+const shellQuote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`;
+
 /** Bind strictly to the private LAN address and require a password. */
-export const redisConfigSnippet = (config: DeployConfig, privateIp: string, port = 6379): string => `bind ${privateIp} 127.0.0.1
+export const redisConfigSnippet = (config: DeployConfig, privateIp: string, port = 6379): string => {
+  // A loopback-only node (single-machine deploy) would otherwise render the
+  // same address twice and Redis would fail its second bind with EADDRINUSE.
+  const bindAddresses = [...new Set([privateIp, "127.0.0.1"])].join(" ");
+  return `bind ${bindAddresses}
 protected-mode yes
 port ${port}
 requirepass ${config.REDIS_PASSWORD}
@@ -28,6 +34,16 @@ appendonly no
 daemonize no
 supervised systemd
 dir /var/lib/pg-redis
+`;
+};
+
+/**
+ * The distro units use ProtectSystem=strict and only whitelist their own
+ * state directory, so /var/lib/pg-redis is read-only unless the unit grants
+ * it explicitly. The drop-in is harmless on units without a sandbox.
+ */
+const redisSystemdDropIn = (): string => `[Service]
+ReadWritePaths=/var/lib/pg-redis
 `;
 
 export const redisFirewallCommands = (config: DeployConfig, port = 6379): string[] => {
@@ -86,12 +102,27 @@ systemctl enable --now redis-server 2>/dev/null || systemctl enable --now valkey
       mode: 0o640,
       sudo: true,
     });
+    for (const unit of ["redis-server", "valkey"]) {
+      runner.writeRemoteFile({
+        target: ssh,
+        path: `/etc/systemd/system/${unit}.service.d/zz-pg-switch.conf`,
+        content: redisSystemdDropIn(),
+        mode: 0o644,
+        sudo: true,
+      });
+    }
     for (const command of redisFirewallCommands(config, spec.servicePort)) {
       commands.push(command);
       runner.run(ssh, command, { sudo: true });
     }
     runner.run(ssh, "chown root:redis /etc/redis/redis.conf 2>/dev/null || chown root:valkey /etc/redis/redis.conf 2>/dev/null || true; chown root:redis /etc/valkey/valkey.conf 2>/dev/null || chown root:valkey /etc/valkey/valkey.conf 2>/dev/null || true", { sudo: true });
-    const restart = "systemctl restart redis-server 2>/dev/null || systemctl restart redis 2>/dev/null || systemctl restart valkey 2>/dev/null || true; sleep 1; redis-cli PING";
+    const auth = config.REDIS_PASSWORD ? `REDISCLI_AUTH=${shellQuote(config.REDIS_PASSWORD)} ` : "";
+    const ping = `${auth}redis-cli -p ${spec.servicePort} PING`;
+    // Disable save-on-shutdown on the currently running instance before the
+    // restart. An instance started under the distro sandbox with a read-only
+    // dir refuses to exit when its shutdown save fails, which would hang
+    // systemctl with TimeoutStopSec=0. The new config restores saving.
+    const restart = `systemctl daemon-reload; ${auth}redis-cli -p ${spec.servicePort} CONFIG SET save "" >/dev/null 2>&1 || true; systemctl restart redis-server 2>/dev/null || systemctl restart redis 2>/dev/null || systemctl restart valkey 2>/dev/null || true; sleep 1; ${ping}`;
     commands.push(restart);
     runner.run(ssh, restart, { sudo: true });
   }

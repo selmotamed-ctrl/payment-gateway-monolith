@@ -1,0 +1,1878 @@
+[
+  {
+    "slug": "payment",
+    "term": "Payment",
+    "aliases": [
+      "transaction"
+    ],
+    "related": [
+      "attempt"
+    ],
+    "short": "A change of numbers that a trusted record-keeper agrees to: money leaves the payer's account and arrives in the receiver's.",
+    "ar": "دفعة"
+  },
+  {
+    "slug": "payer",
+    "term": "Payer",
+    "aliases": [
+      "customer",
+      "end client",
+      "buyer"
+    ],
+    "related": [
+      "merchant"
+    ],
+    "short": "The person who pays. Anonymous on our platform; they never sign in.",
+    "ar": "الدافع"
+  },
+  {
+    "slug": "merchant",
+    "term": "Merchant",
+    "aliases": [
+      "business",
+      "shop"
+    ],
+    "related": [
+      "application",
+      "wallet"
+    ],
+    "short": "A business that we checked and allowed to take payments.",
+    "ar": "التاجر"
+  },
+  {
+    "slug": "application",
+    "term": "Application",
+    "aliases": [
+      "app"
+    ],
+    "related": [
+      "wallet",
+      "payment-link"
+    ],
+    "short": "One place where a merchant takes payments (a website, an app, a branch). Linked to exactly one wallet.",
+    "ar": "التطبيق"
+  },
+  {
+    "slug": "wallet",
+    "term": "Wallet",
+    "aliases": [
+      "merchant wallet"
+    ],
+    "related": [
+      "ledger"
+    ],
+    "short": "A merchant's balance on our books. A number we owe the merchant, calculated from the ledger, not a bank account.",
+    "ar": "المحفظة"
+  },
+  {
+    "slug": "payment-link",
+    "term": "Payment link",
+    "aliases": [
+      "link"
+    ],
+    "related": [
+      "slot",
+      "fee-bearer"
+    ],
+    "short": "A request to pay one fixed amount, with a secret key. Single-use or multi-use.",
+    "ar": "رابط الدفع"
+  },
+  {
+    "slug": "pos",
+    "term": "POS",
+    "aliases": [
+      "point of sale",
+      "terminal"
+    ],
+    "related": [
+      "payment-link"
+    ],
+    "short": "The in-shop counter. A terminal is the place; a screen is a display paired to it.",
+    "ar": "نقطة البيع"
+  },
+  {
+    "slug": "access-token",
+    "term": "Access token",
+    "aliases": [
+      "API key",
+      "token",
+      "pg_live"
+    ],
+    "related": [
+      "secret"
+    ],
+    "short": "A secret string (starting `pg_live_`) that lets a merchant's software create links. Shown once.",
+    "ar": "رمز الوصول"
+  },
+  {
+    "slug": "lyd",
+    "term": "LYD",
+    "aliases": [
+      "Libyan dinar",
+      "dinar"
+    ],
+    "related": [
+      "dirham"
+    ],
+    "short": "The Libyan dinar. 1 LYD = 1000 dirhams, so amounts have three decimals.",
+    "ar": "الدينار الليبي"
+  },
+  {
+    "slug": "dirham",
+    "term": "Dirham",
+    "aliases": [
+      "dirhams"
+    ],
+    "related": [
+      "lyd",
+      "scale"
+    ],
+    "short": "One thousandth of a dinar.",
+    "ar": "درهم"
+  },
+  {
+    "slug": "scale",
+    "term": "Amount scale",
+    "aliases": [
+      "scale",
+      "minor units"
+    ],
+    "related": [
+      "dirham",
+      "rounding"
+    ],
+    "short": "The multiplier used to write an amount for a partner (1, 100 or 1000). A wrong scale makes an amount 1000 times wrong.",
+    "ar": "مقياس المبلغ"
+  },
+  {
+    "slug": "rounding",
+    "term": "Rounding",
+    "aliases": [
+      "round"
+    ],
+    "related": [
+      "scale"
+    ],
+    "short": "Cutting extra decimals: nearest, up, down, or none.",
+    "ar": "التقريب"
+  },
+  {
+    "slug": "commission",
+    "term": "Commission",
+    "aliases": [
+      "platform commission",
+      "fee"
+    ],
+    "related": [
+      "fee-bearer",
+      "gateway-fee"
+    ],
+    "short": "What we charge the merchant. Our revenue.",
+    "ar": "العمولة"
+  },
+  {
+    "slug": "gateway-fee",
+    "term": "Gateway fee",
+    "aliases": [
+      "provider fee"
+    ],
+    "related": [
+      "commission"
+    ],
+    "short": "What the payment company charges us. Our cost.",
+    "ar": "رسوم البوابة"
+  },
+  {
+    "slug": "fee-bearer",
+    "term": "Fee bearer",
+    "aliases": [
+      "who pays the fee"
+    ],
+    "related": [
+      "commission"
+    ],
+    "short": "Who effectively pays our commission: the merchant absorbs it, the payer pays a surcharge, or it is split.",
+    "ar": "متحمل الرسوم"
+  },
+  {
+    "slug": "net-revenue",
+    "term": "Net revenue",
+    "aliases": [
+      "net"
+    ],
+    "related": [
+      "commission",
+      "gateway-fee"
+    ],
+    "short": "Commission minus gateway fee.",
+    "ar": "صافي الإيراد"
+  },
+  {
+    "slug": "gateway",
+    "term": "Gateway",
+    "aliases": [
+      "payment gateway",
+      "door"
+    ],
+    "related": [
+      "rail",
+      "route",
+      "credential-set"
+    ],
+    "short": "One technical door to one payment company: its addresses, login, steps and how to read its answers.",
+    "ar": "البوابة"
+  },
+  {
+    "slug": "switch",
+    "term": "Switch",
+    "aliases": [
+      "national switch"
+    ],
+    "related": [
+      "gateway"
+    ],
+    "short": "A shared network that connects many banks and wallets. In Libya, Moamalat runs the national card switch.",
+    "ar": "شبكة الدفع"
+  },
+  {
+    "slug": "aggregator",
+    "term": "Aggregator",
+    "aliases": [
+      "payment aggregator"
+    ],
+    "related": [
+      "gateway"
+    ],
+    "short": "A company offering one door to many payment methods. One more company in the money path.",
+    "ar": "المجمّع"
+  },
+  {
+    "slug": "rail",
+    "term": "Rail",
+    "aliases": [
+      "payment method",
+      "channel"
+    ],
+    "related": [
+      "route",
+      "collection-mode"
+    ],
+    "short": "What the customer sees and picks (for example Sadad). Has a form, limits and logo.",
+    "ar": "وسيلة الدفع"
+  },
+  {
+    "slug": "route",
+    "term": "Route",
+    "aliases": [
+      "rail route"
+    ],
+    "related": [
+      "rail",
+      "gateway"
+    ],
+    "short": "The link between a rail and a gateway through a credential policy, with priority, cost, limits and health.",
+    "ar": "المسار"
+  },
+  {
+    "slug": "credential-set",
+    "term": "Credential set",
+    "aliases": [
+      "credentials"
+    ],
+    "related": [
+      "secret",
+      "settlement-target"
+    ],
+    "short": "The secret identifiers for one gateway in one environment, owned by the platform or by a merchant.",
+    "ar": "مجموعة بيانات الاعتماد"
+  },
+  {
+    "slug": "settlement-target",
+    "term": "Settlement target",
+    "aliases": [
+      "settlement"
+    ],
+    "related": [
+      "clearing"
+    ],
+    "short": "Where the money lands: platform clearing, merchant direct, or provider held.",
+    "ar": "وجهة التسوية"
+  },
+  {
+    "slug": "collection-mode",
+    "term": "Collection mode",
+    "aliases": [
+      "mode"
+    ],
+    "related": [
+      "otp",
+      "redirect",
+      "hybrid"
+    ],
+    "short": "How the customer completes a payment: OTP, redirect, embedded, push, QR, pay code, deep link, manual, or hybrid.",
+    "ar": "نمط التحصيل"
+  },
+  {
+    "slug": "otp",
+    "term": "OTP",
+    "aliases": [
+      "one-time password",
+      "one-time code",
+      "code"
+    ],
+    "related": [
+      "mfa"
+    ],
+    "short": "A code valid once for a short time, usually sent by SMS.",
+    "ar": "رمز لمرة واحدة"
+  },
+  {
+    "slug": "redirect",
+    "term": "Redirect",
+    "aliases": [
+      "hosted page"
+    ],
+    "related": [
+      "collection-mode"
+    ],
+    "short": "Sending the customer to the payment company's own page and back.",
+    "ar": "إعادة التوجيه"
+  },
+  {
+    "slug": "hybrid",
+    "term": "Hybrid",
+    "aliases": [
+      "HYBRID"
+    ],
+    "related": [
+      "collection-mode"
+    ],
+    "short": "A rail that offers several collection modes at once.",
+    "ar": "مختلط"
+  },
+  {
+    "slug": "qr",
+    "term": "QR code",
+    "aliases": [
+      "QR"
+    ],
+    "related": [
+      "collection-mode"
+    ],
+    "short": "A square code scanned by a bank or wallet app to start a payment.",
+    "ar": "رمز الاستجابة السريعة"
+  },
+  {
+    "slug": "push-approval",
+    "term": "Push approval",
+    "aliases": [
+      "PUSH_APPROVAL"
+    ],
+    "related": [
+      "collection-mode"
+    ],
+    "short": "The customer taps Approve in their wallet app.",
+    "ar": "الموافقة عبر الإشعار"
+  },
+  {
+    "slug": "api",
+    "term": "API",
+    "aliases": [
+      "interface"
+    ],
+    "related": [
+      "request"
+    ],
+    "short": "The menu and rules for asking a computer system to do things.",
+    "ar": "واجهة برمجية"
+  },
+  {
+    "slug": "request",
+    "term": "Request and response",
+    "aliases": [
+      "request",
+      "response"
+    ],
+    "related": [
+      "api"
+    ],
+    "short": "A message sent and the answer received.",
+    "ar": "طلب واستجابة"
+  },
+  {
+    "slug": "server",
+    "term": "Server",
+    "aliases": [
+      "back"
+    ],
+    "related": [
+      "api"
+    ],
+    "short": "A computer that waits for requests and answers them.",
+    "ar": "الخادم"
+  },
+  {
+    "slug": "webhook",
+    "term": "Webhook",
+    "aliases": [
+      "callback",
+      "notification call"
+    ],
+    "related": [
+      "inbox",
+      "signature"
+    ],
+    "short": "A payment company phoning us to say something happened.",
+    "ar": "ويب هوك"
+  },
+  {
+    "slug": "inbox",
+    "term": "Webhook inbox",
+    "aliases": [
+      "inbound events",
+      "inbox"
+    ],
+    "related": [
+      "webhook"
+    ],
+    "short": "Where every incoming message is stored first, exactly as received, and never deleted.",
+    "ar": "صندوق الوارد"
+  },
+  {
+    "slug": "polling",
+    "term": "Polling",
+    "aliases": [
+      "poll"
+    ],
+    "related": [
+      "inquiry"
+    ],
+    "short": "Asking again and again whether something is ready.",
+    "ar": "الاستعلام الدوري"
+  },
+  {
+    "slug": "inquiry",
+    "term": "Inquiry",
+    "aliases": [
+      "inquire",
+      "status check",
+      "status question"
+    ],
+    "related": [
+      "polling"
+    ],
+    "short": "One read-only question to a partner about one payment. The safest way to learn the truth.",
+    "ar": "استعلام"
+  },
+  {
+    "slug": "idempotency",
+    "term": "Idempotency",
+    "aliases": [
+      "idempotent",
+      "idempotency key"
+    ],
+    "related": [
+      "retry"
+    ],
+    "short": "A request is idempotent if sending it twice has the effect of once.",
+    "ar": "عدم التكرار"
+  },
+  {
+    "slug": "retry",
+    "term": "Retry",
+    "aliases": [
+      "retries"
+    ],
+    "related": [
+      "idempotency"
+    ],
+    "short": "Repeating a request. Forbidden for money steps.",
+    "ar": "إعادة المحاولة"
+  },
+  {
+    "slug": "timeout",
+    "term": "Timeout",
+    "aliases": [
+      "silence"
+    ],
+    "related": [
+      "unknown"
+    ],
+    "short": "No answer within the time limit. On a money step it makes a payment unknown.",
+    "ar": "انتهاء المهلة"
+  },
+  {
+    "slug": "json",
+    "term": "JSON",
+    "aliases": [],
+    "related": [
+      "selector"
+    ],
+    "short": "A text format for data, like `{\"amount\":\"10.50\"}`.",
+    "ar": "جيسون"
+  },
+  {
+    "slug": "selector",
+    "term": "Selector",
+    "aliases": [
+      "dot path"
+    ],
+    "related": [
+      "json"
+    ],
+    "short": "A path such as `result.transaction_id` that picks one value out of an answer.",
+    "ar": "المحدد"
+  },
+  {
+    "slug": "sandbox",
+    "term": "Sandbox",
+    "aliases": [
+      "SANDBOX",
+      "test environment"
+    ],
+    "related": [
+      "live"
+    ],
+    "short": "A practice world where nothing real moves.",
+    "ar": "بيئة تجريبية"
+  },
+  {
+    "slug": "live",
+    "term": "Live",
+    "aliases": [
+      "LIVE",
+      "production"
+    ],
+    "related": [
+      "sandbox"
+    ],
+    "short": "The real world: real money, real customers.",
+    "ar": "البيئة الحية"
+  },
+  {
+    "slug": "fake-rails",
+    "term": "Fake Rails",
+    "aliases": [
+      "fake rails service"
+    ],
+    "related": [
+      "sandbox"
+    ],
+    "short": "Our internal service that imitates payment companies for drills. Never in production."
+  },
+  {
+    "slug": "attempt",
+    "term": "Payment attempt",
+    "aliases": [
+      "attempt"
+    ],
+    "related": [
+      "payment-state",
+      "reference"
+    ],
+    "short": "One try to pay a link, with its own state, references and pinned configuration.",
+    "ar": "محاولة دفع"
+  },
+  {
+    "slug": "payment-state",
+    "term": "Payment state",
+    "aliases": [
+      "status",
+      "state"
+    ],
+    "related": [
+      "attempt"
+    ],
+    "short": "One of 14 states of an attempt (for example `UNKNOWN`, `SUCCEEDED`).",
+    "ar": "حالة الدفع"
+  },
+  {
+    "slug": "unknown",
+    "term": "UNKNOWN",
+    "aliases": [
+      "unknown state"
+    ],
+    "related": [
+      "inquiry",
+      "slot"
+    ],
+    "short": "We do not know whether money moved. Never guess; use Inquire.",
+    "ar": "غير معروف"
+  },
+  {
+    "slug": "reference",
+    "term": "Reference",
+    "aliases": [
+      "payment reference"
+    ],
+    "related": [
+      "attempt"
+    ],
+    "short": "Our unique number for a payment. Quote it, never the customer's name.",
+    "ar": "المرجع"
+  },
+  {
+    "slug": "slot",
+    "term": "Slot reservation",
+    "aliases": [
+      "slot",
+      "active locked count"
+    ],
+    "related": [
+      "payment-link"
+    ],
+    "short": "A reservation on a link taken before a payment starts, so one invoice cannot be paid twice.",
+    "ar": "حجز الخانة"
+  },
+  {
+    "slug": "pinned",
+    "term": "Pinned configuration",
+    "aliases": [
+      "pinned"
+    ],
+    "related": [
+      "gateway-version"
+    ],
+    "short": "The version of settings an attempt started with. Later edits do not change it.",
+    "ar": "الإعدادات المثبتة"
+  },
+  {
+    "slug": "expiry",
+    "term": "Expiry",
+    "aliases": [
+      "expires at",
+      "time limit"
+    ],
+    "related": [
+      "grace"
+    ],
+    "short": "When a payment stops waiting. The smaller of the partner's and the platform's limit.",
+    "ar": "انتهاء الصلاحية"
+  },
+  {
+    "slug": "grace",
+    "term": "Grace window",
+    "aliases": [
+      "grace period"
+    ],
+    "related": [
+      "late-success"
+    ],
+    "short": "Time after expiry in which a late confirmation is still accepted.",
+    "ar": "فترة السماح"
+  },
+  {
+    "slug": "late-success",
+    "term": "Late success",
+    "aliases": [
+      "LATE_SUCCESS"
+    ],
+    "related": [
+      "grace"
+    ],
+    "short": "A confirmation arriving after the payment expired or failed.",
+    "ar": "نجاح متأخر"
+  },
+  {
+    "slug": "money-step",
+    "term": "Money step",
+    "aliases": [
+      "MOVES_MONEY",
+      "submit",
+      "confirm"
+    ],
+    "related": [
+      "retry"
+    ],
+    "short": "The step that completes a payment. Never retried automatically.",
+    "ar": "خطوة نقل الأموال"
+  },
+  {
+    "slug": "hint",
+    "term": "Hint",
+    "aliases": [
+      "hints"
+    ],
+    "related": [
+      "trusted-confirmation"
+    ],
+    "short": "A browser or return-address message that makes us ask the partner; it never proves payment.",
+    "ar": "تلميح"
+  },
+  {
+    "slug": "trusted-confirmation",
+    "term": "Trusted confirmation",
+    "aliases": [
+      "verified"
+    ],
+    "related": [
+      "hint"
+    ],
+    "short": "Success checked by our server on five facts: status, reference, amount, currency and environment.",
+    "ar": "تأكيد موثوق"
+  },
+  {
+    "slug": "canonical-status",
+    "term": "Canonical status",
+    "aliases": [
+      "canonical"
+    ],
+    "related": [
+      "status-rule"
+    ],
+    "short": "Our standard five-word vocabulary for a partner's answers.",
+    "ar": "الحالة الموحدة"
+  },
+  {
+    "slug": "status-rule",
+    "term": "Status rule",
+    "aliases": [
+      "status rules"
+    ],
+    "related": [
+      "canonical-status"
+    ],
+    "short": "Maps a partner answer to a canonical status. First match wins.",
+    "ar": "قاعدة الحالة"
+  },
+  {
+    "slug": "error-map",
+    "term": "Error map",
+    "aliases": [
+      "error mapping"
+    ],
+    "related": [
+      "circuit-breaker"
+    ],
+    "short": "Gives a partner's error code a classification and customer message.",
+    "ar": "خريطة الأخطاء"
+  },
+  {
+    "slug": "circuit-breaker",
+    "term": "Circuit breaker",
+    "aliases": [
+      "breaker",
+      "OPEN_BREAKER"
+    ],
+    "related": [
+      "route"
+    ],
+    "short": "Automatically hides a failing route and moves traffic to the next one.",
+    "ar": "قاطع الدائرة"
+  },
+  {
+    "slug": "operator-case",
+    "term": "Operator case",
+    "aliases": [
+      "case"
+    ],
+    "related": [
+      "unknown"
+    ],
+    "short": "A task created by the system when a payment or statement needs a human.",
+    "ar": "حالة تشغيلية"
+  },
+  {
+    "slug": "flow",
+    "term": "Flow",
+    "aliases": [
+      "recipe"
+    ],
+    "related": [
+      "phase",
+      "step"
+    ],
+    "short": "The recipe for one phase of a gateway: an ordered list of steps.",
+    "ar": "التدفق"
+  },
+  {
+    "slug": "phase",
+    "term": "Phase",
+    "aliases": [
+      "phases"
+    ],
+    "related": [
+      "flow"
+    ],
+    "short": "One of ten parts of a gateway recipe, such as INITIATE, SUBMIT or VERIFY.",
+    "ar": "المرحلة"
+  },
+  {
+    "slug": "step",
+    "term": "Step",
+    "aliases": [
+      "flow step"
+    ],
+    "related": [
+      "flow"
+    ],
+    "short": "One action inside a phase: call a web address, compute a value, render something.",
+    "ar": "خطوة"
+  },
+  {
+    "slug": "transform",
+    "term": "Transform",
+    "aliases": [
+      "TransformPipe",
+      "pipeline"
+    ],
+    "related": [
+      "scale"
+    ],
+    "short": "A small safe operation applied to a value, from a closed library.",
+    "ar": "التحويل"
+  },
+  {
+    "slug": "normaliser",
+    "term": "Normaliser",
+    "aliases": [
+      "normalizer",
+      "normaliser"
+    ],
+    "related": [
+      "rail-field"
+    ],
+    "short": "Cleans what a customer types (for example Arabic digits) before checking it.",
+    "ar": "المُطبِّع"
+  },
+  {
+    "slug": "rail-field",
+    "term": "Rail field",
+    "aliases": [
+      "field"
+    ],
+    "related": [
+      "rail"
+    ],
+    "short": "One input of a rail's customer form.",
+    "ar": "حقل"
+  },
+  {
+    "slug": "sensitivity",
+    "term": "Sensitivity",
+    "aliases": [
+      "PAN",
+      "sensitive field"
+    ],
+    "related": [
+      "rail-field"
+    ],
+    "short": "How carefully a field is treated: normal, sensitive or full card number.",
+    "ar": "الحساسية"
+  },
+  {
+    "slug": "pan",
+    "term": "PAN",
+    "aliases": [
+      "card number"
+    ],
+    "related": [
+      "sensitivity"
+    ],
+    "short": "The full card number. Kept in memory only for one call.",
+    "ar": "رقم البطاقة"
+  },
+  {
+    "slug": "crypto-profile",
+    "term": "Crypto profile",
+    "aliases": [
+      "signing profile"
+    ],
+    "related": [
+      "signature"
+    ],
+    "short": "A recipe for signing or checking messages.",
+    "ar": "ملف التشفير"
+  },
+  {
+    "slug": "signature",
+    "term": "Signature",
+    "aliases": [
+      "HMAC",
+      "seal"
+    ],
+    "related": [
+      "crypto-profile",
+      "secret"
+    ],
+    "short": "A seal proving a message came from someone who knows a shared secret and was not changed.",
+    "ar": "التوقيع"
+  },
+  {
+    "slug": "hash",
+    "term": "Hash",
+    "aliases": [
+      "fingerprint"
+    ],
+    "related": [
+      "signature"
+    ],
+    "short": "A fingerprint of data: same data, same fingerprint; cannot be reversed.",
+    "ar": "البصمة"
+  },
+  {
+    "slug": "encryption",
+    "term": "Encryption",
+    "aliases": [
+      "encrypt"
+    ],
+    "related": [
+      "secret"
+    ],
+    "short": "Locking data so only someone with the key can read it.",
+    "ar": "التشفير"
+  },
+  {
+    "slug": "secret",
+    "term": "Secret",
+    "aliases": [
+      "API key",
+      "password",
+      "credential"
+    ],
+    "related": [
+      "encryption"
+    ],
+    "short": "Anything that proves identity: passwords, keys, tokens, certificate keys. Write-only on this platform.",
+    "ar": "سر"
+  },
+  {
+    "slug": "write-only",
+    "term": "Write-only",
+    "aliases": [],
+    "related": [
+      "secret"
+    ],
+    "short": "A secret you can replace but never read back.",
+    "ar": "للكتابة فقط"
+  },
+  {
+    "slug": "mtls",
+    "term": "mTLS",
+    "aliases": [
+      "mutual TLS"
+    ],
+    "related": [
+      "certificate"
+    ],
+    "short": "Both sides show a digital ID card. Used between our own services.",
+    "ar": "التحقق المتبادل"
+  },
+  {
+    "slug": "certificate",
+    "term": "Certificate",
+    "aliases": [
+      "cert"
+    ],
+    "related": [
+      "mtls"
+    ],
+    "short": "A digital ID card issued by an authority we trust.",
+    "ar": "شهادة رقمية"
+  },
+  {
+    "slug": "rotation",
+    "term": "Rotation",
+    "aliases": [
+      "key rotation"
+    ],
+    "related": [
+      "secret"
+    ],
+    "short": "Changing a secret on schedule or after a leak, with an overlap period.",
+    "ar": "تدوير المفاتيح"
+  },
+  {
+    "slug": "ssrf",
+    "term": "SSRF",
+    "aliases": [
+      "server-side request forgery"
+    ],
+    "related": [
+      "safeguard"
+    ],
+    "short": "An attack that makes our server call addresses it should not. Blocked by the engine."
+  },
+  {
+    "slug": "safeguard",
+    "term": "Safeguard",
+    "aliases": [
+      "engineering safeguard"
+    ],
+    "related": [
+      "ssrf"
+    ],
+    "short": "One of the engine protections against mistakes and attacks.",
+    "ar": "ضمانة"
+  },
+  {
+    "slug": "gateway-version",
+    "term": "Gateway version",
+    "aliases": [
+      "version"
+    ],
+    "related": [
+      "gateway"
+    ],
+    "short": "An immutable snapshot of a gateway's configuration.",
+    "ar": "إصدار البوابة"
+  },
+  {
+    "slug": "go-live-gates",
+    "term": "Go-live gates",
+    "aliases": [
+      "gates"
+    ],
+    "related": [
+      "gateway-version"
+    ],
+    "short": "The twelve checks every version must pass before going live.",
+    "ar": "بوابات الإطلاق"
+  },
+  {
+    "slug": "rollback",
+    "term": "Rollback",
+    "aliases": [
+      "rollback version"
+    ],
+    "related": [
+      "gateway-version"
+    ],
+    "short": "Returning to an earlier version.",
+    "ar": "التراجع"
+  },
+  {
+    "slug": "canary",
+    "term": "Canary",
+    "aliases": [
+      "canary plan"
+    ],
+    "related": [
+      "gateway-version"
+    ],
+    "short": "Starting a new version with a small share of traffic.",
+    "ar": "الإطلاق التجريبي"
+  },
+  {
+    "slug": "evidence-level",
+    "term": "Evidence level",
+    "aliases": [
+      "verified",
+      "unverified"
+    ],
+    "related": [
+      "gateway"
+    ],
+    "short": "How well a gateway's behaviour is known.",
+    "ar": "مستوى الإثبات"
+  },
+  {
+    "slug": "visible-rails",
+    "term": "Visible rails",
+    "aliases": [
+      "visible rails formula"
+    ],
+    "related": [
+      "rail"
+    ],
+    "short": "The rule deciding which payment methods a customer sees.",
+    "ar": "الوسائل الظاهرة"
+  },
+  {
+    "slug": "maker",
+    "term": "Maker",
+    "aliases": [
+      "proposer"
+    ],
+    "related": [
+      "checker"
+    ],
+    "short": "The person who proposes a sensitive change.",
+    "ar": "المُنشئ"
+  },
+  {
+    "slug": "checker",
+    "term": "Checker",
+    "aliases": [
+      "approver"
+    ],
+    "related": [
+      "maker"
+    ],
+    "short": "The different person who decides it.",
+    "ar": "المُراجِع"
+  },
+  {
+    "slug": "four-eyes",
+    "term": "Four-eyes principle",
+    "aliases": [
+      "maker-checker",
+      "two-person rule",
+      "maker checker"
+    ],
+    "related": [
+      "maker",
+      "checker"
+    ],
+    "short": "One proposes, another decides. Never the same person.",
+    "ar": "مبدأ العينين"
+  },
+  {
+    "slug": "approval",
+    "term": "Approval request",
+    "aliases": [
+      "approval"
+    ],
+    "related": [
+      "four-eyes"
+    ],
+    "short": "The record of a proposed change, its reason, its diff and its decision.",
+    "ar": "طلب موافقة"
+  },
+  {
+    "slug": "diff",
+    "term": "Diff",
+    "aliases": [
+      "difference"
+    ],
+    "related": [
+      "approval"
+    ],
+    "short": "What would change, old value to new value.",
+    "ar": "الفرق"
+  },
+  {
+    "slug": "sensitive-field",
+    "term": "Sensitive field",
+    "aliases": [
+      "sensitive"
+    ],
+    "related": [
+      "descriptive-field"
+    ],
+    "short": "A field whose change needs two people.",
+    "ar": "حقل حساس"
+  },
+  {
+    "slug": "descriptive-field",
+    "term": "Descriptive field",
+    "aliases": [
+      "descriptive"
+    ],
+    "related": [
+      "sensitive-field"
+    ],
+    "short": "A harmless field edited directly and logged.",
+    "ar": "حقل وصفي"
+  },
+  {
+    "slug": "ratification",
+    "term": "Ratification",
+    "aliases": [
+      "ratify",
+      "emergency ratification"
+    ],
+    "related": [
+      "asymmetry"
+    ],
+    "short": "Second-person confirmation, within 24 hours, of an emergency action.",
+    "ar": "المصادقة اللاحقة"
+  },
+  {
+    "slug": "asymmetry",
+    "term": "Asymmetry principle",
+    "aliases": [],
+    "related": [
+      "ratification"
+    ],
+    "short": "Risk-reducing actions may be immediate; risk-increasing or money-moving ones need approval first.",
+    "ar": "مبدأ عدم التماثل"
+  },
+  {
+    "slug": "authority",
+    "term": "Authority",
+    "aliases": [
+      "permission"
+    ],
+    "related": [
+      "role"
+    ],
+    "short": "A specific permission on an account. No authorities means no access.",
+    "ar": "الصلاحية"
+  },
+  {
+    "slug": "role",
+    "term": "Role",
+    "aliases": [
+      "staff role"
+    ],
+    "related": [
+      "authority"
+    ],
+    "short": "A job family, such as FINANCE or OPERATOR.",
+    "ar": "الدور"
+  },
+  {
+    "slug": "audit-log",
+    "term": "Audit log",
+    "aliases": [
+      "audit trail"
+    ],
+    "related": [
+      "change-log"
+    ],
+    "short": "The unchangeable record of who did what, when.",
+    "ar": "سجل التدقيق"
+  },
+  {
+    "slug": "change-log",
+    "term": "Detail change log",
+    "aliases": [
+      "field history"
+    ],
+    "related": [
+      "audit-log"
+    ],
+    "short": "Old and new value of every changed field.",
+    "ar": "سجل التغييرات"
+  },
+  {
+    "slug": "ledger",
+    "term": "Ledger",
+    "aliases": [
+      "books",
+      "general ledger"
+    ],
+    "related": [
+      "double-entry"
+    ],
+    "short": "All journal entries: our accounting books. Append-only.",
+    "ar": "دفتر الأستاذ"
+  },
+  {
+    "slug": "double-entry",
+    "term": "Double-entry bookkeeping",
+    "aliases": [
+      "double entry"
+    ],
+    "related": [
+      "ledger"
+    ],
+    "short": "Writing both sides of every movement so they must match.",
+    "ar": "القيد المزدوج"
+  },
+  {
+    "slug": "journal-entry",
+    "term": "Journal entry",
+    "aliases": [
+      "entry"
+    ],
+    "related": [
+      "journal-line"
+    ],
+    "short": "One page of the ledger describing one event.",
+    "ar": "قيد يومية"
+  },
+  {
+    "slug": "journal-line",
+    "term": "Journal line",
+    "aliases": [
+      "line"
+    ],
+    "related": [
+      "journal-entry"
+    ],
+    "short": "One row: an account, a direction and an amount.",
+    "ar": "سطر القيد"
+  },
+  {
+    "slug": "debit",
+    "term": "Debit",
+    "aliases": [
+      "Dr"
+    ],
+    "related": [
+      "credit"
+    ],
+    "short": "One of two directions of a line. Not \"bad\".",
+    "ar": "مدين"
+  },
+  {
+    "slug": "credit",
+    "term": "Credit",
+    "aliases": [
+      "Cr"
+    ],
+    "related": [
+      "debit"
+    ],
+    "short": "The other direction.",
+    "ar": "دائن"
+  },
+  {
+    "slug": "gl-account",
+    "term": "GL account",
+    "aliases": [
+      "account",
+      "general ledger account"
+    ],
+    "related": [
+      "ledger"
+    ],
+    "short": "A named place where an amount is tracked. There are 11 kinds.",
+    "ar": "حساب الأستاذ"
+  },
+  {
+    "slug": "treasury",
+    "term": "Treasury",
+    "aliases": [
+      "TREASURY"
+    ],
+    "related": [
+      "gl-account"
+    ],
+    "short": "Our real money.",
+    "ar": "الخزينة"
+  },
+  {
+    "slug": "clearing",
+    "term": "Gateway clearing",
+    "aliases": [
+      "GATEWAY_CLEARING",
+      "clearing"
+    ],
+    "related": [
+      "settlement-target"
+    ],
+    "short": "Money a partner holds for us but has not paid yet.",
+    "ar": "حساب المقاصة"
+  },
+  {
+    "slug": "suspense",
+    "term": "Suspense",
+    "aliases": [
+      "SUSPENSE"
+    ],
+    "related": [
+      "late-success"
+    ],
+    "short": "Money that arrived but does not clearly belong yet.",
+    "ar": "حساب معلق"
+  },
+  {
+    "slug": "aml-hold",
+    "term": "AML hold",
+    "aliases": [
+      "AML_HOLD"
+    ],
+    "related": [
+      "aml"
+    ],
+    "short": "Money held while compliance decides.",
+    "ar": "حجز مكافحة غسل الأموال"
+  },
+  {
+    "slug": "chargeback-reserve",
+    "term": "Chargeback reserve",
+    "aliases": [
+      "CHARGEBACK_RESERVE"
+    ],
+    "related": [
+      "chargeback"
+    ],
+    "short": "Money set aside while a dispute is open.",
+    "ar": "احتياطي الاسترداد"
+  },
+  {
+    "slug": "invariant",
+    "term": "Ledger invariant",
+    "aliases": [
+      "invariant",
+      "drift"
+    ],
+    "related": [
+      "ledger"
+    ],
+    "short": "The equation that must always hold; the difference is the drift.",
+    "ar": "ثابت الدفتر"
+  },
+  {
+    "slug": "settlement",
+    "term": "Settlement",
+    "aliases": [
+      "T+N",
+      "settle"
+    ],
+    "related": [
+      "reconciliation"
+    ],
+    "short": "The partner paying us collected money, usually days later.",
+    "ar": "التسوية"
+  },
+  {
+    "slug": "reconciliation",
+    "term": "Reconciliation",
+    "aliases": [
+      "reconcile",
+      "statement"
+    ],
+    "related": [
+      "settlement"
+    ],
+    "short": "Matching a partner's statement to our books.",
+    "ar": "المطابقة"
+  },
+  {
+    "slug": "adjustment",
+    "term": "Adjustment",
+    "aliases": [
+      "refund",
+      "correction"
+    ],
+    "related": [
+      "four-eyes"
+    ],
+    "short": "Any non-standard money movement; always two people.",
+    "ar": "تسوية يدوية"
+  },
+  {
+    "slug": "cashout",
+    "term": "Cash-out",
+    "aliases": [
+      "payout",
+      "cashout"
+    ],
+    "related": [
+      "wallet"
+    ],
+    "short": "A merchant's request to be paid its balance into its bank.",
+    "ar": "سحب الرصيد"
+  },
+  {
+    "slug": "refund",
+    "term": "Refund",
+    "aliases": [
+      "refunds"
+    ],
+    "related": [
+      "adjustment"
+    ],
+    "short": "Returning money to the payer.",
+    "ar": "استرداد"
+  },
+  {
+    "slug": "chargeback",
+    "term": "Chargeback",
+    "aliases": [
+      "dispute"
+    ],
+    "related": [
+      "dispute"
+    ],
+    "short": "A payer or its bank taking money back through the card or payment network.",
+    "ar": "رد المبلغ المتنازع عليه"
+  },
+  {
+    "slug": "dispute",
+    "term": "Dispute",
+    "aliases": [
+      "disputes"
+    ],
+    "related": [
+      "chargeback"
+    ],
+    "short": "A case that a payment should be returned.",
+    "ar": "نزاع"
+  },
+  {
+    "slug": "statement",
+    "term": "Statement",
+    "aliases": [
+      "settlement statement"
+    ],
+    "related": [
+      "reconciliation"
+    ],
+    "short": "A partner's file listing what it processed.",
+    "ar": "كشف الحساب"
+  },
+  {
+    "slug": "netting",
+    "term": "Netting",
+    "aliases": [
+      "net"
+    ],
+    "related": [
+      "cashout"
+    ],
+    "short": "Offsetting what two sides owe each other.",
+    "ar": "المقاصة بين الأرصدة"
+  },
+  {
+    "slug": "kyb",
+    "term": "KYB",
+    "aliases": [
+      "know your business"
+    ],
+    "related": [
+      "beneficial-owner"
+    ],
+    "short": "Checking that a business is real before allowing it.",
+    "ar": "اعرف عميلك التجاري"
+  },
+  {
+    "slug": "join-request",
+    "term": "Join request",
+    "aliases": [
+      "join requests"
+    ],
+    "related": [
+      "kyb"
+    ],
+    "short": "The record of one onboarding attempt.",
+    "ar": "طلب الانضمام"
+  },
+  {
+    "slug": "sla",
+    "term": "SLA",
+    "aliases": [
+      "deadline",
+      "service level"
+    ],
+    "related": [
+      "operator-case"
+    ],
+    "short": "The deadline attached to a case or review.",
+    "ar": "مهلة الخدمة"
+  },
+  {
+    "slug": "beneficial-owner",
+    "term": "Beneficial owner",
+    "aliases": [
+      "UBO",
+      "owner"
+    ],
+    "related": [
+      "kyb"
+    ],
+    "short": "A real person who owns 25% or more, or controls, a business.",
+    "ar": "المستفيد الحقيقي"
+  },
+  {
+    "slug": "risk-tier",
+    "term": "Risk tier",
+    "aliases": [
+      "risk"
+    ],
+    "related": [
+      "merchant"
+    ],
+    "short": "LOW, STANDARD or HIGH: how risky a merchant is judged to be.",
+    "ar": "مستوى المخاطر"
+  },
+  {
+    "slug": "aml",
+    "term": "AML",
+    "aliases": [
+      "anti-money-laundering",
+      "money laundering"
+    ],
+    "related": [
+      "screening"
+    ],
+    "short": "Rules and activities that stop criminals hiding the origin of money.",
+    "ar": "مكافحة غسل الأموال"
+  },
+  {
+    "slug": "screening",
+    "term": "Screening",
+    "aliases": [
+      "name screening"
+    ],
+    "related": [
+      "sanctions",
+      "pep"
+    ],
+    "short": "Comparing names against official and internal lists.",
+    "ar": "الفحص"
+  },
+  {
+    "slug": "sanctions",
+    "term": "Sanctions list",
+    "aliases": [
+      "sanctions"
+    ],
+    "related": [
+      "screening"
+    ],
+    "short": "An official list of people, companies and countries we must not deal with.",
+    "ar": "قوائم العقوبات"
+  },
+  {
+    "slug": "pep",
+    "term": "PEP",
+    "aliases": [
+      "politically exposed person"
+    ],
+    "related": [
+      "screening"
+    ],
+    "short": "Someone with a prominent public role. Allowed, but riskier.",
+    "ar": "شخص سياسي ممثل للمخاطر"
+  },
+  {
+    "slug": "adverse-media",
+    "term": "Adverse media",
+    "aliases": [
+      "negative news"
+    ],
+    "related": [
+      "screening"
+    ],
+    "short": "Negative news about a person or business.",
+    "ar": "أخبار سلبية"
+  },
+  {
+    "slug": "potential-match",
+    "term": "Potential match",
+    "aliases": [
+      "POTENTIAL_MATCH",
+      "possible match"
+    ],
+    "related": [
+      "screening"
+    ],
+    "short": "A name resembling a listed name. A person must decide.",
+    "ar": "تطابق محتمل"
+  },
+  {
+    "slug": "false-positive",
+    "term": "False positive",
+    "aliases": [
+      "FALSE_POSITIVE"
+    ],
+    "related": [
+      "potential-match"
+    ],
+    "short": "A possible match decided to be a different person.",
+    "ar": "إيجابي كاذب"
+  },
+  {
+    "slug": "velocity",
+    "term": "Velocity rule",
+    "aliases": [
+      "velocity"
+    ],
+    "related": [
+      "aml-rule"
+    ],
+    "short": "A limit on how often or how much within a time window.",
+    "ar": "قاعدة السرعة"
+  },
+  {
+    "slug": "aml-rule",
+    "term": "AML rule",
+    "aliases": [
+      "AML rules"
+    ],
+    "related": [
+      "velocity"
+    ],
+    "short": "A declarative pattern or amount rule that can hold money or open a case.",
+    "ar": "قاعدة مكافحة غسل الأموال"
+  },
+  {
+    "slug": "structuring",
+    "term": "Structuring",
+    "aliases": [
+      "smurfing"
+    ],
+    "related": [
+      "aml-rule"
+    ],
+    "short": "Splitting amounts to stay under a threshold.",
+    "ar": "تجزئة العمليات"
+  },
+  {
+    "slug": "aml-case",
+    "term": "AML case",
+    "aliases": [
+      "compliance case"
+    ],
+    "related": [
+      "mlro"
+    ],
+    "short": "A review of a suspected issue, with severity, deadline and decision.",
+    "ar": "قضية امتثال"
+  },
+  {
+    "slug": "mlro",
+    "term": "MLRO",
+    "aliases": [
+      "money laundering reporting officer"
+    ],
+    "related": [
+      "aml"
+    ],
+    "short": "The senior owner of suspicious-activity decisions.",
+    "ar": "مسؤول الإبلاغ عن غسل الأموال"
+  },
+  {
+    "slug": "str",
+    "term": "STR",
+    "aliases": [
+      "suspicious activity report",
+      "SAR"
+    ],
+    "related": [
+      "mlro"
+    ],
+    "short": "A report to the authority about suspicious activity.",
+    "ar": "بلاغ اشتباه"
+  },
+  {
+    "slug": "tipping-off",
+    "term": "Tipping-off",
+    "aliases": [
+      "tip off",
+      "tipping off"
+    ],
+    "related": [
+      "aml"
+    ],
+    "short": "Telling someone they are under suspicion. Forbidden.",
+    "ar": "التنبيه"
+  },
+  {
+    "slug": "aml-confidential",
+    "term": "AML-confidential",
+    "aliases": [
+      "confidential"
+    ],
+    "related": [
+      "tipping-off"
+    ],
+    "short": "Data only Compliance, the MLRO and audit may see.",
+    "ar": "سري"
+  },
+  {
+    "slug": "cbl",
+    "term": "CBL",
+    "aliases": [
+      "Central Bank of Libya"
+    ],
+    "related": [
+      "aml"
+    ],
+    "short": "The Central Bank of Libya, our regulator.",
+    "ar": "مصرف ليبيا المركزي"
+  },
+  {
+    "slug": "retention",
+    "term": "Retention",
+    "aliases": [
+      "record keeping"
+    ],
+    "related": [
+      "aml"
+    ],
+    "short": "How long records must be kept.",
+    "ar": "الاحتفاظ بالسجلات"
+  },
+  {
+    "slug": "mfa",
+    "term": "MFA",
+    "aliases": [
+      "multi-factor",
+      "2FA"
+    ],
+    "related": [
+      "otp"
+    ],
+    "short": "A second proof of identity, usually a code from an app.",
+    "ar": "التحقق متعدد العوامل"
+  },
+  {
+    "slug": "phishing",
+    "term": "Phishing",
+    "aliases": [
+      "social engineering"
+    ],
+    "related": [
+      "secret"
+    ],
+    "short": "Tricking a person into giving away secrets or acting wrongly.",
+    "ar": "التصيد"
+  },
+  {
+    "slug": "runbook",
+    "term": "Runbook",
+    "aliases": [
+      "RB"
+    ],
+    "related": [
+      "incident"
+    ],
+    "short": "A step-by-step procedure for a known incident.",
+    "ar": "دليل الإجراءات"
+  },
+  {
+    "slug": "incident",
+    "term": "Incident",
+    "aliases": [],
+    "related": [
+      "runbook"
+    ],
+    "short": "Anything threatening money, customers or trust.",
+    "ar": "حادثة"
+  },
+  {
+    "slug": "outbox",
+    "term": "Outbox",
+    "aliases": [
+      "notification outbox"
+    ],
+    "related": [
+      "notification"
+    ],
+    "short": "A safe queue that ensures a message is sent once.",
+    "ar": "صندوق الصادر"
+  },
+  {
+    "slug": "notification",
+    "term": "Notification",
+    "aliases": [
+      "notifications"
+    ],
+    "related": [
+      "outbox"
+    ],
+    "short": "An SMS, e-mail or in-app message about an event.",
+    "ar": "إشعار"
+  },
+  {
+    "slug": "spec",
+    "term": "Integration spec",
+    "aliases": [
+      "integration-spec.json",
+      "spec"
+    ],
+    "related": [
+      "gateway"
+    ],
+    "short": "The JSON file an AI drafts for the Smart AI Integration.",
+    "ar": "مواصفات التكامل"
+  },
+  {
+    "slug": "test-vector",
+    "term": "Test vector",
+    "aliases": [
+      "test vectors"
+    ],
+    "related": [
+      "spec"
+    ],
+    "short": "A sample request and answer used to check a result offline.",
+    "ar": "مثال اختبار"
+  }
+]

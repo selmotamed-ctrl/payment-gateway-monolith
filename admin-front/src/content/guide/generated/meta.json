@@ -1,0 +1,19 @@
+{
+  "contentVersion": "1.0.0",
+  "generatedAt": "1970-01-01T00:00:00.000Z",
+  "counts": {
+    "books": 14,
+    "articles": 125,
+    "glossaryTerms": 151,
+    "safeguardCards": 22,
+    "safeguardChecklistItems": 99,
+    "situations": 29,
+    "readingPaths": 8,
+    "quickAnswers": 58,
+    "dataBlocks": 3,
+    "contextMapScreens": 23,
+    "errorCodes": 19,
+    "edgeCases": 140
+  },
+  "sourceSha256": "5adacd20bf45952665299969c7533802cc3ca1c669e9c3ccd23b7820889420e9"
+}

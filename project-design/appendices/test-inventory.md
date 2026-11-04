@@ -161,13 +161,13 @@
 | `deploy/test/fakeRails.test.ts` | 106 | 7 |
 | `deploy/test/pkiScale.test.ts` | 112 | 5 |
 | `deploy/test/hostPlanner.test.ts` | 311 | 23 |
-| `deploy/test/provisioners.test.ts` | 393 | 18 |
-| `deploy/test/exhaustive-deploy-matrix.test.ts` | 309 | 20 |
+| `deploy/test/provisioners.test.ts` | 417 | 20 |
+| `deploy/test/exhaustive-deploy-matrix.test.ts` | 310 | 20 |
 | `deploy/test/hostPlannerScale.test.ts` | 157 | 6 |
 | `deploy/test/rollingDeploy.test.ts` | 52 | 5 |
 | `deploy/test/testMatrix.test.ts` | 413 | 33 |
 | `deploy/test/templates.test.ts` | 228 | 16 |
-| `deploy/test/healthVerifierScale.test.ts` | 130 | 3 |
+| `deploy/test/healthVerifierScale.test.ts` | 140 | 4 |
 | `deploy/backup-daemon/test/backupEngine.test.ts` | 350 | 18 |
 | `deploy/backup-daemon/test/cron.test.ts` | 82 | 8 |
 | `deploy/backup-daemon/test/config.test.ts` | 117 | 7 |
@@ -178,16 +178,20 @@
 | `deploy/backup-daemon/test/helpers.ts` | 202 | 0 |
 | `deploy/backup-daemon/test/restoreDrillRunner.test.ts` | 382 | 10 |
 | `tests/e2e/admin/finance.spec.ts` | 47 | 1 |
+| `tests/e2e/admin/guide-context.spec.ts` | 128 | 2 |
+| `tests/e2e/admin/guide-reader.spec.ts` | 66 | 3 |
+| `tests/e2e/admin/guide-palette.spec.ts` | 32 | 1 |
 | `tests/e2e/admin/shell.spec.ts` | 238 | 17 |
-| `tests/e2e/admin/create.spec.ts` | 154 | 5 |
+| `tests/e2e/admin/create.spec.ts` | 155 | 5 |
 | `tests/e2e/admin/table-and-padding-geometry.spec.ts` | 235 | 3 |
+| `tests/e2e/admin/guide-safeguard.spec.ts` | 104 | 1 |
 | `tests/e2e/admin/global-search.spec.ts` | 124 | 5 |
-| `tests/e2e/admin/merchants.spec.ts` | 89 | 2 |
-| `tests/e2e/admin/operator-cases.spec.ts` | 186 | 2 |
+| `tests/e2e/admin/merchants.spec.ts` | 90 | 2 |
+| `tests/e2e/admin/operator-cases.spec.ts` | 187 | 2 |
 | `tests/e2e/admin/a11y.spec.ts` | 37 | 2 |
 | `tests/e2e/admin/auth.spec.ts` | 50 | 2 |
 | `tests/e2e/admin/backups.spec.ts` | 123 | 2 |
-| `tests/e2e/fixtures.ts` | 132 | 0 |
+| `tests/e2e/fixtures.ts` | 145 | 0 |
 | `tests/e2e/exhaustive/exhaustive-checkout-surface.spec.ts` | 73 | 1 |
 | `tests/e2e/exhaustive/full-platform-lifecycle-journeys.spec.ts` | 74 | 4 |
 | `tests/e2e/exhaustive/exhaustive-merchant-surface.spec.ts` | 93 | 1 |
@@ -202,8 +206,11 @@
 | `tests/e2e-live/live.spec.ts` | 153 | 6 |
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/authorities.test.ts` | 27 | 4 |
+| `tests/unit/guide-search.test.ts` | 80 | 9 |
 | `tests/unit/global-search.test.ts` | 199 | 9 |
+| `tests/unit/guide-widgets.test.ts` | 221 | 25 |
 | `tests/unit/checkout-redirect.test.ts` | 24 | 4 |
+| `tests/unit/guide-content.test.ts` | 174 | 9 |
 
-- Total files: **200**
-- Total literal test declarations: **1906**
+- Total files: **207**
+- Total literal test declarations: **1959**

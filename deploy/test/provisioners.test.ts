@@ -180,6 +180,17 @@ describe("PostgreSQL 18 provisioner", () => {
     expect(runner.writes.some((write) => write.path === "/etc/pgbouncer/pgbouncer.ini")).toBe(true);
   });
 
+  test("PgBouncer config ownership follows the systemd unit user", () => {
+    const runner = new FakeRunner();
+    provisionPostgres18({ runner, config: config(), dryRun: true });
+    const ownership = runner.runs.find((run) => run.command.includes("pgbouncer_owner"));
+    expect(ownership?.command).toContain("systemctl show -p User --value pgbouncer");
+    expect(ownership?.command).toContain("pgbouncer_owner=postgres");
+    expect(ownership?.command).toContain('chown "$pgbouncer_owner:" /etc/pgbouncer/pgbouncer.ini /etc/pgbouncer/userlist.txt');
+    expect(ownership?.command).toContain("chmod 0640 /etc/pgbouncer/pgbouncer.ini");
+    expect(ownership?.command).toContain("chmod 0600 /etc/pgbouncer/userlist.txt");
+  });
+
   test("is idempotent and never performs real network work in dry-run", () => {
     const first = new FakeRunner();
     const second = new FakeRunner();
@@ -202,11 +213,24 @@ describe("Redis provisioner", () => {
     expect(redisFirewallCommands(config()).join("\n")).toContain("10.10.13.10");
   });
 
+  test("does not bind the same loopback address twice on a single-machine deploy", () => {
+    const snippet = redisConfigSnippet(config(), "127.0.0.1");
+    expect(snippet).toContain("bind 127.0.0.1\n");
+    expect(snippet).not.toContain("bind 127.0.0.1 127.0.0.1");
+  });
+
   test("provisions every redis node through the runner", () => {
     const runner = new FakeRunner();
     const report = provisionRedis({ runner, config: config(), dryRun: true });
     expect(report.nodes).toEqual(["10.10.11.10"]);
     expect(runner.writes.some((write) => write.path === "/etc/redis/redis.conf")).toBe(true);
+    expect(runner.writes.some((write) => write.path === "/etc/systemd/system/redis-server.service.d/zz-pg-switch.conf")).toBe(true);
+    expect(runner.writes.some((write) => write.path === "/etc/systemd/system/valkey.service.d/zz-pg-switch.conf")).toBe(true);
+    const restart = runner.runs.find((run) => run.command.includes("redis-cli"));
+    expect(restart?.command).toContain("systemctl daemon-reload");
+    expect(restart?.command).toContain('CONFIG SET save ""');
+    expect(restart?.command).toContain("REDISCLI_AUTH='ultra-strong-redis-password'");
+    expect(restart?.command).toContain("redis-cli -p 6379 PING");
     expect(runner.runs.some((run) => run.command.includes("redis-server"))).toBe(true);
   });
 });

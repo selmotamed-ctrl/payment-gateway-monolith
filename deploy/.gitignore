@@ -5,3 +5,5 @@ deploy.env
 test-matrix/configs/
 test-matrix/reports/
 test-matrix/*.local.json
+deploy.env.local
+deploy.env.*.local

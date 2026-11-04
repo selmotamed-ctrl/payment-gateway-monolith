@@ -1,0 +1,494 @@
+[
+  {
+    "id": "s-unknown-attempt",
+    "title": "A payment is stuck in UNKNOWN",
+    "screens": [
+      "OperatorCases",
+      "Dashboard"
+    ],
+    "cases": [
+      5,
+      8,
+      20,
+      77
+    ],
+    "articles": [
+      "b07-03",
+      "b07-09",
+      "b10-04"
+    ],
+    "body": "### What you are seeing\nAn attempt shows `UNKNOWN`, or the **Unknown Backlog** tile is rising.\n### What it means\nWe did not get a clear answer from the partner. Money may or may not have moved.\n### What to do\n1. Check the environment badge.\n2. Open the case and read the step log.\n3. Press **Inquire** once.\n4. If the partner cannot be asked, wait for the statement or ask the partner's support with our reference and the provider reference.\n5. Resolve by hand only with evidence and a second person ([[c:sg-resolve-unknown]]).\n### What not to do\nDo not mark it failed because it is old. Do not ask the customer to pay again. Do not re-send an OTP."
+  },
+  {
+    "id": "s-customer-deducted",
+    "title": "A customer says money was deducted",
+    "screens": [
+      "OperatorCases"
+    ],
+    "cases": [
+      1,
+      5,
+      10,
+      19
+    ],
+    "articles": [
+      "b07-12",
+      "b07-03",
+      "b07-08"
+    ],
+    "body": "### What it means\nThe customer's bank or wallet shows a deduction. Our status may be anything.\n### What to do\nAsk for the reference, look it up and follow the table in [[a:b07-12]]. If our status is not `SUCCEEDED`, create or update a case with the reference and time.\n### What not to do\nDo not promise a refund. Do not say \"confirmed\" from a screenshot."
+  },
+  {
+    "id": "s-method-missing",
+    "title": "A customer cannot see a payment method",
+    "screens": [
+      "Routes",
+      "Rails"
+    ],
+    "cases": [
+      49,
+      53,
+      58,
+      34
+    ],
+    "articles": [
+      "b06-12",
+      "b06-11",
+      "b10-02"
+    ],
+    "body": "### What it means\nOne of the nine conditions of the visible-rails formula is failing.\n### What to do\nWalk down the table in [[a:b06-12]]: application list, link list, commission profile, route active, route healthy, limits and daily cap, maintenance and scope, credential verified, currency and blocked flag.\n### What not to do\nDo not widen limits or resume a route to \"make it appear\"."
+  },
+  {
+    "id": "s-breaker-open",
+    "title": "A circuit breaker is open",
+    "screens": [
+      "Dashboard",
+      "Routes"
+    ],
+    "cases": [
+      50,
+      53,
+      54,
+      56
+    ],
+    "articles": [
+      "b10-02",
+      "b06-11"
+    ],
+    "body": "### What to do\nConfirm it, tell the Gateway Admin and your manager, and let traffic move to the next route. When it closes, check the Unknown Backlog.\n### What not to do\nDo not re-enable the route while the partner is failing."
+  },
+  {
+    "id": "s-amount-wrong",
+    "title": "An amount is 1000 times too large or too small",
+    "screens": [
+      "GatewayWizard"
+    ],
+    "cases": [
+      33,
+      45
+    ],
+    "articles": [
+      "b06-04",
+      "b10-01"
+    ],
+    "body": "### What it means\nThe gateway's amount scale or precision is wrong.\n### What to do\nStop. Treat as P1. Tell the Gateway Admin and Security Admin. Pause the route (a risk-reducing action). Do not retry payments."
+  },
+  {
+    "id": "s-signature-fail",
+    "title": "Signature failures or webhooks from an unknown address",
+    "screens": [
+      "Dashboard"
+    ],
+    "cases": [
+      22,
+      23,
+      27,
+      30
+    ],
+    "articles": [
+      "b10-03",
+      "b06-06",
+      "b07-05"
+    ],
+    "body": "### What to do\nFollow [[a:b10-03]]. Never accept unsigned messages to get things moving."
+  },
+  {
+    "id": "s-late-success",
+    "title": "A confirmation arrived after the payment expired",
+    "screens": [
+      "OperatorCases"
+    ],
+    "cases": [
+      10,
+      19,
+      41,
+      136
+    ],
+    "articles": [
+      "b07-08",
+      "b07-06"
+    ],
+    "body": "### What to do\nIf the slot was free, the platform posted it and raised a P2 alert. If the link was already paid, the money is in `SUSPENSE` and a refund is drafted; Finance approves through the normal route."
+  },
+  {
+    "id": "s-conflict",
+    "title": "A webhook and an inquiry disagree",
+    "screens": [
+      "OperatorCases"
+    ],
+    "cases": [
+      20
+    ],
+    "articles": [
+      "b07-08",
+      "b07-03"
+    ],
+    "body": "### What to do\nNothing was posted. This is a P1 conflict case. Escalate to a senior operator and the Gateway Admin; resolution needs partner evidence."
+  },
+  {
+    "id": "s-amount-mismatch",
+    "title": "The partner's amount differs from ours",
+    "screens": [
+      "OperatorCases",
+      "Reconciliation"
+    ],
+    "cases": [
+      25,
+      32,
+      38,
+      45
+    ],
+    "articles": [
+      "b07-08",
+      "b08-06"
+    ],
+    "body": "### What to do\nRead the route's mismatch policy result and the case. Compare with the statement. Propose any correction through Finance."
+  },
+  {
+    "id": "s-statement-lines",
+    "title": "A statement has lines that do not match",
+    "screens": [
+      "Reconciliation"
+    ],
+    "cases": [
+      42,
+      47,
+      102
+    ],
+    "articles": [
+      "b08-06",
+      "b10-05"
+    ],
+    "body": "### What to do\nCheck the file, source and time zone. `MISSING_AT_GATEWAY` is the most serious. Never edit the file."
+  },
+  {
+    "id": "s-ledger-drift",
+    "title": "The ledger invariant shows drift",
+    "screens": [
+      "FinanceInvariant"
+    ],
+    "cases": [
+      97,
+      110,
+      140
+    ],
+    "articles": [
+      "b08-05",
+      "b10-05"
+    ],
+    "body": "### What to do\nTreat as P1. Payouts stop automatically. Follow [[a:b10-05]]. Never edit numbers."
+  },
+  {
+    "id": "s-cashout-request",
+    "title": "A merchant asks for a payout",
+    "screens": [
+      "Cashouts"
+    ],
+    "cases": [
+      111,
+      48
+    ],
+    "articles": [
+      "b08-07",
+      "b08-13"
+    ],
+    "body": "### What to do\nCheck the snapshot of bank details, merchant state, balance and holds. Process with a checklist; a different Finance user approves the subtraction."
+  },
+  {
+    "id": "s-chargeback-arrives",
+    "title": "A chargeback or dispute arrives",
+    "screens": [
+      "Disputes",
+      "Adjustments"
+    ],
+    "cases": [
+      40,
+      126,
+      128
+    ],
+    "articles": [
+      "b08-09",
+      "b08-08"
+    ],
+    "body": "### What to do\nCheck the evidence deadline. The system drafts the adjustment; a human Finance checker must approve before any money moves."
+  },
+  {
+    "id": "s-negative-balance",
+    "title": "A refund or chargeback exceeds the merchant's balance",
+    "screens": [
+      "Adjustments",
+      "Merchants"
+    ],
+    "cases": [
+      48
+    ],
+    "articles": [
+      "b08-13"
+    ],
+    "body": "### What to do\nIf it would breach the ceiling, it does not post; a P1 case opens. Finance chooses to collect, net or suspend."
+  },
+  {
+    "id": "s-merchant-restricted",
+    "title": "A merchant asks why it is restricted",
+    "screens": [
+      "Merchants"
+    ],
+    "cases": [
+      130,
+      65
+    ],
+    "articles": [
+      "b09-08",
+      "b05-09"
+    ],
+    "body": "### What to say\n\"Your account is currently restricted. Please contact the support address in your notice.\" Nothing more. Tell Compliance."
+  },
+  {
+    "id": "s-aml-match",
+    "title": "A screening shows a possible match",
+    "screens": [
+      "AmlScreenings",
+      "JoinRequests"
+    ],
+    "cases": [
+      122,
+      123,
+      124
+    ],
+    "articles": [
+      "b09-03",
+      "b05-05"
+    ],
+    "body": "### What to do\nCompliance decides each match with a written rationale. Do not approve a merchant until matches are decided. Never discuss it outside Compliance."
+  },
+  {
+    "id": "s-emergency-suspension",
+    "title": "An emergency suspension needs ratification",
+    "screens": [
+      "Merchants",
+      "Approvals"
+    ],
+    "cases": [
+      127,
+      65
+    ],
+    "articles": [
+      "b09-06",
+      "b04-04"
+    ],
+    "body": "### What to do\nA different Compliance user or the MLRO reviews within 24 hours. If nobody does, a P2 alert fires and the suspension stays in force."
+  },
+  {
+    "id": "s-join-duplicate",
+    "title": "A join request looks like a past applicant",
+    "screens": [
+      "JoinRequests"
+    ],
+    "cases": [
+      118,
+      120,
+      121
+    ],
+    "articles": [
+      "b05-10",
+      "b05-03"
+    ],
+    "body": "### What to do\nA second reviewer is required. Review the related records. Do not tell the applicant why."
+  },
+  {
+    "id": "s-token-leak",
+    "title": "A merchant says its API token leaked",
+    "screens": [
+      "Merchants"
+    ],
+    "cases": [
+      88
+    ],
+    "articles": [
+      "b05-07",
+      "b10-07"
+    ],
+    "body": "### What to do\nThe merchant revokes it in its portal and creates a new one. Never ask for the token value."
+  },
+  {
+    "id": "s-credential-failing",
+    "title": "A credential set turned FAILING",
+    "screens": [
+      "Gateways"
+    ],
+    "cases": [
+      60,
+      62
+    ],
+    "articles": [
+      "b10-06",
+      "b06-09"
+    ],
+    "body": "### What to do\nFollow [[a:b10-06]]: replace the secret through two-person approval and run the credential check."
+  },
+  {
+    "id": "s-approval-refused",
+    "title": "A button is missing or an action was refused",
+    "screens": [
+      "Approvals"
+    ],
+    "cases": [
+      75
+    ],
+    "articles": [
+      "b03-07",
+      "b03-02"
+    ],
+    "body": "### What to do\nRead [[a:b03-07]]. Do not work around it."
+  },
+  {
+    "id": "s-approval-expired",
+    "title": "An approval expired or is out of date",
+    "screens": [
+      "Approvals"
+    ],
+    "cases": [
+      70,
+      75
+    ],
+    "articles": [
+      "b04-03",
+      "b03-07"
+    ],
+    "body": "### What to do\nThe maker creates a new request from the current values."
+  },
+  {
+    "id": "s-pos-offline",
+    "title": "A POS screen went offline",
+    "screens": [
+      "Dashboard"
+    ],
+    "cases": [
+      14,
+      105,
+      115
+    ],
+    "articles": [
+      "b07-11"
+    ],
+    "body": "### What to do\nThe payment continues on the server. Look it up by reference."
+  },
+  {
+    "id": "s-otp-not-arriving",
+    "title": "The customer says the code never arrived",
+    "screens": [
+      "OperatorCases"
+    ],
+    "cases": [
+      2,
+      96,
+      83
+    ],
+    "articles": [
+      "b07-07"
+    ],
+    "body": "### What to do\nAsk them to wait for the countdown, check the number and use resend once."
+  },
+  {
+    "id": "s-wrong-approval",
+    "title": "I approved or proposed the wrong thing",
+    "screens": [
+      "Approvals",
+      "Adjustments"
+    ],
+    "cases": [
+      101,
+      113
+    ],
+    "articles": [
+      "b10-09",
+      "b08-08"
+    ],
+    "body": "### What to do\nStop. Tell your manager. Do not edit; offset with a new approved entry."
+  },
+  {
+    "id": "s-secret-pasted",
+    "title": "I pasted a secret in the wrong place",
+    "screens": [
+      "Dashboard"
+    ],
+    "cases": [
+      76,
+      88
+    ],
+    "articles": [
+      "b10-07",
+      "b11-04"
+    ],
+    "body": "### What to do\nTell the Security Admin now. The secret must be rotated."
+  },
+  {
+    "id": "s-sandbox-live",
+    "title": "I am not sure if this is sandbox or live",
+    "screens": [
+      "Dashboard"
+    ],
+    "cases": [
+      71,
+      26
+    ],
+    "articles": [
+      "b01-08",
+      "b06-10"
+    ],
+    "body": "### What to do\nStop. Read the badge. If still unsure, ask before acting."
+  },
+  {
+    "id": "s-gateway-live-bad",
+    "title": "A new gateway version is misbehaving",
+    "screens": [
+      "GatewayWizard",
+      "Gateways"
+    ],
+    "cases": [
+      68,
+      69
+    ],
+    "articles": [
+      "b06-10",
+      "b10-02"
+    ],
+    "body": "### What to do\nPause the route, then roll back to the named rollback version through the normal review."
+  },
+  {
+    "id": "s-reference-rejected",
+    "title": "The partner rejects our reference",
+    "screens": [
+      "GatewayWizard"
+    ],
+    "cases": [
+      72,
+      114
+    ],
+    "articles": [
+      "b06-16",
+      "b06-03"
+    ],
+    "body": "### What to do\nTell the Gateway Admin; the reference format contract test (gate 4) is the place to fix it."
+  }
+]

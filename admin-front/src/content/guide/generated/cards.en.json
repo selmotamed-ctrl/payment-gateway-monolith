@@ -1,0 +1,321 @@
+[
+  {
+    "id": "sg-approve-request",
+    "title": "Approve a request from another person",
+    "screen": "Approvals",
+    "risk": "HIGH",
+    "irreversible": true,
+    "body": "**What this does**\nYou are approving a change proposed by someone else. Approving also **executes** the change immediately.\n\n**Check first**\n- [ ] I opened **Details** and read the old value and the new value.\n- [ ] I understand what this will change, and can say it in one sentence.\n- [ ] The merchant name, amount and currency are the ones I expect.\n- [ ] The maker's reason makes sense and is more than \"ok\".\n- [ ] I am not the maker, and nobody asked me to approve without reading.\n- [ ] The environment badge is correct (`SANDBOX` or `LIVE`).\n\n**Never**\n- Never approve something you cannot explain.\n- Never approve because someone is waiting or in a hurry.\n- Never approve on the strength of a phone call or chat message.\n\n**If you made a mistake**\nTell your manager and the owner of the area at once. A change that was executed is corrected by a new approved change, not by editing. See [[a:b10-09]].",
+    "checklist": [
+      "I opened **Details** and read the old value and the new value.",
+      "I understand what this will change, and can say it in one sentence.",
+      "The merchant name, amount and currency are the ones I expect.",
+      "The maker's reason makes sense and is more than \"ok\".",
+      "I am not the maker, and nobody asked me to approve without reading.",
+      "The environment badge is correct (`SANDBOX` or `LIVE`)."
+    ]
+  },
+  {
+    "id": "sg-reject-request",
+    "title": "Reject a request",
+    "screen": "Approvals",
+    "risk": "MEDIUM",
+    "irreversible": false,
+    "body": "**What this does**\nYou are refusing a proposed change. The maker will see your **Decision Reason** and may re-draft.\n\n**Check first**\n- [ ] I wrote a real reason: what I checked and why I refused.\n- [ ] My reason contains no password, code or confidential detail.\n- [ ] The reason does not mention AML or screening if a merchant could read it.\n- [ ] I checked that this is the right request, not a similar one.\n\n**Never**\n- Never reject with \"no\" or \"ok\".\n- Never reject to punish or to avoid work.\n\n**If you made a mistake**\nThe maker can create a new request. If you rejected the wrong one, tell the maker straight away so they re-submit.",
+    "checklist": [
+      "I wrote a real reason: what I checked and why I refused.",
+      "My reason contains no password, code or confidential detail.",
+      "The reason does not mention AML or screening if a merchant could read it.",
+      "I checked that this is the right request, not a similar one."
+    ]
+  },
+  {
+    "id": "sg-propose-adjustment",
+    "title": "Propose an adjustment",
+    "screen": "Adjustments",
+    "risk": "HIGH",
+    "irreversible": true,
+    "body": "**What this does**\nYou are proposing a money movement: a refund, a chargeback, a manual credit or debit, or a correction. A different Finance user must approve it.\n\n**Check first**\n- [ ] I found the original payment by its **reference**.\n- [ ] The amount does not exceed the original payment, and the currency is the same.\n- [ ] I chose the correct type and the correct account.\n- [ ] I decided deliberately whether the commission is reversed.\n- [ ] I checked whether a dispute already covers this payment, so money is not returned twice.\n- [ ] My reason says what I checked, what I found and why ([[a:b04-06]]).\n\n**Never**\n- Never propose from a screenshot, phone call or chat alone.\n- Never split one adjustment into several to avoid review.\n\n**If you made a mistake**\nIf it is still pending, withdraw it. If it was executed, propose an offsetting adjustment with **Reverse**. Never edit an executed adjustment.",
+    "checklist": [
+      "I found the original payment by its **reference**.",
+      "The amount does not exceed the original payment, and the currency is the same.",
+      "I chose the correct type and the correct account.",
+      "I decided deliberately whether the commission is reversed.",
+      "I checked whether a dispute already covers this payment, so money is not returned twice.",
+      "My reason says what I checked, what I found and why ([[a:b04-06]])."
+    ]
+  },
+  {
+    "id": "sg-reverse-adjustment",
+    "title": "Reverse an adjustment",
+    "screen": "Adjustments",
+    "risk": "HIGH",
+    "irreversible": true,
+    "body": "**What this does**\nYou are proposing a new adjustment that cancels the effect of an earlier one. The earlier one stays in the books.\n\n**Check first**\n- [ ] I confirmed the earlier adjustment is the wrong one, by reading its details.\n- [ ] I understand the money will move in the opposite direction.\n- [ ] I wrote the reason, including what went wrong the first time.\n- [ ] The merchant name, amount and currency match the earlier adjustment.\n\n**Never**\n- Never reverse to hide a mistake without telling your manager.\n- Never reverse the same adjustment twice.\n\n**If you made a mistake**\nWithdraw the pending reversal if it is wrong, and tell Finance. See [[a:b08-08]].",
+    "checklist": [
+      "I confirmed the earlier adjustment is the wrong one, by reading its details.",
+      "I understand the money will move in the opposite direction.",
+      "I wrote the reason, including what went wrong the first time.",
+      "The merchant name, amount and currency match the earlier adjustment."
+    ]
+  },
+  {
+    "id": "sg-process-cashout",
+    "title": "Process or approve a cash-out",
+    "screen": "Cashouts",
+    "risk": "CRITICAL",
+    "irreversible": true,
+    "body": "**What this does**\nYou are starting or finalising a payout of a merchant's balance to a real bank account. It cannot be undone by the platform.\n\n**Check first**\n- [ ] The destination is the merchant's verified bank account in its legal name (check the snapshot).\n- [ ] The merchant is `ACTIVE`: not suspended, no negative balance, no hold.\n- [ ] The amount is no more than the wallet balance.\n- [ ] The ledger invariant shows zero drift and payouts are not halted.\n- [ ] I am not the person who made the bank transfer (for the final approval).\n- [ ] I read the amount aloud once: the figure, the merchant and the bank.\n\n**Never**\n- Never change the bank details yourself.\n- Never process because a merchant phoned and said it is urgent.\n- Never approve and execute your own processing.\n\n**If you made a mistake**\nTell your manager and the Security Admin immediately. If a wrong transfer was made at the bank, contact the bank at once. Books are corrected by approved adjustments.",
+    "checklist": [
+      "The destination is the merchant's verified bank account in its legal name (check the snapshot).",
+      "The merchant is `ACTIVE`: not suspended, no negative balance, no hold.",
+      "The amount is no more than the wallet balance.",
+      "The ledger invariant shows zero drift and payouts are not halted.",
+      "I am not the person who made the bank transfer (for the final approval).",
+      "I read the amount aloud once: the figure, the merchant and the bank."
+    ]
+  },
+  {
+    "id": "sg-reject-cashout",
+    "title": "Reject a cash-out",
+    "screen": "Cashouts",
+    "risk": "MEDIUM",
+    "irreversible": false,
+    "body": "**What this does**\nYou are refusing a payout request. Nothing has been subtracted from the wallet yet.\n\n**Check first**\n- [ ] I wrote the reason clearly.\n- [ ] I checked the reason does not reveal AML or screening matters.\n- [ ] I told or will tell the merchant only a generic reason.\n\n**Never**\n- Never reject for an AML reason in words the merchant could read.\n\n**If you made a mistake**\nThe merchant can request again. If rejected by mistake, tell Finance so it is re-handled.",
+    "checklist": [
+      "I wrote the reason clearly.",
+      "I checked the reason does not reveal AML or screening matters.",
+      "I told or will tell the merchant only a generic reason."
+    ]
+  },
+  {
+    "id": "sg-resolve-unknown",
+    "title": "Resolve an UNKNOWN payment by hand",
+    "screen": "OperatorCases",
+    "risk": "CRITICAL",
+    "irreversible": true,
+    "body": "**What this does**\nYou are deciding that an uncertain payment **succeeded** or **failed**. This credits money or frees a link, and it needs a second person.\n\n**Check first**\n- [ ] I pressed **Inquire** and read the answer in the step log.\n- [ ] I have **evidence from the partner**: a statement line or a written reply naming our reference or the provider reference.\n- [ ] The amount and currency in the evidence match the attempt.\n- [ ] The environment is `LIVE` and this is the right attempt.\n- [ ] My reason names the evidence ([[a:b04-06]]).\n\n**Never**\n- Never resolve because it is old.\n- Never resolve from a customer's screenshot or phone call.\n- Never ask the customer to pay again.\n\n**If you made a mistake**\nTell your manager and Finance. A wrongly credited payment or a wrongly failed one is corrected by a new approved adjustment. See [[a:b07-03]].",
+    "checklist": [
+      "I pressed **Inquire** and read the answer in the step log.",
+      "I have **evidence from the partner**: a statement line or a written reply naming our reference or the provider reference.",
+      "The amount and currency in the evidence match the attempt.",
+      "The environment is `LIVE` and this is the right attempt.",
+      "My reason names the evidence ([[a:b04-06]])."
+    ]
+  },
+  {
+    "id": "sg-release-reservation",
+    "title": "Release a link reservation",
+    "screen": "OperatorCases",
+    "risk": "HIGH",
+    "irreversible": true,
+    "body": "**What this does**\nYou are freeing the slot held by an uncertain payment so that the link can be used again.\n\n**Check first**\n- [ ] I have evidence that **no money moved** for this attempt.\n- [ ] I understand the customer could still pay twice if I am wrong.\n- [ ] The case notes explain the evidence.\n\n**Never**\n- Never release while the partner might still confirm.\n- Never release to satisfy an impatient merchant.\n\n**If you made a mistake**\nIf the customer paid again, handle the second payment as an overpayment through Finance ([[a:b07-08]]) and tell your manager.",
+    "checklist": [
+      "I have evidence that **no money moved** for this attempt.",
+      "I understand the customer could still pay twice if I am wrong.",
+      "The case notes explain the evidence."
+    ]
+  },
+  {
+    "id": "sg-bulk-inquiry",
+    "title": "Run a bulk inquiry",
+    "screen": "OperatorCases",
+    "risk": "MEDIUM",
+    "irreversible": false,
+    "body": "**What this does**\nYou are asking a partner about many payments at once. It sends many calls and may be rate-limited.\n\n**Check first**\n- [ ] I limited it to the affected route and time window.\n- [ ] The partner is up (not in an open circuit-breaker period).\n- [ ] I am not repeating a bulk inquiry I just ran.\n- [ ] The environment is correct.\n\n**Never**\n- Never run it against all routes \"just in case\".\n- Never run it while the partner is down.\n\n**If you made a mistake**\nStop and tell the Gateway Admin if the partner starts refusing calls.",
+    "checklist": [
+      "I limited it to the affected route and time window.",
+      "The partner is up (not in an open circuit-breaker period).",
+      "I am not repeating a bulk inquiry I just ran.",
+      "The environment is correct."
+    ]
+  },
+  {
+    "id": "sg-approve-join-request",
+    "title": "Approve a join request",
+    "screen": "JoinRequests",
+    "risk": "HIGH",
+    "irreversible": false,
+    "body": "**What this does**\nYou are approving a business to take live payments. The merchant becomes active at once, or after a second reviewer if one is required.\n\n**Check first**\n- [ ] All seven checks are done and recorded.\n- [ ] Screening is `CLEAR`, or a possible match was decided by Compliance.\n- [ ] The payout account is in the merchant's legal name.\n- [ ] The proposed risk tier is justified.\n- [ ] No unresolved duplicate or related-party flag.\n- [ ] I am not pressured by a deadline or a sales request.\n\n**Never**\n- Never approve with an incomplete checklist.\n- Never discuss screening with the applicant.\n\n**If you made a mistake**\nTell Compliance. An approved merchant can be suspended; a wrongly approved one is reviewed under [[a:b05-08]].",
+    "checklist": [
+      "All seven checks are done and recorded.",
+      "Screening is `CLEAR`, or a possible match was decided by Compliance.",
+      "The payout account is in the merchant's legal name.",
+      "The proposed risk tier is justified.",
+      "No unresolved duplicate or related-party flag.",
+      "I am not pressured by a deadline or a sales request."
+    ]
+  },
+  {
+    "id": "sg-reject-join-request",
+    "title": "Reject a join request",
+    "screen": "JoinRequests",
+    "risk": "HIGH",
+    "irreversible": false,
+    "body": "**What this does**\nYou are refusing an application. The applicant gets a neutral reason code and may apply again after correcting the cause.\n\n**Check first**\n- [ ] I chose the reason code that fits, knowing a revealing code will be shown as `POLICY`.\n- [ ] My internal note states what I checked.\n- [ ] I am not rejecting because of a screening result without Compliance involvement.\n\n**Never**\n- Never tell the applicant about screening.\n- Never reject for a personal reason.\n\n**If you made a mistake**\nA wrongful rejection can be corrected by a new request linked to the old one. Tell your manager.",
+    "checklist": [
+      "I chose the reason code that fits, knowing a revealing code will be shown as `POLICY`.",
+      "My internal note states what I checked.",
+      "I am not rejecting because of a screening result without Compliance involvement."
+    ]
+  },
+  {
+    "id": "sg-suspend-merchant",
+    "title": "Suspend a merchant",
+    "screen": "Merchants",
+    "risk": "CRITICAL",
+    "irreversible": false,
+    "body": "**What this does**\nYou are stopping a business from taking payments and cashing out. It takes effect now and must be ratified within 24 hours.\n\n**Check first**\n- [ ] Delay would cause harm (fraud, sanctions, expired documents, merchant request).\n- [ ] I chose the correct reason code.\n- [ ] I wrote the reason so a stranger can understand it.\n- [ ] I know who will ratify it.\n- [ ] I will not tell the merchant the real reason if it is AML.\n\n**Never**\n- Never suspend casually or as a bargaining tool.\n- Never tell the merchant it is because of compliance.\n\n**If you made a mistake**\nAsk a `COMPLIANCE` or `MLRO` user to review immediately. Reinstatement needs prior approval.",
+    "checklist": [
+      "Delay would cause harm (fraud, sanctions, expired documents, merchant request).",
+      "I chose the correct reason code.",
+      "I wrote the reason so a stranger can understand it.",
+      "I know who will ratify it.",
+      "I will not tell the merchant the real reason if it is AML."
+    ]
+  },
+  {
+    "id": "sg-reinstate-merchant",
+    "title": "Reinstate a merchant",
+    "screen": "Merchants",
+    "risk": "CRITICAL",
+    "irreversible": false,
+    "body": "**What this does**\nYou are letting a suspended business take payments and cash out again. This increases risk, so a different Compliance or MLRO user must approve first.\n\n**Check first**\n- [ ] The reason for suspension is resolved and documented.\n- [ ] Compliance agrees (without telling the merchant why it was restricted).\n- [ ] Documents are current.\n- [ ] No open case or hold is unresolved.\n\n**Never**\n- Never reinstate on a merchant's request alone.\n- Never use the emergency path.\n\n**If you made a mistake**\nSuspend again if reinstated by mistake and tell Compliance.",
+    "checklist": [
+      "The reason for suspension is resolved and documented.",
+      "Compliance agrees (without telling the merchant why it was restricted).",
+      "Documents are current.",
+      "No open case or hold is unresolved."
+    ]
+  },
+  {
+    "id": "sg-edit-merchant-sensitive",
+    "title": "Submit a sensitive merchant change",
+    "screen": "Merchants",
+    "risk": "HIGH",
+    "irreversible": false,
+    "body": "**What this does**\nYou are asking a second person to approve a change to a sensitive field such as payout bank details, tax ID or risk tier.\n\n**Check first**\n- [ ] The change was requested in the merchant's own portal or in writing, not by phone.\n- [ ] The new bank account is in the merchant's legal name.\n- [ ] Supporting documents are attached.\n- [ ] I wrote the reason and the old and new values are correct.\n\n**Never**\n- Never edit payout details after a phone request.\n- Never include secrets in the reason.\n\n**If you made a mistake**\nWithdraw the request before a checker acts. If executed wrongly, submit a corrective change and tell Security.",
+    "checklist": [
+      "The change was requested in the merchant's own portal or in writing, not by phone.",
+      "The new bank account is in the merchant's legal name.",
+      "Supporting documents are attached.",
+      "I wrote the reason and the old and new values are correct."
+    ]
+  },
+  {
+    "id": "sg-aml-propose-resolution",
+    "title": "Propose an AML case resolution",
+    "screen": "AmlCases",
+    "risk": "CRITICAL",
+    "irreversible": true,
+    "body": "**What this does**\nYou are proposing to release, void, freeze or escalate a case. The MLRO approves. Money moves only after approval.\n\n**Check first**\n- [ ] I reviewed all evidence and the rule that caused the case.\n- [ ] My rationale states what I found and why the resolution is right.\n- [ ] The rationale contains nothing a merchant could later read.\n- [ ] I considered whether a report is required.\n- [ ] I am not the checker.\n\n**Never**\n- Never tell the merchant or customer anything about the case.\n- Never release to meet a deadline.\n\n**If you made a mistake**\nWithdraw before the MLRO acts. Tell the MLRO if you proposed in error.",
+    "checklist": [
+      "I reviewed all evidence and the rule that caused the case.",
+      "My rationale states what I found and why the resolution is right.",
+      "The rationale contains nothing a merchant could later read.",
+      "I considered whether a report is required.",
+      "I am not the checker."
+    ]
+  },
+  {
+    "id": "sg-aml-disposition",
+    "title": "Decide a screening match",
+    "screen": "AmlScreenings",
+    "risk": "HIGH",
+    "irreversible": false,
+    "body": "**What this does**\nYou are deciding whether a possible name match is a false positive, a true match or needs escalation.\n\n**Check first**\n- [ ] I compared date of birth, nationality, ID and other attributes.\n- [ ] I wrote the evidence for my decision.\n- [ ] If I suppress future matches I set an expiry date.\n- [ ] If it may be a sanctions match I will escalate, not decide alone.\n\n**Never**\n- Never mark a match false because the merchant is large or important.\n- Never discuss the result outside Compliance.\n\n**If you made a mistake**\nTell the MLRO immediately; a wrong disposition can be re-opened.",
+    "checklist": [
+      "I compared date of birth, nationality, ID and other attributes.",
+      "I wrote the evidence for my decision.",
+      "If I suppress future matches I set an expiry date.",
+      "If it may be a sanctions match I will escalate, not decide alone."
+    ]
+  },
+  {
+    "id": "sg-aml-rule-change",
+    "title": "Create or change an AML rule",
+    "screen": "AmlRules",
+    "risk": "CRITICAL",
+    "irreversible": false,
+    "body": "**What this does**\nYou are changing the rules that hold money and open cases. The MLRO must approve.\n\n**Check first**\n- [ ] I ran the dry-run and read how many holds and cases it would create.\n- [ ] I know whether this tightens or loosens the rule.\n- [ ] If loosening, I accept that it needs full review.\n- [ ] The scope is correct.\n\n**Never**\n- Never loosen a rule to reduce workload.\n- Never test on live.\n\n**If you made a mistake**\nWithdraw the proposal. If activated wrongly, propose the corrective change with the MLRO.",
+    "checklist": [
+      "I ran the dry-run and read how many holds and cases it would create.",
+      "I know whether this tightens or loosens the rule.",
+      "If loosening, I accept that it needs full review.",
+      "The scope is correct."
+    ]
+  },
+  {
+    "id": "sg-aml-report",
+    "title": "Create or save a regulatory report",
+    "screen": "AmlReports",
+    "risk": "CRITICAL",
+    "irreversible": true,
+    "body": "**What this does**\nYou are drafting or saving a report to the authority. Once approved and submitted it is frozen.\n\n**Check first**\n- [ ] The reporting rule is `CONFIRMED`, not `PROVISIONAL`.\n- [ ] Facts in the report match the case.\n- [ ] The report is stored as confidential.\n- [ ] No other system or person is told about it.\n\n**Never**\n- Never tell the subject.\n- Never file from a provisional rule.\n\n**If you made a mistake**\nCorrections are new linked reports. Tell the MLRO.",
+    "checklist": [
+      "The reporting rule is `CONFIRMED`, not `PROVISIONAL`.",
+      "Facts in the report match the case.",
+      "The report is stored as confidential.",
+      "No other system or person is told about it."
+    ]
+  },
+  {
+    "id": "sg-submit-gateway-version",
+    "title": "Submit a gateway version for approval",
+    "screen": "GatewayWizard",
+    "risk": "CRITICAL",
+    "irreversible": false,
+    "body": "**What this does**\nYou are asking a Security Admin to approve a configuration for live money.\n\n**Check first**\n- [ ] I read the compiled request preview and the amount pipeline results.\n- [ ] The 15-scenario suite and contract tests are green.\n- [ ] The money step cannot retry automatically.\n- [ ] Every weak channel must ask the partner.\n- [ ] I named a rollback version and a canary plan.\n- [ ] I did not use a real secret in any example.\n\n**Never**\n- Never submit with a failing gate.\n- Never skip reading the preview.\n\n**If you made a mistake**\nWithdraw the submission. If it went live badly, roll back to the named version and follow [[a:b10-02]].",
+    "checklist": [
+      "I read the compiled request preview and the amount pipeline results.",
+      "The 15-scenario suite and contract tests are green.",
+      "The money step cannot retry automatically.",
+      "Every weak channel must ask the partner.",
+      "I named a rollback version and a canary plan.",
+      "I did not use a real secret in any example."
+    ]
+  },
+  {
+    "id": "sg-edit-route",
+    "title": "Create or change a route",
+    "screen": "Routes",
+    "risk": "HIGH",
+    "irreversible": false,
+    "body": "**What this does**\nYou are changing which payment methods customers see, how traffic is split and what fees apply.\n\n**Check first**\n- [ ] I know which rail and gateway this route joins.\n- [ ] Minimum, maximum and daily cap are correct and in LYD.\n- [ ] The credential policy and scope are what I intend.\n- [ ] The cost model matches the contract.\n- [ ] I know this affects only new payments.\n\n**Never**\n- Never raise a limit to make a test pass.\n- Never resume a route with an open breaker without the Gateway Admin.\n\n**If you made a mistake**\nRevert the change through the normal review; pause the route if customers are harmed.",
+    "checklist": [
+      "I know which rail and gateway this route joins.",
+      "Minimum, maximum and daily cap are correct and in LYD.",
+      "The credential policy and scope are what I intend.",
+      "The cost model matches the contract.",
+      "I know this affects only new payments."
+    ]
+  },
+  {
+    "id": "sg-ai-import-draft",
+    "title": "Create a draft from an AI-generated spec",
+    "screen": "GatewayAiImport",
+    "risk": "HIGH",
+    "irreversible": false,
+    "body": "**What this does**\nYou are saving the AI-generated configuration as a **draft**. Nothing goes live.\n\n**Check first**\n- [ ] The four verification layers all passed.\n- [ ] I read the preview and compared it with the partner's own document.\n- [ ] I typed secrets only into the platform's fields, never into the AI.\n- [ ] I chose Create New or New Version deliberately.\n\n**Never**\n- Never paste a real secret into an AI.\n- Never treat a passed check as approval.\n\n**If you made a mistake**\nDelete or supersede the draft; it has no effect on payments.",
+    "checklist": [
+      "The four verification layers all passed.",
+      "I read the preview and compared it with the partner's own document.",
+      "I typed secrets only into the platform's fields, never into the AI.",
+      "I chose Create New or New Version deliberately."
+    ]
+  },
+  {
+    "id": "sg-run-reconciliation",
+    "title": "Run a statement file",
+    "screen": "Reconciliation",
+    "risk": "HIGH",
+    "irreversible": false,
+    "body": "**What this does**\nYou are matching a partner's statement against our books. Problem lines open cases.\n\n**Check first**\n- [ ] The file is the right partner, the right period and the right source.\n- [ ] The preview shows columns read correctly (amount, fee, date, time zone).\n- [ ] This file has not been loaded before.\n- [ ] I know what to do with mismatches ([[a:b08-06]]).\n\n**Never**\n- Never edit the file to make it match.\n- Never run a file from an unknown source.\n\n**If you made a mistake**\nTell Finance. A wrong run is corrected through cases and adjustments, never by editing.",
+    "checklist": [
+      "The file is the right partner, the right period and the right source.",
+      "The preview shows columns read correctly (amount, fee, date, time zone).",
+      "This file has not been loaded before.",
+      "I know what to do with mismatches ([[a:b08-06]])."
+    ]
+  }
+]

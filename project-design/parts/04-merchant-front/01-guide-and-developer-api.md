@@ -22,7 +22,7 @@ tests:
 gaps:
   - The sample webhook payload (`X-PG-Signature`) is illustrative: outbound merchant webhooks are not implemented.
   - `redirectDomainAllowlist` on applications is stored but never enforced (no `REDIRECT_DOMAIN_NOT_ALLOWED` check exists, and links have no `redirectUrl`).
-  - The merchant guide ships the implemented 10 operations chapters and 5 developer chapters, not the future guide v2 model.
+  - The merchant guide ships the implemented 10 operations chapters and 5 developer chapters, not a guide-v2 model (the admin guide v2 is separate).
   - The first-5 checklist is stored in localStorage and auto-detected from list endpoints; completion is a convenience signal, not a server-issued onboarding status.
   - The fee calculator is client-side and estimates the gateway fee; it does not call the commission engine.
   - The code generator displays a sample bearer token in the browser; operators must use a real scoped token and never share it.
@@ -40,7 +40,7 @@ This part owns the merchant-facing interactive guide and developer API reference
 - The guide page, role filtering, chapter search, first-5 checklist, fee/net settlement calculator, code generator, and webhook verification checks.
 - The dedicated developer guide page and its code-template viewer.
 
-It does not own the external API implementation or the merchant portal data pages. It also does not present the future guide v2 workstream as current.
+It does not own the external API implementation or the merchant portal data pages. It also does not reuse the admin guide v2 content model.
 
 ## 2. Design intent (extracted and synthesized from ./design)
 
@@ -200,7 +200,7 @@ The page uses the same D-01..D-05 content as the operations guide's developer ch
 7. **Redirect URLs must be allowlisted.** The guide teaches this; the external API and checkout enforce it.
 8. **Webhook verification uses the raw body.** The guide's signature checks are normative integration guidance.
 9. **First-5 checklist state is local.** It is not a server permission or activation record.
-10. **Guide v2 is not current.** Merchant content remains the 10+5 baseline until a future implementation lands.
+10. **Admin guide v2 is separate.** Merchant content remains the 10+5 baseline; the 14-book admin guide is implemented only for the admin portal.
 
 ## 5. Data / API / config / deployment surface
 
@@ -248,7 +248,7 @@ The page uses the same D-01..D-05 content as the operations guide's developer ch
 
 ### Missing / deferred
 
-- No guide v2 content, context map, safeguard cards, playbook or read tracking for merchants.
+- No admin-guide-v2 content, context map, safeguard cards, playbook or read tracking for merchants.
 - No server-side checklist/progress record for the first-5 flow.
 - No interactive API sandbox that executes calls against a sandbox token.
 - No generated SDK package.
@@ -258,7 +258,7 @@ The page uses the same D-01..D-05 content as the operations guide's developer ch
 - **Security risk:** the token field is a plaintext browser input; a real token can be exposed on screen or in a screenshot. Use a scoped test token and rotate it.
 - **Accuracy risk:** the fee calculator's gateway-fee estimate is not the ledger truth.
 - **Training risk:** the first-5 checklist is local and can be manually toggled; it must not be used as proof of activation.
-- **Doc risk:** the 10+5 baseline is current; guide v2 is future and must not be described as shipped.
+- **Doc risk:** the merchant 10+5 baseline is current; the admin guide v2 is shipped only in `admin-front`.
 
 ## 8. Verification and tests
 

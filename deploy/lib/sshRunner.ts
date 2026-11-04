@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, chmodSync, rmSync } from "node:fs";
-import { homedir, networkInterfaces } from "node:os";
+import { homedir, networkInterfaces, userInfo } from "node:os";
 import { dirname, resolve } from "node:path";
 import type { SshTarget } from "./hostPlanner";
 
@@ -44,6 +44,17 @@ export const isLocalTarget = (target: SshTarget): boolean => {
   }
   return false;
 };
+
+/**
+ * The account that owns files for a target. Remote targets use the SSH user;
+ * local targets run commands as the orchestrator's OS user, so a configured
+ * SSH name that does not exist locally must not be used for chown/install.
+ */
+export const effectiveTargetUser = (target: SshTarget): string =>
+  isLocalTarget(target) ? userInfo().username : target.user;
+
+export const effectiveTargetHome = (target: SshTarget): string =>
+  isLocalTarget(target) ? userInfo().homedir : `/home/${target.user}`;
 
 const shellQuote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`;
 

@@ -21,6 +21,7 @@ import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+import { useSafeguard } from "@/components/guide/useSafeguard";
 import { FormModal } from "@/components/ui/FormModal";
 import { FormField } from "@/components/ui/FormField";
 import { FormChecklist } from "@/components/ui/FormChecklist";
@@ -298,6 +299,7 @@ const AmlReportsPage = dc(() => {
         }
     };
     const reportChecklistComplete = computed(() => !showChecklists || REPORT_CHECKS.every((check) => reportChecklist.value[check.key] === true));
+    const reportSafeguard = useSafeguard("sg-aml-report");
     const submit = async () => {
         createError.value = "";
         if (!form.value.reportingRuleId || !form.value.periodStart || !form.value.periodEnd) {
@@ -308,6 +310,7 @@ const AmlReportsPage = dc(() => {
             showSnackBar({ type: "warning", message: t("Complete all report checklist items before drafting") });
             return;
         }
+        if (!(await reportSafeguard.confirm())) return;
         actionLoading.value = true;
         try {
             const response = await api.post(urlsMap.amlReports, {
@@ -463,6 +466,7 @@ const AmlReportsPage = dc(() => {
             showSnackBar({ type: "warning", message: t("A rejection reason is required") });
             return;
         }
+        if (!(await reportSafeguard.confirm())) return;
         ackLoading.value = true;
         try {
             const response = await api.post(urlsMap.amlReportAcknowledge(selected.value.id), {

@@ -44,6 +44,12 @@ export const academyProgressSchema = z
           .record(z.string().max(80), z.union([z.number().min(0).max(100), quizResultSchema]))
           .optional(),
         lastModuleId: z.string().max(40).optional(),
+        guideRead: z
+          .record(
+            z.string().max(120),
+            z.object({ v: z.string().max(20), at: z.string().max(60) }).strict(),
+          )
+          .optional(),
       })
       .strict(),
   })

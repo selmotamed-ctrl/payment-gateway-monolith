@@ -186,7 +186,7 @@ This is the important distinction between design intent and code:
 
 ### 3.8 Separation from admin/merchant help
 
-- Admin contextual help uses `GUIDE_ROUTE_HELP` and the 12-book guide; it does not read `supportConfig`.
+- Admin contextual help uses the generated 23-screen context map and the 14-book guide; it does not read `supportConfig`.
 - Merchant contextual help uses M/D chapters; it does not read `supportConfig`.
 - Checkout help uses `supportConfig` and `helpGuide`; it does not read admin/merchant guide content.
 - The admin `/settings/checkout-help` page is the only authoring surface for the platform support config.
@@ -256,7 +256,7 @@ This is the important distinction between design intent and code:
 - No per-merchant support override; support is platform-wide.
 - No content version displayed to the payer.
 - No help-content search or FAQ deep links.
-- No guide v2 context/playbook/safeguard model for checkout.
+- No admin-guide-v2 context/playbook/safeguard model is reused for checkout.
 
 ### Known bugs / risks
 
@@ -265,7 +265,7 @@ This is the important distinction between design intent and code:
 - **Content risk:** per-rail guides are seeded code; a rail whose guide is stale or missing gives the payer less help than expected.
 - **Support risk:** the merchant contact comes from link data; if the merchant's phone/email is missing or stale, the payer sees no merchant channel.
 - **Security risk:** support flows must never ask for OTP/PIN; the guide and default FAQ reinforce this, but contact channels are external.
-- **Future-doc risk:** guide v2 is not the current checkout help implementation.
+- **Doc risk:** the admin guide v2 is implemented for the admin portal, but checkout help remains a separate data-driven product.
 
 ## 8. Verification and tests
 
@@ -282,7 +282,7 @@ The core support test requires PostgreSQL/Redis; the Playwright suites require t
 
 - `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` — checkout/help deployment context.
 - `design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md` — collection-mode and trustworthy-confirmation terminology used by the payer guidance.
-- `design/07-guides-and-academy/guide_system_design_and_content.md` — future guide workstream; not current checkout help behavior.
+- `design/07-guides-and-academy/guide_system_design_and_content.md` — admin guide content; not checkout help behavior.
 
 ### Code paths
 

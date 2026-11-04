@@ -1,0 +1,1212 @@
+{
+  "ledger-events": {
+    "defaults": {
+      "A": "100",
+      "rate": "3",
+      "fee": "0.8",
+      "provFee": "1",
+      "sur": "comm",
+      "var": "0.1",
+      "walletStart": "40"
+    },
+    "derived": {
+      "comm": "round4(A*rate/100)",
+      "net": "A-comm",
+      "hold": "A"
+    },
+    "accounts": [
+      {
+        "id": "TREASURY",
+        "class": "LEFT",
+        "normal": "DEBIT"
+      },
+      {
+        "id": "GATEWAY_CLEARING",
+        "class": "LEFT",
+        "normal": "DEBIT"
+      },
+      {
+        "id": "COMMISSION_RECEIVABLE",
+        "class": "LEFT",
+        "normal": "DEBIT"
+      },
+      {
+        "id": "MERCHANT_WALLET",
+        "class": "RIGHT_PLUS",
+        "normal": "CREDIT"
+      },
+      {
+        "id": "PLATFORM_INCOME",
+        "class": "RIGHT_PLUS",
+        "normal": "CREDIT"
+      },
+      {
+        "id": "GATEWAY_FEE_ACCRUAL",
+        "class": "RIGHT_PLUS",
+        "normal": "CREDIT"
+      },
+      {
+        "id": "AML_HOLD",
+        "class": "RIGHT_PLUS",
+        "normal": "CREDIT"
+      },
+      {
+        "id": "CHARGEBACK_RESERVE",
+        "class": "RIGHT_PLUS",
+        "normal": "CREDIT"
+      },
+      {
+        "id": "SUSPENSE",
+        "class": "RIGHT_PLUS",
+        "normal": "CREDIT"
+      },
+      {
+        "id": "PROVIDER_FEE_EXPENSE",
+        "class": "RIGHT_MINUS",
+        "normal": "DEBIT"
+      },
+      {
+        "id": "GATEWAY_FEE_EXPENSE",
+        "class": "RIGHT_MINUS",
+        "normal": "DEBIT"
+      }
+    ],
+    "equation": "sum(LEFT) == sum(RIGHT_PLUS) - sum(RIGHT_MINUS), each balance = debits-credits for DEBIT-normal accounts and credits-debits for CREDIT-normal accounts",
+    "events": [
+      {
+        "id": "E01",
+        "title": "Fee taken at source (Entry 1)",
+        "entries": [
+          {
+            "label": "Confirmation",
+            "lines": [
+              {
+                "account": "TREASURY",
+                "side": "DR",
+                "amount": "A-provFee",
+                "why": "We hold the money after the partner took its fee."
+              },
+              {
+                "account": "PROVIDER_FEE_EXPENSE",
+                "side": "DR",
+                "amount": "provFee",
+                "why": "The partner's fee is our cost."
+              },
+              {
+                "account": "MERCHANT_WALLET",
+                "side": "CR",
+                "amount": "A-comm",
+                "why": "We now owe the merchant the amount minus our commission."
+              },
+              {
+                "account": "PLATFORM_INCOME",
+                "side": "CR",
+                "amount": "comm",
+                "why": "Our commission is earned."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "E02",
+        "title": "Partner holds the money, fee accrued (Entry 2)",
+        "entries": [
+          {
+            "label": "Confirmation",
+            "lines": [
+              {
+                "account": "GATEWAY_CLEARING",
+                "side": "DR",
+                "amount": "A",
+                "why": "The partner owes us the full amount."
+              },
+              {
+                "account": "GATEWAY_FEE_EXPENSE",
+                "side": "DR",
+                "amount": "fee",
+                "why": "The partner's fee is recognised as a cost now."
+              },
+              {
+                "account": "MERCHANT_WALLET",
+                "side": "CR",
+                "amount": "A-comm",
+                "why": "We owe the merchant the net amount."
+              },
+              {
+                "account": "PLATFORM_INCOME",
+                "side": "CR",
+                "amount": "comm",
+                "why": "Our commission is earned."
+              },
+              {
+                "account": "GATEWAY_FEE_ACCRUAL",
+                "side": "CR",
+                "amount": "fee",
+                "why": "We will pay the fee later, so we record that we owe it."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "E03",
+        "title": "Settlement sweep (Entry 3)",
+        "entries": [
+          {
+            "label": "Statement settles",
+            "lines": [
+              {
+                "account": "TREASURY",
+                "side": "DR",
+                "amount": "A-fee",
+                "why": "The partner paid us the net amount."
+              },
+              {
+                "account": "GATEWAY_FEE_ACCRUAL",
+                "side": "DR",
+                "amount": "fee",
+                "why": "The accrued fee is now settled."
+              },
+              {
+                "account": "GATEWAY_CLEARING",
+                "side": "CR",
+                "amount": "A",
+                "why": "The partner no longer owes us."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "E04",
+        "title": "Fee true-up (Entry 4)",
+        "entries": [
+          {
+            "label": "Variance",
+            "lines": [
+              {
+                "account": "GATEWAY_FEE_EXPENSE",
+                "side": "DR",
+                "amount": "var",
+                "why": "The real fee was higher than accrued."
+              },
+              {
+                "account": "GATEWAY_FEE_ACCRUAL",
+                "side": "CR",
+                "amount": "var",
+                "why": "We owe the extra amount."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "E05",
+        "title": "Payer surcharge (Entry 5)",
+        "entries": [
+          {
+            "label": "Confirmation",
+            "lines": [
+              {
+                "account": "GATEWAY_CLEARING",
+                "side": "DR",
+                "amount": "A+sur",
+                "why": "The payer paid the link amount plus the surcharge."
+              },
+              {
+                "account": "GATEWAY_FEE_EXPENSE",
+                "side": "DR",
+                "amount": "fee",
+                "why": "The partner's fee is a cost."
+              },
+              {
+                "account": "MERCHANT_WALLET",
+                "side": "CR",
+                "amount": "A",
+                "why": "The merchant gets the full link amount."
+              },
+              {
+                "account": "PLATFORM_INCOME",
+                "side": "CR",
+                "amount": "sur",
+                "why": "The surcharge is our commission."
+              },
+              {
+                "account": "GATEWAY_FEE_ACCRUAL",
+                "side": "CR",
+                "amount": "fee",
+                "why": "We owe the partner's fee later."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "E06",
+        "title": "Direct to merchant (Entry 6)",
+        "entries": [
+          {
+            "label": "At confirmation",
+            "lines": [
+              {
+                "account": "COMMISSION_RECEIVABLE",
+                "side": "DR",
+                "amount": "comm",
+                "why": "The merchant owes us the commission."
+              },
+              {
+                "account": "PLATFORM_INCOME",
+                "side": "CR",
+                "amount": "comm",
+                "why": "We earned it."
+              }
+            ]
+          },
+          {
+            "label": "At netting",
+            "lines": [
+              {
+                "account": "MERCHANT_WALLET",
+                "side": "DR",
+                "amount": "comm",
+                "why": "We take the commission off what we owe the merchant."
+              },
+              {
+                "account": "COMMISSION_RECEIVABLE",
+                "side": "CR",
+                "amount": "comm",
+                "why": "The receivable is cleared."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "E07",
+        "title": "AML hold and release (Entry 7)",
+        "entries": [
+          {
+            "label": "At confirmation",
+            "lines": [
+              {
+                "account": "GATEWAY_CLEARING",
+                "side": "DR",
+                "amount": "A",
+                "why": "The partner owes us the amount."
+              },
+              {
+                "account": "AML_HOLD",
+                "side": "CR",
+                "amount": "hold",
+                "why": "The money is held; no commission yet."
+              }
+            ]
+          },
+          {
+            "label": "At release",
+            "lines": [
+              {
+                "account": "AML_HOLD",
+                "side": "DR",
+                "amount": "hold",
+                "why": "The hold ends."
+              },
+              {
+                "account": "MERCHANT_WALLET",
+                "side": "CR",
+                "amount": "A-comm",
+                "why": "The merchant is credited."
+              },
+              {
+                "account": "PLATFORM_INCOME",
+                "side": "CR",
+                "amount": "comm",
+                "why": "Commission is recognised only now."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "E08",
+        "title": "Cash-out subtracted (Entry 8)",
+        "entries": [
+          {
+            "label": "Subtraction",
+            "lines": [
+              {
+                "account": "MERCHANT_WALLET",
+                "side": "DR",
+                "amount": "A",
+                "why": "We owe the merchant less."
+              },
+              {
+                "account": "TREASURY",
+                "side": "CR",
+                "amount": "A",
+                "why": "Our cash left to the merchant's bank."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "E09",
+        "title": "Full refund (Entry 9)",
+        "entries": [
+          {
+            "label": "Refund",
+            "lines": [
+              {
+                "account": "MERCHANT_WALLET",
+                "side": "DR",
+                "amount": "A-comm",
+                "why": "The merchant's share is returned."
+              },
+              {
+                "account": "PLATFORM_INCOME",
+                "side": "DR",
+                "amount": "comm",
+                "why": "Our commission is reversed."
+              },
+              {
+                "account": "TREASURY",
+                "side": "CR",
+                "amount": "A",
+                "why": "The money goes back to the payer."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "E10",
+        "title": "Chargeback reserved, then lost (Entry 10)",
+        "entries": [
+          {
+            "label": "At dispute",
+            "lines": [
+              {
+                "account": "MERCHANT_WALLET",
+                "side": "DR",
+                "amount": "A-comm",
+                "why": "The merchant's share is set aside."
+              },
+              {
+                "account": "PLATFORM_INCOME",
+                "side": "DR",
+                "amount": "comm",
+                "why": "Commission reversed."
+              },
+              {
+                "account": "CHARGEBACK_RESERVE",
+                "side": "CR",
+                "amount": "A",
+                "why": "Money held for the dispute."
+              }
+            ]
+          },
+          {
+            "label": "If lost",
+            "lines": [
+              {
+                "account": "CHARGEBACK_RESERVE",
+                "side": "DR",
+                "amount": "A",
+                "why": "The reserve is used."
+              },
+              {
+                "account": "TREASURY",
+                "side": "CR",
+                "amount": "A",
+                "why": "The money leaves to the payer or scheme."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "E11",
+        "title": "AML hold voided and returned (Entry 11)",
+        "entries": [
+          {
+            "label": "Void",
+            "lines": [
+              {
+                "account": "AML_HOLD",
+                "side": "DR",
+                "amount": "hold",
+                "why": "The hold ends."
+              },
+              {
+                "account": "TREASURY",
+                "side": "CR",
+                "amount": "hold",
+                "why": "The money is returned to the payer."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "E12",
+        "title": "Chargeback won (Entry 12)",
+        "entries": [
+          {
+            "label": "Release reserve",
+            "lines": [
+              {
+                "account": "CHARGEBACK_RESERVE",
+                "side": "DR",
+                "amount": "A",
+                "why": "The reserve is released."
+              },
+              {
+                "account": "MERCHANT_WALLET",
+                "side": "CR",
+                "amount": "A-comm",
+                "why": "The merchant gets its share back."
+              },
+              {
+                "account": "PLATFORM_INCOME",
+                "side": "CR",
+                "amount": "comm",
+                "why": "Commission is restored."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "E13",
+        "title": "NeomPay confirmation (Entry 13)",
+        "entries": [
+          {
+            "label": "Confirmation",
+            "lines": [
+              {
+                "account": "TREASURY",
+                "side": "DR",
+                "amount": "A",
+                "why": "First-party money goes straight to treasury."
+              },
+              {
+                "account": "MERCHANT_WALLET",
+                "side": "CR",
+                "amount": "A-comm",
+                "why": "The merchant is credited."
+              },
+              {
+                "account": "PLATFORM_INCOME",
+                "side": "CR",
+                "amount": "comm",
+                "why": "Commission earned."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "E14",
+        "title": "NeomPay refund (Entry 14)",
+        "entries": [
+          {
+            "label": "Refund",
+            "lines": [
+              {
+                "account": "MERCHANT_WALLET",
+                "side": "DR",
+                "amount": "A-comm",
+                "why": "The merchant's share is returned."
+              },
+              {
+                "account": "PLATFORM_INCOME",
+                "side": "DR",
+                "amount": "comm",
+                "why": "Commission reversed."
+              },
+              {
+                "account": "TREASURY",
+                "side": "CR",
+                "amount": "A",
+                "why": "The money returns to the payer's wallet."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "E15",
+        "title": "Chargeback with too little in the wallet (Entry 15)",
+        "showBalance": {
+          "label": "Merchant wallet after",
+          "expr": "walletStart-A+comm"
+        },
+        "entries": [
+          {
+            "label": "Chargeback approved",
+            "lines": [
+              {
+                "account": "MERCHANT_WALLET",
+                "side": "DR",
+                "amount": "A-comm",
+                "why": "The wallet may go negative up to its ceiling."
+              },
+              {
+                "account": "PLATFORM_INCOME",
+                "side": "DR",
+                "amount": "comm",
+                "why": "Commission reversed."
+              },
+              {
+                "account": "CHARGEBACK_RESERVE",
+                "side": "CR",
+                "amount": "A",
+                "why": "Money set aside for the dispute."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "E16",
+        "title": "Late success on an already-paid link",
+        "entries": [
+          {
+            "label": "Parked",
+            "lines": [
+              {
+                "account": "GATEWAY_CLEARING",
+                "side": "DR",
+                "amount": "A",
+                "why": "The partner collected the money."
+              },
+              {
+                "account": "SUSPENSE",
+                "side": "CR",
+                "amount": "A",
+                "why": "It does not belong to anyone yet; a refund is drafted for approval."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "visible-rails": {
+    "evaluationOrder": [
+      "1",
+      "2",
+      "3",
+      "routes(4-8)",
+      "9"
+    ],
+    "predicates": [
+      {
+        "n": 1,
+        "id": "application-whitelist",
+        "fails": "The merchant's application does not allow this payment method."
+      },
+      {
+        "n": 2,
+        "id": "link-whitelist",
+        "fails": "This payment link does not allow this payment method."
+      },
+      {
+        "n": 3,
+        "id": "commission-profile",
+        "fails": "No live commission profile covers this payment method at this amount."
+      },
+      {
+        "n": 4,
+        "id": "route-active",
+        "fails": "No route for this payment method is active."
+      },
+      {
+        "n": 5,
+        "id": "route-healthy",
+        "fails": "The route is not healthy (degraded or its circuit breaker is open)."
+      },
+      {
+        "n": 6,
+        "id": "limits",
+        "fails": "The amount is outside the route's minimum or maximum, or it would pass the route's daily cap."
+      },
+      {
+        "n": 7,
+        "id": "maintenance-scope",
+        "fails": "The route is in a maintenance window, or this merchant, application, risk tier or channel is outside its scope."
+      },
+      {
+        "n": 8,
+        "id": "credential-verified",
+        "fails": "The route's credential set is not verified."
+      },
+      {
+        "n": 9,
+        "id": "currency-blocked",
+        "fails": "The payment method's currency differs from the link's currency, or the method is blocked."
+      }
+    ],
+    "rule": "Predicates 1,2,3 and 9 are checked on the rail. Predicates 4-8 are checked per route in order 4,5,6,7,8; a route passes only if all five pass. The rail is visible if at least one route passes. If hidden, report the first failing predicate in order 1,2,3, then the best route's failure (the route that passed the most of 4-8, first in list on ties), then 9.",
+    "defaults": {
+      "amount": "100",
+      "currency": "LYD",
+      "applicationWhitelist": null,
+      "linkWhitelist": null,
+      "timeOfDay": "12:00"
+    },
+    "rails": [
+      {
+        "code": "sadad",
+        "name": "Sadad",
+        "currency": "LYD",
+        "blocked": false,
+        "commissionProfile": true,
+        "routes": [
+          {
+            "id": "sadad-direct",
+            "status": "ACTIVE",
+            "health": "HEALTHY",
+            "min": "1",
+            "max": "2000",
+            "dailyCap": "50000",
+            "dailyProcessed": "10000",
+            "maintenance": [
+              {
+                "from": "02:00",
+                "to": "03:00"
+              }
+            ],
+            "scopeOk": true,
+            "credential": "VERIFIED"
+          }
+        ]
+      },
+      {
+        "code": "moamalat_card",
+        "name": "Moamalat Card",
+        "currency": "LYD",
+        "blocked": false,
+        "commissionProfile": true,
+        "routes": [
+          {
+            "id": "moamalat-direct",
+            "status": "ACTIVE",
+            "health": "HEALTHY",
+            "min": "5",
+            "max": "100000",
+            "dailyCap": "500000",
+            "dailyProcessed": "100000",
+            "maintenance": [],
+            "scopeOk": true,
+            "credential": "VERIFIED"
+          }
+        ]
+      },
+      {
+        "code": "edfali",
+        "name": "Edfali",
+        "currency": "LYD",
+        "blocked": false,
+        "commissionProfile": true,
+        "routes": [
+          {
+            "id": "edfali-direct",
+            "status": "ACTIVE",
+            "health": "HEALTHY",
+            "min": "1",
+            "max": "1000",
+            "dailyCap": "20000",
+            "dailyProcessed": "19950",
+            "maintenance": [],
+            "scopeOk": true,
+            "credential": "VERIFIED"
+          },
+          {
+            "id": "edfali-aggregator",
+            "status": "ACTIVE",
+            "health": "OPEN_BREAKER",
+            "min": "1",
+            "max": "1000",
+            "dailyCap": "100000",
+            "dailyProcessed": "0",
+            "maintenance": [],
+            "scopeOk": true,
+            "credential": "VERIFIED"
+          }
+        ]
+      },
+      {
+        "code": "visa_usd",
+        "name": "Visa / Mastercard (USD)",
+        "currency": "USD",
+        "blocked": false,
+        "commissionProfile": true,
+        "routes": [
+          {
+            "id": "mpgs-usd",
+            "status": "ACTIVE",
+            "health": "HEALTHY",
+            "min": "1",
+            "max": "5000",
+            "dailyCap": "100000",
+            "dailyProcessed": "0",
+            "maintenance": [],
+            "scopeOk": true,
+            "credential": "VERIFIED"
+          }
+        ]
+      },
+      {
+        "code": "neompay",
+        "name": "NeomPay",
+        "currency": "LYD",
+        "blocked": false,
+        "commissionProfile": false,
+        "routes": [
+          {
+            "id": "neompay-internal",
+            "status": "ACTIVE",
+            "health": "HEALTHY",
+            "min": "1",
+            "max": "20000",
+            "dailyCap": "500000",
+            "dailyProcessed": "0",
+            "maintenance": [],
+            "scopeOk": true,
+            "credential": "VERIFIED"
+          }
+        ]
+      }
+    ],
+    "vectors": [
+      {
+        "id": "V1",
+        "input": {},
+        "expected": {
+          "sadad": "VISIBLE",
+          "moamalat_card": "VISIBLE",
+          "edfali": "HIDDEN:6",
+          "visa_usd": "HIDDEN:9",
+          "neompay": "HIDDEN:3"
+        }
+      },
+      {
+        "id": "V2",
+        "input": {
+          "timeOfDay": "02:30"
+        },
+        "expected": {
+          "sadad": "HIDDEN:7",
+          "moamalat_card": "VISIBLE",
+          "edfali": "HIDDEN:6",
+          "visa_usd": "HIDDEN:9",
+          "neompay": "HIDDEN:3"
+        }
+      },
+      {
+        "id": "V3",
+        "input": {
+          "amount": "3000"
+        },
+        "expected": {
+          "sadad": "HIDDEN:6",
+          "moamalat_card": "VISIBLE",
+          "edfali": "HIDDEN:6",
+          "visa_usd": "HIDDEN:9",
+          "neompay": "HIDDEN:3"
+        }
+      },
+      {
+        "id": "V4",
+        "input": {
+          "applicationWhitelist": [
+            "sadad"
+          ]
+        },
+        "expected": {
+          "sadad": "VISIBLE",
+          "moamalat_card": "HIDDEN:1",
+          "edfali": "HIDDEN:1",
+          "visa_usd": "HIDDEN:1",
+          "neompay": "HIDDEN:1"
+        }
+      },
+      {
+        "id": "V5",
+        "input": {
+          "amount": "40"
+        },
+        "expected": {
+          "sadad": "VISIBLE",
+          "moamalat_card": "VISIBLE",
+          "edfali": "VISIBLE",
+          "visa_usd": "HIDDEN:9",
+          "neompay": "HIDDEN:3"
+        }
+      },
+      {
+        "id": "V6",
+        "input": {
+          "linkWhitelist": [
+            "moamalat_card",
+            "sadad"
+          ],
+          "routeOverrides": {
+            "sadad-direct": {
+              "health": "OPEN_BREAKER"
+            }
+          }
+        },
+        "expected": {
+          "sadad": "HIDDEN:5",
+          "moamalat_card": "VISIBLE",
+          "edfali": "HIDDEN:2",
+          "visa_usd": "HIDDEN:2",
+          "neompay": "HIDDEN:2"
+        }
+      },
+      {
+        "id": "V7",
+        "input": {
+          "currency": "USD"
+        },
+        "expected": {
+          "sadad": "HIDDEN:9",
+          "moamalat_card": "HIDDEN:9",
+          "edfali": "HIDDEN:6",
+          "visa_usd": "VISIBLE",
+          "neompay": "HIDDEN:3"
+        }
+      }
+    ]
+  },
+  "attempt-transitions": {
+    "initial": "CREATED",
+    "states": [
+      {
+        "id": "CREATED",
+        "slot": "reserved",
+        "money": "none",
+        "human": "Nothing to do. Seconds only; escalate if it stays."
+      },
+      {
+        "id": "INITIATING",
+        "slot": "reserved",
+        "money": "none",
+        "human": "Nothing to do."
+      },
+      {
+        "id": "AWAITING_CUSTOMER",
+        "slot": "reserved",
+        "money": "none",
+        "human": "Nothing to do. Never nudge the customer to pay again."
+      },
+      {
+        "id": "AUTHORIZING",
+        "slot": "reserved",
+        "money": "none",
+        "human": "Nothing to do. It will become UNKNOWN by itself if the partner is silent."
+      },
+      {
+        "id": "VERIFYING",
+        "slot": "reserved",
+        "money": "none",
+        "human": "Nothing to do unless it stays long."
+      },
+      {
+        "id": "UNKNOWN",
+        "slot": "reserved",
+        "money": "none",
+        "human": "We do not know. Use Inquire, then follow the UNKNOWN article. Never guess."
+      },
+      {
+        "id": "SUCCEEDED",
+        "slot": "consumed",
+        "money": "posted",
+        "human": "Nothing to do. Verified and posted together."
+      },
+      {
+        "id": "FAILED",
+        "slot": "released",
+        "money": "none",
+        "human": "If a customer insists they paid, follow the deducted-money procedure."
+      },
+      {
+        "id": "EXPIRED",
+        "slot": "released",
+        "money": "none",
+        "human": "A late success can still arrive during the grace window."
+      },
+      {
+        "id": "CANCELLED",
+        "slot": "released",
+        "money": "none",
+        "human": "Nothing to do."
+      },
+      {
+        "id": "BLOCKED",
+        "slot": "released",
+        "money": "none",
+        "human": "Never explain the real reason to the customer."
+      },
+      {
+        "id": "PARTIALLY_REFUNDED",
+        "slot": "consumed",
+        "money": "posted-partly-reversed",
+        "human": "See Book 8."
+      },
+      {
+        "id": "REFUNDED",
+        "slot": "consumed",
+        "money": "posted-reversed",
+        "human": "See Book 8."
+      },
+      {
+        "id": "DISPUTED",
+        "slot": "consumed",
+        "money": "posted",
+        "human": "A dispute is open. Handled by Finance; the payment is not undone."
+      }
+    ],
+    "events": [
+      {
+        "id": "ev-guard-block",
+        "label": "A guard blocks it before it starts (limit, watch-list, AML rule)",
+        "from": [
+          "CREATED"
+        ],
+        "to": "BLOCKED",
+        "note": "The customer sees only a generic message."
+      },
+      {
+        "id": "ev-start",
+        "label": "The engine starts the payment with the partner",
+        "from": [
+          "CREATED"
+        ],
+        "to": "INITIATING"
+      },
+      {
+        "id": "ev-start-ok",
+        "label": "The partner accepted the start (SMS code sent, QR shown)",
+        "from": [
+          "INITIATING"
+        ],
+        "to": "AWAITING_CUSTOMER"
+      },
+      {
+        "id": "ev-start-refused",
+        "label": "The partner clearly refuses to start",
+        "from": [
+          "INITIATING"
+        ],
+        "to": "FAILED"
+      },
+      {
+        "id": "ev-customer-submits",
+        "label": "The customer enters the code and the engine sends the confirm step",
+        "from": [
+          "AWAITING_CUSTOMER"
+        ],
+        "to": "AUTHORIZING"
+      },
+      {
+        "id": "ev-wrong-otp",
+        "label": "Customer enters a wrong code (retryable, tries left)",
+        "from": [
+          "AUTHORIZING"
+        ],
+        "to": "AWAITING_CUSTOMER",
+        "note": "No new SMS is sent."
+      },
+      {
+        "id": "ev-wrong-otp-last",
+        "label": "Customer enters the third wrong code",
+        "from": [
+          "AUTHORIZING"
+        ],
+        "to": "FAILED"
+      },
+      {
+        "id": "ev-confirm-success",
+        "label": "The partner clearly says success and the five facts match",
+        "from": [
+          "AUTHORIZING"
+        ],
+        "to": "SUCCEEDED",
+        "note": "The journal entry is written in the same transaction."
+      },
+      {
+        "id": "ev-confirm-decline",
+        "label": "The partner clearly declines (for example insufficient funds)",
+        "from": [
+          "AUTHORIZING"
+        ],
+        "to": "FAILED"
+      },
+      {
+        "id": "ev-confirm-timeout",
+        "label": "The gateway times out or answers with an error or unreadable text on confirm",
+        "from": [
+          "AUTHORIZING"
+        ],
+        "to": "UNKNOWN",
+        "note": "Never FAILED. The same code is never resubmitted."
+      },
+      {
+        "id": "ev-confirm-processing",
+        "label": "The partner says it is processing",
+        "from": [
+          "AUTHORIZING"
+        ],
+        "to": "VERIFYING"
+      },
+      {
+        "id": "ev-return-hint",
+        "label": "The customer returns from the partner's page, or the browser says done (a hint)",
+        "from": [
+          "CREATED",
+          "AWAITING_CUSTOMER"
+        ],
+        "to": "VERIFYING",
+        "note": "We must ask the partner; the hint proves nothing."
+      },
+      {
+        "id": "ev-webhook-success",
+        "label": "A verified webhook says paid and the five facts match",
+        "from": [
+          "AWAITING_CUSTOMER",
+          "VERIFYING",
+          "UNKNOWN"
+        ],
+        "to": "SUCCEEDED"
+      },
+      {
+        "id": "ev-inquiry-success",
+        "label": "An inquiry clearly says paid and the five facts match",
+        "from": [
+          "VERIFYING",
+          "UNKNOWN"
+        ],
+        "to": "SUCCEEDED"
+      },
+      {
+        "id": "ev-inquiry-failed",
+        "label": "An inquiry clearly says failed",
+        "from": [
+          "VERIFYING",
+          "UNKNOWN"
+        ],
+        "to": "FAILED"
+      },
+      {
+        "id": "ev-polling-exhausted",
+        "label": "Polling ends with no clear answer",
+        "from": [
+          "VERIFYING"
+        ],
+        "to": "UNKNOWN"
+      },
+      {
+        "id": "ev-conflict",
+        "label": "A verified webhook and an inquiry disagree",
+        "from": [
+          "VERIFYING",
+          "AWAITING_CUSTOMER"
+        ],
+        "to": "UNKNOWN",
+        "note": "Nothing is posted. A priority-1 conflict case opens."
+      },
+      {
+        "id": "ev-expire",
+        "label": "Time runs out and the last inquiry finds nothing",
+        "from": [
+          "AWAITING_CUSTOMER"
+        ],
+        "to": "EXPIRED"
+      },
+      {
+        "id": "ev-cancel",
+        "label": "The customer cancels or switches payment method",
+        "from": [
+          "AWAITING_CUSTOMER"
+        ],
+        "to": "CANCELLED"
+      },
+      {
+        "id": "ev-late-success",
+        "label": "A verified success arrives late and the link slot is still free",
+        "from": [
+          "EXPIRED",
+          "FAILED"
+        ],
+        "to": "SUCCEEDED",
+        "note": "A priority-2 alert is raised."
+      },
+      {
+        "id": "ev-late-success-paid",
+        "label": "A verified success arrives late but the single-use link was already paid",
+        "from": [
+          "EXPIRED",
+          "FAILED"
+        ],
+        "to": "SAME",
+        "note": "The money is parked in SUSPENSE and a refund is drafted for approval."
+      },
+      {
+        "id": "ev-customer-retry",
+        "label": "The customer presses retry while the payment is unknown",
+        "from": [
+          "UNKNOWN"
+        ],
+        "to": "SAME",
+        "note": "Blocked on the server; the slot is still reserved."
+      },
+      {
+        "id": "ev-operator-success",
+        "label": "An operator marks it succeeded with evidence and a second person approves",
+        "from": [
+          "UNKNOWN"
+        ],
+        "to": "SUCCEEDED"
+      },
+      {
+        "id": "ev-operator-failed",
+        "label": "An operator marks it failed with evidence and a second person approves",
+        "from": [
+          "UNKNOWN"
+        ],
+        "to": "FAILED"
+      },
+      {
+        "id": "ev-refund-partial",
+        "label": "A partial refund is approved and executed",
+        "from": [
+          "SUCCEEDED"
+        ],
+        "to": "PARTIALLY_REFUNDED"
+      },
+      {
+        "id": "ev-refund-full",
+        "label": "A full refund is approved and executed",
+        "from": [
+          "SUCCEEDED",
+          "PARTIALLY_REFUNDED"
+        ],
+        "to": "REFUNDED"
+      },
+      {
+        "id": "ev-dispute",
+        "label": "The partner opens a dispute",
+        "from": [
+          "SUCCEEDED",
+          "PARTIALLY_REFUNDED"
+        ],
+        "to": "DISPUTED"
+      }
+    ]
+  }
+}

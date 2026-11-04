@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { ADMIN_KEY, adminSession, seedSession } from "../fixtures";
+import { ADMIN_KEY, adminSession, confirmSafeguard, seedSession } from "../fixtures";
 
 const json = (status: number, body: unknown) => ({
   status,
@@ -89,6 +89,7 @@ test("creates a route from the Routes page", async ({ page }) => {
   await page.getByRole("button", { name: "Add Route" }).click();
   await expect(page.getByRole("button", { name: "Create", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "Create", exact: true }).click();
+  await confirmSafeguard(page);
 
   expect(posted).toMatchObject({
     railId: "rail-1",
