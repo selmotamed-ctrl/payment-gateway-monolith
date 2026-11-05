@@ -3,7 +3,7 @@ id: core.governance
 title: Governance and Compliance
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/engine/governance/ApprovalService.ts
@@ -25,6 +25,9 @@ code:
   - core-back/api/internal/admin.ts
   - core-back/api/internal/merchant.ts
   - core-back/prisma/schema.prisma
+  - core-back/lib/cashoutBalance.ts
+  - core-back/lib/kybScan.ts
+  - core-back/lib/auth/merchantAuthorities.ts
 design_sources:
   - design/01-platform-architecture/payment_gateway_final_design-v5.md#part-ix-platform-interfaces-onboarding-governance-compliance-program
   - design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#15
@@ -51,6 +54,10 @@ tests:
   - core-back/test/gateway-inquiry-schedules.test.ts
   - core-back/test/phase4-onboarding-aml-disputes-recon.test.ts
   - core-back/test/exhaustive/07-workflows/onboarding-and-aml.test.ts
+  - core-back/test/security-regressions/h3-admin-users-and-approvals.test.ts
+  - core-back/test/security-regressions/h4-cashout.test.ts
+  - core-back/test/security-regressions/h1h2-authz.test.ts
+  - core-back/test/security-regressions/m9-m12-upload-kyb.test.ts
 gaps:
   - "`executeApprovalSubject` has no handler for `APPLICATION`, `CASHOUT_REQUEST`, or `PLATFORM_SETTING`; an application-sensitive change cannot be executed through the approvals route."
   - "`PUT /admin/settings` writes platform settings directly without an approval request or maker-checker."
@@ -61,6 +68,9 @@ gaps:
   - "AML layer L4 deferred/batch monitoring, rule dry-run, and emergency tightening with 24-hour ratification are not implemented."
   - "Retention is opt-in and does not cover AML cases, screenings, KYB documents, or regulatory reports."
   - "Manual regulatory-report payloads are stored as plaintext JSON in `payload_ciphertext`; evaluator-generated reports are encrypted."
+  - Payout-account changes have no approval step and the KYB payout hash is not mandatory (TRACKER GAP-017).
+  - No real malware scanner; KYB scanning is content sniffing only (TRACKER GAP-025).
+  - Per-source statement file_hash uniqueness needs a schema and repository change (TRACKER GAP-018).
 ---
 
 # Governance and Compliance
@@ -398,3 +408,15 @@ Some governance tests use fake clients; database-backed suites require PostgreSQ
 ## 10. Change history
 
 - 2026-11-03 — Baseline verification against `5a24f6f+working-tree`: documented approval lifecycle deviations, missing `APPLICATION`/`CASHOUT_REQUEST`/`PLATFORM_SETTING` handlers, direct settings/cash-out/commission/velocity paths, authority and confidentiality gaps, onboarding/KYB, AML layers, disputes, reporting, operator cases, and retention gaps.
+
+## 11. Security hardening (2026-11-05)
+
+- **Cash-out state machine.** Terminal states are immutable. Approve/reject are allowed only from `PENDING` or `PROCESSING`; repeating the same decision is an idempotent skip; the opposite decision returns `409 CASHOUT_STATE_INVALID`. The transition is an atomic conditional `UPDATE`. The journal `refId` is the cash-out id. Approval requires an `ACTIVE` wallet and merchant and a ledger balance check under a `FOR UPDATE` lock on the wallet's shards (`lib/cashoutBalance.ts`; errors `CASHOUT_INSUFFICIENT_BALANCE`, `INSUFFICIENT_BALANCE`, `WALLET_NOT_ACTIVE`, `MERCHANT_NOT_ACTIVE`). `lockGlAccountShardsSorted` now orders by byte order.
+- **Cash-out requests.** Merchant creation requires an idempotency key, checks ledger balance minus open cash-outs and records `requestedByUserId` (new columns `cashout_requests.idempotency_key`, unique per merchant, and `requested_by_user_id`). Destination is a typed structure; a KYB `payoutAccountHash`, when present, must match (`403 CASHOUT_DESTINATION_NOT_VERIFIED`), else the request is flagged `payoutVerified:false`. Staff processing requires `cashout:review`.
+- **Admin users.** Creators can only grant authorities they hold. New users are always `INVITED` with `isMaker`/`isChecker` false; requested flags go through a `PENDING_REVIEW` approval. `PATCH /users` and `/users/:id` route authority, role, flag and ACTIVE changes through maker-checker (only suspend/disable apply directly). Targets must be staff; no self-edit; `executeUserAuthorityChange` refuses self-approval (`APPROVAL_SELF_CHANGE`). The MFA phone is still chosen at creation.
+- **Approvals.** The generic, adjustment and backup-policy approve/reject paths claim the approval with a conditional update inside the transaction.
+- **KYB scan.** `KYB_SCANNER_MODE` unset fails closed (everything `PENDING`, not previewable). Active content (HTML/SVG/script, PDF with `/JS` `/OpenAction` `/Launch` `/EmbeddedFile`, MZ/ELF/Mach-O/shebang) is `INFECTED` in every mode; EICAR is always detected; only `KYB_SCANNER_MODE=eicar` (dev/tests) yields `CLEAN`. Content sniffing is not a malware engine; a real scanner is still required.
+- **Disputes.** Evidence is accepted only from `OPENED` or `EVIDENCE_REQUESTED` (`DISPUTE_NOT_ACCEPTING_EVIDENCE`).
+- **Merchant authorities** and principal separation are described in the API surface part (section 11).
+- **Public checkout** BLOCK/HOLD responses omit internal `reasons`; reasons remain in guard audit and AML cases. AML HOLD still books escrow before capture and RELEASE credits without gateway verification (GAP-015).
+- **Tests.** `core-back/test/security-regressions/{h1h2-authz,h3-admin-users-and-approvals,h4-cashout,m9-m12-upload-kyb}`.

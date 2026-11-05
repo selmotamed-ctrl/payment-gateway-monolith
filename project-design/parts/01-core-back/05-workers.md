@@ -3,7 +3,7 @@ id: core.workers
 title: Background Workers and Outboxes
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - deploy/provisioners/auditAndLogDbProvisioner.ts
@@ -47,6 +47,7 @@ tests:
   - core-back/test/storage-engine/audit-chain.test.ts
   - core-back/test/storage-engine/write-path.integration.test.ts
   - core-back/test/exhaustive/06-concurrency/confirm-webhook-return-race.test.ts
+  - core-back/test/security-regressions/c2-mfa.test.ts
 gaps:
   - The trigger is installed by the deploy provisioner, not by a Prisma migration, so an externally managed audit database must run the provisioner DDL.
   - "The inbound webhook route verifies and processes synchronously; `InboundInboxWorker` is wired but has no producer, so it is effectively idle."
@@ -58,6 +59,7 @@ gaps:
   - "`JoinRequestExpiryWorker` uses raw updates without audit rows or merchant notifications."
   - "Per-worker health and metrics are not exposed; `/health` reports only durable-queue depth/age."
   - "`WORKER_CONCURRENCY` exists in env validation but is not used by the worker runtime."
+  - PollWorker/ExpirySweeper/InboundInbox/OutboxNotification claim rows with SKIP LOCKED outside a transaction; singleton workers have no leader election or advisory lock (TRACKER GAP-012).
 ---
 
 # Background Workers and Outboxes
@@ -406,3 +408,9 @@ Database-backed suites require PostgreSQL 18; Redis-backed invalidation tests re
 - The dedicated audit database computes the hash chain in a BEFORE INSERT trigger under `pg_advisory_xact_lock(994001)`.
 - `AuditShipperWorker` inserts without `prev_hash`/`row_hash` and reads the trigger-computed values from `RETURNING`, so concurrent shippers on HOST_A and HOST_B cannot fork the chain.
 - `verify_audit_chain()` is available for live gate verification and backup drill checks.
+
+## 11. Security hardening (2026-11-05)
+
+- `OutboxNotificationWorker` opens the Vault-encrypted `codeCiphertext` of SMS MFA notifications at send time; `notifications.payload_json` no longer carries the plaintext code.
+- **Multi-node limitation (open, P0, GAP-012).** `PollWorker`, `ExpirySweeper`, `InboundInbox` and `OutboxNotification` claim rows with `SKIP LOCKED` outside a transaction, and singleton workers have no leader election or advisory lock. Do not assume safe multi-instance operation of these workers until fixed.
+- The re-finalize guard for terminal attempts in `verifyCallback`/`finalizeSuccess` is not implemented (GAP-016).

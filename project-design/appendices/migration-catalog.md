@@ -4,7 +4,9 @@
 
 | Migration | Lines | First comment |
 | :--- | ---: | :--- |
-| `20261103000000_postgres18_init` | 2839 | PostgreSQL 18 baseline. Replaces the legacy MySQL migration history. |
-| `20261103120000_postgres18_storage_engine` | 115 | ============================================================================ |
-| `20261103130000_cqrs_read_models` | 27 | CQRS read models maintained asynchronously by OutboxRelayWorker. |
-| `20261103180000_storage_hardening` | 256 | ============================================================================ |
+| `20261103000000_postgres18_init` | 2839 | PostgreSQL 18 baseline. Replaces the legacy MySQL migration history. |
+| `20261103120000_postgres18_storage_engine` | 115 | ============================================================================ |
+| `20261103130000_cqrs_read_models` | 27 | CQRS read models maintained asynchronously by OutboxRelayWorker. |
+| `20261103180000_storage_hardening` | 256 | ============================================================================ |
+| `20261104090000_db_read_write_optimisation` | 97 | ============================================================================ |
+| `20261104120000_mfa_challenges` | 51 | ============================================================================ |

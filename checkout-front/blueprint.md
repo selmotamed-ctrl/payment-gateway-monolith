@@ -6,7 +6,7 @@ Generated from: `checkout-ui.flow`, `checkout-ui.help`.
 
 ## Checkout Payer Flow
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -128,7 +128,7 @@ A client-supplied `amount` or `currency` is outside this contract and is rejecte
 | `SHOW_QR_OR_CODE` | `QrOrCodeRenderer` | Renders QR data URL, optional pay code, bilingual instructions, deep link, expiry. |
 | `SHOW_PUSH_OR_TRANSFER` | `PushOrTransferRenderer` | Shows destination/reference/wallet hint, instructions, optional proof upload, expiry. |
 
-`OtpFormRenderer` limits the OTP to the action length and normalizes Arabic digits. `RedirectRenderer` requires a non-empty allowlist; a wildcard accepts any real host but `javascript:`/`data:` URLs still fail host parsing. `EmbeddedWidgetRenderer` uses a fixed allowlist of Moamalat, MPGS test, Evo, and Numo hosts and an origin check for incoming messages.
+`OtpFormRenderer` limits the OTP to the action length and normalizes Arabic digits. `RedirectRenderer` requires a non-empty allowlist with no `*`, https only (http only for localhost in DEV), exact host match (`*.host` entries for subdomains) and no credentials. `EmbeddedWidgetRenderer` uses an allow-list of bare https origins compared exactly to `new URL(src).origin`, and a fail-closed postMessage bridge (see Security hardening).
 
 ### 3.7 Confirm, resend, cancel
 
@@ -303,6 +303,17 @@ The Playwright/live suites require the running stack; the redirect unit test is 
 ## 10. Change history
 
 - 2026-11-03 — Initial canonical payer-flow part. Confirms the phase machine, five client-action renderers, SSE status stream, amount breakdown, receipt/return allowlist and the checkout 404 recovery bug.
+
+## Security hardening (2026-11-05)
+
+- **Status stream** is absolute under `/api` (`urlsMap.payStatusStream` uses `getBaseUrl`) with a capped-backoff polling fallback through `payLogs` (1.5 s up to 15 s, stopping on a terminal status).
+- **Embedded widgets.** The allow-list holds bare https origins compared exactly to `new URL(src).origin` (no credentials, no subdomain wildcard, test host only in non-production builds); `iframe_src` gets the same check; iframe sandbox is intersected with allow-scripts/allow-forms/allow-popups; SRI is matched by index and a script without a valid hash is rejected. The postMessage bridge fails closed: `event.origin` must be in `allowed_origins` and `event.source` must be the iframe's `contentWindow`; only a sanitized payload is forwarded.
+- **Redirects:** no `*`, https only (http only for localhost in DEV), exact host match (`*.host` entries allow subdomains), no credentials.
+- **Deep links:** https plus `moamalat:`, `evowallet:`, `numopay:` schemes, with `rel="noopener noreferrer"`.
+- **Idempotency keys** use `crypto.randomUUID`, persisted per link in `sessionStorage`. The `attemptId` is persisted and a reload resumes from `payLogs`.
+- **Errors** map to translated messages; raw server text is never shown. Dead bearer-token code was removed.
+- Catalogue keys added (EN and AR): Network Error Try Again, Too Many Requests, Invalid Payment Details, Payment Attempt Expired, Payment Temporarily Unavailable. `.env.example` ships; copy to `.env`.
+- Confirm sends only the OTP.
 
 ## Checkout Help Center
 

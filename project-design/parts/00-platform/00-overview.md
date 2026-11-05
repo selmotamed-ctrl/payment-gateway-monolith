@@ -3,7 +3,7 @@ id: platform.overview
 title: Platform Overview
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/index.ts
@@ -114,7 +114,7 @@ The product scope implemented in code includes:
 
 - Payment links with single-use and multi-use slots, link cancellation, visible rails and fee breakdowns.
 - A universal rail engine with seven runtime phases, a separate credential-check phase, 39 transforms, crypto profiles and a scoped SSRF guard.
-- A PostgreSQL 18 schema with 75 models and 105 enums at schema version 8, and four migrations: baseline, storage engine, CQRS read models and storage hardening.
+- A PostgreSQL 18 schema with 76 models and 105 enums at schema version 10, and six migrations: baseline, storage engine, CQRS read models, storage hardening, DB read/write optimisation and MFA challenges.
 - A double-entry ledger, 17 `LedgerScenario` values and 11 GL account types, with sharded system GL accounts.
 - Merchant onboarding, KYB documents, beneficial owners, screening, AML rules/cases, regulatory reports, disputes, adjustments, cash-outs and reconciliation.
 - Admin and merchant authentication with password login, optional MFA challenge, session JWTs and merchant `pg_live_` API tokens.
@@ -187,7 +187,7 @@ Production operation uses `deploy/deploy.ts` with `deploy/deploy.env`. The engin
 ### Implemented
 
 - Seven-service split with database exclusivity and mTLS channel binding.
-- PostgreSQL 18 storage engine, schema version 8, migrations, replica reads, Redis cache/velocity, audit and log adapters.
+- PostgreSQL 18 storage engine, schema version 10, migrations, replica reads, Redis cache/velocity, audit and log adapters.
 - Dynamic rail engine, transform library, crypto profiles, visible-rails formula and the core API namespaces.
 - Merchant onboarding, KYB, AML, disputes, adjustments, cash-outs, reconciliation and ledger scenarios.
 - Admin back office and merchant portal foundations, hosted checkout, and optional Fake Rails.
@@ -201,7 +201,7 @@ Production operation uses `deploy/deploy.ts` with `deploy/deploy.env`. The engin
 - **Backup daemon mTLS.** Core and daemon configuration use different certificate variable names; the daemon can fall back to `127.0.0.1` without mTLS until the deployment writes are aligned.
 - **Replica routing.** Only global search and a small set of merchant list routes use `readStore`; most dashboards/lists/exports read the primary.
 - **Observability.** No metrics endpoint, tracing, storage health HTTP surface or structured JSON log contract; see `00-platform/04-observability.md`.
-- **Schema version at boot.** `ensureSchemaVersion()` exists and requires version 8, but core startup does not call it; only the seeders do.
+- **Schema version at boot.** `ensureSchemaVersion()` exists and requires version 10, but core startup does not call it; only the seeders do.
 
 ### Missing / deferred
 
@@ -267,3 +267,7 @@ No build or test was run for this documentation change. Database-backed suites r
 ## 10. Change history
 
 - 2026-11-03: Initial canonical part written against `5a24f6f+working-tree`. The historical claims corrected here are listed in `project-design/appendices/stale-claims-register.md` and `project-design/TRACKER.md`.
+
+## Security hardening (2026-11-05)
+
+A cross-cutting security hardening pass touched core payment engine, auth/authorization, edge backends, deploy, frontends and tests. Details live in the owning parts: `core.engine`, `core.api`, `core.governance`, `core.data`, `platform.security`, `edge.*`, `deploy.*`, `fake-rails.*`, the frontend parts and `testing.*`. Remaining risks are tracked in TRACKER section 3 (GAP-011 onward).

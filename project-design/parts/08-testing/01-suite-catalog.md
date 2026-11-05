@@ -3,7 +3,7 @@ id: testing.suites
 title: Test Suite Catalog
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/test/exhaustive/**
@@ -30,6 +30,25 @@ tests:
   - core-back/test/exhaustive/08-security-edge/stride-24-and-15-safeguards.test.ts
   - core-back/test/exhaustive/10-seeder-and-deploy/synthetic-seeder-safety-and-audit.test.ts
   - tests/e2e/exhaustive/exhaustive-admin-surface.spec.ts
+  - core-back/test/security-regressions/c1-forged-success.test.ts
+  - core-back/test/security-regressions/c2-mfa.test.ts
+  - core-back/test/security-regressions/h1h2-authz.test.ts
+  - core-back/test/security-regressions/h3-admin-users-and-approvals.test.ts
+  - core-back/test/security-regressions/h4-cashout.test.ts
+  - core-back/test/security-regressions/h7-rounding.test.ts
+  - core-back/test/security-regressions/h8-webhook.test.ts
+  - core-back/test/security-regressions/m4-idempotency.test.ts
+  - core-back/test/security-regressions/m9-m12-upload-kyb.test.ts
+  - core-back/test/security-regressions/m10-ssrf.test.ts
+  - admin-back/test/security-regressions.test.ts
+  - merchant-back/test/security-regressions.test.ts
+  - checkout-back/test/security-regressions.test.ts
+  - deploy/test/security-regressions.test.ts
+  - deploy/backup-daemon/test/mtlsAuthorization.test.ts
+  - fake-rails-back/test/security.test.ts
+  - tests/unit/frontend-security-admin.test.ts
+  - tests/unit/frontend-security-checkout.test.ts
+  - tests/unit/frontend-security-merchant.test.ts
 gaps:
   - No core-back/test/exhaustive/09-storage-backup directory exists.
   - No tests/e2e/exhaustive/11-e2e-seeder-deploy directory exists.
@@ -334,3 +353,27 @@ This catalog is derived by counting literal declarations and inspecting the suit
 ## 10. Change history
 
 - 2026-11-03: initial canonical part. Verified against `5a24f6f+working-tree`.
+
+## Security regression suites (2026-11-05)
+
+| Suite | Covers |
+| :--- | :--- |
+| `core-back/test/security-regressions/c1-forged-success` | payer evidence ignored, SUBMIT with no steps |
+| `.../c2-mfa` | MFA challenge rows, throttles, retired verify-identity |
+| `.../h1h2-authz` | merchant authority catalogue, principal separation |
+| `.../h3-admin-users-and-approvals` | admin user maker-checker, conditional approval claims |
+| `.../h4-cashout` | cash-out state machine, idempotency, balance checks |
+| `.../h7-rounding` | commission rounding modes |
+| `.../h8-webhook` | webhook verification, timestamps, inbound dedupe |
+| `.../m4-idempotency` | (linkId, idempotencyKey) scoping |
+| `.../m9-m12-upload-kyb` | upload hash conflict, KYB scan modes |
+| `.../m10-ssrf` | outbound URL compile |
+| `admin-back/test/security-regressions.test.ts` | authorityGuard, backup validation, uploads |
+| `merchant-back/test/security-regressions.test.ts` | token creation, uploads, limiter |
+| `checkout-back/test/security-regressions.test.ts` | inbound limiter, body limits, error mapping |
+| `deploy/test/security-regressions.test.ts` | quoting, config hardening, migration planning |
+| `deploy/backup-daemon/test/mtlsAuthorization.test.ts` | CN/SAN authorization |
+| `fake-rails-back/test/security.test.ts` | token compare, CIDR, lockout |
+| `tests/unit/frontend-security-{admin,checkout,merchant}.test.ts` | frontend allow-lists, guards, validation |
+
+Run with `bun test ./path`. Concurrency tests need PostgreSQL 18 and are not covered.

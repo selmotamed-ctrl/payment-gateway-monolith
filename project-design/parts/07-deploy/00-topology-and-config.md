@@ -3,7 +3,7 @@ id: deploy.topology
 title: Deploy Topology and Configuration
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - deploy/test-matrix/topologies.ts
@@ -13,6 +13,7 @@ code:
   - deploy/lib/hostPlanner.ts
   - deploy/deploy.env.example
   - deploy/DEPLOYMENT_GUIDE.md
+  - deploy/lib/quoting.ts
 design_sources:
   - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#1-flexible-1n-compute--storage-topology-model-same-server-vs-fully-distributed
   - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#3-multi-host-configuration-architecture-deployenv--zod-4-validator
@@ -25,6 +26,7 @@ tests:
   - deploy/test/exhaustive-deploy-matrix.test.ts
   - deploy/test/fakeRails.test.ts
   - deploy/test/pipeline.test.ts
+  - deploy/test/security-regressions.test.ts
 gaps:
   - Two-machine configs require HOST_B reachable; live T1-T8 validation is pending.
   - DEPLOY_MODE=auto does not detect a missing remote directory; it behaves like update unless --fresh is passed.
@@ -32,6 +34,7 @@ gaps:
   - The deployment guide says legacy DB_* credentials win when both blocks are present; the code makes PG_* authoritative when any PG field is configured.
   - PG_VERSION accepts any one- or two-digit major version even though the project invariant is PostgreSQL 18.
   - Replication password requirements are not enforced when replicas are configured but PG_MANAGE_VIA_SSH is false.
+  - Real SHA256 values for WAL-G, bun and barman versions must be supplied by the operator (TRACKER GAP-023).
 ---
 
 # Deploy Topology and Configuration
@@ -255,7 +258,7 @@ Start with `--dry-run`: it validates the real file, builds the plan and prints e
 - No JSON schema export or `deploy.env` autocomplete.
 - No validation of explicit `CORE_BACK_URLS` entries in the deploy schema (they are passed through and later used by the edge env).
 - No requirement that `PG_VERSION` be exactly `18`.
-- No explicit requirement for `PG_REPLICATION_PASSWORD` when replicas are configured.
+- No explicit requirement for `PG_REPLICATION_PASSWORD` when replicas are configured (replica `.pgpass` is still written via `printf` argv; GAP-028).
 
 ### Known bugs / risks
 
@@ -315,3 +318,11 @@ These tests run without PostgreSQL/Redis or remote hosts. A real deploy requires
 - `FAKE_RAILS_NODE` is accepted by the real deploy schema and feeds the Fake Rails service, Nginx upstream, firewall and core allowlist.
 - `deploy/test-matrix/topologies.ts` renders every topology derived from the multi-machine lab config (see `testing.multi-machine-matrix`; the two-host example keeps the T1-T8 aliases) and `deploy/test/testMatrix.test.ts` validates every rendered file through `loadDeployConfig` and `planHosts`.
 - The node grammar accepts only IPv4 for `sshHost` and `privateIp`, and SSH user/key/sudo are per tier, not per host; the lab config enforces both.
+
+## Security hardening (2026-11-05)
+
+- **Environment.** `DEPLOY_ENV` now defaults to `production` and gains `test`. In production `FAKE_RAILS_ENABLED`, `IS_TEST_SERVER`, `FAKE_RAILS_ALLOW_IN_PRODUCTION=true` and the synthetic seeder are refused. `deploy.env.example` ships `DEPLOY_ENV=production` and placeholders, so it deliberately fails validation until replaced.
+- **Secrets.** `weakSecretReason` rejects placeholders (`change-me`, `password`, `admin`, `example`...), repeated/sequential patterns and low entropy. `KMS_MASTER_KEY` needs at least 32 characters; the JWT secret must differ from the seeder token.
+- **Schema.** Charsets are restricted for secrets, SSH users, `*_REMOTE_DIR`, `PG_DATA_DIR`, backup/cert paths (absolute, no `..`), cron expressions, binary names and hosts.
+- **New optional keys.** `BACKUP_WALG_VERSION` (default 3.0.9), `BACKUP_WALG_ASSET`, `BACKUP_BARMAN_VERSION` (3.10.1), `BUN_VERSION`, `BUN_SHA256`, `BACKUP_ALLOWED_CLIENT_CNS`, `BACKUP_SECONDARY_MIRROR_DELETE`, `PG_RAM_GB`, `PG_IO_METHOD`, `PG_REPLICA_REBUILD`; required `BACKUP_WALG_SHA256` in wal-g mode; lab key `LAB_WALG_SHA256`.
+- `PG_REPLICATION_*` is no longer written to the core app env.

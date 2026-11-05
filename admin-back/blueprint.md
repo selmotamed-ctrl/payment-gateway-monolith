@@ -6,7 +6,7 @@ Generated from: `edge.shared`, `edge.admin`.
 
 ## Shared Core Upstream Client
 
-> Status: `implemented` · Last verified: 2026-11-03
+> Status: `implemented` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -171,7 +171,7 @@ There is no true fallback to polling at the edge. Checkout and POS SSE are imple
 | `MTLS_CLIENT_KEY_PATH` | yes | all BFFs | Client private key. |
 | `MTLS_CA_CERT_PATH` | yes | all BFFs | Internal CA certificate. |
 | `CORE_REQUEST_TIMEOUT_MS` | no | all BFFs | Per-request and agent timeout. Defaults: admin 60000, merchant/checkout 30000. |
-| `TRUSTED_PROXY_CIDRS` | no | all BFFs | Peers whose forwarded IP headers are trusted. |
+| `TRUSTED_PROXY_CIDRS` | no | all BFFs | Peers whose forwarded IP headers are trusted. Default loopback only (`127.0.0.0/8,::1/128`). |
 | `POS_STREAM_TIMEOUT_MS` | no | merchant | Stream timeout passed by the POS SSE route (default 900000). |
 
 ### Deployment surface
@@ -261,9 +261,21 @@ The suites cover URL parsing, least-in-flight and round-robin selection, cooldow
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
 
+## Security hardening (2026-11-05)
+
+Applies to all three copies of the client:
+- Only transport/TLS errors and 502/503/504 mark a node unhealthy.
+- Header names and values are validated as printable ASCII (`400 CORE_HEADER_INVALID`); edge-owned headers are applied last, and `x-real-client-ip` is always overwritten with the resolved IP.
+- PUT/DELETE are replayed after send only with an `Idempotency-Key`/opt-in, or on a connect-phase failure.
+- SSE streams use their own agent pool (128 sockets) with `MAX_STREAMS_PER_IP` (default 5) and abort upstream on early client disconnect.
+- Buffered responses are capped (`CORE_MAX_RESPONSE_BYTES` default 64 MiB, `CORE_TOTAL_DEADLINE_MS` default 300000).
+- Admin `x-pg-min-lsn` is validated against `^hex/hex$` (400 otherwise).
+- `resolveClientIp` honours forwarded headers only from trusted peers and requires a single valid IP (`x-real-ip` preferred, `x-real-client-ip` fallback).
+- Not done: a consecutive-failure threshold for the breaker (GAP-021).
+
 ## Admin Edge BFF
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -293,7 +305,7 @@ The admin surface is intentionally broad: users, join requests and KYB, merchant
 
 - `x-powered-by` disabled;
 - `trust proxy` disabled at the Express layer (`app.set("trust proxy", false)`);
-- CORS with `origin: true` and `credentials: false`;
+- CORS: no headers unless `CORS_ALLOWED_ORIGINS` is set (credentials disabled), plus hand-written security headers (nosniff, no-referrer, X-Frame-Options, `frame-ancestors 'none'`, CORP, default no-store);
 - request logging middleware;
 - an unauthenticated `GET /health` returning `{ status: "ok", service: "admin-back", uptime }`;
 - JSON and URL-encoded body parsers limited by `MAX_JSON_BODY_BYTES`;
@@ -392,7 +404,7 @@ The AML router applies `requireAuthorities("COMPLIANCE", "MLRO", "aml:read", "am
 | `CORE_BACK_URLS` | optional | Core pool. |
 | `MTLS_CLIENT_CERT_PATH`, `MTLS_CLIENT_KEY_PATH`, `MTLS_CA_CERT_PATH` | required | Edge mTLS material. |
 | `CORE_REQUEST_TIMEOUT_MS` | `60000` | Core request timeout. |
-| `TRUSTED_PROXY_CIDRS` | loopback plus RFC1918 ranges | Peers whose forwarded IP headers are trusted. |
+| `TRUSTED_PROXY_CIDRS` | loopback only (`127.0.0.0/8,::1/128`; deploy sets `127.0.0.1/32,::1/128`) | Peers whose forwarded IP headers are trusted. |
 | `ADMIN_LAN_CIDRS` | loopback plus RFC1918 ranges | Allowed admin clients. |
 | `ADMIN_AUTHORITY_HINTS` | roles plus `aml:*` and `security:*` | Edge-checkable authority vocabulary. |
 | `MAX_JSON_BODY_BYTES` | `4194304` | JSON limit. |
@@ -452,7 +464,7 @@ bun run typecheck
 
 - A forged token with acceptable `typ`/`iss`/`aud` can pass edge AML or backup gating. Core rejects it, but the edge response differs from an outright authentication failure and may leak route existence.
 - Core verifies the session signature, expiry, user status and authorities, but it does not enforce per-call MFA state, session revocation or a per-user admin IP allowlist. The edge does not add those checks.
-- CORS reflects any origin. The LAN guard is the compensating control; do not expose `:8443` outside the LAN.
+- CORS is off unless `CORS_ALLOWED_ORIGINS` is set (cross-origin dev frontends need it). The LAN guard remains a control; do not expose `:8443` outside the LAN.
 - `app.set("trust proxy", false)` means Express's `req.ip` is the socket peer. The LAN guard implements its own trusted-proxy logic; the two can disagree if a new proxy is introduced.
 - The join-request KYB upload forwards the client-declared MIME type without magic-byte validation. Core must treat the file as untrusted.
 - Protected admin routes accept any non-empty bearer string; core is the only authentication authority.
@@ -502,3 +514,12 @@ The tests use a local HTTPS/HTTP stub and do not require PostgreSQL or Redis. A 
 ## 10. Change history
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
+
+## Security hardening (2026-11-05)
+
+- **authorityGuard.** Rejects `alg: none` and non-HS256 tokens and bad signature segment shape; requires `typ`, `iss`, `aud` and `exp` and enforces `exp`/`nbf`. `ADMIN_AUTHORITY_HINTS` (default empty) can only restrict, never skip a guard. Matching is case-sensitive. `requireSession` returns `401 AUTH_INVALID` for tokens that are not live core-shaped sessions. `*` is honoured at the edge; core re-verifies (the edge cannot verify signatures because the key lives in core).
+- **Deny-by-default any-of authority lists** on: users, join-requests, kyb-documents, merchants suspend/close, approvals, gateways, gateway-versions, rails, routes, assets, credential-sets, reconciliation, settings (restore-preview is a read, restore-apply a write), audit-logs, operator-cases, gateway-inquiries, attempts, disputes, adjustments, cashouts, commission-profiles, velocity-rules, finance and system/backups. Search, academy, options and stats are left to core.
+- **Backups.** Policy cron is validated (5 fields; minimum gaps full 60, delta 5, drill 60 minutes); retention floors full >= 7 days and WAL >= 3 days unless `approvalRequestId` is supplied. Backup trigger and drill require an `Idempotency-Key` header (8-128 URL-safe characters) relayed to core, with `BACKUP_JOB_RATE_LIMIT_MAX` (6 per 10 minutes).
+- **KYB uploads.** Upload runs `assertAllowedUpload` (png/jpeg/pdf) plus zod validation; the content route forces `Content-Disposition: attachment`, a CSP sandbox and a Content-Type allow-list. `logoUrl` must be http(s).
+- **Limiters** key on the resolved client IP plus a per-account limiter on login/MFA. Admin `x-pg-min-lsn` is validated (400).
+- **Still open.** Admin logout is client-only (GAP-019).

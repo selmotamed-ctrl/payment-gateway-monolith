@@ -3,7 +3,7 @@ id: deploy.planner
 title: Host Planner
 status: implemented
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - deploy/test-matrix/gates.ts
@@ -302,3 +302,7 @@ The suites cover five-host, two-host and single-host scenarios; firewall source 
 - `NginxPlan` carries `upstreamName` and `upstreamServers`. The renderer emits `upstream` blocks with `least_conn` and `max_fails=2 fail_timeout=3s` over all local and remote nodes.
 - Edge backends bind the node private IP instead of loopback. The planner adds a LAN-scoped firewall rule for each edge backend port so a remote Nginx upstream can reach it.
 - Replica read URLs use the replica's own PostgreSQL port, not a single PgBouncer port that would point a co-located replica back at the primary.
+
+## Security hardening (2026-11-05)
+
+The planner's config validation now rejects weak secrets and restricts charsets for hosts, users, remote dirs and paths (see `deploy.topology`). `DEPLOY_ENV` defaults to `production`. Runtime services are still forced to `NODE_ENV=production`. Edge `TRUSTED_PROXY_CIDRS` is written as `127.0.0.1/32,::1/128`.

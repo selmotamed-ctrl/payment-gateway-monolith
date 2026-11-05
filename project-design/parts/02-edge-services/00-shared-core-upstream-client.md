@@ -3,7 +3,7 @@ id: edge.shared
 title: Shared Core Upstream Client
 status: implemented
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - admin-back/lib/coreInternalClient.ts
@@ -28,11 +28,15 @@ tests:
   - checkout-back/test/core-internal-client.test.ts
   - checkout-back/test/mtls-client.test.ts
   - checkout-back/test/env-isolation.test.ts
+  - admin-back/test/security-regressions.test.ts
+  - merchant-back/test/security-regressions.test.ts
+  - checkout-back/test/security-regressions.test.ts
 gaps:
   - The client is copied into all three BFFs instead of living in a shared workspace package.
   - Client certificates are read when the per-node HTTPS agent is created; replacing files on disk does not reload them until the pool is reset or the process restarts.
   - An upstream HTTP 502/503 is always treated as a node failure, even when it is a legitimate application response.
   - Stream retries can only re-open a stream before it is established; there is no resume or polling fallback at the edge.
+  - The circuit breaker has no consecutive-failure threshold (TRACKER GAP-021).
 ---
 
 # Shared Core Upstream Client
@@ -200,7 +204,7 @@ There is no true fallback to polling at the edge. Checkout and POS SSE are imple
 | `MTLS_CLIENT_KEY_PATH` | yes | all BFFs | Client private key. |
 | `MTLS_CA_CERT_PATH` | yes | all BFFs | Internal CA certificate. |
 | `CORE_REQUEST_TIMEOUT_MS` | no | all BFFs | Per-request and agent timeout. Defaults: admin 60000, merchant/checkout 30000. |
-| `TRUSTED_PROXY_CIDRS` | no | all BFFs | Peers whose forwarded IP headers are trusted. |
+| `TRUSTED_PROXY_CIDRS` | no | all BFFs | Peers whose forwarded IP headers are trusted. Default loopback only (`127.0.0.0/8,::1/128`). |
 | `POS_STREAM_TIMEOUT_MS` | no | merchant | Stream timeout passed by the POS SSE route (default 900000). |
 
 ### Deployment surface
@@ -289,3 +293,15 @@ The suites cover URL parsing, least-in-flight and round-robin selection, cooldow
 ## 10. Change history
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
+
+## Security hardening (2026-11-05)
+
+Applies to all three copies of the client:
+- Only transport/TLS errors and 502/503/504 mark a node unhealthy.
+- Header names and values are validated as printable ASCII (`400 CORE_HEADER_INVALID`); edge-owned headers are applied last, and `x-real-client-ip` is always overwritten with the resolved IP.
+- PUT/DELETE are replayed after send only with an `Idempotency-Key`/opt-in, or on a connect-phase failure.
+- SSE streams use their own agent pool (128 sockets) with `MAX_STREAMS_PER_IP` (default 5) and abort upstream on early client disconnect.
+- Buffered responses are capped (`CORE_MAX_RESPONSE_BYTES` default 64 MiB, `CORE_TOTAL_DEADLINE_MS` default 300000).
+- Admin `x-pg-min-lsn` is validated against `^hex/hex$` (400 otherwise).
+- `resolveClientIp` honours forwarded headers only from trusted peers and requires a single valid IP (`x-real-ip` preferred, `x-real-client-ip` fallback).
+- Not done: a consecutive-failure threshold for the breaker (GAP-021).

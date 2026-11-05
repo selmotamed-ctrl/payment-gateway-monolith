@@ -3,7 +3,7 @@ id: deploy.storage
 title: Storage Provisioners
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - deploy/test/testMatrix.test.ts
@@ -14,6 +14,7 @@ code:
   - deploy/lib/configSchema.ts
   - deploy/lib/hostPlanner.ts
   - deploy/lib/healthVerifier.ts
+  - deploy/lib/quoting.ts
 design_sources:
   - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#4-segment-3--postgresql-18-ddl-partialcoveringgin-indexes--dedicated-auditlog-schemas
   - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#63-individual-storage-solution-provisioners-in-deployprovisioners
@@ -24,13 +25,15 @@ tests:
   - deploy/test/exhaustive-deploy-matrix.test.ts
   - deploy/test/healthVerifierScale.test.ts
   - deploy/test/configScale.test.ts
+  - deploy/test/security-regressions.test.ts
 gaps:
   - The audit/log provisioner assumes the Debian cluster names `audit` and `log`; a custom name is not configurable.
   - Storage mTLS is generated but not consumed; PostgreSQL, PgBouncer, Redis, audit and log databases do not request client certificates.
   - PostgreSQL SSL material is not configured by the provisioner; hostssl rules rely on the distribution's default TLS setup.
   - Redis has no TLS listener.
   - PgBouncer uses `server_tls_sslmode = prefer` and no client certificate because the deploy does not install PostgreSQL TLS material.
-  - The WAL-G download uses a GitHub "latest" Ubuntu 20.04 binary URL and is not pinned or checksum-verified.
+  - (Superseded) WAL-G is now pinned and sha256-verified; see Security hardening. Real SHA256 values must still be supplied by the operator.
+  - Backup daemon runs as the postgres user and PostgreSQL TLS/hostssl-only provisioning is absent (TRACKER GAP-022).
 ---
 
 # Storage Provisioners
@@ -159,7 +162,7 @@ The retention function only drops partitions whose names match the monthly suffi
 `provisionBackupEngine()` installs:
 
 - `barman`, `zstd`, `lz4`, `brotli`, `xz-utils`, `rclone`, `curl`, `ca-certificates`;
-- WAL-G when `BACKUP_ENGINE_MODE=wal-g`, by downloading `wal-g-pg-ubuntu-20.04-amd64` from the GitHub "latest" release and chmod +x;
+- WAL-G when `BACKUP_ENGINE_MODE=wal-g`, by downloading the pinned asset (`BACKUP_WALG_VERSION`, `BACKUP_WALG_ASSET`) and verifying it against the required `BACKUP_WALG_SHA256` (fail closed), then chmod +x;
 - the `pgbackup` system user and `/var/lib/pg-backup`, log and cert directories;
 - `/etc/pg-backup/backup.env` from `backupDaemonEnv()`;
 - `/etc/pg-backup/wal-g.env` for the core target;
@@ -359,3 +362,12 @@ Not covered:
 - Journal partition cron uses the primary cluster port (`psql -p <port>`), not the default 5432.
 - Log partition cron uses the log cluster port (`psql -p <port>`), so a log cluster on 5435 is maintained instead of accidentally touching the main cluster.
 - Backup target verification checks the MinIO health endpoint instead of an unconfigured rclone remote.
+
+## Security hardening (2026-11-05)
+
+- **Quoting.** Provisioners (postgres18, auditAndLogDb, backupEngine) use `deploy/lib/quoting.ts`: SQL literals are escaped, DO blocks use collision-free dollar tags, and `pgbouncer.ini`, `userlist` and `.pgpass` are escaped. `backup.env` and `wal-g.env` are rendered `KEY='value'` (a single quote in a value is rejected).
+- **Credentials.** `pg_basebackup` uses `PGPASSFILE`, never `PGPASSWORD`. Bootstrap/audit/log/archive SQL lives in a private 0700 postgres-owned directory, mode 0600, removed by trap/finally.
+- **WAL-G.** `restore_command` is a valid `postgresql.conf` literal (inner quotes doubled). The daemon setting `WALG_ENV_FILE` keeps S3/encryption secrets out of that line; the provisioner writes `/etc/pg-backup/wal-g.env` 0640 root:postgres. WAL-G is pinned (`BACKUP_WALG_VERSION=3.0.9`, `BACKUP_WALG_ASSET`) and sha256-verified fail-closed with required `BACKUP_WALG_SHA256`; barman is pinned (`BACKUP_BARMAN_VERSION=3.10.1`).
+- **Mirror and restore.** The off-site mirror uses `rclone copy`/`rsync` without `--delete` unless `BACKUP_SECONDARY_MIRROR_DELETE=true`. The scratch restore cluster starts with `-c archive_mode=off`.
+- **PostgreSQL.** `listen_addresses = 127.0.0.1,<private IP>`; memory settings derive from optional `PG_RAM_GB` (unset keeps 8GB/24GB/1GB); `PG_IO_METHOD` defaults to `worker` (io_uring is opt-in); an existing standby (PG_VERSION and `standby.signal` present) is not rebuilt unless `PG_REPLICA_REBUILD=true`.
+- **Still open.** The backup daemon runs as the postgres user and there is no PostgreSQL TLS/hostssl-only provisioning (GAP-022); real SHA256 values for WAL-G/bun/barman must be supplied (GAP-023); replica `.pgpass` is written via `printf` argv (GAP-028).

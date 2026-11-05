@@ -3,7 +3,7 @@ id: core.ledger
 title: Double-Entry Ledger
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/engine/ledger/LedgerPoster.ts
@@ -15,6 +15,7 @@ code:
   - core-back/lib/storageEngine/uowAdapter.ts
   - core-back/prisma/seedGlAccounts.ts
   - core-back/prisma/schema.prisma
+  - core-back/lib/cashoutBalance.ts
 design_sources:
   - design/01-platform-architecture/payment_gateway_final_design-v5.md#11
   - design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#9
@@ -30,6 +31,8 @@ tests:
   - core-back/test/storage-engine/ledger-shards.test.ts
   - core-back/test/storage-engine/uow.test.ts
   - core-back/test/storage-engine/write-path.integration.test.ts
+  - core-back/test/security-regressions/h7-rounding.test.ts
+  - core-back/test/security-regressions/h4-cashout.test.ts
 gaps:
   - "`CheckpointService` is not scheduled or wired into the production runtime; no checkpoint history table exists."
   - "Merchant balance fallbacks add every journal line to `checkpoint_balance`, so a captured checkpoint would be double counted."
@@ -37,6 +40,8 @@ gaps:
   - "Shard rows are projected on write but are not rebuilt or reconciled; a missing shard falls back to journal-line reads."
   - "Idempotent replay returns the existing entry with an empty line list and does not compare the replay payload with the original posting."
   - "Historical design and two test titles still say 15/16 templates even though the code defines 17 scenarios and 20 matrix variants."
+  - Ledger checkpoint is not atomic, mixes app and DB clocks, and there is no runtime shard-vs-journal parity check (TRACKER GAP-011).
+  - No append-only protection on journal_entries/journal_lines/audit_log and the application is the DB owner (TRACKER GAP-013).
 ---
 
 # Double-Entry Ledger
@@ -398,3 +403,10 @@ The unit suites run without PostgreSQL. The checkpoint, shard, UoW, and write-pa
 ## 10. Change history
 
 - 2026-11-03 — Baseline verification against `5a24f6f+working-tree`: documented the 17 scenarios, 11 account types, shard writer, checkpoint and verifier behavior, balance-read differences, and the missing database balance enforcement.
+
+## 11. Security hardening (2026-11-05)
+
+- **Commission math.** `buildBreakdown` rounds the commission once, honouring the commission profile's `roundingMode` (`HALF_UP` default, `HALF_EVEN`, `HALF_DOWN`, `UP`, `DOWN`, `CEILING`, `FLOOR`; 4 decimal places). Net, payer share and surcharge are derived by exact subtraction so journals balance. The gateway fee and refund split are each rounded once, explicitly.
+- **Cash-out ledger rules.** Approval journals use the cash-out id as `refId`. Balance is verified under a `FOR UPDATE` lock on the wallet's shards (`lib/cashoutBalance.ts`); `lockGlAccountShardsSorted` orders shards by byte order to keep lock ordering deterministic.
+- **Still open.** The ledger checkpoint (`CheckpointService`) is not atomic and mixes application and database clocks; there is no runtime shard-vs-journal parity check (GAP-011, P0). `journal_entries`, `journal_lines` and `audit_log` have no append-only protection (triggers/REVOKE) and the application is the DB owner (GAP-013, P0).
+- **Tests.** `core-back/test/security-regressions/{h7-rounding,h4-cashout}`. True concurrency needs PostgreSQL 18 and is not covered.

@@ -3,7 +3,7 @@ id: merchant-ui.portal
 title: Merchant Portal
 status: partial
 confidence: high
-last_verified: 2026-11-04
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - merchant-front/src/router/index.ts
@@ -28,6 +28,7 @@ tests:
   - merchant-front/src/content/__tests__/content-completeness.test.ts
   - merchant-front/src/content/__tests__/landing-content.test.ts
   - tests/e2e/merchant/landing.spec.ts
+  - tests/unit/frontend-security-merchant.test.ts
 gaps:
   - The Statements route has no router-level authority entry, so direct navigation is allowed even when the navigation item is hidden.
   - Merchant guide and developer-guide routes are intentionally open to any authenticated merchant; this is a learning surface, not a data boundary.
@@ -36,6 +37,8 @@ gaps:
   - The portal has no route-level maker-checker visualization for pending application changes beyond status badges and pending states.
   - The public landing page's developer CTA targets `/portal/guide/developers`, which requires sign-in; the login page always lands on the dashboard (no return-to), so a visitor must navigate to the guide again after signing in.
   - The developer guide content (D-01/D-04/D-05) and the operations-guide code generator still document `useCount`, `redirectUrl`, `railWhitelist` and a `checkoutUrl`/`id` create-link response that core-back's strict `linkCreateSchema` does not accept/return (and they omit the required `title`); the landing page snippet uses the real schema.
+  - POS screen stream uses fetch streaming with Authorization and reconnect backoff; not verified against live merchant-back.
+  - Tokens are client-stored; no revoke endpoint (TRACKER GAP-019).
 ---
 
 # Merchant Portal
@@ -400,3 +403,14 @@ The shell/auth/a11y/landing suites run against `bun run preview` with mocked API
 
 - 2026-11-03 — Initial canonical merchant portal part. Confirms 16 portal routes, the 248/56 shell, onboarding and money/commerce/developer pages, guide surfaces, and the Statements/route authority and Google OIDC gaps.
 - 2026-11-04 — Public landing page redesigned (§3.1a): hero payment simulator, money-flow track, product bento with fee preview, stats, lazy developer section with a schema-accurate snippet, security, onboarding, FAQ; EN/AR landing catalogue; motion/reduced-motion/RTL rules; new landing unit and e2e tests. Removed unverifiable claims from the old page (fixed "3.00%" commission, "LYD · USD · EUR", "Live"/"All systems operational" badges) and nested `<a><button>` CTAs. `SegmentedTabs` arrow keys now follow the rendered direction in RTL.
+
+## Security hardening (2026-11-05)
+
+- `X-Client-Channel` is `merchant`. The 401 handler exempts `/auth/login` and `/auth/mfa` and acts only when a token exists.
+- **Cash-out:** an `idempotencyKey` per intent; amount validated against `^\d{1,14}(\.\d{1,4})?$` and greater than zero; a confirm dialog before submit.
+- **Google login/register** send a fixed `redirectUri` path and payload; `payload.redirectUrl` must be https on `VITE_IDENTITY_HOSTS` (default `accounts.google.com`).
+- **Checkout links** are built from `VITE_CHECKOUT_BASE_URL` (fallback `location.origin`).
+- **POS screen stream** uses fetch streaming with `Authorization` and reconnect backoff (not verified against live merchant-back).
+- `resolveUploadPathWithMat` was removed. The landing page no longer names internal ledger accounts (`CUSTOMER_PAYMENT`, `YOUR_WALLET`, `PLATFORM_FEE`) or internal action names.
+- New env: `VITE_CHECKOUT_BASE_URL` (optional), `VITE_IDENTITY_HOSTS`. `.env.example` ships; copy to `.env`.
+- Catalogue keys added (EN and AR): "Enter a valid amount greater than zero (up to 4 decimals).", "Confirm Cash-Out", landing "Customer payment" and "Illustrative".

@@ -2,15 +2,16 @@
 
 <!-- GENERATED FILE. Edit core-back/prisma/schema.prisma instead. Do not hand-edit this file. -->
 
-- Models: **75**
+- Models: **76**
 - Enums: **105**
-- Schema version: **8**
-- Migrations: **4**
+- Schema version: **10**
+- Migrations: **6**
 
 ## Models
 
 - `Merchant`
 - `User`
+- `MfaChallenge`
 - `Application`
 - `Wallet`
 - `AccessToken`
@@ -199,3 +200,5 @@
 - `20261103120000_postgres18_storage_engine`
 - `20261103130000_cqrs_read_models`
 - `20261103180000_storage_hardening`
+- `20261104090000_db_read_write_optimisation`
+- `20261104120000_mfa_challenges`

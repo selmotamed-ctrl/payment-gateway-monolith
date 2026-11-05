@@ -3,7 +3,7 @@ id: fake-rails.integration
 title: Core Integration and Deployment
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/prisma/seedFakeRails.ts
@@ -28,6 +28,7 @@ tests:
   - core-back/test/exhaustive/10-seeder-and-deploy/synthetic-seeder-safety-and-audit.test.ts
   - deploy/test/fakeRails.test.ts
   - deploy/test/exhaustive-deploy-matrix.test.ts
+  - core-back/test/security-regressions/m10-ssrf.test.ts
 gaps:
   - Only 13 of the 20 fake descriptors have seeded core gateways.
   - cbl_lypay and evo_pay seeded URLs do not match the fake route keys.
@@ -343,3 +344,7 @@ bun run deploy.ts --only=fake-rails
 ## 10. Change history
 
 - 2026-11-03: initial canonical part. Verified against `5a24f6f+working-tree`.
+
+## Security hardening (2026-11-05)
+
+Core's outbound URL compile now fails closed on an empty `allowed_hosts` (`HOST_ALLOWLIST_EMPTY`) unless `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST=true`, and blocks private/loopback/link-local literals unless `allowPrivateHosts`; the Fake Rails exception (three-part allowlist) is unchanged. Seed blueprints for generic `input.code`, `mpgs` and `mypay` set `timestampToleranceSec = 0` because they carry no timestamp field. In production deploys `FAKE_RAILS_ENABLED`, `IS_TEST_SERVER`, `FAKE_RAILS_ALLOW_IN_PRODUCTION=true` and the synthetic seeder are refused.

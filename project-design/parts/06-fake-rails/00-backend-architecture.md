@@ -3,7 +3,7 @@ id: fake-rails.backend
 title: Fake Rails Backend Architecture
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - fake-rails-back/index.ts
@@ -18,12 +18,14 @@ tests:
   - fake-rails-back/test/api.test.ts
   - fake-rails-back/test/crypto.test.ts
   - fake-rails-back/test/exhaustive/05-api-matrix/fake-rails-portal-and-chaos-api.test.ts
+  - fake-rails-back/test/security.test.ts
 gaps:
   - Inbound rail requests are not authenticated or signature-verified.
   - Default outbound webhook URL includes an extra /webhook path segment.
   - The service has no direct TLS listener; deployment relies on Nginx.
   - Portal rate limiting is in-process and resets on restart.
   - Stored step events contain raw headers and bodies without redaction.
+  - Fake Rails /hosted/* public approve/decline has no token on the action POST (TRACKER GAP-024).
 ---
 
 # Fake Rails Backend Architecture
@@ -141,7 +143,7 @@ Indexes cover reference lookup, creation time, rail/status, provider reference, 
 - `/internal/*` requires `x-fake-rails-seeder-token` equal to `FAKE_RAILS_SEEDER_TOKEN`.
 - Everything else requires a Bearer token or `?token=` query token with `role=FAKE_RAILS_TESTER`.
 
-`lib/jwt.ts` is a small HS256 implementation using HMAC-SHA256, base64url, expiry checking and `timingSafeEqual`. There is no issuer, audience, revocation or refresh-token mechanism.
+`lib/jwt.ts` is a small HS256 implementation using HMAC-SHA256, base64url, expiry checking and `timingSafeEqual`. There is no issuer, audience, revocation or refresh-token mechanism (the secret must now be at least 32 characters and pass the weak-secret checks).
 
 ### 3.6 Portal routers and event hub
 
@@ -296,3 +298,9 @@ bun run start
 ## 10. Change history
 
 - 2026-11-03: initial canonical part. Verified against `5a24f6f+working-tree`.
+
+## Security hardening (2026-11-05)
+
+- The JWT secret and seeder token must be at least 32 characters and pass the same weak-secret checks as deploy. The seeder token compare is constant-time. A `?token=` JWT is accepted only on `/transactions/stream`.
+- `FAKE_RAILS_ALLOWED_CIDRS` is enforced against `socket.remoteAddress` (not `X-Forwarded-For`); behind nginx the real allowlist is the nginx `allow`/`deny` block. `FAKE_RAILS_TRUST_PROXY` defaults to loopback. `FAKE_RAILS_PORTAL_ACCOUNT_LOCKOUT` (default 5 per username) locks repeated failed portal logins.
+- Still open: `/hosted/*` remains public with no token on the action POST (GAP-024).

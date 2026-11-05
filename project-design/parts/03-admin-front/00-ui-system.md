@@ -3,7 +3,7 @@ id: admin-ui.system
 title: Admin UI System
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - admin-front/src/plugins/vuetify.ts
@@ -19,6 +19,7 @@ code:
   - checkout-front/src/layouts/**
   - fake-rails-front/src/styles/**
   - fake-rails-front/src/components/ui/**
+  - admin-front/src/utils/devLog.ts
 design_sources:
   - design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md
   - design/06-ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md
@@ -30,9 +31,11 @@ tests:
   - tests/e2e/admin/a11y.spec.ts
   - tests/e2e/merchant/shell.spec.ts
   - tests/e2e/checkout/pay.spec.ts
+  - tests/unit/frontend-security-admin.test.ts
 gaps:
   - Fake Rails receives only a partial shared-UI rollout; it has separate portal/hosted shells and is not covered by the admin compliance test.
   - Shared primitives are copied per workspace rather than published as one package, so drift is possible.
+  - Admin logout is client-only (no admin-back revoke endpoint) and tokens are not in httpOnly cookies (TRACKER GAP-019).
 ---
 
 # Admin UI System
@@ -297,3 +300,11 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 ## 10. Change history
 
 - 2026-11-03 — Initial canonical part created from the v1/v2 UI designs and working-tree code. Records the 13-primitive contract, 248/56 shell, Fake Rails partial rollout, removed app scaling, and the still-present stale files.
+
+## Security hardening (2026-11-05)
+
+- Blob previews whitelist png/jpeg/pdf and open with `noopener`; `ApiImage` renders raster images only; `resolveUploadPathWithMat` was removed.
+- `console.log` is gated through `utils/devLog.ts` (DEV builds only).
+- A fresh clone should `cp .env.example .env`; the real `.env` is no longer tracked.
+- Catalogue keys added (EN and AR): "This file type cannot be previewed." and the full-backup confirmation text.
+- Admin logout is still client-only (GAP-019).

@@ -3,7 +3,7 @@ id: fake-rails.chaos
 title: Fake Rails Chaos Engine and Tester Portal
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - fake-rails-back/engine/chaos/**
@@ -20,6 +20,8 @@ tests:
   - fake-rails-back/test/api.test.ts
   - fake-rails-back/test/exhaustive/05-api-matrix/fake-rails-portal-and-chaos-api.test.ts
   - tests/e2e/exhaustive/exhaustive-fake-rails-surface.spec.ts
+  - fake-rails-back/test/security.test.ts
+  - tests/unit/frontend-security-checkout.test.ts
 gaps:
   - autoApproveAsyncAfterSec is persisted but never scheduled.
   - The portal exposes failure chance and one primary failure mode, not the full phase/mode weight matrix.
@@ -366,3 +368,7 @@ curl -X POST http://127.0.0.1:4104/portal-api/webhooks/$TX_ID/fire \
 ## 10. Change history
 
 - 2026-11-03: initial canonical part. Verified against `5a24f6f+working-tree`.
+
+## Security hardening (2026-11-05)
+
+fake-rails-front: the postMessage target is `VITE_CHECKOUT_ORIGIN`, otherwise the embedding parent's origin, never `*`; `redirect_url` is validated as http(s) without credentials. The SSE token is still passed in the query string, and `/hosted/*` is still public with no token on the action POST (GAP-024). New env: `VITE_CHECKOUT_ORIGIN`.

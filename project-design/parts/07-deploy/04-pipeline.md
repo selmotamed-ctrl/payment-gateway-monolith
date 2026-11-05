@@ -3,7 +3,7 @@ id: deploy.pipeline
 title: Deployment Pipeline
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - deploy/deploy.ts
@@ -12,6 +12,7 @@ code:
   - deploy/lib/healthVerifier.ts
   - deploy/templates/**
   - deploy/DEPLOYMENT_GUIDE.md
+  - deploy/lib/quoting.ts
 design_sources:
   - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#6-ordered-14-step-multi-host-deployment-pipeline
   - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#2-complete-deploy-directory-structure
@@ -22,13 +23,15 @@ tests:
   - deploy/test/templates.test.ts
   - deploy/test/healthVerifierScale.test.ts
   - deploy/test/provisioners.test.ts
+  - deploy/test/security-regressions.test.ts
 gaps:
   - The deployment guide says pruning happens in step 13 and in step 11; the code prunes inside deployService and step 13 only logs the retained count.
   - deploy/templates/pm2.core.config.cjs.tpl and pm2.edge.config.cjs.tpl are dead; PM2 config is generated inline.
-  - The pre-migration backup runs pg_dump on the core host, but the fresh bootstrap installs no PostgreSQL client package and the command embeds PGPASSWORD in the remote command line.
+  - The pre-migration backup runs pg_dump on the core host, but the fresh bootstrap installs no PostgreSQL client package (the dump now authenticates through a PGPASSFILE rather than PGPASSWORD; see Security hardening).
   - There is no automatic rollback after a failed batch or failed verification; earlier batches remain on the new release.
   - Single-node services restart with pm2 delete + pm2 start, so a single-node edge or core restart is not zero-downtime.
   - The deployment guide's DEPLOY_MODE=auto description does not match the code.
+  - No CI at the repo root; legacy per-service deploy.yml workflows deploy with no tests, StrictHostKeyChecking=no and rsync --delete (TRACKER GAP-014).
 ---
 
 # Deployment Pipeline
@@ -97,9 +100,9 @@ The legacy path creates the database/role when `DB_MANAGE_VIA_SSH` and no PG tie
 
 #### Pre-migration backup details
 
-`preMigrationBackup()` resolves the primary direct port (never PgBouncer) and the PG or legacy credentials, then builds `PGPASSWORD="<password>" pg_dump -h <host> -p <port> -U <user> -Fc <db> > <target>.dump`. `backupDatabase()` creates `<CORE_REMOTE_DIR>/shared/backups`, chowns it to the SSH user, and runs the command on the **core host** as that user. The file is `pre-migrate-<releaseTimestamp>.dump`.
+`preMigrationBackup()` resolves the primary direct port (never PgBouncer) and the PG or legacy credentials, then builds `PGPASSFILE=<private passfile> pg_dump -h <host> -p <port> -U <user> -Fc <db> > <target>.dump`. `backupDatabase()` creates `<CORE_REMOTE_DIR>/shared/backups`, chowns it to the SSH user, and runs the command on the **core host** as that user. The file is `pre-migrate-<releaseTimestamp>.dump`.
 
-No dump is taken on a fresh install. A failure aborts before migrations. `pg_dump` must already exist (the bootstrap package list omits `postgresql-client`), `PGPASSWORD` appears in the verbose remote command, and the dump is not automatically verified or restored.
+No dump is taken on a fresh install. A failure aborts before migrations. `pg_dump` must already exist (the bootstrap package list omits `postgresql-client`), the password no longer appears on the command line (PGPASSFILE), and the dump is not automatically verified or restored.
 
 #### Backup daemon source deployment
 
@@ -292,7 +295,7 @@ It then prints `Deployment complete.` There is no post-deploy state file and no 
 
 ### Known bugs / risks
 
-- `PGPASSWORD` is embedded in the remote command string and can appear in verbose logs.
+- The pre-migrate dump uses a PGPASSFILE (no PGPASSWORD on the command line). Credential handling of the health-step storage probes was not re-audited in this change.
 - The pre-migration dump can fail on a minimal core host without PostgreSQL client tools.
 - A rolling batch failure leaves earlier batches on the new release and later batches untouched; there is no automatic compensation.
 - `pm2 delete` + `pm2 start` creates a restart gap for a single-node service; the deploy itself does not provide zero downtime.
@@ -345,3 +348,14 @@ No test performs a real multi-host deployment, migration, PM2 restart or Nginx r
 ## 11. Per-node release isolation (2026-11-03)
 
 `deployService()` now writes `shared/.env.<nodeId>` and points the release's `.env` symlink at it. Releases live under `releases/<nodeId>/<timestamp>` and the atomic switch updates `current-<nodeId>`. The prune command is scoped to that node's release root, so deploying `core-2` cannot delete `core-1`'s current release. Nginx is rendered with the plan's upstream list rather than a single loopback backend port.
+
+## Security hardening (2026-11-05)
+
+- **Quoting.** `deploy/lib/quoting.ts` is the single helper set (`shellQuote`, `sqlLiteral`, `sqlIdent`, `dollarTag`, `pgbouncerQuoted`, `pgpassField`, `assertSingleLine`, `envAssign`). Paths are shell-quoted in rm/chown/mkdir/ln/xargs/pm2 commands.
+- **Pre-migrate dump.** `pg_dump` uses `PGPASSFILE` (never `PGPASSWORD`), runs under `umask 077` into a 0700 backups directory, and only the newest `KEEP_RELEASES` dumps are kept. The earlier statements in this part that the dump embeds `PGPASSWORD` are superseded.
+- **Migrations.** `planMigrations()` is exported; only the first core node migrates. `--fresh` against a non-empty database is refused unless `--force-fresh` or `DEPLOY_FORCE_FRESH=1`. Update deploys run `migrate deploy` when migrations are pending or unknown. The dump is taken before migrating in both modes when the database is non-empty or unknown.
+- **sshRunner** local-sudo writes use an `mkdtemp` 0700 directory removed in `finally`.
+- **Bun** is installed from a pinned download verified against `BUN_SHA256` (no `curl | bash`).
+- **nginx templates**: `server_tokens off` and `limit_req` (with `limit_req_status 429`) in all six; the fakerails vhost gets `allow`/`deny` from `FAKE_RAILS_ALLOWED_CIDRS`, `script-src 'self'`, `object-src 'none'`, `frame-ancestors 'self'` (previously `'self' *`); the checkout CSP is unchanged.
+- **scripts/deploy-localhost.sh** refuses `NODE_ENV=production` unless `LOCAL_TARGET=1`, no longer falls back to default secrets (random secrets via `openssl rand` go to a 0600 `.local/secrets.env` or `LOCAL_SECRETS_FILE`), and requires `DB_PASSWORD`.
+- **Still open.** No CI at the repo root; legacy per-service `deploy.yml` workflows deploy without tests, with `StrictHostKeyChecking=no` and `rsync --delete` (GAP-014). Replica `.pgpass` is still written via `printf` argv (GAP-028).

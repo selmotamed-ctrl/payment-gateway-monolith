@@ -113,7 +113,7 @@ Request logging writes console lines with a separate short id and an `http_acces
 - The migration order and files are generated in [`../project-design/appendices/migration-catalog.md`](../project-design/appendices/migration-catalog.md).
 - The committed history is forward-only: baseline schema, storage-engine indexes, CQRS read models and storage hardening. There are no down migrations. Recovery is restore/PITR or a new forward migration.
 - `journal_lines` is monthly range-partitioned by `created_at`; the primary key includes `created_at`. The deploy engine installs a daily partition-maintenance cron. Elsewhere, run `SELECT ensure_journal_line_partitions(18)` on a schedule.
-- Schema version 8 is required. `ensureSchemaVersion()` is called by the baseline seeder, the Fake Rails seeder and the synthetic seeder, but not by the HTTP start path. A stale database can boot and fail later at query time.
+- Schema version 10 is required (latest migration `20261104120000_mfa_challenges`). `ensureSchemaVersion()` is called by the baseline seeder, the Fake Rails seeder and the synthetic seeder, but not by the HTTP start path. A stale database can boot and fail later at query time.
 
 ### 3.2 Storage engine ports
 
@@ -219,7 +219,7 @@ bun install
 bun run generate-mtls-certs
 
 export DATABASE_URL=postgresql://postgres@127.0.0.1:55432/payment_gateway_monolith
-export KMS_MASTER_KEY=local-payment-gateway-master-key-32chars!
+export KMS_MASTER_KEY="$(openssl rand -base64 32)"   # strong random value, at least 32 chars
 
 bun run migrate-generate
 bun run migrate-deploy
@@ -230,7 +230,7 @@ bun run start
 The baseline seed creates administrator accounts but deliberately leaves their passwords unset. Activate one before signing in:
 
 ```bash
-bun run create-admin --email admin@example.com --password 'Str0ngPassw0rd!'
+ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com
 ```
 
 `bun run start` listens on `HOST:PORT` (`127.0.0.1:4000` by default) with TLS 1.3 and requires a client certificate. `bun run dev` uses Bun watch mode.
@@ -344,6 +344,7 @@ The Vault also recognizes `KMS_KEYS_JSON` for multiple key ids; it is read outsi
 | :--- | :--- | :--- |
 | `FAKE_RAILS_ENABLED` | `false` | Enables Fake Rails-aware seeding/flows. |
 | `FAKE_RAILS_ALLOW_IN_PRODUCTION` | `false` | Required when `NODE_ENV=production` and Fake Rails is enabled. |
+| `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST` | `false` | Outbound URL compile fails closed (`HOST_ALLOWLIST_EMPTY`) on an empty `allowed_hosts` unless `true`. |
 | `IS_TEST_SERVER` | `false` | Must be `true` for the synthetic seeder. |
 | `FAKE_RAILS_PUBLIC_BASE_URL` | unset | Public emulator base URL used by seeders and gateway base URLs. |
 | `ALLOW_FAKE_RAILS_HOSTS` | `false` | Relaxes the SSRF private-address guard for exact allowed hosts. |
@@ -351,7 +352,7 @@ The Vault also recognizes `KMS_KEYS_JSON` for multiple key ids; it is read outsi
 | `FAKE_RAILS_SEEDER_TOKEN` | unset, min 16 | Shared seeder handshake/bulk-sync token. |
 | `FAKE_RAILS_ALLOWED_CIDRS` | empty | Declared for source-CIDR policy; the engine SSRF guard does not consume it. |
 
-Keys read outside the env proxy include `KMS_KEYS_JSON`, `KYB_SCANNER_MODE` (default `eicar`) and the `SYNTHETIC_*` seeder controls. Deploy-injected admin UI flags are frontend/deploy settings, not core keys. Configuration is cached per process outside tests; restart after changing it.
+Keys read outside the env proxy include `KMS_KEYS_JSON`, `KYB_SCANNER_MODE` (unset fails closed: every document stays `PENDING` and is not previewable; `eicar` is for development/tests only and is the only mode that yields `CLEAN`; active content is `INFECTED` in every mode; this is not a real malware engine) and the `SYNTHETIC_*` seeder controls. Deploy-injected admin UI flags are frontend/deploy settings, not core keys. Configuration is cached per process outside tests; restart after changing it.
 
 ## 7. Scripts and command reference
 
@@ -380,12 +381,12 @@ Keys read outside the env proxy include `KMS_KEYS_JSON`, `KYB_SCANNER_MODE` (def
 ### 7.1 Administrator bootstrap
 
 ```bash
-bun run create-admin --email admin@example.com --password 'Str0ngPassw0rd!'
-bun run create-admin --email compliance@example.com --password 'Str0ngPassw0rd!' --role COMPLIANCE
-bun run create-admin --email admin@example.com --password 'Str0ngPassw0rd!' --mfa
+ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com
+ADMIN_PASSWORD='<strong password>' bun run create-admin --email compliance@example.com --role COMPLIANCE
+ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com --no-mfa   # MFA is on by default
 ```
 
-Environment equivalents: `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_ROLE`, `ADMIN_MFA=true`. The password policy is 12-128 characters with a lowercase letter, an uppercase letter and a digit. The command is idempotent; it sets `ACTIVE`, clears a stale MFA secret and rotates the password. Roles are `GATEWAY_ADMIN`, `SECURITY_ADMIN`, `FINANCE`, `COMPLIANCE`, `MLRO`, `OPERATOR` and `SUPPORT`. The baseline seed creates the seeded accounts with no password and `INVITED` status on purpose.
+Environment equivalents: `ADMIN_EMAIL`, `ADMIN_PASSWORD` (the only way to supply the password: `--password` on the command line is rejected), `ADMIN_ROLE`, `ADMIN_MFA=false` (MFA is on by default; `--no-mfa` also disables it). The password policy is 12-128 characters with a lowercase letter, an uppercase letter and a digit. The command is idempotent; it sets `ACTIVE`, clears a stale MFA secret and rotates the password. Roles are `GATEWAY_ADMIN`, `SECURITY_ADMIN`, `FINANCE`, `COMPLIANCE`, `MLRO`, `OPERATOR` and `SUPPORT`. The baseline seed creates the seeded accounts with no password and `INVITED` status on purpose.
 
 ### 7.2 Development superusers
 
@@ -407,7 +408,7 @@ bun run migrate-generate  # after schema changes, before typecheck/start
 bun run prisma:validate
 ```
 
-`migrate-dev` wraps Prisma: it runs `prisma migrate dev --create-only --name init`, removes the generated `DROP TABLE "schema_versions"` statement, appends the schema-version table DDL and an upsert to version 8, then runs `migrate deploy`. Review the patched SQL before committing a migration. The patch is string-based.
+`migrate-dev` wraps Prisma: it runs `prisma migrate dev --create-only --name init`, removes the generated `DROP TABLE "schema_versions"` statement, appends the schema-version table DDL and an upsert to the new version (currently 10), then runs `migrate deploy`. Review the patched SQL before committing a migration. The patch is string-based.
 
 `migrate-reset` is destructive; it drops and recreates the database. There are no down migrations. A partial restore that stops before the storage-hardening migration leaves schema version 7; seeders refuse to run, while the HTTP server can still boot because it does not check the version.
 
@@ -569,3 +570,9 @@ Historical design material lives under [`../design/`](../design/). It is referen
 - Attempt transitions are republished on the Redis-backed `realtime:attempt` topic. Checkout SSE and merchant POS streams subscribe to it and keep their database poll as a fallback.
 - The dedicated audit database computes `prev_hash`/`row_hash` in a BEFORE INSERT trigger under `pg_advisory_xact_lock(994001)`. `AuditShipperWorker` inserts without hashes and reads them from `RETURNING`.
 - `verify_audit_chain()` is installed by the deploy audit-DB provisioner and is used by the two-machine backup/audit gates.
+
+## Security notes (2026-11-05)
+
+- MFA challenges live in `mfa_challenges`; `/internal/merchant/auth/verify-identity` is retired (`410 IDENTITY_VERIFICATION_RETIRED`). Login and MFA throttles are per-instance memory counters.
+- Merchant authorities come from a closed catalogue (`lib/auth/merchantAuthorities.ts`); API tokens carry only `link:write`, `link:read`, `payment:read` and may only call `/external/*`.
+- Cash-out creation requires an idempotency key; approval checks ledger balance under a shard lock. See `project-design/parts/01-core-back/` for details and `project-design/TRACKER.md` for open gaps.

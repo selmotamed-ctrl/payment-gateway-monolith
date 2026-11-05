@@ -3,7 +3,7 @@ id: platform.observability
 title: Observability
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/index.ts
@@ -34,6 +34,7 @@ tests:
   - core-back/test/storage-engine/outbox-workers.test.ts
   - checkout-back/test/error-and-logger.test.ts
   - deploy/backup-daemon/test/server.test.ts
+  - checkout-back/test/security-regressions.test.ts
 gaps:
   - No Prometheus/OpenTelemetry metrics or traces.
   - Storage health exists in code but is not exposed over HTTP.
@@ -474,3 +475,7 @@ No live monitoring stack, metrics scrape, restore drill or production-shaped log
 ## 10. Change history
 
 - 2026-11-03: Initial canonical observability part written against `5a24f6f+working-tree`; records the actual health, queue, audit/log and backup observability and the missing metrics/tracing.
+
+## Security hardening (2026-11-05)
+
+Redaction was extended to PII keys (email, phone, msisdn, iban, account number, names, identity, national id, passport, dob, address) and `redactUrl` masks sensitive query values and path tokens (inbound path tokens, link keys, attempt tokens, `/logs/` ids, `/external/links/` keys). Edge limiters and access logs use the resolved client IP. Core's access-log client IP is the edge-reported `x-real-client-ip` only when it is a valid IP, otherwise `request.ip`. MFA SMS codes no longer appear in `notifications.payload_json`.

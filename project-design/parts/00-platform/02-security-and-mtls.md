@@ -3,7 +3,7 @@ id: platform.security
 title: Security and mTLS
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/index.ts
@@ -39,6 +39,13 @@ tests:
   - admin-back/test/env-isolation.test.ts
   - merchant-back/test/env-isolation.test.ts
   - checkout-back/test/env-isolation.test.ts
+  - admin-back/test/security-regressions.test.ts
+  - merchant-back/test/security-regressions.test.ts
+  - checkout-back/test/security-regressions.test.ts
+  - core-back/test/security-regressions/c2-mfa.test.ts
+  - core-back/test/security-regressions/h1h2-authz.test.ts
+  - core-back/test/security-regressions/m10-ssrf.test.ts
+  - deploy/backup-daemon/test/mtlsAuthorization.test.ts
 gaps:
   - Session JWTs are stateless; there is no session revocation table and no per-call MFA claim enforcement.
   - API-token scopes are stored but not enforced per merchant endpoint.
@@ -46,6 +53,10 @@ gaps:
   - Google OIDC login returns 501.
   - Storage mTLS certificates are generated but not consumed by PostgreSQL/Redis.
   - The backup daemon certificate environment names are not aligned with core.
+  - No admin/merchant logout or token revoke endpoint; tokens are held client-side (TRACKER GAP-019).
+  - No distinct JWT aud per channel (TRACKER GAP-020).
+  - Throttle counters are per-instance memory (TRACKER GAP-027).
+  - No PCI scope statement or PAN-rail guard (TRACKER GAP-026).
 ---
 
 # Security and mTLS
@@ -140,7 +151,7 @@ There is no mapping from a certificate to a specific core node or tenant. One ce
    - Reads `authoritiesMap` from the database, not from the JWT; empty authorities are rejected with `403 SESSION_AUTHORITIES_EMPTY`.
    - Returns `kind: "session"`, user id, role, merchant id, authorities and `sessionId` equal to the JWT subject.
 
-The session key and MFA-challenge key are derived with HKDF-SHA256 from `KMS_MASTER_KEY` using the purposes `session-signing` and `mfa-challenge`. Session lifetime is 12 hours; MFA challenge lifetime is 10 minutes. The JWT includes a `mfa` boolean claim and an `appScopeIds` array.
+(Superseded for MFA: challenges are now rows in `mfa_challenges`, 5-minute lifetime; the `mfa-challenge` HKDF purpose no longer signs a challenge token. See section 11.) The session key and the legacy MFA-challenge key are derived with HKDF-SHA256 from `KMS_MASTER_KEY` using the purposes `session-signing` and `mfa-challenge`. Session lifetime is 12 hours; MFA challenge lifetime is 10 minutes. The JWT includes a `mfa` boolean claim and an `appScopeIds` array.
 
 ### 3.4 Actual MFA, revocation and IP behavior
 
@@ -154,7 +165,7 @@ The session key and MFA-challenge key are derived with HKDF-SHA256 from `KMS_MAS
 | Authority source | DB `authoritiesMap` | DB `authoritiesMap` | Token scopes | Session JWT authorities are not trusted for authorization decisions |
 | Google OIDC | N/A | 501 | N/A | Merchant `/auth/google` is a stub |
 
-The `pg_live_` token IP check trusts `x-real-client-ip` without checking that the immediate peer is a trusted proxy. That is acceptable only because core is expected to be reachable solely through the mTLS edge and a private network; a direct core access path would make the header spoofable.
+The `pg_live_` token IP check trusts `x-real-client-ip` (always overwritten by the edge with the validated resolved IP; core's `edgeReportedClientIp` falls back to `request.ip` for an invalid value) without checking that the immediate peer is a trusted proxy. That is acceptable only because core is expected to be reachable solely through the mTLS edge and a private network; a direct core access path would make the header spoofable.
 
 The admin edge also enforces `ADMIN_LAN_CIDRS` through `enforceLanAccess`, resolving the client IP through `TRUSTED_PROXY_CIDRS`. That is an edge control; core itself has no admin IP guard.
 
@@ -210,7 +221,7 @@ The executable subject coverage is uneven. `executeApprovalSubject` handles `AML
 Outbound gateway calls run through `StepExecutor` and/or `ApiConsumer`. Both enforce:
 
 - **HTTPS only**, except for the explicitly scoped Fake Rails host.
-- **Host allowlist:** the final URL host must appear in the gateway version's `allowed_hosts` when the list is non-empty.
+- **Host allowlist:** the final URL host must appear in the gateway version's `allowed_hosts`. An empty list fails closed (`HOST_ALLOWLIST_EMPTY`) unless `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST=true`; private/loopback/link-local literals are blocked at compile time unless `allowPrivateHosts`.
 - **No userinfo, no fragments, no backslashes, no encoded path separators, no `.`/`..` traversal.**
 - **No control characters** in URLs, headers, query keys/values.
 - **No redirects:** fetch uses `redirect: "manual"` and a 3xx response becomes `GATEWAY_REDIRECT_BLOCKED`.
@@ -246,10 +257,10 @@ The inbox stores `content-type` and `content-length` in `redactedHeadersJson`, n
 - Admin auth has a 10-request/15-minute limiter; admin protected routes have a 600-request/60-second limiter.
 - Merchant auth has a 20-request/15-minute limiter; portal API 300/60s; external API 120/60s.
 - Checkout pay has 120/60s; inbound webhook has 600/60s.
-- Upload limits: admin 20 MiB, merchant 10 MiB, checkout inbound 3 MiB at the edge; core raw-body limit is 25 MiB.
+- Upload limits: admin 20 MiB, merchant 10 MiB, checkout inbound 1 MiB at the edge (`MAX_INBOUND_BODY_BYTES`); core raw-body limit is 25 MiB.
 - KYB uploads are checked by declared MIME and magic bytes in both the edge and core; core stores the detected type, not the declared one.
 - The admin edge's authority guard is advisory; core re-checks authorities.
-- CORS is `origin: true` with credentials disabled on all three edges. The source of truth for browser safety is the reverse proxy/CSP and the bearer-token model, not CORS.
+- CORS: admin-back and merchant-back emit no CORS headers unless `CORS_ALLOWED_ORIGINS` is set; checkout-back is permissive without credentials unless it is set. The source of truth for browser safety is the reverse proxy/CSP and the bearer-token model, not CORS.
 
 ## 4. Contracts and invariants
 
@@ -414,3 +425,23 @@ No test run was performed for this documentation change. Integration suites that
 ## 10. Change history
 
 - 2026-11-03: Initial canonical security part written against `5a24f6f+working-tree`; records actual MFA/revocation/IP enforcement and the merchant authorization gap.
+
+## 11. Security hardening (2026-11-05)
+
+### Authentication and authorization (core)
+- MFA challenges are `mfa_challenges` rows (opaque UUID, HMAC-stored code, single-use, channel-bound, 5 guesses then a 15-minute cool-down, 5-minute expiry). Login throttles (per identifier, per IP, MFA per IP) are per-instance memory counters; the DB attempt counter is the durable guarantee (GAP-027).
+- Principal separation: staff and merchant principals cannot cross routers (`STAFF_PRINCIPAL_REQUIRED`, `MERCHANT_PRINCIPAL_REQUIRED`); API tokens may only call `/external/*`. Merchant authority catalogue, escalation guards and token expiry are described in the core API part.
+- Authorities remain enforced by core. The edge guard is advisory but now deny-by-default. `*` is honoured at the edge only because core re-verifies; the edge cannot verify signatures because the key lives in core.
+
+### Edge client IP and headers
+- `TRUSTED_PROXY_CIDRS` defaults to loopback only (`127.0.0.0/8,::1/128`; deploy sets `127.0.0.1/32,::1/128` explicitly). `resolveClientIp` honours forwarded headers only from trusted peers and requires a single valid IP (`x-real-ip` preferred, `x-real-client-ip` fallback). The edge always overwrites `x-real-client-ip` towards core.
+- Hand-written security headers on all edges: `nosniff`, `no-referrer`, `X-Frame-Options`, `frame-ancestors 'none'`, CORP, default `no-store`.
+- Redaction now covers PII keys (email, phone, msisdn, iban, account number, names, identity, national id, passport, dob, address). `redactUrl` masks sensitive query values and path tokens (inbound path tokens, link keys, attempt tokens, `/logs/` ids, `/external/links/` keys).
+- Limiters key on the resolved client IP, with an extra per-account limiter on admin login/MFA and merchant auth POSTs. Window envs: `AUTH_RATE_LIMIT_WINDOW_MS`, `ADMIN_RATE_LIMIT_WINDOW_MS`, `API_RATE_LIMIT_WINDOW_MS`, `EXTERNAL_RATE_LIMIT_WINDOW_MS`, `PAY_RATE_LIMIT_WINDOW_MS`, `INBOUND_RATE_LIMIT_WINDOW_MS`.
+- Ops note: cross-origin development frontends need `CORS_ALLOWED_ORIGINS`.
+
+### Outbound and inbound engine controls
+See the core engine part: empty `allowed_hosts` fails closed, unkeyed SHA256 webhooks are rejected, timestamp requirements and capped unverified inbound storage.
+
+### Still open
+Admin/merchant logout and httpOnly-cookie storage (GAP-019); distinct JWT `aud` per channel (GAP-020); throttle counters in memory (GAP-027); PCI scope statement and PAN-rail guard (GAP-026). The `x-real-client-ip` trust in core still depends on the private mTLS boundary.

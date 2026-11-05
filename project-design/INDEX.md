@@ -87,7 +87,7 @@ This is the canonical entrypoint for the payment-gateway project design.
 - [Test Suite Catalog](parts/08-testing/01-suite-catalog.md) — `testing.suites` · `partial`
 - [Fixtures, Mock API and Live Stack](parts/08-testing/02-fixtures-and-live-stack.md) — `testing.fixtures` · `partial`
 - [Benchmarks and Performance Gates](parts/08-testing/03-benchmarks.md) — `testing.benchmarks` · `partial`
-- [Two-Machine Multi-Topology Matrix](parts/08-testing/04-two-machine-matrix.md) — `testing.two-machine-matrix` · `partial`
+- [Multi-Machine Topology and Stress Matrix](parts/08-testing/04-multi-machine-matrix.md) — `testing.multi-machine-matrix` · `partial`
 
 ### 09-future-and-unimplemented
 

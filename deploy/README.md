@@ -406,8 +406,7 @@ Step 12 checks:
 Any failed result aborts the deploy. `--skip-verify` and `--dry-run` skip the
 step, so a run can report success without a live probe.
 
-The storage probes use `PGPASSWORD` on the remote command line. Password values
-therefore can appear in verbose runner output.
+The storage probes were not re-audited for credential exposure in the security pass; treat verbose runner output as sensitive. `pg_basebackup` and the pre-migration `pg_dump` use a `PGPASSFILE`, never `PGPASSWORD`.
 
 ## 11. Certificates
 
@@ -490,7 +489,7 @@ host against the primary's direct port (never PgBouncer) into:
 <CORE_REMOTE_DIR>/shared/backups/pre-migrate-<timestamp>.dump
 ```
 
-The command embeds `PGPASSWORD` in the remote command line. The fresh bootstrap
+The command authenticates through a private `PGPASSFILE` (no `PGPASSWORD` on the command line), runs under `umask 077` into a 0700 directory, and only the newest `KEEP_RELEASES` dumps are kept. The dump is taken before `migrate deploy` whenever the database is non-empty or unknown. The fresh bootstrap
 does **not** install `postgresql-client`, so `pg_dump` must already exist. The
 dump is not verified, encrypted, copied off-host or restored automatically. A
 fresh install takes no dump. Migrations are forward-only; there is no down path.
@@ -519,8 +518,8 @@ automatic restore from the dump.
   host's client key.
 - Core listens on the private network; UFW is the outer ring and mTLS plus the
   channel CN guard are the inner controls.
-- The pre-migration `PGPASSWORD` and storage probe passwords can appear in
-  verbose command output. Treat deploy logs as sensitive.
+- Storage probe passwords may still appear in verbose command output; treat
+  deploy logs as sensitive. The pre-migration dump and `pg_basebackup` use `PGPASSFILE`.
 - Fake Rails is an isolated test service. It has no gateway database credential,
   no direct TLS listener and no inbound rail authentication. Keep it off
   untrusted networks.
@@ -628,3 +627,21 @@ bun run test-matrix --topologies=T1 --intensity=smoke
 - Topologies are derived from machine roles per family (`single-host`, `split`, `replicated`, `dmz`, `mesh`, `scale`, `chaos`); `machines.two-host-lab.example.json` reproduces the old T1-T8 lab as aliases.
 - No password is stored in the JSON or the repo; the sudo password is read from the env var named by `ssh.sudo.passwordEnv`, lab secrets are generated into git-ignored `test-matrix/configs/`.
 - Reports are written to `test-matrix/reports/<runId>/` with the config hash and resolved intensity.
+
+## Security hardening notes (deploy.env)
+
+- `DEPLOY_ENV` unset means `production`: Fake Rails, `IS_TEST_SERVER`, `FAKE_RAILS_ALLOW_IN_PRODUCTION` and the synthetic seeder are refused. Use `development|staging|test` explicitly.
+- Placeholder / low-entropy secrets (`change-me`, `password`, `admin`, repeated or sequential patterns) are rejected; `KMS_MASTER_KEY` needs >= 32 chars. Secrets may not contain quotes, backslash, `$`, backtick or whitespace.
+- `BACKUP_WALG_SHA256` (SHA-256 of the pinned WAL-G asset) is required for `BACKUP_ENGINE_MODE=wal-g`; `BUN_SHA256` is needed to install bun (otherwise an existing bun is reused).
+- `--fresh` against a non-empty database is refused unless `--force-fresh` (or `DEPLOY_FORCE_FRESH=1`). Update deploys run `migrate deploy` on the first core node when migrations are pending, after a pre-migration dump.
+- PostgreSQL binds `127.0.0.1,<node private IP>`; `PG_RAM_GB` derives memory settings; `PG_IO_METHOD` defaults to `worker`; `PG_REPLICA_REBUILD=true` is needed to re-clone an existing standby.
+
+### Additional hardening notes (2026-11-05)
+
+- `deploy/lib/quoting.ts` is the single quoting helper set used by the provisioners and `deploy.ts`; `backup.env` and `wal-g.env` are rendered `KEY='value'` and a single quote in a value is rejected.
+- WAL-G is pinned (`BACKUP_WALG_VERSION=3.0.9`, `BACKUP_WALG_ASSET`) and sha256-verified fail-closed; `BACKUP_WALG_SHA256` is required in wal-g mode and you must supply the real value. barman is pinned (`BACKUP_BARMAN_VERSION=3.10.1`); bun installs from a pinned download verified against `BUN_SHA256` (`BUN_VERSION`).
+- The off-site mirror uses `rclone copy`/`rsync` without `--delete` unless `BACKUP_SECONDARY_MIRROR_DELETE=true`.
+- The backup daemon authorizes mTLS clients by certificate CN or DNS SAN against `BACKUP_ALLOWED_CLIENT_CNS` (default `backup-client`); verified live on Windows only.
+- New optional keys: `BACKUP_WALG_VERSION`, `BACKUP_WALG_ASSET`, `BACKUP_BARMAN_VERSION`, `BUN_VERSION`, `BUN_SHA256`, `BACKUP_ALLOWED_CLIENT_CNS`, `BACKUP_SECONDARY_MIRROR_DELETE`, `PG_RAM_GB`, `PG_IO_METHOD`, `PG_REPLICA_REBUILD`; lab: `LAB_WALG_SHA256`.
+- `deploy.env.example` ships `DEPLOY_ENV=production` and placeholder secrets, so it fails validation until you replace them.
+- Open: legacy per-service `deploy.yml` workflows deploy without tests, with `StrictHostKeyChecking=no` and `rsync --delete`; the backup daemon runs as the `postgres` user; PostgreSQL TLS is not provisioned. See `project-design/TRACKER.md`.

@@ -3,7 +3,7 @@ id: core.data
 title: Data Schema and Migrations
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/prisma/schema.prisma
@@ -17,15 +17,18 @@ code:
   - core-back/prisma/seedGuides.ts
   - core-back/prisma/seedFakeRails.ts
   - core-back/prisma/syntheticSeeder/**
+  - core-back/prisma/migrations/20261104120000_mfa_challenges/migration.sql
 tests:
   - core-back/test/exhaustive/01-schema/**
   - core-back/test/phase1-mtls-and-schema.test.ts
   - core-back/test/blueprint-seed.test.ts
   - core-back/test/synthetic-seeder.test.ts
+  - core-back/test/security-regressions/c2-mfa.test.ts
+  - core-back/test/security-regressions/h4-cashout.test.ts
 gaps:
   - Core tables use `TIMESTAMP(3)` while storage-engine tables use `TIMESTAMPTZ(3)`.
   - The migration history is forward-only; there are no down migrations.
-  - Core HTTP start does not call `ensureSchemaVersion()`; only the seeders assert schema version 8.
+  - Core HTTP start does not call `ensureSchemaVersion()`; only the seeders assert schema version 10.
   - `journal_lines` partition maintenance depends on an external deploy cron.
   - The generated schema catalog appendix is produced by the project-design generator and is not hand-maintained.
 ---
@@ -38,9 +41,9 @@ This part owns the PostgreSQL 18 relational model, the committed migration histo
 
 It covers:
 
-- `core-back/prisma/schema.prisma` — 75 Prisma models and 105 enums;
+- `core-back/prisma/schema.prisma` — 76 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — four committed migrations;
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 8 and the boot guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 10 and the boot guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -61,8 +64,8 @@ The historical design treats PostgreSQL 18 as the only runtime database and the 
 
 The blueprint's stale counts are corrected here:
 
-- the schema is not 64 models and 100 enums; it is 75 models and 105 enums;
-- the schema version is 8, not 5 or 6;
+- the schema is not 64 models and 100 enums; it is 76 models and 105 enums;
+- the schema version is 10, not 5 or 6;
 - there is not one migration that creates shards, outboxes and all tables. The baseline creates the tables, the storage migration adds indexes, the CQRS migration adds read models, and the hardening migration adds partitions, checks and search indexes;
 - `rm_merchant_dashboard_stats` and `rm_wallet_statements` do not exist. The actual read models are `rm_merchant_daily_stats` and `rm_route_daily_volumes`.
 
@@ -72,7 +75,7 @@ The blueprint's stale counts are corrected here:
 
 `core-back/prisma/schema.prisma` contains:
 
-- 75 `model` declarations;
+- 76 `model` declarations;
 - 105 `enum` declarations;
 - 188 `@@index` / `@@unique` declarations in the datamodel;
 - PostgreSQL provider configured through `DATABASE_URL` and the Prisma 7 `@prisma/adapter-pg` runtime.
@@ -95,7 +98,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 8`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 10`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -108,7 +111,7 @@ The models are grouped by domain:
 
 ### 3.3 Migration history
 
-There are exactly four committed migrations:
+There are six committed migrations (the original four below, plus `20261104090000_db_read_write_optimisation` which adds indexes and bumps the schema version to 9, and `20261104120000_mfa_challenges`, described in section 11; the generated migration catalog is authoritative):
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -282,7 +285,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 
 ## 6. Operational usage
 
-- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 8.
+- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 10.
 - Use `bun run migrate-dev` only in development. For production, review and commit the generated migration, then run `bun run migrate-deploy`.
 - After changing `schema.prisma`, run `bun run migrate-generate` before typechecking or starting the application.
 - Keep the `schema_versions` patch logic in `migrateDev/index.ts` under review. It is the only place that updates the version for newly created migrations.
@@ -296,8 +299,8 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 
 ### Implemented
 
-- 75 models and 105 enums in the Prisma datamodel.
-- Schema version 8 with an equality check used by the seeders.
+- 76 models and 105 enums in the Prisma datamodel.
+- Schema version 10 with an equality check used by the seeders.
 - Four committed migrations with the intended separation: baseline, storage indexes, CQRS read models, hardening.
 - Monthly range partitioning of `journal_lines` with historical/future partitions and a default partition.
 - Partial, covering, BRIN and trigram indexes for the write path, workers and search.
@@ -397,3 +400,13 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 ## 10. Change history
 
 - 2026-11-03 — Initial canonical extraction. Records 75 models, 105 enums, schema version 8, the four-migration history, `journal_lines` partitioning, the actual constraint/trigger set, UUID/timestamp conventions, baseline seeders, Fake Rails bridge and migration wrapper behavior. See `project-design/TRACKER.md`.
+
+## 11. Security hardening (2026-11-05)
+
+Migration `20261104120000_mfa_challenges` (schema version 10, `REQUIRED_SCHEMA_VERSION = 10`; model count 75 to 76):
+- creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
+- adds `access_tokens.expires_at`;
+- adds `cashout_requests.idempotency_key` (unique per merchant) and `cashout_requests.requested_by_user_id`;
+- bumps `schema_versions` to 10.
+
+Notes: the schema version and model counts quoted elsewhere in this part are updated to 10 and 76; the change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply this migration before starting the new core build, because merchant cash-out, API-token expiry and MFA depend on the new columns and table.

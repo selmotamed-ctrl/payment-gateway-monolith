@@ -6,7 +6,7 @@ Generated from: `admin-ui.system`, `admin-ui.routes`, `admin-ui.tables`, `admin-
 
 ## Admin UI System
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -269,9 +269,17 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 
 - 2026-11-03 — Initial canonical part created from the v1/v2 UI designs and working-tree code. Records the 13-primitive contract, 248/56 shell, Fake Rails partial rollout, removed app scaling, and the still-present stale files.
 
+## Security hardening (2026-11-05)
+
+- Blob previews whitelist png/jpeg/pdf and open with `noopener`; `ApiImage` renders raster images only; `resolveUploadPathWithMat` was removed.
+- `console.log` is gated through `utils/devLog.ts` (DEV builds only).
+- A fresh clone should `cp .env.example .env`; the real `.env` is no longer tracked.
+- Catalogue keys added (EN and AR): "This file type cannot be previewed." and the full-backup confirmation text.
+- Admin logout is still client-only (GAP-019).
+
 ## Admin Route and Page Catalog
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -499,6 +507,10 @@ These suites require a running stack and are skipped without the live/edge servi
 ## 10. Change history
 
 - 2026-11-03 — Initial canonical route catalog. Confirms 37 admin protected routes and 16 merchant portal routes, records missing UI authority gates, the broken 9.4 help chapter placement, and the checkout 404 recovery bug.
+
+## Security hardening (2026-11-05)
+
+The `VITE_AUTHORIZED` bypass was removed. The route authority table moved to `src/utils/routeAuthorities.ts` with a default-deny guard: `PUBLIC_FOR_AUTHENTICATED` is Dashboard, AdminGuide and AdminAcademy; `AUTHORITY_ALIASES` normalizes dotted and colon forms. Entries were added for AdminUsers, AdminUserDetail, AdminPlatformSettings, PricingControls, GatewayAiImport and AdminCheckoutHelp. These checks are advisory; core enforces authorities. Any route not in the table is denied to authenticated users unless it is in `PUBLIC_FOR_AUTHENTICATED`.
 
 ## Tables Filters and Exports
 
@@ -1315,7 +1327,7 @@ The content test and `guides-support` test require Bun; the latter requires Post
 
 ## Backups Settings and Operations
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -1608,3 +1620,7 @@ The backup E2E suite requires the live stack; the core backup test requires Post
 ## 10. Change history
 
 - 2026-11-03 — Initial canonical operations part. Records backup/target/drill/policy behavior, settings versioning/restore, checkout-support history/diff, academy reporting, export/checklist behavior, and the authority/workflow gaps.
+
+## Security hardening (2026-11-05)
+
+Backups page: actions are disabled unless backups are configured and the daemon is reachable; a full backup of all targets needs an extra confirmation; trigger and drill send an `Idempotency-Key` header (required by admin-back); policy form validation mirrors the edge rules (cron, minimum gaps, retention floors); server error text is sanitized and clipped.

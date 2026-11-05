@@ -280,3 +280,7 @@ Browser/unit coverage comes from the `tests/` workspace:
   - [Checkout Help Center](../project-design/parts/05-checkout-front/01-help-center.md)
 - Generated appendices: [environment and config matrix](../project-design/appendices/env-and-config-matrix.md), [API route matrix](../project-design/appendices/api-route-matrix.md), [test inventory](../project-design/appendices/test-inventory.md)
 - Related canonical surfaces: [Checkout edge BFF](../project-design/parts/02-edge-services/03-checkout-back.md), [Admin Checkout Help settings](../project-design/parts/03-admin-front/05-backups-settings-and-operations.md)
+
+## Environment file (2026-11-05)
+
+The real `.env` is no longer tracked. On a fresh clone run `cp .env.example .env`. See `project-design/parts/` for the frontend security notes and `project-design/TRACKER.md` for open gaps.
