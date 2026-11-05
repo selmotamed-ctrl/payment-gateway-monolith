@@ -48,7 +48,31 @@ export const routesAuthorities: Record<string, string[]> = {
 };
 
 /** Authenticated routes that intentionally need login only. */
-export const PUBLIC_FOR_AUTHENTICATED: readonly string[] = ["Dashboard", "AdminGuide", "AdminAcademy"];
+export const PUBLIC_FOR_AUTHENTICATED: readonly string[] = [
+    "Dashboard",
+    // Interactive Guide: learning material for every signed-in staff member.
+    "AdminGuide",
+    "AdminGuideBook",
+    "AdminGuideArticle",
+    "AdminGuideGlossary",
+    "AdminGuideTools",
+    "AdminGuidePlaybook",
+    "AdminGuideCards",
+    "AdminGuideEdgeCases",
+    // Employee Academy: every signed-in staff member (tracks, lessons, labs, exam, help).
+    // AdminAcademyTeam is listed so it passes this guard; it is still limited to
+    // SECURITY_ADMIN by `routesRoles` in layouts/sections.tsx.
+    "AdminAcademy",
+    "AdminAcademyTracks",
+    "AdminAcademyTrack",
+    "AdminAcademyModule",
+    "AdminAcademyLesson",
+    "AdminAcademyLab",
+    "AdminAcademyExam",
+    "AdminAcademyCertificate",
+    "AdminAcademyTeam",
+    "AdminAcademyHelp",
+];
 
 /** Raw backend (colon) authority -> equivalent portal (dotted) keys. Mirrors the server projection. */
 export const AUTHORITY_ALIASES: Record<string, string[]> = {
