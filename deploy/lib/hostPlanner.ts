@@ -298,6 +298,7 @@ const coreEnv = (config: DeployConfig, node?: NodePlan): Record<string, string> 
     KMS_MASTER_KEY: config.KMS_MASTER_KEY,
     STORAGE_SHARD_COUNT: String(config.STORAGE_SHARD_COUNT),
     READ_REPLICA_MAX_LAG_MS: String(config.READ_REPLICA_MAX_LAG_MS),
+    KYB_SCANNER_MODE: config.KYB_SCANNER_MODE,
     TRUST_PROXY: "false",
     LOG_LEVEL: "info",
     WORKER_ENABLED: "true",
@@ -353,7 +354,18 @@ const fakeRailsEnv = (config: DeployConfig): Record<string, string> => ({
   FAKE_RAILS_ADMIN_PASSWORD: config.FAKE_RAILS_ADMIN_PASSWORD ?? "",
   FAKE_RAILS_JWT_SECRET: config.FAKE_RAILS_JWT_SECRET ?? "",
   FAKE_RAILS_SEEDER_TOKEN: config.FAKE_RAILS_SEEDER_TOKEN ?? "",
-  FAKE_RAILS_ALLOWED_CIDRS: withIpv6Loopback(config.FAKE_RAILS_ALLOWED_CIDRS),
+  // The local nginx proxies to the backend from loopback. Even when an operator
+  // narrows the client allowlist, the proxy peer must remain reachable or every
+  // legitimate user is refused.
+  FAKE_RAILS_ALLOWED_CIDRS: (() => {
+    const entries = withIpv6Loopback(config.FAKE_RAILS_ALLOWED_CIDRS)
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    if (!entries.includes("127.0.0.1/32")) entries.push("127.0.0.1/32");
+    if (!entries.includes("::1/128")) entries.push("::1/128");
+    return entries.join(",");
+  })(),
 });
 
 /**

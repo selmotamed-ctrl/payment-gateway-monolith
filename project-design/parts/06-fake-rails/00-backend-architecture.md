@@ -67,7 +67,7 @@ The design describes Nginx in front of the service. The service itself is plain 
 
 ### 3.2 Environment and guardrails
 
-`fake-rails-back/lib/env/index.ts` defines the Zod schema and a lazy proxy so importing the module does not parse the environment. Required values have no defaults: `FAKE_RAILS_ADMIN_USER` (4-128 chars), `FAKE_RAILS_ADMIN_PASSWORD` (12-512), `FAKE_RAILS_JWT_SECRET` (16-512) and `FAKE_RAILS_SEEDER_TOKEN` (16-512).
+`fake-rails-back/lib/env/index.ts` defines the Zod schema and a lazy proxy so importing the module does not parse the environment. Required values have no defaults: `FAKE_RAILS_ADMIN_USER` (4-128 chars), `FAKE_RAILS_ADMIN_PASSWORD` (12-512), `FAKE_RAILS_JWT_SECRET` (32-512) and `FAKE_RAILS_SEEDER_TOKEN` (32-512).
 
 | Key | Default | Purpose |
 | :--- | :--- | :--- |

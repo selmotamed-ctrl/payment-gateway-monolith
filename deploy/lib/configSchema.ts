@@ -293,6 +293,12 @@ const base = z.strictObject({
   KMS_MASTER_KEY_HEX: z.string().trim().regex(/^[0-9a-fA-F]{64}$/).or(z.literal("")).default(""),
   STORAGE_SHARD_COUNT: z.coerce.number().int().min(1).max(32).default(16),
   READ_REPLICA_MAX_LAG_MS: z.coerce.number().int().min(0).max(600_000).default(2_000),
+  /**
+   * KYB document scanner mode. `eicar` is the built-in content gate (EICAR +
+   * active-content sniffing) for deployments without a real malware engine;
+   * `disabled` leaves every document PENDING (reviewers cannot preview it).
+   */
+  KYB_SCANNER_MODE: z.enum(["eicar", "disabled"]).default("eicar"),
   BASE_CURRENCY: z.string().trim().length(3).default("LYD"),
   GATEWAY_TIMEZONE: z.string().trim().min(1).max(64).default("Africa/Tripoli"),
   REDIS_URL: z.string().trim().max(500).optional(),
@@ -481,6 +487,8 @@ const base = z.strictObject({
   BACKUP_SCRATCH_AUDIT_PORT: port.default(55433),
   BACKUP_COMMAND_TIMEOUT_MS: z.coerce.number().int().positive().max(86_400_000).default(1_800_000),
   BACKUP_ALLOW_INSECURE_HTTP: booleanish.default(false),
+  /** Managed MinIO is installed without TLS; this gate is independent of the daemon's mTLS protocol. */
+  BACKUP_S3_ALLOW_INSECURE_HTTP: booleanish.default(false),
   BACKUP_WALG_BIN: binName.default("wal-g"),
   // Pinned WAL-G release. The downloaded asset is verified against BACKUP_WALG_SHA256 (REQUIRED for wal-g mode).
   BACKUP_WALG_VERSION: z.string().trim().regex(/^[0-9]+\.[0-9]+\.[0-9]+$/, "must be a release such as 3.0.9").default("3.0.9"),
@@ -840,9 +848,9 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
     if (!config.BACKUP_SSH_KEY_PATH) problems.push("BACKUP_SSH_KEY_PATH is required when BACKUP_ENABLED=true");
     if (!config.BACKUP_PRIMARY_S3_BUCKET) problems.push("BACKUP_PRIMARY_S3_BUCKET is required when BACKUP_ENABLED=true");
     if (!config.BACKUP_ENCRYPTION_KEY_HEX) problems.push("BACKUP_ENCRYPTION_KEY_HEX is required when BACKUP_ENABLED=true");
-    if (config.BACKUP_ENGINE_MODE === "wal-g" && !config.BACKUP_WALG_SHA256) {
-      problems.push("BACKUP_WALG_SHA256 is required when BACKUP_ENGINE_MODE=wal-g (SHA-256 of the pinned WAL-G release asset; the install fails closed without it)");
-    }
+    // BACKUP_WALG_SHA256 is required only when WAL-G must be downloaded; an
+    // already installed binary is reused. The install command fails closed if
+    // a download is needed without a checksum.
     const endpointIsHttpUrl = (() => {
       try {
         const endpoint = new URL(config.BACKUP_PRIMARY_S3_ENDPOINT);
@@ -863,11 +871,11 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
       }
       try {
         const endpoint = new URL(config.BACKUP_PRIMARY_S3_ENDPOINT);
-        if (endpoint.protocol === "http:" && !config.BACKUP_ALLOW_INSECURE_HTTP) {
-          problems.push("a managed MinIO on an http:// endpoint requires BACKUP_ALLOW_INSECURE_HTTP=true");
+        if (endpoint.protocol === "http:" && !config.BACKUP_S3_ALLOW_INSECURE_HTTP) {
+          problems.push("a managed MinIO on an http:// endpoint requires BACKUP_S3_ALLOW_INSECURE_HTTP=true");
         }
         if (endpoint.protocol === "https:") {
-          problems.push("a managed MinIO is installed without TLS; use an http:// endpoint (with BACKUP_ALLOW_INSECURE_HTTP=true) or BACKUP_S3_MODE=external");
+          problems.push("a managed MinIO is installed without TLS; use an http:// endpoint (with BACKUP_S3_ALLOW_INSECURE_HTTP=true) or BACKUP_S3_MODE=external");
         }
       } catch {
         /* already reported above */

@@ -13,6 +13,7 @@ import {
   verifyInvariant,
 } from "../_harness";
 import { createRow } from "../_dbFactory";
+import { withLedgerMaintenance } from "../../helpers/ledgerMaintenance";
 import { PrismaSlotReservationStore } from "../../../engine/runtime/slotStore";
 import { LedgerPoster, buildLedgerTemplate, type LedgerPostContext } from "../../../engine/ledger/LedgerPoster";
 import type { DynamicAttempt } from "../../../engine/flow/DynamicRailEngine";
@@ -45,14 +46,16 @@ afterAll(async () => {
   if (!databaseIsReachable) {
     return;
   }
-  await db.$executeRawUnsafe(
-    'DELETE FROM "journal_lines" WHERE "entry_id" IN (SELECT "id" FROM "journal_entries" WHERE "ref_id" LIKE $1)',
-    `${PREFIX}%`,
-  );
-  await db.$executeRawUnsafe(
-    'DELETE FROM "journal_entries" WHERE "ref_id" LIKE $1',
-    `${PREFIX}%`,
-  );
+  await withLedgerMaintenance(db as never, async (tx) => {
+    await tx.$executeRawUnsafe(
+      'DELETE FROM "journal_lines" WHERE "entry_id" IN (SELECT "id" FROM "journal_entries" WHERE "ref_id" LIKE $1)',
+      `${PREFIX}%`,
+    );
+    await tx.$executeRawUnsafe(
+      'DELETE FROM "journal_entries" WHERE "ref_id" LIKE $1',
+      `${PREFIX}%`,
+    );
+  });
   await db.$executeRawUnsafe(
     'DELETE FROM "adjustments" WHERE "source_attempt_id" IN (SELECT "id" FROM "payment_attempts" WHERE "link_id" IN (SELECT "id" FROM "payment_links" WHERE "key" LIKE $1))',
     `${PREFIX}%`,

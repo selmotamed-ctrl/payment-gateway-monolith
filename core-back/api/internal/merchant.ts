@@ -27,6 +27,7 @@ import {
   assertKnownMerchantAuthorities,
   assertKnownTokenScopes,
   assertMerchantAuthority,
+  normalizeTokenScopes,
 } from "../../lib/auth/merchantAuthorities";
 import { lockWalletLedgerBalance, openCashoutTotal } from "../../lib/cashoutBalance";
 import { Vault } from "../../engine/crypto/Vault";
@@ -872,6 +873,7 @@ router.post("/auth/login", async (request: Request, response: Response) => {
       issueMfaChallenge(tx as never, {
         userId: user.id,
         channel: "MERCHANT",
+        phone: user.phone,
         phoneLast4: (user.phone ?? "").slice(-4),
         ip,
       }),
@@ -1948,8 +1950,10 @@ const cashoutDestinationSchema = z
     bankAccountId: z.string().min(1).max(64).optional(),
   })
   .strict()
-  .refine((value) => Boolean(value.accountNumber || value.iban || value.bankAccountId), {
-    error: "an account number, an IBAN or a bank account id is required",
+  .refine((value) => Boolean(value.accountNumber || value.iban), {
+    // The KYB payout hash is derived from the bank + account number/IBAN;
+    // a bankAccountId alone can never match it.
+    error: "an account number or an IBAN is required",
   });
 
 router.post("/cashouts", async (request: Request, response: Response) => {
@@ -1961,6 +1965,7 @@ router.post("/cashouts", async (request: Request, response: Response) => {
       .object({
         walletId: z.string().min(1).max(64),
         amount: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/),
+        currency: z.string().length(3).optional(),
         destinationBank: cashoutDestinationSchema,
         idempotencyKey: z.string().min(8).max(128).optional(),
       })
@@ -1986,11 +1991,24 @@ router.post("/cashouts", async (request: Request, response: Response) => {
   if (wallet.status !== "ACTIVE") {
     throw new ApiError(409, "WALLET_NOT_ACTIVE", "Cash-outs are only available from an active wallet");
   }
+  if (body.currency && body.currency.toUpperCase() !== wallet.currency) {
+    throw new ApiError(400, "CASHOUT_CURRENCY_MISMATCH", "The cash-out currency must match the wallet currency");
+  }
   // GAP-017: the payout destination is ALWAYS bound to the KYB-verified payout account.
-  // A merchant without a KYB payoutAccountHash cannot cash out at all (it is no longer
-  // flagged payoutVerified:false), and a session alone can never redirect a cash-out:
-  // the account only changes through the maker-checker merchant edit approval.
-  if (!merchant.payoutAccountHash) {
+  // Legacy merchants may have the bank details but a null hash (the column was
+  // introduced after they onboarded): derive and backfill it instead of locking
+  // them out.
+  let verifiedPayoutHash = merchant.payoutAccountHash;
+  if (!verifiedPayoutHash) {
+    verifiedPayoutHash = payoutAccountHash(merchant.payoutBankDetailsJson);
+    if (verifiedPayoutHash) {
+      await client.merchant.update({
+        where: { id: merchant.id },
+        data: { payoutAccountHash: verifiedPayoutHash },
+      });
+    }
+  }
+  if (!verifiedPayoutHash) {
     throw new ApiError(
       403,
       "CASHOUT_PAYOUT_ACCOUNT_NOT_VERIFIED",
@@ -1998,7 +2016,7 @@ router.post("/cashouts", async (request: Request, response: Response) => {
     );
   }
   const destinationHash = payoutAccountHash(body.destinationBank);
-  if (!destinationHash || destinationHash !== merchant.payoutAccountHash) {
+  if (!destinationHash || destinationHash !== verifiedPayoutHash) {
     throw new ApiError(
       403,
       "CASHOUT_DESTINATION_NOT_VERIFIED",
@@ -2018,12 +2036,26 @@ router.post("/cashouts", async (request: Request, response: Response) => {
     return;
   }
   let freshlyCreated = false;
+  let replayedInTransaction = false;
   const created = await client.$transaction(async (tx) => {
+    // Re-check the idempotency key inside the wallet lock: a concurrent retry
+    // must replay the winner, not fail the balance check against its reservation.
+    const racedBeforeLock = await tx.cashoutRequest.findFirst({ where: { merchantId, idempotencyKey } });
+    if (racedBeforeLock) {
+      replayedInTransaction = true;
+      return racedBeforeLock;
+    }
     // Serialise concurrent requests of the wallet, then check the available balance:
     // the ledger balance minus the cash-outs that are already waiting.
     const ledgerBalance = await lockWalletLedgerBalance(tx, wallet.glAccountId);
     const reserved = await openCashoutTotal(tx, wallet.id);
     if (ledgerBalance.minus(reserved).lt(decimal(body.amount))) {
+      // The winner may have committed while this transaction waited for the lock.
+      const raced = await tx.cashoutRequest.findFirst({ where: { merchantId, idempotencyKey } });
+      if (raced) {
+        replayedInTransaction = true;
+        return raced;
+      }
       throw new ApiError(409, "INSUFFICIENT_BALANCE", "The available balance does not cover this cash-out");
     }
     const row = await tx.cashoutRequest.create({
@@ -2060,7 +2092,7 @@ router.post("/cashouts", async (request: Request, response: Response) => {
   if (!created) {
     throw new ApiError(409, "CASHOUT_CONFLICT", "The cash-out could not be created");
   }
-  if (freshlyCreated) {
+  if (freshlyCreated && !replayedInTransaction) {
     response.status(201).json({ id: created.id, state: created.state });
     return;
   }
@@ -2126,8 +2158,9 @@ router.post("/tokens", async (request: Request, response: Response) => {
       .strict(),
     request.body,
   );
-  assertKnownTokenScopes(body.scopes);
-  assertGrantableMerchantAuthorities(principal, body.scopes);
+  const tokenScopes = normalizeTokenScopes(body.scopes);
+  assertKnownTokenScopes(tokenScopes);
+  assertGrantableMerchantAuthorities(principal, tokenScopes);
   let tokenExpiresAt: Date | null = null;
   if (body.expiresAt) {
     tokenExpiresAt = new Date(body.expiresAt);
@@ -2150,7 +2183,7 @@ router.post("/tokens", async (request: Request, response: Response) => {
       name: body.name,
       tokenHash: hashAccessToken(plaintext),
       lastFour: plaintext.slice(-4),
-      scopes: body.scopes,
+      scopes: tokenScopes,
       expiresAt: tokenExpiresAt,
       ipWhitelistEnabled: Boolean(body.allowedCidrs?.length),
       ips: body.allowedCidrs

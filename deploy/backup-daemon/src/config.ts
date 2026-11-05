@@ -68,8 +68,10 @@ export const backupDaemonEnvSchema = z
     BACKUP_DAEMON_CA_CERT_PATH: optionalNonEmpty,
     // Comma separated subject CNs (or DNS SANs) of client certificates allowed to call the API.
     BACKUP_ALLOWED_CLIENT_CNS: nonEmpty.default("backup-client"),
-    // Optional env file that restore_command sources instead of embedding S3/encryption secrets in postgresql.auto.conf.
+    // Optional env files that restore_command sources instead of embedding S3/encryption secrets in postgresql.auto.conf.
+    // The audit target must use its own prefix, so it has a separate file.
     WALG_ENV_FILE: optionalNonEmpty,
+    WALG_ENV_FILE_AUDIT: optionalNonEmpty,
     PG_PRIMARY_HOST: nonEmpty.default("127.0.0.1"),
     PG_PRIMARY_PORT: port.default(5432),
     PG_PRIMARY_USER: nonEmpty.default("postgres"),

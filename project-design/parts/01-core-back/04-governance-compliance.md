@@ -202,12 +202,12 @@ The seven design layers map to code as follows:
 
 Screening is a provider interface (`ScreeningProvider`) with Arabic normalization, name similarity, internal watch-list provider, mock provider, and a cached provider. `MerchantScreeningService` persists `aml_screenings` and `aml_screening_matches` with list versions and input hashes, applies owner screening status, and raises a confirmed-match case only. Potential matches remain in the screening queue for disposition.
 
-The AML rule engine (`core-back/engine/guards/AmlRuleEngine.ts`) supports `SINGLE_AMOUNT`, `CUMULATIVE_WINDOW`, `STRUCTURING`, `RISK_TIER`, `COUNTERPARTY_COUNTRY`, `RAIL`, and `MERCHANT_DIRECT_AMOUNT`; actions are `HOLD`, `FLAG`, `BLOCK`, `CASE_ONLY`. Severity starts at the rule base, correlates with velocity, raises for high merchant tier, volume multiple, another open case, confirmed sanctions, and potential PEP. On a `HOLD`, the guard posts `Dr GATEWAY_CLEARING` / `Cr AML_HOLD` and stores the hold journal entry on the case.
+The AML rule engine (`core-back/engine/guards/AmlRuleEngine.ts`) supports `SINGLE_AMOUNT`, `CUMULATIVE_WINDOW`, `STRUCTURING`, `RISK_TIER`, `COUNTERPARTY_COUNTRY`, `RAIL`, and `MERCHANT_DIRECT_AMOUNT`; actions are `HOLD`, `FLAG`, `BLOCK`, `CASE_ONLY`. Severity starts at the rule base, correlates with velocity, raises for high merchant tier, volume multiple, another open case, confirmed sanctions, and potential PEP. On a `HOLD`, the guard only records the decision (`AML_HOLD_PENDING_CAPTURE`) and the `AML_HOLD` substatus; it does NOT post anything, because no money has been captured yet. The escrow is booked by the engine after a verified gateway capture (see `core.engine`).
 
 AML case resolution (`GovernanceExecution.ts:1470`):
 
-- `RELEASE` posts `AML_HOLD_AND_RELEASE` release lines, sets attempt `SUCCEEDED`, commits the link slot.
-- `REJECT` posts `AML_VOID`, sets attempt `FAILED`, releases the slot.
+- `RELEASE` posts `AML_HOLD_AND_RELEASE` release lines only when the verified-capture escrow exists (otherwise `409 AML_HOLD_CAPTURE_NOT_VERIFIED`), sets attempt `SUCCEEDED`, clears the `AML_HOLD` substatus, commits the link slot.
+- `REJECT` posts `AML_VOID` only when an escrow exists; a not-yet-captured hold is simply failed with no posting, and the attempt substatus becomes `AML_VOID`.
 - `ESCALATE` leaves the money in `AML_HOLD`, sets `ESCALATED_STR`, and opens a P1 operator case.
 - `HOLD` freezes the case without moving money.
 - `MERCHANT_DIRECT` cases never post.

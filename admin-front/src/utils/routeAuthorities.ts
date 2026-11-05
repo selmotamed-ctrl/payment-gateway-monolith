@@ -19,8 +19,8 @@ export const routesAuthorities: Record<string, string[]> = {
     Merchants: ["merchants.read", "support.read_merchant"],
     MerchantDetail: ["merchants.read", "support.read_merchant"],
     Approvals: ["approvals.approve", "approvals.reject"],
-    AdminUsers: ["users_admin.propose", "user:write"],
-    AdminUserDetail: ["users_admin.propose", "user:write"],
+    AdminUsers: ["security:read", "user:read", "user:write", "security:write", "users_admin.propose"],
+    AdminUserDetail: ["security:read", "user:read", "user:write", "security:write", "users_admin.propose"],
     AuditLog: ["security:read"],
     AmlCases: ["aml.read_confidential"],
     AmlScreenings: ["aml.read_confidential"],
@@ -33,7 +33,7 @@ export const routesAuthorities: Record<string, string[]> = {
     Adjustments: ["adjustments.propose"],
     CashOuts: ["cashout.process"],
     Reconciliation: ["reconciliation.run", "reconciliation.resolve"],
-    PricingControls: ["commission.propose", "velocity.propose", "profit.read"],
+    PricingControls: ["commission.propose", "velocity.propose", "profit.read", "liquidity.read"],
     Profitability: ["profit.read"],
     Liquidity: ["liquidity.read"],
     Invariant: ["profit.read", "liquidity.read"],
@@ -42,13 +42,33 @@ export const routesAuthorities: Record<string, string[]> = {
     GatewayWizard: ["gateways.edit"],
     Rails: ["gateways.edit"],
     GatewayRoutes: ["gateways.edit"],
-    AdminPlatformSettings: ["security:read", "security:write"],
-    AdminCheckoutHelp: ["gateways.edit", "security:write"],
+    AdminPlatformSettings: ["settings:read", "settings:write", "security:read", "security:write"],
+    AdminCheckoutHelp: ["settings:read", "settings:write", "gateways.edit", "security:write"],
     SystemBackups: ["security:read", "gateway:read"],
 };
 
-/** Authenticated routes that intentionally need login only. */
-export const PUBLIC_FOR_AUTHENTICATED: readonly string[] = ["Dashboard", "AdminGuide", "AdminAcademy"];
+/** Authenticated routes that intentionally need login only (content has its own role checks). */
+export const PUBLIC_FOR_AUTHENTICATED: readonly string[] = [
+    "Dashboard",
+    "AdminGuide",
+    "AdminGuideBook",
+    "AdminGuideArticle",
+    "AdminGuideGlossary",
+    "AdminGuideTools",
+    "AdminGuidePlaybook",
+    "AdminGuideCards",
+    "AdminGuideEdgeCases",
+    "AdminAcademy",
+    "AdminAcademyTracks",
+    "AdminAcademyTrack",
+    "AdminAcademyModule",
+    "AdminAcademyLesson",
+    "AdminAcademyLab",
+    "AdminAcademyExam",
+    "AdminAcademyCertificate",
+    "AdminAcademyTeam",
+    "AdminAcademyHelp",
+];
 
 /** Raw backend (colon) authority -> equivalent portal (dotted) keys. Mirrors the server projection. */
 export const AUTHORITY_ALIASES: Record<string, string[]> = {
@@ -57,6 +77,9 @@ export const AUTHORITY_ALIASES: Record<string, string[]> = {
     "case:read": ["support.read_merchant"],
     "operator:read": ["support.read_merchant"],
     "user:write": ["users_admin.propose"],
+    "user:read": ["users_admin.read"],
+    "settings:read": ["settings.read"],
+    "settings:write": ["settings.write"],
     "security:read": [],
     "security:write": [],
     "dispute:read": [],

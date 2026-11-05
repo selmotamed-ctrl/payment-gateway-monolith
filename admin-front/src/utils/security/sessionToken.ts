@@ -39,14 +39,21 @@ export const revokeServerSession = async (
         return false;
     }
     try {
-        const response = await fetchImpl(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", ...sessionHeaders(token) },
-            body: "{}",
-            credentials: "same-origin",
-            cache: "no-store",
-        });
-        return response.ok;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5_000);
+        try {
+            const response = await fetchImpl(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", ...sessionHeaders(token) },
+                body: "{}",
+                credentials: "same-origin",
+                cache: "no-store",
+                signal: controller.signal,
+            });
+            return response.ok;
+        } finally {
+            clearTimeout(timer);
+        }
     } catch {
         return false;
     }

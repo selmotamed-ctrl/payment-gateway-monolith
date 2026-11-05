@@ -835,7 +835,6 @@ export const claimAttemptForConfirm = async (
           AND terminal_at IS NULL
           AND status IN (${statusPlaceholders})
           AND NOT (status = 'UNKNOWN' AND point_of_no_return = true)
-          AND (substatus IS NULL OR substatus <> '${AML_HOLD_SUBSTATUS}')
           AND (
             (customer_fields_masked #>> '{${CONFIRM_IDEMPOTENCY_FIELD}}') IS NULL
             OR (customer_fields_masked #>> '{${CONFIRM_IDEMPOTENCY_FIELD}}') <> ${keyPlaceholder}
@@ -1245,19 +1244,14 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
     return;
   }
 
-  if (decision.outcome === "HOLD") {
-    // The money is escrowed and the attempt waits for the resolution of the
-    // AML case. It is never settled from here.
-    response.status(202).json({
-      attemptId: decision.attemptId,
-      reference: decision.reference,
-      status: "CREATED",
-      code: decision.customerMessageCode,
-      hold: true,
-      clientAction: null,
-    });
-    return;
-  }
+  // A held payment is NOT stopped before the gateway: the hold is a decision
+  // about where the captured money goes (design §11.3 entry 7, "AML Threshold
+  // Hold on Confirmation"). The attempt therefore continues through the normal
+  // rail flow; only the final settlement is diverted to `AML_HOLD` when a
+  // verified capture arrives (DynamicRailEngine.finalizeSuccess). Stopping the
+  // flow here would mean no gateway capture ever happens and the hold could
+  // never be released.
+  const amlHeld = decision.outcome === "HOLD";
 
   const attemptId = decision.attemptId;
   if (!attemptId) {
@@ -1321,6 +1315,7 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
     attemptId: attempt.id,
     reference: attempt.reference,
     status: attemptRow?.status ?? engineResult.status,
+    ...(amlHeld ? { hold: true } : {}),
     clientAction,
   });
 });
@@ -1663,6 +1658,9 @@ route.post("/inbound/:gateway/:env/:pathToken", async (request: Request, respons
     }
   }
 
+  const pendingDedupeKey = createHash("sha256")
+    .update(`${channel.id}:pending:${randomUUID()}`, "utf8")
+    .digest("hex");
   const stored = await client.inboundEvent.create({
     data: {
       channelId: channel.id,
@@ -1674,10 +1672,39 @@ route.post("/inbound/:gateway/:env/:pathToken", async (request: Request, respons
       sourceIp,
       verified: false,
       verificationError: "VERIFICATION_PENDING",
-      dedupeKey: createHash("sha256").update(`${channel.id}:pending:${randomUUID()}`, "utf8").digest("hex"),
+      dedupeKey: pendingDedupeKey,
       receivedAt: new Date(),
     },
   });
+
+  // Claim the canonical dedupe key BEFORE the engine side effects. The unique
+  // index is the single-writer guard: only one delivery can settle this body.
+  // A forged copy that wins the claim releases it again when verification
+  // fails, so the genuine retry can still claim it.
+  let ownsCanonicalKey = false;
+  try {
+    await client.inboundEvent.update({
+      where: { id: stored.id },
+      data: { dedupeKey },
+    });
+    ownsCanonicalKey = true;
+  } catch (error) {
+    if ((error as { code?: string })?.code !== "P2002") {
+      throw error;
+    }
+    const owner = await client.inboundEvent.findFirst({
+      where: { channelId: channel.id, dedupeKey, verified: true },
+    });
+    if (owner) {
+      response.status(channel.ackStatus).send(
+        channel.ackBodyTemplate ? renderTemplate(channel.ackBodyTemplate, { dedupeKey }) : "",
+      );
+      return;
+    }
+    // A concurrent delivery owns the pending claim. Continue: finalization is
+    // claimed atomically per attempt, and the final update below marks this
+    // row DUPLICATE if the other delivery wins.
+  }
 
   const correlation = extractCorrelation(rawBody, channel.correlationSelector);
   const attempt = correlation
@@ -1724,6 +1751,15 @@ route.post("/inbound/:gateway/:env/:pathToken", async (request: Request, respons
     processingResult = "REJECTED";
   }
 
+  if (!verified && ownsCanonicalKey) {
+    // Nothing was trusted: release the canonical key so the genuine delivery
+    // (or a corrected retry) can claim it. Keep a unique pending key.
+    await client.inboundEvent.update({
+      where: { id: stored.id },
+      data: { dedupeKey: pendingDedupeKey },
+    });
+  }
+
   const finalData = {
     verified,
     verificationError,
@@ -1734,7 +1770,7 @@ route.post("/inbound/:gateway/:env/:pathToken", async (request: Request, respons
   try {
     await client.inboundEvent.update({
       where: { id: stored.id },
-      data: verified ? { ...finalData, dedupeKey } : finalData,
+      data: verified && !ownsCanonicalKey ? { ...finalData, dedupeKey } : finalData,
     });
   } catch (error) {
     if (verified && (error as { code?: string })?.code === "P2002") {

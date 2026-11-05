@@ -139,7 +139,10 @@ describe("GAP-017: payout account maker-checker and mandatory hash", () => {
     const start = merchant.indexOf('router.post("/cashouts"');
     const body = merchant.slice(start, merchant.indexOf('router.get("/tokens"', start));
     expect(body).toContain("CASHOUT_PAYOUT_ACCOUNT_NOT_VERIFIED");
-    expect(body).toContain("if (!merchant.payoutAccountHash)");
+    // A null hash with derivable payout details is backfilled; only a merchant
+    // with no derivable account is refused.
+    expect(body).toContain("payoutAccountHash(merchant.payoutBankDetailsJson)");
+    expect(body).toContain("if (!verifiedPayoutHash)");
     expect(body).not.toContain("payoutVerified: Boolean(");
     expect(body).toContain("payoutVerified: true");
   });

@@ -560,12 +560,21 @@ const JoinRequestDetailPage = dc(() => {
             showSnackBar({ type: "warning", message: t("This file type cannot be previewed.") });
             return;
         }
+        // Open the tab synchronously, before the await: browsers only allow a
+        // popup from the click handler itself.
+        const target = window.open("", "_blank");
+        if (target) target.opener = null;
         try {
             const response = await api.get(urlsMap.kybDocumentContent(document.id), { responseType: "blob" });
             const url = URL.createObjectURL(new Blob([response.data], { type: mime }));
-            window.open(url, "_blank", "noopener,noreferrer");
+            if (target) {
+                target.location.href = url;
+            } else {
+                window.open(url, "_blank", "noopener,noreferrer");
+            }
             setTimeout(() => URL.revokeObjectURL(url), 60_000);
         } catch (cause) {
+            target?.close();
             showSnackBar({ type: "error", message: extractApiErrorMessage(cause) });
         }
     };

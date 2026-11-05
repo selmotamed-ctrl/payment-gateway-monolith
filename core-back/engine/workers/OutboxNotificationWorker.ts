@@ -71,7 +71,7 @@ export class OutboxNotificationWorker extends BaseWorker {
       notification.lang,
     );
     if (!template) {
-      await this.fail(notification, now, `Template not found: ${notification.templateCode}`, 0);
+      await this.fail(notification, now, `Template not found: ${notification.templateCode}`, notification.attempts);
       return;
     }
 
@@ -83,7 +83,7 @@ export class OutboxNotificationWorker extends BaseWorker {
         confidentialityClass: template.confidentialityClass,
       });
     } catch (error) {
-      await this.fail(notification, now, (error as Error).message, 0);
+      await this.fail(notification, now, (error as Error).message, notification.attempts);
       return;
     }
 
@@ -93,7 +93,7 @@ export class OutboxNotificationWorker extends BaseWorker {
       try {
         payloadRaw.code = await openMfaCode(payloadRaw.codeCiphertext);
       } catch {
-        await this.fail(notification, now, "MFA code could not be decrypted", 0);
+        await this.fail(notification, now, "MFA code could not be decrypted", notification.attempts);
         return;
       }
       delete payloadRaw.codeCiphertext;

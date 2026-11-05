@@ -266,7 +266,7 @@ The suites cover URL parsing, least-in-flight and round-robin selection, cooldow
 Applies to all three copies of the client:
 - Only transport/TLS errors and 502/503/504 mark a node unhealthy.
 - Header names and values are validated as printable ASCII (`400 CORE_HEADER_INVALID`); edge-owned headers are applied last, and `x-real-client-ip` is always overwritten with the resolved IP.
-- PUT/DELETE are replayed after send only with an `Idempotency-Key`/opt-in, or on a connect-phase failure.
+- PUT/DELETE are HTTP-idempotent and are replayed after send like GET/HEAD/OPTIONS; POST/PATCH still need an `Idempotency-Key`/opt-in, and a connect-phase failure is always retryable.
 - SSE streams use their own agent pool (128 sockets) with `MAX_STREAMS_PER_IP` (default 5) and abort upstream on early client disconnect.
 - Buffered responses are capped (`CORE_MAX_RESPONSE_BYTES` default 64 MiB, `CORE_TOTAL_DEADLINE_MS` default 300000).
 - Admin `x-pg-min-lsn` is validated against `^hex/hex$` (400 otherwise).
@@ -559,5 +559,5 @@ The core POS SSE stream now subscribes to the Redis-backed `realtime:attempt` an
 
 ## Gap resolutions (2026-11-05)
 
-- **Logout and session cookie (GAP-019, RESOLVED).** `POST /api/v1/merchant/auth/logout` forwards to core `POST /internal/merchant/auth/logout` (session `jti` revocation) and clears the cookie. `SESSION_COOKIE_MODE` (default `false`) and `SESSION_COOKIE_SECURE` (default `true`) are validated in `merchant-back/lib/env`; in cookie mode the token is set as the `pg_merchant_session` HttpOnly, `SameSite=Strict` cookie (path `/api/v1/merchant`, 12 h), the body carries `sessionCookie: true`, and cookie-authenticated writes require `x-pg-csrf: 1`. The mode is off by default.
+- **Logout and session cookie (GAP-019, RESOLVED).** `POST /api/v1/merchant/auth/logout` forwards to core `POST /internal/merchant/auth/logout` (session `jti` revocation) and clears the cookie. `SESSION_COOKIE_MODE` (default `false`) and `SESSION_COOKIE_SECURE` (default `true`) are validated in `merchant-back/lib/env`; in cookie mode the token is set as the `pg_merchant_session` HttpOnly, `SameSite=Strict` cookie (path `/api/v1/merchant`, 12 h), the body carries `sessionCookie: true`, and cookie-authenticated writes require `x-pg-csrf: 1`. The cookie is ignored when the mode is off; login/MFA are exempt from the CSRF conversion so a stale cookie cannot block sign-in. The mode is off by default.
 - **Audience and breaker (GAP-020, GAP-021).** Merchant sessions carry `aud=payment-gateway-merchant`; a session minted for another channel is refused by core (`401 SESSION_AUDIENCE_INVALID`). The upstream client uses `CORE_FAILURE_THRESHOLD = 3`.

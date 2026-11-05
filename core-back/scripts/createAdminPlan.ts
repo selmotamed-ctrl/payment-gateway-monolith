@@ -54,6 +54,7 @@ export const validatePassword = (password: string): string | null => {
 export interface CreateAdminArgs {
   email: string;
   password: string;
+  phone: string | null;
   role: AdminRole;
   mfaRequired: boolean;
   roleProvided: boolean;
@@ -65,6 +66,7 @@ export const parseCreateAdminArgs = (
 ): { ok: true; args: CreateAdminArgs } | { ok: false; error: string } => {
   let email = env.ADMIN_EMAIL?.trim() ?? "";
   let password = env.ADMIN_PASSWORD ?? "";
+  let phone = env.ADMIN_PHONE?.trim() || null;
   let role: string = env.ADMIN_ROLE?.trim().toUpperCase() ?? "GATEWAY_ADMIN";
   // MFA is ON unless it is switched off explicitly (--no-mfa or ADMIN_MFA=false).
   let mfaRequired = (env.ADMIN_MFA ?? "true").toLowerCase() !== "false";
@@ -83,6 +85,8 @@ export const parseCreateAdminArgs = (
     try {
       if (flag === "--email") {
         email = next().trim();
+      } else if (flag === "--phone") {
+        phone = next().trim();
       } else if (flag === "--password") {
         // A password on the command line leaks through the process list and the shell history.
         return { ok: false, error: "--password is not accepted: pass the password in the ADMIN_PASSWORD environment variable" };
@@ -111,15 +115,25 @@ export const parseCreateAdminArgs = (
   if (!(ADMIN_ROLES as readonly string[]).includes(role)) {
     return { ok: false, error: `'${role}' is not a valid role (${ADMIN_ROLES.join(", ")})` };
   }
+  if (phone !== null && !/^\+?[0-9][0-9 .()-]{5,19}$/.test(phone)) {
+    return { ok: false, error: `'${phone}' is not a valid phone number` };
+  }
+  if (mfaRequired && !phone) {
+    return {
+      ok: false,
+      error: "MFA is enabled but no phone number was provided (--phone or ADMIN_PHONE); pass --no-mfa only when SMS delivery is not configured",
+    };
+  }
 
   return {
     ok: true,
-    args: { email: email.toLowerCase(), password, role: role as AdminRole, mfaRequired, roleProvided },
+    args: { email: email.toLowerCase(), password, phone, role: role as AdminRole, mfaRequired, roleProvided },
   };
 };
 
 export interface AdminUserData {
   email: string;
+  phone: string | null;
   passwordHash: string;
   role: AdminRole;
   authoritiesMap: string[];
@@ -131,6 +145,7 @@ export interface AdminUserData {
 
 export const buildAdminUserData = (args: CreateAdminArgs, passwordHash: string): AdminUserData => ({
   email: args.email,
+  phone: args.phone,
   passwordHash,
   role: args.role,
   authoritiesMap: [...ROLE_AUTHORITIES[args.role]],
@@ -140,13 +155,14 @@ export const buildAdminUserData = (args: CreateAdminArgs, passwordHash: string):
   status: "ACTIVE",
 });
 
-export const USAGE = `Usage: ADMIN_PASSWORD=<password> bun run create-admin --email <email> [--role <ROLE>] [--no-mfa]
+export const USAGE = `Usage: ADMIN_PASSWORD=<password> bun run create-admin --email <email> --phone <phone> [--role <ROLE>] [--no-mfa]
 
 Creates or re-provisions an administrator. The account is set to ACTIVE and its
 password is set to the value of ADMIN_PASSWORD (never a command line argument).
-MFA is ON unless --no-mfa (or ADMIN_MFA=false) is passed.
+MFA is ON unless --no-mfa (or ADMIN_MFA=false) is passed; because the code is
+delivered by SMS, a phone number is required while MFA is on.
 
-Environment equivalents: ADMIN_EMAIL, ADMIN_ROLE, ADMIN_MFA=false.
+Environment equivalents: ADMIN_EMAIL, ADMIN_PHONE, ADMIN_ROLE, ADMIN_MFA=false.
 
 Roles: ${ADMIN_ROLES.join(", ")}
 Password: ${PASSWORD_POLICY}.`;

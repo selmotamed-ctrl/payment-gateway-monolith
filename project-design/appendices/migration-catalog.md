@@ -9,6 +9,6 @@
 | `20261103130000_cqrs_read_models` | 27 | CQRS read models maintained asynchronously by OutboxRelayWorker. |
 | `20261103180000_storage_hardening` | 256 | ============================================================================ |
 | `20261104090000_db_read_write_optimisation` | 97 | ============================================================================ |
-| `20261104120000_mfa_challenges` | 51 | ============================================================================ |
-| `20261105090000_append_only_ledger_guards` | 158 | ============================================================================ |
-| `20261105130000_statement_unique_source_file_hash` | 9 | GAP-018: statement file hashes are unique per statement source, not globally. |
+| `20261104120000_mfa_challenges` | 51 | ============================================================================ |
+| `20261105090000_append_only_ledger_guards` | 158 | ============================================================================ |
+| `20261105130000_statement_unique_source_file_hash` | 33 | GAP-018: statement file hashes are unique per statement source, not globally. |

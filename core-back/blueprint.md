@@ -199,7 +199,7 @@ TCP + TLS 1.3 handshake (client cert required)
 6. **Unexpected errors do not leak internals.** The response is `SERVER_ERROR` with `Internal server error` and a reference.
 7. **The database client is lazy and process-global.** Module import does not connect.
 8. **The storage engine is the transactional owner.** Routes should not open ad-hoc long transactions when a storage port exists.
-9. **Schema version 10 is required.** The seeders enforce it; the API currently does not at boot.
+9. **Schema version 11 is required.** The seeders enforce it; the API currently does not at boot.
 10. **The TLS server requires a client certificate.** There is no optional-client-cert mode in production startup.
 
 ## 5. Data / API / config / deployment surface
@@ -243,7 +243,7 @@ TCP + TLS 1.3 handshake (client cert required)
 1. Generate certs.
 2. Set `DATABASE_URL`.
 3. Apply migrations.
-4. Seed (this also checks schema version 10).
+4. Seed (this also checks schema version 11).
 5. `bun run start`.
 6. Probe `/health` over mTLS with a client cert.
 
@@ -336,7 +336,7 @@ No build or test was run for this documentation change.
 
 ## Security hardening (2026-11-05)
 
-Schema version is now 10 (see the data part). Login and MFA throttles live in `lib/auth/throttle.ts` as in-process counters (per instance). Create-admin (`scripts/createAdminPlan.ts`): MFA is on by default (`--no-mfa` or `ADMIN_MFA=false` disables it), `--password` on the command line is rejected, and the password comes from `ADMIN_PASSWORD`.
+Schema version is now 11 (see the data part). Login and MFA throttles live in `lib/auth/throttle.ts` (Redis-backed shared state when `REDIS_URL` is set, per-process memory otherwise). Create-admin (`scripts/createAdminPlan.ts`): MFA is on by default and requires a delivery phone (`--phone` or `ADMIN_PHONE`); `--no-mfa` or `ADMIN_MFA=false` disables it, `--password` on the command line is rejected, and the password comes from `ADMIN_PASSWORD`.
 
 ## Core API Surface
 
@@ -897,7 +897,7 @@ No build or test was run for this documentation change. Database-backed route te
 - The idempotency lookup is scoped to `(linkId, idempotencyKey)`; a unique-constraint race on create is treated as a replay.
 
 ### MFA and login
-- MFA challenges are rows in `mfa_challenges`: the client sees an opaque UUID, the code is stored as an HMAC, the challenge is single-use and bound to a channel (`ADMIN`/`MERCHANT`). Five wrong guesses kill the challenge and trigger a 15-minute user cool-down. Challenges expire after 5 minutes; at most 5 SMS sends per 15 minutes; a new challenge supersedes open ones. The password step is required before a challenge is issued. `signMfaChallenge`/`verifyMfaChallengeToken` were removed.
+- MFA challenges are rows in `mfa_challenges`: the client sees an opaque UUID, the code is stored as an HMAC, the challenge is single-use and bound to a channel (`ADMIN`/`MERCHANT`). Five wrong guesses kill the challenge and trigger a 15-minute user cool-down. Challenges expire after 5 minutes; at most 5 SMS sends per 15 minutes; a new challenge supersedes open ones. The password step is required before a challenge is issued. The notification carries the code and the full destination phone encrypted (never plaintext; the worker decrypts at send time); an account with `mfaRequired` but no phone gets `409 MFA_DESTINATION_MISSING` instead of an undeliverable challenge. `signMfaChallenge`/`verifyMfaChallengeToken` were removed.
 - `/internal/merchant/auth/verify-identity` is retired and always returns `410 IDENTITY_VERIFICATION_RETIRED`.
 - The SMS code is no longer stored in plaintext in `notifications.payload_json`: a Vault-encrypted `codeCiphertext` is opened by `OutboxNotificationWorker` at send time.
 - Login performs a dummy bcrypt for unknown users. Throttles: per identifier (5 failures lock for 15 minutes), per IP (30 failures), MFA verify per IP (20 failures). These counters are in-process memory (per instance); the DB attempt counter is the durable guarantee.
@@ -908,11 +908,11 @@ A closed catalogue in `lib/auth/merchantAuthorities.ts` is enforced route by rou
 - Coarse: `merchant:read`, `merchant:write`, `link:write`, `payment:read`.
 - Fine-grained: `link:read`, `wallet:create`, `application:manage`, `pos:manage`, `onboarding:write`, `dispute:respond`, `cashout:read`, `cashout:request`, `user:manage`, `token:manage`, `credential:manage`.
 - API token scopes are limited to `link:write`, `link:read`, `payment:read`. Clients can never supply `*` or unknown strings (`UNKNOWN_AUTHORITY`, `UNKNOWN_TOKEN_SCOPE`). Callers can only grant authorities they hold (`AUTHORITY_ESCALATION_FORBIDDEN`); only `MERCHANT_ADMIN` can grant the admin role (`ROLE_ESCALATION_FORBIDDEN`); no self-modification (`SELF_MODIFICATION_FORBIDDEN`); user create/patch is audited.
-- API tokens may only call `/external/*` (`API_TOKEN_SCOPE_VIOLATION`). Token `expiresAt` is validated, stored, listed and enforced (`TOKEN_EXPIRY_INVALID`, `ACCESS_TOKEN_EXPIRED`). `*` is honoured only for staff principals.
+- API tokens may only call `/external/*` (`API_TOKEN_SCOPE_VIOLATION`). Token `expiresAt` is validated, stored, listed and enforced (`TOKEN_EXPIRY_INVALID`, `ACCESS_TOKEN_EXPIRED`). `*` is honoured only for staff principals. The scope catalogue is `link:write`, `link:read`, `payment:read`; the legacy documented aliases (`links:create`, `links:write`, `links:cancel`, `links:read`, `payments:read`, `payments:write`) are normalised on creation and when an existing token is evaluated, so old tokens keep working.
 - Legacy: `merchant:write` implies the non-privileged fine-grained set for any role and the privileged four (`user:manage`, `token:manage`, `credential:manage`, `cashout:request`) only for `MERCHANT_ADMIN`. Existing tokens with other scope strings fail the external routes.
 
 ### Cash-outs
-- Merchant `POST /cashouts` requires an idempotency key (body `idempotencyKey` or `Idempotency-Key` header; replay returns 200, a different payload returns `409 IDEMPOTENCY_KEY_REUSED`, a missing key `IDEMPOTENCY_KEY_REQUIRED`). It checks the ledger balance minus open cash-outs, records `requestedByUserId` and audits. The destination is a typed structure (bank, account number, IBAN, holder, SWIFT). The merchant must have a KYB `payoutAccountHash` (else `403 CASHOUT_PAYOUT_ACCOUNT_NOT_VERIFIED`) and the destination must hash to it (else `403 CASHOUT_DESTINATION_NOT_VERIFIED`); the destination is stored `payoutVerified:true`. Payout-account changes go only through the maker-checker merchant edit and the hash is recomputed on approval (GAP-017, resolved 2026-11-05).
+- Merchant `POST /cashouts` requires an idempotency key (body `idempotencyKey` or `Idempotency-Key` header; replay returns 200, a different payload returns `409 IDEMPOTENCY_KEY_REUSED`, a missing key `IDEMPOTENCY_KEY_REQUIRED`). It checks the ledger balance minus open cash-outs, records `requestedByUserId` and audits. The idempotency lookup is repeated inside the wallet-lock transaction (and again before an insufficient-balance refusal), so a concurrent retry replays the winner. The destination is a typed structure (bank, account number, IBAN, holder, SWIFT; a bank-account id alone is rejected because the payout hash is derived from bank + account/IBAN). The merchant must have a KYB `payoutAccountHash` (else `403 CASHOUT_PAYOUT_ACCOUNT_NOT_VERIFIED`); a legacy merchant whose column is null but whose bank details are derivable gets the hash backfilled instead of being locked out, and the destination must hash to it (else `403 CASHOUT_DESTINATION_NOT_VERIFIED`); the destination is stored `payoutVerified:true`. Payout-account changes go only through the maker-checker merchant edit and the hash is recomputed on approval (GAP-017, resolved 2026-11-05).
 - Staff process route requires `cashout:review` (`finance:write` alone no longer suffices); the maker is a merchant user, the checker is staff. State machine and ledger rules are in the governance part.
 
 ### Admin user routes
@@ -1557,7 +1557,7 @@ No build or test was run for this documentation change. Tests that require Postg
 - **Outbound URL compile.** An empty `allowed_hosts` list fails closed (`HOST_ALLOWLIST_EMPTY`) unless `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST=true` (default false). Private, loopback and link-local literals are blocked at compile time unless `allowPrivateHosts` is set. Consumer layers keep their own DNS/literal guards and the Fake Rails exception.
 - **Tests.** `core-back/test/security-regressions/{c1-forged-success,h8-webhook,m10-ssrf}`.
 - **Re-finalize guard (GAP-016, RESOLVED 2026-11-05).** `finalizeGuardFor(status)` classifies an attempt: `SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED` and `DISPUTED` are `IDEMPOTENT` (already settled), `CANCELLED` and `BLOCKED` are `REFUSE`, everything else (including `FAILED` and `EXPIRED`, so a late success is still recovered) is `ALLOW`. `verifyCallback` applies it before the trusted-facts check: a duplicate of the trusted success on a settled attempt is a no-op that returns the current state, a contradicting (failure/untrusted) signal on a settled attempt throws `409 ATTEMPT_TERMINAL`, and a callback for a cancelled/blocked attempt throws `409 ATTEMPT_TERMINAL`. `finalizeSuccess` re-reads the attempt status first so a stale in-memory attempt cannot settle twice (idempotent settled attempts return `COMMITTED`, or `SUSPENSE` for `SUSPENSE_SETTLEMENT`, with the stored ledger entry id).
-- **AML hold escrow after capture (GAP-015, RESOLVED 2026-11-05).** The guard pipeline no longer books escrow when it decides `HOLD` (no money has been captured yet, so `Dr GATEWAY_CLEARING` / `Cr AML_HOLD` would fabricate a balance); the decision reason is now `AML_HOLD_PENDING_CAPTURE` and `hold_journal_entry_id` is no longer written on the case. When a verified gateway capture of an AML-held attempt reaches `finalizeSuccess`, `escrowHeldCapture` books the escrow (`AML_HOLD_AND_RELEASE` scenario, idempotent per `PAYMENT_ATTEMPT`/attempt id, in the transaction runner when present) and returns the new `SlotCommitResult.outcome` `HELD`: the attempt is NOT settled, the slot is NOT committed, and the result keeps the `AML_HOLD` substatus. The checker's release (see `core.governance`) settles it and is refused until the escrow exists. Residual: a merchant-direct (`MERCHANT_DIRECT`) held attempt holds no platform cash, so nothing is booked (`AML_HOLD_NO_ESCROW`) and release/void have no escrow to move.
+- **AML hold escrow after capture (GAP-015, RESOLVED 2026-11-05).** The guard pipeline no longer books escrow when it decides `HOLD` (no money has been captured yet, so `Dr GATEWAY_CLEARING` / `Cr AML_HOLD` would fabricate a balance); the decision reason is now `AML_HOLD_PENDING_CAPTURE` and `hold_journal_entry_id` is no longer written on the case. When a verified gateway capture of an AML-held attempt reaches `finalizeSuccess`, `escrowHeldCapture` books the escrow (`AML_HOLD_AND_RELEASE` scenario, idempotent per `PAYMENT_ATTEMPT`/attempt id, in the transaction runner when present) and returns the new `SlotCommitResult.outcome` `HELD`: the attempt is NOT settled, the slot is NOT committed, and the result keeps the `AML_HOLD` substatus. Because the money can only be captured by the rail, the checkout initiate route does NOT stop a `HOLD` attempt before `engine.initiate`; the attempt continues through the normal rail flow and a held attempt remains confirmable (`claimAttemptForConfirm` no longer excludes the `AML_HOLD` substatus). Cancel and expiry still refuse to touch a held attempt. The checker's release (see `core.governance`) settles it and is refused until the escrow exists. A duplicate finalize is refused atomically (`claimFinalize` conditional update), so two concurrent verified callbacks cannot settle/commit the slot twice. Residual: a merchant-direct (`MERCHANT_DIRECT`) held attempt holds no platform cash, so nothing is booked (`AML_HOLD_NO_ESCROW`) and release/void have no escrow to move.
 
 ## Double-Entry Ledger
 
@@ -2061,12 +2061,12 @@ The seven design layers map to code as follows:
 
 Screening is a provider interface (`ScreeningProvider`) with Arabic normalization, name similarity, internal watch-list provider, mock provider, and a cached provider. `MerchantScreeningService` persists `aml_screenings` and `aml_screening_matches` with list versions and input hashes, applies owner screening status, and raises a confirmed-match case only. Potential matches remain in the screening queue for disposition.
 
-The AML rule engine (`core-back/engine/guards/AmlRuleEngine.ts`) supports `SINGLE_AMOUNT`, `CUMULATIVE_WINDOW`, `STRUCTURING`, `RISK_TIER`, `COUNTERPARTY_COUNTRY`, `RAIL`, and `MERCHANT_DIRECT_AMOUNT`; actions are `HOLD`, `FLAG`, `BLOCK`, `CASE_ONLY`. Severity starts at the rule base, correlates with velocity, raises for high merchant tier, volume multiple, another open case, confirmed sanctions, and potential PEP. On a `HOLD`, the guard posts `Dr GATEWAY_CLEARING` / `Cr AML_HOLD` and stores the hold journal entry on the case.
+The AML rule engine (`core-back/engine/guards/AmlRuleEngine.ts`) supports `SINGLE_AMOUNT`, `CUMULATIVE_WINDOW`, `STRUCTURING`, `RISK_TIER`, `COUNTERPARTY_COUNTRY`, `RAIL`, and `MERCHANT_DIRECT_AMOUNT`; actions are `HOLD`, `FLAG`, `BLOCK`, `CASE_ONLY`. Severity starts at the rule base, correlates with velocity, raises for high merchant tier, volume multiple, another open case, confirmed sanctions, and potential PEP. On a `HOLD`, the guard only records the decision (`AML_HOLD_PENDING_CAPTURE`) and the `AML_HOLD` substatus; it does NOT post anything, because no money has been captured yet. The escrow is booked by the engine after a verified gateway capture (see `core.engine`).
 
 AML case resolution (`GovernanceExecution.ts:1470`):
 
-- `RELEASE` posts `AML_HOLD_AND_RELEASE` release lines, sets attempt `SUCCEEDED`, commits the link slot.
-- `REJECT` posts `AML_VOID`, sets attempt `FAILED`, releases the slot.
+- `RELEASE` posts `AML_HOLD_AND_RELEASE` release lines only when the verified-capture escrow exists (otherwise `409 AML_HOLD_CAPTURE_NOT_VERIFIED`), sets attempt `SUCCEEDED`, clears the `AML_HOLD` substatus, commits the link slot.
+- `REJECT` posts `AML_VOID` only when an escrow exists; a not-yet-captured hold is simply failed with no posting, and the attempt substatus becomes `AML_VOID`.
 - `ESCALATE` leaves the money in `AML_HOLD`, sets `ESCALATED_STR`, and opens a P1 operator case.
 - `HOLD` freezes the case without moving money.
 - `MERCHANT_DIRECT` cases never post.
@@ -3120,7 +3120,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 76 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — four committed migrations;
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 10 and the boot guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 11 and the boot guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -3175,7 +3175,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 10`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 11`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -3378,7 +3378,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 ### Implemented
 
 - 76 models and 105 enums in the Prisma datamodel.
-- Schema version 10 with an equality check used by the seeders.
+- Schema version 11 with an equality check used by the seeders.
 - Four committed migrations with the intended separation: baseline, storage indexes, CQRS read models, hardening.
 - Monthly range partitioning of `journal_lines` with historical/future partitions and a default partition.
 - Partial, covering, BRIN and trigram indexes for the write path, workers and search.
@@ -3481,13 +3481,16 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-Migration `20261104120000_mfa_challenges` (schema version 10, `REQUIRED_SCHEMA_VERSION = 10`; model count 75 to 76):
-- creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
-- adds `access_tokens.expires_at`;
-- adds `cashout_requests.idempotency_key` (unique per merchant) and `cashout_requests.requested_by_user_id`;
-- bumps `schema_versions` to 10.
+The current schema version is 11 (`REQUIRED_SCHEMA_VERSION = 11`; model count 76). Three migrations make up the change:
 
-Notes: the schema version and model counts quoted elsewhere in this part are updated to 10 and 76; the change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply this migration before starting the new core build, because merchant cash-out, API-token expiry and MFA depend on the new columns and table.
+- `20261104120000_mfa_challenges` (version 10):
+  - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
+  - adds `access_tokens.expires_at`;
+  - adds `cashout_requests.idempotency_key` (unique per merchant) and `cashout_requests.requested_by_user_id`.
+- `20261105090000_append_only_ledger_guards`: append-only triggers on `journal_entries`, `journal_lines` (and partitions) and `audit_log`, plus the non-owner `pgw_app` role. Audit retention deletes remain possible inside a transaction that sets `pgw.audit_retention` (accidental-error protection, not privilege separation from a compromised app role).
+- `20261105130000_statement_unique_source_file_hash`: replaces the global `reconciliation_runs.file_hash` unique index with `(statement_source_id, file_hash)`, sets `timestamp_tolerance_sec = 0` for legacy keyed channels with no signed timestamp source (the verifier now fails closed on a missing signed timestamp), and bumps `schema_versions` to 11.
+
+The change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply these migrations before starting the new core build, because merchant cash-out, API-token expiry, MFA and the append-only guards depend on them.
 
 ## Global Search
 
@@ -4179,7 +4182,7 @@ The scratch clusters use `--auth=trust` and listen only on loopback. The drill d
 - For a policy change, submit without an approval id, then have a different `security:write` user submit with the returned id.
 - Watch `archiveLagSeconds` against `BACKUP_ALERT_LAG_SECONDS`. A non-zero lag with a healthy bucket usually means archive_command, credentials or the archive process is failing.
 - Inspect `backup_catalog_runs` and `backup_restore_drills` for the local copy and the daemon catalog for the in-process view. A failed drill's three checks identify double-entry, parity or audit-chain failure.
-- After a real restore, verify schema version 10, the ledger invariant, shard parity and audit chain.
+- After a real restore, verify schema version 11, the ledger invariant, shard parity and audit chain.
 - Do not rely on policy `fullRetentionDays` for WAL-G pruning; WAL-G uses `BACKUP_RETENTION_FULL_COUNT` and Barman uses its server-side policy.
 
 ## 7. Status and deviations

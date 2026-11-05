@@ -78,7 +78,7 @@ The node spec carries only host, SSH port, private IP and service port. SSH user
 | Redis | `REDIS_MANAGE_VIA_SSH`, `REDIS_NODES`, `REDIS_SSH_USER`, `REDIS_SSH_PORT`, `REDIS_SSH_KEY_PATH`, `REDIS_SUDO_PASSWORD`, `REDIS_PASSWORD`, `REDIS_MAXMEMORY` | Cache/velocity nodes. |
 | Audit database | `AUDIT_DB_MANAGE_VIA_SSH`, `AUDIT_DB_NODE`, `AUDIT_DB_SSH_USER`, `AUDIT_DB_SSH_PORT`, `AUDIT_DB_SSH_KEY_PATH`, `AUDIT_DB_SUDO_PASSWORD`, `AUDIT_DB_NAME`, `AUDIT_DB_USER`, `AUDIT_DB_PASSWORD` | Append-only audit database. |
 | Log database | `LOG_DB_MANAGE_VIA_SSH`, `LOG_DB_NODE`, `LOG_DB_SSH_USER`, `LOG_DB_SSH_PORT`, `LOG_DB_SSH_KEY_PATH`, `LOG_DB_SUDO_PASSWORD`, `LOG_DB_NAME`, `LOG_DB_USER`, `LOG_DB_PASSWORD`, `LOG_RETENTION_MONTHS` | Partitioned operational log database. |
-| Backup | `BACKUP_ENABLED`, `BACKUP_NODE`, `BACKUP_SSH_USER`, `BACKUP_SSH_PORT`, `BACKUP_SSH_KEY_PATH`, `BACKUP_SUDO_PASSWORD`, `BACKUP_ENGINE_MODE`, `BACKUP_COMPRESSION`, `BACKUP_ENCRYPTION_KEY_HEX`, `BACKUP_PRIMARY_S3_*`, `BACKUP_CORE_S3_PREFIX`, `BACKUP_AUDIT_S3_PREFIX`, `BACKUP_SECONDARY_SSH_TARGET`, cron/retention/alert keys, `BACKUP_DAEMON_*`, `BACKUP_CATALOG_PATH`, `BACKUP_PGPASSFILE`, `BACKUP_SCRATCH_*`, `BACKUP_COMMAND_TIMEOUT_MS`, `BACKUP_ALLOW_INSECURE_HTTP`, binary paths, `BARMAN_AUDIT_SERVER` | WAL-G/Barman, daemon listener, catalog, drills and schedule. |
+| Backup | `BACKUP_ENABLED`, `BACKUP_NODE`, `BACKUP_SSH_USER`, `BACKUP_SSH_PORT`, `BACKUP_SSH_KEY_PATH`, `BACKUP_SUDO_PASSWORD`, `BACKUP_ENGINE_MODE`, `BACKUP_COMPRESSION`, `BACKUP_ENCRYPTION_KEY_HEX`, `BACKUP_PRIMARY_S3_*`, `BACKUP_CORE_S3_PREFIX`, `BACKUP_AUDIT_S3_PREFIX`, `BACKUP_SECONDARY_SSH_TARGET`, cron/retention/alert keys, `BACKUP_DAEMON_*`, `BACKUP_CATALOG_PATH`, `BACKUP_PGPASSFILE`, `BACKUP_SCRATCH_*`, `BACKUP_COMMAND_TIMEOUT_MS`, `BACKUP_ALLOW_INSECURE_HTTP` (daemon protocol), `BACKUP_S3_ALLOW_INSECURE_HTTP` (managed MinIO on http), binary paths, `BARMAN_AUDIT_SERVER` | WAL-G/Barman, daemon listener, catalog, drills and schedule. |
 | Fake Rails | `FAKE_RAILS_ENABLED`, `FAKE_RAILS_ALLOW_IN_PRODUCTION`, `FAKE_RAILS_NODE`, `FAKE_RAILS_SSH_*`, `FAKE_RAILS_PRIVATE_IP`, `FAKE_RAILS_BACK_PORT`, `FAKE_RAILS_NGINX_PORT`, `FAKE_RAILS_SSL*`, `FAKE_RAILS_DOMAIN`, `FAKE_RAILS_PUBLIC_BASE_URL`, `FAKE_RAILS_REMOTE_DIR`, `FAKE_RAILS_ALLOWED_CIDRS`, `FAKE_RAILS_ALLOWED_HOSTS`, `FAKE_RAILS_ADMIN_*`, `FAKE_RAILS_JWT_SECRET`, `FAKE_RAILS_SEEDER_TOKEN`, `SEED_FAKE_RAILS_BLUEPRINTS` | Optional emulator and tester portal. |
 | Synthetic seeder | `RUN_SYNTHETIC_HISTORY_SEED`, `SYNTHETIC_SEED_PROFILE`, `SYNTHETIC_SEED_KEY`, `SYNTHETIC_YEARS_SPAN` | Test-server-only historical data. |
 | Test marker | `IS_TEST_SERVER` | Required for the synthetic seed and used as a test-installation declaration. |
@@ -295,7 +295,7 @@ These tests run without PostgreSQL/Redis or remote hosts. A real deploy requires
 - **Environment.** `DEPLOY_ENV` now defaults to `production` and gains `test`. In production `FAKE_RAILS_ENABLED`, `IS_TEST_SERVER`, `FAKE_RAILS_ALLOW_IN_PRODUCTION=true` and the synthetic seeder are refused. `deploy.env.example` ships `DEPLOY_ENV=production` and placeholders, so it deliberately fails validation until replaced.
 - **Secrets.** `weakSecretReason` rejects placeholders (`change-me`, `password`, `admin`, `example`...), repeated/sequential patterns and low entropy. `KMS_MASTER_KEY` needs at least 32 characters; the JWT secret must differ from the seeder token.
 - **Schema.** Charsets are restricted for secrets, SSH users, `*_REMOTE_DIR`, `PG_DATA_DIR`, backup/cert paths (absolute, no `..`), cron expressions, binary names and hosts.
-- **New optional keys.** `BACKUP_WALG_VERSION` (default 3.0.9), `BACKUP_WALG_ASSET`, `BACKUP_BARMAN_VERSION` (3.10.1), `BUN_VERSION`, `BUN_SHA256`, `BACKUP_ALLOWED_CLIENT_CNS`, `BACKUP_SECONDARY_MIRROR_DELETE`, `PG_RAM_GB`, `PG_IO_METHOD`, `PG_REPLICA_REBUILD`; required `BACKUP_WALG_SHA256` in wal-g mode; lab key `LAB_WALG_SHA256`.
+- **New optional keys.** `BACKUP_WALG_VERSION` (default 3.0.9), `BACKUP_WALG_ASSET`, `BACKUP_BARMAN_VERSION` (3.10.1), `BUN_VERSION`, `BUN_SHA256`, `BACKUP_ALLOWED_CLIENT_CNS`, `BACKUP_SECONDARY_MIRROR_DELETE`, `BACKUP_S3_ALLOW_INSECURE_HTTP`, `KYB_SCANNER_MODE` (`eicar` content gate by default, `disabled` leaves documents PENDING), `PG_RAM_GB`, `PG_IO_METHOD`, `PG_REPLICA_REBUILD`; `BACKUP_WALG_SHA256` is required only when WAL-G has to be downloaded (an installed binary is reused); lab key `LAB_WALG_SHA256`.
 - `PG_REPLICATION_*` is no longer written to the core app env.
 
 ## Gap resolutions (2026-11-05)
@@ -1472,8 +1472,9 @@ Found by deploying the single-machine `deploy/deploy.env` repeatedly until it co
 - **Pre-migrate dump.** `pg_dump` uses `PGPASSFILE` (never `PGPASSWORD`), runs under `umask 077` into a 0700 backups directory, and only the newest `KEEP_RELEASES` dumps are kept. The earlier statements in this part that the dump embeds `PGPASSWORD` are superseded.
 - **Migrations.** `planMigrations()` is exported; only the first core node migrates. `--fresh` against a non-empty database is refused unless `--force-fresh` or `DEPLOY_FORCE_FRESH=1`. Update deploys run `migrate deploy` when migrations are pending or unknown. The dump is taken before migrating in both modes when the database is non-empty or unknown.
 - **sshRunner** local-sudo writes use an `mkdtemp` 0700 directory removed in `finally`.
-- **Bun** is installed from a pinned download verified against `BUN_SHA256` (no `curl | bash`).
-- **nginx templates**: `server_tokens off` and `limit_req` (with `limit_req_status 429`) in all six; the fakerails vhost gets `allow`/`deny` from `FAKE_RAILS_ALLOWED_CIDRS`, `script-src 'self'`, `object-src 'none'`, `frame-ancestors 'self'` (previously `'self' *`); the checkout CSP is unchanged.
+- **Bun** is installed from a pinned download verified against `BUN_SHA256` (no `curl | bash`); the fresh-host bootstrap installs `unzip`, and an existing `/usr/local/bin/bun` or `~/.bun/bin/bun` is reused.
+- **Frontend build env**: the deploy injects `VITE_CHECKOUT_BASE_URL` into merchant-front and `VITE_CHECKOUT_ORIGIN` into fake-rails-front from `CHECKOUT_DOMAIN`/ports, so checkout links and hosted-widget postMessage targets do not fall back to the wrong origin.
+- **nginx templates**: `server_tokens off` and `limit_req` (with `limit_req_status 429`) in all six; the fakerails vhost gets `allow`/`deny` from `FAKE_RAILS_ALLOWED_CIDRS`, `script-src 'self'`, `object-src 'none'`, and a computed `frame-ancestors` list (self + merchant/checkout origins + loopback) so the hosted widget can still be embedded; the checkout CSP is unchanged.
 - **scripts/deploy-localhost.sh** refuses `NODE_ENV=production` unless `LOCAL_TARGET=1`, no longer falls back to default secrets (random secrets via `openssl rand` go to a 0600 `.local/secrets.env` or `LOCAL_SECRETS_FILE`), and requires `DB_PASSWORD`.
 - **CI and legacy deploy workflows (GAP-014, RESOLVED 2026-11-05).** `.github/workflows/ci.yml` (jobs `design`, `backend`, `frontend`; triggers push to `main`/`ayoub`, pull requests and manual dispatch; `contents: read`; concurrency-cancelled per ref) runs the AGENTS.md gate: `bun scripts/project-design/build.ts --check`, then for `core-back`, `deploy`, `deploy/backup-daemon`, `admin-back`, `merchant-back`, `checkout-back` and `fake-rails-back` a frozen-lockfile install, typecheck and `bun test`, and for `admin-front`, `merchant-front`, `checkout-front` and `fake-rails-front` a frozen-lockfile install and `bun run build`. Suites that need PostgreSQL 18 and Redis skip themselves when the services are absent. The per-service `*/.github/workflows/deploy.yml` workflows are now legacy and manual only (`workflow_dispatch` with a typed `deploy` confirmation): they run the service typecheck/tests first, run the deploy job in the `legacy-deploy` environment, use `StrictHostKeyChecking=yes` with a pinned `known_hosts` taken from the **`SSH_KNOWN_HOSTS` secret (which operators must now create, with the server's verified host key lines)**, sync additively (no `rsync --delete`) and never scan the host key on first use. The supported deploy path remains the multi-host engine in `deploy/`. Tests: `deploy/test/ci-workflows.test.ts`.
 - **Replica pgpass (GAP-028, RESOLVED).** The replica `.pgpass` is streamed over stdin; see `deploy.storage`.
@@ -1609,7 +1610,7 @@ The retention function only drops partitions whose names match the monthly suffi
 `provisionBackupEngine()` installs:
 
 - `barman`, `zstd`, `lz4`, `brotli`, `xz-utils`, `rclone`, `curl`, `ca-certificates`;
-- WAL-G when `BACKUP_ENGINE_MODE=wal-g`, by downloading the pinned asset (`BACKUP_WALG_VERSION`, `BACKUP_WALG_ASSET`) and verifying it against the required `BACKUP_WALG_SHA256` (fail closed), then chmod +x;
+- WAL-G when `BACKUP_ENGINE_MODE=wal-g`: an already installed `wal-g` is reused; otherwise the pinned asset (`BACKUP_WALG_VERSION`, `BACKUP_WALG_ASSET`) is downloaded and verified against `BACKUP_WALG_SHA256` (fail closed when no checksum is supplied), then chmod +x;
 - the `pgbackup` system user and `/var/lib/pg-backup`, log and cert directories;
 - `/etc/pg-backup/backup.env` from `backupDaemonEnv()`;
 - `/etc/pg-backup/wal-g.env` for the core target;
@@ -1640,7 +1641,7 @@ Before verification, `ensureObjectStore()` runs on the backup host:
 - `BACKUP_S3_MODE` = `auto` (default) | `managed-minio` | `external`. `auto` resolves to `managed-minio` when the endpoint host is loopback, the backup node private IP or its SSH host, otherwise `external` (`resolveBackupS3Mode`).
 - `external`: never touched, only verified.
 - `managed-minio`: a healthy endpoint is left running; otherwise the engine installs `minio` (MinIO no longer publishes binaries and `dl.min.io` answers 410, so: an existing `minio` on the host, else `BACKUP_MINIO_BINARY_URL` (http(s):// or file://), else a source build with Go, `go install github.com/minio/minio@BACKUP_MINIO_VERSION`, several minutes; with none of these it fails with an actionable message), creates the `minio-user` account and `BACKUP_MINIO_DATA_DIR`, writes `/etc/default/minio` (0640 root:minio-user; root user/password = `BACKUP_PRIMARY_S3_ACCESS_KEY`/`SECRET_KEY`) and a `minio.service` unit, starts it, waits for health and creates the bucket from `BACKUP_PRIMARY_S3_BUCKET` (SigV4-signed `curl -X PUT`, HTTP 200/409 accepted; no `mc` needed). Install steps fail loudly: an earlier version continued past a failed download and started a unit with no binary. Loopback endpoints bind 127.0.0.1 only; others bind 0.0.0.0. Console port: `BACKUP_MINIO_CONSOLE_PORT`.
-- Config validation (managed only): access key ≥3 chars, secret ≥8, bucket `s3://dns-bucket[/prefix]`, http endpoint requires `BACKUP_ALLOW_INSECURE_HTTP=true`, https endpoints are rejected (no TLS is provisioned; use `external`).
+- Config validation (managed only): access key ≥3 chars, secret ≥8, bucket `s3://dns-bucket[/prefix]`, an http endpoint requires `BACKUP_S3_ALLOW_INSECURE_HTTP=true` (independent of the daemon's `BACKUP_ALLOW_INSECURE_HTTP`), https endpoints are rejected (no TLS is provisioned; use `external`).
 - `BACKUP_ENGINE_MODE=auto` resolves at load time: `wal-g` when `BACKUP_NODE` shares the PG primary's private IP, `barman` when it is a different host. Explicit `wal-g`/`barman` unchanged.
 - `BACKUP_ENGINE_MODE=auto` and `BACKUP_S3_MODE` keys are validated at load; MinIO install order and failure behaviour are described above (and in `04-pipeline.md` §13).
 - The two-machine test matrix sets `BACKUP_S3_MODE=external` because it provisions its own object store.
@@ -1846,7 +1847,7 @@ Not covered:
 
 - **Quoting.** Provisioners (postgres18, auditAndLogDb, backupEngine) use `deploy/lib/quoting.ts`: SQL literals are escaped, DO blocks use collision-free dollar tags, and `pgbouncer.ini`, `userlist` and `.pgpass` are escaped. `backup.env` and `wal-g.env` are rendered `KEY='value'` (a single quote in a value is rejected).
 - **Credentials.** `pg_basebackup` uses `PGPASSFILE`, never `PGPASSWORD`. Bootstrap/audit/log/archive SQL lives in a private 0700 postgres-owned directory, mode 0600, removed by trap/finally.
-- **WAL-G.** `restore_command` is a valid `postgresql.conf` literal (inner quotes doubled). The daemon setting `WALG_ENV_FILE` keeps S3/encryption secrets out of that line; the provisioner writes `/etc/pg-backup/wal-g.env` 0640 root:postgres. WAL-G is pinned (`BACKUP_WALG_VERSION=3.0.9`, `BACKUP_WALG_ASSET`) and sha256-verified fail-closed with required `BACKUP_WALG_SHA256`; barman is pinned (`BACKUP_BARMAN_VERSION=3.10.1`).
+- **WAL-G.** `restore_command` is a valid `postgresql.conf` literal (inner quotes doubled). The daemon settings `WALG_ENV_FILE`/`WALG_ENV_FILE_AUDIT` keep S3/encryption secrets out of that line; the provisioner writes `/etc/pg-backup/wal-g-core.env` and `/etc/pg-backup/wal-g-audit.env` (0640 root:postgres), so the audit restore uses the audit prefix instead of the core prefix. WAL-G is pinned (`BACKUP_WALG_VERSION=3.0.9`, `BACKUP_WALG_ASSET`) and sha256-verified fail-closed when it must be downloaded; barman is pinned (`BACKUP_BARMAN_VERSION=3.10.1`).
 - **Mirror and restore.** The off-site mirror uses `rclone copy`/`rsync` without `--delete` unless `BACKUP_SECONDARY_MIRROR_DELETE=true`. The scratch restore cluster starts with `-c archive_mode=off`.
 - **PostgreSQL.** `listen_addresses = 127.0.0.1,<private IP>`; memory settings derive from optional `PG_RAM_GB` (unset keeps 8GB/24GB/1GB); `PG_IO_METHOD` defaults to `worker` (io_uring is opt-in); an existing standby (PG_VERSION and `standby.signal` present) is not rebuilt unless `PG_REPLICA_REBUILD=true`.
 - **Still open.** Real SHA256 values for WAL-G/bun/barman must be supplied by the operator (GAP-023). GAP-022 and GAP-028 are resolved (see the gap resolutions below).
@@ -1896,7 +1897,7 @@ It exposes overview, trigger, policy, run and drill endpoints over mTLS to core,
 
 Bodies are capped at 256 KiB. Responses use `cache-control: no-store` and recursively redact credential-shaped keys/values. `HttpError` becomes a JSON envelope; unexpected errors become a generic 500 with a request id.
 
-`loadTlsOptions()` returns plain HTTP only when `BACKUP_ALLOW_INSECURE_HTTP=true`. Otherwise it requires the server certificate, key and CA and sets `requestCert: true`, `rejectUnauthorized: true`. The daemon verifies the client chain but does not inspect the client CN; any CA-signed client can call every route. Core presents `backup-client`.
+`loadTlsOptions()` returns plain HTTP only when `BACKUP_ALLOW_INSECURE_HTTP=true`. Otherwise it requires the server certificate, key and CA and sets `requestCert: true`, `rejectUnauthorized: true`. A `node:tls` front listener verifies the client chain and authorizes the client CN/DNS SAN against `BACKUP_ALLOWED_CLIENT_CNS` (default `backup-client`); other identities get 403. Core presents `backup-client`.
 
 ### 3.3 Engines
 
@@ -1969,7 +1970,7 @@ The provisioner writes `/etc/cron.d/pg-backup`: when the scheduler is enabled on
 ## 4. Contracts and invariants
 
 - The daemon listens over mTLS by default and refuses plain HTTP unless explicitly allowed for development.
-- Core presents a CA-signed `backup-client` certificate; the daemon does not authorize a CN per route.
+- Core presents a CA-signed `backup-client` certificate; the daemon authorizes that CN (or the configured allow-list) on every route.
 - Trigger and drill return 202 and complete asynchronously; the catalog is the state store.
 - Scheduled jobs do not overlap; HTTP triggers are not globally serialized.
 - Catalog writes are atomic; a failed write does not crash the daemon.
@@ -2083,7 +2084,7 @@ Not covered: a real WAL-G/Barman backup or restore; a real PostgreSQL 18 scratch
 ## Security hardening (2026-11-05)
 
 - **mTLS authorization.** In TLS mode a `node:tls` front listener verifies the client certificate and checks its CN or DNS SAN against `BACKUP_ALLOWED_CLIENT_CNS` (default `backup-client`); anything else gets 403. It is bridged to `Bun.serve` over a private unix socket (a loopback port on win32). Verified live on Windows only; the Linux unix-socket path is untested.
-- New daemon setting `WALG_ENV_FILE` keeps secrets out of the `restore_command` line. The daemon mirror does not delete unless `BACKUP_SECONDARY_MIRROR_DELETE=true`.
+- New daemon settings `WALG_ENV_FILE`/`WALG_ENV_FILE_AUDIT` keep secrets out of the `restore_command` line and use the correct prefix for the core and audit targets. The daemon mirror does not delete unless `BACKUP_SECONDARY_MIRROR_DELETE=true`.
 - **Daemon user (GAP-022, RESOLVED 2026-11-05).** The provisioned systemd unit runs as `pgbackup` (`SupplementaryGroups=postgres`) instead of `postgres`, and PostgreSQL accepts only TLS connections (`hostssl`-only `pg_hba`, see `deploy.storage`). The daemon code itself is unchanged.
 
 ## Health Verification, Rollback and Recovery
@@ -2178,9 +2179,9 @@ Fake Rails gets backend and vhost `/health` probes, with `-k` when SSL is enable
 | Redis | `REDISCLI_AUTH=<password> redis-cli -h 127.0.0.1 -p <port> PING`, expecting `PONG`. |
 | Audit DB | `psql SELECT 1` with the audit user/password. |
 | Log DB | `psql SELECT 1` with the log user/password. |
-| Backup daemon | HTTPS `/health` with the CA and the `backup-daemon` certificate/key when `BACKUP_ALLOW_INSECURE_HTTP=false`; plain HTTP when it is `true`. Expects `"status":"ok"` or `ok`. |
+| Backup daemon | HTTPS `/health` with the CA and the `backup-client` certificate/key when `BACKUP_ALLOW_INSECURE_HTTP=false`; plain HTTP when it is `true`. Expects `"status":"ok"` or `ok`. |
 
-The mTLS backup probe uses the daemon's server certificate (which also has clientAuth) rather than `backup-client`. It depends on the daemon being able to read its own 0600 key; if the key is root-owned and the daemon runs as `postgres`, the probe fails. When `BACKUP_ALLOW_INSECURE_HTTP=true` the daemon serves plain HTTP and the verifier uses an unauthenticated HTTP probe on the same host/port, so development deployments do not fail on TLS.
+The mTLS backup probe presents the `backup-client` certificate/key, matching the daemon's CN allow-list; the daemon's own server certificate is not a client identity and is rejected. When `BACKUP_ALLOW_INSECURE_HTTP=true` the daemon serves plain HTTP and the verifier uses an unauthenticated HTTP probe on the same host/port, so development deployments do not fail on TLS.
 
 ### 3.6 Verification aggregation
 

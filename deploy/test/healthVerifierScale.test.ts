@@ -111,7 +111,7 @@ describe("scaled health verification", () => {
     expect(all).toContain("redis-cli");
     expect(all).toContain("-d pg_audit_db");
     expect(all).toContain("-d pg_logs_db");
-    expect(all).toContain("backup-daemon.crt");
+    expect(all).toContain("backup-client.crt");
     expect(all).toContain(":4090/health");
   });
 
@@ -122,7 +122,7 @@ describe("scaled health verification", () => {
     const results = probeBackupDaemon(asRunner(fake), plan, insecure);
     expect(results.every((result) => result.ok)).toBe(true);
     expect(fake.commands.some((entry) => entry.command.startsWith("curl") && entry.command.includes("http://"))).toBe(true);
-    expect(fake.commands.some((entry) => entry.command.includes("backup-daemon.crt"))).toBe(false);
+    expect(fake.commands.some((entry) => entry.command.includes("backup-client.crt"))).toBe(false);
   });
 
   test("verifyDeployment keeps the legacy probes and adds storage when configured", () => {

@@ -41,7 +41,7 @@ It exposes overview, trigger, policy, run and drill endpoints over mTLS to core,
 
 Bodies are capped at 256 KiB. Responses use `cache-control: no-store` and recursively redact credential-shaped keys/values. `HttpError` becomes a JSON envelope; unexpected errors become a generic 500 with a request id.
 
-`loadTlsOptions()` returns plain HTTP only when `BACKUP_ALLOW_INSECURE_HTTP=true`. Otherwise it requires the server certificate, key and CA and sets `requestCert: true`, `rejectUnauthorized: true`. The daemon verifies the client chain but does not inspect the client CN; any CA-signed client can call every route. Core presents `backup-client`.
+`loadTlsOptions()` returns plain HTTP only when `BACKUP_ALLOW_INSECURE_HTTP=true`. Otherwise it requires the server certificate, key and CA and sets `requestCert: true`, `rejectUnauthorized: true`. A `node:tls` front listener verifies the client chain and authorizes the client CN/DNS SAN against `BACKUP_ALLOWED_CLIENT_CNS` (default `backup-client`); other identities get 403. Core presents `backup-client`.
 
 ### 3.3 Engines
 
@@ -114,7 +114,7 @@ The provisioner writes `/etc/cron.d/pg-backup`: when the scheduler is enabled on
 ## 4. Contracts and invariants
 
 - The daemon listens over mTLS by default and refuses plain HTTP unless explicitly allowed for development.
-- Core presents a CA-signed `backup-client` certificate; the daemon does not authorize a CN per route.
+- Core presents a CA-signed `backup-client` certificate; the daemon authorizes that CN (or the configured allow-list) on every route.
 - Trigger and drill return 202 and complete asynchronously; the catalog is the state store.
 - Scheduled jobs do not overlap; HTTP triggers are not globally serialized.
 - Catalog writes are atomic; a failed write does not crash the daemon.
@@ -228,5 +228,5 @@ Not covered: a real WAL-G/Barman backup or restore; a real PostgreSQL 18 scratch
 ## Security hardening (2026-11-05)
 
 - **mTLS authorization.** In TLS mode a `node:tls` front listener verifies the client certificate and checks its CN or DNS SAN against `BACKUP_ALLOWED_CLIENT_CNS` (default `backup-client`); anything else gets 403. It is bridged to `Bun.serve` over a private unix socket (a loopback port on win32). Verified live on Windows only; the Linux unix-socket path is untested.
-- New daemon setting `WALG_ENV_FILE` keeps secrets out of the `restore_command` line. The daemon mirror does not delete unless `BACKUP_SECONDARY_MIRROR_DELETE=true`.
+- New daemon settings `WALG_ENV_FILE`/`WALG_ENV_FILE_AUDIT` keep secrets out of the `restore_command` line and use the correct prefix for the core and audit targets. The daemon mirror does not delete unless `BACKUP_SECONDARY_MIRROR_DELETE=true`.
 - **Daemon user (GAP-022, RESOLVED 2026-11-05).** The provisioned systemd unit runs as `pgbackup` (`SupplementaryGroups=postgres`) instead of `postgres`, and PostgreSQL accepts only TLS connections (`hostssl`-only `pg_hba`, see `deploy.storage`). The daemon code itself is unchanged.

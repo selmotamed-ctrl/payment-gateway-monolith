@@ -1,6 +1,7 @@
 import { edgeCoreUrls, parseNodeList, type DeployConfig } from "./configSchema";
 import type { DeployPlan, HostPlan, NodePlan, StorageNodePlan } from "./hostPlanner";
 import type { SshRunner } from "./sshRunner";
+import { pgpassField, shellQuote } from "./quoting";
 
 /**
  * End-to-end verification.
@@ -250,8 +251,18 @@ const result = (node: StorageNodePlan, check: string, ok: boolean, detail: strin
   detail,
 });
 
-const psqlSelectOne = (user: string, password: string, database: string, port: number): string =>
-  `PGPASSWORD=${JSON.stringify(password)} psql -h 127.0.0.1 -p ${port} -U ${user} -d ${database} -tAc 'SELECT 1'`;
+const psqlSelectOne = (user: string, password: string, database: string, port: number): string => {
+  // The password lives in a 0600 .pgpass in a private temp dir, never in the
+  // command line (visible in the process list and shell history).
+  const pgpass = [
+    pgpassField("127.0.0.1"),
+    pgpassField(String(port)),
+    pgpassField(database),
+    pgpassField(user),
+    pgpassField(password),
+  ].join(":");
+  return `d=$(mktemp -d) && trap 'rm -rf "$d"' EXIT && printf '%s\n' ${shellQuote(pgpass)} > "$d/pgpass" && chmod 600 "$d/pgpass" && PGPASSFILE="$d/pgpass" psql -h 127.0.0.1 -p ${port} -U ${user} -d ${database} -tAc 'SELECT 1'`;
+};
 
 /** PostgreSQL 18 primary/replica readiness (`pg_isready` + `SELECT 1`). */
 export const probePostgresNode = (
@@ -339,7 +350,9 @@ export const probeBackupDaemon = (runner: SshRunner, plan: DeployPlan, config: D
     ? `curl -fsS --max-time 10 ${JSON.stringify(`http://${healthHost}:${config.BACKUP_DAEMON_PORT}/health`)}`
     : mtlsCurl({
         certs,
-        certName: "backup-daemon",
+        // The daemon's CN allowlist admits backup-client, not its own server
+        // certificate (the server cert is not a client identity).
+        certName: "backup-client",
         url: `https://${healthHost}:${config.BACKUP_DAEMON_PORT}/health`,
         expect: "OK",
       });

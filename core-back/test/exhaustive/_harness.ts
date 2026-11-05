@@ -22,6 +22,7 @@ import { Decimal } from "decimal.js";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../../generated/prisma/client";
 import { buildPostgresPoolConfig } from "../../lib/db/connectionConfig";
+import { pinUtcInConnectionUrl } from "../../lib/storageEngine/utcSession";
 import { InvariantVerifier } from "../../engine/ledger/InvariantVerifier";
 
 export const EXHAUSTIVE_SEED = "pg-exhaustive-2026";
@@ -37,7 +38,7 @@ let clientInstance: PrismaClient | undefined;
 export const exhaustiveClient = (): PrismaClient => {
   if (!clientInstance) {
     clientInstance = new PrismaClient({
-      adapter: new PrismaPg(buildPostgresPoolConfig(EXHAUSTIVE_DATABASE_URL)),
+      adapter: new PrismaPg(buildPostgresPoolConfig(pinUtcInConnectionUrl(EXHAUSTIVE_DATABASE_URL))),
       log: [],
     });
   }
@@ -48,7 +49,7 @@ export const exhaustiveClient = (): PrismaClient => {
 export const createExhaustiveClient = (): PrismaClient =>
   new PrismaClient({
     adapter: new PrismaPg(
-      buildPostgresPoolConfig(EXHAUSTIVE_DATABASE_URL, {
+      buildPostgresPoolConfig(pinUtcInConnectionUrl(EXHAUSTIVE_DATABASE_URL), {
         applicationName: `pg-core-back-exhaustive-${randomUUID().slice(0, 8)}`,
       }),
     ),

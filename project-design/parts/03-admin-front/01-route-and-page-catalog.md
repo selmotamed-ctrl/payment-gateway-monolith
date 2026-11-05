@@ -27,9 +27,9 @@ tests:
   - tests/e2e/admin/global-search.spec.ts
   - tests/unit/frontend-security-admin.test.ts
 gaps:
-  - Eight admin route names have no effective UI authority gate; AdminGuide and AdminAcademy are deliberate learning surfaces, while AdminUsers, AdminUserDetail, PricingControls, GatewayAiImport, AdminPlatformSettings, and AdminCheckoutHelp are privilege gaps.
   - The merchant Statements route has no router-level authority entry even though navigation hides it without statement authority.
   - The checkout catch-all NotFound page links to a non-existent Dashboard route, so its recovery button returns to the catch-all.
+  - The admin route table is advisory and must stay aligned with core authority names; a mismatch hides a page the server would allow (or shows one it denies).
 ---
 
 # Admin Route and Page Catalog
@@ -212,10 +212,9 @@ The merchant portal has a similar gap: `Statements` is shown in navigation only 
 
 ### Partial
 
-- Admin route authority coverage is incomplete: six privileged surfaces are ungated in the UI.
 - Merchant `Statements` is not route-gated.
 - Contextual help covers most admin routes but not all (see `04-contextual-help.md`).
-- Admin `AdminUsers` explicitly uses an empty authority array while the backend requires `user:read`/`security:read`; this is a deliberate-looking but unsafe pattern.
+- The admin route-authority table is advisory and must be kept in sync with core; the Guide/Academy reader routes are login-only and the Team page keeps its own `SECURITY_ADMIN` check.
 
 ### Missing / deferred
 
@@ -270,4 +269,4 @@ These suites require a running stack and are skipped without the live/edge servi
 
 ## Security hardening (2026-11-05)
 
-The `VITE_AUTHORIZED` bypass was removed. The route authority table moved to `src/utils/routeAuthorities.ts` with a default-deny guard: `PUBLIC_FOR_AUTHENTICATED` is Dashboard, AdminGuide and AdminAcademy; `AUTHORITY_ALIASES` normalizes dotted and colon forms. Entries were added for AdminUsers, AdminUserDetail, AdminPlatformSettings, PricingControls, GatewayAiImport and AdminCheckoutHelp. These checks are advisory; core enforces authorities. Any route not in the table is denied to authenticated users unless it is in `PUBLIC_FOR_AUTHENTICATED`.
+The `VITE_AUTHORIZED` bypass was removed. The route authority table moved to `src/utils/routeAuthorities.ts` with a default-deny guard. `PUBLIC_FOR_AUTHENTICATED` covers Dashboard, every Guide reader route and every Academy route (the Team page keeps its own `SECURITY_ADMIN` check); `AUTHORITY_ALIASES` normalizes dotted and colon forms. AdminUsers/Detail accept `user:read`/`user:write`/`security:*`, AdminPlatformSettings accepts `settings:read`/`settings:write` (plus the security fallback), and PricingControls includes `liquidity.read`. These checks are advisory; core enforces authorities. Any route not in the table is denied to authenticated users unless it is in `PUBLIC_FOR_AUTHENTICATED`.

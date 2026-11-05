@@ -66,7 +66,7 @@ The return URL is an untrusted browser hint. Core inspects the attempt, triggers
 
 - disables `x-powered-by`;
 - sets `trust proxy` to false;
-- emits permissive CORS without credentials unless `CORS_ALLOWED_ORIGINS` is set, plus hand-written security headers;
+- emits no CORS headers unless `CORS_ALLOWED_ORIGINS` is set (same-origin by default; credentials disabled), plus hand-written security headers;
 - installs request logging;
 - serves unauthenticated `GET /health`;
 - mounts `/api/v1/inbound` with `inboundRouter` **before** the JSON body parser, so the inbound router can install its own raw parser;

@@ -632,16 +632,16 @@ bun run test-matrix --topologies=T1 --intensity=smoke
 
 - `DEPLOY_ENV` unset means `production`: Fake Rails, `IS_TEST_SERVER`, `FAKE_RAILS_ALLOW_IN_PRODUCTION` and the synthetic seeder are refused. Use `development|staging|test` explicitly.
 - Placeholder / low-entropy secrets (`change-me`, `password`, `admin`, repeated or sequential patterns) are rejected; `KMS_MASTER_KEY` needs >= 32 chars. Secrets may not contain quotes, backslash, `$`, backtick or whitespace.
-- `BACKUP_WALG_SHA256` (SHA-256 of the pinned WAL-G asset) is required for `BACKUP_ENGINE_MODE=wal-g`; `BUN_SHA256` is needed to install bun (otherwise an existing bun is reused).
+- `BACKUP_WALG_SHA256` (SHA-256 of the pinned WAL-G asset) is required only when WAL-G must be downloaded; an already installed binary is reused. `BUN_SHA256` is needed to install bun (otherwise an existing `/usr/local/bin/bun` or `~/.bun/bin/bun` is reused).
 - `--fresh` against a non-empty database is refused unless `--force-fresh` (or `DEPLOY_FORCE_FRESH=1`). Update deploys run `migrate deploy` on the first core node when migrations are pending, after a pre-migration dump.
 - PostgreSQL binds `127.0.0.1,<node private IP>`; `PG_RAM_GB` derives memory settings; `PG_IO_METHOD` defaults to `worker`; `PG_REPLICA_REBUILD=true` is needed to re-clone an existing standby.
 
 ### Additional hardening notes (2026-11-05)
 
 - `deploy/lib/quoting.ts` is the single quoting helper set used by the provisioners and `deploy.ts`; `backup.env` and `wal-g.env` are rendered `KEY='value'` and a single quote in a value is rejected.
-- WAL-G is pinned (`BACKUP_WALG_VERSION=3.0.9`, `BACKUP_WALG_ASSET`) and sha256-verified fail-closed; `BACKUP_WALG_SHA256` is required in wal-g mode and you must supply the real value. barman is pinned (`BACKUP_BARMAN_VERSION=3.10.1`); bun installs from a pinned download verified against `BUN_SHA256` (`BUN_VERSION`).
+- WAL-G is pinned (`BACKUP_WALG_VERSION=3.0.9`, `BACKUP_WALG_ASSET`) and sha256-verified fail-closed when downloaded; supply `BACKUP_WALG_SHA256` for a fresh install (an installed `wal-g` is reused). barman is pinned (`BACKUP_BARMAN_VERSION=3.10.1`); bun installs from a pinned download verified against `BUN_SHA256` (`BUN_VERSION`), with `unzip` installed by the fresh-host bootstrap.
 - The off-site mirror uses `rclone copy`/`rsync` without `--delete` unless `BACKUP_SECONDARY_MIRROR_DELETE=true`.
 - The backup daemon authorizes mTLS clients by certificate CN or DNS SAN against `BACKUP_ALLOWED_CLIENT_CNS` (default `backup-client`); verified live on Windows only.
-- New optional keys: `BACKUP_WALG_VERSION`, `BACKUP_WALG_ASSET`, `BACKUP_BARMAN_VERSION`, `BUN_VERSION`, `BUN_SHA256`, `BACKUP_ALLOWED_CLIENT_CNS`, `BACKUP_SECONDARY_MIRROR_DELETE`, `PG_RAM_GB`, `PG_IO_METHOD`, `PG_REPLICA_REBUILD`; lab: `LAB_WALG_SHA256`.
+- New optional keys: `BACKUP_WALG_VERSION`, `BACKUP_WALG_ASSET`, `BACKUP_BARMAN_VERSION`, `BUN_VERSION`, `BUN_SHA256`, `BACKUP_ALLOWED_CLIENT_CNS`, `BACKUP_SECONDARY_MIRROR_DELETE`, `BACKUP_S3_ALLOW_INSECURE_HTTP` (managed MinIO over http; independent of the daemon protocol), `KYB_SCANNER_MODE` (`eicar` content gate by default), `PG_RAM_GB`, `PG_IO_METHOD`, `PG_REPLICA_REBUILD`; lab: `LAB_WALG_SHA256`.
 - `deploy.env.example` ships `DEPLOY_ENV=production` and placeholder secrets, so it fails validation until you replace them.
 - Open: legacy per-service `deploy.yml` workflows deploy without tests, with `StrictHostKeyChecking=no` and `rsync --delete`; the backup daemon runs as the `postgres` user; PostgreSQL TLS is not provisioned. See `project-design/TRACKER.md`.

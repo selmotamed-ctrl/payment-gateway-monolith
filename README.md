@@ -175,12 +175,12 @@ bun run migrate-generate    # regenerate the Prisma client
 bun run db-seed             # platform settings, GL accounts, blueprints, templates, guides
 bun run seed-fake-rails     # point seeded gateways at Fake Rails
 bun run seed-synthetic-history
-ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com
+ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com --phone +218911234567
 bun run create-dev-users
 bun run generate-mtls-certs
 ```
 
-`create-admin` activates a seeded administrator (the baseline seed intentionally leaves passwords unset). The password is read from `ADMIN_PASSWORD`; `--password` on the command line is rejected, and MFA is on by default (`--no-mfa` or `ADMIN_MFA=false` disables it). `create-dev-users` refuses production unless `--allow-production` or `DEV_USERS_ALLOW_PRODUCTION=true` is supplied.
+`create-admin` activates a seeded administrator (the baseline seed intentionally leaves passwords unset). The password is read from `ADMIN_PASSWORD`; `--password` on the command line is rejected. MFA is on by default and requires a delivery phone (`--phone` or `ADMIN_PHONE`); pass `--no-mfa` (or `ADMIN_MFA=false`) only when SMS delivery is not configured. `create-dev-users` refuses production unless `--allow-production` or `DEV_USERS_ALLOW_PRODUCTION=true` is supplied.
 
 ## Testing and benchmarks
 

@@ -177,6 +177,7 @@ export type AttemptSnapshot = {
     attemptId: string;
     reference: string;
     status: AttemptStatus;
+    substatus?: string | null;
     clientAction?: ClientAction | null;
     publicOutputs?: Record<string, unknown>;
     createdAt?: string;
@@ -187,6 +188,7 @@ export type InitiateResponse = {
     attemptId: string;
     reference: string;
     status: AttemptStatus;
+    hold?: boolean;
     clientAction: ClientAction;
 };
 

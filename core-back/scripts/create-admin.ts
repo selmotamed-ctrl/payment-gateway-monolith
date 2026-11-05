@@ -41,6 +41,7 @@ const main = async (): Promise<void> => {
       where: { email: data.email },
       data: {
         passwordHash: data.passwordHash,
+        phone: data.phone,
         status: "ACTIVE",
         mfaRequired: data.mfaRequired,
         mfaSecretCiphertext: null,

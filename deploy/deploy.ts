@@ -239,6 +239,8 @@ export const renderNginxTemplate = (input: {
   lanAllowedCidrs: string;
   upstreamName?: string;
   upstreamServers?: string[];
+  /** CSP frame-ancestors sources; the Fake Rails widget is embedded by the portals. */
+  frameAncestors?: string;
 }): string => {
   const lanRules = withIpv6Loopback(input.lanAllowedCidrs).split(",")
     .map((cidr) => cidr.trim())
@@ -268,7 +270,8 @@ export const renderNginxTemplate = (input: {
     .replaceAll("{{STATIC_ROOT}}", input.staticRoot)
     .replaceAll("{{BACKEND_PORT}}", String(input.backendPort))
     .replaceAll("{{UPSTREAM_NAME}}", input.upstreamName ?? `127.0.0.1:${input.backendPort}`)
-    .replaceAll("{{LAN_ALLOWED_CIDRS}}", withIpv6Loopback(input.lanAllowedCidrs));
+    .replaceAll("{{LAN_ALLOWED_CIDRS}}", withIpv6Loopback(input.lanAllowedCidrs))
+    .replaceAll("{{FRAME_ANCESTORS}}", input.frameAncestors ?? "'self'");
 };
 
 const renderNginx = (host: HostPlan, config: DeployConfig, runner: SshRunner, role?: string): void => {
@@ -313,6 +316,19 @@ const renderNginx = (host: HostPlan, config: DeployConfig, runner: SshRunner, ro
       lanAllowedCidrs: site.role === "fake-rails" ? config.FAKE_RAILS_ALLOWED_CIDRS : config.LAN_ALLOWED_CIDRS,
       upstreamName: site.upstreamName,
       upstreamServers: site.upstreamServers,
+      ...(site.role === "fake-rails"
+        ? {
+            frameAncestors: [
+              "'self'",
+              publicOrigin(config.MERCHANT_DOMAIN, false, config.MERCHANT_HTTP_PORT, config.MERCHANT_HTTPS_PORT),
+              publicOrigin(config.MERCHANT_DOMAIN, true, config.MERCHANT_HTTP_PORT, config.MERCHANT_HTTPS_PORT),
+              publicOrigin(config.CHECKOUT_DOMAIN, false, config.CHECKOUT_HTTP_PORT, config.CHECKOUT_HTTPS_PORT),
+              publicOrigin(config.CHECKOUT_DOMAIN, true, config.CHECKOUT_HTTP_PORT, config.CHECKOUT_HTTPS_PORT),
+              "http://localhost:*",
+              "http://127.0.0.1:*",
+            ].join(" "),
+          }
+        : {}),
     });
     const available = `/etc/nginx/sites-available/pg-${site.site}.conf`;
     runner.writeRemoteFile({ target: host.ssh, path: available, content: rendered, mode: 0o644, sudo: true });
@@ -534,7 +550,7 @@ export const bunInstallCommand = (config: Pick<DeployConfig, "BUN_VERSION" | "BU
   const download = sha
     ? `d=$(mktemp -d) && trap 'rm -rf "$d"' EXIT && curl -fsSL ${shellQuote(`https://github.com/oven-sh/bun/releases/download/bun-v${config.BUN_VERSION}/bun-linux-x64.zip`)} -o "$d/bun.zip" && echo ${shellQuote(`${sha}  `)}"$d/bun.zip" | sha256sum -c - && unzip -q -o "$d/bun.zip" -d "$d" && install -m 0755 "$d/bun-linux-x64/bun" /usr/local/bin/bun`
     : missing;
-  return `if [ ! -x /usr/local/bin/bun ]; then if command -v bun >/dev/null 2>&1; then ln -sfn "$(command -v bun)" /usr/local/bin/bun; else ${download}; fi; fi; ${link}`;
+  return `if [ ! -x /usr/local/bin/bun ]; then if command -v bun >/dev/null 2>&1; then ln -sfn "$(command -v bun)" /usr/local/bin/bun; elif [ -x "$HOME/.bun/bin/bun" ]; then ln -sfn "$HOME/.bun/bin/bun" /usr/local/bin/bun; else ${download}; fi; fi; ${link}`;
 };
 
 const provisionDatabase = (input: {
@@ -711,6 +727,12 @@ const probeMigrationState = (input: {
 export const adminChecklistsVisible = (config: DeployConfig): boolean =>
   config.ADMIN_SHOW_CHECKLISTS ?? config.ADMIN_SHOW_SNAPSHOT_EXPORT_CHECKLIST;
 
+const publicOrigin = (domain: string, ssl: boolean, httpPort: number, httpsPort: number): string => {
+  const port = ssl ? httpsPort : httpPort;
+  const suffix = port === (ssl ? 443 : 80) ? "" : `:${port}`;
+  return `${ssl ? "https" : "http"}://${domain}${suffix}`;
+};
+
 const frontendBuildEnv = (frontend: string, config: DeployConfig): Record<string, string> => {
   if (frontend === "admin-front") {
     const visible = String(adminChecklistsVisible(config));
@@ -719,6 +741,15 @@ const frontendBuildEnv = (frontend: string, config: DeployConfig): Record<string
       VITE_SHOW_SNAPSHOT_EXPORT_CHECKLIST: visible,
       VITE_SHOW_HELP_PANELS: String(config.ADMIN_SHOW_HELP_PANELS),
     };
+  }
+  if (frontend === "merchant-front") {
+    // The merchant portal and the checkout portal are separate vhosts; a link
+    // built from the merchant origin would point at the wrong service.
+    return { VITE_CHECKOUT_BASE_URL: publicOrigin(config.CHECKOUT_DOMAIN, config.CHECKOUT_SSL, config.CHECKOUT_HTTP_PORT, config.CHECKOUT_HTTPS_PORT) };
+  }
+  if (frontend === "fake-rails-front") {
+    // The hosted widget posts to its embedding checkout origin instead of "*".
+    return { VITE_CHECKOUT_ORIGIN: publicOrigin(config.CHECKOUT_DOMAIN, config.CHECKOUT_SSL, config.CHECKOUT_HTTP_PORT, config.CHECKOUT_HTTPS_PORT) };
   }
   return {};
 };

@@ -178,6 +178,8 @@ beforeAll(async () => {
 afterAll(async () => {
   await new Promise<void>((resolve) => edgeServer.close(() => resolve()));
   await core.close();
+  delete process.env.ADMIN_AUTHORITY_HINTS;
+  delete process.env.BACKUP_JOB_RATE_LIMIT_MAX;
 });
 
 const call = (

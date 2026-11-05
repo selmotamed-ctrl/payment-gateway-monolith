@@ -113,7 +113,7 @@ Request logging writes console lines with a separate short id and an `http_acces
 - The migration order and files are generated in [`../project-design/appendices/migration-catalog.md`](../project-design/appendices/migration-catalog.md).
 - The committed history is forward-only: baseline schema, storage-engine indexes, CQRS read models and storage hardening. There are no down migrations. Recovery is restore/PITR or a new forward migration.
 - `journal_lines` is monthly range-partitioned by `created_at`; the primary key includes `created_at`. The deploy engine installs a daily partition-maintenance cron. Elsewhere, run `SELECT ensure_journal_line_partitions(18)` on a schedule.
-- Schema version 10 is required (latest migration `20261104120000_mfa_challenges`). `ensureSchemaVersion()` is called by the baseline seeder, the Fake Rails seeder and the synthetic seeder, but not by the HTTP start path. A stale database can boot and fail later at query time.
+- Schema version 11 is required (latest migration `20261105130000_statement_unique_source_file_hash`). `ensureSchemaVersion()` is called by the baseline seeder, the Fake Rails seeder and the synthetic seeder, but not by the HTTP start path. A stale database can boot and fail later at query time.
 
 ### 3.2 Storage engine ports
 
@@ -230,7 +230,7 @@ bun run start
 The baseline seed creates administrator accounts but deliberately leaves their passwords unset. Activate one before signing in:
 
 ```bash
-ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com
+ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com --phone +218911234567
 ```
 
 `bun run start` listens on `HOST:PORT` (`127.0.0.1:4000` by default) with TLS 1.3 and requires a client certificate. `bun run dev` uses Bun watch mode.
@@ -381,12 +381,12 @@ Keys read outside the env proxy include `KMS_KEYS_JSON`, `KYB_SCANNER_MODE` (uns
 ### 7.1 Administrator bootstrap
 
 ```bash
-ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com
-ADMIN_PASSWORD='<strong password>' bun run create-admin --email compliance@example.com --role COMPLIANCE
-ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com --no-mfa   # MFA is on by default
+ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com --phone +218911234567
+ADMIN_PASSWORD='<strong password>' bun run create-admin --email compliance@example.com --role COMPLIANCE --phone +218911234568
+ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com --no-mfa   # MFA is on by default and needs a phone
 ```
 
-Environment equivalents: `ADMIN_EMAIL`, `ADMIN_PASSWORD` (the only way to supply the password: `--password` on the command line is rejected), `ADMIN_ROLE`, `ADMIN_MFA=false` (MFA is on by default; `--no-mfa` also disables it). The password policy is 12-128 characters with a lowercase letter, an uppercase letter and a digit. The command is idempotent; it sets `ACTIVE`, clears a stale MFA secret and rotates the password. Roles are `GATEWAY_ADMIN`, `SECURITY_ADMIN`, `FINANCE`, `COMPLIANCE`, `MLRO`, `OPERATOR` and `SUPPORT`. The baseline seed creates the seeded accounts with no password and `INVITED` status on purpose.
+Environment equivalents: `ADMIN_EMAIL`, `ADMIN_PASSWORD` (the only way to supply the password: `--password` on the command line is rejected), `ADMIN_PHONE`, `ADMIN_ROLE`, `ADMIN_MFA=false` (MFA is on by default and requires a phone; `--no-mfa` also disables it). The password policy is 12-128 characters with a lowercase letter, an uppercase letter and a digit. The command is idempotent; it sets `ACTIVE`, clears a stale MFA secret and rotates the password. Roles are `GATEWAY_ADMIN`, `SECURITY_ADMIN`, `FINANCE`, `COMPLIANCE`, `MLRO`, `OPERATOR` and `SUPPORT`. The baseline seed creates the seeded accounts with no password and `INVITED` status on purpose.
 
 ### 7.2 Development superusers
 

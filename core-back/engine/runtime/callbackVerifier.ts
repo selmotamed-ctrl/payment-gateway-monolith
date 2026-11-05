@@ -110,12 +110,10 @@ export class PrismaCallbackVerifier implements CallbackVerifier {
     const keyedMethod = verifyMethod !== "IP_ONLY" && verifyMethod !== "NONE_PLUS_INQUIRY";
     const toleranceRaw = Number(channel.timestampToleranceSec ?? 300);
     const tolerance = Number.isFinite(toleranceRaw) ? toleranceRaw : 300;
-    const timestamp = this.readTimestamp(
-      payload,
-      request.headers,
-      channel,
-      String((channel.cryptoProfile as Record<string, unknown> | null)?.canonicalizationMode ?? "RAW_BODY"),
+    const canonicalization = String(
+      (channel.cryptoProfile as Record<string, unknown> | null)?.canonicalizationMode ?? "RAW_BODY",
     );
+    const timestamp = this.readTimestamp(payload, request.headers, channel, canonicalization);
     if (timestamp !== null) {
       if (tolerance > 0) {
         const driftSeconds = Math.abs((Date.now() - timestamp) / 1000);
@@ -125,7 +123,8 @@ export class PrismaCallbackVerifier implements CallbackVerifier {
       }
     } else if (keyedMethod && tolerance > 0) {
       // A replay window is configured but no SIGNED timestamp is available:
-      // fail closed. (Set timestampToleranceSec = 0 to opt a channel out.)
+      // fail closed. (Set timestampToleranceSec = 0 to opt a channel out; the
+      // schema migration does that for legacy channels with no selector.)
       return { verified: false, reason: "INBOUND_TIMESTAMP_MISSING" };
     }
 

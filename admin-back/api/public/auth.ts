@@ -47,6 +47,10 @@ const accountLimiter = lazyLimiter(() => rateLimiter({
   handler: limited,
 }));
 
+// Logout is deliberately outside the login limiter: a page load with several
+// expired requests triggers it, and it must not consume the login budget.
+router.post("/logout", logoutHandler);
+
 router.use(authLimiter);
 router.post(["/login", "/mfa"], accountLimiter);
 
@@ -63,8 +67,6 @@ const mfaSchema = z
     code: zMfaCode,
   })
   .strict();
-
-router.post("/logout", logoutHandler);
 
 router.post(
   "/login",

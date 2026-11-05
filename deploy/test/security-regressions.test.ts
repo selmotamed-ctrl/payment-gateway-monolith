@@ -324,8 +324,14 @@ describe("supply-chain pinning", () => {
     const cmd = walGInstallCommand({ ...load(), BACKUP_WALG_SHA256: "a".repeat(64) });
     expect(cmd).toContain("sha256sum -c");
     expect(cmd).toContain("/v3.0.9/");
-    expect(() => walGInstallCommand({ ...load(), BACKUP_WALG_SHA256: "" })).toThrow("BACKUP_WALG_SHA256");
-    expect(loadDeployConfig(SOURCE.replace(/^BACKUP_WALG_SHA256=.*$/m, "").replace('BACKUP_ENGINE_MODE="barman"', 'BACKUP_ENGINE_MODE="wal-g"').replace('BACKUP_NODE="backup-1@10.10.13.10:22:10.10.13.10:4090"', 'BACKUP_NODE="backup-1@10.10.10.10:22:10.10.10.10:4090"')).ok).toBe(false);
+    // Without a checksum an installed WAL-G is still reused, but a download
+    // is refused with a clear, fail-closed command.
+    expect(walGInstallCommand({ ...load(), BACKUP_WALG_SHA256: "" })).toContain("BACKUP_WALG_SHA256 is not set");
+    // The config loads (an existing binary needs no checksum); the install
+    // command itself refuses a download without one.
+    const noSha = loadDeployConfig(SOURCE.replace(/^BACKUP_WALG_SHA256=.*$/m, "").replace('BACKUP_ENGINE_MODE="barman"', 'BACKUP_ENGINE_MODE="wal-g"').replace('BACKUP_NODE="backup-1@10.10.13.10:22:10.10.13.10:4090"', 'BACKUP_NODE="backup-1@10.10.10.10:22:10.10.10.10:4090"'));
+    expect(noSha.ok).toBe(true);
+    expect(walGInstallCommand(noSha.config!)).toContain("BACKUP_WALG_SHA256 is not set");
   });
   test("bun is never installed with curl | bash", () => {
     const withSha = bunInstallCommand({ BUN_VERSION: "1.3.5", BUN_SHA256: "b".repeat(64) });

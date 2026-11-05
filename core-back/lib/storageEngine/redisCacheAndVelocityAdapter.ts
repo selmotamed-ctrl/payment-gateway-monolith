@@ -271,7 +271,11 @@ export class RedisCacheAdapter implements CachePort {
           await instance.connect();
         }
         return instance;
-      })();
+      })().catch((error) => {
+        // A failed connection must not be cached forever: the next call retries.
+        this.clientPromise = null;
+        throw error;
+      });
     }
     return this.clientPromise;
   }
@@ -406,7 +410,11 @@ export class RedisCacheAdapter implements CachePort {
       }
     } catch (error) {
       this.degradedVelocityCount += 1;
-      this.options.onVelocityDegraded?.({ policy: this.velocityPolicy, error });
+      try {
+        this.options.onVelocityDegraded?.({ policy: this.velocityPolicy, error });
+      } catch {
+        // A metrics hook must never change the payment decision.
+      }
       if (this.velocityPolicy === "fail-closed") {
         throw new VelocityUnavailableError(error);
       }

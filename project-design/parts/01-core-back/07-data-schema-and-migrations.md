@@ -28,7 +28,7 @@ tests:
 gaps:
   - Core tables use `TIMESTAMP(3)` while storage-engine tables use `TIMESTAMPTZ(3)`.
   - The migration history is forward-only; there are no down migrations.
-  - Core HTTP start does not call `ensureSchemaVersion()`; only the seeders assert schema version 10.
+  - Core HTTP start does not call `ensureSchemaVersion()`; only the seeders assert schema version 11.
   - `journal_lines` partition maintenance depends on an external deploy cron.
   - The generated schema catalog appendix is produced by the project-design generator and is not hand-maintained.
 ---
@@ -43,7 +43,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 76 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — four committed migrations;
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 10 and the boot guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 11 and the boot guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -98,7 +98,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 10`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 11`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -301,7 +301,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 ### Implemented
 
 - 76 models and 105 enums in the Prisma datamodel.
-- Schema version 10 with an equality check used by the seeders.
+- Schema version 11 with an equality check used by the seeders.
 - Four committed migrations with the intended separation: baseline, storage indexes, CQRS read models, hardening.
 - Monthly range partitioning of `journal_lines` with historical/future partitions and a default partition.
 - Partial, covering, BRIN and trigram indexes for the write path, workers and search.
@@ -404,10 +404,13 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-Migration `20261104120000_mfa_challenges` (schema version 10, `REQUIRED_SCHEMA_VERSION = 10`; model count 75 to 76):
-- creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
-- adds `access_tokens.expires_at`;
-- adds `cashout_requests.idempotency_key` (unique per merchant) and `cashout_requests.requested_by_user_id`;
-- bumps `schema_versions` to 10.
+The current schema version is 11 (`REQUIRED_SCHEMA_VERSION = 11`; model count 76). Three migrations make up the change:
 
-Notes: the schema version and model counts quoted elsewhere in this part are updated to 10 and 76; the change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply this migration before starting the new core build, because merchant cash-out, API-token expiry and MFA depend on the new columns and table.
+- `20261104120000_mfa_challenges` (version 10):
+  - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
+  - adds `access_tokens.expires_at`;
+  - adds `cashout_requests.idempotency_key` (unique per merchant) and `cashout_requests.requested_by_user_id`.
+- `20261105090000_append_only_ledger_guards`: append-only triggers on `journal_entries`, `journal_lines` (and partitions) and `audit_log`, plus the non-owner `pgw_app` role. Audit retention deletes remain possible inside a transaction that sets `pgw.audit_retention` (accidental-error protection, not privilege separation from a compromised app role).
+- `20261105130000_statement_unique_source_file_hash`: replaces the global `reconciliation_runs.file_hash` unique index with `(statement_source_id, file_hash)`, sets `timestamp_tolerance_sec = 0` for legacy keyed channels with no signed timestamp source (the verifier now fails closed on a missing signed timestamp), and bumps `schema_versions` to 11.
+
+The change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply these migrations before starting the new core build, because merchant cash-out, API-token expiry, MFA and the append-only guards depend on them.

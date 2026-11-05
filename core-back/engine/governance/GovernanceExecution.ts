@@ -1487,6 +1487,10 @@ const finalizeAmlAttempt = async (
     where: { id: String(attempt.id), terminalAt: null },
     data: {
       status: input.status,
+      // The AML hold substatus is cleared: the case owns the hold only until it
+      // is resolved. Leaving `AML_HOLD` behind would make a later late-success
+      // recovery divert a voided attempt back into the escrow branch.
+      substatus: input.action === "RELEASE" ? "AML_RELEASED" : "AML_VOID",
       terminalAt: new Date(),
       nextCheckAt: null,
       ...(input.ledgerEntryId ? { ledgerEntryId: input.ledgerEntryId } : {}),

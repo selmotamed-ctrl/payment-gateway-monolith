@@ -177,6 +177,7 @@
 | `deploy/deploy.env.example` | `BACKUP_SCRATCH_AUDIT_PORT` |
 | `deploy/deploy.env.example` | `BACKUP_COMMAND_TIMEOUT_MS` |
 | `deploy/deploy.env.example` | `BACKUP_ALLOW_INSECURE_HTTP` |
+| `deploy/deploy.env.example` | `BACKUP_S3_ALLOW_INSECURE_HTTP` |
 | `deploy/deploy.env.example` | `BACKUP_WALG_BIN` |
 | `deploy/deploy.env.example` | `BACKUP_BARMAN_BIN` |
 | `deploy/deploy.env.example` | `BACKUP_BARMAN_CLOUD_BIN` |
@@ -186,6 +187,7 @@
 | `deploy/deploy.env.example` | `KMS_MASTER_KEY_ID` |
 | `deploy/deploy.env.example` | `KMS_MASTER_KEY_HEX` |
 | `deploy/deploy.env.example` | `STORAGE_SHARD_COUNT` |
+| `deploy/deploy.env.example` | `KYB_SCANNER_MODE` |
 | `deploy/deploy.env.example` | `BASE_CURRENCY` |
 | `deploy/deploy.env.example` | `GATEWAY_TIMEZONE` |
 | `deploy/deploy.env.example` | `REDIS_URL` |

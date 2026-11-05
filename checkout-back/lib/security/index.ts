@@ -23,9 +23,9 @@ const allowedOrigins = (): string[] =>
     .filter((value) => value.length > 0);
 
 /**
- * The public pay page is served from another origin, so with an empty `CORS_ALLOWED_ORIGINS`
- * the checkout API stays reachable cross-origin. It never uses cookies or credentials, so
- * credentials are never allowed; a non empty list restricts the origins to exactly that list.
+ * CORS from an explicit allow-list (`CORS_ALLOWED_ORIGINS`). With an empty list no CORS headers
+ * are emitted at all (same-origin only, the deployed pay page is served by the same nginx vhost).
+ * Credentials are never allowed.
  */
 export const corsAllowList = (): RequestHandler => {
   const handler = cors({
@@ -35,8 +35,11 @@ export const corsAllowList = (): RequestHandler => {
     },
     credentials: false,
   });
-  const permissive = cors({ origin: true, credentials: false });
   return (req, res, next) => {
-    (allowedOrigins().length === 0 ? permissive : handler)(req, res, next);
+    if (allowedOrigins().length === 0) {
+      next();
+      return;
+    }
+    handler(req, res, next);
   };
 };

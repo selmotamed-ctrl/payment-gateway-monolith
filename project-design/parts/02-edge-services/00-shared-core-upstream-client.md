@@ -34,7 +34,7 @@ tests:
 gaps:
   - The client is copied into all three BFFs instead of living in a shared workspace package.
   - Client certificates are read when the per-node HTTPS agent is created; replacing files on disk does not reload them until the pool is reset or the process restarts.
-  - An upstream HTTP 502/503 is always treated as a node failure, even when it is a legitimate application response.
+  - Only transport/TLS errors and HTTP 502/503/504 remove a node from rotation; other error responses (including legitimate application 5xx) do not.
   - Stream retries can only re-open a stream before it is established; there is no resume or polling fallback at the edge.
 ---
 
@@ -298,7 +298,7 @@ The suites cover URL parsing, least-in-flight and round-robin selection, cooldow
 Applies to all three copies of the client:
 - Only transport/TLS errors and 502/503/504 mark a node unhealthy.
 - Header names and values are validated as printable ASCII (`400 CORE_HEADER_INVALID`); edge-owned headers are applied last, and `x-real-client-ip` is always overwritten with the resolved IP.
-- PUT/DELETE are replayed after send only with an `Idempotency-Key`/opt-in, or on a connect-phase failure.
+- PUT/DELETE are HTTP-idempotent and are replayed after send like GET/HEAD/OPTIONS; POST/PATCH still need an `Idempotency-Key`/opt-in, and a connect-phase failure is always retryable.
 - SSE streams use their own agent pool (128 sockets) with `MAX_STREAMS_PER_IP` (default 5) and abort upstream on early client disconnect.
 - Buffered responses are capped (`CORE_MAX_RESPONSE_BYTES` default 64 MiB, `CORE_TOTAL_DEADLINE_MS` default 300000).
 - Admin `x-pg-min-lsn` is validated against `^hex/hex$` (400 otherwise).

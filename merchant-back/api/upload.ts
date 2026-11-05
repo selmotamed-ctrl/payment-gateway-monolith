@@ -46,11 +46,9 @@ export const uploadGuards: Array<(req: Request, res: Response, next: NextFunctio
   (req, _res, next) => {
     requireBearer(req);
     const declared = Number(req.headers["content-length"]);
-    if (!Number.isFinite(declared) || declared <= 0) {
-      next(new ApiError(411, "LENGTH_REQUIRED", "A Content-Length header is required for uploads"));
-      return;
-    }
-    if (declared > env.MAX_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES) {
+    // Chunked clients have no Content-Length; multer still enforces the byte
+    // limit while streaming. Only an explicitly oversized body is refused here.
+    if (Number.isFinite(declared) && declared > 0 && declared > env.MAX_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES) {
       next(new ApiError(413, "UPLOAD_TOO_LARGE", "The uploaded document exceeds the size limit"));
       return;
     }

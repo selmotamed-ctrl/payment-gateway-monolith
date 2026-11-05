@@ -107,7 +107,12 @@ export const backupDaemonEnv = (config: DeployConfig): Record<string, string> =>
     BACKUP_DAEMON_KEY_PATH: `${config.BACKUP_DAEMON_CERT_DIR}/backup-daemon.key`,
     BACKUP_DAEMON_CA_CERT_PATH: `${config.BACKUP_DAEMON_CERT_DIR}/internal-ca.crt`,
     BACKUP_ALLOWED_CLIENT_CNS: config.BACKUP_ALLOWED_CLIENT_CNS,
-    ...(config.BACKUP_ENGINE_MODE === "wal-g" ? { WALG_ENV_FILE: "/etc/pg-backup/wal-g.env" } : {}),
+    ...(config.BACKUP_ENGINE_MODE === "wal-g"
+      ? {
+          WALG_ENV_FILE: "/etc/pg-backup/wal-g-core.env",
+          WALG_ENV_FILE_AUDIT: "/etc/pg-backup/wal-g-audit.env",
+        }
+      : {}),
     PG_PRIMARY_HOST: primary?.privateIp ?? "127.0.0.1",
     PG_PRIMARY_PORT: String(primary?.servicePort ?? 5432),
     PG_PRIMARY_USER: config.PG_DB_USER,
@@ -152,13 +157,18 @@ export const renderEnvFile = (env: Record<string, string>): string =>
     return envAssign(key, value);
   }).join("\n")}\n`;
 
-/** Fail-closed WAL-G install: pinned release + SHA-256 verified before it is made executable. */
+/**
+ * Fail-closed WAL-G install: pinned release + SHA-256 verified before it is
+ * made executable. An existing wal-g binary is reused, so a host that already
+ * has WAL-G does not need the checksum; a host that must download it does.
+ */
 export const walGInstallCommand = (config: DeployConfig): string => {
   const sha = config.BACKUP_WALG_SHA256.trim().toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(sha)) {
-    throw new Error("BACKUP_WALG_SHA256 is required to install WAL-G (refusing to run an unverified binary)");
-  }
+  const hasSha = /^[0-9a-f]{64}$/.test(sha);
   const url = `https://github.com/wal-g/wal-g/releases/download/v${config.BACKUP_WALG_VERSION}/${config.BACKUP_WALG_ASSET}`;
+  if (!hasSha) {
+    return "command -v wal-g >/dev/null 2>&1 || { echo 'WAL-G is not installed and BACKUP_WALG_SHA256 is not set: install wal-g manually or set the SHA-256 of the pinned release' >&2; exit 1; }";
+  }
   return `command -v wal-g >/dev/null 2>&1 || { tmp=$(umask 077 && mktemp) && trap 'rm -f "$tmp"' EXIT && curl -fsSL ${shellQuote(url)} -o "$tmp" && echo ${shellQuote(`${sha}  `)}"$tmp" | sha256sum -c - && install -m 0755 "$tmp" /usr/local/bin/wal-g; }`;
 };
 
@@ -627,15 +637,20 @@ fi`,
     mode: 0o600,
     sudo: true,
   });
-  runner.writeRemoteFile({
-    target: ssh,
-    path: "/etc/pg-backup/wal-g.env",
-    content: renderEnvFile(walGEnvironment(config)),
-    mode: 0o640,
-    sudo: true,
-  });
-  // restore_command (run by the scratch postgres as user postgres) sources this file.
-  runner.run(ssh, `chown root:${backupDaemonUser(config)} /etc/pg-backup/wal-g.env && chmod 0640 /etc/pg-backup/wal-g.env`, { sudo: true });
+  for (const [envPath, target] of [
+    ["/etc/pg-backup/wal-g-core.env", "postgres_core"],
+    ["/etc/pg-backup/wal-g-audit.env", "audit_db"],
+  ] as const) {
+    runner.writeRemoteFile({
+      target: ssh,
+      path: envPath,
+      content: renderEnvFile(walGEnvironment(config, target)),
+      mode: 0o640,
+      sudo: true,
+    });
+    // restore_command (run by the scratch postgres as user postgres) sources these files.
+    runner.run(ssh, `chown root:${backupDaemonUser(config)} ${envPath} && chmod 0640 ${envPath}`, { sudo: true });
+  }
   runner.writeRemoteFile({
     target: ssh,
     path: "/etc/systemd/system/pg-backup-daemon.service",

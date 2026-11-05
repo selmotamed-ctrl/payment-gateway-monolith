@@ -4,7 +4,7 @@
 
 - Models: **76**
 - Enums: **105**
-- Schema version: **10**
+- Schema version: **11**
 - Migrations: **8**
 
 ## Models

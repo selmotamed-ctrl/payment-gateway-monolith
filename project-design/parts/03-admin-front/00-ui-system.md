@@ -35,7 +35,7 @@ tests:
 gaps:
   - Fake Rails receives only a partial shared-UI rollout; it has separate portal/hosted shells and is not covered by the admin compliance test.
   - Shared primitives are copied per workspace rather than published as one package, so drift is possible.
-  - "Residual (GAP-019/GAP-029): the admin session token lives in client storage unless the edge runs `SESSION_COOKIE_MODE=true`; `@prisma/client` is still listed (unused) in `admin-front/package.json`."
+  - "Residual (GAP-019): the admin session token lives in client storage unless the edge runs `SESSION_COOKIE_MODE=true`."
 ---
 
 # Admin UI System

@@ -609,6 +609,7 @@ router.post("/auth/login", async (request: Request, response: Response) => {
       issueMfaChallenge(tx as never, {
         userId: staffUser.id,
         channel: "ADMIN",
+        phone: staffUser.phone,
         phoneLast4: (staffUser.phone ?? "").slice(-4),
         ip,
       }),
@@ -962,6 +963,7 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
 });
 
 router.post("/stats/export-audit", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["security:read", "security:write"]);
   const body = parseOrThrow(
     z.object({
       period: z.string().min(1).max(32),
@@ -2813,12 +2815,20 @@ router.post("/join-requests/:id/submit", async (request: Request, response: Resp
     throw new ApiError(409, "JOIN_REQUEST_PAYOUT_BANK_REQUIRED", "Payout bank details are required");
   }
   // GAP-017: the KYB payout hash is mandatory; it binds every cash-out destination.
-  if (!joinRequest.merchant.payoutAccountHash && !payoutAccountHash(joinRequest.merchant.payoutBankDetailsJson)) {
+  const payoutHash = joinRequest.merchant.payoutAccountHash
+    ?? payoutAccountHash(joinRequest.merchant.payoutBankDetailsJson);
+  if (!payoutHash) {
     throw new ApiError(
       409,
       "JOIN_REQUEST_PAYOUT_HASH_REQUIRED",
       "The payout bank details must include a bank and an account number or IBAN",
     );
+  }
+  if (!joinRequest.merchant.payoutAccountHash) {
+    await client.merchant.update({
+      where: { id: joinRequest.merchantId },
+      data: { payoutAccountHash: payoutHash },
+    });
   }
   if (owners.length === 0) {
     throw new ApiError(409, "JOIN_REQUEST_OWNER_REQUIRED", "At least one beneficial owner is required");

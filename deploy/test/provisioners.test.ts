@@ -443,6 +443,7 @@ BACKUP_PRIMARY_S3_BUCKET="s3://payment-gateway-backups/dev"
 BACKUP_PRIMARY_S3_ACCESS_KEY="minio-admin"
 BACKUP_PRIMARY_S3_SECRET_KEY="minio-secret-123"
 BACKUP_ALLOW_INSECURE_HTTP="true"
+BACKUP_S3_ALLOW_INSECURE_HTTP="true"
 ${extra}`.replace(/BACKUP_NODE="[^"]*"/, 'BACKUP_NODE="backup-1@10.10.10.10:22:10.10.10.10:4090"'),
     );
 

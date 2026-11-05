@@ -13,6 +13,7 @@ import { Pool, type PoolConfig } from "pg";
 import { createClient as createRedisClient } from "redis";
 import { PrismaClient } from "../../../generated/prisma/client";
 import { buildPostgresPoolConfig } from "../../../lib/db/connectionConfig";
+import { pinUtcInConnectionUrl } from "../../../lib/storageEngine/utcSession";
 import { DedicatedAuditDatabaseDriver } from "../../../lib/storageEngine/auditAndLogAdapters";
 import { withLedgerMaintenance } from "../../helpers/ledgerMaintenance";
 
@@ -77,7 +78,7 @@ export interface PoolOptions {
 
 export const createPool = (options: PoolOptions = {}): Pool => {
   const config: PoolConfig = {
-    connectionString: options.url ?? DATABASE_URL,
+    connectionString: pinUtcInConnectionUrl(options.url ?? DATABASE_URL),
     max: options.max ?? 5,
     connectionTimeoutMillis: options.connectionTimeoutMillis ?? 3_000,
   };
@@ -94,7 +95,7 @@ export const createPrismaForSchema = (
 ): PrismaClient =>
   new PrismaClient({
     adapter: new PrismaPg({
-      ...buildPostgresPoolConfig(options.url ?? DATABASE_URL, {
+      ...buildPostgresPoolConfig(pinUtcInConnectionUrl(options.url ?? DATABASE_URL), {
         max: options.max ?? 10,
         applicationName: `pg-storage-test-${RUN_ID}`,
       }),

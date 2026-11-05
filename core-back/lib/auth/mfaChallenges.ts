@@ -42,18 +42,31 @@ const vault = new Vault();
 /** The SMS payload carries the code encrypted; the notification worker opens it at send time. */
 export const sealMfaCode = (code: string): Promise<string> => vault.encryptSecret(code, "mfa-sms");
 export const openMfaCode = (ciphertext: string): Promise<string> => vault.decryptSecret(ciphertext);
+/** The delivery address (phone) is encrypted at rest; the transport opens it at send time. */
+export const sealMfaAddress = (phone: string): Promise<string> => vault.encryptSecret(phone, "mfa-address");
 
 export const issueMfaChallenge = async (
   db: MfaStore,
   input: {
     userId: string;
     channel: MfaChannel;
+    /** Full destination phone. Required: the challenge is useless without a delivery address. */
+    phone?: string | null;
     phoneLast4: string;
     ip: string | null;
     templateCode?: string;
     now?: Date;
   },
 ): Promise<{ challengeId: string }> => {
+  if (!input.phone) {
+    // Fail explicitly instead of queueing a code that can never be delivered
+    // (the notification transport would otherwise receive only a last-4).
+    throw new ApiError(
+      409,
+      "MFA_DESTINATION_MISSING",
+      "This account has no phone number for multi-factor authentication. Contact an administrator",
+    );
+  }
   const now = input.now ?? new Date();
   const recent = await db.mfaChallenge.findMany({
     where: { userId: input.userId, createdAt: { gte: new Date(now.getTime() - MFA_ISSUE_WINDOW_MS) } },
@@ -89,9 +102,9 @@ export const issueMfaChallenge = async (
       templateCode: input.templateCode ?? "LOGIN_MFA",
       channel: "SMS",
       lang: "EN",
-      // Never the plaintext code: the worker decrypts `codeCiphertext` for delivery only.
+      // Never the plaintext code or address: the worker decrypts them at send time.
       payloadJson: { codeCiphertext: await sealMfaCode(code) },
-      addressCiphertext: "",
+      addressCiphertext: await sealMfaAddress(input.phone),
       status: "QUEUED",
       addressMasked: input.phoneLast4,
     },

@@ -818,8 +818,11 @@ export class WalGEngine implements BackupEngine {
     // restore_command is a postgresql.conf single-quoted literal: every inner
     // single quote MUST be doubled. With WALG_ENV_FILE configured the secrets
     // stay in that 0640 file and only the (non-secret) prefix is on the line.
-    const walFetch = this.config.WALG_ENV_FILE
-      ? `WALG_S3_PREFIX=${shellQuote(env.WALG_S3_PREFIX ?? "")} sh -c ${shellQuote(`set -a; . ${shellQuote(this.config.WALG_ENV_FILE)}; exec ${shellQuote(this.config.WALG_BIN)} wal-fetch %f %p`)}`
+    const walgEnvFile = request.target === "audit_db"
+      ? (this.config.WALG_ENV_FILE_AUDIT ?? this.config.WALG_ENV_FILE)
+      : this.config.WALG_ENV_FILE;
+    const walFetch = walgEnvFile
+      ? `WALG_S3_PREFIX=${shellQuote(env.WALG_S3_PREFIX ?? "")} sh -c ${shellQuote(`set -a; . ${shellQuote(walgEnvFile)}; exec ${shellQuote(this.config.WALG_BIN)} wal-fetch %f %p`)}`
       : `${Object.entries(env)
         .filter(([key]) => key.startsWith("WALG_") || key.startsWith("AWS_"))
         .map(([key, value]) => `${key}=${shellQuote(value)}`)

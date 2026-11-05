@@ -59,6 +59,9 @@ const accountLimiter = lazyLimiter(() =>
   }),
 );
 
+// Logout is deliberately outside the login limiter (see admin-back).
+router.post("/logout", logoutHandler);
+
 router.use(authLimiter);
 router.use(accountLimiter);
 
@@ -147,8 +150,6 @@ router.post(
     requireAuth: false,
   }),
 );
-
-router.post("/logout", logoutHandler);
 
 router.post(
   "/login",
